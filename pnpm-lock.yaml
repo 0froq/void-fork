@@ -61,6 +61,9 @@ importers:
       '@voidcloud/isr-shared':
         specifier: workspace:*
         version: link:../isr-shared
+      aws4fetch:
+        specifier: ^1.0.20
+        version: 1.0.20
       blake3-jit:
         specifier: ^1.1.0
         version: 1.1.0

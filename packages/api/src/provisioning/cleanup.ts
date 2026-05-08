@@ -1,6 +1,6 @@
 import { sql as drizzleSql, and, eq, notInArray } from 'drizzle-orm';
 import type { Context } from 'hono';
-import { deleteWorkerBundle } from '../assets.ts';
+import { deleteProjectAssets, deleteWorkerBundle } from '../assets.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
 import { clearCronScheduler } from '../cron-scheduler-client.ts';
 import {
@@ -232,6 +232,16 @@ async function cleanupBestEffortResources(
         warn(`Failed to delete worker bundle for deployment ${deployment.id}`),
       ),
     ),
+  );
+
+  // Delete R2 static-asset objects under `assets/{projectId}/...`. The retention
+  // cleanup loop only walks hashes referenced by retained manifests, so any
+  // bytes uploaded via the direct-to-R2 presigned PUTs that never landed in a
+  // finalized deploy (TOCTOU race against teardown, abandoned upload, etc.)
+  // are durable orphans without this sweep. Best-effort: failures here become
+  // warnings — the surrounding teardown still cascades the DB rows.
+  await deleteProjectAssets(c.env.STATIC_ASSETS_R2, projectId).catch(
+    warn(`Failed to delete static assets for project ${projectId}`),
   );
 
   const cleanup: Array<Promise<void>> = [];

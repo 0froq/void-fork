@@ -138,6 +138,14 @@ export const MANIFEST_REDIRECT_RULE_STATUSES: ReadonlySet<number> = new Set([
 
 export interface DeployManifest {
   version: number;
+  /**
+   * Asset manifest schema version. Absent / 1 = legacy
+   * `Record<path, { hash, size }>` (multipart deploys). 2 = direct-to-R2
+   * upload flow (`Record<path, { blake3, md5, size }>`); JSON-mode deploys
+   * must declare `assetManifestVersion === 2`. See
+   * `meta/design-docs/0068-direct-r2-asset-upload.md`.
+   */
+  assetManifestVersion?: 1 | 2;
   auth?: boolean;
   bindings: {
     d1?: Array<string>;

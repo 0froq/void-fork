@@ -2,11 +2,11 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   applyDeclaredAssetManifest,
   AssetHashMismatchError,
-  cleanupStreamedStaticAssets,
   computeAssetHash,
   createAssetUploadSession,
   deleteUnreferencedAssets,
   deleteWorkerBundle,
+  normalizeForCfAssetSession,
   persistWorkerBundle,
   replayWorkerBundle,
   uploadAssetBuckets,
@@ -363,112 +363,6 @@ describe('deleteUnreferencedAssets', () => {
   });
 });
 
-describe('cleanupStreamedStaticAssets', () => {
-  it('removes retained entries from the tracking map without deleting them', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-    kv.store.set('assets/proj_test/hash_live', new ArrayBuffer(4));
-
-    const uploaded = new Map<string, 'kv' | 'r2'>([['hash_live', 'kv']]);
-    const retainedHashes = new Set(['hash_live']);
-
-    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, retainedHashes);
-
-    expect(kv.delete).not.toHaveBeenCalled();
-    expect(r2.delete).not.toHaveBeenCalled();
-    expect(kv.store.has('assets/proj_test/hash_live')).toBe(true);
-    expect(uploaded.size).toBe(0);
-  });
-
-  it('deletes unreferenced entries from their recorded store and clears them', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-    kv.store.set('assets/proj_test/hash_a', new ArrayBuffer(4));
-    r2.store.set('assets/proj_test/hash_b', new ArrayBuffer(4));
-
-    const uploaded = new Map<string, 'kv' | 'r2'>([
-      ['hash_a', 'kv'],
-      ['hash_b', 'r2'],
-    ]);
-
-    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set());
-
-    expect(kv.store.has('assets/proj_test/hash_a')).toBe(false);
-    expect(r2.store.has('assets/proj_test/hash_b')).toBe(false);
-    expect(uploaded.size).toBe(0);
-  });
-
-  it('only targets the recorded store, not both', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-    kv.store.set('assets/proj_test/hash_r2only', new ArrayBuffer(4));
-    r2.store.set('assets/proj_test/hash_r2only', new ArrayBuffer(4));
-
-    const uploaded = new Map<string, 'kv' | 'r2'>([['hash_r2only', 'r2']]);
-
-    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set());
-
-    // Only the R2 copy (the recorded store) is touched.
-    expect(r2.delete).toHaveBeenCalledTimes(1);
-    expect(kv.delete).not.toHaveBeenCalled();
-    expect(r2.store.has('assets/proj_test/hash_r2only')).toBe(false);
-    // KV still holds its copy (no phantom delete).
-    expect(kv.store.has('assets/proj_test/hash_r2only')).toBe(true);
-  });
-
-  it('retains failed hashes in the map so a later retry can re-attempt them', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-    kv.store.set('assets/proj_test/hash_fail', new ArrayBuffer(4));
-    kv.store.set('assets/proj_test/hash_ok', new ArrayBuffer(4));
-
-    let kvFailOnce = true;
-    // First call for hash_fail throws; second call (retry) succeeds.
-    kv.delete = vi.fn(async (key: string) => {
-      if (key === 'assets/proj_test/hash_fail' && kvFailOnce) {
-        kvFailOnce = false;
-        throw new Error('transient KV failure');
-      }
-      kv.store.delete(key);
-    });
-
-    const uploaded = new Map<string, 'kv' | 'r2'>([
-      ['hash_fail', 'kv'],
-      ['hash_ok', 'kv'],
-    ]);
-
-    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set());
-
-    // First pass: hash_ok was deleted, hash_fail is still in the tracking
-    // map so an outer-finally retry can re-attempt it.
-    expect(uploaded.has('hash_ok')).toBe(false);
-    expect(uploaded.has('hash_fail')).toBe(true);
-    expect(kv.store.has('assets/proj_test/hash_fail')).toBe(true);
-
-    // Retry pass with a fresh call — hash_fail now deletes cleanly and is
-    // removed from the tracking map.
-    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set());
-    expect(uploaded.size).toBe(0);
-    expect(kv.store.has('assets/proj_test/hash_fail')).toBe(false);
-  });
-
-  it('revalidates a hash with shouldProtectHash immediately before delete', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-    kv.store.set('assets/proj_test/hash_late', new ArrayBuffer(4));
-
-    const uploaded = new Map<string, 'kv' | 'r2'>([['hash_late', 'kv']]);
-    const shouldProtectHash = vi.fn(async (hash: string) => hash === 'hash_late');
-
-    await cleanupStreamedStaticAssets(kv, r2, 'proj_test', uploaded, new Set(), shouldProtectHash);
-
-    expect(shouldProtectHash).toHaveBeenCalledWith('hash_late');
-    expect(kv.delete).not.toHaveBeenCalled();
-    expect(kv.store.has('assets/proj_test/hash_late')).toBe(true);
-    expect(uploaded.size).toBe(0);
-  });
-});
-
 describe('uploadAssetBuckets', () => {
   const singleAssetMap = new Map<string, AssetEntry>([['hash1', entry('hello', 'text/plain')]]);
   const opts = { retryDelayMs: 0, gatewayDelayMs: 0 };
@@ -820,6 +714,57 @@ describe('createAssetUploadSession', () => {
     ).rejects.toThrow('asset upload session failed: Unauthorized');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('normalizeForCfAssetSession', () => {
+  it('strips v2 manifest extras (blake3, md5) and keeps only {hash, size}', () => {
+    const v2Manifest = {
+      '/index.html': {
+        // v2 wire shape from the framework CLI
+        blake3: 'a'.repeat(32),
+        md5: 'b'.repeat(32),
+        size: 100,
+        hash: 'a'.repeat(32),
+      } as unknown as { hash: string; size: number },
+      '/style.css': {
+        blake3: 'c'.repeat(32),
+        md5: 'd'.repeat(32),
+        size: 50,
+        hash: 'c'.repeat(32),
+      } as unknown as { hash: string; size: number },
+    };
+
+    const out = normalizeForCfAssetSession(v2Manifest);
+
+    expect(Object.keys(out).sort()).toEqual(['/index.html', '/style.css']);
+    for (const entry of Object.values(out)) {
+      expect(Object.keys(entry).sort()).toEqual(['hash', 'size']);
+      expect(entry).not.toHaveProperty('blake3');
+      expect(entry).not.toHaveProperty('md5');
+    }
+    expect(out['/index.html']).toEqual({ hash: 'a'.repeat(32), size: 100 });
+    expect(out['/style.css']).toEqual({ hash: 'c'.repeat(32), size: 50 });
+  });
+
+  it('returns a fresh object — mutating input does not affect output', () => {
+    const input = { '/a.js': { hash: 'h', size: 1 } };
+    const out = normalizeForCfAssetSession(input);
+    expect(out).not.toBe(input);
+    expect(out['/a.js']).not.toBe(input['/a.js']);
+    // mutating input post-normalize must not leak through
+    (input['/a.js'] as { extra?: string }).extra = 'leaked';
+    expect(out['/a.js']).not.toHaveProperty('extra');
+  });
+
+  it('passes a manifest that is already {hash, size} through unchanged in shape', () => {
+    const input = { '/index.html': { hash: 'aaa', size: 7 } };
+    const out = normalizeForCfAssetSession(input);
+    expect(out).toEqual(input);
+  });
+
+  it('preserves all paths, including empty manifests', () => {
+    expect(normalizeForCfAssetSession({})).toEqual({});
   });
 });
 

@@ -29,6 +29,7 @@
   "dependencies": {
     "@cloudflare/sandbox": "0.9.1",
     "@voidcloud/isr-shared": "workspace:*",
+    "aws4fetch": "^1.0.20",
     "blake3-jit": "^1.1.0",
     "cron-parser": "5.5.0",
     "drizzle-orm": "^0.45.2",

@@ -1,24 +1,17 @@
 import { isrCacheKey, isrCachePrefix } from '@voidcloud/isr-shared';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import {
-  applyDeclaredAssetManifest,
   AssetHashMismatchError,
-  cleanupStreamedStaticAssets,
-  collectBufferedAsset,
   computeAssetHash,
   createAssetUploadSession,
   deleteWorkerBundle,
-  KV_THRESHOLD,
-  readStaticAssetPart,
-  STATIC_ASSET_UPLOAD_CONCURRENCY,
-  streamStaticAssetToR2,
+  normalizeForCfAssetSession,
+  sweepProjectAssetOrphans,
   uploadAssetBuckets,
-  uploadStaticAssetPart,
   buildAssetMetadata,
   uploadStaticAssets,
   deleteUnreferencedAssets,
-  verifyStreamedAssetPart,
   getContentType,
   persistWorkerBundle,
   type AssetEntry,
@@ -55,12 +48,6 @@ import {
 } from '../db.ts';
 import { sendDeployFailedEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
-import {
-  MultipartParseError,
-  parseBoundary,
-  parseMultipart,
-  PartTooLargeError,
-} from '../multipart.ts';
 import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
 import {
   BETTER_AUTH_SECRET_NAME,
@@ -76,6 +63,7 @@ import {
   provisionPerDeployContainer,
 } from '../provisioning/containers.ts';
 import { provisionBindings } from '../provisioning/provision.ts';
+import { presignAssetPut } from '../r2-presign.ts';
 import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
 import { deployments } from '../schema.ts';
 import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers.ts';
@@ -92,29 +80,10 @@ import {
 const DEFAULT_DISPATCH_NAMESPACE = 'void-users';
 const DEFAULT_TAIL_SERVICE_NAME = 'void-tail';
 
-// Per-part byte caps for buffered text fields. The Cloudflare Workers request
-// budget is 128 MiB, and these parts are fully buffered in memory before
-// `validateManifestShape` can run — so we must refuse oversized inputs before
-// we allocate. Numbers below are generous for legitimate deploys while still
-// bounding any single buffered allocation well under the request budget.
-const MAX_MANIFEST_BYTES = 8 * 1024 * 1024; // 8 MiB — DeployManifest JSON
-const MAX_ASSET_MANIFEST_BYTES = 32 * 1024 * 1024; // 32 MiB — per-asset records for huge static sites
-const MAX_PREFLIGHT_BYTES = 1 * 1024 * 1024; // 1 MiB — preflight metadata
-const MAX_SMALL_TEXT_BYTES = 64 * 1024; // 64 KiB — source, commit, misc
-// CF's worker script size limit (free plan 1 MiB, paid plan 10 MiB compressed;
-// uncompressed/multipart headroom is roughly 32 MiB). Enforced per part so a
-// single runaway worker:* module cannot OOM the request before the upload to
-// CF ever happens.
+// CF's worker script size limit (free plan 1 MiB, paid plan 10 MiB compressed).
+// Enforced per worker module so a single runaway worker file cannot OOM the
+// request before the upload to CF ever happens.
 const MAX_WORKER_FILE_BYTES = 32 * 1024 * 1024; // 32 MiB
-// There is no aggregate in-memory cap on buffered deploy payloads: the
-// direct-to-R2 streaming path handles the large-asset case with O(1)
-// residency, and per-part caps above (plus the 128 MiB Worker isolate
-// memory hard wall) are the only remaining backstops for buffered paths
-// (worker-backed asset uploads and the streamed-static pool for small
-// assets). A deploy that buffers many legally-sized parts may approach
-// the 128 MiB isolate budget; that is accepted as the user's own risk.
-const STREAMED_ASSET_CLAIM_PREFIX = 'deploy-asset-claim';
-const STREAMED_ASSET_CLAIM_TTL_SECONDS = 60 * 60;
 /**
  * Detect the known CF WfP bug where APIs return plain text about asset state
  * instead of JSON. CF returns different messages depending on propagation state
@@ -123,6 +92,33 @@ const STREAMED_ASSET_CLAIM_TTL_SECONDS = 60 * 60;
  */
 function isCfAssetPlainText(text: string): boolean {
   return text.trimStart().startsWith('Assets have');
+}
+
+/**
+ * Decode a base64 string to bytes with the lowest peak residency the
+ * runtime allows. Prefers the (TC39 stage-4) `Uint8Array.fromBase64` helper
+ * which performs the decode in a single allocation; falls back to the
+ * `atob` + per-byte copy path on runtimes that don't expose it (notably
+ * Node, where the integration tests run — the production CF Workers compat
+ * date is 2026-02-12 and ships the helper natively).
+ *
+ * For a 32 MiB module the fast path drops peak residency from
+ * roughly `raw + bin + decoded ≈ 86 + 64 + 32 = 182 MiB` to
+ * `raw + decoded ≈ 86 + 32 = 118 MiB`, which fits under the 128 MiB
+ * isolate cap with margin. The fallback path matches the previous behaviour.
+ */
+function decodeBase64ToBytes(raw: string): Uint8Array {
+  const fromBase64 = (Uint8Array as unknown as { fromBase64?: (s: string) => Uint8Array })
+    .fromBase64;
+  if (typeof fromBase64 === 'function') {
+    return fromBase64(raw);
+  }
+  const bin = atob(raw);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
+  return out;
 }
 
 const CF_RETRY = { maxRetries: 3, delayMs: 1000 };
@@ -180,129 +176,6 @@ async function deleteContainerApplicationWithRetry(
 }
 
 const app = new Hono<ApiEnv>();
-
-/**
- * Read a multipart part body up to `maxBytes`. Throws `PartTooLargeError` as
- * soon as the cap is exceeded — we stop reading rather than draining the
- * remainder, so abandoning the stream does NOT buffer past the cap.
- */
-async function readPartBytes(
-  body: ReadableStream<Uint8Array>,
-  partName: string,
-  maxBytes: number,
-): Promise<Uint8Array> {
-  const reader = body.getReader();
-  const chunks: Array<Uint8Array> = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) {
-        break;
-      }
-      total += value.length;
-      if (total > maxBytes) {
-        throw new PartTooLargeError(partName, maxBytes);
-      }
-      chunks.push(value);
-    }
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // Reader may already be in a terminal state; nothing to release.
-    }
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return merged;
-}
-
-async function readPartText(
-  body: ReadableStream<Uint8Array>,
-  partName: string,
-  maxBytes: number,
-): Promise<string> {
-  return new TextDecoder().decode(await readPartBytes(body, partName, maxBytes));
-}
-
-async function discardPartBody(body: ReadableStream<Uint8Array>): Promise<void> {
-  const reader = body.getReader();
-  try {
-    while (true) {
-      const { done } = await reader.read();
-      if (done) {
-        break;
-      }
-    }
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // Reader may already be in a terminal state; nothing to release.
-    }
-  }
-}
-
-/**
- * Read a multipart part body directly into a `Blob` with the given content
- * type. Same per-part cap semantics as `readPartBytes`, but never exposes a
- * merged `Uint8Array` to the caller — the chunks are handed straight to the
- * `Blob` constructor inside this function, and only the resulting `Blob`
- * escapes.
- *
- * Why this exists instead of `new Blob([await readPartBytes(...)])`:
- * `new Blob([uint8])` always copies the source bytes, so that two-step form
- * momentarily holds two full-size copies (the returned `Uint8Array` AND the
- * `Blob`'s internal buffer). When the caller reads several large worker
- * modules in a `for await` loop, V8 may not reclaim the previous iteration's
- * dead `const bytes` binding before the next parse begins — pushing the
- * per-request peak toward the 128 MiB Worker budget. Keeping the raw chunks
- * strictly local to this function means the caller's loop body never names a
- * `Uint8Array` that could survive into the next iteration.
- */
-async function readPartAsBlob(
-  body: ReadableStream<Uint8Array>,
-  partName: string,
-  maxBytes: number,
-  contentType: string,
-): Promise<Blob> {
-  const reader = body.getReader();
-  const chunks: Array<Uint8Array> = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) {
-        break;
-      }
-      total += value.length;
-      if (total > maxBytes) {
-        throw new PartTooLargeError(partName, maxBytes);
-      }
-      chunks.push(value);
-    }
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // Reader may already be in a terminal state; nothing to release.
-    }
-  }
-  // Hand chunks directly to the Blob constructor — no merged-Uint8Array
-  // intermediary. `chunks` is strictly local to this function and becomes
-  // unreachable when we return, so the caller never holds a raw byte buffer
-  // that could survive into the next iteration of a buffering loop. The
-  // `as BlobPart[]` cast exists because lib.dom types widen `Uint8Array`'s
-  // buffer to `ArrayBufferLike`, which includes `SharedArrayBuffer` and is
-  // not directly assignable to `BlobPart`. Our chunks come from a
-  // `ReadableStream<Uint8Array>` reader — never shared memory.
-  return new Blob(chunks as unknown as Array<BlobPart>, { type: contentType });
-}
 
 function sameClassSet(a: Array<string>, b: Array<string>): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
@@ -482,6 +355,15 @@ export function validateManifestShape(parsed: unknown): string | null {
   ] as const) {
     if (m[key] !== undefined && typeof m[key] !== 'string') {
       return `invalid manifest shape: ${key} must be a string`;
+    }
+  }
+
+  if (m.assetManifestVersion !== undefined) {
+    // Direct-to-R2 deploys require v2 (declares blake3 + md5 + size per asset).
+    // The handler enforces v2 with its own error message; this shape check
+    // accepts 1 here so the layered error is the one users see.
+    if (m.assetManifestVersion !== 1 && m.assetManifestVersion !== 2) {
+      return 'invalid manifest shape: assetManifestVersion must be 1 or 2';
     }
   }
 
@@ -917,10 +799,6 @@ function sanitizeDeployErrorMessage(message: string): string {
   return message;
 }
 
-function streamedAssetClaimKey(projectId: string, hash: string, token: string): string {
-  return `${STREAMED_ASSET_CLAIM_PREFIX}:${projectId}:${hash}:${token}`;
-}
-
 async function assertDeploymentNotCanceled(db: Db, deploymentId: string): Promise<void> {
   const latest = await getDeployment(db, deploymentId);
   if (latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status)) {
@@ -1288,42 +1166,326 @@ export function enrichSandboxManifest(
   };
 }
 
-// Deploy to a project
-app.post('/:id/deploy', async (c) => {
+// Cap on the number of presign requests in a single batch. Presigning is
+// CPU-light (one HMAC chain per call) but unbounded fanout still costs
+// memory and lets a malformed CLI burn server CPU without bound. 5000
+// matches the largest realistic dist/ asset count we've observed (memora
+// repro: 570; design doc 0068's TBD ceiling). Asset manifests on the
+// JSON-mode deploy share the same cap for symmetry.
+const MAX_UPLOAD_URLS_BATCH = 5000;
+// Body cap for `POST /:id/deploy/upload-urls`. The body is dominated by
+// `assets[]` entries — each entry is ~150 bytes (blake3 + md5 + size +
+// contentType). 5000 entries × ~150 bytes ≈ 750 KB, so 4 MiB carries a
+// 4× safety margin. Asset BYTES never travel this endpoint — they go
+// direct-to-R2 via the presigned PUTs this endpoint issues.
+const MAX_UPLOAD_URLS_BODY_BYTES = 4 * 1024 * 1024;
+// Bounded concurrency for the presign batch. Presigning is CPU-light;
+// 50 in-flight is generous and keeps tail latency bounded without
+// fanning out to 5000 simultaneous async tasks.
+const PRESIGN_BATCH_CONCURRENCY = 50;
+// Bounded concurrency for the R2 head check that verifies declared assets
+// were actually uploaded by the CLI before the JSON-mode deploy proceeds.
+// 20 matches R2's typical head-throughput sweet spot — verifying 5000
+// assets at this concurrency completes in well under the deploy heartbeat
+// interval.
+const R2_HEAD_VERIFY_CONCURRENCY = 20;
+// Per-blake3 / per-md5 validation: 32 lowercase hex characters.
+const HEX_32_REGEX = /^[0-9a-f]{32}$/;
+// Generous body cap for JSON-mode deploy POSTs. The body is dominated by
+// `workerFiles` (base64-encoded user worker modules); MAX_WORKER_FILE_BYTES
+// is 32 MiB per module and a worker can ship ~10 modules in practice.
+//
+// Base64 expansion is ~33%, so a single 32 MiB raw module weighs ~43 MiB
+// on the wire. 64 MiB comfortably accommodates one full-size module (with
+// safety margin) plus the manifest, assetManifest, vars, and source/commit
+// JSON, while staying well under the 128 MiB Worker memory limit. Asset
+// BYTES are NOT in this body — they go direct-to-R2 via presigned PUTs,
+// which is the whole reason this endpoint exists.
+const MAX_JSON_DEPLOY_BODY_BYTES = 64 * 1024 * 1024;
+
+interface UploadUrlsRequestAsset {
+  blake3: string;
+  md5: string;
+  size: number;
+  contentType: string;
+}
+
+/**
+ * Validate a single `assets[]` entry from `POST /:id/deploy/upload-urls`.
+ * Returns an error message on failure, `null` on success. Mirrors the
+ * presigner's MD5 validation so a malformed input is rejected at the
+ * platform boundary rather than inside `presignAssetPut`.
+ */
+function validateUploadUrlsAsset(asset: unknown, index: number): string | null {
+  if (asset == null || typeof asset !== 'object' || Array.isArray(asset)) {
+    return `invalid assets[${index}]: must be an object`;
+  }
+  const a = asset as Record<string, unknown>;
+  if (typeof a.blake3 !== 'string' || !HEX_32_REGEX.test(a.blake3)) {
+    return `invalid assets[${index}].blake3: must be 32 lowercase hex characters`;
+  }
+  if (typeof a.md5 !== 'string' || !HEX_32_REGEX.test(a.md5)) {
+    return `invalid assets[${index}].md5: must be 32 lowercase hex characters`;
+  }
+  if (
+    typeof a.size !== 'number' ||
+    !Number.isInteger(a.size) ||
+    a.size < 0 ||
+    !Number.isFinite(a.size)
+  ) {
+    return `invalid assets[${index}].size: must be a non-negative integer`;
+  }
+  if (typeof a.contentType !== 'string' || a.contentType.length === 0) {
+    return `invalid assets[${index}].contentType: must be a non-empty string`;
+  }
+  return null;
+}
+
+/**
+ * Issue presigned R2 PUT URLs for a batch of declared assets.
+ *
+ * Auth and ownership are handled the same way as `/deploy/preflight`:
+ * project loaded, `user_id` checked, 403 on mismatch, 404 on missing.
+ * Each asset's blake3 keys it under `assets/${projectId}/${blake3}`; MD5
+ * is signed into the URL's headers so R2 enforces "uploaded bytes' MD5
+ * matches declared MD5" at write time. URLs expire in 30 minutes.
+ *
+ * Returns `{ urls: { [blake3]: { url, headers } } }`. Note: when two
+ * assets in the batch share a blake3 (deduplicated content under
+ * different paths), the second write to the result map wins — both are
+ * pointed at the same key, so this is the intended dedupe behaviour.
+ *
+ * FOLLOW-UP: For very slow deploys (large bundles + low bandwidth + low
+ * upload concurrency), a 30-min TTL can still expire on the tail of the
+ * upload pool before that asset's PUT runs. The next iteration of this
+ * endpoint should re-presign on `SignatureExpired` 403 from R2 — keyed
+ * off a CLI-side retry against `/deploy/upload-urls` for the affected
+ * blake3s. Tracking issue: see meta/design-docs/0068 follow-up.
+ */
+// Sentinel thrown out of the upload-urls FOR-SHARE transaction to signal
+// "project flipped to status='deleting' before we acquired the lock".
+// Caught at the awaiting site to surface a 410 to the CLI. Mirrors the
+// `PROJECT_DELETING_ERROR_MESSAGE` pattern used by `handleManifestOnlyDeploy`.
+const UPLOAD_URLS_PROJECT_DELETING = 'upload_urls:project_deleting';
+
+app.post('/:id/deploy/upload-urls', async (c) => {
   const projectId = c.req.param('id');
   const project = await getProject(c.get('db'), projectId);
   if (!project) {
     return c.json({ error: 'project not found' }, 404);
   }
-
   if (project.user_id !== c.get('user').id) {
     return c.json({ error: 'forbidden' }, 403);
   }
+  // Fast 410 — mirror `handleManifestOnlyDeploy`. The unlocked read here
+  // is a TOCTOU best-effort: it short-circuits the common case (project
+  // already marked `deleting` before this request arrived). The
+  // authoritative status check happens inside the FOR-SHARE transaction
+  // below so a teardown that lands AFTER this read but BEFORE we issue
+  // presigns is forced to wait until our share lock releases — and any
+  // teardown that already committed before we acquired the lock will be
+  // observed by the in-tx re-read and surface as a 410.
+  if (project.status === 'deleting') {
+    return c.json({ error: 'project is being deleted' }, 410);
+  }
+  // TODO(orphan-gc): authenticated users can upload bytes via upload-urls
+  // without ever finalizing a deploy, leaving durable orphans. Teardown
+  // cleans these up; for active projects, abandoned uploads accumulate
+  // until a future deploy's retention cleanup happens to walk over them.
+  // Track in a follow-up: add a periodic per-project R2 sweep that diffs
+  // `assets/${projectId}/*` against the union of retained manifests.
 
-  // Race guard against project teardown (design-doc 0067 §7). Teardown flips
-  // `projects.status='deleting'` under a project-row lock before tearing down
-  // CF state and ultimately calling deleteProjectCascade. A deploy admitted
-  // after the flip would create a fresh deployment row, which can break
-  // cascade deletion (deployments FK is ON DELETE no action) and leave the
-  // project stuck in 'deleting'. The same status is re-checked under
-  // FOR UPDATE in the atomic precheck-and-claim below to close the TOCTOU
-  // window.
+  const startedAt = Date.now();
+  const logger = createDeployLogger({
+    projectId,
+    projectSlug: project.slug,
+    userId: c.get('user').id,
+    branch: null,
+  });
+
+  // Stream the body with a hard size cap before JSON.parse — `c.req.json()`
+  // would otherwise buffer arbitrary bytes from a malicious / buggy client
+  // before parsing, peaking at body bytes plus a UTF-16 string plus the
+  // parsed object. The cap is enforced via TransformStream so we abort the
+  // moment the threshold is crossed; native `Response.json()` then handles
+  // streaming + parsing efficiently. Mirrors `handleManifestOnlyDeploy`.
+  if (!c.req.raw.body) {
+    return c.json({ error: 'request body is required' }, 400);
+  }
+  let totalBytes = 0;
+  let overflowed = false;
+  const limited = c.req.raw.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        totalBytes += chunk.byteLength;
+        if (totalBytes > MAX_UPLOAD_URLS_BODY_BYTES) {
+          overflowed = true;
+          controller.error(new Error('body too large'));
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    }),
+  );
+  let parsed: unknown;
+  try {
+    parsed = await new Response(limited, {
+      headers: { 'Content-Type': 'application/json' },
+    }).json();
+  } catch (err) {
+    if (overflowed) {
+      return c.json(
+        {
+          error: `request body exceeds ${MAX_UPLOAD_URLS_BODY_BYTES} bytes`,
+        },
+        413,
+      );
+    }
+    return c.json(
+      { error: `invalid JSON body: ${err instanceof Error ? err.message : String(err)}` },
+      400,
+    );
+  }
+  if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return c.json({ error: 'request body must be a JSON object' }, 400);
+  }
+  const body = parsed as Record<string, unknown>;
+  if (!Array.isArray(body.assets)) {
+    return c.json({ error: 'request body must include an `assets` array' }, 400);
+  }
+  if (body.assets.length > MAX_UPLOAD_URLS_BATCH) {
+    return c.json(
+      {
+        error: `assets[] has ${body.assets.length} entries, exceeds the ${MAX_UPLOAD_URLS_BATCH} per-request limit`,
+      },
+      400,
+    );
+  }
+  for (let i = 0; i < body.assets.length; i++) {
+    const err = validateUploadUrlsAsset(body.assets[i], i);
+    if (err) {
+      return c.json({ error: err }, 400);
+    }
+  }
+  const assets = body.assets as Array<UploadUrlsRequestAsset>;
+
+  logger.info('upload_urls', 'request', { assetCount: assets.length });
+
+  const urls: Record<string, { url: string; headers: Record<string, string> }> = {};
+  try {
+    // Serialize against project teardown. `lockAndMarkDeleting` takes
+    // FOR UPDATE on the project row in `provisioning/cleanup.ts`; we take
+    // FOR SHARE here, which is compatible with concurrent upload-urls /
+    // deploy precheck calls (also FOR SHARE / FOR UPDATE on the same row,
+    // queueing as Postgres allows) but blocks teardown until this
+    // transaction commits. Once the lock is acquired we re-read the
+    // project row inside the transaction; if status flipped to `deleting`
+    // between the unlocked early-out above and the lock acquisition,
+    // throw the sentinel to surface a 410 to the CLI.
+    //
+    // Lock window: presigning is pure HMAC (no R2 / DB / network I/O
+    // beyond the initial SELECT FOR SHARE). A 5000-entry batch fans out
+    // to 50 concurrent crypto.subtle signs and finishes in ~250 ms, so
+    // teardown never waits long for the share lock to release.
+    await c.get('db').transaction(async (tx) => {
+      await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR SHARE`);
+      const txDb = tx as unknown as Db;
+      const lockedProject = await getProject(txDb, projectId);
+      if (!lockedProject || lockedProject.status === 'deleting') {
+        throw new Error(UPLOAD_URLS_PROJECT_DELETING);
+      }
+      await uploadPool(assets, PRESIGN_BATCH_CONCURRENCY, async (asset) => {
+        const result = await presignAssetPut({
+          accountId: c.env.CF_ACCOUNT_ID,
+          accessKeyId: c.env.R2_ACCESS_KEY_ID,
+          secretAccessKey: c.env.R2_SECRET_ACCESS_KEY,
+          bucket: c.env.R2_STATIC_ASSETS_BUCKET,
+          key: `assets/${projectId}/${asset.blake3}`,
+          md5: asset.md5,
+          contentType: asset.contentType,
+          // 30 minutes. With ~570 assets, concurrency=10, and a slow uplink
+          // a tail asset can sit in the pool for >10 min before its first
+          // PUT — 600s expired and R2 returned 403 SignatureExpired which
+          // the CLI treats as terminal. 1800s covers all realistic
+          // deploys; pathological multi-hour deploys are deferred to the
+          // re-presign-on-expiry follow-up noted in the docstring above.
+          ttlSeconds: 1800,
+        });
+        // Last-write-wins on duplicate blake3 — see docstring above. Map
+        // assignment is synchronous so concurrent pool tasks do not race
+        // beyond a benign last-writer.
+        urls[asset.blake3] = result;
+      });
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === UPLOAD_URLS_PROJECT_DELETING) {
+      return c.json({ error: 'project is being deleted' }, 410);
+    }
+    logger.error('upload_urls', 'presign_error', err, { assetCount: assets.length });
+    return c.json(
+      {
+        error: `failed to presign upload URLs: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      500,
+    );
+  }
+
+  logger.info('upload_urls', 'response', {
+    urlsIssued: Object.keys(urls).length,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return c.json({ urls });
+});
+
+// Deploy to a project
+app.post('/:id/deploy', handleManifestOnlyDeploy);
+
+/**
+ * JSON-mode (manifest-only) deploy handler — direct-to-R2 asset upload flow.
+ *
+ * Operates on a JSON request body. The CLI uploads asset bytes directly
+ * to R2 via presigned PUTs (issued by the `/deploy/upload-urls` endpoint
+ * above) BEFORE calling this handler, so the request body carries only:
+ *   - `manifest` (DeployManifest, must declare `assetManifestVersion: 2`)
+ *   - `assetManifest` (path → { blake3, md5, size })
+ *   - `source`, `commit`, `repositoryUrl`, `commitUrl`, `gitRef`, `preflight`
+ *   - `vars` (optional plain-text bindings — same as `manifest.vars`)
+ *   - `workerFiles` (base64-encoded module bytes for WfP deploys; absent for
+ *     static-only deploys)
+ *
+ * The bytes for declared assets MUST already be in `STATIC_ASSETS_R2` under
+ * `assets/${projectId}/${blake3}` — the handler does parallel `R2.head` to
+ * verify before the deploy proceeds. A missing hash is a hard 400.
+ *
+ * For static deploys, every asset's serving-manifest entry is `!{hash}` —
+ * direct-to-R2 always lands in R2. For WfP deploys, asset bytes are fetched
+ * back from `STATIC_ASSETS_R2` to populate the in-memory `assetsByHash` map
+ * that `uploadAssetBuckets` consumes — server-internal R2-to-CF traffic
+ * bypasses the user's request pipe, which is the whole point of the
+ * direct-to-R2 flow.
+ */
+async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
+  // Hono's `c.req.param('id')` types as `string | undefined` when called
+  // from a non-route-typed context (we receive `Context<ApiEnv>` rather
+  // than the route-typed callback Hono synthesises for `app.post`). The
+  // route literal is `/:id/deploy`, so this is always a string at
+  // runtime — narrow by hand. The ApiEnv route registry guarantees the
+  // path matched.
+  const projectId = c.req.param('id') as string;
+  const project = await getProject(c.get('db'), projectId);
+  if (!project) {
+    return c.json({ error: 'project not found' }, 404);
+  }
+  if (project.user_id !== c.get('user').id) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
   if (project.status === 'deleting') {
     return c.json({ error: 'project is being deleted' }, 410);
   }
 
-  // Admin suspensions are already blocked by authMiddleware → 403. Usage-limit
-  // suspensions (requests_exceeded) must remain able to deploy so users can
-  // ship fixes and roll back while their limits reset.
-
   const user = c.get('user');
 
-  // Request-scoped structured logger. Carries projectId/projectSlug/userId
-  // through the entire deploy pipeline; `branch` and `deploymentId` are
-  // filled in via `.with(...)` once the handler determines the deploy mode
-  // and the placeholder/real deployment row exists. Passed as a local
-  // variable rather than via `c.set(...)` to match the existing handler's
-  // convention (which doesn't use Hono context for cross-cutting state).
   let logger: DeployLogger = createDeployLogger({
     projectId,
     projectSlug: project.slug,
@@ -1331,31 +1493,280 @@ app.post('/:id/deploy', async (c) => {
     branch: null,
   });
 
+  // Parse + validate the JSON body BEFORE the precheck-and-claim transaction.
+  // A malformed body should not consume the project's active-deploy slot —
+  // the JSON body can be validated up-front and rejected without ever
+  // inserting a placeholder row.
+  //
+  // Stream the body through a counting TransformStream and let
+  // `Response.json()` handle the parse natively. The previous implementation
+  // collected chunks into an Array, copied them into a Uint8Array, decoded
+  // to a UTF-16 string, and ran JSON.parse — peaking at ~4× the body size
+  // in residency for a body that can legitimately reach 64 MiB. Native
+  // Response.json() consumes the stream incrementally and reuses internal
+  // buffers; the only retained allocation at the end is the parsed object.
+  if (!c.req.raw.body) {
+    return c.json({ error: 'request body is required' }, 400);
+  }
+  let totalBytes = 0;
+  let overflowed = false;
+  const limited = c.req.raw.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        totalBytes += chunk.byteLength;
+        if (totalBytes > MAX_JSON_DEPLOY_BODY_BYTES) {
+          overflowed = true;
+          controller.error(new Error('body too large'));
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    }),
+  );
+  let parsedBody: unknown;
+  try {
+    parsedBody = await new Response(limited, {
+      headers: { 'Content-Type': 'application/json' },
+    }).json();
+  } catch (err) {
+    if (overflowed) {
+      return c.json(
+        {
+          error: `request body exceeds ${MAX_JSON_DEPLOY_BODY_BYTES} bytes (asset bytes must be uploaded direct-to-R2, not in the request body)`,
+        },
+        413,
+      );
+    }
+    return c.json(
+      { error: `invalid JSON body: ${err instanceof Error ? err.message : String(err)}` },
+      400,
+    );
+  }
+  if (parsedBody == null || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+    return c.json({ error: 'request body must be a JSON object' }, 400);
+  }
+  const body = parsedBody as Record<string, unknown>;
+
+  // Manifest validation. `validateManifestShape` is the canonical source of
+  // truth for what's accepted; the `assetManifestVersion === 2` check below
+  // requires the v2 wire shape (blake3 + md5 + size per asset) that
+  // direct-to-R2 deploys depend on.
+  if (body.manifest == null || typeof body.manifest !== 'object' || Array.isArray(body.manifest)) {
+    return c.json({ event: 'error', message: 'manifest is required and must be an object' }, 400);
+  }
+  const shapeError = validateManifestShape(body.manifest);
+  if (shapeError) {
+    return c.json({ event: 'error', message: shapeError }, 400);
+  }
+  const incomingManifest = body.manifest as DeployManifest;
+  if (
+    incomingManifest.version == null ||
+    !SUPPORTED_MANIFEST_VERSIONS.includes(incomingManifest.version)
+  ) {
+    return c.json(
+      { event: 'error', message: 'Unsupported deploy manifest version. Please update void.' },
+      400,
+    );
+  }
+  if (incomingManifest.assetManifestVersion !== 2) {
+    return c.json(
+      {
+        event: 'error',
+        message: 'deploy requires assetManifestVersion: 2; please upgrade your void CLI',
+      },
+      400,
+    );
+  }
+
+  // Validate the v2 asset manifest. Each entry MUST carry a 32-hex blake3
+  // (storage key), 32-hex md5 (R2 PUT integrity check), and a non-negative
+  // integer size. We translate the v2 entries into the v1 shape
+  // (`{ hash: blake3, size }`) the rest of the pipeline expects — this
+  // keeps the existing dedupe / retention / serving-manifest code paths
+  // unchanged. The md5 isn't carried into the persisted manifest because
+  // BLAKE3 is the storage-key identifier and md5 is purely a write-time
+  // R2 integrity primitive.
+  if (
+    body.assetManifest == null ||
+    typeof body.assetManifest !== 'object' ||
+    Array.isArray(body.assetManifest)
+  ) {
+    return c.json(
+      { event: 'error', message: 'assetManifest is required and must be an object' },
+      400,
+    );
+  }
+  const rawAssetManifest = body.assetManifest as Record<string, unknown>;
+  const assetEntries = Object.entries(rawAssetManifest);
+  if (assetEntries.length > MAX_UPLOAD_URLS_BATCH) {
+    return c.json(
+      {
+        event: 'error',
+        message: `assetManifest has ${assetEntries.length} entries, exceeds the ${MAX_UPLOAD_URLS_BATCH} per-deploy limit`,
+      },
+      400,
+    );
+  }
+  const incomingAssetManifest: Record<string, AssetManifestEntry> = {};
+  for (const [path, raw] of assetEntries) {
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+      return c.json(
+        { event: 'error', message: `invalid assetManifest entry for ${path}: must be an object` },
+        400,
+      );
+    }
+    const entry = raw as Record<string, unknown>;
+    if (typeof entry.blake3 !== 'string' || !HEX_32_REGEX.test(entry.blake3)) {
+      return c.json(
+        {
+          event: 'error',
+          message: `invalid assetManifest entry for ${path}: blake3 must be 32 lowercase hex characters`,
+        },
+        400,
+      );
+    }
+    if (typeof entry.md5 !== 'string' || !HEX_32_REGEX.test(entry.md5)) {
+      return c.json(
+        {
+          event: 'error',
+          message: `invalid assetManifest entry for ${path}: md5 must be 32 lowercase hex characters`,
+        },
+        400,
+      );
+    }
+    if (
+      typeof entry.size !== 'number' ||
+      !Number.isInteger(entry.size) ||
+      entry.size < 0 ||
+      !Number.isFinite(entry.size)
+    ) {
+      return c.json(
+        {
+          event: 'error',
+          message: `invalid assetManifest entry for ${path}: size must be a non-negative integer`,
+        },
+        400,
+      );
+    }
+    incomingAssetManifest[path] = { hash: entry.blake3, size: entry.size };
+  }
+
+  // Optional metadata fields.
+  const source = typeof body.source === 'string' ? body.source : null;
+  const commit = typeof body.commit === 'string' ? body.commit : null;
+  const repositoryUrl = typeof body.repositoryUrl === 'string' ? body.repositoryUrl : null;
+  const commitUrl = typeof body.commitUrl === 'string' ? body.commitUrl : null;
+  const gitRef = typeof body.gitRef === 'string' ? body.gitRef : null;
+  const preflightRaw = body.preflight === 'true' ? 'true' : null;
+
+  // workerFiles is the only meaningful body content beyond the manifest
+  // tuples. Each entry is a base64-encoded module body keyed by relative
+  // path with a per-module cap of MAX_WORKER_FILE_BYTES (32 MiB). Absent or
+  // empty means a static-only deploy.
+  const workerFiles: Array<{ name: string; content: Blob }> = [];
+  if (body.workerFiles !== undefined) {
+    if (
+      body.workerFiles == null ||
+      typeof body.workerFiles !== 'object' ||
+      Array.isArray(body.workerFiles)
+    ) {
+      return c.json(
+        { event: 'error', message: 'workerFiles must be an object mapping relative path → base64' },
+        400,
+      );
+    }
+    // Decode each base64 module to bytes and drop the source string from the
+    // parsed body before moving to the next entry. The previous implementation
+    // walked `for…of Object.entries(...)` over a captured snapshot, holding
+    // the entire `workerFiles` map (and thus every base64 string) live for
+    // the full loop. For a near-cap module that source string alone is ~43
+    // MiB UTF-16 (≈86 MiB), and the explicit `atob` + per-byte loop added a
+    // second 64 MiB latin1 string before the `Uint8Array` allocation —
+    // enough peak residency to push the isolate past 128 MiB on a single
+    // 32 MiB module. Iterating through `body.workerFiles` directly and
+    // `delete`-ing each property after decode lets V8 reclaim the source
+    // string before peak. We also prefer the (now-stage-4) `fromBase64`
+    // helper — single-allocation, no intermediate string — falling back to
+    // the previous loop for runtimes that don't expose it (e.g. Node-based
+    // tests; the production CF Workers compat date is 2026-02-12 and ships
+    // the helper natively).
+    const workerFilesMap = body.workerFiles as Record<string, unknown>;
+    for (const filePath of Object.keys(workerFilesMap)) {
+      const raw = workerFilesMap[filePath];
+      if (typeof raw !== 'string') {
+        return c.json(
+          {
+            event: 'error',
+            message: `workerFiles entry for ${filePath} must be a base64-encoded string`,
+          },
+          400,
+        );
+      }
+      let decoded: Uint8Array;
+      try {
+        decoded = decodeBase64ToBytes(raw);
+      } catch (err) {
+        return c.json(
+          {
+            event: 'error',
+            message: `workerFiles entry for ${filePath} is not valid base64: ${err instanceof Error ? err.message : String(err)}`,
+          },
+          400,
+        );
+      }
+      // Release the source string back to GC now that the bytes are
+      // materialized — see the block comment above.
+      delete workerFilesMap[filePath];
+      if (decoded.byteLength > MAX_WORKER_FILE_BYTES) {
+        return c.json(
+          {
+            event: 'error',
+            message: `workerFiles entry for ${filePath} exceeds ${MAX_WORKER_FILE_BYTES} bytes`,
+          },
+          413,
+        );
+      }
+      // Hand the bytes directly to a `Blob` so we never name the
+      // `Uint8Array` past this scope — keeps per-iteration memory residency
+      // bounded by one decoded module at a time.
+      workerFiles.push({
+        name: filePath,
+        content: new Blob([decoded as unknown as BlobPart], {
+          type: moduleContentType(filePath),
+        }),
+      });
+    }
+  }
+  const hasWorkerFiles = workerFiles.length > 0;
+
+  // Reject worker files for static manifest types. Without this check a
+  // malformed CLI could send `workerFiles` for a `'spa'` / `'static'`
+  // manifest and end up deploying a WfP worker, breaking the project type
+  // invariants. Done BEFORE placeholder insert so a rejected request
+  // doesn't leave a phantom row to reap.
+  if (hasWorkerFiles && (incomingManifest.type === 'spa' || incomingManifest.type === 'static')) {
+    return c.json(
+      {
+        event: 'error',
+        message: 'worker parts are not allowed when manifest.type is spa or static',
+      },
+      400,
+    );
+  }
+
+  // (env vars travel inside `manifest.vars`; the JSON-mode wire contract
+  // never accepted a top-level `body.vars` — every CLI version that ever
+  // hit this endpoint populated `manifest.vars` instead.)
+
+  // Pre-validation done — now run the atomic precheck-and-claim
+  // transaction. FOR UPDATE on the project row, 10-minute stale-deploy
+  // reaper, placeholder insert. Once the placeholder row exists, every
+  // later failure must route through the catch / finally below to avoid
+  // leaving it stranded in `pending`.
   const currentLiveDeployment = project.active_deployment_id
     ? await getDeployment(c.get('db'), project.active_deployment_id)
     : null;
 
-  // Atomic precheck-and-claim (design-doc 0067 §7). Two concurrent deploys
-  // would otherwise both observe "no active deploy" before either inserts a
-  // row, race past the gate, and produce two parallel pipelines — corrupting
-  // sandbox state and racing CF API mutations. To serialize them BEFORE the
-  // streaming multipart parse begins, this transaction:
-  //   1. SELECT FOR UPDATE on the project row, serializing concurrent
-  //      precheck transactions and any teardown holding the same lock.
-  //   2. Re-checks `projects.status` under the lock. Closes the TOCTOU
-  //      window between the early reject above and createDeployment.
-  //   3. Looks up the active in-flight deploy. If fresh (<10min), throws
-  //      ConcurrentDeployError → caller maps to HTTP 409. If stale, marks
-  //      the predecessor failed/canceled and proceeds.
-  //   4. Inserts a placeholder deployment row with NULL manifest/source/
-  //      commit. Its existence is the serialization point: the second
-  //      concurrent precheck transaction reads it via getActiveDeployment
-  //      (status='pending', non-terminal) and rejects with 409.
-  //
-  // The placeholder row's manifest/source/commit are filled in by
-  // `updateDeploymentManifest` after the multipart parse completes. This
-  // keeps the lock duration to the precheck only — a pg connection is NOT
-  // held across the streaming parse, deploy upload, or routing flip.
   let preDeployment: Awaited<ReturnType<typeof createDeployment>>;
   try {
     preDeployment = await c.get('db').transaction(async (tx) => {
@@ -1367,9 +1778,6 @@ app.post('/:id/deploy', async (c) => {
       }
       const activeDeploy = await getActiveDeployment(txDb, projectId);
       if (activeDeploy) {
-        // Normalize timestamp to ISO 8601 for safe Date parsing. PostgreSQL
-        // returns ISO format; also handles legacy format (space separator,
-        // no Z).
         const createdAt = activeDeploy.created_at.includes('T')
           ? activeDeploy.created_at
           : activeDeploy.created_at.replace(' ', 'T') + 'Z';
@@ -1377,7 +1785,6 @@ app.post('/:id/deploy', async (c) => {
         if (ageMs < 10 * 60 * 1000) {
           throw new ConcurrentDeployError(activeDeploy.id);
         }
-        // Stale — auto-fail and proceed
         const staleNext = activeDeploy.status === 'canceling' ? 'canceled' : 'failed';
         logger.info('status_transition', 'status_change', {
           deploymentId: activeDeploy.id,
@@ -1393,8 +1800,6 @@ app.post('/:id/deploy', async (c) => {
           activeDeploy.status === 'canceling' ? { force: true } : undefined,
         );
       }
-      // Insert placeholder. Manifest/source/commit are filled in
-      // post-parse via updateDeploymentManifest.
       return await createDeployment(txDb, projectId, null, null, null);
     });
   } catch (err) {
@@ -1407,308 +1812,17 @@ app.post('/:id/deploy', async (c) => {
     throw err;
   }
 
-  // The daily deploy-count limit is evaluated in two places depending on the
-  // deploy mode:
-  //   - worker-backed deploys: post-parse, AFTER the static no-op dedupe
-  //     branch, so an identical retry at the cap still returns the existing
-  //     live deployment.
-  //   - streamed-static deploys: immediately after the manifest part is
-  //     parsed, BEFORE any `asset:*` parts are written to KV/R2, so an
-  //     over-quota user never pays storage write cost for a rejected request.
   const planLimits = getPlanLimits(user.plan);
 
-  // Stream the multipart body instead of buffering it via c.req.formData(),
-  // which would decode every asset blob into Worker memory at once and OOM
-  // on media-heavy deploys. Small text parts and worker modules are still
-  // buffered (they are tiny). For static deploys (manifest.type === 'spa' |
-  // 'static') asset parts are piped straight into KV/R2 as they arrive so
-  // peak memory is bounded by one asset at a time. For other deploy modes
-  // assets fall back to being buffered into a hash map, matching the old
-  // behaviour so the CF asset upload session can consume them later.
-  let manifestRaw: string | null = null;
-  let incomingManifest: DeployManifest | null = null;
-  let incomingAssetManifestRaw: string | null = null;
-  // Declared asset manifest parsed eagerly when the `assetManifest` part
-  // arrives. Used by the streamed-static `asset:*` fast-path to detect
-  // duplicate paths that map to a hash already being processed this
-  // request — those bodies are drained without buffering or re-hashing,
-  // eliminating a redundant memory allocation for the duplicate. Left
-  // `null` if the client never sends `assetManifest` (the fast-path
-  // simply never activates and the full read path handles every asset
-  // as before).
-  let declaredAssetManifest: Record<string, AssetManifestEntry> | null = null;
-  let source: string | null = null;
-  let commit: string | null = null;
-  let repositoryUrl: string | null = null;
-  let commitUrl: string | null = null;
-  let gitRef: string | null = null;
-  let preflightRaw: string | null = null;
-  // Worker modules are stored as a `Blob` built once, inside `readPartAsBlob`,
-  // from the raw chunks. We never name a `Uint8Array` in the parse loop, so
-  // there is no per-iteration `const bytes` that could survive into the next
-  // parse before GC. The upload loop below also reuses these Blobs directly
-  // without re-wrapping — so each worker module only ever exists as a single
-  // full-size byte copy inside its `Blob`, rather than doubling to ~2x during
-  // the upload step (the exact per-request OOM class this branch hardens
-  // against).
-  const workerFiles: Array<{ name: string; content: Blob }> = [];
-  const assetsByHash = new Map<string, AssetEntry>();
-  const builtAssetManifest: Record<string, AssetManifestEntry> = {};
-  const streamedHashStores = new Map<string, 'kv' | 'r2'>();
-  const streamedLargeHashes = new Set<string>();
-  // Deployment id whose WfP safety-net serving manifest (`manifest:{id}` in
-  // ROUTING KV) was written by this request. Tracked so the abort path can
-  // delete it if the deploy fails before routing switches. See
-  // meta/design-docs/0066.
-  let wfpMirroredManifestDeploymentId: string | null = null;
-  // Bounded-concurrency upload pool for streamed static assets. The parse
-  // loop reads one part's bytes inline, then fans the KV/R2 PUT off into a
-  // task tracked by both sets. `inFlightStaticUploads` gates the pool
-  // (`while (size >= STATIC_ASSET_UPLOAD_CONCURRENCY) await Promise.race
-  // (...)`); `staticUploadPromises` keeps a permanent reference so that a
-  // task which settles (and deletes itself from the in-flight set) before
-  // the post-parse drain still surfaces its rejection via Promise.all. This
-  // split is what keeps the upstream multipart reader draining while PUTs
-  // are in flight — the bug that previously caused "Connection lost during
-  // deploy" on asset-heavy payloads.
-  const inFlightStaticUploads = new Set<Promise<void>>();
-  const staticUploadPromises: Array<Promise<void>> = [];
-  // Per-hash in-flight dedupe for the upload pool. Keyed by content hash,
-  // value is the outstanding KV/R2 PUT promise for that hash. Without this
-  // map two concurrent pool tasks with identical content would both miss
-  // the post-settle `streamedHashStores` cache (only populated once an
-  // upload resolves) and both issue a full PUT, doubling cost and
-  // inflating `newStaticAssetCount`. See `uploadStaticAssetPart` in
-  // `src/assets.ts` for the sync check-then-set atomicity guarantee.
-  const inFlightUploadByHash = new Map<string, Promise<'kv' | 'r2'>>();
-  let hasWorkerFiles = false;
-  let manifestSeen = false;
-  let streamedStaticAssets = false;
-  let newStaticAssetCount = 0;
-  let deferredParseErrorMessage: string | null = null;
-  // Pre-populated with the placeholder deployment row created by the
-  // atomic precheck-and-claim transaction. The streamed-asset abort path
-  // excludes this id when computing the in-flight retained-hash set so
-  // assets streamed by THIS request are not preserved by their own
-  // claim row.
-  let cleanupExcludeDeploymentId: string | null = preDeployment.id;
-  const streamedAssetClaimToken = crypto.randomUUID();
-  const claimedStreamedHashes = new Set<string>();
-
-  const ensureStreamedAssetClaim = async (hash: string): Promise<void> => {
-    if (claimedStreamedHashes.has(hash)) {
-      return;
-    }
-    await c.env.ROUTING.put(streamedAssetClaimKey(projectId, hash, streamedAssetClaimToken), '1', {
-      expirationTtl: STREAMED_ASSET_CLAIM_TTL_SECONDS,
-    });
-    claimedStreamedHashes.add(hash);
-  };
-
-  // Wait for any still-running pool tasks from the streamed-static upload
-  // path to settle. Invoked from the two cleanup helpers so every abort
-  // path — parse-loop early returns, the catch block, post-parse validation
-  // failures — converges on the same invariant: no KV/R2 PUT or claim
-  // write is in flight when we start deleting. After this returns each
-  // task's `.finally(() => inFlightStaticUploads.delete(task))` has run,
-  // so a second call from the second cleanup helper is a cheap no-op.
-  const drainInFlightStaticUploads = async (): Promise<void> => {
-    if (inFlightStaticUploads.size > 0) {
-      await Promise.allSettled(inFlightStaticUploads);
-    }
-  };
-
-  const cleanupOwnStreamedAssetClaims = async (): Promise<void> => {
-    // Drain first: pool tasks call `ensureStreamedAssetClaim` via
-    // `onHashed`, which writes to ROUTING KV. Deleting claims before those
-    // writes finish would let a late PUT re-publish a claim we just
-    // deleted, leaking an orphan until its TTL expires.
-    await drainInFlightStaticUploads();
-    if (claimedStreamedHashes.size === 0) {
-      return;
-    }
-    await Promise.allSettled(
-      Array.from(claimedStreamedHashes, (hash) =>
-        c.env.ROUTING.delete(streamedAssetClaimKey(projectId, hash, streamedAssetClaimToken)),
-      ),
-    );
-    claimedStreamedHashes.clear();
-  };
-
-  /**
-   * Delete assets that were streamed into KV/R2 during a failed/rejected parse.
-   * Uses retained-deployment hashes as a safety net: content-addressed keys may
-   * be shared across deploys, so we must never evict a hash that some retained
-   * deployment still references.
-   *
-   * The protection set is built from two sources: (1) all `retained=true`
-   * deployments, and (2) the current live deployment (regardless of its
-   * `retained` flag). Including (2) guards against the post-routing recovery
-   * path where `markDeploymentRetained(...).catch(()=>{})` can silently fail,
-   * leaving a deployment that is live but `retained=false`; without this
-   * second source we would happily evict assets out from under real traffic.
-   */
-  const cleanupStreamedAssetsOnAbort = async (): Promise<void> => {
-    // Drain first: a task still in flight may publish fresh entries to
-    // `streamedHashStores` (and its claim) after we've computed the
-    // retained-set. Without draining, those keys would escape eviction and
-    // leak as orphan blobs. Draining before the size check also catches
-    // the edge case where the pool had tasks pending but none had reached
-    // `streamedHashStores.set(...)` yet.
-    await drainInFlightStaticUploads();
-    // Evict the WfP safety-net serving manifest regardless of whether any
-    // blobs were streamed — the manifest is written even when all assets
-    // were preflight-skipped (carry-forward serves them from the prior
-    // mirror), and it is deployment-scoped so deletion is safe.
-    if (wfpMirroredManifestDeploymentId) {
-      const id = wfpMirroredManifestDeploymentId;
-      wfpMirroredManifestDeploymentId = null;
-      await c.env.ROUTING.delete(`manifest:${id}`).catch((err) =>
-        logger.warn('catch', 'mirrored_manifest_evict_failed', {
-          deploymentId: id,
-          err: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    }
-    if (streamedHashStores.size === 0) {
-      return;
-    }
-    try {
-      const retainedHashes = new Set<string>();
-      const collectFromAssetHashes = (raw: string | null): void => {
-        if (!raw) {
-          return;
-        }
-        try {
-          const parsed = JSON.parse(raw) as Record<string, { hash?: string }>;
-          for (const entry of Object.values(parsed)) {
-            if (entry && typeof entry.hash === 'string') {
-              retainedHashes.add(entry.hash);
-            }
-          }
-        } catch {
-          // ignore malformed manifests — be conservative and continue
-        }
-      };
-      const hasForeignStreamedAssetClaim = async (hash: string): Promise<boolean> => {
-        const foreignClaims = await c.env.ROUTING.list({
-          prefix: `${STREAMED_ASSET_CLAIM_PREFIX}:${projectId}:${hash}:`,
-        });
-        return foreignClaims.keys.some(
-          (key) => key.name !== streamedAssetClaimKey(projectId, hash, streamedAssetClaimToken),
-        );
-      };
-
-      const retained = await getRetainedDeployments(c.get('db'), projectId);
-      for (const dep of retained) {
-        collectFromAssetHashes(dep.asset_hashes ?? null);
-      }
-
-      const inFlight = await getInFlightDeploymentsExcluding(
-        c.get('db'),
-        projectId,
-        cleanupExcludeDeploymentId,
-      );
-      for (const dep of inFlight) {
-        collectFromAssetHashes(dep.asset_hashes ?? null);
-      }
-
-      // Other concurrent streamed-static requests may already have hashed the
-      // same content-addressed blob and published an in-flight claim, but not
-      // yet persisted `asset_hashes` to their deployment row. Protect those
-      // hashes too, while explicitly ignoring this request's own claim token
-      // so abort cleanup still sweeps blobs that are only referenced by the
-      // failing request itself.
-      for (const hash of streamedHashStores.keys()) {
-        if (await hasForeignStreamedAssetClaim(hash)) {
-          retainedHashes.add(hash);
-        }
-      }
-
-      // Also protect the current live deployment even if it is not in the
-      // retained set. A live-but-not-retained deployment is possible after
-      // a post-routing recovery where markDeploymentRetained failed silently
-      // but routing is still pointed at the deployment, so its asset hashes
-      // are still being served by traffic.
-      const latestProject = await getProject(c.get('db'), projectId);
-      if (latestProject?.active_deployment_id) {
-        const inRetainedList = retained.some((d) => d.id === latestProject.active_deployment_id);
-        if (!inRetainedList) {
-          const active = await getDeployment(c.get('db'), latestProject.active_deployment_id);
-          if (active) {
-            collectFromAssetHashes(active.asset_hashes ?? null);
-          }
-        }
-      }
-
-      await cleanupStreamedStaticAssets(
-        c.env.STATIC_ASSETS,
-        c.env.STATIC_ASSETS_R2,
-        projectId,
-        streamedHashStores,
-        retainedHashes,
-        hasForeignStreamedAssetClaim,
-      );
-      // Only clear on a successful sweep. A re-entry via the outer catch
-      // (triggered by a non-parser error re-thrown from the parse loop)
-      // will then short-circuit via the early return above. On failure we
-      // intentionally leave the map populated so the outer catch gets a
-      // second best-effort sweep — cleanupStreamedStaticAssets is idempotent
-      // against already-deleted keys, so re-running only pays for a wasted
-      // retained-set query while preserving the chance to clean up blobs
-      // left orphaned by a transient DB/KV/R2 failure on the first attempt.
-      streamedHashStores.clear();
-    } catch (err) {
-      logger.warn('catch', 'streamed_asset_cleanup_failed', {
-        err: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
-
-  // Validate the multipart boundary BEFORE opening the response stream. Once
-  // the TransformStream is constructed and handed to `new Response(...)`, the
-  // handler is committed to a 200 + NDJSON reply — errors become `{event:
-  // 'error'}` lines instead of HTTP statuses. A missing / malformed
-  // Content-Type is a pre-stream concern (it's a sync header read, not
-  // something uncovered during body parse), so keep it on the 4xx path
-  // alongside the other pre-stream guards (404 project, 403 forbidden,
-  // 409 concurrent deploy). Monitoring tools and generic HTTP clients expect
-  // malformed requests to carry a 4xx, not a 200-with-error-body.
-  let multipartBoundary: string;
-  try {
-    multipartBoundary = parseBoundary(c.req.raw.headers.get('content-type'));
-  } catch (err) {
-    if (err instanceof MultipartParseError) {
-      return c.json({ error: err.message }, 400);
-    }
-    throw err;
-  }
-
-  // Construct the response stream BEFORE parse/upload work so the client sees
-  // headers immediately. Every byte emitted downstream (parse rejections,
-  // heartbeats, deploy progress) flows through `writer`. The `return new
-  // Response(readable, ...)` at the bottom of this handler executes before the
-  // IIFE even begins its first await — CF edge / intermediaries get the 200
-  // status line right away and hold the connection open for the body.
+  // Construct the response stream — same NDJSON wire contract as the
+  // multipart path (heartbeats, progress events, `done`/`error`).
   const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   let streamOpen = true;
   let currentStep = 'parsing';
-  // Initialize with the placeholder id so heartbeats during the parse
-  // phase carry the correct deployment id (the row exists from the
-  // atomic precheck-and-claim transaction at route entry).
-  let currentDeploymentId = preDeployment.id;
-  // In-memory mirror of the deployment row's `status` column. The
-  // precheck-and-claim transaction inserts the placeholder with the default
-  // status of 'pending'; every `updateDeploymentStatus` call below must keep
-  // this variable in sync so `status_transition` log records carry the
-  // correct `from` value even when optional pipeline phases (migrations,
-  // prerender) are skipped.
+  let currentDeploymentId: string = preDeployment.id;
   let currentStatus: DeploymentStatus = 'pending';
-  // Phase-boundary tracker. `markPhase(name)` logs `phase_end` for the
-  // previous phase (with elapsed durationMs since the last call) then
-  // `phase_start` for the new one. Cheap — pure local state, no async.
   let phaseName = 'parsing';
   let phaseStartMs = Date.now();
   const markPhase = (next: string): void => {
@@ -1719,33 +1833,15 @@ app.post('/:id/deploy', async (c) => {
     logger.info(next, 'phase_start');
   };
   const emit = (event: DeployEvent): void => {
-    // Mirror every NDJSON event into structured logs so postmortem analysis
-    // from Tail can reconstruct the wire stream without separately
-    // instrumenting each call site. Wire contract is unchanged — this only
-    // adds one structured log line per emit (heartbeats are high-frequency
-    // but also include `currentPhase` which is exactly what postmortem
-    // needs). Logged BEFORE the writer.write so a closed stream still
-    // captures the event in tail.
     logger.info('emit', 'ndjson_event', event as unknown as Record<string, unknown>);
     if (!streamOpen) {
       return;
     }
-    // WritableStreamDefaultWriter.write() reports errors via a rejected
-    // promise, not a sync throw. When the downstream ReadableStream is
-    // canceled (e.g. client disconnect), the returned promise rejects —
-    // attach .catch() so we flip streamOpen and subsequent emits / the
-    // heartbeat loop become cheap no-ops instead of leaking unhandled
-    // rejections for the remainder of the pipeline.
     writer.write(encoder.encode(JSON.stringify(event) + '\n')).catch((err) => {
       streamOpen = false;
       logger.warn('emit', 'stream_closed', { event: event.event, err: String(err) });
     });
   };
-  // Heartbeat cadence is hard-coded in production (15s) but overridable via
-  // `DEPLOY_HEARTBEAT_INTERVAL_MS` for integration tests that assert the timer
-  // fires during parse/pipeline — 15s is too slow to run in a unit test. Any
-  // non-positive / non-finite override falls back to the production default,
-  // and a 1ms floor guards against runaway 0ms intervals.
   const heartbeatOverride = c.env.DEPLOY_HEARTBEAT_INTERVAL_MS;
   const heartbeatIntervalMs =
     typeof heartbeatOverride === 'number' &&
@@ -1755,15 +1851,10 @@ app.post('/:id/deploy', async (c) => {
       : 15_000;
 
   void (async () => {
-    logger.info('multipart_parse', 'phase_start');
-    phaseName = 'multipart_parse';
+    logger.info('json_validate', 'phase_start');
+    phaseName = 'json_validate';
     phaseStartMs = Date.now();
     let routingSwitched = false;
-    // Track every ROUTING KV key written by this deploy so the catch-path
-    // can roll them ALL back if teardown wins the race or pre-routing fails
-    // — `routingSwitched` only flags the slug write, but queue routes are
-    // written before the slug and active-domain routes are written after,
-    // and all three need to be cleaned up on rollback.
     const writtenRoutingKeys: Array<string> = [];
     let workerUploaded = false;
     let workerUploadUrl: string | undefined;
@@ -1774,23 +1865,25 @@ app.post('/:id/deploy', async (c) => {
     let workerName: string | undefined;
     let dispatchNamespace: string | undefined;
     let deployment: Awaited<ReturnType<typeof createDeployment>> | undefined;
-    // Memoized project-domain fetch shared across the deploy pipeline. Three
-    // independent branches need the project's domains: the host-scoped
-    // routing-rule check, the dedupe-skip URL builder, and the post-upload
-    // routing/URL stage. Each branch lazy-initialises this so deploys that
-    // never enter a given branch don't pay for the Postgres roundtrip.
     let projectDomains: Awaited<ReturnType<typeof getDomainsByProjectId>> | undefined;
 
-    // Timer is created inside the IIFE so it is scope-paired with its
-    // clearInterval in the finally below. If setup and teardown lived in
-    // different scopes, any code later inserted between them (or a pre-stream
-    // guard moved down) would leak the interval on a synchronous early return.
+    // Bytes uploaded directly to R2 by the CLI before this request landed.
+    // For static deploys this map stays empty (the static branch reads
+    // them straight from R2 by hash). For WfP deploys it gets populated
+    // from R2 fetches further down — the CF asset upload session needs
+    // the actual bytes to fan into upload buckets.
+    const assetsByHash = new Map<string, AssetEntry>();
+    // For JSON mode, every asset lives in R2 (direct-to-R2 uploads never
+    // touch KV). We still pass `streamedHashStores` / `streamedLargeHashes`
+    // / `streamedStaticAssets=true` into the static branch so it builds
+    // the serving manifest correctly with `!` prefixes on every entry.
+    // The map stays empty for cleanup-on-abort: the bytes pre-existed
+    // this deploy and may be needed for a retry, so we never delete them
+    // on a JSON-mode failure.
+    const streamedHashStores = new Map<string, 'kv' | 'r2'>();
+    const streamedLargeHashes = new Set<string>();
+
     const heartbeat = setInterval(() => {
-      // Omit `deploymentId` from heartbeats emitted before createDeployment
-      // populates it. Emitting `deploymentId: ''` during the parse/validate
-      // phase (the exact window where the heartbeat matters most) would
-      // leak a protocol-invalid empty id to monitoring tools and any
-      // external consumer that correlates events by deployment id.
       emit(
         currentDeploymentId
           ? { event: 'heartbeat', deploymentId: currentDeploymentId, step: currentStep }
@@ -1798,470 +1891,80 @@ app.post('/:id/deploy', async (c) => {
       );
     }, heartbeatIntervalMs);
 
+    let wfpMirroredManifestDeploymentId: string | null = null;
+
     try {
-      try {
-        for await (const part of parseMultipart(c.req.raw.body, multipartBoundary)) {
-          if (deferredParseErrorMessage) {
-            await discardPartBody(part.body);
-            continue;
-          }
-          if (part.name === 'manifest') {
-            if (manifestSeen) {
-              deferredParseErrorMessage = 'duplicate manifest part';
-              await discardPartBody(part.body);
-              continue;
-            }
-            manifestRaw = await readPartText(part.body, 'manifest', MAX_MANIFEST_BYTES);
-            let parsedManifest: unknown;
-            try {
-              parsedManifest = JSON.parse(manifestRaw);
-            } catch (parseErr) {
-              deferredParseErrorMessage =
-                'invalid manifest JSON: ' +
-                (parseErr instanceof Error ? parseErr.message : String(parseErr));
-              continue;
-            }
-            const shapeError = validateManifestShape(parsedManifest);
-            if (shapeError) {
-              deferredParseErrorMessage = shapeError;
-              continue;
-            }
-            incomingManifest = parsedManifest as DeployManifest;
-            if (
-              incomingManifest.version == null ||
-              !SUPPORTED_MANIFEST_VERSIONS.includes(incomingManifest.version)
-            ) {
-              deferredParseErrorMessage =
-                'Unsupported deploy manifest version. Please update void.';
-              continue;
-            }
-            manifestSeen = true;
-            streamedStaticAssets =
-              incomingManifest.type === 'spa' || incomingManifest.type === 'static';
-
-            // For streamed-static deploys we cannot defer the daily-cap check
-            // until after the parse: `asset:*` parts are written to KV/R2 as
-            // they arrive (see the concurrency-limited upload pool below), so
-            // by the time the post-parse check fires an over-quota user has already
-            // paid for every byte in storage write cost. Reject here, before
-            // any asset part is streamed. This sacrifices dedupe-at-cap for
-            // static retries, which is an acceptable tradeoff: the cap is
-            // intended to be a hard ceiling and storage writes should not
-            // happen past it. Worker-backed deploys still defer to the
-            // post-dedupe check further down because their worker modules are
-            // buffered in RAM, not persisted during parse.
-            if (streamedStaticAssets && planLimits.deploysPerDay > 0) {
-              const todayCount = await countUserDeploymentsToday(c.get('db'), c.get('user').id);
-              if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
-                deferredParseErrorMessage = 'deploy limit exceeded';
-                continue;
-              }
-            }
-            continue;
-          }
-          if (part.name === 'assetManifest') {
-            incomingAssetManifestRaw = await readPartText(
-              part.body,
-              'assetManifest',
-              MAX_ASSET_MANIFEST_BYTES,
-            );
-            // Parse eagerly so the `asset:*` fast-path below can detect
-            // in-request duplicate hashes (common with CLIs that mirror the
-            // same asset under multiple paths — e.g. a blog that emits every
-            // media file both under `/client/blog/...` and `/blog/...`).
-            // `parseAssetManifest` returns `null` on malformed/empty input
-            // and never throws; the stricter shape validation still runs
-            // post-parse at `applyDeclaredAssetManifest` time, so an invalid
-            // declared manifest simply means the fast-path doesn't activate.
-            declaredAssetManifest = parseAssetManifest(incomingAssetManifestRaw);
-            continue;
-          }
-          if (part.name === 'source') {
-            source = await readPartText(part.body, 'source', MAX_SMALL_TEXT_BYTES);
-            continue;
-          }
-          if (part.name === 'commit') {
-            commit = await readPartText(part.body, 'commit', MAX_SMALL_TEXT_BYTES);
-            continue;
-          }
-          if (part.name === 'repositoryUrl') {
-            repositoryUrl = await readPartText(part.body, 'repositoryUrl', MAX_SMALL_TEXT_BYTES);
-            continue;
-          }
-          if (part.name === 'commitUrl') {
-            commitUrl = await readPartText(part.body, 'commitUrl', MAX_SMALL_TEXT_BYTES);
-            continue;
-          }
-          if (part.name === 'gitRef') {
-            gitRef = await readPartText(part.body, 'gitRef', MAX_SMALL_TEXT_BYTES);
-            continue;
-          }
-          if (part.name === 'preflight') {
-            preflightRaw = await readPartText(part.body, 'preflight', MAX_PREFLIGHT_BYTES);
-            continue;
-          }
-          // `worker:*` and `asset:*` parts depend on the deploy mode decided by
-          // the manifest. They MUST arrive after the manifest so we know whether
-          // to buffer them (full deploy) or stream directly to KV/R2 (static).
-          if (part.name.startsWith('worker:') || part.name.startsWith('asset:')) {
-            if (!manifestSeen) {
-              emit({
-                event: 'error',
-                message: 'manifest part must precede worker and asset parts',
-                step: currentStep,
-              });
-              await cleanupStreamedAssetsOnAbort();
-              await cleanupOwnStreamedAssetClaims();
-              return;
-            }
-          }
-          if (part.name.startsWith('worker:')) {
-            // Static deploys have no worker script. Rejecting here avoids orphaned
-            // streamed assets when a malformed payload mixes a static manifest with
-            // worker parts.
-            if (streamedStaticAssets) {
-              deferredParseErrorMessage =
-                'worker parts are not allowed when manifest.type is spa or static';
-              await discardPartBody(part.body);
-              continue;
-            }
-            hasWorkerFiles = true;
-            const filePath = part.name.slice('worker:'.length);
-            // Read the module body directly into a Blob inside `readPartAsBlob`.
-            // This avoids naming a `Uint8Array` in this loop body — a local const
-            // here can survive into the next iteration before V8 runs GC, which
-            // is the exact path that can push the per-request peak over 128 MiB
-            // when several large `worker:*` parts are back-to-back.
-            workerFiles.push({
-              name: filePath,
-              content: await readPartAsBlob(
-                part.body,
-                `worker:${filePath}`,
-                MAX_WORKER_FILE_BYTES,
-                moduleContentType(filePath),
-              ),
-            });
-            continue;
-          }
-          if (part.name.startsWith('asset:')) {
-            const path = '/' + part.name.slice('asset:'.length);
-            if (streamedStaticAssets) {
-              // Fast-path: drain duplicate-hash bodies without buffering.
-              //
-              // Many CLIs (and some SSG frameworks like the cpojer-blog
-              // build) emit the same binary under multiple URL paths —
-              // a 19 MiB Git.mp4 appearing as both `/client/blog/.../Git.mp4`
-              // and `/blog/.../Git.mp4` is typical. Under the full-read path
-              // both parts allocate and hash 19 MiB each, even though
-              // `uploadStaticAssetPart`'s dedupe #2 ultimately issues only
-              // one KV/R2 PUT. Skipping the buffered read for duplicates
-              // removes that redundant allocation entirely, keeping peak
-              // memory proportional to unique content rather than part count.
-              //
-              // If the declared manifest maps `path` to a hash we are
-              // already uploading (or have uploaded) in THIS request, we
-              // already hold the verified bytes for that hash — the server
-              // stores the first occurrence's fully-hashed content at
-              // `assets/${projectId}/${declared.hash}`. We can drain this
-              // duplicate's body with byte-count verification and commit
-              // `builtAssetManifest[path] = { hash, size }` directly, with
-              // no buffered allocation and no additional PUT.
-              //
-              // Security: dedupe is per-request, keyed by blobs this same
-              // request already read-and-verified. A malicious client that
-              // declares a wrong hash for a later path can only cause the
-              // first-occurrence's content to serve at that later path —
-              // which is exactly what the declared manifest asked for.
-              // Cross-project bleed is blocked by the `projectId`-scoped
-              // KV/R2 key namespace.
-              //
-              // Size verification: we still enforce `bytesSeen ===
-              // declared.size` so a client cannot lie about size to
-              // create an inconsistent manifest entry that would
-              // mismatch the stored blob.
-              //
-              // One lookup + shape validation shared across both
-              // declared-manifest branches below (fast-path and streaming):
-              // the two have identical "client sent a well-formed
-              // `{ hash, size }` for this path" invariant and only differ
-              // by whether the hash is already resident this request and
-              // whether the size crosses the streaming threshold. A single
-              // validated reference keeps future changes to the
-              // well-formed-ness rules in lockstep.
-              const declaredEntry = declaredAssetManifest?.[path];
-              const declared =
-                declaredEntry != null &&
-                typeof declaredEntry.hash === 'string' &&
-                declaredEntry.hash.length === 32 &&
-                Number.isFinite(declaredEntry.size) &&
-                declaredEntry.size >= 0
-                  ? declaredEntry
-                  : null;
-              if (
-                declared &&
-                (streamedHashStores.has(declared.hash) || inFlightUploadByHash.has(declared.hash))
-              ) {
-                // Stream-hash verify the body against the declared hash.
-                // Byte-count-only drain would let a duplicate-path part with
-                // corrupted or tampered bytes silently commit a manifest
-                // entry pointing at the first occurrence's content —
-                // `applyDeclaredAssetManifest` then sees matching declared
-                // values and never revalidates, losing the end-to-end
-                // integrity check the full-read path provides on the first
-                // occurrence. Incremental hashing has constant memory cost
-                // (hasher state + a ≤2 byte carry), so this preserves the
-                // O(1)-residency property that makes the fast-path
-                // worthwhile while restoring the mismatch detection.
-                await verifyStreamedAssetPart(part.body, path, declared);
-                builtAssetManifest[path] = {
-                  hash: declared.hash,
-                  size: declared.size,
-                };
-                // Publish our own claim for this hash so `cleanupOwnStreamedAssetClaims`
-                // still has something to delete if the deploy fails later.
-                // Idempotent via the sync `claimedStreamedHashes.has` guard.
-                await ensureStreamedAssetClaim(declared.hash);
-                continue;
-              }
-              // Direct-to-R2 streaming path: when the client declared a valid
-              // `{ hash, size }` for this path AND the declared size crosses
-              // the KV threshold, pipe `part.body` straight through a hashing
-              // transform into `r2.put` without buffering the bytes. Per-asset
-              // memory is O(1) (hasher state + ≤ 2-byte carry), so a single
-              // large asset no longer pins its full size against the 128 MiB
-              // request budget.
-              //
-              // Preconditions (all required — otherwise fall through to the
-              // buffered pool path, which handles smaller files and recovers
-              // from any declared-manifest anomalies the full read would catch):
-              //   - `declaredAssetManifest` entry exists for this path
-              //   - `declared.hash` is the right shape (32 hex chars)
-              //   - `declared.size` is a sane, non-negative, cap-abiding integer
-              //   - `declared.size >= KV_THRESHOLD` (smaller assets still go
-              //     through KV via the pool path — KV PUTs are cheap and the
-              //     small payload doesn't justify the streaming complexity)
-              //   - the hash is NOT already handled this request (branch 1
-              //     above owns the duplicate-hash case)
-              //
-              // Serialization: `streamStaticAssetToR2` drives `part.body` to
-              // completion before returning, which means the multipart parser
-              // is blocked for the duration. We MUST drain `inFlightStaticUploads`
-              // first — otherwise a pool task could be mid-stream on a prior
-              // `part.body`, racing the transport reader with our new pipe
-              // reader. The pool size is bounded by `STATIC_ASSET_UPLOAD_CONCURRENCY`,
-              // so this is a short wait on asset-heavy deploys. This path
-              // never buffers asset bytes in Worker memory — O(1) residency
-              // for an arbitrarily large asset.
-              if (
-                declared &&
-                declared.size >= KV_THRESHOLD &&
-                !streamedHashStores.has(declared.hash) &&
-                !inFlightUploadByHash.has(declared.hash)
-              ) {
-                while (inFlightStaticUploads.size > 0) {
-                  // Drain the KV/R2 pool before we start streaming: the pool
-                  // tasks own the previous part's buffered read, but they
-                  // don't necessarily contend for the transport reader once
-                  // `readStaticAssetPart` returns. Still, running a stream
-                  // pipe concurrently with an in-flight task that itself
-                  // calls `onHashed` → `ROUTING.put` would race on KV order,
-                  // and more importantly we want the streaming path to have
-                  // uncontested access to the request body's reader during
-                  // its single-threaded pipeThrough/pipeTo pair.
-                  await Promise.race(inFlightStaticUploads);
-                }
-                // Register the hash for abort cleanup BEFORE `r2.put` can
-                // succeed. `streamStaticAssetToR2` can throw *after* it has
-                // already written bytes to R2 — specifically on the
-                // hash-mismatch-after-write path, where its best-effort
-                // `r2.delete` may transiently fail. If we waited to
-                // populate `streamedHashStores` until after the call
-                // returned, `cleanupStreamedAssetsOnAbort` would have no
-                // record of this hash and the poisoned blob would linger
-                // at `assets/${projectId}/${declared.hash}`. A later
-                // deploy with correct bytes would then hit the
-                // precondition-miss path (key exists) and trust the stored
-                // bytes — serving corrupted content.
-                //
-                // Pre-registering is safe on every other outcome:
-                //   - Happy path: no abort runs, the map is discarded at
-                //     request end.
-                //   - Early throw (FixedLengthStream size mismatch before
-                //     the put completes): cleanup tries to delete a key
-                //     that was never written → R2 delete is a no-op.
-                //   - Precondition miss (result === null): the existing
-                //     blob was written by another deploy. That deploy's
-                //     claim and/or its retained deployment row mark the
-                //     hash as foreign, so `cleanupStreamedAssetsOnAbort`
-                //     protects it via `hasForeignStreamedAssetClaim` /
-                //     `retainedHashes` — our registration does not cause
-                //     a cross-deploy wipe.
-                //
-                // Claim publishing (`ensureStreamedAssetClaim`) moves up
-                // for the same reason: a late claim write after the put
-                // succeeded would miss an abort-cleanup window. It's
-                // idempotent via `claimedStreamedHashes.has`, so the
-                // pre-put call is cheap.
-                streamedHashStores.set(declared.hash, 'r2');
-                streamedLargeHashes.add(declared.hash);
-                await ensureStreamedAssetClaim(declared.hash);
-
-                const { isNew } = await streamStaticAssetToR2(
-                  c.env.STATIC_ASSETS_R2,
-                  projectId,
-                  path,
-                  part.body,
-                  declared,
-                  getContentType(path),
-                );
-                // Parse-order deterministic, synchronous writes: same shape
-                // as both the fast-path (branch 1) and the pool path commit
-                // (branch 3). Last multipart-part wins if a path repeats.
-                builtAssetManifest[path] = {
-                  hash: declared.hash,
-                  size: declared.size,
-                };
-                if (isNew) {
-                  newStaticAssetCount++;
-                }
-                continue;
-              }
-              // Gate BEFORE reading the part body. Waiting here caps peak
-              // pool concurrency at `STATIC_ASSET_UPLOAD_CONCURRENCY` (the
-              // currently-reading task slots into a freed spot), serving
-              // as reader-safety backpressure: a burst of tiny assets
-              // can't schedule hundreds of PUTs whose retries would stall
-              // the runtime.
-              //
-              // Promise.race resolves when any upload settles, and that
-              // promise's `.finally` removes it from the set *before*
-              // settling its derived promise, so the while-condition
-              // observes the new size on the next iteration.
-              while (inFlightStaticUploads.size >= STATIC_ASSET_UPLOAD_CONCURRENCY) {
-                await Promise.race(inFlightStaticUploads);
-              }
-              const prepared = await readStaticAssetPart(part.body, path);
-              // Commit the manifest entry synchronously in parse order.
-              // `uploadStaticAssetPart` returns `entry = { hash, size }`
-              // in every dedupe branch — values we already have from
-              // `prepared` — so deferring this write into the upload
-              // task's async body would make last-writer-wins depend on
-              // KV/R2 completion order, not multipart parse order. For
-              // a payload that repeats the same asset path, that split
-              // would let a slower earlier upload overwrite a faster
-              // later upload and silently flip the deployed content (or
-              // trip `AssetHashMismatchError` against the declared
-              // manifest). Writing here mirrors the old sequential
-              // behaviour: whichever part appears last in the multipart
-              // stream wins the path deterministically.
-              builtAssetManifest[path] = { hash: prepared.hash, size: prepared.size };
-              const uploadTask = (async () => {
-                const { store, isNew } = await uploadStaticAssetPart(
-                  c.env.STATIC_ASSETS,
-                  c.env.STATIC_ASSETS_R2,
-                  projectId,
-                  prepared,
-                  streamedHashStores,
-                  inFlightUploadByHash,
-                  { onHashed: ensureStreamedAssetClaim },
-                );
-                if (store === 'r2') {
-                  streamedLargeHashes.add(prepared.hash);
-                }
-                if (isNew) {
-                  newStaticAssetCount++;
-                }
-              })();
-              inFlightStaticUploads.add(uploadTask);
-              // Retain a reference in `staticUploadPromises` so a rejection
-              // that settles before the post-parse drain is still surfaced —
-              // if we relied on `inFlightStaticUploads` alone, early
-              // rejections would be removed from the set by their `.finally`
-              // deletion before `Promise.all` ran, and the error would be
-              // silently lost.
-              staticUploadPromises.push(uploadTask);
-              uploadTask
-                .finally(() => {
-                  inFlightStaticUploads.delete(uploadTask);
-                })
-                .catch(() => {
-                  // Suppress unhandled-rejection warning: the rejection is
-                  // re-surfaced via `await Promise.all(staticUploadPromises)`
-                  // after the parse loop.
-                });
-            } else {
-              const { entry, hash, assetEntry } = await collectBufferedAsset(path, part.body);
-              builtAssetManifest[path] = entry;
-              // Duplicate content hashes collapse to one live buffered blob
-              // in `assetsByHash` — the replaced entry is unreachable and
-              // becomes GC-eligible.
-              assetsByHash.set(hash, assetEntry);
-            }
-            continue;
-          }
-          // Unknown part (e.g. legacy `migration:*`) — the parser auto-drains it
-          // when we don't consume its body.
+      // === ASSET VERIFY (R2 head) ===
+      // Verify every NEW declared asset exists in R2 before claiming a
+      // deployment slot's worth of pipeline work. This is the JSON-mode
+      // analogue of the multipart path's "the bytes arrived in the body"
+      // invariant — without it, a buggy CLI that skipped an upload
+      // would deploy a serving manifest that 404s for the missing path.
+      //
+      // Carry-forward: hashes present in the prior live deployment's
+      // `asset_hashes` are preflight-skipped and already exist somewhere
+      // (KV OR R2) for the prior deploy. Skip R2.head() for those because
+      // (a) the CLI was never asked to upload them this deploy, and (b)
+      // the prior placement may be KV (small assets), in which case R2
+      // would correctly return null. We only verify hashes that are NEW
+      // to this deploy — those MUST exist in R2 because the CLI was
+      // supposed to direct-upload them via a presigned URL.
+      currentStep = 'asset_verify';
+      markPhase('asset_verify');
+      const priorAssetManifest = await getLastLiveAssetManifest(c.get('db'), projectId);
+      const carryForwardHashes = new Set<string>();
+      if (priorAssetManifest) {
+        for (const entry of Object.values(priorAssetManifest)) {
+          carryForwardHashes.add(entry.hash);
         }
-        // Drain the streamed-static upload pool before post-parse validation:
-        // `builtAssetManifest`, `streamedHashStores`, `streamedLargeHashes`,
-        // and `newStaticAssetCount` are all written from inside the pool
-        // tasks, so any code that reads them (dedupe compare,
-        // cleanup-on-abort, the final asset-count event) must see a
-        // fully-settled state. `Promise.all` re-surfaces the first upload
-        // rejection here, inside the parse `try`, so the existing `catch`
-        // below routes it through the same cleanup path as a parse error.
-        if (staticUploadPromises.length > 0) {
-          await Promise.all(staticUploadPromises);
-        }
-        if (deferredParseErrorMessage) {
-          await cleanupStreamedAssetsOnAbort();
-          await cleanupOwnStreamedAssetClaims();
-          emit({ event: 'error', message: deferredParseErrorMessage, step: currentStep });
-          return;
-        }
-      } catch (err) {
-        // Both cleanup helpers drain `inFlightStaticUploads` internally
-        // before touching KV/R2 or ROUTING, so a late-settling PUT cannot
-        // resurrect a key or claim we just deleted. Call them in order —
-        // claim-delete must follow the PUT whose `onHashed` wrote it,
-        // which the shared drain guarantees.
-        await cleanupStreamedAssetsOnAbort();
-        await cleanupOwnStreamedAssetClaims();
-        if (
-          err instanceof MultipartParseError ||
-          err instanceof PartTooLargeError ||
-          err instanceof AssetHashMismatchError
-        ) {
-          // `AssetHashMismatchError` reaches here from `verifyStreamedAssetPart`
-          // in the duplicate-hash fast-path. Treat it as a parse-time client
-          // error (same as size/shape mismatches) so the NDJSON event carries
-          // `step: 'parsing'` rather than the misleading later step it would
-          // land on if it bubbled to the outer catch.
-          emit({ event: 'error', message: err.message, step: currentStep });
-          return;
-        }
-        throw err;
       }
-
-      // === POST-PARSE VALIDATION ===
-      currentStep = 'validating';
-      markPhase('manifest_validate');
-      // Reuse the eagerly-parsed manifest from the `assetManifest` part
-      // handler above — same input string, never mutated during parse, and
-      // the declared manifest can be up to `MAX_ASSET_MANIFEST_BYTES` (32 MiB)
-      // so a second `JSON.parse` would duplicate both the CPU cost and the
-      // parsed-object heap footprint.
-      const incomingAssetManifest = declaredAssetManifest;
-
-      // Guard against a body that parsed cleanly but never included a manifest
-      // part. A missing manifest must not fall through to the deploy pipeline
-      // (where an empty default would silently create a blank live deployment).
-      if (!manifestSeen || incomingManifest == null) {
-        await cleanupStreamedAssetsOnAbort();
-        await cleanupOwnStreamedAssetClaims();
-        emit({ event: 'error', message: 'manifest part is required', step: currentStep });
+      const declaredHashes = Array.from(
+        new Set(Object.values(incomingAssetManifest).map((e) => e.hash)),
+      );
+      const newHashes = declaredHashes.filter((h) => !carryForwardHashes.has(h));
+      const missingHashes: Array<string> = [];
+      const missingMutex: { busy: boolean } = { busy: false };
+      const r2HeadCache = new Map<string, { size: number } | null>();
+      await uploadPool(newHashes, R2_HEAD_VERIFY_CONCURRENCY, async (hash) => {
+        const key = `assets/${projectId}/${hash}`;
+        const head = await c.env.STATIC_ASSETS_R2.head(key);
+        // Single-writer atomicity: this `set` is synchronous so concurrent
+        // pool tasks don't actually race the map even though they share
+        // it. Cache it so the WfP path below can reuse the head metadata
+        // (for the size-based KV-vs-R2 split, though direct-to-R2 lands
+        // everything in R2 — see below).
+        r2HeadCache.set(hash, head ? { size: head.size } : null);
+        if (!head) {
+          // Single-writer atomicity is enough here: array `push` is
+          // synchronous and each iteration either pushes once or doesn't.
+          // The mutex guard is a hint to keep the cap-truncation logic
+          // race-free if it grows.
+          if (!missingMutex.busy) {
+            missingMutex.busy = true;
+            missingHashes.push(hash);
+            missingMutex.busy = false;
+          } else {
+            missingHashes.push(hash);
+          }
+        }
+      });
+      if (missingHashes.length > 0) {
+        const cap = 10;
+        const sample = missingHashes.slice(0, cap);
+        const more = missingHashes.length > cap ? ` (+${missingHashes.length - cap} more)` : '';
+        emit({
+          event: 'error',
+          message:
+            `${missingHashes.length} declared asset hash${missingHashes.length === 1 ? '' : 'es'} not found in R2: ${sample.join(', ')}${more}. ` +
+            `Upload may have been skipped, or presigned URLs may have expired (10 min TTL). Re-run preflight + upload-urls.`,
+          step: currentStep,
+        });
         return;
       }
+
+      // === MANIFEST VALIDATION & DEDUPE ===
+      currentStep = 'validating';
+      markPhase('manifest_validate');
 
       const previousManifest = parseManifest(currentLiveDeployment?.manifest);
       const websocketManifestResult = enrichWebSocketManifest(
@@ -2279,18 +1982,7 @@ app.post('/:id/deploy', async (c) => {
       manifest = enrichedManifestResult.manifest;
       const finalManifestRaw = JSON.stringify(manifest);
 
-      // Host-scoped routing rules: reject any rule whose `host` is not
-      // registered on the project. Checked here (not in
-      // `validateManifestShape`) because the valid set depends on live DB
-      // state. A rule scoped to a host that isn't on this project would
-      // silently never fire at dispatch — reject at deploy time so the
-      // author sees the mistake instead.
-      //
-      // Pending custom domains are accepted: while DCV is incomplete, traffic
-      // for that hostname doesn't route to this project's dispatch entry, so
-      // the rule physically can't fire. Once DCV completes, the rule starts
-      // firing automatically without a redeploy. This matches Netlify/Vercel
-      // UX — stage the redirect in the same change as the domain.
+      // Host-scoped routing rules — same logic as multipart path.
       const hostScopedRedirects = manifest.redirectRules?.some((r) => r.host) ?? false;
       const hostScopedFallbacks = manifest.fallbackRules?.some((r) => r.host) ?? false;
       if (hostScopedRedirects || hostScopedFallbacks) {
@@ -2305,8 +1997,6 @@ app.post('/:id/deploy', async (c) => {
           .filter((h): h is string => typeof h === 'string' && !boundHosts.has(h));
         if (unbound.length > 0) {
           const unique = Array.from(new Set(unbound));
-          await cleanupStreamedAssetsOnAbort();
-          await cleanupOwnStreamedAssetClaims();
           emit({
             event: 'error',
             message: `routing rule host not bound to project: ${unique.join(', ')} — add the domain (\`void domain add\`) before deploying rules scoped to it`,
@@ -2316,6 +2006,11 @@ app.post('/:id/deploy', async (c) => {
         }
       }
 
+      // Dedupe-skip. JSON-mode CLIs always send the full assetManifest
+      // (including preflight-skipped paths), so `built` and `declared`
+      // collapse to the same object — the dedupe helper just normalises
+      // the comparison shape and returns it.
+      const builtAssetManifest = incomingAssetManifest;
       const comparableAssetManifest = await buildComparableAssetManifestForDedupe(
         c.get('db'),
         projectId,
@@ -2324,11 +2019,6 @@ app.post('/:id/deploy', async (c) => {
         preflightRaw,
       );
 
-      // Skip static-only deploys if identical to the current live deployment.
-      // Worker-backed deploys are not skipped because the deploy manifest does not
-      // include worker module content hashes.
-      // Secrets are not checked: the secrets API already live-pushes values to the active
-      // worker via putWorkerSecret.
       if (!hasWorkerFiles && currentLiveDeployment && currentLiveDeployment.status === 'live') {
         const sameManifest = currentLiveDeployment.manifest === finalManifestRaw;
         const sameAssets = equalAssetManifests(
@@ -2356,55 +2046,28 @@ app.post('/:id/deploy', async (c) => {
             assets: 0,
             workers: 0,
           });
-          // Dedupe short-circuit: sweep anything the client streamed that is
-          // NOT referenced by the matched live deployment. Hashes that are part
-          // of the matched manifest are in the retained-hash set and will be
-          // preserved by deleteUnreferencedAssets.
-          await cleanupStreamedAssetsOnAbort();
-          await cleanupOwnStreamedAssetClaims();
-          // Release the placeholder claim row inserted by the precheck —
-          // this request is a verified no-op against the live deployment,
-          // so the placeholder represents no real deploy attempt. Delete
-          // it so deploy history shows only meaningful rows. Nothing
-          // outside this transaction holds a reference to the row yet
-          // (no routing entry, no `active_deployment_id`, no logs); the
-          // delete is safe.
+          // Release the placeholder row — verified no-op.
           await c.get('db').delete(deployments).where(eq(deployments.id, preDeployment.id));
           return;
         }
       }
 
-      // Daily deploy-count limit for worker-backed deploys. Runs AFTER the
-      // dedupe branch so an identical retry at the cap is still served from
-      // the live deployment instead of failing hard with 429. Worker parts
-      // are buffered in RAM during parse (not persisted), so deferring the
-      // check here costs nothing in storage writes. Streamed-static deploys
-      // are gated earlier, at manifest-parse time, because they start writing
-      // to KV/R2 during the parse loop — see the early check in the parse
-      // loop above.
-      if (!streamedStaticAssets && planLimits.deploysPerDay > 0) {
+      // Daily deploy-count limit. JSON-mode deploys don't write any KV/R2
+      // bytes during this request (assets pre-existed direct-to-R2), so
+      // we can defer the cap check until AFTER the dedupe short-circuit
+      // — same as the multipart path's worker-backed branch.
+      if (planLimits.deploysPerDay > 0) {
         const todayCount = await countUserDeploymentsToday(c.get('db'), c.get('user').id);
         if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
-          await cleanupStreamedAssetsOnAbort();
-          await cleanupOwnStreamedAssetClaims();
           emit({ event: 'error', message: 'deploy limit exceeded', step: currentStep });
-          // The finally-block reaper marks the placeholder 'failed' if it
-          // is still 'pending'; let it run.
           return;
         }
       }
 
-      // Fill in the deployment record. The row was inserted pre-stream by
-      // the atomic precheck-and-claim transaction at route entry (see the
-      // `c.get('db').transaction(...)` block above the response stream
-      // construction). Wrap the update in a FOR UPDATE transaction that
-      // re-checks `projects.status` so a teardown that won the race
-      // between the route's early reject and here cannot leave a
-      // partially-populated deployment row pointing at a deleting project
-      // (design-doc 0067 §7). `deleteProjectCascade` deletes deployments
-      // before the project, and the deployments FK is ON DELETE no action
-      // — a late update would break cascade deletion or leave the project
-      // stuck in 'deleting'.
+      // Fill in the deployment record (same FOR UPDATE pattern as
+      // multipart). Once this completes the deployment row is no longer
+      // a precheck placeholder — every subsequent failure must transition
+      // it to a terminal status via the catch path.
       deployment = await c.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
         const txDb = tx as unknown as Db;
@@ -2426,7 +2089,6 @@ app.post('/:id/deploy', async (c) => {
         );
       });
       currentDeploymentId = deployment.id;
-      cleanupExcludeDeploymentId = deployment.id;
       logger = logger.with({ deploymentId: deployment.id });
       if (manifestVersionChanged) {
         await updateProjectWebSocketVersion(
@@ -2438,21 +2100,12 @@ app.post('/:id/deploy', async (c) => {
       dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
       workerName = `user-${project.slug}-${deployment.id}`;
 
-      // Re-bind as const with non-null narrowing so references inside nested
-      // async callbacks (retryWithBackoff, uploadPool, ...) keep their typing.
-      // The outer `let` bindings above were just assigned and are guaranteed
-      // defined here, but TS loses `let` narrowing inside async closures
-      // (they could be reassigned externally). The outer `let` bindings are
-      // still what the outer catch reads to detect a pre-createDeployment
-      // failure.
       const pipelineDeployment = deployment;
       const pipelineManifest = manifest;
       const pipelineWorkerName = workerName;
       const pipelineDispatchNamespace = dispatchNamespace;
 
       try {
-        // Shadow with the original names so the pipeline body (unchanged)
-        // binds to these consts.
         const deployment = pipelineDeployment;
         const manifest = pipelineManifest;
         const workerName = pipelineWorkerName;
@@ -2472,46 +2125,24 @@ app.post('/:id/deploy', async (c) => {
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await assertProjectNotDeleting(c.get('db'), projectId);
 
-        // Merge the declared asset manifest into the one we built from the
-        // streamed parts — this validates hash agreement and preserves the
-        // CLI-declared `size` field verbatim when it matches.
-        const assetManifest = applyDeclaredAssetManifest(
-          builtAssetManifest,
-          incomingAssetManifest ?? undefined,
-        );
+        // JSON-mode CLI always sends the full assetManifest including
+        // preflight-skipped paths; no server-side fill-in needed. Clone so
+        // the cache-buster injection below mutates a fresh object rather
+        // than the validated incoming map.
+        const assetManifest: Record<string, AssetManifestEntry> = { ...incomingAssetManifest };
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await assertProjectNotDeleting(c.get('db'), projectId);
 
-        // When preflight was used, fill in skipped assets.
-        // Prefer the CLI's full manifest (new CLIs send it) to avoid accumulating
-        // stale entries from previous deploys. Fall back to the previous deploy's
-        // manifest for older CLIs that don't send it.
         const preflightUsed = preflightRaw === 'true';
-        if (preflightUsed) {
-          const fillManifest =
-            incomingAssetManifest ?? (await getLastLiveAssetManifest(c.get('db'), projectId));
-          if (fillManifest) {
-            for (const [path, entry] of Object.entries(fillManifest)) {
-              if (!(path in assetManifest)) {
-                assetManifest[path] = entry;
-              }
-            }
-          }
-        }
-
-        // Determine if this is a static-only deploy (no worker files in FormData)
         const isStaticOnly = !hasWorkerFiles;
         logger = logger.with({ branch: isStaticOnly ? 'static' : 'wfp' });
 
-        // CF's `assets-upload-session` API can return empty/incomplete buckets
-        // when its dedupe index is in a bad state for some hashes — entries get
-        // claimed in the index without actual bytes backing them, then later
-        // requests serve a 36-byte "Assets have not yet been deployed..." stub.
-        // Tracked in cloudflare/workers-sdk#12586 (CF internal WC-4511).
-        // Workaround: inject a deterministic-but-unique-per-deploy asset so the
-        // session always sees at least one novel hash, forcing CF to re-validate
-        // the full manifest. Only needed for the WfP path; static-only deploys
-        // upload directly to KV/R2 and don't hit this API.
+        // CF dedupe-poisoning workaround: same as multipart path. WfP
+        // deploys with non-empty asset manifests inject a unique cache
+        // buster so CF's asset session always sees at least one novel
+        // hash. The buster's bytes still need to reach CF, so we put
+        // them directly into `assetsByHash` (not into our R2 — they're
+        // a deploy-local artifact, not a CLI-uploaded asset).
         if (!isStaticOnly && Object.keys(assetManifest).length > 0) {
           const bustPath = `/.void-deploy/${deployment.id}.txt`;
           const bustContent = `${deployment.id}\n${Date.now()}\n`;
@@ -2530,97 +2161,92 @@ app.post('/:id/deploy', async (c) => {
 
         const assetCount = Object.keys(assetManifest).length;
 
-        // Fetch domains once — used in both static-only and full deploy paths.
-        // Reuses the IIFE-scoped memo so the host-scoped rule check and the
-        // dedupe-skip block don't double-fetch.
         projectDomains ??= await getDomainsByProjectId(c.get('db'), projectId);
 
         if (isStaticOnly) {
-          // Static-only deploy: upload assets to KV/R2, skip bindings/migrations/WfP
+          // Static-only branch: bytes already in R2; build the serving
+          // manifest with `!{hash}` for every entry (direct-to-R2 always
+          // lands in R2). No KV/R2 writes for asset bodies — only the
+          // serving manifest under `manifest:{deploymentId}` and the
+          // routing entry under `project.slug`.
           currentStep = 'asset_upload';
           const assetConfig = manifest.assetConfig ?? {
             not_found_handling: 'single-page-application',
           };
 
-          // For streamed static deploys, assets were already piped into KV/R2
-          // during body parsing — just reuse the set of R2-stored hashes.
-          // For buffered static deploys (older CLIs without manifest.type),
-          // upload from the assetsByHash map as before.
-          const newAssets = streamedStaticAssets ? newStaticAssetCount : assetsByHash.size;
+          // We didn't upload anything new this request — every asset was
+          // pre-uploaded direct-to-R2 by the CLI. `new` and `cached`
+          // here represent "verified existing in R2" and convey the
+          // same information shape as the multipart path's
+          // `streamedStaticAssets` branch.
           emit({
             event: 'asset_upload',
             total: assetCount,
-            new: newAssets,
-            cached: assetCount - newAssets,
+            new: 0,
+            cached: assetCount,
           });
-          const largeHashes = streamedStaticAssets
-            ? streamedLargeHashes
-            : await uploadStaticAssets(
-                c.env.STATIC_ASSETS,
-                c.env.STATIC_ASSETS_R2,
-                assetsByHash,
-                projectId,
-              );
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           await assertProjectNotDeleting(c.get('db'), projectId);
           emit({ event: 'asset_upload_done' });
 
-          // Build serving manifest: path → hash (prefix with "!" for R2-stored assets)
-          // For assets from preflight (not in assetsByHash), carry forward R2 status
-          // from the previous deployment's manifest
+          // Build serving manifest. Carry-forward hashes (declared in the
+          // prior live deploy's `asset_hashes`) MUST preserve the prior
+          // KV-vs-R2 placement: small assets in the prior deploy live in
+          // KV (no `!` prefix), and rewriting them as `!hash` would point
+          // dispatch's WfP fallback at R2 keys that don't exist. New
+          // hashes (not in the prior manifest) were just uploaded
+          // direct-to-R2 by the CLI and always use the `!` prefix.
+          //
+          // We always read the prior serving manifest (not just when
+          // `preflightUsed` is true) — a CLI that re-declares the same
+          // hashes without preflight still relies on carry-forward to
+          // serve those bytes from their existing KV/R2 home.
           let prevServingManifest: Record<string, string> | null = null;
-          if (preflightUsed && project.active_deployment_id) {
+          if (project.active_deployment_id) {
             const prev = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
             if (prev) {
               prevServingManifest = JSON.parse(prev) as Record<string, string>;
             }
           }
-
-          // Build a reverse lookup from hash → "!" prefix status from previous manifest
-          const prevR2Hashes = new Set<string>();
+          const prevHashEntry = new Map<string, string>();
           if (prevServingManifest) {
             for (const v of Object.values(prevServingManifest)) {
-              if (v.startsWith('!')) {
-                prevR2Hashes.add(v.slice(1));
-              }
+              const hash = v.startsWith('!') ? v.slice(1) : v;
+              prevHashEntry.set(hash, v);
             }
           }
 
           const servingManifest: Record<string, string> = {};
           for (const [path, entry] of Object.entries(assetManifest)) {
-            if (largeHashes.has(entry.hash)) {
-              // Newly uploaded to R2
-              servingManifest[path] = `!${entry.hash}`;
-            } else if (prevR2Hashes.has(entry.hash)) {
-              // Preflight-skipped asset that was previously in R2
-              servingManifest[path] = `!${entry.hash}`;
+            if (carryForwardHashes.has(entry.hash) && prevHashEntry.has(entry.hash)) {
+              // Carry-forward — preserve prior placement (KV vs R2).
+              servingManifest[path] = prevHashEntry.get(entry.hash)!;
+            } else if (carryForwardHashes.has(entry.hash)) {
+              // Carry-forward by hash (existed in prior `asset_hashes`)
+              // but the prior serving manifest is gone (e.g. dedupe
+              // GC'd the entry). Direct-to-R2 lands carry-forward bytes
+              // nowhere new this deploy, so we have no `!` guarantee —
+              // omit and rely on the dispatch fallback chain. Same gap
+              // case as the multipart path's else branch.
             } else {
-              // KV-stored asset (newly uploaded or preflight-skipped)
-              servingManifest[path] = entry.hash;
+              // New this deploy — verified in R2 above; direct-to-R2
+              // always uses the `!` prefix.
+              servingManifest[path] = `!${entry.hash}`;
             }
           }
 
-          // Store serving manifest in ROUTING KV for dispatch to look up
           await c.env.ROUTING.put(`manifest:${deployment.id}`, JSON.stringify(servingManifest));
 
-          // Store asset manifest in DB for future preflight dedup + retention cleanup.
-          // The retention claim below (markDeploymentRetained) is what actually
-          // guarantees these hashes are visible to future cleanup — until then
-          // `getRetainedDeployments` filters on `retained=true` and wouldn't
-          // see this deployment, so a failure between here and the retention
-          // claim must still sweep the streamed blobs.
           await c
             .get('db')
             .update(deployments)
             .set({ asset_hashes: JSON.stringify(assetManifest) })
             .where(eq(deployments.id, deployment.id));
 
-          // Use manifest type when present, fall back to assetConfig-based derivation for older CLIs
           const type =
             manifest.type ??
             (assetConfig.not_found_handling === 'single-page-application' ? 'spa' : 'static');
 
-          // Set KV routing — uses staticDeploymentId (no WfP worker)
           const existingRouting = await c.env.ROUTING.get(project.slug);
           const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
           const routingJson = buildStaticRoutingJson({
@@ -2635,9 +2261,6 @@ app.post('/:id/deploy', async (c) => {
           await assertProjectNotDeleting(c.get('db'), projectId);
           markPhase('routing_switch');
           await c.env.ROUTING.put(project.slug, routingJson);
-          // Record AFTER successful put — a rejected put must not appear in
-          // the rollback set, otherwise the catch path would delete a
-          // previous deployment's still-live route on a transient KV failure.
           writtenRoutingKeys.push(project.slug);
           routingSwitched = true;
           logger = logger.with({ routingSwitched: true });
@@ -2651,11 +2274,6 @@ app.post('/:id/deploy', async (c) => {
             }
           }
 
-          // Mark deployment live + update project type. Take a project-row
-          // FOR UPDATE lock and re-check status so a teardown that flipped
-          // `projects.status='deleting'` between the pre-routing checks and
-          // here can't sneak past — see the WfP path for the same pattern
-          // and design-doc 0067 §7.
           markPhase('db_finalize');
           logger.info('status_transition', 'status_change', {
             from: currentStatus,
@@ -2680,16 +2298,8 @@ app.post('/:id/deploy', async (c) => {
           await setActiveDeployment(c.get('db'), projectId, deployment.id);
           await markDeploymentRetained(c.get('db'), deployment.id, true);
 
-          // Static deploys have no crons. Clear unconditionally so a stale
-          // CronScheduler DO never churns through "Worker not found" against
-          // scripts we're about to delete. /clear is idempotent (deleteAll +
-          // deleteAlarm are no-ops on empty DOs), and a prior deploy's clear
-          // may have failed transiently (clearCronScheduler swallows errors)
-          // — gating on the previous manifest would skip the recovery path.
-          // Matches the WfP no-cron branch and project deletion.
           await clearCronScheduler(c.env, projectId);
 
-          // Hard cutoff: delete legacy WfP scripts (one-time cleanup on first KV/R2 deploy)
           const legacyName = `user-${project.slug}`;
           await deleteDispatchScript(
             c.env.CF_ACCOUNT_ID,
@@ -2698,14 +2308,11 @@ app.post('/:id/deploy', async (c) => {
             legacyName,
           );
 
-          // Fetch all retained deployments once — used for both WfP cleanup and retention
           const retained = await getRetainedDeploymentsExcluding(
             c.get('db'),
             projectId,
             deployment.id,
           );
-
-          // Delete any previously retained versioned WfP scripts
           for (const old of retained) {
             await deleteDispatchScript(
               c.env.CF_ACCOUNT_ID,
@@ -2715,20 +2322,22 @@ app.post('/:id/deploy', async (c) => {
             );
           }
 
-          // Static retention cleanup — STATIC_RETENTION_LIMIT (100) instead of per-plan limits
           markPhase('retention_cleanup');
           if (STATIC_RETENTION_LIMIT > 0) {
-            // STATIC_RETENTION_LIMIT includes the active deployment, so keep (limit - 1) others
             const toEvict = retained.slice(STATIC_RETENTION_LIMIT - 1);
-            if (toEvict.length > 0) {
-              // Collect all hashes from the current + remaining retained deployments
-              const retainedHashes = new Set<string>();
-              for (const [, entry] of Object.entries(assetManifest)) {
-                retainedHashes.add(entry.hash);
-              }
-              const keptDeployments = retained.slice(0, STATIC_RETENTION_LIMIT - 1);
-              for (const kept of keptDeployments) {
-                if (kept.asset_hashes) {
+            // Build the post-eviction retained-hashes union once. Always
+            // built (independent of `toEvict.length`) because the R2
+            // keyspace sweep below uses it to opportunistically GC
+            // direct-to-R2 orphans (bytes uploaded via presigned PUTs that
+            // never finalized into a live deploy).
+            const retainedHashes = new Set<string>();
+            for (const [, entry] of Object.entries(assetManifest)) {
+              retainedHashes.add(entry.hash);
+            }
+            const keptDeployments = retained.slice(0, STATIC_RETENTION_LIMIT - 1);
+            for (const kept of keptDeployments) {
+              if (kept.asset_hashes) {
+                try {
                   const keptManifest = JSON.parse(kept.asset_hashes) as Record<
                     string,
                     { hash: string }
@@ -2736,29 +2345,51 @@ app.post('/:id/deploy', async (c) => {
                   for (const entry of Object.values(keptManifest)) {
                     retainedHashes.add(entry.hash);
                   }
+                } catch (e) {
+                  logger.warn('retention_cleanup', 'retained_asset_hashes_parse_failed', {
+                    retainedDeploymentId: kept.id,
+                    err: e instanceof Error ? e.message : String(e),
+                  });
                 }
               }
+            }
 
-              for (const old of toEvict) {
-                // Collect evicted hashes and delete unreferenced assets
-                if (old.asset_hashes) {
-                  const evictedManifest = JSON.parse(old.asset_hashes) as Record<
-                    string,
-                    { hash: string }
-                  >;
-                  const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
-                  await deleteUnreferencedAssets(
-                    c.env.STATIC_ASSETS,
-                    c.env.STATIC_ASSETS_R2,
-                    evictedHashes,
-                    retainedHashes,
-                    projectId,
-                  );
-                }
-                // Delete serving manifest from ROUTING KV
-                await c.env.ROUTING.delete(`manifest:${old.id}`);
-                await markDeploymentRetained(c.get('db'), old.id, false);
+            for (const old of toEvict) {
+              if (old.asset_hashes) {
+                const evictedManifest = JSON.parse(old.asset_hashes) as Record<
+                  string,
+                  { hash: string }
+                >;
+                const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
+                await deleteUnreferencedAssets(
+                  c.env.STATIC_ASSETS,
+                  c.env.STATIC_ASSETS_R2,
+                  evictedHashes,
+                  retainedHashes,
+                  projectId,
+                );
               }
+              await c.env.ROUTING.delete(`manifest:${old.id}`);
+              await markDeploymentRetained(c.get('db'), old.id, false);
+            }
+
+            // Direct-to-R2 orphan sweep. See WfP branch for rationale —
+            // orphans uploaded via presigned PUTs that never finalized are
+            // not named in any manifest, so the eviction loop misses them.
+            // Best-effort: a failed sweep should not fail the deploy.
+            try {
+              const orphans = await sweepProjectAssetOrphans(
+                c.env.STATIC_ASSETS_R2,
+                projectId,
+                retainedHashes,
+              );
+              if (orphans > 0) {
+                logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
+              }
+            } catch (e) {
+              logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
+                err: e instanceof Error ? e.message : String(e),
+              });
             }
           }
 
@@ -2783,13 +2414,16 @@ app.post('/:id/deploy', async (c) => {
           return;
         }
 
-        // Full deploy path
-        // Provision bindings (D1, KV, R2) — creates CF resources if needed
+        // === WfP branch ===
+        // Direct-to-R2 doesn't change anything about CF's asset upload
+        // session: CF still wants the actual bytes to fan into upload
+        // buckets. We fetch the bytes back from OUR R2 (where the CLI
+        // just uploaded them) — server-internal R2-to-CF traffic that
+        // doesn't go through the user's pipe. The fetch concurrency
+        // matches the existing R2 head verify pool.
         currentStep = 'provisioning';
         markPhase('provisioning');
 
-        // Derive binding labels from the manifest upfront so we can show the
-        // spinner BEFORE the (potentially slow) CF API provisioning calls.
         const bindingLabels: Array<string> = [];
         for (const name of manifest.bindings.d1 ?? []) {
           bindingLabels.push(`d1:${name}`);
@@ -2862,12 +2496,51 @@ app.post('/:id/deploy', async (c) => {
           })),
         );
 
-        // Upload assets via CF asset upload API (3-step flow)
         let completionJwt: string | undefined;
         if (assetCount > 0) {
           currentStep = 'asset_upload';
           markPhase('asset_upload');
-          const newAssets = assetsByHash.size;
+          // Hydrate `assetsByHash` from R2. The cache-buster injected
+          // above is already in `assetsByHash`; only fetch the rest.
+          // Bounded concurrency matches the head-verify pool.
+          const wfpDeclaredHashSet = new Set(
+            Object.values(incomingAssetManifest).map((e) => e.hash),
+          );
+          const hashesNeedingBytes = Array.from(wfpDeclaredHashSet).filter(
+            (h) => !assetsByHash.has(h),
+          );
+          await uploadPool(hashesNeedingBytes, R2_HEAD_VERIFY_CONCURRENCY, async (hash) => {
+            const obj = await c.env.STATIC_ASSETS_R2.get(`assets/${projectId}/${hash}`);
+            if (!obj) {
+              // Should be impossible — we already head-verified above.
+              // Surface as a hard error: a missing object after head
+              // succeeded means R2 lost the bytes between head and get.
+              throw new Error(
+                `R2 object ${`assets/${projectId}/${hash}`} disappeared between head and get`,
+              );
+            }
+            const ab = await obj.arrayBuffer();
+            // Find a path in the asset manifest with this hash so we
+            // can derive the content type for the CF asset upload.
+            // Multiple paths can share a hash; any one is correct.
+            let path = '';
+            for (const [p, e] of Object.entries(incomingAssetManifest)) {
+              if (e.hash === hash) {
+                path = p;
+                break;
+              }
+            }
+            assetsByHash.set(hash, {
+              bytes: new Uint8Array(ab),
+              contentType: getContentType(path),
+            });
+          });
+          // `new` reflects "newly uploaded by the CLI this deploy" —
+          // for direct-to-R2 we don't re-upload, so we report 0 new
+          // (every byte was pre-uploaded). The CF asset upload session
+          // still dedupes against its own server-side index, which is
+          // what the WfP path's `cached` semantic refers to.
+          const newAssets = 0;
           emit({
             event: 'asset_upload',
             total: assetCount,
@@ -2880,7 +2553,9 @@ app.post('/:id/deploy', async (c) => {
             c.env.CF_API_TOKEN,
             dispatchNamespace,
             workerName,
-            assetManifest,
+            // Strip extras (e.g. v2 `blake3`/`md5`) at the CF API boundary —
+            // CF documents only `{ hash, size }` and may strictly validate.
+            normalizeForCfAssetSession(assetManifest),
           );
           logger.info('asset_upload', 'session_created', {
             manifestEntries: Object.keys(assetManifest).length,
@@ -2888,8 +2563,6 @@ app.post('/:id/deploy', async (c) => {
             blobsAvailable: assetsByHash.size,
           });
 
-          // Upload asset buckets to CF. When all assets are cached (empty buckets),
-          // the session JWT is already the completion token — no exchange needed.
           completionJwt = await uploadAssetBuckets(
             c.env.CF_ACCOUNT_ID,
             session.jwt,
@@ -2903,43 +2576,17 @@ app.post('/:id/deploy', async (c) => {
           });
           emit({ event: 'asset_upload_done' });
 
-          // Persist the asset manifest as soon as CF acknowledges the bytes.
-          // Writing this here — before worker upload, migrations, retention,
-          // and routing — means any later-step failure (migrations especially)
-          // still leaves a row the next deploy's corroboration can read. This
-          // is the minimal fix for the "first deploy fails at migration →
-          // project permanently deadlocked" class of incident.
           await c
             .get('db')
             .update(deployments)
             .set({ asset_hashes: JSON.stringify(assetManifest) })
             .where(eq(deployments.id, deployment.id));
 
-          // Mirror assets to platform R2/KV as a safety net for CF asset
-          // dedupe poisoning (cloudflare/workers-sdk#12586). CF remains the
-          // primary serving path; dispatch consults this mirror only when
-          // CF returns the "Assets have not yet been deployed" stub. See
-          // meta/design-docs/0066.
-          //
-          // Register hashes with the abort-cleanup path BEFORE the upload
-          // so a partial failure — uploadStaticAssets runs concurrent
-          // workers and rejects on the first error, leaving already-settled
-          // writes on disk — still gets swept. Placement is a pure function
-          // of size, so we compute it up-front instead of relying on the
-          // return value (which is unreachable on rejection).
-          for (const [hash, entry] of assetsByHash) {
-            if (!streamedHashStores.has(hash)) {
-              streamedHashStores.set(hash, entry.bytes.byteLength >= KV_THRESHOLD ? 'r2' : 'kv');
-            }
-          }
-
-          const largeHashes = await uploadStaticAssets(
-            c.env.STATIC_ASSETS,
-            c.env.STATIC_ASSETS_R2,
-            assetsByHash,
-            projectId,
-          );
-
+          // Mirror serving manifest. Direct-to-R2 already lands assets
+          // in our R2; we just need to write the per-deploy serving
+          // manifest so dispatch's WfP fallback can read them when CF's
+          // asset store returns the dedupe-poisoning stub.
+          const declaredHashes2 = new Set(Object.values(incomingAssetManifest).map((e) => e.hash));
           let prevServingManifest: Record<string, string> | null = null;
           if (preflightUsed && project.active_deployment_id) {
             const prev = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
@@ -2947,9 +2594,6 @@ app.post('/:id/deploy', async (c) => {
               prevServingManifest = JSON.parse(prev) as Record<string, string>;
             }
           }
-
-          // Hash → prior serving-manifest entry, so preflight-skipped assets
-          // keep their R2-vs-KV placement without needing the bytes on hand.
           const prevHashEntry = new Map<string, string>();
           if (prevServingManifest) {
             for (const v of Object.values(prevServingManifest)) {
@@ -2957,53 +2601,43 @@ app.post('/:id/deploy', async (c) => {
               prevHashEntry.set(hash, v);
             }
           }
-
           const servingManifest: Record<string, string> = {};
           for (const [path, entry] of Object.entries(assetManifest)) {
-            if (assetsByHash.has(entry.hash)) {
-              servingManifest[path] = largeHashes.has(entry.hash) ? `!${entry.hash}` : entry.hash;
+            if (declaredHashes2.has(entry.hash)) {
+              // Direct-to-R2 always uses R2-prefixed entries.
+              servingManifest[path] = `!${entry.hash}`;
             } else if (prevHashEntry.has(entry.hash)) {
-              // Preflight-skipped but the previous mirror has the bytes.
               servingManifest[path] = prevHashEntry.get(entry.hash)!;
             }
-            // else: preflight-skipped with no prior mirror — bytes only live
-            // in CF's asset store. Omit from serving manifest; fallback
-            // cannot cover this path until a future deploy re-uploads it.
+            // else: preflight-skipped with no prior mirror — same gap
+            // case as multipart; serving manifest omits.
           }
-
           await c.env.ROUTING.put(`manifest:${deployment.id}`, JSON.stringify(servingManifest));
           wfpMirroredManifestDeploymentId = deployment.id;
         }
 
-        // 1. Upload worker to dispatch namespace via CF API
+        // 1. Worker upload
         currentStep = 'worker_upload';
         markPhase('worker_upload');
         const workerFormData = new FormData();
-
-        // Worker modules were already buffered during the streaming body parse.
         emit({ event: 'worker_upload', modules: workerFiles.length });
 
-        // Build combined bindings: user vars + provisioned (d1/kv/r2) + ASSETS
-        // Platform bindings come LAST so they win on name collision (CF uses last-wins semantics)
         const RESERVED_BINDING_NAMES = new Set([
           '__VOID_PROXY',
           '__PROJECT_ID',
           '__VOID_PROXY_TOKEN',
           'ASSETS',
         ]);
-
         const userVarNames = Object.keys(manifest.vars ?? {});
         const reserved = userVarNames.filter((n) => RESERVED_BINDING_NAMES.has(n));
         if (reserved.length > 0) {
           throw new Error(`reserved binding names: ${reserved.join(', ')}`);
         }
-
         const secretNames = new Set(secretBindings.map((s) => s.name));
         const collisions = userVarNames.filter((n) => secretNames.has(n));
         if (collisions.length > 0) {
           logger.warn('worker_upload', 'var_secret_collisions', { collisions });
         }
-
         const plainTextBindings = Object.entries(manifest.vars ?? {}).map(([name, text]) => ({
           type: 'plain_text' as const,
           name,
@@ -3020,11 +2654,9 @@ app.post('/:id/deploy', async (c) => {
           ...(completionJwt ? [{ name: 'ASSETS', type: 'assets' }] : []),
         ];
 
-        // Add metadata part (include provisioned bindings + assets)
         if (!manifest.compatibilityDate) {
           logger.warn('worker_upload', 'missing_compatibility_date');
         }
-
         const assetConfig = manifest.assetConfig ?? { not_found_handling: 'none' };
         const durableObjectMigrations = buildDurableObjectUploadMigrations(
           manifest.websocket?.migrations,
@@ -3044,36 +2676,16 @@ app.post('/:id/deploy', async (c) => {
             enabled: true,
             logs: { invocation_logs: true, head_sampling_rate: 1 },
           },
-          // Explicit per-script tail consumer wiring. The dispatch worker
-          // already declares `tail_consumers` (which CF documents as
-          // propagating to scripts in the namespace), but propagation is
-          // undocumented for dispatch-namespace scripts and silent if it
-          // breaks — log rows would simply stop appearing in AE under
-          // `index1='user-{slug}'`. Belt-and-suspenders: send it on every
-          // upload as well. If CF rejects this on namespace scripts, the
-          // upload will fail loudly and we'll iterate.
           tail_consumers: [{ service: tailServiceName }],
         };
         workerFormData.append(
           'metadata',
           new Blob([JSON.stringify(metadata)], { type: 'application/json' }),
         );
-
-        // Add each worker module. The Blob was constructed at parse time
-        // with the correct module content type, so we can append the
-        // existing Blob directly instead of allocating a second copy here.
         for (const file of workerFiles) {
           workerFormData.append(file.name, file.content, file.name);
         }
 
-        // Upload to CF Workers for Platforms API.
-        // CF's WfP API sometimes returns plain text (e.g. "Assets have already
-        // been uploaded") with 200 status instead of completing the upload.
-        // This is the same CF bug handled in createAssetUploadSession — retry
-        // to hit a different edge node.
-        // Assigned to the outer-scoped `workerUploadUrl` so the catch-path
-        // teardown-race branch can DELETE the script if teardown's own
-        // worker DELETE ran before our PUT (orphan recovery).
         workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
         await retryWithBackoff(
           async (attempt) => {
@@ -3105,7 +2717,7 @@ app.post('/:id/deploy', async (c) => {
                 code: 'cf_plain_text',
                 bodyPreview: cfBody.slice(0, 100),
               });
-              return undefined; // retry
+              return undefined;
             }
             return true;
           },
@@ -3116,18 +2728,6 @@ app.post('/:id/deploy', async (c) => {
         );
         workerUploaded = true;
 
-        // Persist the worker bundle to R2 BEFORE the cancel/delete checks so
-        // the invariant `bundle_stored=true ⇒ rollbackable` holds. If the
-        // bundle write throws, the deploy aborts via the outer catch; the
-        // freshly-uploaded user worker is torn down on the pre-routing
-        // cleanup path. Cancellation only kicks in AFTER the bundle is
-        // durably written + flagged, which is what we want — a deploy that
-        // was canceled mid-write would otherwise leave `bundle_stored=false`
-        // on a script that did upload, blocking rollback to it later.
-        //
-        // Static / SPA deploys (`!hasWorkerFiles`) skip this — their assets
-        // are already content-addressed in R2, and they have no worker
-        // module to replay, so their `bundle_stored` stays false.
         if (hasWorkerFiles) {
           try {
             await persistWorkerBundle(
@@ -3137,11 +2737,6 @@ app.post('/:id/deploy', async (c) => {
               workerFiles,
             );
           } catch (err) {
-            // The bounded-worker pool inside persistWorkerBundle awaits all
-            // in-flight puts before throwing, so the R2 set is stable here.
-            // Successful puts before the throw are otherwise unreferenced —
-            // bundle_stored never flips true and no other code path will
-            // reap them.
             await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, deployment.id).catch((e) =>
               logger.error('worker_upload', 'partial_bundle_cleanup_failed', e, {
                 deploymentId: deployment!.id,
@@ -3156,11 +2751,6 @@ app.post('/:id/deploy', async (c) => {
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await assertProjectNotDeleting(c.get('db'), projectId);
 
-        // Per-deploy sandbox container provisioning. Must run AFTER the user
-        // worker PUT because the container app's `durable_objects.namespace_id`
-        // points at the freshly-minted DO namespace owned by the per-deploy
-        // user worker. CF rejects cross-script DO bindings into dispatch
-        // namespaces, so each deploy mints its own namespace + container.
         if (manifest.sandbox && hasWorkerFiles) {
           currentStep = 'sandbox_container';
           markPhase('sandbox_container');
@@ -3190,10 +2780,7 @@ app.post('/:id/deploy', async (c) => {
 
         emit({ event: 'worker_upload_done' });
 
-        // 1b. Run migrations via the newly-uploaded worker (v3 flow).
-        // On failure, the thrown error propagates to the outer catch which
-        // runs the pre-routing cleanup branch (`routingSwitched === false`)
-        // and deletes the freshly-uploaded worker exactly once.
+        // Migrations
         let migrationsApplied = 0;
         if (manifest.migrations && manifest.migrations.pending > 0) {
           currentStep = 'migration';
@@ -3209,10 +2796,6 @@ app.post('/:id/deploy', async (c) => {
           emit({ event: 'migration_start', pending: manifest.migrations.pending });
 
           const proxyTokenBinding = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN');
-
-          // Worker name is unique per deployment, so the probe always targets the new script.
-          // Returns "ready" when the endpoint confirms, or "compat" when the worker
-          // is live but doesn't expose /__void/ready (older framework version).
           const probeResult = await retryWithBackoff<'ready' | 'compat'>(
             async (attempt) => {
               const attemptStart = Date.now();
@@ -3233,7 +2816,7 @@ app.post('/:id/deploy', async (c) => {
                     code: 'cf_plain_text',
                     bodyPreview: text.slice(0, 200),
                   });
-                  return undefined; // retry
+                  return undefined;
                 }
                 try {
                   const data = JSON.parse(text);
@@ -3244,11 +2827,9 @@ app.post('/:id/deploy', async (c) => {
                   // fall through
                 }
                 if (readyResponse.status === 404) {
-                  // Worker is live but doesn't expose /__void/ready (older framework version).
                   return 'compat';
                 }
                 if (readyResponse.ok) {
-                  // 2xx but not { ready: true } — likely CF propagation lag
                   logger.warn('migrate', 'readiness_probe_attempt_failed', {
                     attempt,
                     maxAttempts,
@@ -3274,7 +2855,7 @@ app.post('/:id/deploy', async (c) => {
                   code: 'threw',
                   err: err instanceof Error ? err.message : String(err),
                 });
-                return undefined; // retry on timeout / network errors
+                return undefined;
               }
             },
             {
@@ -3283,12 +2864,8 @@ app.post('/:id/deploy', async (c) => {
             },
           );
 
-          // When the probe confirmed readiness, migration only needs short retries
-          // for transient failures. When the probe was skipped (compat), migration
-          // must absorb CF propagation lag itself — use the longer window.
           const migrationRetry = probeResult === 'ready' ? CF_MIGRATION_RETRY : CF_READINESS_RETRY;
 
-          // Dispatch migration
           type MigrationResult = {
             ok: boolean;
             migrations: Array<{
@@ -3313,7 +2890,6 @@ app.post('/:id/deploy', async (c) => {
               );
 
               const text = await migrateResponse.text();
-              // CF dispatch can regress between consecutive calls; re-check
               if (isCfAssetPlainText(text)) {
                 logger.warn('migrate', 'attempt_failed', {
                   attempt,
@@ -3322,7 +2898,7 @@ app.post('/:id/deploy', async (c) => {
                   code: 'cf_plain_text',
                   bodyPreview: text.slice(0, 200),
                 });
-                return undefined; // retry
+                return undefined;
               }
 
               try {
@@ -3337,7 +2913,7 @@ app.post('/:id/deploy', async (c) => {
                     status: migrateResponse.status,
                     bodyPreview: text.slice(0, 500),
                   });
-                  return undefined; // retry
+                  return undefined;
                 }
                 throw new Error(
                   `migration failed (${migrateResponse.status}): ${text.slice(0, 200)}`,
@@ -3353,37 +2929,28 @@ app.post('/:id/deploy', async (c) => {
           if (!result.ok) {
             throw new Error(`migration failed: ${result.error ?? 'unknown error'}`);
           }
-
           for (const m of result.migrations) {
             if (m.applied) {
               emit({ event: 'migration', name: m.name, durationMs: m.durationMs });
               migrationsApplied++;
             }
           }
-
           const allApplied = result.migrations.map((m) => m.name);
           await setAppliedMigrations(c.get('db'), deployment.id, allApplied);
           await assertDeploymentNotCanceled(c.get('db'), deployment.id);
           await assertProjectNotDeleting(c.get('db'), projectId);
         }
 
-        // 2b. Configure queue consumers (dispatch worker relays to user workers)
+        // Queue setup
         currentStep = 'queue_setup';
         markPhase('queue_setup');
         const queueNames = (manifest.queues ?? []).map((q) => q.name);
         if (queueNames.length > 0) {
           emit({ event: 'queue_setup', queues: queueNames });
         }
-
         const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
         const queueProxyToken = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN')?.text;
         const queueConflicts: Array<{ queue: string; ownerScript: string }> = [];
-        // Pass 1: register consumer subscriptions at CF and collect any
-        // conflicts. Do NOT touch ROUTING KV yet — if a sibling queue
-        // conflicts we throw, and the live KV route for every other queue
-        // must stay pointing at the previously-live worker. Otherwise a
-        // failed deploy would flip routing to a worker we are about to
-        // tear down in the error cleanup.
         const consumerOutcomes = await Promise.all(
           (manifest.queues ?? []).map(async (q) => {
             const queueBinding = workerBindings.find(
@@ -3423,11 +2990,6 @@ app.post('/:id/deploy', async (c) => {
             .join('; ');
           throw new Error(`queue consumer conflict: ${details}`);
         }
-        // Pass 2: flip KV routes only after we know every queue is claimable
-        // by this deployment. proxyToken is included so void-dispatch can
-        // set `x-void-internal` on the relay; without it the user worker's
-        // framework-generated /__void/queue handler rejects with 401 and
-        // messages silently exhaust retries.
         for (const outcome of consumerOutcomes) {
           if (!outcome) {
             continue;
@@ -3442,9 +3004,6 @@ app.post('/:id/deploy', async (c) => {
               proxyToken: queueProxyToken,
             }),
           );
-          // Record AFTER successful put — a rejected put must not appear in
-          // the rollback set, otherwise the catch path would delete a
-          // previous deployment's still-live route on a transient KV failure.
           writtenRoutingKeys.push(queueKey);
         }
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
@@ -3452,14 +3011,10 @@ app.post('/:id/deploy', async (c) => {
 
         const hasCrons = manifest.schedules && manifest.schedules.length > 0;
 
-        // 3. Clear this deployment's ISR namespace before warming it.
-        // ISR keys are deployment-scoped so a new deployment never reads HTML
-        // produced by an older deployment with different hashed assets.
         await clearIsrCache(c.env.ISR_CACHE, projectId, deployment.id);
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await assertProjectNotDeleting(c.get('db'), projectId);
 
-        // 3b. Prerender pages (write ISR cache entries before going live)
         currentStep = 'prerender';
         if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
           markPhase('prerender');
@@ -3479,29 +3034,21 @@ app.post('/:id/deploy', async (c) => {
             if (ttl <= 0) {
               return;
             }
-
             try {
-              // Invoke the user worker directly via dispatch namespace
               const userWorker = c.env.DISPATCH.get(workerName);
               const url = `https://${project.slug}.${siteDomain}${pathname}`;
               const response = await userWorker.fetch(new Request(url));
-
               if (response.ok) {
                 const key = isrCacheKey(projectId, deployment.id, pathname);
                 const headers = serializePrerenderHeaders(response);
                 const body = await response.arrayBuffer();
                 const packed = packIsrValue(headers, body);
-
                 await c.env.ISR_CACHE.put(key, packed, {
-                  metadata: {
-                    s: response.status,
-                    c: Date.now(),
-                    t: ttl,
-                  },
+                  metadata: { s: response.status, c: Date.now(), t: ttl },
                 });
               }
             } catch {
-              // Prerender failures are non-blocking — page will be rendered on first request
+              // non-blocking
             }
           });
           emit({ event: 'prerender_done' });
@@ -3509,11 +3056,9 @@ app.post('/:id/deploy', async (c) => {
         await assertDeploymentNotCanceled(c.get('db'), deployment.id);
         await assertProjectNotDeleting(c.get('db'), projectId);
 
-        // 4. Update KV routing table
-        // Carry forward suspended flag from current KV entry
+        // Routing switch
         const existingRouting = await c.env.ROUTING.get(project.slug);
         const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-        // Include per-request limits for dispatch enforcement
         const dispatchLimits =
           planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
             ? {
@@ -3539,16 +3084,11 @@ app.post('/:id/deploy', async (c) => {
         await assertProjectNotDeleting(c.get('db'), projectId);
         markPhase('routing_switch');
         await c.env.ROUTING.put(project.slug, routingJson);
-        // Record AFTER successful put — see queue route comment above.
         writtenRoutingKeys.push(project.slug);
-
-        // Traffic can now reach the new worker via project.slug.
-        // Set the flag immediately so the outer catch never deletes a live worker.
         routingSwitched = true;
         logger = logger.with({ routingSwitched: true });
         logger.info('routing_switch', 'slug_routed', { slug: project.slug });
 
-        // Update KV routing for active custom domains
         for (const domain of projectDomains) {
           if (domain.status === 'active') {
             const domainKey = `domain:${domain.hostname}`;
@@ -3557,15 +3097,6 @@ app.post('/:id/deploy', async (c) => {
           }
         }
 
-        // 5. Mark deployment as live + update project mode.
-        //
-        // Race guard (design-doc 0067 §7): teardown takes the project-row
-        // lock and flips `projects.status='deleting'` before tearing down CF
-        // state. The window between the pre-routing checks above and the KV
-        // writes is small but real, so the final commit must take the same
-        // FOR UPDATE lock and re-check status. If teardown won the race, we
-        // throw `PROJECT_DELETING_ERROR_MESSAGE` so the catch-path branch
-        // below rolls back the routing entries we just wrote.
         markPhase('db_finalize');
         logger.info('status_transition', 'status_change', {
           from: currentStatus,
@@ -3589,26 +3120,10 @@ app.post('/:id/deploy', async (c) => {
           );
         });
         currentStatus = 'live';
-
-        // 5b. Set active deployment + mark retained
         await setActiveDeployment(c.get('db'), projectId, deployment.id);
         await markDeploymentRetained(c.get('db'), deployment.id, true);
 
-        // 5c. Sync cron schedules to CronScheduler DO. Deferred via waitUntil
-        // because the deploy is already live (routing/DB committed); cron sync
-        // failure is non-fatal (next deploy resyncs) and we should not extend
-        // the user-visible deploy time by a DO RPC.
-        //
-        // (Why this runs AFTER the routing switch, not before: a pre-cutover
-        // failure with cron state already mutated would strand the still-live
-        // previous deployment without crons. Running cron sync after routing
-        // switch guarantees the previous deployment cron state is untouched
-        // until its routing entry has been replaced.)
-        //
-        // /clear is idempotent (deleteAll + deleteAlarm); we call it
-        // unconditionally for no-cron deploys rather than gating on KV
-        // `hasCrons`, which is omitted when false and missing on older
-        // entries.
+        // Cron sync
         currentStep = 'cron_setup';
         markPhase('cron_sync');
         const cronSyncPromise = (async () => {
@@ -3629,24 +3144,13 @@ app.post('/:id/deploy', async (c) => {
             logger.error('cron_sync', 'cron_sync_failed_post_routing', err);
           }
         })();
-        // Prefer waitUntil so we don't extend the user-visible deploy time;
-        // fall back to awaiting inline if no ExecutionContext is available
-        // (e.g. tests that drive `app.fetch` without one).
         try {
           c.executionCtx.waitUntil(cronSyncPromise);
         } catch {
           await cronSyncPromise;
         }
 
-        // Deliberately NO `assertDeploymentNotCanceled` after this point.
-        // Routing has switched and the new deployment is already serving
-        // traffic, so a cancellation request can no longer be honored. If we
-        // threw here, the outer catch's `routingSwitched=true` branch would
-        // force-mark the deploy live but skip legacy script deletion and
-        // retention cleanup below — leaking CF scripts and stale R2/KV
-        // mirror state. The remaining work must complete.
-
-        // Legacy cleanup — delete unversioned worker script (safe no-op if already gone)
+        // Legacy + retention cleanup (mirror of multipart's WfP path)
         const legacyWorkerName = `user-${project.slug}`;
         await deleteDispatchScript(
           c.env.CF_ACCOUNT_ID,
@@ -3655,7 +3159,6 @@ app.post('/:id/deploy', async (c) => {
           legacyWorkerName,
         );
 
-        // Retention cleanup — delete old worker scripts beyond plan limit
         markPhase('retention_cleanup');
         const retentionLimit = planLimits.retainedDeployments;
         if (retentionLimit > 0) {
@@ -3664,21 +3167,22 @@ app.post('/:id/deploy', async (c) => {
             projectId,
             deployment.id,
           );
-          // retentionLimit includes the active deployment, so keep (limit - 1) others
           const toEvict = retained.slice(retentionLimit - 1);
 
-          // Build retained-hash set across current + kept deployments so the
-          // R2/KV mirror GC below doesn't evict hashes still referenced by
-          // a retained deployment. See meta/design-docs/0066.
-          let retainedHashes: Set<string> | null = null;
-          if (toEvict.length > 0) {
-            retainedHashes = new Set<string>();
-            for (const [, entry] of Object.entries(assetManifest)) {
-              retainedHashes.add(entry.hash);
-            }
-            const keptDeployments = retained.slice(0, retentionLimit - 1);
-            for (const kept of keptDeployments) {
-              if (kept.asset_hashes) {
+          // Build the union of hashes that must remain in R2 after this deploy:
+          // this deploy's manifest plus every kept retained deployment's
+          // manifest. Always built (independent of `toEvict.length`) because
+          // the post-eviction R2 keyspace sweep below uses it to opportunistically
+          // GC direct-to-R2 orphans (bytes uploaded via presigned PUTs that
+          // never finalized into a live deploy).
+          const retainedHashes = new Set<string>();
+          for (const [, entry] of Object.entries(assetManifest)) {
+            retainedHashes.add(entry.hash);
+          }
+          const keptDeployments = retained.slice(0, retentionLimit - 1);
+          for (const kept of keptDeployments) {
+            if (kept.asset_hashes) {
+              try {
                 const keptManifest = JSON.parse(kept.asset_hashes) as Record<
                   string,
                   { hash: string }
@@ -3686,44 +3190,28 @@ app.post('/:id/deploy', async (c) => {
                 for (const entry of Object.values(keptManifest)) {
                   retainedHashes.add(entry.hash);
                 }
+              } catch (e) {
+                // A single corrupt asset_hashes blob must not poison the
+                // sweep — skip the bad row and keep walking. The orphan sweep
+                // is best-effort either way.
+                logger.warn('retention_cleanup', 'retained_asset_hashes_parse_failed', {
+                  retainedDeploymentId: kept.id,
+                  err: e instanceof Error ? e.message : String(e),
+                });
               }
             }
           }
 
           for (const old of toEvict) {
-            // Phase 1: flip `retained=false` inside a per-project FOR UPDATE
-            // lock so this serializes with rollback's transaction.
-            //
-            // Rollback acquires the same project lock and gates on
-            // `target.retained === true` BEFORE writing routing. Without
-            // serialization, a rollback that read `retained=true` could
-            // race with this loop's `markDeploymentRetained(false)` and
-            // proceed to point production routing at a deployment whose
-            // worker / container / bundle is being torn down below.
-            //
-            // The lock is held only for the pg flip (and a defensive
-            // active-deployment re-read). External CF deletes run AFTER
-            // the transaction commits — holding the lock across multi-
-            // second CF API calls would needlessly block rollback. Once
-            // `retained=false` is durably committed, any rollback that
-            // acquires the lock afterwards observes the flag and aborts
-            // with 400 before writing routing.
             const evictionSkipped = await c.get('db').transaction(async (tx) => {
               await tx.execute(
                 drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
               );
               const txDb = tx as unknown as Db;
-
-              // Defensive re-read: if a concurrent rollback won the lock
-              // race and promoted this deployment back to active before
-              // we acquired it, skip eviction. Without this check we
-              // would unretain (and tear down) the project's currently
-              // live deployment.
               const lockedProject = await getProject(txDb, projectId);
               if (lockedProject?.active_deployment_id === old.id) {
                 return true;
               }
-
               await markDeploymentRetained(txDb, old.id, false);
               return false;
             });
@@ -3731,21 +3219,6 @@ app.post('/:id/deploy', async (c) => {
               continue;
             }
 
-            // Phase 2: external deletes (CF worker, container, bundle,
-            // mirrored assets, ROUTING manifest, ISR cache). Safe outside
-            // the lock — `retained=false` is already durably committed,
-            // so any rollback racing with these deletes will fail its
-            // `target.retained` precheck and abort cleanly without
-            // writing routing.
-            //
-            // After Phase 1 (markDeploymentRetained=false) commits, partial
-            // failure of external cleanup leaves CF/KV/R2 state orphaned.
-            // Best-effort + log because flipping retained=false is the
-            // rollback-race anti-corruption barrier — must commit first.
-            // Future retention passes only scan retained=true rows, so a
-            // throw here would strand the deployment in leaked-state with
-            // no retry. A periodic orphan-sweep cron is future work for
-            // this rare failure mode.
             try {
               const oldWorkerName = `user-${project.slug}-${old.id}`;
               await deleteDispatchScript(
@@ -3759,9 +3232,7 @@ app.post('/:id/deploy', async (c) => {
                   err: e instanceof Error ? e.message : String(e),
                 });
               });
-              // Evict mirrored assets + serving manifest written by prior
-              // WfP deploys under this plan (pre-mirror deploys have neither).
-              if (retainedHashes && old.asset_hashes) {
+              if (old.asset_hashes) {
                 try {
                   const evictedManifest = JSON.parse(old.asset_hashes) as Record<
                     string,
@@ -3793,7 +3264,6 @@ app.post('/:id/deploy', async (c) => {
                   });
                 }
               }
-
               if (old.manifest) {
                 try {
                   const oldManifest = JSON.parse(old.manifest) as DeployManifest;
@@ -3822,7 +3292,6 @@ app.post('/:id/deploy', async (c) => {
                   });
                 }
               }
-
               if (old.bundle_stored) {
                 try {
                   await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, old.id);
@@ -3832,23 +3301,40 @@ app.post('/:id/deploy', async (c) => {
                   });
                 }
               }
-
               await clearIsrCache(c.env.ISR_CACHE, projectId, old.id).catch((e) =>
                 logger.error('retention_cleanup', 'evicted_isr_cache_clear_failed', e, {
                   evictedDeploymentId: old.id,
                 }),
               );
             } catch (e) {
-              // Top-level guard: any unhandled throw above leaves CF/KV/R2
-              // state orphaned, but Phase 1's retained=false flip already
-              // committed (preserves the rollback-race fix). Surface a
-              // warning and continue to the next eviction.
               logger.warn('retention_cleanup', 'eviction_partial_failure', {
                 evictedDeploymentId: old.id,
                 err: e instanceof Error ? e.message : String(e),
               });
               continue;
             }
+          }
+
+          // Direct-to-R2 orphan sweep. The eviction loop above only deletes
+          // hashes named in the EVICTED deployments' `asset_hashes` — bytes
+          // uploaded via direct-to-R2 presigned PUTs that never finalized
+          // into a live deploy were never named in any manifest, so they
+          // outlive the eviction loop. Walk the project's R2 keyspace and
+          // drop anything not in `retainedHashes`. Best-effort: a failed
+          // sweep should not fail the deploy.
+          try {
+            const orphans = await sweepProjectAssetOrphans(
+              c.env.STATIC_ASSETS_R2,
+              projectId,
+              retainedHashes,
+            );
+            if (orphans > 0) {
+              logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
+            }
+          } catch (e) {
+            logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
+              err: e instanceof Error ? e.message : String(e),
+            });
           }
         }
 
@@ -3887,37 +3373,24 @@ app.post('/:id/deploy', async (c) => {
           bundleStored,
         });
 
-        // Sweep streamed static assets only if the slug/domain routing has
-        // not yet switched over to this deployment. Once `routingSwitched`
-        // is true, the new hashes are actively serving live traffic (via
-        // the static serving manifest in ROUTING KV) and deleting them
-        // from STATIC_ASSETS/STATIC_ASSETS_R2 would break the live site
-        // even though the post-routing recovery branch below keeps the
-        // deployment marked live. For non-streamed (buffered) deploys this
-        // is a no-op because `streamedHashStores` is empty.
-        if (!routingSwitched) {
-          await cleanupStreamedAssetsOnAbort();
+        // Wfp mirror manifest cleanup on pre-routing failure (mirror of
+        // multipart `cleanupStreamedAssetsOnAbort`'s mirror-only branch).
+        if (!routingSwitched && wfpMirroredManifestDeploymentId) {
+          const id = wfpMirroredManifestDeploymentId;
+          wfpMirroredManifestDeploymentId = null;
+          await c.env.ROUTING.delete(`manifest:${id}`).catch((e) =>
+            logger.warn('catch', 'mirrored_manifest_evict_failed', {
+              deploymentId: id,
+              err: e instanceof Error ? e.message : String(e),
+            }),
+          );
         }
 
-        // The inner try runs only after `deployment`, `manifest`,
-        // `workerName`, and `dispatchNamespace` have all been assigned, so
-        // they are non-null here; the non-null assertions satisfy TS because
-        // the declarations above are `let ... | undefined`.
         const dep = deployment!;
         const mf = manifest!;
         const wn = workerName!;
         const dn = dispatchNamespace!;
 
-        // Teardown race (design-doc 0067 §7): the final-commit FOR UPDATE
-        // transaction threw `PROJECT_DELETING_ERROR_MESSAGE` because teardown
-        // flipped `projects.status='deleting'` between the pre-routing checks
-        // and this commit. Every ROUTING KV entry we wrote (queue routes,
-        // slug, active domains) points at a worker teardown has already
-        // deleted (or is about to delete); iterate the tracker so the
-        // rollback covers all three write sites — DB-fetched domains can
-        // miss the queue routes entirely. Also DELETE the uploaded user
-        // worker: teardown's worker DELETE may have run BEFORE our PUT,
-        // leaving an orphan that won't be cleaned up by anyone else.
         const teardownRaceLost = routingSwitched && raw === PROJECT_DELETING_ERROR_MESSAGE;
         if (teardownRaceLost) {
           logger.error('catch', 'teardown_race_lost', err, {
@@ -3929,11 +3402,6 @@ app.post('/:id/deploy', async (c) => {
               logger.error('catch', 'routing_rollback_failed', e, { key }),
             );
           }
-          // Orphan-recovery: if teardown's DELETE on the worker script
-          // happened BEFORE our PUT (the only ordering that lets the PUT
-          // succeed against a deleting project), the script we just uploaded
-          // is now an orphan. Issue our own DELETE here. If teardown's
-          // DELETE happens AFTER our PUT, this is a redundant 404 — safe.
           if (workerUploaded && workerUploadUrl) {
             await fetch(workerUploadUrl, {
               method: 'DELETE',
@@ -3942,23 +3410,11 @@ app.post('/:id/deploy', async (c) => {
               logger.error('catch', 'orphan_worker_delete_failed', e, { workerName: wn }),
             );
           }
-          // The worker bundle is otherwise orphaned: bundle_stored=true but
-          // the deployment never reaches 'live', so retention's eviction
-          // sweep won't see it and there is no rollback target to keep.
           if (bundleStored) {
             await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, dep.id).catch((e) =>
               logger.error('catch', 'worker_bundle_delete_failed', e, { deploymentId: dep.id }),
             );
           }
-          // Per-deploy container apps are tracked only by deterministic name
-          // (no DB row); teardown enumerates by project, not by deploy, so a
-          // container created in this deploy attempt won't be reaped by any
-          // other path. Delete independently of the worker DELETE above —
-          // they are separate CF resources and either can fail without
-          // implicating the other. Retry once with a short backoff to absorb
-          // transient CF failures during the teardown-race cancellation
-          // window; persistent failures are logged and left for teardown's
-          // orphan recovery to reap.
           if (sandboxContainerAppId) {
             await deleteContainerApplicationWithRetry(
               c.env.CF_ACCOUNT_ID,
@@ -3966,11 +3422,6 @@ app.post('/:id/deploy', async (c) => {
               sandboxContainerAppId,
             );
           } else if (sandboxContainerAppName) {
-            // provisionPerDeployContainer rejected after CF accepted the POST
-            // (network drop / response-parse failure), so we never learned the
-            // application id. Look up the orphan by deterministic name and
-            // delete it — without this, the app is lost forever (no DB row,
-            // and teardown enumerates by project, not by deploy).
             try {
               const orphan = await findContainerApplication(
                 c.env.CF_ACCOUNT_ID,
@@ -4000,10 +3451,6 @@ app.post('/:id/deploy', async (c) => {
           currentStatus = 'failed';
           emit({ event: 'error', message: msg, step: currentStep });
         } else if (routingSwitched) {
-          // Routing already points to this worker — it IS serving live traffic.
-          // Mark as "live" so DB state matches reality. The late-step failure
-          // (retention cleanup, asset_hashes update, etc.) is non-critical and
-          // will self-correct on the next deploy.
           logger.error('catch', 'post_routing_step_failed', err, {
             workerName: wn,
             currentPhase: currentStep,
@@ -4025,7 +3472,6 @@ app.post('/:id/deploy', async (c) => {
           ).catch(() => {});
           await setActiveDeployment(c.get('db'), projectId, dep.id).catch(() => {});
           await markDeploymentRetained(c.get('db'), dep.id, true).catch(() => {});
-          // Emit "done" so the CLI shows success with the URL — the deploy IS live.
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
           const slugUrl = `https://${project.slug}.${siteDomain}`;
           emit({
@@ -4037,11 +3483,6 @@ app.post('/:id/deploy', async (c) => {
             workers: 0,
           });
         } else {
-          // Routing not yet switched — safe to clean up the worker script and
-          // mark the deployment as failed. We may still have written queue
-          // routing keys earlier in the pipeline (queue routes are written
-          // BEFORE the slug route) — iterate the tracker so any partially
-          // written ROUTING entries are removed too.
           const latest = await getDeployment(c.get('db'), dep.id);
           const wasCanceled =
             latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
@@ -4053,22 +3494,11 @@ app.post('/:id/deploy', async (c) => {
           await deleteDispatchScript(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, dn, wn).catch((e) =>
             logger.error('catch', 'worker_script_cleanup_failed', e, { workerName: wn }),
           );
-          // The worker bundle is otherwise orphaned: bundle_stored=true but
-          // the deployment ends in 'failed'/'canceled', so retention's
-          // eviction sweep skips it (it filters on retained=true) and there
-          // is no rollback target.
           if (bundleStored) {
             await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, dep.id).catch((e) =>
               logger.error('catch', 'worker_bundle_delete_failed', e, { deploymentId: dep.id }),
             );
           }
-          // Per-deploy container apps are tracked only by deterministic name
-          // (no DB row), so retention/teardown can't find this one if we leak
-          // it here — the deployment never reached 'live' status, so the
-          // retention sweep that enumerates retained deployments will skip it.
-          // Retry once with a short backoff to absorb transient CF failures;
-          // persistent failures are logged and left for teardown's orphan
-          // recovery (when the project is eventually deleted).
           if (sandboxContainerAppId) {
             await deleteContainerApplicationWithRetry(
               c.env.CF_ACCOUNT_ID,
@@ -4076,11 +3506,6 @@ app.post('/:id/deploy', async (c) => {
               sandboxContainerAppId,
             );
           } else if (sandboxContainerAppName) {
-            // provisionPerDeployContainer rejected after CF accepted the POST
-            // (network drop / response-parse failure), so we never learned the
-            // application id. Look up the orphan by deterministic name and
-            // delete it — without this, the app is lost forever (no DB row,
-            // and teardown enumerates by project, not by deploy).
             try {
               const orphan = await findContainerApplication(
                 c.env.CF_ACCOUNT_ID,
@@ -4103,11 +3528,6 @@ app.post('/:id/deploy', async (c) => {
           await clearIsrCache(c.env.ISR_CACHE, projectId, dep.id).catch((e) =>
             logger.error('catch', 'isr_cache_clear_failed', e, { deploymentId: dep.id }),
           );
-          // No cron-DO unwind here: cron sync runs only AFTER the routing
-          // switch (step 5c above), so a pre-routing failure means we never
-          // touched the DO and the previous deployment's cron state is
-          // intact. A post-routing cron-sync failure is logged in step 5c's
-          // own try/catch and does not bubble to this branch.
           logger.info('status_transition', 'status_change', {
             deploymentId: dep.id,
             from: currentStatus,
@@ -4140,16 +3560,6 @@ app.post('/:id/deploy', async (c) => {
       }
     } catch (err) {
       logger.error('catch', 'unhandled_pipeline_error', err, { currentPhase: currentStep });
-      try {
-        await cleanupStreamedAssetsOnAbort();
-      } catch {
-        // ignore — best-effort cleanup on unhandled path
-      }
-      // Emit a generic message — unhandled errors here can carry DB query
-      // fragments, CF provider responses, or other internal details that
-      // must not leak to deploy clients. The raw error is logged above for
-      // operator debugging. Inner pipeline failures have their own sanitized
-      // emit path earlier in the try block.
       emit({
         event: 'error',
         message: 'deploy failed due to an internal error',
@@ -4157,34 +3567,31 @@ app.post('/:id/deploy', async (c) => {
       });
     } finally {
       clearInterval(heartbeat);
-      try {
-        await cleanupOwnStreamedAssetClaims();
-      } catch {
-        // ignore — best-effort cleanup on unhandled path
-      }
       // Reap the placeholder deployment row if it never advanced past the
-      // initial 'pending' + null-manifest state (e.g. parse-loop early
-      // return, multipart error, manifest validation failure). Leaving
-      // it at 'pending' would block future deploys for 10 minutes via
-      // the active-deploy precheck. We DELETE rather than mark 'failed'
-      // because the row represents no real deploy attempt — no manifest,
-      // no source/commit, nothing the user would want surfaced in their
-      // deploy history. The combined `status='pending' AND manifest IS
-      // NULL` predicate is the only safe DELETE: once the post-parse
-      // `updateDeploymentManifest` lands a non-null manifest, the row
-      // represents a real attempt and the pipeline's own catch paths
-      // become responsible for status transitions ('failed' / 'canceled'
-      // / 'live').
+      // initial 'pending' + null-manifest state. Same invariant as
+      // multipart: a row stuck at 'pending' with a manifest set is the
+      // bug class we want surfaced.
+      //
+      // A `canceling` placeholder means a `cancelDeployment` API call
+      // raced an early-return path (asset-verify failure, quota check,
+      // etc.) AFTER the precheck-and-claim insert but BEFORE the manifest
+      // update. The two-phase cancellation flip sets status='canceling'
+      // but the pipeline's catch never reached a force-finalize path.
+      // DELETE alongside `pending` placeholders — both represent no real
+      // deploy attempt (manifest is still null).
       try {
         const latest = await getDeployment(c.get('db'), preDeployment.id);
-        if (latest && latest.status === 'pending' && latest.manifest === null) {
+        if (
+          latest &&
+          (latest.status === 'pending' || latest.status === 'canceling') &&
+          latest.manifest === null
+        ) {
           await c.get('db').delete(deployments).where(eq(deployments.id, preDeployment.id));
           logger.info('placeholder_reap', 'placeholder_deleted', {
             placeholderId: preDeployment.id,
+            priorStatus: latest.status,
           });
         } else if (latest && latest.status === 'pending' && latest.manifest !== null) {
-          // The bug class we're trying to surface: pipeline returned without
-          // landing a terminal status, manifest is set, row is stuck pending.
           logger.warn('placeholder_reap', 'stranded_pending_row', {
             placeholderId: preDeployment.id,
             latestStatus: latest.status,
@@ -4201,7 +3608,7 @@ app.post('/:id/deploy', async (c) => {
       try {
         await writer.close();
       } catch {
-        // ignore — writer may already be closed if the client disconnected
+        // ignore
       }
     }
   })();
@@ -4209,7 +3616,7 @@ app.post('/:id/deploy', async (c) => {
   return new Response(readable, {
     headers: { 'Content-Type': 'application/x-ndjson' },
   });
-});
+}
 
 // Deploy preflight — returns which assets need uploading based on diff with last deploy
 app.post('/:id/deploy/preflight', async (c) => {

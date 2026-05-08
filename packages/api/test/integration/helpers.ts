@@ -49,6 +49,9 @@ export type TestEnv = {
   JWT_SECRET: string;
   PROJECT_SECRET_KEYS_JSON: string;
   PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
+  R2_ACCESS_KEY_ID: string;
+  R2_SECRET_ACCESS_KEY: string;
+  R2_STATIC_ASSETS_BUCKET: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   GITHUB_PREVIEW_REPO_PAT?: string;
@@ -324,15 +327,32 @@ class MemoryR2Bucket {
     };
   }
 
-  async list(options?: {
-    prefix?: string;
-  }): Promise<{ objects: Array<{ key: string; size: number }>; truncated: boolean }> {
+  async list(options?: { prefix?: string }): Promise<{
+    objects: Array<{ key: string; size: number; uploaded: Date }>;
+    truncated: boolean;
+  }> {
     const prefix = options?.prefix ?? '';
     const objects = Array.from(this.store.entries())
       .filter(([key]) => key.startsWith(prefix))
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, entry]) => ({ key, size: entry.body.byteLength }));
+      .map(([key, entry]) => ({
+        key,
+        size: entry.body.byteLength,
+        uploaded: entry.uploaded,
+      }));
     return { objects, truncated: false };
+  }
+
+  /**
+   * Test-only helper: override the `uploaded` timestamp on an existing key.
+   * Used by retention-sweep tests to simulate keys uploaded outside the
+   * pending-upload protection window without sleeping for an hour.
+   */
+  setUploadedAt(key: string, uploaded: Date): void {
+    const entry = this.store.get(key);
+    if (entry) {
+      entry.uploaded = uploaded;
+    }
   }
 
   async delete(keys: string | Array<string>): Promise<void> {
@@ -382,6 +402,9 @@ export async function setupEnv(): Promise<TestEnv> {
     JWT_SECRET,
     PROJECT_SECRET_KEYS_JSON,
     PROJECT_SECRET_ACTIVE_KEY_VERSION,
+    R2_ACCESS_KEY_ID: 'test-r2-access-key-id',
+    R2_SECRET_ACCESS_KEY: 'test-r2-secret-access-key',
+    R2_STATIC_ASSETS_BUCKET: 'void-static-assets-overflow-test',
     GITHUB_CLIENT_ID: 'test-github-client-id',
     GITHUB_CLIENT_SECRET: 'test-github-client-secret',
     GOOGLE_CLIENT_ID: 'test-google-client-id',

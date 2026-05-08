@@ -50,10 +50,40 @@ export function clearTestDb() {
   testDb = null;
 }
 
+// Per-test override hook for the imported `getProject` helper. Tests that
+// need to simulate row-state changes between two reads (e.g. TOCTOU
+// regression coverage for the upload-urls FOR SHARE lock) can register a
+// callback here to intercept calls. When unset, the original `getProject`
+// runs unchanged.
+type GetProjectFn = typeof import('../../src/db.ts').getProject;
+let getProjectOverride:
+  | ((args: {
+      original: GetProjectFn;
+      argsList: Parameters<GetProjectFn>;
+    }) => ReturnType<GetProjectFn>)
+  | null = null;
+
+export function setGetProjectOverride(
+  override:
+    | ((args: {
+        original: GetProjectFn;
+        argsList: Parameters<GetProjectFn>;
+      }) => ReturnType<GetProjectFn>)
+    | null,
+) {
+  getProjectOverride = override;
+}
+
 vi.mock('../../src/db', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../src/db.ts')>();
   return {
     ...mod,
     createDb: (...args: [string]) => testDb ?? mod.createDb(...args),
+    getProject: ((...argsList: Parameters<GetProjectFn>) => {
+      if (getProjectOverride) {
+        return getProjectOverride({ original: mod.getProject, argsList });
+      }
+      return mod.getProject(...argsList);
+    }) as GetProjectFn,
   };
 });

@@ -340,4 +340,42 @@ describe('DELETE /projects/:id', () => {
     });
     expect(deleteWorkerCall).toBeDefined();
   });
+
+  // Regression for direct-to-R2 orphan accumulation: bytes uploaded via the
+  // direct-to-R2 presigned PUTs that never finalized into a live deploy (e.g.
+  // upload-urls / teardown TOCTOU race, abandoned upload) live durably under
+  // `assets/{projectId}/{blake3}` keys. Retention cleanup only walks hashes
+  // referenced by retained manifests, so without a teardown sweep these would
+  // leak permanently. Project teardown must clear the entire prefix.
+  it('sweeps R2 assets/{projectId}/* on teardown', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'asset-sweep');
+    mockCfApi();
+
+    const ownKeys = [
+      `assets/${project.id}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`,
+      `assets/${project.id}/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`,
+      `assets/${project.id}/cccccccccccccccccccccccccccccccc`,
+    ];
+    for (const key of ownKeys) {
+      await env.STATIC_ASSETS_R2.put(key, new Uint8Array([1, 2, 3]).buffer as ArrayBuffer);
+    }
+    // Sibling project's bytes must NOT be touched.
+    const otherKey = 'assets/proj_otherproject/dddddddddddddddddddddddddddddddd';
+    await env.STATIC_ASSETS_R2.put(otherKey, new Uint8Array([4, 5, 6]).buffer as ArrayBuffer);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    for (const key of ownKeys) {
+      expect(await env.STATIC_ASSETS_R2.head(key)).toBeNull();
+    }
+    expect(await env.STATIC_ASSETS_R2.head(otherKey)).not.toBeNull();
+  });
 });

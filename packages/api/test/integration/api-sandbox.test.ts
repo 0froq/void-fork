@@ -77,19 +77,12 @@ function buildSandboxManifest(overrides?: {
   };
 }
 
-function buildSandboxDeployForm(opts?: {
-  manifest?: Record<string, unknown>;
-  workers?: Record<string, string>;
-}): FormData {
-  const form = new FormData();
-  form.append('manifest', JSON.stringify(opts?.manifest ?? buildSandboxManifest()));
-  const workers = opts?.workers ?? {
-    'index.js': "export default { fetch() { return new Response('ok'); } }",
-  };
-  for (const [name, content] of Object.entries(workers)) {
-    form.append(`worker:${name}`, new Blob([content]));
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
-  return form;
+  return btoa(binary);
 }
 
 async function deploy(
@@ -98,11 +91,33 @@ async function deploy(
   manifest?: Record<string, unknown>,
   workers?: Record<string, string>,
 ): Promise<Response> {
+  const baseManifest = manifest ?? buildSandboxManifest();
+  const workerSources = workers ?? {
+    'index.js': "export default { fetch() { return new Response('ok'); } }",
+  };
+  const workerFiles: Record<string, string> = {};
+  for (const [name, content] of Object.entries(workerSources)) {
+    workerFiles[name] = bytesToBase64(new TextEncoder().encode(content));
+  }
+
   return app.fetch(
     new Request(`http://localhost/projects/${projectId}/deploy`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${jwt}` },
-      body: buildSandboxDeployForm({ manifest, workers }),
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        manifest: { assetManifestVersion: 2, ...baseManifest },
+        assetManifest: {},
+        source: null,
+        commit: null,
+        repositoryUrl: null,
+        commitUrl: null,
+        gitRef: null,
+        preflight: null,
+        workerFiles,
+      }),
     }),
     env,
   );
@@ -276,23 +291,46 @@ describe('per-deploy sandbox integration', () => {
     const project = await createTestProject(env.db, user.id, 'sb-static');
     mockCfApi();
 
-    const form = new FormData();
-    form.append(
-      'manifest',
-      JSON.stringify({
-        version: 3,
-        bindings: {},
-        type: 'static',
-        assetConfig: { not_found_handling: 'none' },
-      }),
+    // Pre-upload the asset to R2 — direct-to-R2 deploys verify R2 has the
+    // declared bytes before flipping routing.
+    const indexBytes = new TextEncoder().encode('<html>hello</html>');
+    const indexHash = (await import('../../src/assets.ts')).computeAssetHash(
+      indexBytes.buffer.slice(
+        indexBytes.byteOffset,
+        indexBytes.byteOffset + indexBytes.byteLength,
+      ) as ArrayBuffer,
+      '/index.html',
     );
-    form.append('asset:index.html', new Blob(['<html>hello</html>']));
+    await env.STATIC_ASSETS_R2.put(
+      `assets/${project.id}/${indexHash}`,
+      indexBytes as unknown as ArrayBuffer,
+    );
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: form,
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          manifest: {
+            version: 3,
+            assetManifestVersion: 2,
+            bindings: {},
+            type: 'static',
+            assetConfig: { not_found_handling: 'none' },
+          },
+          assetManifest: {
+            '/index.html': { blake3: indexHash, md5: indexHash, size: indexBytes.byteLength },
+          },
+          source: null,
+          commit: null,
+          repositoryUrl: null,
+          commitUrl: null,
+          gitRef: null,
+          preflight: null,
+        }),
       }),
       env,
     );

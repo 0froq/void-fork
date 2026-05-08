@@ -125,6 +125,15 @@ Set via `wrangler secret put <NAME>` (separate values per environment):
 | `GITHUB_CLIENT_SECRET`              | GitHub OAuth app client secret                   |
 | `GOOGLE_CLIENT_ID`                  | Google OAuth app client ID                       |
 | `GOOGLE_CLIENT_SECRET`              | Google OAuth app client secret                   |
+| `R2_ACCESS_KEY_ID`                  | R2 access key ID for presigning asset PUT URLs   |
+| `R2_SECRET_ACCESS_KEY`              | R2 secret access key for presigning asset PUTs   |
+
+R2 presigning also needs the bucket NAME — not just the binding — because the
+`STATIC_ASSETS_R2` binding only surfaces the `R2Bucket` object. The name is
+plumbed through `R2_STATIC_ASSETS_BUCKET` in `wrangler.jsonc` (`vars` block)
+and must match the configured `r2_buckets[].bucket_name`. Production:
+`void-static-assets-overflow`. Staging: `void-static-assets-overflow-staging`.
+Not a secret — it's a public bucket name and is committed in `wrangler.jsonc`.
 
 `PROJECT_SECRET_KEYS_JSON` should be a JSON object mapping key-version strings to base64-encoded 32-byte AES keys. `PROJECT_SECRET_ACTIVE_KEY_VERSION` must match one of those configured versions.
 
@@ -413,6 +422,8 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    wrangler secret put GITHUB_CLIENT_SECRET --env <name>
    wrangler secret put GOOGLE_CLIENT_ID --env <name>
    wrangler secret put GOOGLE_CLIENT_SECRET --env <name>
+   wrangler secret put R2_ACCESS_KEY_ID --env <name>
+   wrangler secret put R2_SECRET_ACCESS_KEY --env <name>
 
    ```
 

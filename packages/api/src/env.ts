@@ -64,6 +64,23 @@ export interface ApiEnv extends Env {
     PLATFORM_ENV?: string;
     PROJECT_SECRET_KEYS_JSON: string;
     PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
+    /**
+     * R2 S3-compatible API credentials for presigning direct-to-R2 asset
+     * uploads (see `src/r2-presign.ts` and the upload-urls deploy
+     * endpoint). Set via `wrangler secret put` — never committed.
+     */
+    R2_ACCESS_KEY_ID: string;
+    R2_SECRET_ACCESS_KEY: string;
+    /**
+     * Bucket name used in the presigned R2 PUT URL path. The
+     * `STATIC_ASSETS_R2` binding gives the platform an `R2Bucket` object
+     * but doesn't surface its underlying bucket name (CF binds by name and
+     * exposes only the bound object). The presigner needs the bucket name
+     * to assemble `https://<account>.r2.cloudflarestorage.com/<bucket>/<key>`,
+     * so we plumb it explicitly. Wrangler's `vars` block carries the same
+     * string used in the `r2_buckets[].bucket_name` config.
+     */
+    R2_STATIC_ASSETS_BUCKET: string;
     EMAIL?: SendEmail;
     /**
      * Test-only override for the deploy handler's heartbeat interval in ms.

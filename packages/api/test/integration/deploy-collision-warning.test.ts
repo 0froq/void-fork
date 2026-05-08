@@ -29,14 +29,34 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function buildDeployForm(manifest: object): FormData {
-  const form = new FormData();
-  form.append('manifest', JSON.stringify(manifest));
-  form.append(
-    'worker:index.js',
-    new Blob(["export default { fetch() { return new Response('ok'); } }"]),
-  );
-  return form;
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function buildDeployRequest(projectId: string, jwt: string, manifest: object): Request {
+  const workerSrc = "export default { fetch() { return new Response('ok'); } }";
+  return new Request(`http://localhost/projects/${projectId}/deploy`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      manifest: { assetManifestVersion: 2, ...manifest },
+      assetManifest: {},
+      source: null,
+      commit: null,
+      repositoryUrl: null,
+      commitUrl: null,
+      gitRef: null,
+      preflight: null,
+      workerFiles: { 'index.js': bytesToBase64(new TextEncoder().encode(workerSrc)) },
+    }),
+  });
 }
 
 describe('manifest var / secret collision warning', () => {
@@ -48,14 +68,10 @@ describe('manifest var / secret collision warning', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const res = await app.fetch(
-      new Request(`http://localhost/projects/${project.id}/deploy`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${user.jwt}` },
-        body: buildDeployForm({
-          version: 3,
-          bindings: {},
-          vars: { API_KEY: 'from-manifest' },
-        }),
+      buildDeployRequest(project.id, user.jwt, {
+        version: 3,
+        bindings: {},
+        vars: { API_KEY: 'from-manifest' },
       }),
       env,
     );
