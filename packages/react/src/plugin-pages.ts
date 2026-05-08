@@ -95,6 +95,8 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         return;
       }
 
+      const reactDedupe = ['react', 'react-dom'];
+
       // In dev mode, exclude @void/react from dep optimization so the
       // virtual module and user components share the same React context objects.
       // Without this, Vite pre-bundles @void/react, creating separate
@@ -110,6 +112,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
           'react-dom/server',
         ];
         return {
+          resolve: {
+            dedupe: reactDedupe,
+          },
           optimizeDeps: {
             // Exclude @void/react so the virtual module and user
             // components share the same React context objects (identity).
@@ -133,6 +138,9 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       }
 
       return {
+        resolve: {
+          dedupe: reactDedupe,
+        },
         build: {
           manifest: true,
           rollupOptions: {
