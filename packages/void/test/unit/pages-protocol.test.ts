@@ -86,6 +86,28 @@ describe('handlePageGet', () => {
     expect(body.errors).toBeNull();
   });
 
+  it('preserves headers set by loaders on X-VoidPages JSON responses', async () => {
+    const c = await createTestContext('GET', '/users', {
+      headers: { 'x-voidpages': 'true' },
+    });
+
+    const handler = vi.fn((ctx: Context) => {
+      ctx.header('Set-Cookie', 'void_auth_nonce=abc; Path=/auth; HttpOnly');
+      return { users: [] };
+    });
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      'users',
+      mockRenderFn,
+      mockGetAssetTags,
+    );
+
+    expect(response.headers.get('Set-Cookie')).toContain('void_auth_nonce=abc');
+    expect(response.headers.get('X-VoidPages')).toBe('true');
+  });
+
   it('includes the request query string in page object URLs', async () => {
     const c = await createTestContext('GET', '/users?page=2', {
       headers: { 'x-voidpages': 'true' },
@@ -120,6 +142,26 @@ describe('handlePageGet', () => {
     expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
     const html = await response.text();
     expect(html).toContain('users');
+  });
+
+  it('preserves headers set by loaders on rendered HTML responses', async () => {
+    const c = await createTestContext('GET', '/login');
+
+    const handler = vi.fn((ctx: Context) => {
+      ctx.header('Set-Cookie', 'void_auth_nonce=abc; Path=/auth; HttpOnly');
+      return { githubUrl: '/auth/github' };
+    });
+    const response = await handlePageGet(
+      handler,
+      undefined,
+      c,
+      'login',
+      mockRenderFn,
+      mockGetAssetTags,
+    );
+
+    expect(response.headers.get('Set-Cookie')).toContain('void_auth_nonce=abc');
+    expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
   });
 
   it('handles undefined handler (empty props)', async () => {

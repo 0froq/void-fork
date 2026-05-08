@@ -58,9 +58,21 @@ function isPagesRequest(c: CloudContext): boolean {
   return c.req.header('x-voidpages') === 'true';
 }
 
-function pageJsonResponse(pageObj: PageObject): Response {
+function pageResponseHeaders(c: CloudContext, headers: Record<string, string>): Headers {
+  const out = new Headers(c.res.headers);
+  for (const [key, value] of Object.entries(headers)) {
+    out.set(key, value);
+  }
+  return out;
+}
+
+function pageJsonResponse(c: CloudContext, pageObj: PageObject): Response {
   return Response.json(pageObj, {
-    headers: { 'X-VoidPages': 'true', Vary: 'X-VoidPages', ...POWERED_BY },
+    headers: pageResponseHeaders(c, {
+      'X-VoidPages': 'true',
+      Vary: 'X-VoidPages',
+      ...POWERED_BY,
+    }),
   });
 }
 
@@ -131,12 +143,16 @@ async function writeRenderResult(
   }
 }
 
-function renderedResponse(result: PageRenderResult, contentType: string): Response {
+function renderedResponse(
+  c: CloudContext,
+  result: PageRenderResult,
+  contentType: string,
+): Response {
   return new Response(result, {
-    headers: {
+    headers: pageResponseHeaders(c, {
       'content-type': contentType,
       ...POWERED_BY,
-    },
+    }),
   });
 }
 
@@ -173,7 +189,7 @@ function streamDeferredResponse(
   });
 
   return new Response(readable, {
-    headers: { 'content-type': contentType, ...POWERED_BY },
+    headers: pageResponseHeaders(c, { 'content-type': contentType, ...POWERED_BY }),
   });
 }
 
@@ -268,7 +284,7 @@ export async function handlePageGet(
           }
         }),
       );
-      return pageJsonResponse({
+      return pageJsonResponse(c, {
         ...pageObj,
         props: resolvedProps,
         deferred: undefined,
@@ -276,7 +292,7 @@ export async function handlePageGet(
     }
 
     if (!hasDeferred) {
-      return pageJsonResponse(pageObj);
+      return pageJsonResponse(c, pageObj);
     }
     // Stream NDJSON: first line is PageObject, subsequent lines are deferred groups
     return streamDeferredResponse(
@@ -293,7 +309,7 @@ export async function handlePageGet(
   const html = await renderFn(pageObj, assetTags);
 
   if (!hasDeferred) {
-    return renderedResponse(html, 'text/html; charset=utf-8');
+    return renderedResponse(c, html, 'text/html; charset=utf-8');
   }
 
   // Stream HTML followed by deferred <script> tags
@@ -352,10 +368,10 @@ export async function handlePageMutation(
       const props = stripDeferred(rawProps);
       const pageObj = buildMutationPageObj(props, e.errors);
       if (isPagesRequest(c)) {
-        return pageJsonResponse(pageObj);
+        return pageJsonResponse(c, pageObj);
       }
       const assetTags = await getAssetTags(c.req.raw, c.env, componentId);
-      return renderedResponse(await renderFn(pageObj, assetTags), 'text/html; charset=utf-8');
+      return renderedResponse(c, await renderFn(pageObj, assetTags), 'text/html; charset=utf-8');
     }
     throw e;
   }
@@ -378,10 +394,10 @@ export async function handlePageMutation(
       const props = stripDeferred(rawProps);
       const pageObj = buildMutationPageObj(props, errors);
       if (isPagesRequest(c)) {
-        return pageJsonResponse(pageObj);
+        return pageJsonResponse(c, pageObj);
       }
       const assetTags = await getAssetTags(c.req.raw, c.env, componentId);
-      return renderedResponse(await renderFn(pageObj, assetTags), 'text/html; charset=utf-8');
+      return renderedResponse(c, await renderFn(pageObj, assetTags), 'text/html; charset=utf-8');
     }
     // 204 (void from withValidator) — fall through to re-run GET
     if (status !== 204) {
@@ -397,8 +413,8 @@ export async function handlePageMutation(
   const props = stripDeferred(rawProps);
   const pageObj = buildMutationPageObj(props, null);
   if (isPagesRequest(c)) {
-    return pageJsonResponse(pageObj);
+    return pageJsonResponse(c, pageObj);
   }
   const assetTags = await getAssetTags(c.req.raw, c.env, componentId);
-  return renderedResponse(await renderFn(pageObj, assetTags), 'text/html; charset=utf-8');
+  return renderedResponse(c, await renderFn(pageObj, assetTags), 'text/html; charset=utf-8');
 }
