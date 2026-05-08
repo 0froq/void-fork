@@ -113,16 +113,11 @@ async function runD1Migrations(
 
     const start = Date.now();
     try {
-      const statements = m.sql
-        .split(';')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      await db.batch([
-        ...statements.map((s) => db.prepare(s)),
-        db
-          .prepare('INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)')
-          .bind(m.name, new Date().toISOString()),
-      ]);
+      await db.exec(m.sql);
+      await db
+        .prepare('INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)')
+        .bind(m.name, new Date().toISOString())
+        .run();
       migrationResults.push({ name: m.name, applied: true, durationMs: Date.now() - start });
     } catch (err) {
       migrationResults.push({

@@ -299,6 +299,83 @@ describe('createMigrationHandler with missing D1 binding', () => {
   });
 });
 
+describe('createMigrationHandler D1 execution', () => {
+  const proxyToken = 'test-token-123';
+
+  function createMockD1() {
+    const calls = {
+      batch: 0,
+      exec: [] as Array<string>,
+    };
+    const applied = new Set<string>();
+
+    const db = {
+      async batch() {
+        calls.batch++;
+        return [];
+      },
+      async exec(sql: string) {
+        calls.exec.push(sql);
+      },
+      prepare(sql: string) {
+        let bound: Array<unknown> = [];
+        const statement = {
+          bind(...params: Array<unknown>) {
+            bound = params;
+            return statement;
+          },
+          async all() {
+            if (sql.includes('sqlite_master') && sql.includes("'_migrations'")) {
+              return { results: [] };
+            }
+            if (sql === 'SELECT name FROM _void_migrations') {
+              return {
+                results: Array.from(applied, (name) => ({ name })),
+              };
+            }
+            return { results: [] };
+          },
+          async run() {
+            if (sql.startsWith('INSERT OR IGNORE INTO _void_migrations')) {
+              applied.add(bound[0] as string);
+            }
+            return {};
+          },
+        };
+        return statement;
+      },
+    };
+
+    return { calls, db: db as unknown as D1Database };
+  }
+
+  it('passes the full migration SQL to D1 instead of splitting on semicolons', async () => {
+    const sql = `CREATE TABLE notes (message TEXT DEFAULT 'a;b');\nINSERT INTO notes DEFAULT VALUES;`;
+    const { calls, db } = createMockD1();
+    const handler = createMigrationHandler(
+      { __VOID_PROXY_TOKEN: proxyToken, DB: db },
+      [{ name: '0001_semicolon.sql', sql }],
+      'sqlite',
+    );
+
+    const response = await handler(
+      new Request('https://example.com/__void/migrate', {
+        method: 'POST',
+        headers: { 'x-void-internal': proxyToken },
+      }),
+    );
+    const body = (await response.json()) as MigrationResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.migrations).toEqual([
+      { name: '0001_semicolon.sql', applied: true, durationMs: expect.any(Number) },
+    ]);
+    expect(calls.exec).toEqual([sql]);
+    expect(calls.batch).toBe(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // End-to-end: collectMigrations + inference + buildVoidManifest
 // ---------------------------------------------------------------------------
