@@ -2573,7 +2573,18 @@ describe('asset_hashes storage', () => {
           if (url.pathname === '/__void/ready') {
             return Response.json({ ready: true });
           }
-          return Response.json({ ok: false, error: 'simulated SQL error', migrations: [] });
+          return Response.json({
+            ok: false,
+            error: 'migration 001_create_table.sql failed',
+            migrations: [
+              {
+                name: '001_create_table.sql',
+                applied: false,
+                durationMs: 2,
+                error: 'D1_ERROR: near "broken": syntax error',
+              },
+            ],
+          });
         },
       }),
     } as unknown as DispatchNamespace;
@@ -2592,17 +2603,21 @@ describe('asset_hashes storage', () => {
       );
       expect(res.status).toBe(200);
       const events = (await readAllEvents(res)) as Array<{ event: string; message?: string }>;
-      expect(events.find((e) => e.event === 'error')?.message).toMatch(/migration failed/);
+      expect(events.find((e) => e.event === 'error')?.message).toContain(
+        'D1_ERROR: near "broken": syntax error',
+      );
 
       const [dpl] = await env.db
         .select({
           status: deployments.status,
           asset_hashes: deployments.asset_hashes,
+          error_message: deployments.error_message,
           retained: deployments.retained,
         })
         .from(deployments)
         .where(eq(deployments.project_id, project.id));
       expect(dpl?.status).toBe('failed');
+      expect(dpl?.error_message).toContain('D1_ERROR: near "broken": syntax error');
       // Retention claim happens after migrations succeed, so retained stays
       // false — but asset_hashes MUST survive so the next deploy can
       // corroborate against it.

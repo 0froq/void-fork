@@ -95,6 +95,26 @@ function isCfAssetPlainText(text: string): boolean {
   return text.trimStart().startsWith('Assets have');
 }
 
+type UserWorkerMigrationResult = {
+  ok: boolean;
+  migrations: Array<{
+    name: string;
+    applied: boolean;
+    durationMs: number;
+    error?: string;
+  }>;
+  error?: string;
+};
+
+function formatMigrationFailure(result: UserWorkerMigrationResult): string {
+  const failedMigration = result.migrations.find((migration) => migration.error);
+  if (failedMigration?.error) {
+    const detailed = `migration ${failedMigration.name} failed: ${failedMigration.error}`;
+    return result.error?.includes(failedMigration.error) ? result.error : detailed;
+  }
+  return result.error ?? 'unknown error';
+}
+
 /**
  * Decode a base64 string to bytes with the lowest peak residency the
  * runtime allows. Prefers the (TC39 stage-4) `Uint8Array.fromBase64` helper
@@ -2890,17 +2910,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
 
           const migrationRetry = probeResult === 'ready' ? CF_MIGRATION_RETRY : CF_READINESS_RETRY;
 
-          type MigrationResult = {
-            ok: boolean;
-            migrations: Array<{
-              name: string;
-              applied: boolean;
-              durationMs: number;
-              error?: string;
-            }>;
-            error?: string;
-          };
-          const result = await retryWithBackoff<MigrationResult>(
+          const result = await retryWithBackoff<UserWorkerMigrationResult>(
             async (attempt) => {
               const attemptStart = Date.now();
               const maxAttempts = migrationRetry.maxRetries + 1;
@@ -2926,7 +2936,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               }
 
               try {
-                return JSON.parse(text) as MigrationResult;
+                return JSON.parse(text) as UserWorkerMigrationResult;
               } catch {
                 if (migrateResponse.ok) {
                   logger.warn('migrate', 'attempt_failed', {
@@ -2951,7 +2961,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           );
 
           if (!result.ok) {
-            throw new Error(`migration failed: ${result.error ?? 'unknown error'}`);
+            throw new Error(`migration failed: ${formatMigrationFailure(result)}`);
           }
           for (const m of result.migrations) {
             if (m.applied) {
