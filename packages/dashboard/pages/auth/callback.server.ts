@@ -2,13 +2,8 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { defineHandler } from 'void';
 import { fetchApi, readApiJson } from '../../lib/api.ts';
 
-export function getCleanLoginUrl(url: string): string {
-  return new URL('/login', url).toString();
-}
-
 export const loader = defineHandler(async (c) => {
   const homeUrl = new URL('/', c.req.url).toString();
-  const loginUrl = getCleanLoginUrl(c.req.url);
 
   // Production/staging: exchange short-lived auth code for JWT via API
   const code = c.req.query('code');
@@ -21,7 +16,7 @@ export const loader = defineHandler(async (c) => {
     const nonceCookie = getCookie(c, 'void_auth_nonce');
     const nonceParam = c.req.query('login_nonce');
     if (!nonceCookie || !nonceParam || nonceCookie !== nonceParam) {
-      return c.redirect(loginUrl);
+      return c.redirect('/login');
     }
     deleteCookie(c, 'void_auth_nonce', { path: '/auth' });
     const resp = await fetchApi(c, '/auth/exchange', {
@@ -29,11 +24,11 @@ export const loader = defineHandler(async (c) => {
       body: JSON.stringify({ code }),
     });
     if (!resp.ok) {
-      return c.redirect(loginUrl);
+      return c.redirect('/login');
     }
     const exchange = await readApiJson<{ token: string }>(resp);
     if (!exchange?.token) {
-      return c.redirect(loginUrl);
+      return c.redirect('/login');
     }
     const host = c.req.header('host') ?? '';
     setCookie(c, 'void_token', exchange.token, {
@@ -53,7 +48,7 @@ export const loader = defineHandler(async (c) => {
   if (token) {
     const host = c.req.header('host') ?? '';
     if (!host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
-      return c.redirect(loginUrl);
+      return c.redirect('/login');
     }
     setCookie(c, 'void_token', token, {
       httpOnly: true,
@@ -65,5 +60,5 @@ export const loader = defineHandler(async (c) => {
     return c.redirect(homeUrl);
   }
 
-  return c.redirect(loginUrl);
+  return c.redirect('/login');
 });
