@@ -20,6 +20,11 @@ declare module 'void' {
 }
 
 const PUBLIC_PATHS = new Set(['/login', '/logout']);
+const PUBLIC_PREFIXES = ['/assets/', '/auth/'];
+
+export function isPublicDashboardPath(path: string): boolean {
+  return PUBLIC_PATHS.has(path) || PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
 
 function isLocalHost(host: string | undefined): boolean {
   host ??= '';
@@ -29,7 +34,7 @@ function isLocalHost(host: string | undefined): boolean {
 export default defineMiddleware(async (c, next) => {
   const path = c.req.path;
 
-  if (PUBLIC_PATHS.has(path) || path.startsWith('/auth/')) {
+  if (isPublicDashboardPath(path)) {
     c.set('shared', { user: null, canAccessDashboard: false });
     return next();
   }
