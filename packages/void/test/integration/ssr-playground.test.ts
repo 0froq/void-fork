@@ -145,10 +145,14 @@ describe('playground/ssr build + preview', () => {
     const wranglerConfig = JSON.parse(
       readFileSync(join(ROOT, 'playground/ssr/dist/ssr/wrangler.json'), 'utf-8'),
     ) as {
-      assets?: { run_worker_first?: boolean | Array<string> };
+      assets?: {
+        not_found_handling?: string;
+        run_worker_first?: boolean | Array<string>;
+      };
       kv_namespaces?: Array<{ binding: string }>;
     };
     expect(wranglerConfig.assets?.run_worker_first).toEqual(['/**']);
+    expect(wranglerConfig.assets?.not_found_handling).toBe('none');
     expect(wranglerConfig.kv_namespaces?.some((b) => b.binding === 'KV')).toBe(true);
   });
 

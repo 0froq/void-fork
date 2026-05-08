@@ -1343,6 +1343,9 @@ export function voidPlugin(options?: {
   if (ssrEntry || hasPages) {
     workerConfig.assets = {
       binding: 'ASSETS',
+      // Pages/SSR workers own HTML routing. Asset misses must stay 404s so
+      // module/script/style requests never receive the app shell as text/html.
+      not_found_handling: 'none',
       // Route all requests through the worker so the entry can set proper
       // Cache-Control headers on static asset responses (CF's default is
       // max-age=0 and _headers files don't work for WfP dispatch uploads).

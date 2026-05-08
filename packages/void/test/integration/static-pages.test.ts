@@ -151,9 +151,14 @@ describe('playground/static-pages build (output: static)', () => {
 
   it('wrangler.json has correct asset config', () => {
     const wranglerConfig = JSON.parse(readFileSync(join(DIST, 'ssr/wrangler.json'), 'utf-8')) as {
-      assets?: { run_worker_first?: boolean | Array<string>; directory?: string };
+      assets?: {
+        directory?: string;
+        not_found_handling?: string;
+        run_worker_first?: boolean | Array<string>;
+      };
     };
     expect(wranglerConfig.assets?.directory).toBe('../client');
     expect(wranglerConfig.assets?.run_worker_first).toBeDefined();
+    expect(wranglerConfig.assets?.not_found_handling).toBe('none');
   });
 });
