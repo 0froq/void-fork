@@ -355,6 +355,70 @@ describe('createVoidRouter prefetch', () => {
     );
   });
 
+  it('resolves abandoned GET visits without surfacing abort errors to fire-and-forget callers', async () => {
+    stubClientGlobals();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init: RequestInit) => {
+        if (url === '/slow') {
+          return new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => {
+              reject(new DOMException('Navigation aborted', 'AbortError'));
+            });
+          });
+        }
+        if (url === '/fast') {
+          return Promise.resolve(
+            Response.json(
+              {
+                component: 'fast',
+                props: { title: 'Fast' },
+              },
+              { headers: { 'X-VoidPages': 'true' } },
+            ),
+          );
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    const { router } = await createVoidRouter({
+      adapter: {
+        applyUpdate: vi.fn(),
+        createDeferred: vi.fn(() => ({})),
+        isLoading: vi.fn(() => false),
+        rejectDeferred: vi.fn((_ref, error) => error),
+        resolveDeferred: vi.fn((_ref, value) => value),
+      },
+      components: {
+        fast: vi.fn(async () => ({ default: {} })),
+        home: vi.fn(async () => ({ default: {} })),
+        slow: vi.fn(async () => ({ default: {} })),
+      },
+      layoutTree: {},
+      matchRoute: vi.fn((url) => {
+        if (url === '/slow') {
+          return 'slow';
+        }
+        if (url === '/fast') {
+          return 'fast';
+        }
+        return 'home';
+      }),
+      prefetchDefaultCacheFor: parseCacheFor('30s'),
+      prefetchHoverDelay: 75,
+      routeMeta: {},
+      viewTransitions: false,
+    });
+
+    const slowVisit = router.visit('/slow');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await router.visit('/fast');
+
+    await expect(slowVisit).resolves.toBeUndefined();
+  });
+
   it('does not fetch or write history for same-page hash popstate visits', async () => {
     stubClientGlobals();
     window.location.pathname = '/docs';

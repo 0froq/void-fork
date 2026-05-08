@@ -1,6 +1,11 @@
 /// <reference lib="dom" />
 
-import { VoidActionError, isCallSiteActionError, type ActionResult } from './action-result.ts';
+import {
+  VoidActionError,
+  isAbortError,
+  isCallSiteActionError,
+  type ActionResult,
+} from './action-result.ts';
 import {
   createPageNavigationEngine as createNavigationEngine,
   type PageComponentModule,
@@ -356,6 +361,15 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
           setRouteUrl(currentUrl());
         }
         return result.pageData;
+      } catch (error) {
+        if (
+          resource.method.toUpperCase() === 'GET' &&
+          !resource.options._resolveOnShell &&
+          isAbortError(error)
+        ) {
+          return undefined;
+        }
+        throw error;
       } finally {
         if (activeNavigationId === resource.id) {
           activeNavigationId = null;

@@ -459,7 +459,15 @@ function App({
               resolveViewTransition();
             }
             pendingVisitSettlers.delete(prepared.id);
-            rejectVisit(error);
+            const abortingGetVisit =
+              prepared.method.toUpperCase() === 'GET' &&
+              !prepared.options._resolveOnShell &&
+              isAbortError(error);
+            if (abortingGetVisit) {
+              resolveVisit(undefined);
+            } else {
+              rejectVisit(error);
+            }
             if (activePendingNavigationId === prepared.id) {
               activePendingNavigationId = null;
             }

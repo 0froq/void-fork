@@ -580,6 +580,36 @@ function defineClientTests(getBase: () => string) {
     }
   });
 
+  it('Link ignores aborted GET navigations from interrupted clicks', async () => {
+    const page = await newPage();
+    const errors: Array<string> = [];
+    page.on('pageerror', (error) => {
+      errors.push(error.message);
+    });
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') {
+        errors.push(msg.text());
+      }
+    });
+
+    try {
+      await page.goto(BASE + '/link-behavior');
+      await waitForHydration(page);
+
+      await page.click('button:has-text("Run interrupted navigation check")');
+      await page.waitForFunction(() =>
+        document
+          .querySelector('[data-testid="abort-navigation-status"]')
+          ?.textContent?.startsWith('Passed:'),
+      );
+
+      expect(errors.filter((error) => error.includes('Navigation aborted'))).toEqual([]);
+      expect(errors.filter((error) => error.includes('AbortError'))).toEqual([]);
+    } finally {
+      await page.context().close();
+    }
+  });
+
   it('Link hash navigation runs the navigation lifecycle', async () => {
     const page = await newPage();
     try {
