@@ -7,6 +7,16 @@ import { generateComponentManifest } from './pages-manifest.ts';
 
 const RENDERER_ID = 'virtual:void-pages-renderer';
 const CLIENT_ENTRY_ID = 'virtual:void-pages-client';
+const WORKER_ENVIRONMENT_NAME = 'void_worker';
+const REACT_DEDUPE = ['react', 'react-dom'];
+const REACT_OPTIMIZE_DEPS = [
+  'react',
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
+  'react-dom',
+  'react-dom/client',
+  'react-dom/server',
+];
 
 interface PrefetchConfig {
   hoverDelay?: number;
@@ -95,25 +105,15 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
         return;
       }
 
-      const reactDedupe = ['react', 'react-dom'];
-
       // In dev mode, exclude @void/react from dep optimization so the
       // virtual module and user components share the same React context objects.
       // Without this, Vite pre-bundles @void/react, creating separate
       // context instances that break useContext (React contexts use object identity).
       if (env.command === 'serve') {
         isDev = true;
-        const reactOptimizeDeps = [
-          'react',
-          'react/jsx-runtime',
-          'react/jsx-dev-runtime',
-          'react-dom',
-          'react-dom/client',
-          'react-dom/server',
-        ];
         return {
           resolve: {
-            dedupe: reactDedupe,
+            dedupe: REACT_DEDUPE,
           },
           optimizeDeps: {
             // Exclude @void/react so the virtual module and user
@@ -122,11 +122,19 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
             // Pre-include React entries that are discovered late via dynamic
             // imports during SPA navigation, avoiding a full-page reload
             // from Vite's dep optimizer.
-            include: reactOptimizeDeps,
+            include: REACT_OPTIMIZE_DEPS,
           },
           ssr: {
             optimizeDeps: {
-              include: reactOptimizeDeps,
+              include: REACT_OPTIMIZE_DEPS,
+            },
+          },
+          environments: {
+            [WORKER_ENVIRONMENT_NAME]: {
+              optimizeDeps: {
+                exclude: ['@void/react'],
+                include: REACT_OPTIMIZE_DEPS,
+              },
             },
           },
         };
@@ -139,7 +147,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
       return {
         resolve: {
-          dedupe: reactDedupe,
+          dedupe: REACT_DEDUPE,
         },
         build: {
           manifest: true,
