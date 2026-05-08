@@ -25,6 +25,7 @@
 - Deploy manifests: `packageBuild` and `packageFrameworkBuild` must include the database binding whenever `bindings.needsD1 || bindings.needsAuth || hasMigrations`.
 - Deploy cancellation/dedupe: cancellation is two-phase and must stay blocking until cleanup completes. Only skip worker deploys when worker module hashes are part of the comparison.
 - Deploy asset handling: verify client-declared blob hashes against uploaded bytes, stream multipart bodies in the API Worker, and keep the CF WfP cache-buster, early `asset_hashes` persistence, and KV/R2 mirror fallback from design doc 0066.
+- API compatibility: dashboard deploys after the platform deploy in the same pipeline, so API changes must stay backward compatible with the currently live dashboard and forward compatible with the dashboard about to deploy. Do not make backwards-incompatible API changes without a staged rollout.
 - Staging access: CI must set `VOID_API_URL=https://api.staging.void.cloud`; `STAGING=1` is not enough. Staging hosts require Cloudflare Access credentials via `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET` or `CF_ACCESS_TOKEN`; OAuth callbacks stay Access-bypassed.
 - WfP DO namespace lookup: do not poll account-wide DO namespace lists. Use `GET /workers/dispatch/namespaces/{ns}/scripts/{script}/bindings` and read the binding `namespace_id`.
 - WfP DO dispatch: do not call service-binding `.fetch` from inside a `DurableObject` or `WorkerEntrypoint` subclass; enqueue to a Queue or dispatch from a non-DO worker instead.

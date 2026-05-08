@@ -103,12 +103,12 @@ git submodule status
 | `pnpm lint`                         | Run oxlint                                                                                          |
 | `pnpm fmt`                          | Run oxfmt                                                                                           |
 | `pnpm check`                        | Run package `typecheck` scripts (`tsgo --noEmit` in most packages, `vue-tsc --noEmit` in dashboard) |
-| `pnpm run deploy`                   | Deploy `proxy` → `tail` → `api` → `dispatch`                                                        |
-| `pnpm run deploy:dashboard`         | Deploy the dashboard separately                                                                     |
-| `pnpm run deploy:staging`           | Deploy staging `proxy` → `tail` → `api` → `dispatch`                                                |
-| `pnpm run deploy:staging:dashboard` | Deploy the staging dashboard separately                                                             |
+| `pnpm run deploy`                   | Deploy `proxy` → `tail` → `api` → `dispatch` → `dashboard`                                          |
+| `pnpm run deploy:dashboard`         | Deploy the dashboard only                                                                           |
+| `pnpm run deploy:staging`           | Deploy staging `proxy` → `tail` → `api` → `dispatch` → `dashboard`                                  |
+| `pnpm run deploy:staging:dashboard` | Deploy the staging dashboard only                                                                   |
 
-Root `dev` and `build` are intentionally dashboard-only. Dashboard work is currently deferred, which is why it stays outside the main platform deploy pipeline.
+Root `dev` and `build` are intentionally dashboard-only. Dashboard deploys run after the platform workers in the main deploy pipeline.
 
 **Manual deploys only. Do not ask to push or deploy.**
 
@@ -296,12 +296,10 @@ There are five deployable platform packages/surfaces:
 | `packages/dashboard` | `dash.void.cloud` / `dash.staging.void.cloud`   | User-facing dashboard                          |
 | `packages/dispatch`  | `*.void.app` / `*.staging.void.app`             | User traffic router                            |
 
-Dashboard deployment is intentionally separate from the main platform pipeline.
-
 ```
-pnpm run deploy                     # proxy -> tail -> api -> dispatch
+pnpm run deploy                     # proxy -> tail -> api -> dispatch -> dashboard
 pnpm run deploy:dashboard           # dashboard only
-pnpm run deploy:staging             # staging proxy -> tail -> api -> dispatch
+pnpm run deploy:staging             # staging proxy -> tail -> api -> dispatch -> dashboard
 pnpm run deploy:staging:dashboard   # staging dashboard only
 ```
 

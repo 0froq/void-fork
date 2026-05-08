@@ -311,7 +311,7 @@ Callers:
 Root `package.json` orchestrates deployment:
 
 ```
-pnpm run deploy           # Production: deploy proxy, then migrate (drizzle-kit) + deploy api, then dispatch
+pnpm run deploy           # Production: deploy proxy, then migrate (drizzle-kit) + deploy api, then dispatch, then dashboard
 pnpm run deploy:staging   # Staging: same with --env staging
 ```
 
@@ -320,18 +320,22 @@ Broken down:
 ```
 deploy
 ├── deploy:proxy        → pnpm -F proxy run deploy        (wrangler deploy)
+├── deploy:tail         → pnpm -F tail run deploy         (wrangler deploy)
 ├── deploy:api          → pnpm -F api migrate             (drizzle-kit migrate — requires DATABASE_URL)
 │                       → pnpm -F api run deploy          (wrangler deploy)
-└── deploy:dispatch     → pnpm -F dispatch run deploy     (wrangler deploy)
+├── deploy:dispatch     → pnpm -F dispatch run deploy     (wrangler deploy)
+└── deploy:dashboard    → pnpm -F dashboard run deploy    (vite build && wrangler deploy)
 
 deploy:staging
 ├── deploy:staging:proxy     → pnpm -F proxy run deploy --env staging
+├── deploy:staging:tail      → pnpm -F tail run deploy --env staging
 ├── deploy:staging:api       → pnpm -F api migrate:staging  (DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate)
 │                            → pnpm -F api run deploy --env staging
-└── deploy:staging:dispatch  → pnpm -F dispatch run deploy --env staging
+├── deploy:staging:dispatch  → pnpm -F dispatch run deploy --env staging
+└── deploy:staging:dashboard → pnpm -F dashboard run deploy:staging
 ```
 
-Deploy order matters: proxy deploys first (user workers depend on it via service binding), then api runs PostgreSQL migrations via drizzle-kit before deploying (ensures schema is ready for new code), and dispatch deploys last. Dashboard is deployed separately (not included in `deploy` / `deploy:staging` scripts).
+Deploy order matters: proxy deploys first (user workers depend on it via service binding), then api runs PostgreSQL migrations via drizzle-kit before deploying (ensures schema is ready for new code), then dispatch deploys, and dashboard deploys only after the platform worker deploys succeed.
 
 ### API rollout notes for DB-backed project secrets
 
@@ -361,12 +365,14 @@ Three workflows in `.github/workflows/`:
 **`deploy.yml`** — runs on push to `prod` (production, environment: `Prod`):
 
 1. Runs CI workflow first
-2. `pnpm run deploy` (proxy, api with drizzle-kit migrations, dispatch)
+2. Builds the framework packages used by the dashboard
+3. `pnpm run deploy` (proxy, tail, api with drizzle-kit migrations, dispatch, dashboard)
 
 **`deploy-staging.yml`** — runs on push to `main` (staging, environment: `Staging`):
 
 1. Runs CI workflow first
-2. `pnpm run deploy:staging` (proxy, api with drizzle-kit migrations, dispatch — all to staging)
+2. Builds the framework packages used by the dashboard
+3. `pnpm run deploy:staging` (proxy, tail, api with drizzle-kit migrations, dispatch, dashboard — all to staging)
 
 ### Health Checks
 

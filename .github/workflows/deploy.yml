@@ -27,14 +27,12 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
 
-      # framework build only needed when deploying dashboard
-
-      # - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-      #   with:
-      #     path: framework/node_modules
-      #     key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
-      # - run: pnpm --dir framework install --frozen-lockfile
-      # - run: pnpm --dir framework build
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: framework/node_modules
+          key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
+      - run: pnpm --dir framework install --frozen-lockfile
+      - run: pnpm --dir framework build
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run deploy
