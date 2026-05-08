@@ -1,5 +1,6 @@
 import React, {
   Suspense,
+  startTransition,
   use,
   useCallback,
   useEffect,
@@ -581,10 +582,12 @@ export async function startReactPages(config: ReactPagesConfig): Promise<ReactPa
     throw new Error('pages: Missing #app element for Void React pages hydration.');
   }
 
-  hydrateRoot(
-    appEl,
-    React.createElement(App, { engine, router, viewTransitions: config.viewTransitions }),
-  );
+  startTransition(() => {
+    hydrateRoot(
+      appEl,
+      React.createElement(App, { engine, router, viewTransitions: config.viewTransitions }),
+    );
+  });
   appEl.setAttribute('data-hydrated', 'true');
   engine.start();
 
