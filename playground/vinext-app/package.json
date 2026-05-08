@@ -7,10 +7,10 @@
     "dev": "vp dev"
   },
   "dependencies": {
-    "@vitejs/plugin-rsc": "^0.5.25",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "react-server-dom-webpack": "^19.2.5",
+    "@vitejs/plugin-rsc": "^0.5.26",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-server-dom-webpack": "^19.2.6",
     "vinext": "^0.0.35"
   },
   "devDependencies": {

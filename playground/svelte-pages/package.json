@@ -9,7 +9,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "hono": "^4.12.17",
+    "hono": "^4.12.18",
     "svelte": "^5.55.5",
     "valibot": "^1.4.0"
   },

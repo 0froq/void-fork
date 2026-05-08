@@ -9,7 +9,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "hono": "^4.12.17",
+    "hono": "^4.12.18",
     "solid-js": "^1.9.12",
     "valibot": "^1.4.0"
   },

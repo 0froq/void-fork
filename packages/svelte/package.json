@@ -41,7 +41,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@sveltejs/vite-plugin-svelte": "^7.1.1"
+    "@sveltejs/vite-plugin-svelte": "^7.1.2"
   },
   "devDependencies": {
     "@types/node": "catalog:",

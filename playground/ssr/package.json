@@ -8,9 +8,9 @@
     "preview": "vp preview"
   },
   "dependencies": {
-    "hono": "^4.12.17",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "hono": "^4.12.18",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",
