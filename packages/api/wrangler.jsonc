@@ -116,6 +116,83 @@
   // For local dev, set AUTH_REDIRECT_URI=http://localhost:8787/auth/callback and DEV_AUTH_BYPASS=true in .dev.vars
   // For local Hyperdrive, set CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://user:pass@localhost:5432/void_api_dev in .dev.vars (run `pnpm setup` to auto-configure)
   "env": {
+    "production": {
+      "name": "void-api",
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          "id": "7bd6b2a606a347819ad3421867840736",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "ROUTING",
+          "id": "9250c33f3db6494ebe8ad6272812c8c0",
+        },
+        {
+          "binding": "ISR_CACHE",
+          "id": "7a0284b2390b42218901919579aadf0e",
+        },
+        {
+          "binding": "STATIC_ASSETS",
+          "id": "843a002c09eb4a2f910426212826b666",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "STATIC_ASSETS_R2",
+          "bucket_name": "void-static-assets-overflow",
+        },
+      ],
+      "dispatch_namespaces": [
+        {
+          "binding": "DISPATCH",
+          "namespace": "void-users",
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "USAGE_COUNTER",
+            "class_name": "UsageCounter",
+          },
+          {
+            "name": "CRON_SCHEDULER",
+            "class_name": "CronScheduler",
+          },
+          {
+            "name": "ERROR_ALERT_MONITOR",
+            "class_name": "ErrorAlertMonitor",
+          },
+        ],
+      },
+      "queues": {
+        "producers": [{ "binding": "CRON_FIRES_QUEUE", "queue": "void-cron-fires" }],
+        "consumers": [
+          {
+            "queue": "void-usage-events",
+            "max_batch_size": 100,
+            "max_batch_timeout": 5,
+          },
+          {
+            "queue": "void-cron-fires",
+            "max_batch_size": 50,
+            "max_batch_timeout": 1,
+            "max_retries": 3,
+          },
+        ],
+      },
+      "send_email": [
+        { "name": "EMAIL", "remote": true, "allowed_sender_addresses": ["noreply@void.cloud"] },
+      ],
+      "routes": [{ "pattern": "api.void.cloud", "custom_domain": true }],
+      "vars": {
+        "PLATFORM_ENV": "production",
+        "REQUESTS_DATASET": "void_requests",
+        "TAIL_SERVICE_NAME": "void-tail",
+        "R2_STATIC_ASSETS_BUCKET": "void-static-assets-overflow",
+      },
+    },
     "staging": {
       "name": "void-api-staging",
       "hyperdrive": [

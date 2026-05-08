@@ -108,8 +108,8 @@ test/unit/
 ## Deploy
 
 ```bash
-vp run --filter @voidcloud/proxy deploy
-vp run --filter @voidcloud/proxy deploy -- --env staging
+vp run --filter @voidcloud/proxy deploy --env production
+vp run --filter @voidcloud/proxy deploy --env staging
 ```
 
 Deployed as part of the root `vp run deploy` and `vp run deploy:staging` scripts.

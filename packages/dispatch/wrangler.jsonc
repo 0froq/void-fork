@@ -54,6 +54,56 @@
   },
   "tail_consumers": [{ "service": "void-tail" }],
   "env": {
+    "production": {
+      "name": "void-dispatch",
+      "routes": [
+        { "pattern": "*.void.app/*", "zone_name": "void.app" },
+        { "pattern": "*.void.app", "zone_name": "void.app" },
+        { "pattern": "*/*", "zone_name": "void.app" },
+        { "pattern": "*", "zone_name": "void.app" },
+      ],
+      "tail_consumers": [{ "service": "void-tail" }],
+      "dispatch_namespaces": [
+        {
+          "binding": "DISPATCH",
+          "namespace": "void-users",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "ROUTING",
+          "id": "9250c33f3db6494ebe8ad6272812c8c0",
+        },
+        {
+          "binding": "ISR_CACHE",
+          "id": "7a0284b2390b42218901919579aadf0e",
+        },
+        {
+          "binding": "STATIC_ASSETS",
+          "id": "843a002c09eb4a2f910426212826b666",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "STATIC_ASSETS_R2",
+          "bucket_name": "void-static-assets-overflow",
+        },
+      ],
+      "analytics_engine_datasets": [
+        {
+          "binding": "ANALYTICS",
+          "dataset": "void_requests",
+        },
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "USAGE_QUEUE",
+            "queue": "void-usage-events",
+          },
+        ],
+      },
+    },
     "staging": {
       "name": "void-dispatch-staging",
       "routes": [

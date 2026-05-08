@@ -12,6 +12,15 @@
     },
   ],
   "env": {
+    "production": {
+      "name": "void-tail",
+      "analytics_engine_datasets": [
+        {
+          "binding": "ANALYTICS",
+          "dataset": "void_logs",
+        },
+      ],
+    },
     "staging": {
       "name": "void-tail-staging",
       "analytics_engine_datasets": [

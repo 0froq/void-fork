@@ -43,8 +43,8 @@ test/parse-script-name.test.ts
 ## Deploy
 
 ```bash
-pnpm -F tail run deploy
-pnpm -F tail run deploy --env staging
+vp run --filter @voidcloud/tail deploy --env production
+vp run --filter @voidcloud/tail deploy --env staging
 ```
 
 Deploy this before `dispatch`, since dispatch references it as a tail consumer.

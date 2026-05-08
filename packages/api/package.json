@@ -19,7 +19,7 @@
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "deploy": "wrangler deploy",
+    "deploy": "node ../../scripts/wrangler-deploy.ts",
     "dev": "wrangler dev",
     "migrate": "drizzle-kit migrate",
     "migrate:staging": "DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate",

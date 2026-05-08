@@ -311,7 +311,7 @@ Callers:
 Root `package.json` orchestrates deployment:
 
 ```
-vp run deploy           # Production: deploy proxy, then migrate (drizzle-kit) + deploy api, then dispatch, then dashboard
+vp run deploy           # Production: same with --env production
 vp run deploy:staging   # Staging: same with --env staging
 ```
 
@@ -319,23 +319,23 @@ Broken down:
 
 ```
 deploy
-├── deploy:proxy        → vp run --filter @voidcloud/proxy deploy        (wrangler deploy)
-├── deploy:tail         → vp run --filter @voidcloud/tail deploy         (wrangler deploy)
+├── deploy:proxy        → vp run --filter @voidcloud/proxy deploy --env production
+├── deploy:tail         → vp run --filter @voidcloud/tail deploy --env production
 ├── deploy:api          → vp run --filter @voidcloud/api migrate         (drizzle-kit migrate — requires DATABASE_URL)
-│                       → vp run --filter @voidcloud/api deploy          (wrangler deploy)
-├── deploy:dispatch     → vp run --filter @voidcloud/dispatch deploy     (wrangler deploy)
-└── deploy:dashboard    → vp run --filter @voidcloud/dashboard deploy    (vp build && wrangler deploy)
+│                       → vp run --filter @voidcloud/api deploy --env production
+├── deploy:dispatch     → vp run --filter @voidcloud/dispatch deploy --env production
+└── deploy:dashboard    → vp run --filter @voidcloud/dashboard deploy --env production
 
 deploy:staging
-├── deploy:staging:proxy     → vp run --filter @voidcloud/proxy deploy -- --env staging
-├── deploy:staging:tail      → vp run --filter @voidcloud/tail deploy -- --env staging
+├── deploy:staging:proxy     → vp run --filter @voidcloud/proxy deploy --env staging
+├── deploy:staging:tail      → vp run --filter @voidcloud/tail deploy --env staging
 ├── deploy:staging:api       → vp run --filter @voidcloud/api migrate:staging  (DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate)
-│                            → vp run --filter @voidcloud/api deploy -- --env staging
-├── deploy:staging:dispatch  → vp run --filter @voidcloud/dispatch deploy -- --env staging
-└── deploy:staging:dashboard → vp run --filter @voidcloud/dashboard deploy:staging
+│                            → vp run --filter @voidcloud/api deploy --env staging
+├── deploy:staging:dispatch  → vp run --filter @voidcloud/dispatch deploy --env staging
+└── deploy:staging:dashboard → vp run --filter @voidcloud/dashboard deploy --env staging
 ```
 
-Deploy order matters: proxy deploys first (user workers depend on it via service binding), then api runs PostgreSQL migrations via drizzle-kit before deploying (ensures schema is ready for new code), then dispatch deploys, and dashboard deploys only after the platform worker deploys succeed.
+Deploy order matters: proxy deploys first (user workers depend on it via service binding), then api runs PostgreSQL migrations via drizzle-kit before deploying (ensures schema is ready for new code), then dispatch deploys, and dashboard deploys only after the platform worker deploys succeed. Package-level deploy scripts reject missing env flags; production must be invoked with `--env production` and staging with `--env staging`.
 
 ### API rollout notes for DB-backed project secrets
 

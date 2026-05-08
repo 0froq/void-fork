@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vp build",
-    "deploy": "vp build && wrangler deploy",
-    "deploy:staging": "CLOUDFLARE_ENV=staging vp build && wrangler deploy",
+    "deploy": "node ../../scripts/wrangler-deploy.ts --build",
+    "deploy:staging": "node ../../scripts/wrangler-deploy.ts --build --env staging",
     "dev": "node scripts/refresh-access-token.mjs && vp dev",
     "preview": "vp preview",
     "typecheck": "tsgo --noEmit"

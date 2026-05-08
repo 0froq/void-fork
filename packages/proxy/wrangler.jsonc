@@ -31,6 +31,29 @@
   },
   "routes": [{ "pattern": "proxy.void.cloud", "custom_domain": true }],
   "env": {
+    "production": {
+      "name": "void-proxy",
+      "ai": { "binding": "AI" },
+      "kv_namespaces": [
+        {
+          "binding": "ROUTING",
+          "id": "9250c33f3db6494ebe8ad6272812c8c0",
+        },
+      ],
+      "services": [
+        {
+          "binding": "API",
+          "service": "void-api",
+        },
+      ],
+      "dispatch_namespaces": [
+        {
+          "binding": "DISPATCH",
+          "namespace": "void-users",
+        },
+      ],
+      "routes": [{ "pattern": "proxy.void.cloud", "custom_domain": true }],
+    },
     "staging": {
       "name": "void-proxy-staging",
       "ai": { "binding": "AI" },
