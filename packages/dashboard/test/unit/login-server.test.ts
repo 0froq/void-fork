@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getCleanLoginUrl } from '../../pages/auth/callback.server.ts';
 import { getAuthCallbackForwardPath } from '../../pages/login.server.ts';
 
 describe('login loader auth forwarding', () => {
@@ -21,5 +22,15 @@ describe('login loader auth forwarding', () => {
     expect(
       getAuthCallbackForwardPath('https://dash.staging.void.cloud/login?login_nonce=abc'),
     ).toBeNull();
+  });
+});
+
+describe('auth callback redirects', () => {
+  it('drops stale auth query params when returning to login', () => {
+    expect(
+      getCleanLoginUrl(
+        'https://dash.staging.void.cloud/auth/callback?login_nonce=abc&code=auth-code',
+      ),
+    ).toBe('https://dash.staging.void.cloud/login');
   });
 });
