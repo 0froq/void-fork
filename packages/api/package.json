@@ -27,7 +27,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@cloudflare/sandbox": "0.9.1",
+    "@cloudflare/sandbox": "0.10.0",
     "@voidcloud/isr-shared": "workspace:*",
     "aws4fetch": "^1.0.20",
     "blake3-jit": "^1.1.0",
@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
-    "@electric-sql/pglite": "0.4.4",
+    "@electric-sql/pglite": "0.4.5",
     "@types/pg": "8.20.0",
     "@typescript/native-preview": "catalog:",
     "drizzle-kit": "^0.31.10",
