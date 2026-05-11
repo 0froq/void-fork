@@ -34,4 +34,24 @@ jobs:
       - run: vp run build
 
       - run: npm install -g npm@latest
-      - run: vp pm publish -r --access public --tag latest --no-git-checks -- --provenance
+      - name: Publish create-void
+        working-directory: packages/create-void
+        run: npm publish --access public --tag latest --provenance
+      - name: Publish @void/md
+        working-directory: packages/md
+        run: npm publish --access public --tag latest --provenance
+      - name: Publish void
+        working-directory: packages/void
+        run: npm publish --access public --tag latest --provenance
+      - name: Publish @void/react
+        working-directory: packages/react
+        run: npm publish --access public --tag latest --provenance
+      - name: Publish @void/vue
+        working-directory: packages/vue
+        run: npm publish --access public --tag latest --provenance
+      - name: Publish @void/svelte
+        working-directory: packages/svelte
+        run: npm publish --access public --tag latest --provenance
+      - name: Publish @void/solid
+        working-directory: packages/solid
+        run: npm publish --access public --tag latest --provenance
