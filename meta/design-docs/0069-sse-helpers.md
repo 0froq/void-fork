@@ -121,6 +121,12 @@ export function eventStream(
 
 export function formatSse(message: SseMessage): string;
 
+export type SseTextMessage = Omit<SseMessage, 'data'> & {
+  data?: string;
+};
+
+export function formatSseText(message: SseTextMessage): string;
+
 export function getLastEventId(request: Request): string | null;
 
 export class SseStreamClosedError extends Error {}
@@ -438,6 +444,8 @@ Unit tests:
 
 - `formatSse()` serializes event, id, retry, string data, object data, and
   multi-line data.
+- `formatSseText()` serializes pre-serialized string data without JSON
+  serialization while preserving control-field validation.
 - `eventStream()` returns correct headers.
 - `eventStream()` emits keepalives.
 - `eventStream()` enables keepalives by default and disables them with
@@ -454,7 +462,8 @@ Integration tests:
 - hosted dispatch passes `text/event-stream` through without body inspection.
 - dispatch does not cache, ISR-write, or asset-fallback-probe SSE responses.
 
-## Open Questions
+## Decisions
 
-- Should `formatSse()` expose a lower-level string-only variant for callers that
-  already serialized JSON?
+- `formatSseText()` exposes a lower-level string-only formatter for callers that
+  already serialized JSON while preserving the same control-field validation as
+  `formatSse()`.

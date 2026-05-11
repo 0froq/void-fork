@@ -66,6 +66,13 @@ function clientRevalidateResponse(response: Response): Response {
   return res;
 }
 
+export function isEventStreamResponse(response: Response): boolean {
+  return (
+    response.headers.get('content-type')?.toLowerCase().split(';', 1)[0]?.trim() ===
+    'text/event-stream'
+  );
+}
+
 function jsonCacheResponse(pageData: string, ttl: number, state: 'HIT' | 'MISS'): Response {
   return new Response(pageData, {
     headers: {
@@ -265,6 +272,9 @@ async function maybeServeWfpAssetFallback(opts: {
   response: Response;
   userAgent: string | null;
 }): Promise<Response> {
+  if (isEventStreamResponse(opts.response)) {
+    return opts.response;
+  }
   if (!opts.routing.assetManifestId || !isLikelyCfAssetStub(opts.response)) {
     return opts.response;
   }
@@ -377,7 +387,9 @@ export default {
       request.headers.get('upgrade')?.toLowerCase() === 'websocket' ? 'websocket' : 'static';
 
     const meter = (response: Response) => {
-      const responseBytes = Number(response.headers.get('content-length') ?? 0);
+      const responseBytes = isEventStreamResponse(response)
+        ? 0
+        : Number(response.headers.get('content-length') ?? 0);
       recordRequest(env, {
         projectId: routing.projectId,
         type: requestType,
@@ -475,7 +487,7 @@ export default {
             ? ((await fetchStaticAsset(env, hash, pathname, routing.projectId)) ??
               createErrorResponse(request, 404, 'Not Found'))
             : createErrorResponse(request, 404, 'Not Found');
-          if (response.ok) {
+          if (response.ok && !isEventStreamResponse(response)) {
             const res = new Response(response.body, response);
             res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
             ctx.waitUntil(cache.put(cacheKey, res.clone()));
@@ -496,7 +508,7 @@ export default {
             response,
             userAgent: request.headers.get('user-agent'),
           });
-          if (response.ok) {
+          if (response.ok && !isEventStreamResponse(response)) {
             const res = new Response(response.body, response);
             res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
             ctx.waitUntil(cache.put(cacheKey, res.clone()));
@@ -599,29 +611,40 @@ export default {
           requestType = 'isr';
           const worker = getWorker(env, routing);
           let workerResponse = await worker.fetch(workerRequest);
+          let isWorkerEventStream = isEventStreamResponse(workerResponse);
           const cachePathname = pathname;
           const cacheOriginalUrlVariant = isrOriginalUrlVariant;
           const cacheKeyForWrite = cacheKey;
           const jsonCacheKeyForWrite = jsonCacheKey;
-          const fallbackResult = await applyWorkerFallbackRules({
-            response: workerResponse,
-            worker,
-            dispatchReq: workerRequest,
-            routing,
-            pathname,
-            url,
-            originalRequestUrl: request.url,
-            originalUrlHeader,
-            originalUrlVariant: isrOriginalUrlVariant,
-          });
-          if (fallbackResult.applied) {
-            workerResponse = await maybeServeWfpAssetFallback({
-              env,
+          if (!isWorkerEventStream) {
+            const fallbackResult = await applyWorkerFallbackRules({
+              response: workerResponse,
+              worker,
+              dispatchReq: workerRequest,
               routing,
-              pathname: fallbackResult.pathname,
-              response: fallbackResult.response,
-              userAgent: request.headers.get('user-agent'),
+              pathname,
+              url,
+              originalRequestUrl: request.url,
+              originalUrlHeader,
+              originalUrlVariant: isrOriginalUrlVariant,
             });
+            if (fallbackResult.applied) {
+              workerResponse = fallbackResult.response;
+              isWorkerEventStream = isEventStreamResponse(workerResponse);
+              if (!isWorkerEventStream) {
+                workerResponse = await maybeServeWfpAssetFallback({
+                  env,
+                  routing,
+                  pathname: fallbackResult.pathname,
+                  response: workerResponse,
+                  userAgent: request.headers.get('user-agent'),
+                });
+                isWorkerEventStream = isEventStreamResponse(workerResponse);
+              }
+            }
+          }
+          if (isWorkerEventStream) {
+            return meter(workerResponse);
           }
           const ttl = resolveRevalidateTtl(workerResponse, isrTtl);
           if (ttl > 0 && workerResponse.ok) {
@@ -786,48 +809,59 @@ export default {
       const dispatchReqForFallback =
         hasBodyMethod && routing.fallbackRules?.length ? dispatchReq.clone() : dispatchReq;
       let response = await worker.fetch(dispatchReq);
+      let isEventStream = isEventStreamResponse(response);
 
       // Safety net for CF asset dedupe poisoning (WC-4511). See
       // meta/design-docs/0066. Pre-check gates body read so non-asset
       // responses stream through untouched.
-      response = await maybeServeWfpAssetFallback({
-        env,
-        routing,
-        pathname,
-        response,
-        userAgent: request.headers.get('user-agent'),
-      });
+      if (!isEventStream) {
+        response = await maybeServeWfpAssetFallback({
+          env,
+          routing,
+          pathname,
+          response,
+          userAgent: request.headers.get('user-agent'),
+        });
+        isEventStream = isEventStreamResponse(response);
+      }
 
       // routing.fallbackRules — for static deployments these fire post-asset
       // (line ~533). The user worker is the equivalent path resolver here, so
       // a 404 is the analogue of a static-asset miss. Single-pass: the
       // rewrite target's response is returned as-is even if it's also 404.
-      const fallbackResult = await applyWorkerFallbackRules({
-        response,
-        worker,
-        dispatchReq: dispatchReqForFallback,
-        routing,
-        pathname,
-        url,
-        originalRequestUrl: request.url,
-        originalUrlHeader,
-        originalUrlVariant,
-      });
-      if (fallbackResult.applied) {
-        pathname = fallbackResult.pathname;
-        url.pathname = pathname;
-        originalUrlVariant = fallbackResult.originalUrlVariant;
-        response = await maybeServeWfpAssetFallback({
-          env,
+      if (!isEventStream) {
+        const fallbackResult = await applyWorkerFallbackRules({
+          response,
+          worker,
+          dispatchReq: dispatchReqForFallback,
           routing,
           pathname,
-          response: fallbackResult.response,
-          userAgent: request.headers.get('user-agent'),
+          url,
+          originalRequestUrl: request.url,
+          originalUrlHeader,
+          originalUrlVariant,
         });
+        if (fallbackResult.applied) {
+          pathname = fallbackResult.pathname;
+          url.pathname = pathname;
+          originalUrlVariant = fallbackResult.originalUrlVariant;
+          response = fallbackResult.response;
+          isEventStream = isEventStreamResponse(response);
+          if (!isEventStream) {
+            response = await maybeServeWfpAssetFallback({
+              env,
+              routing,
+              pathname,
+              response,
+              userAgent: request.headers.get('user-agent'),
+            });
+            isEventStream = isEventStreamResponse(response);
+          }
+        }
       }
 
       // Cache static asset at edge if eligible
-      if (staticCacheKey && response.ok && !hasCacheOptOut(response)) {
+      if (staticCacheKey && response.ok && !isEventStream && !hasCacheOptOut(response)) {
         const res = new Response(response.body, response);
         res.headers.delete('x-void-page-data');
         const finalRes = applyHeaderRules(res, pathname, routing.headerRules);
@@ -851,6 +885,7 @@ export default {
       // Guard: only cache GET requests without credentials, and respect worker x-revalidate
       if (
         routing.revalidate &&
+        !isEventStream &&
         !request.headers.has('X-VoidPages') &&
         request.method === 'GET' &&
         !shouldBypassIsr(request)
@@ -1120,6 +1155,9 @@ async function revalidateInBackground(
     // cf === undefined and writes wrong-geo/wrong-bot HTML into the ISR cache.
     const cleanRequest = rebuildRequest(request, request.url, (h) => h.delete('X-VoidPages'));
     let response = await worker.fetch(cleanRequest);
+    if (isEventStreamResponse(response)) {
+      return;
+    }
     const fallbackResult = await applyWorkerFallbackRules({
       response,
       worker,
@@ -1131,13 +1169,20 @@ async function revalidateInBackground(
       originalUrlHeader: request.headers.get('X-Void-Original-URL') ?? undefined,
       originalUrlVariant: originalUrl ?? undefined,
     });
+    response = fallbackResult.response;
+    if (isEventStreamResponse(response)) {
+      return;
+    }
     response = await maybeServeWfpAssetFallback({
       env,
       routing,
       pathname: fallbackResult.pathname,
-      response: fallbackResult.response,
+      response,
       userAgent: request.headers.get('user-agent'),
     });
+    if (isEventStreamResponse(response)) {
+      return;
+    }
     const ttl = resolveRevalidateTtl(response, defaultTtl);
     const cache = caches.default;
     if (ttl > 0 && response.ok) {

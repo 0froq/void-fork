@@ -259,12 +259,27 @@ export function resolveRevalidateTtl(response: Response, defaultTtl: number): nu
   return value;
 }
 
+function acceptsEventStream(request: Request): boolean {
+  return (
+    request.headers
+      .get('Accept')
+      ?.toLowerCase()
+      .split(',')
+      .some((part) => part.split(';', 1)[0]?.trim() === 'text/event-stream') ?? false
+  );
+}
+
 /**
- * ISR should be bypassed for requests with credentials.
- * Pages protocol navigation (X-VoidPages) now uses a separate JSON edge cache.
+ * ISR should be bypassed for requests with credentials and EventSource
+ * requests. Pages protocol navigation (X-VoidPages) uses a separate JSON edge
+ * cache.
  */
 export function shouldBypassIsr(request: Request): boolean {
-  return request.headers.has('Cookie') || request.headers.has('Authorization');
+  return (
+    request.headers.has('Cookie') ||
+    request.headers.has('Authorization') ||
+    acceptsEventStream(request)
+  );
 }
 
 /**

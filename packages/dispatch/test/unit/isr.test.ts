@@ -232,6 +232,13 @@ describe('shouldBypassIsr', () => {
     expect(shouldBypassIsr(request)).toBe(false);
   });
 
+  it('returns true when the request accepts event streams', () => {
+    const request = new Request('https://example.com', {
+      headers: { Accept: 'text/html, text/event-stream; q=1' },
+    });
+    expect(shouldBypassIsr(request)).toBe(true);
+  });
+
   it('returns false for plain GET request', () => {
     const request = new Request('https://example.com');
     expect(shouldBypassIsr(request)).toBe(false);
