@@ -59,6 +59,7 @@ async function invokeWorker(
       // the success-path drain below. .catch() because this runs inside
       // the outer try; a throwing cancel() would otherwise route into the
       // `catch (err)` block and mis-categorize as a transport failure.
+      console.log(`[cron-fires-diag] pre-drain 404 fallback for ${message.workerName}`);
       await res.body?.cancel().catch(() => {});
       res = await worker.fetch(
         new Request('https://internal/__scheduled', { method: 'POST', headers, body }),
@@ -96,7 +97,11 @@ async function invokeWorker(
   // "retry the message", duplicating cron execution. The whole point of this
   // file is at-most-once for cron handlers; cosmetic tail-log polish must not
   // weaken that contract.
+  console.log(`[cron-fires-diag] pre-drain ok path for ${message.workerName} status=${res.status}`);
   await res.body?.cancel().catch(() => {});
+  console.log(
+    `[cron-fires-diag] post-drain ok path for ${message.workerName} status=${res.status}`,
+  );
   return { responseReceived: true, status: res.status };
 }
 
