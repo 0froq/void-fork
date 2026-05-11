@@ -34,4 +34,4 @@ jobs:
       - run: vp run build
 
       - run: npm install -g npm@latest
-      - run: vp pm publish -r --access public --tag latest --no-git-checks -- --provenance
+      - run: vp pm publish -r --access public --tag latest --no-git-checks
