@@ -55,6 +55,11 @@ async function invokeWorker(
     );
     // Legacy: workers deployed before /__void/* migration listened on /__scheduled.
     if (res.status === 404) {
+      // Drain the orphaned 404 body before reassigning — same reason as
+      // the success-path drain below. .catch() because this runs inside
+      // the outer try; a throwing cancel() would otherwise route into the
+      // `catch (err)` block and mis-categorize as a transport failure.
+      await res.body?.cancel().catch(() => {});
       res = await worker.fetch(
         new Request('https://internal/__scheduled', { method: 'POST', headers, body }),
       );
@@ -82,6 +87,16 @@ async function invokeWorker(
       bodySnippet: text.slice(0, 200),
     };
   }
+  // Drain the response body so the dispatch subrequest finalizes cleanly,
+  // otherwise workerd flags the user worker's tail event as
+  // `outcome: "canceled"` even though the handler ran to completion.
+  // Swallow rejection from cancel() locally: a stream errored mid-drain would
+  // otherwise throw out of invokeWorker, get swallowed by Promise.allSettled
+  // in processCronFiresBatch, and skip msg.ack() — which CF Queues treats as
+  // "retry the message", duplicating cron execution. The whole point of this
+  // file is at-most-once for cron handlers; cosmetic tail-log polish must not
+  // weaken that contract.
+  await res.body?.cancel().catch(() => {});
   return { responseReceived: true, status: res.status };
 }
 
