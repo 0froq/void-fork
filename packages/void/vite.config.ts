@@ -75,6 +75,8 @@ export default defineConfig({
       'src/runtime/client.ts',
       'src/runtime/fetch.ts',
       'src/runtime/fetch-stream.ts',
+      'src/runtime/sse.ts',
+      'src/runtime/sse-client.ts',
       'src/runtime/auth.ts',
       'src/runtime/auth-client.ts',
       'src/runtime/ws.ts',

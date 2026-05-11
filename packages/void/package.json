@@ -31,6 +31,8 @@
     "#self/remote/binding-handler": "./dist/runtime/remote/binding-handler.mjs",
     "#self/response": "./dist/runtime/response.mjs",
     "#self/sandbox": "./dist/runtime/sandbox.mjs",
+    "#self/sse": "./dist/runtime/sse.mjs",
+    "#self/sse/client": "./dist/runtime/sse-client.mjs",
     "#self/runtime/fetch": "./dist/runtime/fetch.mjs",
     "#self/runtime/fetch-stream": "./dist/runtime/fetch-stream.mjs",
     "#self/runtime/migration-handler": "./dist/runtime/migration-handler.mjs",
@@ -85,6 +87,16 @@
       "types": "./dist/runtime/fetch-stream.d.mts",
       "import": "./dist/runtime/fetch-stream.mjs",
       "require": "./dist/runtime/fetch-stream.mjs"
+    },
+    "./sse": {
+      "types": "./dist/runtime/sse.d.mts",
+      "import": "./dist/runtime/sse.mjs",
+      "require": "./dist/runtime/sse.mjs"
+    },
+    "./sse/client": {
+      "types": "./dist/runtime/sse-client.d.mts",
+      "import": "./dist/runtime/sse-client.mjs",
+      "require": "./dist/runtime/sse-client.mjs"
     },
     "./ws": {
       "types": "./dist/runtime/ws.d.mts",
