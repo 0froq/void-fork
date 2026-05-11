@@ -3881,7 +3881,7 @@ export default config;
       writeFileSync(
         join(wsroot, 'package.json'),
         JSON.stringify(
-          { name: 'workspace-root', private: true, packageManager: 'pnpm@11.0.8' },
+          { name: 'workspace-root', private: true, packageManager: 'pnpm@11.0.9' },
           null,
           2,
         ) + '\n',
@@ -3923,7 +3923,7 @@ export default config;
       writeFileSync(
         join(wsroot, 'package.json'),
         JSON.stringify(
-          { name: 'workspace-root', private: true, packageManager: 'pnpm@11.0.8' },
+          { name: 'workspace-root', private: true, packageManager: 'pnpm@11.0.9' },
           null,
           2,
         ) + '\n',
@@ -3965,7 +3965,7 @@ export default config;
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
       expectPnpmAllowBuilds(root);
-      expect(pkg.packageManager).toBe('pnpm@11.0.8');
+      expect(pkg.packageManager).toBe('pnpm@11.0.9');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

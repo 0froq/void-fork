@@ -2158,7 +2158,7 @@ function scaffoldPagesApp(
     packageManager === 'pnpm' &&
     (!pkg.packageManager || typeof pkg.packageManager !== 'string')
   ) {
-    pkg.packageManager = 'pnpm@11.0.8';
+    pkg.packageManager = 'pnpm@11.0.9';
   }
 
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
