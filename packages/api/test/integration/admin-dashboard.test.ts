@@ -844,6 +844,7 @@ describe('POST /admin/signup-control/toggle', () => {
 describe('POST /admin/signup-control/add + delete', () => {
   test('adds and removes entries', async () => {
     const admin = await createTestUser(env.db, 'admin-sc4', 'github', undefined, 'free', 'admin');
+    await env.ROUTING.delete('signup:allowlist');
 
     // Add entry
     const addBody = new URLSearchParams({ type: 'github', pattern: 'testuser', note: 'Test' });
@@ -870,6 +871,32 @@ describe('POST /admin/signup-control/add + delete', () => {
 
     const rawAfter = await env.ROUTING.get('signup:allowlist');
     expect(JSON.parse(rawAfter!)).toHaveLength(0);
+
+    await env.ROUTING.delete('signup:allowlist');
+  });
+
+  test('adds multiple comma or whitespace separated entries', async () => {
+    const admin = await createTestUser(env.db, 'admin-sc7', 'github', undefined, 'free', 'admin');
+    await env.ROUTING.delete('signup:allowlist');
+
+    const body = new URLSearchParams({
+      type: 'email',
+      pattern: 'One@Example.com, two@example.com\n*@Example.org  One@Example.com',
+      note: 'Sales list',
+    });
+    const res = await req('/admin/signup-control/add', admin.adminJwt, {
+      method: 'POST',
+      body: body.toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+
+    const raw = await env.ROUTING.get('signup:allowlist');
+    expect(JSON.parse(raw!)).toEqual([
+      { type: 'email', pattern: 'one@example.com', note: 'Sales list' },
+      { type: 'email', pattern: 'two@example.com', note: 'Sales list' },
+      { type: 'email', pattern: '*@example.org', note: 'Sales list' },
+    ]);
 
     await env.ROUTING.delete('signup:allowlist');
   });

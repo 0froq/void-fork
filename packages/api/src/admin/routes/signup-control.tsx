@@ -5,6 +5,17 @@ import { SignupControlPage } from '../views/signup-control.tsx';
 
 const app = new Hono<ApiEnv>();
 
+function parseAllowlistPatterns(input: string): Array<string> {
+  return Array.from(
+    new Set(
+      input
+        .split(/[\s,]+/)
+        .map((pattern) => pattern.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
 // GET /signup-control
 app.get('/', async (c) => {
   const enabled = (await c.env.ROUTING.get('signup:enabled')) === 'true';
@@ -25,15 +36,17 @@ app.post('/toggle', async (c) => {
 app.post('/add', async (c) => {
   const body = await c.req.parseBody();
   const type = body.type as string;
-  const pattern = (body.pattern as string)?.trim();
+  const patterns = parseAllowlistPatterns((body.pattern as string) ?? '');
   const note = ((body.note as string) || '').trim();
 
-  if (!pattern || (type !== 'github' && type !== 'email')) {
+  if (patterns.length === 0 || (type !== 'github' && type !== 'email')) {
     return c.html('<h1>Invalid entry</h1>', 400);
   }
 
   const entries = await getAllowlist(c.env.ROUTING);
-  entries.push({ type: type as 'github' | 'email', pattern, note: note || undefined });
+  for (const pattern of patterns) {
+    entries.push({ type: type as 'github' | 'email', pattern, note: note || undefined });
+  }
   await putAllowlist(c.env.ROUTING, entries);
   return c.redirect('/admin/signup-control');
 });

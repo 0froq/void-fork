@@ -29,18 +29,18 @@ export function SignupControlPage({
       <form
         method="post"
         action="/admin/signup-control/add"
-        style="margin-bottom: 20px; display: flex; gap: 8px; align-items: center"
+        style="margin-bottom: 20px; display: flex; gap: 8px; align-items: flex-start"
       >
         <select name="type">
           <option value="github">GitHub username</option>
           <option value="email">Email / pattern</option>
         </select>
-        <input
-          type="text"
+        <textarea
           name="pattern"
-          placeholder="username or *@domain.com"
+          placeholder="username, teammate@example.com, *@domain.com"
           required
-          style="width: 250px"
+          rows={3}
+          style="width: 360px"
         />
         <input type="text" name="note" placeholder="Note (optional)" style="width: 150px" />
         <button type="submit">Add</button>
