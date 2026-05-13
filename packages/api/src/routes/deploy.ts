@@ -74,6 +74,7 @@ import {
   type DeployManifest,
   type DeployEvent,
   type DeploymentStatus,
+  type LiveMigrationMeta,
   type SandboxMigrationMeta,
   type WebSocketMigrationMeta,
 } from '../types.ts';
@@ -694,6 +695,45 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
+  if (m.live !== undefined) {
+    if (m.live == null || typeof m.live !== 'object' || Array.isArray(m.live)) {
+      return 'invalid manifest shape: live must be an object';
+    }
+    const live = m.live as Record<string, unknown>;
+    for (const key of ['bindingName', 'className']) {
+      if (typeof live[key] !== 'string' || live[key].length === 0) {
+        return `invalid manifest shape: live.${key} must be a non-empty string`;
+      }
+    }
+    if (live.storage !== 'sqlite') {
+      return 'invalid manifest shape: live.storage must be "sqlite"';
+    }
+    if (!Array.isArray(live.classes) || !live.classes.every((x) => typeof x === 'string')) {
+      return 'invalid manifest shape: live.classes must be an array of strings';
+    }
+    if (live.migrations !== undefined) {
+      if (!Array.isArray(live.migrations)) {
+        return 'invalid manifest shape: live.migrations must be an array';
+      }
+      for (const migration of live.migrations) {
+        if (migration == null || typeof migration !== 'object' || Array.isArray(migration)) {
+          return 'invalid manifest shape: live.migrations entries must be objects';
+        }
+        const mg = migration as Record<string, unknown>;
+        if (typeof mg.tag !== 'string') {
+          return 'invalid manifest shape: live.migrations entries must have a string tag';
+        }
+        if (
+          mg.newSqliteClasses !== undefined &&
+          (!Array.isArray(mg.newSqliteClasses) ||
+            !mg.newSqliteClasses.every((x) => typeof x === 'string'))
+        ) {
+          return 'invalid manifest shape: live.migrations newSqliteClasses must be an array of strings';
+        }
+      }
+    }
+  }
+
   return null;
 }
 
@@ -881,6 +921,7 @@ export function buildWebSocketUploadMigrations(
 export function buildDurableObjectUploadMigrations(
   websocketMigrations: Array<WebSocketMigrationMeta> | undefined,
   sandboxMigrations: Array<SandboxMigrationMeta> | undefined,
+  liveMigrations: Array<LiveMigrationMeta> | undefined = undefined,
 ):
   | {
       new_tag: string;
@@ -916,6 +957,16 @@ export function buildDurableObjectUploadMigrations(
         ? { new_sqlite_classes: migration.newSqliteClasses }
         : {}),
       ...(migration.deletedClasses?.length ? { deleted_classes: migration.deletedClasses } : {}),
+    });
+  }
+
+  for (const migration of liveMigrations ?? []) {
+    steps.push({
+      tag: migration.tag,
+      index: steps.length,
+      ...(migration.newSqliteClasses?.length
+        ? { new_sqlite_classes: migration.newSqliteClasses }
+        : {}),
     });
   }
 
@@ -1021,6 +1072,23 @@ export function buildSandboxUploadBindings(sandbox: DeployManifest['sandbox'] | 
       type: 'durable_object_namespace',
       name: sandbox.bindingName,
       class_name: sandbox.className,
+    },
+  ];
+}
+
+export function buildLiveUploadBindings(live: DeployManifest['live'] | undefined): Array<{
+  type: 'durable_object_namespace';
+  name: string;
+  class_name: string;
+}> {
+  if (!live) {
+    return [];
+  }
+  return [
+    {
+      type: 'durable_object_namespace',
+      name: live.bindingName,
+      class_name: live.className,
     },
   ];
 }
@@ -1179,6 +1247,83 @@ export function enrichSandboxManifest(
       ...manifest,
       sandbox: {
         ...manifest.sandbox,
+        migrations: [...previousMigrations, migration],
+      },
+    },
+    changed: true,
+    nextVersion,
+  };
+}
+
+export function enrichLiveManifest(
+  manifest: DeployManifest,
+  previousManifest: DeployManifest | null,
+  currentVersion: number,
+): { manifest: DeployManifest; changed: boolean; nextVersion: number } {
+  if (!manifest.live) {
+    return { manifest, changed: false, nextVersion: currentVersion };
+  }
+
+  const previousLive = previousManifest?.live;
+  const previousMigrations = previousLive?.migrations ?? [];
+  const nextClasses = sortUnique(manifest.live.classes);
+  const nextClass = manifest.live.className;
+
+  if (previousLive?.className === nextClass && previousMigrations.length > 0) {
+    return {
+      manifest: {
+        ...manifest,
+        live: {
+          ...manifest.live,
+          classes: nextClasses,
+          migrations: previousMigrations,
+        },
+      },
+      changed: false,
+      nextVersion: currentVersion,
+    };
+  }
+
+  const existingClasses = new Set<string>();
+  if (previousLive?.className) {
+    existingClasses.add(previousLive.className);
+  }
+  for (const className of previousLive?.classes ?? []) {
+    existingClasses.add(className);
+  }
+  for (const migration of previousMigrations) {
+    for (const className of migration.newSqliteClasses ?? []) {
+      existingClasses.add(className);
+    }
+  }
+
+  if (existingClasses.has(nextClass)) {
+    return {
+      manifest: {
+        ...manifest,
+        live: {
+          ...manifest.live,
+          classes: nextClasses,
+          migrations: previousMigrations,
+        },
+      },
+      changed: false,
+      nextVersion: currentVersion,
+    };
+  }
+
+  const nextVersion = currentVersion + 1;
+  const migration: LiveMigrationMeta = {
+    tag: `live-v${nextVersion}`,
+    newSqliteClasses: [nextClass],
+  };
+
+  return {
+    manifest: {
+      ...manifest,
+      live: {
+        ...manifest.live,
+        classes: nextClasses,
         migrations: [...previousMigrations, migration],
       },
     },
@@ -2021,9 +2166,16 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         previousManifest,
         websocketManifestResult.nextVersion,
       );
+      const liveManifestResult = enrichLiveManifest(
+        enrichedManifestResult.manifest,
+        previousManifest,
+        enrichedManifestResult.nextVersion,
+      );
       const manifestVersionChanged =
-        websocketManifestResult.changed || enrichedManifestResult.changed;
-      manifest = enrichedManifestResult.manifest;
+        websocketManifestResult.changed ||
+        enrichedManifestResult.changed ||
+        liveManifestResult.changed;
+      manifest = liveManifestResult.manifest;
       const finalManifestRaw = JSON.stringify(manifest);
 
       // Host-scoped routing rules — same logic as multipart path.
@@ -2135,11 +2287,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       currentDeploymentId = deployment.id;
       logger = logger.with({ deploymentId: deployment.id });
       if (manifestVersionChanged) {
-        await updateProjectWebSocketVersion(
-          c.get('db'),
-          projectId,
-          enrichedManifestResult.nextVersion,
-        );
+        await updateProjectWebSocketVersion(c.get('db'), projectId, liveManifestResult.nextVersion);
       }
       dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
       workerName = `user-${project.slug}-${deployment.id}`;
@@ -2689,12 +2837,14 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         }));
         const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
         const sandboxBindings = buildSandboxUploadBindings(manifest.sandbox);
+        const liveBindings = buildLiveUploadBindings(manifest.live);
         const allBindings = [
           ...plainTextBindings,
           ...secretBindings,
           ...workerBindings,
           ...websocketBindings,
           ...sandboxBindings,
+          ...liveBindings,
           ...(completionJwt ? [{ name: 'ASSETS', type: 'assets' }] : []),
         ];
 
@@ -2705,6 +2855,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         const durableObjectMigrations = buildDurableObjectUploadMigrations(
           manifest.websocket?.migrations,
           manifest.sandbox?.migrations,
+          manifest.live?.migrations,
         );
         const containers = buildSandboxUploadContainers(manifest.sandbox);
         const tailServiceName = c.env.TAIL_SERVICE_NAME ?? DEFAULT_TAIL_SERVICE_NAME;

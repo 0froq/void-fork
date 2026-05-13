@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
   buildDurableObjectUploadMigrations,
+  buildLiveUploadBindings,
   buildSandboxUploadBindings,
   buildSandboxUploadContainers,
   buildWebSocketUploadBindings,
   buildWebSocketUploadMigrations,
+  enrichLiveManifest,
   enrichSandboxManifest,
   enrichWebSocketManifest,
 } from '../../src/routes/deploy.ts';
@@ -444,6 +446,108 @@ describe('enrichSandboxManifest', () => {
   });
 });
 
+describe('enrichLiveManifest', () => {
+  it('adds a SQLite Durable Object migration for the live stream class', () => {
+    const result = enrichLiveManifest(
+      {
+        version: 3,
+        bindings: {},
+        live: {
+          bindingName: 'VOID_LIVE',
+          className: 'VoidLiveStreamDurableObject',
+          storage: 'sqlite',
+          classes: ['VoidLiveStreamDurableObject'],
+        },
+      },
+      null,
+      0,
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.nextVersion).toBe(1);
+    expect(result.manifest.live?.migrations).toEqual([
+      { tag: 'live-v1', newSqliteClasses: ['VoidLiveStreamDurableObject'] },
+    ]);
+  });
+
+  it('reuses previous live migrations when the class is unchanged', () => {
+    const previousManifest: DeployManifest = {
+      version: 3,
+      bindings: {},
+      live: {
+        bindingName: 'VOID_LIVE',
+        className: 'VoidLiveStreamDurableObject',
+        storage: 'sqlite',
+        classes: ['VoidLiveStreamDurableObject'],
+        migrations: [{ tag: 'live-v1', newSqliteClasses: ['VoidLiveStreamDurableObject'] }],
+      },
+    };
+
+    const result = enrichLiveManifest(
+      {
+        version: 3,
+        bindings: {},
+        live: {
+          bindingName: 'VOID_LIVE',
+          className: 'VoidLiveStreamDurableObject',
+          storage: 'sqlite',
+          classes: ['VoidLiveStreamDurableObject', 'VoidLiveStreamDurableObject'],
+        },
+      },
+      previousManifest,
+      1,
+    );
+
+    expect(result.changed).toBe(false);
+    expect(result.nextVersion).toBe(1);
+    expect(result.manifest.live?.classes).toEqual(['VoidLiveStreamDurableObject']);
+    expect(result.manifest.live?.migrations).toEqual(previousManifest.live?.migrations);
+  });
+
+  it('does not preserve previous live metadata when the current manifest omits live', () => {
+    const previousManifest: DeployManifest = {
+      version: 3,
+      bindings: {},
+      live: {
+        bindingName: 'VOID_LIVE',
+        className: 'VoidLiveStreamDurableObject',
+        storage: 'sqlite',
+        classes: ['VoidLiveStreamDurableObject'],
+        migrations: [{ tag: 'live-v1', newSqliteClasses: ['VoidLiveStreamDurableObject'] }],
+      },
+    };
+
+    const result = enrichLiveManifest({ version: 3, bindings: {} }, previousManifest, 1);
+
+    expect(result.changed).toBe(false);
+    expect(result.nextVersion).toBe(1);
+    expect(result.manifest.live).toBeUndefined();
+  });
+
+  it('uses the shared Durable Object migration version sequence', () => {
+    const result = enrichLiveManifest(
+      {
+        version: 3,
+        bindings: {},
+        live: {
+          bindingName: 'VOID_LIVE',
+          className: 'VoidLiveStreamDurableObject',
+          storage: 'sqlite',
+          classes: ['VoidLiveStreamDurableObject'],
+        },
+      },
+      null,
+      3,
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.nextVersion).toBe(4);
+    expect(result.manifest.live?.migrations).toEqual([
+      { tag: 'live-v4', newSqliteClasses: ['VoidLiveStreamDurableObject'] },
+    ]);
+  });
+});
+
 describe('buildSandboxUploadMetadata', () => {
   const sandbox = {
     bindingName: 'SANDBOX',
@@ -473,6 +577,37 @@ describe('buildSandboxUploadMetadata', () => {
       new_tag: 'sandbox-v2',
       steps: [{ new_classes: ['ChatRoom'] }, { new_sqlite_classes: ['Sandbox'] }],
     });
+  });
+
+  it('combines live SQLite Durable Object migrations for Worker upload metadata', () => {
+    expect(
+      buildDurableObjectUploadMigrations([{ tag: 'ws-v1', newClasses: ['ChatRoom'] }], undefined, [
+        { tag: 'live-v2', newSqliteClasses: ['VoidLiveStreamDurableObject'] },
+      ]),
+    ).toEqual({
+      new_tag: 'live-v2',
+      steps: [
+        { new_classes: ['ChatRoom'] },
+        { new_sqlite_classes: ['VoidLiveStreamDurableObject'] },
+      ],
+    });
+  });
+
+  it('serializes live Durable Object binding metadata', () => {
+    expect(
+      buildLiveUploadBindings({
+        bindingName: 'VOID_LIVE',
+        className: 'VoidLiveStreamDurableObject',
+        storage: 'sqlite',
+        classes: ['VoidLiveStreamDurableObject'],
+      }),
+    ).toEqual([
+      {
+        type: 'durable_object_namespace',
+        name: 'VOID_LIVE',
+        class_name: 'VoidLiveStreamDurableObject',
+      },
+    ]);
   });
 
   it('preserves chronological migration tag order across websocket and sandbox migrations', () => {

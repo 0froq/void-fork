@@ -87,6 +87,19 @@ export interface SandboxManifestMeta {
   migrations?: Array<SandboxMigrationMeta>;
 }
 
+export interface LiveMigrationMeta {
+  tag: string;
+  newSqliteClasses?: Array<string>;
+}
+
+export interface LiveManifestMeta {
+  bindingName: string;
+  className: string;
+  storage: 'sqlite';
+  classes: Array<string>;
+  migrations?: Array<LiveMigrationMeta>;
+}
+
 /**
  * Manifest header-rule shape. Mirrors `HeaderRule` in `dispatch/src/headers.ts`
  * and the framework-side `HeaderRule` in `packages/void/src/cli/types.ts`.
@@ -185,6 +198,7 @@ export interface DeployManifest {
   fallbackRules?: Array<RedirectRule>;
   websocket?: WebSocketManifestMeta;
   sandbox?: SandboxManifestMeta;
+  live?: LiveManifestMeta;
 }
 
 export type DeployEvent =
