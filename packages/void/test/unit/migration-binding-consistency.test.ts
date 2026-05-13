@@ -350,6 +350,7 @@ describe('createMigrationHandler D1 execution', () => {
     const calls = {
       batch: 0,
       exec: [] as Array<string>,
+      run: [] as Array<string>,
     };
     const applied = new Set<string>();
 
@@ -380,6 +381,7 @@ describe('createMigrationHandler D1 execution', () => {
             return { results: [] };
           },
           async run() {
+            calls.run.push(sql);
             if (sql.startsWith('INSERT OR IGNORE INTO _void_migrations')) {
               applied.add(bound[0] as string);
             }
@@ -416,7 +418,95 @@ describe('createMigrationHandler D1 execution', () => {
       { name: '0001_semicolon.sql', applied: true, durationMs: expect.any(Number) },
     ]);
     expect(calls.exec).toEqual([sql]);
+    expect(calls.run).toEqual([
+      `CREATE TABLE IF NOT EXISTS _void_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    )`,
+      'INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)',
+    ]);
     expect(calls.batch).toBe(0);
+  });
+
+  it('applies Drizzle statement breakpoint chunks separately on D1', async () => {
+    const sql = [
+      'CREATE TABLE `account` (',
+      '\t`id` text PRIMARY KEY NOT NULL,',
+      '\t`userId` text NOT NULL',
+      ');',
+      '--> statement-breakpoint',
+      'CREATE UNIQUE INDEX `account_userId_key` ON `account` (`userId`);--> statement-breakpoint',
+      'CREATE TABLE `user` (',
+      '\t`id` text PRIMARY KEY NOT NULL',
+      ');',
+    ].join('\n');
+    const { calls, db } = createMockD1();
+    const handler = createMigrationHandler(
+      { __VOID_PROXY_TOKEN: proxyToken, DB: db },
+      [{ name: '0001_drizzle.sql', sql }],
+      'sqlite',
+    );
+
+    const response = await handler(
+      new Request('https://example.com/__void/migrate', {
+        method: 'POST',
+        headers: { 'x-void-internal': proxyToken },
+      }),
+    );
+    const body = (await response.json()) as MigrationResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(calls.exec).toEqual([]);
+    expect(calls.run).toEqual([
+      `CREATE TABLE IF NOT EXISTS _void_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    )`,
+      [
+        'CREATE TABLE `account` (',
+        '\t`id` text PRIMARY KEY NOT NULL,',
+        '\t`userId` text NOT NULL',
+        ');',
+      ].join('\n'),
+      'CREATE UNIQUE INDEX `account_userId_key` ON `account` (`userId`);',
+      ['CREATE TABLE `user` (', '\t`id` text PRIMARY KEY NOT NULL', ');'].join('\n'),
+      'INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)',
+    ]);
+    expect(calls.batch).toBe(0);
+  });
+
+  it('does not split statement breakpoint text inside SQL strings or comments', async () => {
+    const sql = [
+      "CREATE TABLE notes (message TEXT DEFAULT '--> statement-breakpoint');",
+      "INSERT INTO notes VALUES ('literal --> statement-breakpoint value');",
+      '/* --> statement-breakpoint */',
+    ].join('\n');
+    const { calls, db } = createMockD1();
+    const handler = createMigrationHandler(
+      { __VOID_PROXY_TOKEN: proxyToken, DB: db },
+      [{ name: '0001_literal_marker.sql', sql }],
+      'sqlite',
+    );
+
+    const response = await handler(
+      new Request('https://example.com/__void/migrate', {
+        method: 'POST',
+        headers: { 'x-void-internal': proxyToken },
+      }),
+    );
+    const body = (await response.json()) as MigrationResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(calls.exec).toEqual([sql]);
+    expect(calls.run).toEqual([
+      `CREATE TABLE IF NOT EXISTS _void_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    )`,
+      'INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)',
+    ]);
   });
 });
 

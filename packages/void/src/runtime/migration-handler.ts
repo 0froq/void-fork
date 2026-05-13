@@ -113,7 +113,14 @@ async function runD1Migrations(
 
     const start = Date.now();
     try {
-      await db.exec(m.sql);
+      const statements = splitMigrationSql(m.sql);
+      if (statements.length === 1 && statements[0] === m.sql) {
+        await db.exec(m.sql);
+      } else {
+        for (const statement of statements) {
+          await db.prepare(statement).run();
+        }
+      }
       await db
         .prepare('INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)')
         .bind(m.name, new Date().toISOString())
@@ -131,4 +138,54 @@ async function runD1Migrations(
   }
 
   return { ok: true, migrations: migrationResults };
+}
+
+function splitMigrationSql(sql: string): Array<string> {
+  const lines = sql.split(/\r?\n/);
+  if (
+    !lines.some((line) => isStatementBreakpointLine(line) || hasInlineStatementBreakpoint(line))
+  ) {
+    return [sql];
+  }
+
+  const statements: Array<string> = [];
+  const current: Array<string> = [];
+
+  for (const line of lines) {
+    if (isStatementBreakpointLine(line)) {
+      const statement = current.join('\n').trim();
+      if (statement) {
+        statements.push(statement);
+      }
+      current.length = 0;
+      continue;
+    }
+
+    if (hasInlineStatementBreakpoint(line)) {
+      current.push(line.replace(/-->\s*statement-breakpoint\s*$/, ''));
+      const statement = current.join('\n').trim();
+      if (statement) {
+        statements.push(statement);
+      }
+      current.length = 0;
+      continue;
+    }
+
+    current.push(line);
+  }
+
+  const statement = current.join('\n').trim();
+  if (statement) {
+    statements.push(statement);
+  }
+
+  return statements.length > 0 ? statements : [sql];
+}
+
+function isStatementBreakpointLine(line: string): boolean {
+  return line.trim() === '--> statement-breakpoint';
+}
+
+function hasInlineStatementBreakpoint(line: string): boolean {
+  return /;\s*-->\s*statement-breakpoint\s*$/.test(line.trim());
 }
