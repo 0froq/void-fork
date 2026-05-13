@@ -276,6 +276,7 @@ export async function createDeployment(
   source?: string | null,
   commit?: string | null,
   metadata?: {
+    cliVersion?: string | null;
     commitUrl?: string | null;
     gitRef?: string | null;
     repositoryUrl?: string | null;
@@ -293,6 +294,7 @@ export async function createDeployment(
       repository_url: metadata?.repositoryUrl ?? null,
       commit_url: metadata?.commitUrl ?? null,
       git_ref: metadata?.gitRef ?? null,
+      cli_version: metadata?.cliVersion ?? null,
     })
     .returning();
   return row;
@@ -312,6 +314,7 @@ export async function updateDeploymentManifest(
   source: string | null,
   commit: string | null,
   metadata?: {
+    cliVersion?: string | null;
     commitUrl?: string | null;
     gitRef?: string | null;
     repositoryUrl?: string | null;
@@ -326,6 +329,7 @@ export async function updateDeploymentManifest(
       repository_url: metadata?.repositoryUrl ?? null,
       commit_url: metadata?.commitUrl ?? null,
       git_ref: metadata?.gitRef ?? null,
+      cli_version: metadata?.cliVersion ?? null,
       updated_at: sql`now()`,
     })
     .where(eq(deployments.id, id))
@@ -1149,6 +1153,40 @@ export async function getSystemStats(
   };
 }
 
+export interface CliVersionDeploymentStats {
+  cli_version: string | null;
+  deployments: number;
+  projects: number;
+  users: number;
+  first_seen: string;
+  last_seen: string;
+}
+
+export async function getCliVersionDeploymentStats(
+  db: Db,
+  options?: { sinceDays?: number },
+): Promise<Array<CliVersionDeploymentStats>> {
+  const sinceDays = options?.sinceDays;
+  return db
+    .select({
+      cli_version: deployments.cli_version,
+      deployments: sql<number>`count(*)::int`,
+      projects: sql<number>`count(distinct ${deployments.project_id})::int`,
+      users: sql<number>`count(distinct ${projects.user_id})::int`,
+      first_seen: sql<string>`min(${deployments.created_at})`,
+      last_seen: sql<string>`max(${deployments.created_at})`,
+    })
+    .from(deployments)
+    .leftJoin(projects, eq(deployments.project_id, projects.id))
+    .where(
+      sinceDays && sinceDays > 0
+        ? sql`${deployments.created_at} >= now() - (${sinceDays} * interval '1 day')`
+        : sql`true`,
+    )
+    .groupBy(deployments.cli_version)
+    .orderBy(desc(sql`count(*)`));
+}
+
 export async function suspendUser(db: Db, id: string, reason: string): Promise<void> {
   await db.update(users).set({ suspended_reason: reason }).where(eq(users.id, id));
 }
@@ -1244,6 +1282,7 @@ export async function searchDeployments(
         ilike(deployments.status, pattern),
         ilike(deployments.commit, pattern),
         ilike(deployments.source, pattern),
+        ilike(deployments.cli_version, pattern),
       ),
     )
     .orderBy(desc(deployments.created_at))

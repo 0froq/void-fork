@@ -141,6 +141,7 @@ describe('POST /projects/:id/deploy/upload-urls', () => {
         headers: {
           Authorization: `Bearer ${user.jwt}`,
           'Content-Type': 'application/json',
+          'X-Void-CLI-Version': '0.8.3',
         },
         body: JSON.stringify({
           assets: [
@@ -341,6 +342,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
         headers: {
           Authorization: `Bearer ${user.jwt}`,
           'Content-Type': 'application/json',
+          'X-Void-CLI-Version': '0.8.3',
         },
         body: JSON.stringify({
           manifest: v2Manifest({
@@ -376,10 +378,11 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
 
     // DB row reaches `live`
     const [dpl] = await env.db
-      .select({ status: deployments.status })
+      .select({ cli_version: deployments.cli_version, status: deployments.status })
       .from(deployments)
       .where(eq(deployments.project_id, project.id));
     expect(dpl?.status).toBe('live');
+    expect(dpl?.cli_version).toBe('0.8.3');
 
     // Serving manifest: each path → `!{hash}` (direct-to-R2 always lands
     // in R2)

@@ -113,6 +113,7 @@ export const deployments = pgTable(
     repository_url: text('repository_url'),
     commit_url: text('commit_url'),
     git_ref: text('git_ref'),
+    cli_version: text('cli_version'),
     error_message: text('error_message'),
     asset_hashes: text('asset_hashes'),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),

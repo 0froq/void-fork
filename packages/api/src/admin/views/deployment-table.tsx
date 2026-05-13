@@ -69,6 +69,7 @@ export function DeploymentTable({
           {showProject && <th>Project</th>}
           <th>Status</th>
           <th>Source</th>
+          <th>CLI</th>
           <th>Commit</th>
           <th>Error</th>
           <th>Created</th>
@@ -94,6 +95,7 @@ export function DeploymentTable({
               )}
               <td style={statusColor(status)}>{status}</td>
               <td>{d.source ?? '-'}</td>
+              <td>{d.cli_version ?? '-'}</td>
               <td>{d.commit ? d.commit.slice(0, 7) : '-'}</td>
               <td>
                 {d.error_message ? (

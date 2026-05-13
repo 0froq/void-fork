@@ -511,6 +511,7 @@ export async function createTestDeployment(
     | 'canceled' = 'live',
   source?: string,
   errorMessage?: string,
+  options?: { cliVersion?: string | null },
 ): Promise<{ id: string }> {
   const n = ++deploymentCounter;
   const id = `dpl_test${n}`;
@@ -524,6 +525,7 @@ export async function createTestDeployment(
     project_id: projectId,
     status,
     source: source ?? null,
+    cli_version: options?.cliVersion ?? null,
     error_message: errorMessage ?? null,
     // Production deploys always have a manifest set after `updateDeploymentManifest`
     // (post-parse). Test fixtures seeding rows directly need a non-null

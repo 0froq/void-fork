@@ -8,10 +8,12 @@ import {
   getAllProjectsWithOwner,
   getAllDeploymentsWithProject,
   getProjectsWithOwnerByIds,
+  getCliVersionDeploymentStats,
 } from '../../db.ts';
 import { type ApiEnv, isDevBypass } from '../../env.ts';
 import { getRequestsDataset, queryTopProjectTraffic } from '../../routes/usage.ts';
 import { backfillQueueTokens } from '../backfill-queue-tokens.ts';
+import { CliVersionsPage } from '../views/cli-versions.tsx';
 import { DashboardPage } from '../views/dashboard.tsx';
 
 /** Derive the base cloud domain from the API request hostname.
@@ -78,6 +80,22 @@ function mockHealthResult(): HealthResult {
 }
 
 export const adminSystem = new Hono<ApiEnv>();
+
+adminSystem.get('/cli-versions', async (c) => {
+  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
+  const [last30Days, allTime] = await Promise.all([
+    getCliVersionDeploymentStats(c.get('db'), { sinceDays: 30 }),
+    getCliVersionDeploymentStats(c.get('db')),
+  ]);
+  return c.html(
+    <CliVersionsPage
+      last30Days={last30Days}
+      allTime={allTime}
+      username={c.get('user').login}
+      tz={tz}
+    />,
+  );
+});
 const TOP_PROJECT_LIMIT = 10;
 const TOP_PROJECT_WINDOW_MS = 60 * 60 * 1000;
 

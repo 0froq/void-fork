@@ -423,6 +423,7 @@ describe('GET /projects/:id/deployments', () => {
     const project = await createTestProject(env.db, user.id);
 
     const d1 = await createDeployment(env.db, project.id, null, 'manual', 'abc1234', {
+      cliVersion: '0.8.3',
       commitUrl: 'https://github.com/voidzero-dev/void/commit/abc1234',
       gitRef: 'main',
       repositoryUrl: 'https://github.com/voidzero-dev/void',
@@ -439,6 +440,7 @@ describe('GET /projects/:id/deployments', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       deployments: Array<{
+        cli_version: string | null;
         commit: string | null;
         commit_url: string | null;
         git_ref: string | null;
@@ -453,12 +455,14 @@ describe('GET /projects/:id/deployments', () => {
 
     const byId = Object.fromEntries(body.deployments.map((d) => [d.id, d]));
     expect(byId[d1.id].source).toBe('manual');
+    expect(byId[d1.id].cli_version).toBe('0.8.3');
     expect(byId[d1.id].commit).toBe('abc1234');
     expect(byId[d1.id].repository_url).toBe('https://github.com/voidzero-dev/void');
     expect(byId[d1.id].commit_url).toBe('https://github.com/voidzero-dev/void/commit/abc1234');
     expect(byId[d1.id].git_ref).toBe('main');
     expect(byId[d1.id].status).toBe('live');
     expect(byId[d2.id].source).toBe('ci');
+    expect(byId[d2.id].cli_version).toBeNull();
     expect(byId[d2.id].commit_url).toBeNull();
     expect(byId[d2.id].status).toBe('pending');
   });

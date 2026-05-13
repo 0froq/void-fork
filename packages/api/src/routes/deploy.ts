@@ -1699,6 +1699,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
   if (versionReject) {
     return versionReject;
   }
+  const cliVersion = c.req.header('x-void-cli-version') ?? null;
 
   const user = c.get('user');
 
@@ -2016,7 +2017,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           activeDeploy.status === 'canceling' ? { force: true } : undefined,
         );
       }
-      return await createDeployment(txDb, projectId, null, null, null);
+      return await createDeployment(txDb, projectId, null, null, null, { cliVersion });
     });
   } catch (err) {
     if (err instanceof ConcurrentDeployError) {
@@ -2305,6 +2306,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           source,
           commit,
           {
+            cliVersion,
             repositoryUrl,
             commitUrl,
             gitRef,

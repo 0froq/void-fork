@@ -156,6 +156,12 @@ app.get('/:id', async (c) => {
             <th>Type</th>
             <td>{project?.type ?? '-'}</td>
           </tr>
+          <tr>
+            <th>CLI Version</th>
+            <td>{deployment.cli_version ?? '-'}</td>
+            <th />
+            <td />
+          </tr>
           {manifest && (
             <tr>
               <td colspan={4} style="padding: 0">

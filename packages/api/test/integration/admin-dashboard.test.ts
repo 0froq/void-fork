@@ -381,7 +381,9 @@ describe('GET /admin/deployments', () => {
     const admin = await createTestUser(env.db, 'admin10', 'github', undefined, 'free', 'admin');
     const user = await createTestUser(env.db, 'deplowner');
     const project = await createTestProject(env.db, user.id, 'depl-proj');
-    await createTestDeployment(env.db, project.id, 'live', 'cli');
+    await createTestDeployment(env.db, project.id, 'live', 'cli', undefined, {
+      cliVersion: '0.8.3',
+    });
 
     const res = await req('/admin/deployments', admin.adminJwt);
     expect(res.status).toBe(200);
@@ -390,6 +392,7 @@ describe('GET /admin/deployments', () => {
     expect(html).toContain(`/admin/projects/${project.id}`);
     expect(html).toContain('live');
     expect(html).toContain('cli');
+    expect(html).toContain('0.8.3');
   });
 
   test('shows error preview for failed deployments', async () => {
@@ -401,6 +404,43 @@ describe('GET /admin/deployments', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('migration failed: syntax');
+  });
+
+  test('searches deployments by CLI version', async () => {
+    const admin = await createTestUser(env.db, 'admin10c', 'github', undefined, 'free', 'admin');
+    const project = await createTestProject(env.db, admin.id, 'search-cli-version');
+    await createTestDeployment(env.db, project.id, 'live', 'cli', undefined, {
+      cliVersion: '0.8.9',
+    });
+
+    const res = await req('/admin/deployments?search=0.8.9', admin.adminJwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('search-cli-version');
+    expect(html).toContain('0.8.9');
+  });
+
+  test('renders CLI version aggregate page', async () => {
+    const admin = await createTestUser(env.db, 'admin10d', 'github', undefined, 'free', 'admin');
+    const owner = await createTestUser(env.db, 'cli-owner');
+    const projectA = await createTestProject(env.db, owner.id, 'cli-stats-a');
+    const projectB = await createTestProject(env.db, owner.id, 'cli-stats-b');
+    await createTestDeployment(env.db, projectA.id, 'live', 'cli', undefined, {
+      cliVersion: '0.8.3',
+    });
+    await createTestDeployment(env.db, projectB.id, 'failed', 'cli', undefined, {
+      cliVersion: '0.8.3',
+    });
+    await createTestDeployment(env.db, projectB.id, 'live');
+
+    const res = await req('/admin/cli-versions', admin.adminJwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('CLI Versions');
+    expect(html).toContain('Last 30 Days');
+    expect(html).toContain('All Time');
+    expect(html).toContain('0.8.3');
+    expect(html).toContain('unknown');
   });
 
   test('paginates deployments', async () => {
@@ -428,7 +468,9 @@ describe('GET /admin/deployments/:id', () => {
   test('renders deployment detail', async () => {
     const admin = await createTestUser(env.db, 'admin12', 'github', undefined, 'free', 'admin');
     const project = await createTestProject(env.db, admin.id, 'depldetail-proj');
-    const deployment = await createTestDeployment(env.db, project.id, 'live', 'cli');
+    const deployment = await createTestDeployment(env.db, project.id, 'live', 'cli', undefined, {
+      cliVersion: '0.8.3',
+    });
 
     const res = await req(`/admin/deployments/${deployment.id}`, admin.adminJwt);
     expect(res.status).toBe(200);
@@ -437,6 +479,8 @@ describe('GET /admin/deployments/:id', () => {
     expect(html).toContain('depldetail-proj');
     expect(html).toContain('live');
     expect(html).toContain('cli');
+    expect(html).toContain('CLI Version');
+    expect(html).toContain('0.8.3');
   });
 
   test('shows error banner for failed deployment', async () => {
