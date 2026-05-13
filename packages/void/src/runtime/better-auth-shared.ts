@@ -126,10 +126,6 @@ const SCRYPT_OPTIONS = {
   r: 16,
 } as const;
 
-function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
 function derivePasswordKey(password: string, salt: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     scrypt(password.normalize('NFKC'), salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS, (error, key) => {
@@ -144,7 +140,7 @@ function derivePasswordKey(password: string, salt: string): Promise<Buffer> {
 
 export const voidAuthPassword: VoidAuthPasswordOptions = {
   async hash(password) {
-    const salt = toHex(randomBytes(PASSWORD_SALT_LENGTH));
+    const salt = randomBytes(PASSWORD_SALT_LENGTH).toString('hex');
     const key = await derivePasswordKey(password, salt);
     return `${salt}:${key.toString('hex')}`;
   },
@@ -154,12 +150,12 @@ export const voidAuthPassword: VoidAuthPasswordOptions = {
       return false;
     }
 
-    const targetKey = await derivePasswordKey(password, salt);
     const storedKey = Buffer.from(key, 'hex');
-    if (storedKey.length !== targetKey.length) {
+    if (key.length !== SCRYPT_KEY_LENGTH * 2 || storedKey.length !== SCRYPT_KEY_LENGTH) {
       return false;
     }
 
+    const targetKey = await derivePasswordKey(password, salt);
     return timingSafeEqual(targetKey, storedKey);
   },
 };

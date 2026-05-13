@@ -180,10 +180,28 @@ describe('resolveVoidAuthOptions', () => {
     ).resolves.toBe(false);
   });
 
+  it('verifies existing Better Auth scrypt hashes', async () => {
+    const hash =
+      '0123456789abcdeffedcba9876543210:bb68a5c89332e634a98a2ca6f60e2d68861b64f1fa59446dd8669396e5b76a66059da52a9ce48b43bddfc319aceddf788125882ae27c395f90306cb47e8264ae';
+
+    await expect(
+      voidAuthPassword.verify({
+        hash,
+        password: 'correct horse battery staple',
+      }),
+    ).resolves.toBe(true);
+  });
+
   it('treats unsupported password hash formats as invalid credentials', async () => {
     await expect(
       voidAuthPassword.verify({
         hash: 'sha256-pbkdf2:1000:salt:hash',
+        password: 'password',
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      voidAuthPassword.verify({
+        hash: '0123456789abcdeffedcba9876543210:not-hex',
         password: 'password',
       }),
     ).resolves.toBe(false);
