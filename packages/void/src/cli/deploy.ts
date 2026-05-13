@@ -105,6 +105,7 @@ import type {
 } from './types.ts';
 import {
   readExistingLiveBindingConfig,
+  normalizeWranglerCompatibilityFlags,
   readWranglerCompat,
   resolveLiveBindingConfig,
   syncWranglerBindings,
@@ -271,8 +272,25 @@ export function resolveDeployWranglerCompat(
   root: string,
   config: VoidConfig,
   buildOutputDir: string,
+  requirements?: {
+    authEnabled?: boolean;
+    dialect?: DatabaseDialect;
+    needsSandbox?: boolean;
+  },
 ): WranglerCompat | undefined {
-  return isNodeTarget(config.target) ? undefined : readWranglerCompat(root, config, buildOutputDir);
+  if (isNodeTarget(config.target)) {
+    return undefined;
+  }
+  const compat = readWranglerCompat(root, config, buildOutputDir);
+  const compatibilityFlags = normalizeWranglerCompatibilityFlags(compat.compatibilityFlags, {
+    needsNodejsCompat:
+      requirements?.authEnabled === true ||
+      requirements?.dialect === 'postgresql' ||
+      requirements?.needsSandbox === true,
+  });
+  return compatibilityFlags === compat.compatibilityFlags
+    ? compat
+    : { ...compat, compatibilityFlags };
 }
 
 /**
@@ -1172,7 +1190,7 @@ async function runFrameworkDeploy(
   // Use the original workerDir (not actualWorkerDir) because bundleEntry() may
   // reassign actualWorkerDir to a temporary output — the plugin-generated
   // wrangler.json with correct compat settings lives in the original build output.
-  const wranglerCompat = readWranglerCompat(root, voidConfig, workerDir);
+  const wranglerCompat = resolveDeployWranglerCompat(root, voidConfig, workerDir, { dialect });
 
   // 9. Resolve revalidate + prerender from void.json
   const revalidate = voidConfig.routing?.revalidate;
@@ -1237,8 +1255,8 @@ async function runFrameworkDeploy(
   const packageOptions = {
     bindingNames: resolveBindingNames(voidConfig.inference?.bindings),
     workerMain: actualWorkerMain,
-    compatibilityDate: wranglerCompat.compatibilityDate,
-    compatibilityFlags: wranglerCompat.compatibilityFlags,
+    compatibilityDate: wranglerCompat?.compatibilityDate,
+    compatibilityFlags: wranglerCompat?.compatibilityFlags,
   };
 
   const manifest = buildFrameworkManifest({
@@ -1626,6 +1644,11 @@ async function runFullDeploy(
     root,
     deployConfig,
     join(distDir, workerDirName),
+    {
+      authEnabled,
+      dialect,
+      needsSandbox: effectiveBindings.needsSandbox,
+    },
   );
 
   // 9. Load .env vars for production (excludes .local files)

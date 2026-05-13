@@ -1,3 +1,4 @@
+import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import type { Context } from 'hono';
 import type { VoidAuthMigrationSchema } from '../auth/drizzle.ts';
@@ -35,6 +36,12 @@ export interface ResolvedDatabase {
 }
 
 type ResolveDatabase = (env: VoidAuthEnv) => Promise<ResolvedDatabase>;
+type EmailPasswordOptions = NonNullable<BetterAuthOptions['emailAndPassword']>;
+type PasswordOptions = NonNullable<EmailPasswordOptions['password']>;
+type VoidAuthPasswordOptions = PasswordOptions & {
+  hash: NonNullable<PasswordOptions['hash']>;
+  verify: NonNullable<PasswordOptions['verify']>;
+};
 
 export interface VoidAuthRuntimeApi {
   resolveVoidAuthOptions(
@@ -110,11 +117,61 @@ function readEnvString(env: VoidAuthEnv, ...keys: Array<string>): string | undef
   return undefined;
 }
 
+const PASSWORD_SALT_LENGTH = 16;
+const SCRYPT_KEY_LENGTH = 64;
+const SCRYPT_OPTIONS = {
+  N: 16_384,
+  maxmem: 128 * 16_384 * 16 * 2,
+  p: 1,
+  r: 16,
+} as const;
+
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function derivePasswordKey(password: string, salt: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password.normalize('NFKC'), salt, SCRYPT_KEY_LENGTH, SCRYPT_OPTIONS, (error, key) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(key);
+    });
+  });
+}
+
+export const voidAuthPassword: VoidAuthPasswordOptions = {
+  async hash(password) {
+    const salt = toHex(randomBytes(PASSWORD_SALT_LENGTH));
+    const key = await derivePasswordKey(password, salt);
+    return `${salt}:${key.toString('hex')}`;
+  },
+  async verify({ hash, password }) {
+    const [salt, key, ...extra] = hash.split(':');
+    if (!salt || !key || extra.length > 0) {
+      return false;
+    }
+
+    const targetKey = await derivePasswordKey(password, salt);
+    const storedKey = Buffer.from(key, 'hex');
+    if (storedKey.length !== targetKey.length) {
+      return false;
+    }
+
+    return timingSafeEqual(targetKey, storedKey);
+  },
+};
+
 function resolveEmailAndPassword(
   configuredProviders: ReadonlyArray<VoidAuthProvider> | null,
 ): BetterAuthOptions['emailAndPassword'] | undefined {
   if (!configuredProviders || configuredProviders.includes(VOID_EMAIL_AUTH_PROVIDER)) {
-    return { enabled: true };
+    return {
+      enabled: true,
+      password: voidAuthPassword,
+    };
   }
   return undefined;
 }
@@ -185,15 +242,29 @@ function resolveUserConfig(
   env: VoidAuthEnv,
   dialect: VoidAuthDialect,
 ): BetterAuthOptions {
+  const mergeEmailAndPasswordDefaults = (options: BetterAuthOptions): BetterAuthOptions => {
+    if (!defaults.emailAndPassword?.password || !options.emailAndPassword) {
+      return options;
+    }
+
+    return {
+      ...options,
+      emailAndPassword: {
+        ...options.emailAndPassword,
+        password: options.emailAndPassword.password ?? defaults.emailAndPassword.password,
+      },
+    };
+  };
+
   if (!userConfig) {
     return defaults;
   }
 
   if (typeof userConfig === 'function') {
-    return userConfig({ defaults, request, env, dialect });
+    return mergeEmailAndPasswordDefaults(userConfig({ defaults, request, env, dialect }));
   }
 
-  return { ...defaults, ...userConfig };
+  return mergeEmailAndPasswordDefaults({ ...defaults, ...userConfig });
 }
 
 function assertRuntimeDialect(runtime: VoidAuthRuntimeOptions, dialect: VoidAuthDialect): void {

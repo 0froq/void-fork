@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
+import { voidAuthPassword } from '../../src/runtime/better-auth-shared.ts';
 import { resolveVoidAuthOptions } from '../../src/runtime/better-auth.ts';
 
 describe('resolveVoidAuthOptions', () => {
@@ -15,7 +16,10 @@ describe('resolveVoidAuthOptions', () => {
       {} as never,
     );
 
-    expect(options.emailAndPassword).toEqual({ enabled: true });
+    expect(options.emailAndPassword).toEqual({
+      enabled: true,
+      password: voidAuthPassword,
+    });
     expect(options.socialProviders).toBeUndefined();
   });
 
@@ -36,7 +40,10 @@ describe('resolveVoidAuthOptions', () => {
       {} as never,
     );
 
-    expect(options.emailAndPassword).toEqual({ enabled: true });
+    expect(options.emailAndPassword).toEqual({
+      enabled: true,
+      password: voidAuthPassword,
+    });
     expect(options.socialProviders).toEqual({
       discord: {
         clientId: 'discord-id',
@@ -46,6 +53,66 @@ describe('resolveVoidAuthOptions', () => {
         clientId: 'github-id',
         clientSecret: 'github-secret',
       },
+    });
+  });
+
+  it('preserves the default password handler when email auth is customized', async () => {
+    const { options } = await resolveVoidAuthOptions(
+      new Request('https://example.com/api/auth'),
+      {
+        BETTER_AUTH_SECRET: 'secret',
+      },
+      {
+        dialect: 'sqlite',
+        providers: null,
+        userConfig: {
+          emailAndPassword: {
+            enabled: true,
+            requireEmailVerification: true,
+          },
+        },
+      },
+      {} as never,
+    );
+
+    expect(options.emailAndPassword).toEqual({
+      enabled: true,
+      password: voidAuthPassword,
+      requireEmailVerification: true,
+    });
+  });
+
+  it('preserves a custom password handler when email auth is customized', async () => {
+    const password = {
+      async hash(value: string) {
+        return `custom:${value}`;
+      },
+      async verify() {
+        return true;
+      },
+    };
+
+    const { options } = await resolveVoidAuthOptions(
+      new Request('https://example.com/api/auth'),
+      {
+        BETTER_AUTH_SECRET: 'secret',
+      },
+      {
+        dialect: 'sqlite',
+        providers: null,
+        userConfig: {
+          emailAndPassword: {
+            enabled: true,
+            password,
+          },
+        },
+      },
+      {} as never,
+    );
+
+    expect(options.emailAndPassword).toEqual({
+      enabled: true,
+      password,
     });
   });
 
@@ -93,5 +160,32 @@ describe('resolveVoidAuthOptions', () => {
     );
 
     expect(options.secret).toBe('void-dev-better-auth-secret-1234567890');
+  });
+
+  it('uses a native scrypt password handler compatible with Better Auth hashes', async () => {
+    const hash = await voidAuthPassword.hash('correct horse battery staple');
+
+    expect(hash).toMatch(/^[0-9a-f]{32}:[0-9a-f]{128}$/);
+    await expect(
+      voidAuthPassword.verify({
+        hash,
+        password: 'correct horse battery staple',
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      voidAuthPassword.verify({
+        hash,
+        password: 'wrong password',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('treats unsupported password hash formats as invalid credentials', async () => {
+    await expect(
+      voidAuthPassword.verify({
+        hash: 'sha256-pbkdf2:1000:salt:hash',
+        password: 'password',
+      }),
+    ).resolves.toBe(false);
   });
 });

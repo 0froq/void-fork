@@ -20,6 +20,7 @@ import {
   ensureWranglerNodejsAlsFlag,
   hasDurableObjectSqliteMigration,
   LIVE_MIGRATION_TAG,
+  normalizeWranglerCompatibilityFlags,
   nextDurableObjectMigrationTag,
   readWranglerCompat,
   readExistingLiveBindingConfig,
@@ -1393,18 +1394,17 @@ export function voidPlugin(options?: {
     ];
   }
 
+  // Void-managed auth uses native node:crypto password hashing.
   // PostgreSQL needs nodejs_compat for the `pg` driver (events, net, tls, dns, etc.).
   // Cloudflare's Sandbox SDK also imports Node built-ins.
   // Other apps only need nodejs_als for AsyncLocalStorage (isomorphic fetch context threading).
   const existingFlags = (workerConfig.compatibility_flags as Array<string> | undefined) ?? [];
-  const needsNodejsCompat = dialect === 'postgresql' || bindings.needsSandbox;
-  if (needsNodejsCompat && !existingFlags.includes('nodejs_compat')) {
-    workerConfig.compatibility_flags = [
-      ...existingFlags.filter((f) => f !== 'nodejs_als'),
-      'nodejs_compat',
-    ];
-  } else if (!existingFlags.includes('nodejs_als') && !existingFlags.includes('nodejs_compat')) {
-    workerConfig.compatibility_flags = [...existingFlags, 'nodejs_als'];
+  const needsNodejsCompat = authEnabled || dialect === 'postgresql' || bindings.needsSandbox;
+  const normalizedFlags = normalizeWranglerCompatibilityFlags(existingFlags, {
+    needsNodejsCompat,
+  });
+  if (normalizedFlags && normalizedFlags !== existingFlags) {
+    workerConfig.compatibility_flags = normalizedFlags;
   }
 
   const jobs = scanJobsSync(root);

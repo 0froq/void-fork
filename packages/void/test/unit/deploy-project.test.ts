@@ -168,6 +168,36 @@ describe('resolveDeployWranglerCompat', () => {
     );
     expect(existsSync(join(root, 'void.json'))).toBe(false);
   });
+
+  it('upgrades auth deploy manifests to nodejs_compat even when root wrangler flags win', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-test-'));
+    tempDirs.push(root);
+    writeFileSync(
+      join(root, 'wrangler.jsonc'),
+      JSON.stringify({
+        compatibility_date: '2026-04-01',
+        compatibility_flags: ['custom_flag', 'nodejs_als'],
+      }),
+    );
+    const buildDir = join(root, 'dist', 'ssr');
+    mkdirSync(buildDir, { recursive: true });
+    writeFileSync(
+      join(buildDir, 'wrangler.json'),
+      JSON.stringify({
+        compatibility_date: '2026-04-01',
+        compatibility_flags: ['nodejs_compat'],
+      }),
+    );
+
+    expect(
+      resolveDeployWranglerCompat(root, { auth: { providers: ['email'] } }, buildDir, {
+        authEnabled: true,
+      }),
+    ).toEqual({
+      compatibilityDate: '2026-04-01',
+      compatibilityFlags: ['custom_flag', 'nodejs_compat'],
+    });
+  });
 });
 
 describe('ensurePreviouslyDeployedLiveBindingConfig', () => {

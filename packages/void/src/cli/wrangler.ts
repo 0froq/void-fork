@@ -14,6 +14,7 @@ import {
 
 const COMPAT_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const NODEJS_ALS_FLAG = 'nodejs_als';
+const NODEJS_COMPAT_FLAG = 'nodejs_compat';
 const VOID_CONFIG_FILE = 'void.json';
 export const DEFAULT_LIVE_BINDING = 'VOID_LIVE';
 export const DEFAULT_LIVE_CLASS = 'VoidLiveStreamDurableObject';
@@ -37,6 +38,23 @@ export const LATEST_KNOWN_COMPAT_DATE = '2026-02-24';
 export interface WranglerCompat {
   compatibilityDate: string;
   compatibilityFlags?: Array<string>;
+}
+
+export function normalizeWranglerCompatibilityFlags(
+  flags: Array<string> | undefined,
+  options?: { needsNodejsCompat?: boolean },
+): Array<string> | undefined {
+  const existingFlags = flags ?? [];
+  if (options?.needsNodejsCompat && !existingFlags.includes(NODEJS_COMPAT_FLAG)) {
+    return [...existingFlags.filter((flag) => flag !== NODEJS_ALS_FLAG), NODEJS_COMPAT_FLAG];
+  }
+  if (
+    existingFlags.length === 0 ||
+    (!existingFlags.includes(NODEJS_ALS_FLAG) && !existingFlags.includes(NODEJS_COMPAT_FLAG))
+  ) {
+    return [...existingFlags, NODEJS_ALS_FLAG];
+  }
+  return flags;
 }
 
 export function hasDurableObjectSqliteMigration(
