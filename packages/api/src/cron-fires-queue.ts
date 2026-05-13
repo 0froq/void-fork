@@ -57,10 +57,9 @@ async function invokeWorker(
     if (res.status === 404) {
       // Drain the orphaned 404 body before reassigning — same reason as
       // the success-path drain below. .catch() because this runs inside
-      // the outer try; a throwing cancel() would otherwise route into the
+      // the outer try; a throwing body read would otherwise route into the
       // `catch (err)` block and mis-categorize as a transport failure.
-      console.log(`[cron-fires-diag] pre-drain 404 fallback for ${message.workerName}`);
-      await res.body?.cancel().catch(() => {});
+      await res.arrayBuffer().catch(() => {});
       res = await worker.fetch(
         new Request('https://internal/__scheduled', { method: 'POST', headers, body }),
       );
@@ -88,20 +87,20 @@ async function invokeWorker(
       bodySnippet: text.slice(0, 200),
     };
   }
-  // Drain the response body so the dispatch subrequest finalizes cleanly,
+  // Fully consume the response body so the dispatch subrequest finalizes cleanly,
   // otherwise workerd flags the user worker's tail event as
   // `outcome: "canceled"` even though the handler ran to completion.
-  // Swallow rejection from cancel() locally: a stream errored mid-drain would
-  // otherwise throw out of invokeWorker, get swallowed by Promise.allSettled
-  // in processCronFiresBatch, and skip msg.ack() — which CF Queues treats as
-  // "retry the message", duplicating cron execution. The whole point of this
-  // file is at-most-once for cron handlers; cosmetic tail-log polish must not
-  // weaken that contract.
-  console.log(`[cron-fires-diag] pre-drain ok path for ${message.workerName} status=${res.status}`);
-  await res.body?.cancel().catch(() => {});
-  console.log(
-    `[cron-fires-diag] post-drain ok path for ${message.workerName} status=${res.status}`,
-  );
+  // arrayBuffer() (not cancel()) is required: cancel() aborts the stream rather
+  // than reading it, so workerd still sees an unfinished subrequest. Verified
+  // against prod logs after PR #146 — cancel() resolved cleanly but the tail
+  // outcome remained canceled.
+  // Swallow rejection from the body read locally: a stream errored mid-drain
+  // would otherwise throw out of invokeWorker, get swallowed by
+  // Promise.allSettled in processCronFiresBatch, and skip msg.ack() — which CF
+  // Queues treats as "retry the message", duplicating cron execution. The
+  // whole point of this file is at-most-once for cron handlers; cosmetic
+  // tail-log polish must not weaken that contract.
+  await res.arrayBuffer().catch(() => {});
   return { responseReceived: true, status: res.status };
 }
 
