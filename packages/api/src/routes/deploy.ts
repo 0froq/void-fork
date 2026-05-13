@@ -263,14 +263,18 @@ export function validateManifestShape(parsed: unknown): string | null {
   if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return 'invalid manifest shape: expected a JSON object';
   }
-  const m = parsed as Record<string, unknown>;
+  const manifest = parsed as Record<string, unknown>;
 
-  if (m.bindings == null || typeof m.bindings !== 'object' || Array.isArray(m.bindings)) {
+  if (
+    manifest.bindings == null ||
+    typeof manifest.bindings !== 'object' ||
+    Array.isArray(manifest.bindings)
+  ) {
     return 'invalid manifest shape: bindings must be an object';
   }
-  const b = m.bindings as Record<string, unknown>;
+  const bindings = manifest.bindings as Record<string, unknown>;
   for (const key of ['d1', 'kv', 'r2', 'hyperdrive'] as const) {
-    const v = b[key];
+    const v = bindings[key];
     if (v === undefined) {
       continue;
     }
@@ -279,11 +283,11 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
-  if (m.queues !== undefined) {
-    if (!Array.isArray(m.queues)) {
+  if (manifest.queues !== undefined) {
+    if (!Array.isArray(manifest.queues)) {
       return 'invalid manifest shape: queues must be an array';
     }
-    for (const q of m.queues) {
+    for (const q of manifest.queues) {
       if (q == null || typeof q !== 'object' || Array.isArray(q)) {
         return 'invalid manifest shape: queues entries must be objects';
       }
@@ -308,11 +312,11 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
-  if (m.schedules !== undefined) {
-    if (!Array.isArray(m.schedules)) {
+  if (manifest.schedules !== undefined) {
+    if (!Array.isArray(manifest.schedules)) {
       return 'invalid manifest shape: schedules must be an array';
     }
-    for (const s of m.schedules) {
+    for (const s of manifest.schedules) {
       if (s == null || typeof s !== 'object' || Array.isArray(s)) {
         return 'invalid manifest shape: schedules entries must be objects';
       }
@@ -323,28 +327,39 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
-  if (m.prerender !== undefined) {
-    if (!Array.isArray(m.prerender) || !m.prerender.every((x) => typeof x === 'string')) {
+  if (manifest.prerender !== undefined) {
+    if (
+      !Array.isArray(manifest.prerender) ||
+      !manifest.prerender.every((x) => typeof x === 'string')
+    ) {
       return 'invalid manifest shape: prerender must be an array of strings';
     }
   }
 
-  if (m.vars !== undefined) {
-    if (m.vars == null || typeof m.vars !== 'object' || Array.isArray(m.vars)) {
+  if (manifest.vars !== undefined) {
+    if (
+      manifest.vars == null ||
+      typeof manifest.vars !== 'object' ||
+      Array.isArray(manifest.vars)
+    ) {
       return 'invalid manifest shape: vars must be an object';
     }
-    for (const [k, v] of Object.entries(m.vars as Record<string, unknown>)) {
+    for (const [k, v] of Object.entries(manifest.vars as Record<string, unknown>)) {
       if (typeof v !== 'string') {
         return `invalid manifest shape: vars.${k} must be a string`;
       }
     }
   }
 
-  if (m.migrations !== undefined) {
-    if (m.migrations == null || typeof m.migrations !== 'object' || Array.isArray(m.migrations)) {
+  if (manifest.migrations !== undefined) {
+    if (
+      manifest.migrations == null ||
+      typeof manifest.migrations !== 'object' ||
+      Array.isArray(manifest.migrations)
+    ) {
       return 'invalid manifest shape: migrations must be an object';
     }
-    const mig = m.migrations as Record<string, unknown>;
+    const mig = manifest.migrations as Record<string, unknown>;
     // `dialect` and `pending` are read unconditionally by the migration
     // dispatch path (`manifest.migrations.pending > 0`). A wrong-typed value
     // would reach the CF migration runner and crash mid-deploy.
@@ -361,11 +376,11 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
-  if (m.auth !== undefined && typeof m.auth !== 'boolean') {
+  if (manifest.auth !== undefined && typeof manifest.auth !== 'boolean') {
     return 'invalid manifest shape: auth must be a boolean';
   }
 
-  if (m.ssr !== undefined && typeof m.ssr !== 'boolean') {
+  if (manifest.ssr !== undefined && typeof manifest.ssr !== 'boolean') {
     return 'invalid manifest shape: ssr must be a boolean';
   }
 
@@ -375,45 +390,45 @@ export function validateManifestShape(parsed: unknown): string | null {
     'hashedAssetsPrefix',
     'framework',
   ] as const) {
-    if (m[key] !== undefined && typeof m[key] !== 'string') {
+    if (manifest[key] !== undefined && typeof manifest[key] !== 'string') {
       return `invalid manifest shape: ${key} must be a string`;
     }
   }
 
-  if (m.assetManifestVersion !== undefined) {
+  if (manifest.assetManifestVersion !== undefined) {
     // Direct-to-R2 deploys require v2 (declares blake3 + md5 + size per asset).
     // The handler enforces v2 with its own error message; this shape check
     // accepts 1 here so the layered error is the one users see.
-    if (m.assetManifestVersion !== 1 && m.assetManifestVersion !== 2) {
+    if (manifest.assetManifestVersion !== 1 && manifest.assetManifestVersion !== 2) {
       return 'invalid manifest shape: assetManifestVersion must be 1 or 2';
     }
   }
 
-  if (m.compatibilityFlags !== undefined) {
+  if (manifest.compatibilityFlags !== undefined) {
     if (
-      !Array.isArray(m.compatibilityFlags) ||
-      !m.compatibilityFlags.every((x) => typeof x === 'string')
+      !Array.isArray(manifest.compatibilityFlags) ||
+      !manifest.compatibilityFlags.every((x) => typeof x === 'string')
     ) {
       return 'invalid manifest shape: compatibilityFlags must be an array of strings';
     }
   }
 
-  if (m.type !== undefined) {
+  if (manifest.type !== undefined) {
     const allowed = ['void', 'spa', 'static', 'framework'];
-    if (typeof m.type !== 'string' || !allowed.includes(m.type)) {
+    if (typeof manifest.type !== 'string' || !allowed.includes(manifest.type)) {
       return `invalid manifest shape: type must be one of ${allowed.join(', ')}`;
     }
   }
 
-  if (m.assetConfig !== undefined) {
+  if (manifest.assetConfig !== undefined) {
     if (
-      m.assetConfig == null ||
-      typeof m.assetConfig !== 'object' ||
-      Array.isArray(m.assetConfig)
+      manifest.assetConfig == null ||
+      typeof manifest.assetConfig !== 'object' ||
+      Array.isArray(manifest.assetConfig)
     ) {
       return 'invalid manifest shape: assetConfig must be an object';
     }
-    const ac = m.assetConfig as Record<string, unknown>;
+    const ac = manifest.assetConfig as Record<string, unknown>;
     if (
       ac.not_found_handling !== undefined &&
       !['none', 'single-page-application', '404-page'].includes(ac.not_found_handling as string)
@@ -430,17 +445,17 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
-  if (m.revalidate !== undefined) {
-    if (typeof m.revalidate === 'number') {
+  if (manifest.revalidate !== undefined) {
+    if (typeof manifest.revalidate === 'number') {
       // ok
     } else if (
-      m.revalidate == null ||
-      typeof m.revalidate !== 'object' ||
-      Array.isArray(m.revalidate)
+      manifest.revalidate == null ||
+      typeof manifest.revalidate !== 'object' ||
+      Array.isArray(manifest.revalidate)
     ) {
       return 'invalid manifest shape: revalidate must be a number or object';
     } else {
-      for (const [k, v] of Object.entries(m.revalidate as Record<string, unknown>)) {
+      for (const [k, v] of Object.entries(manifest.revalidate as Record<string, unknown>)) {
         if (typeof v !== 'number') {
           return `invalid manifest shape: revalidate.${k} must be a number`;
         }
@@ -448,11 +463,11 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
-  if (m.headerRules !== undefined) {
-    if (!Array.isArray(m.headerRules)) {
+  if (manifest.headerRules !== undefined) {
+    if (!Array.isArray(manifest.headerRules)) {
       return 'invalid manifest shape: headerRules must be an array';
     }
-    for (const rule of m.headerRules) {
+    for (const rule of manifest.headerRules) {
       if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
         return 'invalid manifest shape: headerRules entries must be objects';
       }
@@ -480,14 +495,14 @@ export function validateManifestShape(parsed: unknown): string | null {
   // rewrite (internal URL rewrite, no Location header); `status: 3xx` means a
   // redirect. Destinations may not contain `?` — request query is merged
   // separately at dispatch time (see `mergeQueryIntoLocation`).
-  if (m.redirectRules !== undefined) {
-    if (!Array.isArray(m.redirectRules)) {
+  if (manifest.redirectRules !== undefined) {
+    if (!Array.isArray(manifest.redirectRules)) {
       return 'invalid manifest shape: redirectRules must be an array';
     }
-    if (m.redirectRules.length > MAX_ROUTING_RULES) {
-      return `invalid manifest shape: redirectRules has ${m.redirectRules.length} entries, exceeds the ${MAX_ROUTING_RULES} per-list limit`;
+    if (manifest.redirectRules.length > MAX_ROUTING_RULES) {
+      return `invalid manifest shape: redirectRules has ${manifest.redirectRules.length} entries, exceeds the ${MAX_ROUTING_RULES} per-list limit`;
     }
-    for (const rule of m.redirectRules) {
+    for (const rule of manifest.redirectRules) {
       if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
         return 'invalid manifest shape: redirectRules entries must be objects';
       }
@@ -532,15 +547,15 @@ export function validateManifestShape(parsed: unknown): string | null {
   // attack via `?utm=…`/`?cb=…` can't multiply cache slots. The validator
   // only enforces shape; semantic correctness (does the pattern match a
   // real route?) is the user's responsibility.
-  if (m.revalidateQueryAllowlist !== undefined) {
+  if (manifest.revalidateQueryAllowlist !== undefined) {
     if (
-      m.revalidateQueryAllowlist == null ||
-      typeof m.revalidateQueryAllowlist !== 'object' ||
-      Array.isArray(m.revalidateQueryAllowlist)
+      manifest.revalidateQueryAllowlist == null ||
+      typeof manifest.revalidateQueryAllowlist !== 'object' ||
+      Array.isArray(manifest.revalidateQueryAllowlist)
     ) {
       return 'invalid manifest shape: revalidateQueryAllowlist must be an object';
     }
-    const entries = Object.entries(m.revalidateQueryAllowlist as Record<string, unknown>);
+    const entries = Object.entries(manifest.revalidateQueryAllowlist as Record<string, unknown>);
     if (entries.length > MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES) {
       return `invalid manifest shape: revalidateQueryAllowlist has ${entries.length} entries, exceeds the ${MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES} entry limit`;
     }
@@ -562,14 +577,14 @@ export function validateManifestShape(parsed: unknown): string | null {
   // fallbackRules fire after the static asset resolver 404s. Rewrites only,
   // so every entry carries the same internal-destination constraints as a
   // status=200 redirectRule.
-  if (m.fallbackRules !== undefined) {
-    if (!Array.isArray(m.fallbackRules)) {
+  if (manifest.fallbackRules !== undefined) {
+    if (!Array.isArray(manifest.fallbackRules)) {
       return 'invalid manifest shape: fallbackRules must be an array';
     }
-    if (m.fallbackRules.length > MAX_ROUTING_RULES) {
-      return `invalid manifest shape: fallbackRules has ${m.fallbackRules.length} entries, exceeds the ${MAX_ROUTING_RULES} per-list limit`;
+    if (manifest.fallbackRules.length > MAX_ROUTING_RULES) {
+      return `invalid manifest shape: fallbackRules has ${manifest.fallbackRules.length} entries, exceeds the ${MAX_ROUTING_RULES} per-list limit`;
     }
-    for (const rule of m.fallbackRules) {
+    for (const rule of manifest.fallbackRules) {
       if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
         return 'invalid manifest shape: fallbackRules entries must be objects';
       }
@@ -602,11 +617,15 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
-  if (m.websocket !== undefined) {
-    if (m.websocket == null || typeof m.websocket !== 'object' || Array.isArray(m.websocket)) {
+  if (manifest.websocket !== undefined) {
+    if (
+      manifest.websocket == null ||
+      typeof manifest.websocket !== 'object' ||
+      Array.isArray(manifest.websocket)
+    ) {
       return 'invalid manifest shape: websocket must be an object';
     }
-    const ws = m.websocket as Record<string, unknown>;
+    const ws = manifest.websocket as Record<string, unknown>;
     if (!Array.isArray(ws.routes)) {
       return 'invalid manifest shape: websocket.routes must be an array';
     }
@@ -641,11 +660,15 @@ export function validateManifestShape(parsed: unknown): string | null {
   // and there are no worker files. This is currently tolerated as a no-op
   // (the deploy provisions nothing) but a clearer signal at validation time
   // would prevent stale-manifest leakage.
-  if (m.sandbox !== undefined) {
-    if (m.sandbox == null || typeof m.sandbox !== 'object' || Array.isArray(m.sandbox)) {
+  if (manifest.sandbox !== undefined) {
+    if (
+      manifest.sandbox == null ||
+      typeof manifest.sandbox !== 'object' ||
+      Array.isArray(manifest.sandbox)
+    ) {
       return 'invalid manifest shape: sandbox must be an object';
     }
-    const sandbox = m.sandbox as Record<string, unknown>;
+    const sandbox = manifest.sandbox as Record<string, unknown>;
     for (const key of ['bindingName', 'className', 'containerName', 'image']) {
       if (typeof sandbox[key] !== 'string' || sandbox[key].length === 0) {
         return `invalid manifest shape: sandbox.${key} must be a non-empty string`;
@@ -695,11 +718,15 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
-  if (m.live !== undefined) {
-    if (m.live == null || typeof m.live !== 'object' || Array.isArray(m.live)) {
+  if (manifest.live !== undefined) {
+    if (
+      manifest.live == null ||
+      typeof manifest.live !== 'object' ||
+      Array.isArray(manifest.live)
+    ) {
       return 'invalid manifest shape: live must be an object';
     }
-    const live = m.live as Record<string, unknown>;
+    const live = manifest.live as Record<string, unknown>;
     for (const key of ['bindingName', 'className']) {
       if (typeof live[key] !== 'string' || live[key].length === 0) {
         return `invalid manifest shape: live.${key} must be a non-empty string`;
@@ -3571,15 +3598,15 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           );
         }
 
-        const dep = deployment!;
-        const mf = manifest!;
-        const wn = workerName!;
-        const dn = dispatchNamespace!;
+        const failedDeployment = deployment!;
+        const failedManifest = manifest!;
+        const failedWorkerName = workerName!;
+        const failedDispatchNamespace = dispatchNamespace!;
 
         const teardownRaceLost = routingSwitched && raw === PROJECT_DELETING_ERROR_MESSAGE;
         if (teardownRaceLost) {
           logger.error('catch', 'teardown_race_lost', err, {
-            workerName: wn,
+            workerName: failedWorkerName,
             writtenRoutingKeyCount: writtenRoutingKeys.length,
           });
           for (const key of writtenRoutingKeys) {
@@ -3592,12 +3619,17 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               method: 'DELETE',
               headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
             }).catch((e) =>
-              logger.error('catch', 'orphan_worker_delete_failed', e, { workerName: wn }),
+              logger.error('catch', 'orphan_worker_delete_failed', e, {
+                workerName: failedWorkerName,
+              }),
             );
           }
           if (bundleStored) {
-            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, dep.id).catch((e) =>
-              logger.error('catch', 'worker_bundle_delete_failed', e, { deploymentId: dep.id }),
+            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, failedDeployment.id).catch(
+              (e) =>
+                logger.error('catch', 'worker_bundle_delete_failed', e, {
+                  deploymentId: failedDeployment.id,
+                }),
             );
           }
           if (sandboxContainerAppId) {
@@ -3627,48 +3659,50 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             }
           }
           logger.info('status_transition', 'status_change', {
-            deploymentId: dep.id,
+            deploymentId: failedDeployment.id,
             from: currentStatus,
             to: 'failed',
             reason: 'teardown_race_lost',
           });
-          await updateDeploymentStatus(c.get('db'), dep.id, 'failed', msg).catch(() => {});
+          await updateDeploymentStatus(c.get('db'), failedDeployment.id, 'failed', msg).catch(
+            () => {},
+          );
           currentStatus = 'failed';
           emit({ event: 'error', message: msg, step: currentStep });
         } else if (routingSwitched) {
           logger.error('catch', 'post_routing_step_failed', err, {
-            workerName: wn,
+            workerName: failedWorkerName,
             currentPhase: currentStep,
           });
           logger.info('status_transition', 'status_change', {
-            deploymentId: dep.id,
+            deploymentId: failedDeployment.id,
             from: currentStatus,
             to: 'live',
             reason: 'post_routing_recovery',
           });
-          await updateDeploymentStatus(c.get('db'), dep.id, 'live', undefined, {
+          await updateDeploymentStatus(c.get('db'), failedDeployment.id, 'live', undefined, {
             force: true,
           }).catch(() => {});
           currentStatus = 'live';
           await updateProjectType(
             c.get('db'),
             projectId,
-            mf.type ?? (mf.framework ? 'framework' : 'void'),
+            failedManifest.type ?? (failedManifest.framework ? 'framework' : 'void'),
           ).catch(() => {});
-          await setActiveDeployment(c.get('db'), projectId, dep.id).catch(() => {});
-          await markDeploymentRetained(c.get('db'), dep.id, true).catch(() => {});
+          await setActiveDeployment(c.get('db'), projectId, failedDeployment.id).catch(() => {});
+          await markDeploymentRetained(c.get('db'), failedDeployment.id, true).catch(() => {});
           const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
           const slugUrl = `https://${project.slug}.${siteDomain}`;
           emit({
             event: 'done',
-            deployment: dep.id,
+            deployment: failedDeployment.id,
             url: slugUrl,
             urls: [slugUrl],
             assets: 0,
             workers: 0,
           });
         } else {
-          const latest = await getDeployment(c.get('db'), dep.id);
+          const latest = await getDeployment(c.get('db'), failedDeployment.id);
           const wasCanceled =
             latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
           for (const key of writtenRoutingKeys) {
@@ -3676,12 +3710,22 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               logger.error('catch', 'routing_rollback_failed', e, { key }),
             );
           }
-          await deleteDispatchScript(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, dn, wn).catch((e) =>
-            logger.error('catch', 'worker_script_cleanup_failed', e, { workerName: wn }),
+          await deleteDispatchScript(
+            c.env.CF_ACCOUNT_ID,
+            c.env.CF_API_TOKEN,
+            failedDispatchNamespace,
+            failedWorkerName,
+          ).catch((e) =>
+            logger.error('catch', 'worker_script_cleanup_failed', e, {
+              workerName: failedWorkerName,
+            }),
           );
           if (bundleStored) {
-            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, dep.id).catch((e) =>
-              logger.error('catch', 'worker_bundle_delete_failed', e, { deploymentId: dep.id }),
+            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, failedDeployment.id).catch(
+              (e) =>
+                logger.error('catch', 'worker_bundle_delete_failed', e, {
+                  deploymentId: failedDeployment.id,
+                }),
             );
           }
           if (sandboxContainerAppId) {
@@ -3710,21 +3754,23 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               });
             }
           }
-          await clearIsrCache(c.env.ISR_CACHE, projectId, dep.id).catch((e) =>
-            logger.error('catch', 'isr_cache_clear_failed', e, { deploymentId: dep.id }),
+          await clearIsrCache(c.env.ISR_CACHE, projectId, failedDeployment.id).catch((e) =>
+            logger.error('catch', 'isr_cache_clear_failed', e, {
+              deploymentId: failedDeployment.id,
+            }),
           );
           logger.info('status_transition', 'status_change', {
-            deploymentId: dep.id,
+            deploymentId: failedDeployment.id,
             from: currentStatus,
             to: wasCanceled ? 'canceled' : 'failed',
             reason: 'pre_routing_failure',
             wasCanceled,
           });
           if (!wasCanceled) {
-            await updateDeploymentStatus(c.get('db'), dep.id, 'failed', msg);
+            await updateDeploymentStatus(c.get('db'), failedDeployment.id, 'failed', msg);
             currentStatus = 'failed';
           } else {
-            await updateDeploymentStatus(c.get('db'), dep.id, 'canceled', msg, {
+            await updateDeploymentStatus(c.get('db'), failedDeployment.id, 'canceled', msg, {
               force: true,
             });
             currentStatus = 'canceled';
