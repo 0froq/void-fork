@@ -51,6 +51,24 @@ describe('hasDeploySchemaDrift', () => {
     expect(snapshotDir(migrationsDir)).toEqual(before);
     expect(existsSync(join(root, '.void', 'deploy-drift-check'))).toBe(false);
   });
+
+  it('throws when drizzle-kit cannot evaluate the schema', () => {
+    const root = createTempApp();
+    writeFileSync(
+      join(root, 'db', 'schema.ts'),
+      [
+        'import { missingTable } from "missing-drizzle-schema-package";',
+        '',
+        'export const users = missingTable("users");',
+        '',
+      ].join('\n'),
+    );
+
+    expect(() => hasDeploySchemaDrift(root, 'sqlite')).toThrow(
+      'Failed to check Drizzle schema drift during deploy.',
+    );
+    expect(existsSync(join(root, '.void', 'deploy-drift-check'))).toBe(false);
+  });
 });
 
 function createTempApp(): string {

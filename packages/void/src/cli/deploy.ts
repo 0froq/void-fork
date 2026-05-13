@@ -1,14 +1,13 @@
-import { execFileSync, execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
-  symlinkSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, relative, resolve } from 'pathe';
 
@@ -1848,11 +1847,9 @@ export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): bo
     return false;
   }
 
-  const driftRoot = mkDeployDriftCheckRoot();
+  const driftRoot = mkDeployDriftCheckRoot(root);
   const driftProjectRoot = join(driftRoot, 'project');
 
-  rmSync(driftRoot, { recursive: true, force: true });
-  mkdirSync(driftRoot, { recursive: true });
   createDeployDriftProject(root, driftProjectRoot);
 
   try {
@@ -1864,17 +1861,43 @@ export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): bo
       dialect,
     );
 
-    execFileSync(process.execPath, [drizzleKitBin, 'generate', '--config', driftConfigPath], {
-      cwd: driftProjectRoot,
-      stdio: 'pipe',
-    });
+    const output = runDrizzleKitGenerate(driftProjectRoot, driftConfigPath);
+    const after = snapshotDir(migrationsDir);
+    const snapshotsEqual = migrationSnapshotsEqual(before, after);
 
-    return !migrationSnapshotsEqual(before, snapshotDir(migrationsDir));
+    if (snapshotsEqual && !output.includes('No schema changes, nothing to migrate')) {
+      throw new Error(output || 'drizzle-kit generate finished without reporting schema status.');
+    }
+
+    return !snapshotsEqual;
   } catch (error) {
     throw new Error(formatDeploySchemaDriftCheckError(error));
   } finally {
     rmSync(driftRoot, { recursive: true, force: true });
+    cleanupDeployDriftCheckRoot(root);
   }
+}
+
+function runDrizzleKitGenerate(root: string, configPath: string): string {
+  const result = spawnSync(process.execPath, [drizzleKitBin, 'generate', '--config', configPath], {
+    cwd: root,
+    encoding: 'utf-8',
+  });
+  const stderr = bufferToString(result.stderr);
+  const stdout = bufferToString(result.stdout);
+  const output = [stderr, stdout].filter(Boolean).join('\n').trim();
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (stderr) {
+    throw new Error(output);
+  }
+  if (result.status !== 0) {
+    throw new Error(output || `drizzle-kit generate exited with code ${result.status}.`);
+  }
+
+  return output;
 }
 
 function getDeploySchemaDriftMessage(): string {
@@ -1907,6 +1930,10 @@ function extractExecErrorOutput(error: unknown): string {
   }
   if (stdout) {
     details.push(stdout);
+  }
+  const message = 'message' in error ? bufferToString(error.message) : '';
+  if (details.length === 0 && message) {
+    details.push(message);
   }
 
   return details.join('\n').trim();
@@ -1944,45 +1971,27 @@ function createDeployDriftProject(root: string, driftProjectRoot: string): void 
     const source = join(root, entry.name);
     const target = join(driftProjectRoot, entry.name);
 
-    if (entry.name === 'db') {
-      cpSync(source, target, { recursive: true });
-      continue;
-    }
-
-    symlinkSync(source, target, entry.isDirectory() ? symlinkDirType() : 'file');
-  }
-
-  const nodeModules = findNearestNodeModules(root);
-  if (nodeModules) {
-    symlinkSync(nodeModules, join(driftProjectRoot, 'node_modules'), symlinkDirType());
+    cpSync(source, target, { recursive: true });
   }
 }
 
-function findNearestNodeModules(root: string): string | null {
-  let current = root;
-  while (true) {
-    const candidate = join(current, 'node_modules');
-    if (existsSync(candidate)) {
-      return candidate;
-    }
+function mkDeployDriftCheckRoot(root: string): string {
+  const driftCheckDir = join(root, deployDriftCheckDir);
+  rmSync(driftCheckDir, { recursive: true, force: true });
+  mkdirSync(driftCheckDir, { recursive: true });
+  return mkdtempSync(join(driftCheckDir, 'check-'));
+}
 
-    const parent = resolve(current, '..');
-    if (parent === current) {
-      return null;
+function cleanupDeployDriftCheckRoot(root: string): void {
+  const driftCheckDir = join(root, deployDriftCheckDir);
+  try {
+    if (existsSync(driftCheckDir) && readdirSync(driftCheckDir).length === 0) {
+      rmSync(driftCheckDir, { recursive: true, force: true });
     }
-    current = parent;
+  } catch {
+    // Best-effort cleanup only. The deploy drift check must not mask
+    // the original Drizzle Kit error with a cleanup failure.
   }
-}
-
-function mkDeployDriftCheckRoot(): string {
-  return join(
-    tmpdir(),
-    `${deployDriftCheckDir.replaceAll('/', '-').replaceAll('\\', '-')}-${Date.now()}`,
-  );
-}
-
-function symlinkDirType(): 'dir' | 'junction' {
-  return process.platform === 'win32' ? 'junction' : 'dir';
 }
 
 function snapshotDir(root: string): Record<string, string> {
