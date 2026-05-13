@@ -23,11 +23,7 @@ async function sendEmail(
   await binding.send({ from: SENDER, ...params });
 }
 
-export async function sendInvitationEmail(
-  emailBinding: SendEmail,
-  to: string,
-  inviteUrl: string,
-): Promise<void> {
+export async function sendInvitationEmail(emailBinding: SendEmail, to: string): Promise<void> {
   await sendEmail(emailBinding, {
     to,
     subject: "You're invited to Void's Private Beta",
@@ -42,13 +38,14 @@ export async function sendInvitationEmail(
 </ul>
 <p>Thank you!</p>
 <p>Please authenticate with a GitHub or Google account that uses the same email address as this invite.</p>
-<p>${button(inviteUrl, 'Get Started')}</p>`,
+<p>${button(QUICKSTART_URL, 'Get Started')}</p>`,
       "If you didn't expect this invitation, you can ignore this email.",
     ),
-    text: `Hello there!\n\nYou're invited to Void's Private Beta phase.\n\nWarning: Void is still a work in progress and things may change.\n\nWe'd love to get your feedback on how we can improve. There are two ways to share your thoughts:\n\nJoin the Void Discord server: ${DISCORD_URL}. Then write in the private feedback channel.\n\nCreate an issue in ${GITHUB_REPO_URL} after you receive the invite.\n\nThank you!\n\nPlease authenticate with a GitHub or Google account that uses the same email address as this invite.\n\nGet started: ${inviteUrl}\n\nIf you didn't expect this invitation, you can ignore this email.`,
+    text: `Hello there!\n\nYou're invited to Void's Private Beta phase.\n\nWarning: Void is still a work in progress and things may change.\n\nWe'd love to get your feedback on how we can improve. There are two ways to share your thoughts:\n\nJoin the Void Discord server: ${DISCORD_URL}. Then write in the private feedback channel.\n\nCreate an issue in ${GITHUB_REPO_URL} after you receive the invite.\n\nThank you!\n\nPlease authenticate with a GitHub or Google account that uses the same email address as this invite.\n\nGet started: ${QUICKSTART_URL}\n\nIf you didn't expect this invitation, you can ignore this email.`,
   });
 }
 
+const QUICKSTART_URL = 'https://void.cloud/guide/quickstart';
 const GUIDE_URL = 'https://void.cloud/guide/';
 const DISCORD_URL = 'https://discord.gg/QRF4nSvcQv';
 const GITHUB_REPO_URL = 'https://github.com/void-sdk/void';

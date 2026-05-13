@@ -99,12 +99,9 @@ app.post('/send', async (c) => {
 
   // Send emails (non-fatal — invitations + allowlist are already committed)
   if (c.env.EMAIL) {
-    const baseUrl = c.req.url.startsWith('https://api.staging')
-      ? 'https://api.staging.void.cloud'
-      : 'https://api.void.cloud';
     for (const email of emails) {
       try {
-        await sendInvitationEmail(c.env.EMAIL, email, `${baseUrl}/invite`);
+        await sendInvitationEmail(c.env.EMAIL, email);
       } catch (err) {
         console.error(`Failed to send invitation email to ${email}:`, err);
       }
