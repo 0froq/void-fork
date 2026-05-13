@@ -32,6 +32,7 @@ import {
   authCodes,
   migrationRenames,
 } from './schema.ts';
+import type { AllowlistEntry } from './signup-allowlist.ts';
 import type { PlanId } from './tiers.ts';
 import type {
   Deployment,
@@ -56,6 +57,11 @@ export const CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES: Array<DeploymentStatus>
   'canceling',
   'canceled',
 ];
+
+export type AllowlistEntryStatus = AllowlistEntry & {
+  accepted: boolean;
+  deployed: boolean;
+};
 
 // --- Users ---
 
@@ -1395,6 +1401,124 @@ export async function getUsersWithProjectsBatch(db: Db, limit: number, offset: n
     user,
     projects: projectsByUser.get(user.id) ?? [],
   }));
+}
+
+export async function getAllowlistEntryStatuses(
+  db: Db,
+  entries: Array<AllowlistEntry>,
+): Promise<Array<AllowlistEntryStatus>> {
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const exactEmails = Array.from(
+    new Set(
+      entries
+        .filter((entry) => entry.type === 'email' && !entry.pattern.startsWith('*@'))
+        .map((entry) => entry.pattern.toLowerCase()),
+    ),
+  );
+  const emailDomains = Array.from(
+    new Set(
+      entries
+        .filter((entry) => entry.type === 'email' && entry.pattern.startsWith('*@'))
+        .map((entry) => entry.pattern.slice(1).toLowerCase()),
+    ),
+  );
+  const githubLogins = Array.from(
+    new Set(
+      entries
+        .filter((entry) => entry.type === 'github')
+        .map((entry) => entry.pattern.toLowerCase()),
+    ),
+  );
+
+  const userConditions = [
+    exactEmails.length > 0 ? inArray(sql<string>`lower(${users.email})`, exactEmails) : undefined,
+    githubLogins.length > 0
+      ? and(eq(users.provider, 'github'), inArray(sql<string>`lower(${users.login})`, githubLogins))
+      : undefined,
+    ...emailDomains.map((domain) => sql`lower(${users.email}) like ${`%${domain}`}`),
+  ].filter((condition) => condition !== undefined);
+
+  const matchingUsers =
+    userConditions.length > 0
+      ? await db
+          .select({
+            id: users.id,
+            provider: users.provider,
+            login: users.login,
+            email: users.email,
+          })
+          .from(users)
+          .where(or(...userConditions))
+      : [];
+
+  const invitationConditions = [
+    exactEmails.length > 0
+      ? inArray(sql<string>`lower(${invitations.email})`, exactEmails)
+      : undefined,
+    ...emailDomains.map((domain) => sql`lower(${invitations.email}) like ${`%${domain}`}`),
+  ].filter((condition) => condition !== undefined);
+
+  const acceptedInvitations =
+    invitationConditions.length > 0
+      ? await db
+          .select({ email: invitations.email })
+          .from(invitations)
+          .where(and(eq(invitations.status, 'accepted'), or(...invitationConditions)))
+      : [];
+
+  const matchingUserIds = matchingUsers.map((user) => user.id);
+  const deployedUserRows =
+    matchingUserIds.length > 0
+      ? await db
+          .select({ id: users.id })
+          .from(users)
+          .innerJoin(projects, eq(projects.user_id, users.id))
+          .innerJoin(deployments, eq(deployments.project_id, projects.id))
+          .where(and(inArray(users.id, matchingUserIds), isNotNull(deployments.deployed_at)))
+      : [];
+  const deployedUserIds = new Set(deployedUserRows.map((row) => row.id));
+
+  function userMatchesEntry(user: (typeof matchingUsers)[number], entry: AllowlistEntry): boolean {
+    if (entry.type === 'github') {
+      return user.provider === 'github' && user.login.toLowerCase() === entry.pattern.toLowerCase();
+    }
+
+    if (!user.email) {
+      return false;
+    }
+
+    const email = user.email.toLowerCase();
+    const pattern = entry.pattern.toLowerCase();
+    return pattern.startsWith('*@') ? email.endsWith(pattern.slice(1)) : email === pattern;
+  }
+
+  function invitationMatchesEntry(email: string, entry: AllowlistEntry): boolean {
+    if (entry.type !== 'email') {
+      return false;
+    }
+
+    const normalizedEmail = email.toLowerCase();
+    const pattern = entry.pattern.toLowerCase();
+    return pattern.startsWith('*@')
+      ? normalizedEmail.endsWith(pattern.slice(1))
+      : normalizedEmail === pattern;
+  }
+
+  return entries.map((entry) => {
+    const usersForEntry = matchingUsers.filter((user) => userMatchesEntry(user, entry));
+    const hasAcceptedInvitation = acceptedInvitations.some((invitation) =>
+      invitationMatchesEntry(invitation.email, entry),
+    );
+
+    return {
+      ...entry,
+      accepted: usersForEntry.length > 0 || hasAcceptedInvitation,
+      deployed: usersForEntry.some((user) => deployedUserIds.has(user.id)),
+    };
+  });
 }
 
 export async function unsuspendUserIfReason(db: Db, id: string, reason: string): Promise<void> {

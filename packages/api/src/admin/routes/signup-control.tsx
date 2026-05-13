@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { getAllowlistEntryStatuses } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import { getAllowlist, putAllowlist } from '../../signup-allowlist.ts';
 import { SignupControlPage } from '../views/signup-control.tsx';
@@ -18,10 +19,12 @@ function parseAllowlistPatterns(input: string): Array<string> {
 
 // GET /signup-control
 app.get('/', async (c) => {
+  const db = c.get('db');
   const enabled = (await c.env.ROUTING.get('signup:enabled')) === 'true';
   const entries = await getAllowlist(c.env.ROUTING);
+  const entryStatuses = await getAllowlistEntryStatuses(db, entries);
   return c.html(
-    <SignupControlPage enabled={enabled} entries={entries} username={c.get('user').login} />,
+    <SignupControlPage enabled={enabled} entries={entryStatuses} username={c.get('user').login} />,
   );
 });
 

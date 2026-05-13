@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vite-plus/test';
 import { app } from '../../src/index.ts';
 import { deployments, invitations, projects, users } from '../../src/schema.ts';
@@ -804,6 +805,45 @@ describe('GET /admin/signup-control', () => {
     const html = await res.text();
     expect(html).toContain('octocat');
     expect(html).toContain('Test');
+    await env.ROUTING.delete('signup:allowlist');
+  });
+
+  test('shows accepted and deployed status for allowlist entries', async () => {
+    const admin = await createTestUser(env.db, 'admin-sc2c', 'github', undefined, 'free', 'admin');
+    const acceptedEmailUser = await createTestUser(env.db, 'email-user');
+    await env.db
+      .update(users)
+      .set({ email: 'accepted@example.com' })
+      .where(eq(users.id, acceptedEmailUser.id));
+    const project = await createTestProject(env.db, acceptedEmailUser.id, 'allowlist-status-proj');
+    await createTestDeployment(env.db, project.id, 'live');
+    await createTestUser(env.db, 'octocat');
+
+    await env.ROUTING.put(
+      'signup:allowlist',
+      JSON.stringify([
+        { type: 'email', pattern: 'accepted@example.com', note: 'Email user' },
+        { type: 'github', pattern: 'octocat', note: 'GitHub user' },
+        { type: 'email', pattern: 'pending@example.com', note: 'Pending' },
+      ]),
+    );
+
+    const res = await req('/admin/signup-control', admin.adminJwt);
+    const html = await res.text();
+
+    function rowFor(pattern: string): string {
+      const row = html.split('<tr').find((part) => part.includes(`<td>${pattern}</td>`));
+      expect(row).not.toBeNull();
+      return `<tr${row}`;
+    }
+
+    expect(html).toContain('<th>Accepted</th>');
+    expect(html).toContain('<th>Deployed</th>');
+    expect(rowFor('accepted@example.com').match(/>yes<\/strong>/g)).toHaveLength(2);
+    expect(rowFor('octocat').match(/>yes<\/strong>/g)).toHaveLength(1);
+    expect(rowFor('octocat').match(/>no<\/strong>/g)).toHaveLength(1);
+    expect(rowFor('pending@example.com').match(/>no<\/strong>/g)).toHaveLength(2);
+
     await env.ROUTING.delete('signup:allowlist');
   });
 

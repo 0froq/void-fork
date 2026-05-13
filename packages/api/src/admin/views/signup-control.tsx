@@ -1,5 +1,9 @@
-import type { AllowlistEntry } from '../../signup-allowlist.ts';
+import type { AllowlistEntryStatus } from '../../db.ts';
 import { Layout } from './layout.tsx';
+
+function BooleanBadge({ value }: { value: boolean }) {
+  return <strong style={`color: ${value ? 'green' : '#666'}`}>{value ? 'yes' : 'no'}</strong>;
+}
 
 export function SignupControlPage({
   enabled,
@@ -7,7 +11,7 @@ export function SignupControlPage({
   username,
 }: {
   enabled: boolean;
-  entries: Array<AllowlistEntry>;
+  entries: Array<AllowlistEntryStatus>;
   username?: string;
 }) {
   return (
@@ -53,6 +57,8 @@ export function SignupControlPage({
             <th>Type</th>
             <th>Pattern</th>
             <th>Note</th>
+            <th>Accepted</th>
+            <th>Deployed</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -62,6 +68,12 @@ export function SignupControlPage({
               <td>{entry.type}</td>
               <td>{entry.pattern}</td>
               <td>{entry.note || '-'}</td>
+              <td>
+                <BooleanBadge value={entry.accepted} />
+              </td>
+              <td>
+                <BooleanBadge value={entry.deployed} />
+              </td>
               <td>
                 <form method="post" action="/admin/signup-control/delete" style="display: inline">
                   <input type="hidden" name="index" value={String(i)} />
