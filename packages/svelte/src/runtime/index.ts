@@ -1,5 +1,6 @@
 export { default as Link } from './Link.svelte';
 export { useRouter } from './use-router.ts';
+export { useParams } from './use-params.ts';
 export { useShared } from './use-shared.ts';
 export { useForm } from './use-form.svelte.ts';
 export { useNavigation } from './use-navigation.ts';

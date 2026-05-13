@@ -22,6 +22,7 @@ export function safeJsonStringify(value: unknown): string {
 export interface PageObject {
   component: string;
   props: Record<string, unknown>;
+  params: Record<string, string>;
   shared: Record<string, unknown>;
   url: string;
   errors: Record<string, string> | null;
@@ -78,6 +79,10 @@ function pageJsonResponse(c: CloudContext, pageObj: PageObject): Response {
 
 function requestPathWithSearch(c: CloudContext): string {
   return c.req.path + new URL(c.req.url).search;
+}
+
+function requestParams(c: CloudContext): Record<string, string> {
+  return c.req.param() as Record<string, string>;
 }
 
 /** Extract props from a handler result, handling Response wrapping from withValidator */
@@ -249,6 +254,7 @@ export async function handlePageGet(
   const pageObj: PageObject = {
     component: componentId,
     props: immediateProps,
+    params: requestParams(c),
     shared,
     url: requestPathWithSearch(c),
     errors: null,
@@ -349,6 +355,7 @@ export async function handlePageMutation(
     return {
       component: componentId,
       props,
+      params: requestParams(c),
       shared,
       url: requestPathWithSearch(c),
       errors,

@@ -416,6 +416,7 @@ export async function renderIslandPage(pageObj, assetTags) {
     setup() {
       provide("__void_shared", reactive(pageObj.shared || {}));
       provide("__void_errors", reactive(pageObj.errors || {}));
+      provide("__void_params", reactive(pageObj.params || {}));
       if (__frontmatter) provide("__void_frontmatter", __frontmatter);
       // No router provided — islands have no Void Router
       return () => {

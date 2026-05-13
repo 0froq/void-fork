@@ -4,7 +4,13 @@ import { createSsrRouter, idleNavigationState } from 'void/pages-client';
 import { renderBodyAttrs, renderHeadToString, renderHtmlAttrs } from 'void/pages-head';
 import type { PageObject } from 'void/pages-protocol';
 import { serializePageData } from 'void/pages-server';
-import { ErrorsContext, NavigationContext, RouterContext, SharedContext } from './context.ts';
+import {
+  ErrorsContext,
+  NavigationContext,
+  ParamsContext,
+  RouterContext,
+  SharedContext,
+} from './context.ts';
 
 // oxlint-disable-next-line no-explicit-any -- component props are narrowed by generated route types
 type ComponentModule = { default: ComponentType<any> };
@@ -133,7 +139,7 @@ export async function renderReactPage({
 
   element = React.createElement(
     RouterContext.Provider,
-    { value: createSsrRouter(pageObj.url || '/') },
+    { value: createSsrRouter(pageObj.url || '/', pageObj.params ?? {}) },
     React.createElement(
       NavigationContext.Provider,
       { value: idleNavigationState() },
@@ -143,7 +149,11 @@ export async function renderReactPage({
         React.createElement(
           SharedContext.Provider,
           { value: pageObj.shared || {} },
-          React.createElement(ErrorsContext.Provider, { value: pageObj.errors || {} }, element),
+          React.createElement(
+            ParamsContext.Provider,
+            { value: pageObj.params ?? {} },
+            React.createElement(ErrorsContext.Provider, { value: pageObj.errors || {} }, element),
+          ),
         ),
       ),
     ),

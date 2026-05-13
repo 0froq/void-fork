@@ -127,7 +127,7 @@ function generateRendererModule(scan: PageScanResult, pagesDir: string): string 
   return `
 import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
-import { SharedContext, ErrorsContext, RouterContext, NavigationContext } from "@void/solid";
+import { SharedContext, ErrorsContext, ParamsContext, RouterContext, NavigationContext } from "@void/solid";
 import { createSsrRouter, idleNavigationState } from "void/pages-client";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 import { serializePageData } from "void/pages-server";
@@ -149,19 +149,24 @@ export async function renderPage(pageObj, assetTags) {
           value: pageObj.errors || {},
           get children() {
             return createComponent(RouterContext.Provider, {
-              value: createSsrRouter(pageObj.url || "/"),
+              value: createSsrRouter(pageObj.url || "/", pageObj.params || {}),
               get children() {
                 return createComponent(NavigationContext.Provider, {
                   value: () => idleNavigationState(),
                   get children() {
-                    // Build layout chain inside providers so contexts are available
-                    let element = createComponent(PageComponent, pageObj.props);
-                    for (let i = layoutComponents.length - 1; i >= 0; i--) {
-                      const Layout = layoutComponents[i];
-                      const child = element;
-                      element = createComponent(Layout, { get children() { return child; } });
-                    }
-                    return element;
+                    return createComponent(ParamsContext.Provider, {
+                      value: pageObj.params || {},
+                      get children() {
+                        // Build layout chain inside providers so contexts are available
+                        let element = createComponent(PageComponent, pageObj.props);
+                        for (let i = layoutComponents.length - 1; i >= 0; i--) {
+                          const Layout = layoutComponents[i];
+                          const child = element;
+                          element = createComponent(Layout, { get children() { return child; } });
+                        }
+                        return element;
+                      }
+                    });
                   }
                 });
               }
@@ -203,7 +208,7 @@ function generateClientEntry(
   return `
 import { createSignal, createComponent, batch } from "solid-js";
 import { hydrate } from "solid-js/web";
-import { SharedContext, ErrorsContext, RouterContext, NavigationContext, setActionRouter } from "@void/solid";
+import { SharedContext, ErrorsContext, ParamsContext, RouterContext, NavigationContext, setActionRouter } from "@void/solid";
 import { createRouterFacade, createVoidRouter, idleNavigationState } from "void/pages-client";
 import { parseCacheFor } from "void/pages-prefetch";
 
@@ -215,6 +220,7 @@ const [layouts, setLayouts] = createSignal([]);
 const [shared, setShared] = createSignal({});
 const [errors, setErrors] = createSignal({});
 const [routeUrl, setRouteUrl] = createSignal(window.location.pathname + window.location.search + window.location.hash);
+const [routeParams, setRouteParams] = createSignal({});
 const [navigation, setNavigation] = createSignal(idleNavigationState());
 
 const { router, initialPageData, initialComponent, initialLayouts, start } =
@@ -231,6 +237,7 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
           setLayouts(layoutComps);
           setShared((prev) => ({ ...prev, ...(pageData.shared || {}) }));
           setErrors(pageData.errors || {});
+          setRouteParams(pageData.params || {});
         });
       },
       onDeferredUpdate(props) {
@@ -251,7 +258,7 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
     },
   });
 
-const reactiveRouter = createRouterFacade(router, () => routeUrl());
+const reactiveRouter = createRouterFacade(router, () => routeUrl(), () => routeParams());
 
 setActionRouter(reactiveRouter);
 
@@ -261,6 +268,7 @@ batch(() => {
   setLayouts(initialLayouts);
   setShared(initialPageData.shared || {});
   setErrors(initialPageData.errors || {});
+  setRouteParams(initialPageData.params || {});
 });
 
 function App() {
@@ -273,19 +281,24 @@ function App() {
           return createComponent(RouterContext.Provider, {
             value: reactiveRouter,
             get children() {
-              return createComponent(NavigationContext.Provider, {
-                value: navigation,
+              return createComponent(ParamsContext.Provider, {
+                get value() { return routeParams(); },
                 get children() {
-                  const Comp = component();
-                  if (!Comp) return null;
-                  let element = createComponent(Comp, pageProps());
-                  const layoutList = layouts();
-                  for (let i = layoutList.length - 1; i >= 0; i--) {
-                    const Layout = layoutList[i];
-                    const child = element;
-                    element = createComponent(Layout, { get children() { return child; } });
-                  }
-                  return element;
+                  return createComponent(NavigationContext.Provider, {
+                    value: navigation,
+                    get children() {
+                      const Comp = component();
+                      if (!Comp) return null;
+                      let element = createComponent(Comp, pageProps());
+                      const layoutList = layouts();
+                      for (let i = layoutList.length - 1; i >= 0; i--) {
+                        const Layout = layoutList[i];
+                        const child = element;
+                        element = createComponent(Layout, { get children() { return child; } });
+                      }
+                      return element;
+                    }
+                  });
                 }
               });
             }

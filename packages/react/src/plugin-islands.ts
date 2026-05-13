@@ -333,7 +333,7 @@ function generateIslandRenderer(
   return `
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { SharedContext, ErrorsContext } from "@void/react";
+import { SharedContext, ErrorsContext, ParamsContext } from "@void/react";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
@@ -364,9 +364,13 @@ export async function renderIslandPage(pageObj, assetTags) {
     SharedContext.Provider,
     { value: pageObj.shared || {} },
     React.createElement(
-      ErrorsContext.Provider,
-      { value: pageObj.errors || {} },
-      element
+      ParamsContext.Provider,
+      { value: pageObj.params || {} },
+      React.createElement(
+        ErrorsContext.Provider,
+        { value: pageObj.errors || {} },
+        element
+      )
     )
   );
 

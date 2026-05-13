@@ -181,6 +181,35 @@ function defineClientTests(getBase: () => string) {
     }
   });
 
+  it('SPA navigation: loaderless dynamic page exposes current route params', async () => {
+    const page = await newPage();
+
+    try {
+      await page.goto(BASE + '/router-params');
+      await waitForHydration(page);
+
+      await page.click('a[href="/router-params/alpha"]');
+      await page.waitForFunction(() =>
+        document.querySelector('h1')?.textContent?.includes('Router Param alpha'),
+      );
+
+      expect(page.url()).toBe(BASE + '/router-params/alpha');
+      expect(await page.textContent('[data-testid="router-param-id"]')).toBe('alpha');
+      expect(await page.textContent('[data-testid="router-path"]')).toBe('/router-params/alpha');
+
+      await page.click('a[href="/router-params/bravo"]');
+      await page.waitForFunction(() =>
+        document.querySelector('h1')?.textContent?.includes('Router Param bravo'),
+      );
+
+      expect(page.url()).toBe(BASE + '/router-params/bravo');
+      expect(await page.textContent('[data-testid="router-param-id"]')).toBe('bravo');
+      expect(await page.textContent('[data-testid="router-path"]')).toBe('/router-params/bravo');
+    } finally {
+      await page.context().close();
+    }
+  });
+
   it('layout persists across navigation', async () => {
     const page = await newPage();
 

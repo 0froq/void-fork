@@ -195,6 +195,17 @@ router.refresh(); // re-fetch current page props
 router.visit('/logout', { method: 'POST' }); // non-GET navigation
 ```
 
+For dynamic route params, use `useParams()` from the same adapter package:
+
+```tsx
+import { useParams } from '@void/react';
+
+export default function PostPage() {
+  const { id } = useParams<{ id: string }>();
+  return <h1>Post {id}</h1>;
+}
+```
+
 ## Scroll Restoration
 
 The Void Router automatically saves and restores scroll position during client-side navigation:

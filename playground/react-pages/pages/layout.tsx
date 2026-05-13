@@ -21,6 +21,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           Deferred
         </Link>{' '}
         |{' '}
+        <Link href="/router-params" prefetch>
+          Router Params
+        </Link>{' '}
+        |{' '}
         <Link href="/live" prefetch>
           Live
         </Link>{' '}

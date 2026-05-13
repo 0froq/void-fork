@@ -34,6 +34,7 @@ Main runtime APIs live at `@void/svelte`:
 
 - `Link`
 - `useRouter()`
+- `useParams()`
 - `useNavigation()`
 - `useShared()`
 - `useForm()`

@@ -234,7 +234,8 @@ export async function renderPage(pageObj, assetTags) {
     setup() {
       provide("__void_shared", reactive(pageObj.shared || {}));
       provide("__void_errors", reactive(pageObj.errors || {}));
-      provide("__void_router", createSsrRouter(pageObj.url || "/"));
+      provide("__void_params", reactive(pageObj.params || {}));
+      provide("__void_router", createSsrRouter(pageObj.url || "/", pageObj.params || {}));
       provide("__void_navigation", idleNavigationState());
       return () => {
         patchProps(PageComponent, pageObj.props);
@@ -285,6 +286,7 @@ ${generateComponentManifest(scan, pagesDir)}
 
 const shared = reactive({});
 const errors = reactive({});
+const params = reactive({});
 const currentComponent = shallowRef(null);
 const currentLayouts = shallowRef([]);
 const currentProps = shallowRef({});
@@ -297,6 +299,11 @@ function patchProps(comp, props) {
   comp.__voidPatched = true;
 }
 
+function replaceRecord(target, source) {
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, source || {});
+}
+
 const { router, initialPageData, initialComponent, initialLayouts, start } =
   await createVoidRouter({
     adapter: {
@@ -306,8 +313,8 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
       isLoading: (ref) => ref.loading,
       applyUpdate(pageData, comp, layouts) {
         Object.assign(shared, pageData.shared || {});
-        for (const key of Object.keys(errors)) delete errors[key];
-        Object.assign(errors, pageData.errors || {});
+        replaceRecord(errors, pageData.errors || {});
+        replaceRecord(params, pageData.params || {});
         currentProps.value = pageData.props;
         currentLayouts.value = layouts;
         currentComponent.value = comp;
@@ -330,12 +337,13 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
     },
   });
 
-const reactiveRouter = createRouterFacade(router, () => routeUrl.value);
+const reactiveRouter = createRouterFacade(router, () => routeUrl.value, () => params);
 
 setActionRouter(reactiveRouter);
 
 Object.assign(shared, initialPageData.shared || {});
-Object.assign(errors, initialPageData.errors || {});
+replaceRecord(errors, initialPageData.errors || {});
+replaceRecord(params, initialPageData.params || {});
 currentProps.value = initialPageData.props;
 currentComponent.value = initialComponent;
 currentLayouts.value = initialLayouts;
@@ -344,6 +352,7 @@ const app = createSSRApp({
   setup() {
     provide("__void_shared", shared);
     provide("__void_errors", errors);
+    provide("__void_params", params);
     provide("__void_router", reactiveRouter);
     provide("__void_navigation", navigation);
 

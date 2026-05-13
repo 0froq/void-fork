@@ -412,6 +412,7 @@ export async function renderIslandPage(pageObj, assetTags) {
       pageProps: pageObj.props,
       shared: pageObj.shared || {},
       errors: pageObj.errors || {},
+      params: pageObj.params || {},
       router: null,
       stores: null,
     },

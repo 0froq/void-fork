@@ -19,6 +19,9 @@ function routerWithVisit(visit: VoidRouter['visit']): VoidRouter {
     get query() {
       return new URLSearchParams();
     },
+    get params() {
+      return {};
+    },
     visit,
     refresh: vi.fn(),
     prefetch: vi.fn(),

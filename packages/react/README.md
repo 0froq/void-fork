@@ -36,6 +36,7 @@ Main runtime APIs live at `@void/react`:
 
 - `Link`
 - `useRouter()`
+- `useParams()`
 - `useNavigation()`
 - `useShared()`
 - `useForm()`
@@ -141,6 +142,11 @@ accepts `{ data, method, params }`.
 
 `useRouter()` returns the Void Router. `visit()`, `refresh()`, and `prefetch()`
 are awaitable; `prefetch()` resolves when the page data has been cached.
+
+### `useParams`
+
+`useParams()` returns dynamic route params for the page currently being rendered.
+Use it instead of parsing `useRouter().path` in dynamic Pages routes.
 
 ### `Link`
 

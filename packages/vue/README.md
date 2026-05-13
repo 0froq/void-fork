@@ -33,6 +33,7 @@ Main runtime APIs live at `@void/vue`:
 
 - `Link`
 - `useRouter()`
+- `useParams()`
 - `useNavigation()`
 - `useShared()`
 - `useForm()`

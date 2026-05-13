@@ -1,5 +1,6 @@
 export { Link } from './link.ts';
 export { useRouter } from './use-router.ts';
+export { useParams } from './use-params.ts';
 export { useShared } from './use-shared.ts';
 export { useForm } from './use-form.ts';
 export { useNavigation } from './use-navigation.ts';

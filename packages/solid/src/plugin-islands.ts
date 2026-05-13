@@ -352,7 +352,7 @@ function generateIslandRenderer(
   return `
 import { renderToStringAsync, generateHydrationScript } from "solid-js/web";
 import { createComponent } from "solid-js";
-import { SharedContext, ErrorsContext } from "@void/solid";
+import { SharedContext, ErrorsContext, ParamsContext } from "@void/solid";
 import { renderHeadToString, renderHtmlAttrs, renderBodyAttrs } from "void/pages-head";
 
 ${generateComponentManifest(scan, pagesDir)}
@@ -378,15 +378,20 @@ export async function renderIslandPage(pageObj, assetTags) {
         return createComponent(ErrorsContext.Provider, {
           value: pageObj.errors || {},
           get children() {
-            // Build layout chain inside providers so contexts are available.
-            // No RouterContext — islands have no Void Router.
-            let element = createComponent(PageComponent, pageObj.props);
-            for (let i = layoutComponents.length - 1; i >= 0; i--) {
-              const Layout = layoutComponents[i];
-              const child = element;
-              element = createComponent(Layout, { get children() { return child; } });
-            }
-            return element;
+            return createComponent(ParamsContext.Provider, {
+              value: pageObj.params || {},
+              get children() {
+                // Build layout chain inside providers so contexts are available.
+                // No RouterContext — islands have no Void Router.
+                let element = createComponent(PageComponent, pageObj.props);
+                for (let i = layoutComponents.length - 1; i >= 0; i--) {
+                  const Layout = layoutComponents[i];
+                  const child = element;
+                  element = createComponent(Layout, { get children() { return child; } });
+                }
+                return element;
+              }
+            });
           }
         });
       }

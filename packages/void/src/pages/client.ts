@@ -64,6 +64,7 @@ export interface VoidRouter {
   readonly url: URL;
   readonly path: string;
   readonly query: URLSearchParams;
+  readonly params: Record<string, string>;
   visit(url: string | URL, options?: VisitOptions): Promise<unknown>;
   refresh(options?: VisitOptions): Promise<unknown>;
   prefetch(url: string | URL, options?: PrefetchOptions): Promise<unknown>;
@@ -149,7 +150,11 @@ export function idleNavigationState(): NavigationState {
   };
 }
 
-export function createRouterFacade(router: VoidRouter, getCurrentUrl: () => string): VoidRouter {
+export function createRouterFacade(
+  router: VoidRouter,
+  getCurrentUrl: () => string,
+  getCurrentParams: () => Record<string, string> = () => router.params,
+): VoidRouter {
   return {
     get _hoverDelay() {
       return router._hoverDelay;
@@ -165,6 +170,10 @@ export function createRouterFacade(router: VoidRouter, getCurrentUrl: () => stri
 
     get query() {
       return this.url.searchParams;
+    },
+
+    get params() {
+      return getCurrentParams();
     },
 
     visit(url, options = {}) {
@@ -189,7 +198,7 @@ export function createRouterFacade(router: VoidRouter, getCurrentUrl: () => stri
   };
 }
 
-export function createSsrRouter(url = '/'): VoidRouter {
+export function createSsrRouter(url = '/', params: Record<string, string> = {}): VoidRouter {
   const router = {
     _hoverDelay: 75,
     get url() {
@@ -200,6 +209,9 @@ export function createSsrRouter(url = '/'): VoidRouter {
     },
     get query() {
       return this.url.searchParams;
+    },
+    get params() {
+      return params;
     },
     visit() {
       throw new Error('Void Router: visit() is not available during SSR.');
@@ -327,9 +339,11 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
   {
     const engine = await createNavigationEngine(config);
     let routeUrl = currentUrl();
+    let routeParams = engine.initialPageData.params ?? {};
     let activeNavigationId: number | null = null;
-    const setRouteUrl = (url: string) => {
+    const setRouteState = (url: string, params: Record<string, string> = routeParams) => {
       routeUrl = url;
+      routeParams = params;
       config.onRouteChange?.(url);
     };
     const setNavigation = (navigation: NavigationState) => {
@@ -345,6 +359,11 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
           return undefined;
         }
 
+        setRouteState(
+          result.pageData.url || resource.fetchUrl + resource.hash,
+          result.pageData.params ?? {},
+        );
+
         const applyUpdate = () =>
           config.adapter.applyUpdate(result.pageData, result.component, result.layouts);
 
@@ -358,7 +377,7 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
 
         await resource.commit();
         if (activeNavigationId === resource.id) {
-          setRouteUrl(currentUrl());
+          setRouteState(currentUrl(), result.pageData.params ?? {});
         }
         return result.pageData;
       } catch (error) {
@@ -373,7 +392,7 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
       } finally {
         if (activeNavigationId === resource.id) {
           activeNavigationId = null;
-          setRouteUrl(currentUrl());
+          setRouteState(currentUrl());
           setNavigation(idleNavigationState());
         }
       }
@@ -392,6 +411,10 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
 
       get query() {
         return this.url.searchParams;
+      },
+
+      get params() {
+        return routeParams;
       },
 
       visit(url, options = {}) {
@@ -419,7 +442,11 @@ export async function createVoidRouter(config: VoidRouterConfig): Promise<{
         engine.flushAll();
       },
     };
-    const router = createRouterFacade(rawRouter, () => routeUrl);
+    const router = createRouterFacade(
+      rawRouter,
+      () => routeUrl,
+      () => routeParams,
+    );
 
     engine.setPopStateHandler((url, options) => {
       router.visit(url, options);

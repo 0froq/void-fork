@@ -34,6 +34,7 @@ Main runtime APIs live at `@void/solid`:
 
 - `Link`
 - `useRouter()`
+- `useParams()`
 - `useNavigation()`
 - `useShared()`
 - `useForm()`

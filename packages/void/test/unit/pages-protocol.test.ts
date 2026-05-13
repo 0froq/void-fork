@@ -13,6 +13,7 @@ type RenderPage = { component: string };
 type PageResponse = {
   component: string;
   props: Record<string, unknown>;
+  params?: Record<string, string>;
   url: string;
   errors: Record<string, string> | null;
   shared?: Record<string, unknown>;
@@ -30,6 +31,7 @@ function createTestContext(
   path: string,
   options: {
     headers?: Record<string, string>;
+    routePattern?: string;
     shared?: Record<string, unknown>;
   } = {},
 ): Promise<Context> {
@@ -46,7 +48,7 @@ function createTestContext(
     await next();
   });
 
-  app.all('*', (c) => {
+  app.all(options.routePattern ?? '*', (c) => {
     resolveContext!(c);
     return c.text('ok');
   });
@@ -124,6 +126,46 @@ describe('handlePageGet', () => {
 
     const body = await json<PageResponse>(response);
     expect(body.url).toBe('/users?page=2');
+  });
+
+  it('includes route params in page objects without requiring loader props', async () => {
+    const c = await createTestContext('GET', '/posts/abc-123?preview=true', {
+      headers: { 'x-voidpages': 'true' },
+      routePattern: '/posts/:id',
+    });
+
+    const response = await handlePageGet(
+      undefined,
+      undefined,
+      c,
+      'posts/[id]',
+      mockRenderFn,
+      mockGetAssetTags,
+    );
+
+    const body = await json<PageResponse>(response);
+    expect(body.props).toEqual({});
+    expect(body.params).toEqual({ id: 'abc-123' });
+    expect(body.url).toBe('/posts/abc-123?preview=true');
+  });
+
+  it('passes route params to rendered page objects', async () => {
+    const c = await createTestContext('GET', '/posts/abc-123', {
+      routePattern: '/posts/:id',
+    });
+    const renderFn = vi.fn(async () => '<html>post</html>');
+
+    await handlePageGet(undefined, undefined, c, 'posts/[id]', renderFn, mockGetAssetTags);
+
+    expect(renderFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: 'posts/[id]',
+        params: { id: 'abc-123' },
+        props: {},
+        url: '/posts/abc-123',
+      }),
+      expect.anything(),
+    );
   });
 
   it('calls renderFn and returns HTML when no X-VoidPages header', async () => {

@@ -13,6 +13,7 @@
     pageProps: props.pageProps,
     shared: props.shared,
     errors: props.errors,
+    params: props.params,
     router: props.router,
     routeUrl: props.routeUrl,
     navigation: props.navigation,
@@ -25,9 +26,10 @@
   let currentPageProps = $state(init.pageProps);
   let shared = $state(init.shared);
   let errors = $state(init.errors);
+  let params = $state(init.params || {});
   let routeUrl = $state(init.routeUrl || "/");
   let navigation = $state(init.navigation || idleNavigationState());
-  const router = createRouterFacade(init.router, () => routeUrl);
+  const router = createRouterFacade(init.router, () => routeUrl, () => params);
 
   // Capitalized alias for dynamic component rendering
   let Page = $derived(currentPage);
@@ -38,6 +40,9 @@
   });
   setContext("__void_errors", {
     get value() { return errors; },
+  });
+  setContext("__void_params", {
+    get value() { return params; },
   });
   setContext("__void_router", router);
   setContext("__void_navigation", {
@@ -54,6 +59,7 @@
       init.stores.layouts.subscribe((v) => { currentLayouts = v; }),
       init.stores.shared.subscribe((v) => { shared = v; }),
       init.stores.errors.subscribe((v) => { errors = v; }),
+      init.stores.params.subscribe((v) => { params = v; }),
       init.stores.route.subscribe((v) => { routeUrl = v; }),
       init.stores.navigation.subscribe((v) => { navigation = v; }),
     ];

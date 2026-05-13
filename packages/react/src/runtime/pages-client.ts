@@ -28,7 +28,13 @@ import {
 import type { CacheForResult } from 'void/pages-prefetch';
 import type { PageObject } from 'void/pages-protocol';
 import { setActionRouter } from './action.ts';
-import { ErrorsContext, NavigationContext, RouterContext, SharedContext } from './context.ts';
+import {
+  ErrorsContext,
+  NavigationContext,
+  ParamsContext,
+  RouterContext,
+  SharedContext,
+} from './context.ts';
 
 // oxlint-disable-next-line no-explicit-any -- component props are narrowed by generated route types
 type ComponentModule = { default: ComponentType<any> };
@@ -94,6 +100,7 @@ const deferredState = new WeakMap<DeferredResource, DeferredResourceState>();
 const viewTransitionWaiters = new Map<number, () => void>();
 const pendingVisitSettlers = new Map<number, VisitSettler>();
 const committedResources = new Set<number>();
+const EMPTY_PARAMS: Record<string, string> = {};
 
 let activePendingNavigationId: number | null = null;
 let scheduleVisit:
@@ -225,6 +232,9 @@ function createRouter(engine: Awaited<ReturnType<typeof createPageNavigationEngi
     get query() {
       return this.url.searchParams;
     },
+    get params() {
+      return {};
+    },
     visit(url, options = {}) {
       if (!scheduleVisit) {
         return Promise.reject(new Error('router.visit() called before router initialized'));
@@ -259,6 +269,7 @@ function RouteResource({
   onCommit(resource: ReactPageResource, result: PageNavigationResult): void;
 }): React.ReactNode {
   const result = use(resource.shell);
+  const outerRouter = React.useContext(RouterContext);
   useLayoutEffect(() => {
     if (result) {
       onCommit(resource, result);
@@ -271,6 +282,22 @@ function RouteResource({
 
   const pageData = result.pageData as ReactPageData;
   const PageComponent = result.component as ReactPageComponent;
+  const routeParams = pageData.params ?? EMPTY_PARAMS;
+  const routeRouter = useMemo(
+    () =>
+      createRouterFacade(
+        outerRouter!,
+        () => {
+          const outerUrl = outerRouter!.url;
+          const outerPath = outerUrl.pathname + outerUrl.search;
+          return outerPath === pageData.url
+            ? outerPath + outerUrl.hash
+            : pageData.url + resource.hash;
+        },
+        () => routeParams,
+      ),
+    [outerRouter, pageData.url, resource.hash, routeParams],
+  );
   let element = React.createElement(PageComponent, pageData.props);
   for (let i = result.layouts.length - 1; i >= 0; i--) {
     const Layout = result.layouts[i] as ReactLayoutComponent;
@@ -278,9 +305,17 @@ function RouteResource({
   }
 
   return React.createElement(
-    SharedContext.Provider,
-    { value: pageData.shared },
-    React.createElement(ErrorsContext.Provider, { value: pageData.errors ?? {} }, element),
+    RouterContext.Provider,
+    { value: routeRouter },
+    React.createElement(
+      ParamsContext.Provider,
+      { value: routeParams },
+      React.createElement(
+        SharedContext.Provider,
+        { value: pageData.shared },
+        React.createElement(ErrorsContext.Provider, { value: pageData.errors ?? {} }, element),
+      ),
+    ),
   );
 }
 

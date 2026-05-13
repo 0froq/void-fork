@@ -149,7 +149,8 @@ export async function renderPage(pageObj, assetTags) {
       pageProps: pageObj.props,
       shared: pageObj.shared || {},
       errors: pageObj.errors || {},
-      router: createSsrRouter(pageObj.url || "/"),
+      params: pageObj.params || {},
+      router: createSsrRouter(pageObj.url || "/", pageObj.params || {}),
       routeUrl: pageObj.url || "/",
       navigation: idleNavigationState(),
       stores: null,
@@ -196,7 +197,9 @@ const propsStore = writable({});
 const layoutsStore = writable([]);
 const sharedStore = writable({});
 const errorsStore = writable({});
+const paramsStore = writable({});
 let routeUrl = window.location.pathname + window.location.search + window.location.hash;
+let routeParams = {};
 const routeStore = writable(routeUrl);
 const navigationStore = writable(idleNavigationState());
 
@@ -211,6 +214,8 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
         propsStore.set(pageData.props);
         sharedStore.update((s) => ({ ...s, ...(pageData.shared || {}) }));
         errorsStore.set(pageData.errors || {});
+        routeParams = pageData.params || {};
+        paramsStore.set(routeParams);
         layoutsStore.set(layouts);
         pageStore.set(comp);
       },
@@ -233,7 +238,7 @@ const { router, initialPageData, initialComponent, initialLayouts, start } =
     },
   });
 
-const reactiveRouter = createRouterFacade(router, () => routeUrl);
+const reactiveRouter = createRouterFacade(router, () => routeUrl, () => routeParams);
 
 setActionRouter(reactiveRouter);
 
@@ -242,6 +247,8 @@ propsStore.set(initialPageData.props);
 layoutsStore.set(initialLayouts);
 sharedStore.set(initialPageData.shared || {});
 errorsStore.set(initialPageData.errors || {});
+routeParams = initialPageData.params || {};
+paramsStore.set(routeParams);
 
 const appEl = document.getElementById("app");
 hydrate(App, {
@@ -252,6 +259,7 @@ hydrate(App, {
     pageProps: initialPageData.props,
     shared: initialPageData.shared || {},
     errors: initialPageData.errors || {},
+    params: initialPageData.params || {},
     router,
     routeUrl,
     navigation: idleNavigationState(),
@@ -261,6 +269,7 @@ hydrate(App, {
       layouts: layoutsStore,
       shared: sharedStore,
       errors: errorsStore,
+      params: paramsStore,
       route: routeStore,
       navigation: navigationStore,
     },
