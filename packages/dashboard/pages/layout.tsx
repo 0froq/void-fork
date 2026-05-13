@@ -4,7 +4,8 @@ import monoIcon from '@voidcloud/ui/assets/icons/void-icon.svg';
 import logoDark from '@voidcloud/ui/assets/logos/void-dark.svg';
 import logoLight from '@voidcloud/ui/assets/logos/void-light.svg';
 import footerBg from '@voidcloud/ui/assets/vite/footer-background.jpg';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+import preventDragging from '../lib/preventDragging.ts';
 import type { DashboardShared } from '../middleware/01.auth.ts';
 import '../app.css';
 
@@ -41,6 +42,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { user, canAccessDashboard } = useShared<DashboardShared>();
   const navigation = useNavigation();
   const isLoading = navigation.state !== 'idle';
+
+  useEffect(() => preventDragging(), []);
 
   if (!user || !canAccessDashboard) {
     return (
