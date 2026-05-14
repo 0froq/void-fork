@@ -42,6 +42,16 @@ function req(path: string, cookie?: string, init?: RequestInit): Response | Prom
   );
 }
 
+function tableRowContaining(html: string, needle: string): string {
+  const needleIndex = html.indexOf(needle);
+  expect(needleIndex).toBeGreaterThan(-1);
+  const rowStart = html.lastIndexOf('<tr', needleIndex);
+  const rowEnd = html.indexOf('</tr>', needleIndex);
+  expect(rowStart).toBeGreaterThan(-1);
+  expect(rowEnd).toBeGreaterThan(rowStart);
+  return html.slice(rowStart, rowEnd);
+}
+
 describe('auth middleware', () => {
   test('redirects to /admin/login without cookie', async () => {
     const res = await req('/admin/');
@@ -337,6 +347,41 @@ describe('GET /admin/projects', () => {
     const html2 = await res2.text();
     expect(html2).toContain('2 / 2');
     expect(html2).toContain('?page=1');
+  });
+
+  test('renders each project row with its own latest deployment', async () => {
+    const admin = await createTestUser(env.db, 'admin7c', 'github', undefined, 'free', 'admin');
+    const owner = await createTestUser(env.db, 'latest-owner');
+    const alpha = await createTestProject(env.db, owner.id, 'latest-alpha');
+    const beta = await createTestProject(env.db, owner.id, 'latest-beta');
+    const alphaOld = await createTestDeployment(env.db, alpha.id, 'failed');
+    const alphaLatest = await createTestDeployment(env.db, alpha.id, 'live');
+    const betaLatest = await createTestDeployment(env.db, beta.id, 'canceled');
+
+    await env.db
+      .update(deployments)
+      .set({ created_at: '2026-01-01 00:00:00' })
+      .where(eq(deployments.id, alphaOld.id));
+    await env.db
+      .update(deployments)
+      .set({ created_at: '2026-01-02 00:00:00' })
+      .where(eq(deployments.id, alphaLatest.id));
+    await env.db
+      .update(deployments)
+      .set({ created_at: '2026-01-03 00:00:00' })
+      .where(eq(deployments.id, betaLatest.id));
+
+    const res = await req('/admin/projects?search=latest-owner', admin.adminJwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    const alphaRow = tableRowContaining(html, `/admin/projects/${alpha.id}`);
+    const betaRow = tableRowContaining(html, `/admin/projects/${beta.id}`);
+
+    expect(alphaRow).toContain(`/admin/deployments/${alphaLatest.id}`);
+    expect(alphaRow).not.toContain(`/admin/deployments/${alphaOld.id}`);
+    expect(alphaRow).not.toContain(`/admin/deployments/${betaLatest.id}`);
+    expect(betaRow).toContain(`/admin/deployments/${betaLatest.id}`);
+    expect(betaRow).not.toContain(`/admin/deployments/${alphaLatest.id}`);
   });
 });
 

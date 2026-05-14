@@ -1217,6 +1217,19 @@ export async function getAllProjects(
   return db.select().from(projects).orderBy(desc(projects.created_at)).limit(limit).offset(offset);
 }
 
+function getLatestDeploymentByProjectSubquery(db: Db) {
+  return db
+    .selectDistinctOn([deployments.project_id], {
+      project_id: deployments.project_id,
+      last_deploy: deployments.created_at,
+      last_deploy_id: deployments.id,
+      last_deploy_status: deployments.status,
+    })
+    .from(deployments)
+    .orderBy(deployments.project_id, desc(deployments.created_at), desc(deployments.id))
+    .as('last_deploy_sq');
+}
+
 export async function searchProjects(
   db: Db,
   query: string,
@@ -1231,22 +1244,7 @@ export async function searchProjects(
   >
 > {
   const pattern = `%${query}%`;
-  const lastDeploy = db
-    .select({
-      project_id: deployments.project_id,
-      last_deploy: sql<string>`max(${deployments.created_at})`.as('last_deploy'),
-      last_deploy_id:
-        sql<string>`(SELECT id FROM deployments d2 WHERE d2.project_id = ${deployments.project_id} ORDER BY d2.created_at DESC LIMIT 1)`.as(
-          'last_deploy_id',
-        ),
-      last_deploy_status:
-        sql<string>`(SELECT status FROM deployments d3 WHERE d3.project_id = ${deployments.project_id} ORDER BY d3.created_at DESC LIMIT 1)`.as(
-          'last_deploy_status',
-        ),
-    })
-    .from(deployments)
-    .groupBy(deployments.project_id)
-    .as('last_deploy_sq');
+  const lastDeploy = getLatestDeploymentByProjectSubquery(db);
 
   return db
     .select({
@@ -1309,22 +1307,7 @@ export async function getAllProjectsWithOwner(
     }
   >
 > {
-  const lastDeploy = db
-    .select({
-      project_id: deployments.project_id,
-      last_deploy: sql<string>`max(${deployments.created_at})`.as('last_deploy'),
-      last_deploy_id:
-        sql<string>`(SELECT id FROM deployments d2 WHERE d2.project_id = ${deployments.project_id} ORDER BY d2.created_at DESC LIMIT 1)`.as(
-          'last_deploy_id',
-        ),
-      last_deploy_status:
-        sql<string>`(SELECT status FROM deployments d3 WHERE d3.project_id = ${deployments.project_id} ORDER BY d3.created_at DESC LIMIT 1)`.as(
-          'last_deploy_status',
-        ),
-    })
-    .from(deployments)
-    .groupBy(deployments.project_id)
-    .as('last_deploy_sq');
+  const lastDeploy = getLatestDeploymentByProjectSubquery(db);
 
   return db
     .select({
