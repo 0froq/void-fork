@@ -219,6 +219,7 @@ app.get('/callback', async (c) => {
     }
   }
 
+  let createdUser = false;
   if (!user) {
     // Check signup allowlist (new users only)
     const enabled = await c.env.ROUTING.get('signup:enabled');
@@ -252,12 +253,16 @@ app.get('/callback', async (c) => {
       await createOAuthAccount(txDb, newUser.id, resolvedProvider, providerId);
       return newUser;
     });
-    if (emailVerified && email) {
-      try {
-        await acceptInvitationByEmail(db, email, user.id);
-      } catch (err) {
-        console.error(`Failed to accept invitation for ${email} (user ${user.id}):`, err);
-      }
+    createdUser = true;
+  }
+
+  if (emailVerified && email) {
+    try {
+      await acceptInvitationByEmail(db, email, user.id);
+    } catch (err) {
+      console.error(`Failed to accept invitation for ${email} (user ${user.id}):`, err);
+    }
+    if (createdUser) {
       if (c.env.EMAIL) {
         c.executionCtx.waitUntil(
           sendWelcomeEmail(c.env.EMAIL, email, login).catch((err) =>

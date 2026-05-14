@@ -11,7 +11,7 @@ import {
 } from 'vite-plus/test';
 import { hmacSignState } from '../../src/auth/hmac.ts';
 import app from '../../src/index.ts';
-import { users } from '../../src/schema.ts';
+import { invitations, users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -297,6 +297,49 @@ describe('email verification gating on account linking', () => {
     const payload = await verifyJwt(token, JWT_SECRET);
     expect(payload).toBeDefined();
     expect(payload!.sub).toBe(existing.id);
+  });
+
+  it('accepts a pending invitation when an existing account logs in with a verified email', async () => {
+    const inviter = await createTestUser(env.db, 'inviter');
+    const existing = await createTestUser(env.db, 'invited-existing', 'github', '424242');
+    await env.db
+      .update(users)
+      .set({ email: 'invited-existing@example.com' })
+      .where(eq(users.id, existing.id));
+    await env.db.insert(invitations).values({
+      id: 'inv_existing_login',
+      email: 'invited-existing@example.com',
+      invited_by: inviter.id,
+    });
+
+    const state = await buildSignedState('github');
+    await seedOAuthNonce(env.db, 'test-nonce');
+    vi.stubGlobal(
+      'fetch',
+      mockGitHubApi({
+        id: 424242,
+        login: 'invited-existing',
+        email: 'invited-existing@example.com',
+        emailVerified: true,
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: 'oauth_nonce=test-nonce' },
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(res.status).toBe(302);
+    const [invitation] = await env.db
+      .select()
+      .from(invitations)
+      .where(eq(invitations.id, 'inv_existing_login'));
+    expect(invitation.status).toBe('accepted');
+    expect(invitation.accepted_by).toBe(existing.id);
+    expect(invitation.accepted_at).toBeTruthy();
   });
 
   it('invites the GitHub user to the preview repo when configured', async () => {

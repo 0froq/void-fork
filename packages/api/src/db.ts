@@ -1596,7 +1596,12 @@ export async function acceptInvitationByEmail(
   await db
     .update(invitations)
     .set({ status: 'accepted', accepted_by: userId, accepted_at: sql`now()` })
-    .where(and(eq(invitations.email, email.toLowerCase()), eq(invitations.status, 'pending')));
+    .where(
+      and(
+        sql`lower(${invitations.email}) = ${email.toLowerCase()}`,
+        eq(invitations.status, 'pending'),
+      ),
+    );
 }
 
 export async function getAllInvitations(
