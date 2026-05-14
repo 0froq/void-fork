@@ -16,6 +16,7 @@ import { findVoidAuthConfig } from './auth/config.ts';
 import { getToken, isStagingMode } from './cli/auth.ts';
 import { readProjectConfig } from './cli/project.ts';
 import {
+  ensureWranglerCompat,
   ensureWranglerCompatibilityDate,
   ensureWranglerNodejsAlsFlag,
   hasDurableObjectSqliteMigration,
@@ -404,6 +405,30 @@ function createSandboxSdkResolvePlugin(): Plugin {
   };
 }
 
+function createWranglerCompatPersistPlugin(
+  root: string,
+  config: ReturnType<typeof readConfig>,
+): Plugin {
+  let persisted = false;
+  const persist = () => {
+    if (persisted || isNodeTarget(config.target)) {
+      return;
+    }
+    persisted = true;
+    ensureWranglerCompat(root, config);
+  };
+
+  return {
+    name: 'void:wrangler-compat-persist',
+    buildStart() {
+      persist();
+    },
+    configureServer() {
+      persist();
+    },
+  };
+}
+
 type CredentialStatus =
   | { status: 'ok'; token: string; projectId: string; staging?: boolean }
   | { status: 'no-token' }
@@ -645,8 +670,7 @@ export function voidPlugin(options?: {
   if (detected && (detected.class === 'b' || detected.class === 'c')) {
     const bindingNames = resolveBindingNames(config.inference?.bindings);
     const frameworkPersistRoot = join(root, '.wrangler', 'state');
-    const syncFrameworkCompat = () => {
-      const compat = readWranglerCompat(root, config);
+    const syncFrameworkCompat = (compat: ReturnType<typeof readWranglerCompat>) => {
       const syncedDate = ensureWranglerCompatibilityDate(root, compat.compatibilityDate);
       if (syncedDate) {
         voidLog('Synced compatibility_date to wrangler config');
@@ -659,7 +683,7 @@ export function voidPlugin(options?: {
       name: 'void:wrangler-compat',
       enforce: 'pre',
       config(_, env) {
-        syncFrameworkCompat();
+        syncFrameworkCompat(ensureWranglerCompat(root, config));
         if (env.command !== 'serve') {
           return;
         }
@@ -668,13 +692,19 @@ export function voidPlugin(options?: {
           voidLog('Synced nodejs_als to wrangler config');
         }
       },
+      buildStart() {
+        syncFrameworkCompat(ensureWranglerCompat(root, config));
+      },
+      configureServer() {
+        syncFrameworkCompat(ensureWranglerCompat(root, config));
+      },
     };
 
     // Wrangler.jsonc binding sync plugin — runs on dev startup
     const wranglerSyncPlugin: Plugin = {
       name: 'void:wrangler-sync',
       configResolved(resolvedConfig) {
-        syncFrameworkCompat();
+        syncFrameworkCompat(readWranglerCompat(root, config));
         if (resolvedConfig.command !== 'serve') {
           return;
         }
@@ -1311,6 +1341,7 @@ export function voidPlugin(options?: {
 
     return [
       createCloudflareBuiltinsExternalPlugin(),
+      createWranglerCompatPersistPlugin(root, config),
       restartPlugin(),
       bindingWatchPlugin,
       envPlugin,
@@ -1438,6 +1469,7 @@ export function voidPlugin(options?: {
   return [
     createCloudflareBuiltinsExternalPlugin(),
     createDefaultWorkerEnvironmentPlugin(),
+    createWranglerCompatPersistPlugin(root, config),
     restartPlugin(),
     bindingWatchPlugin,
     envPlugin,

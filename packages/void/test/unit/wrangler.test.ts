@@ -1,8 +1,8 @@
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'pathe';
 import { describe, it, expect, afterEach } from 'vite-plus/test';
 import {
+  ensureWranglerCompat,
   ensureWranglerCompatibilityDate,
   ensureWranglerNodejsAlsFlag,
   LATEST_KNOWN_COMPAT_DATE,
@@ -27,15 +27,13 @@ afterEach(() => {
 });
 
 describe('readWranglerCompat', () => {
-  it('pins the latest known-good compatibility date in void.json when none exists', () => {
+  it('resolves the latest known-good compatibility date without writing void.json', () => {
     rmSync(tmpDir, { recursive: true, force: true });
     mkdirSync(tmpDir, { recursive: true });
     expect(readWranglerCompat(tmpDir)).toEqual({
       compatibilityDate: LATEST_KNOWN_COMPAT_DATE,
     });
-    expect(JSON.parse(readFileSync(join(tmpDir, 'void.json'), 'utf-8'))).toEqual({
-      worker: { compatibility_date: LATEST_KNOWN_COMPAT_DATE },
-    });
+    expect(existsSync(join(tmpDir, 'void.json'))).toBe(false);
   });
 
   it('reads from wrangler.json', () => {
@@ -102,14 +100,12 @@ describe('readWranglerCompat', () => {
     });
   });
 
-  it('pins void.json when fields are missing from wrangler config', () => {
+  it('uses the default when fields are missing from wrangler config', () => {
     setup('wrangler.json', '{ "name": "test" }');
     expect(readWranglerCompat(tmpDir)).toEqual({
       compatibilityDate: LATEST_KNOWN_COMPAT_DATE,
     });
-    expect(JSON.parse(readFileSync(join(tmpDir, 'void.json'), 'utf-8'))).toEqual({
-      worker: { compatibility_date: LATEST_KNOWN_COMPAT_DATE },
-    });
+    expect(existsSync(join(tmpDir, 'void.json'))).toBe(false);
   });
 
   it('handles strings containing // without stripping them', () => {
@@ -252,11 +248,35 @@ describe('readWranglerCompat', () => {
     });
   });
 
-  it('pins void.json when the build output fallback is missing too', () => {
+  it('uses the default when the build output fallback is missing too', () => {
     rmSync(tmpDir, { recursive: true, force: true });
     mkdirSync(tmpDir, { recursive: true });
     expect(readWranglerCompat(tmpDir, undefined, join(tmpDir, 'nonexistent'))).toEqual({
       compatibilityDate: LATEST_KNOWN_COMPAT_DATE,
+    });
+  });
+});
+
+describe('ensureWranglerCompat', () => {
+  it('pins the latest known-good compatibility date in void.json when none exists', () => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    mkdirSync(tmpDir, { recursive: true });
+    expect(ensureWranglerCompat(tmpDir)).toEqual({
+      compatibilityDate: LATEST_KNOWN_COMPAT_DATE,
+    });
+    expect(JSON.parse(readFileSync(join(tmpDir, 'void.json'), 'utf-8'))).toEqual({
+      worker: { compatibility_date: LATEST_KNOWN_COMPAT_DATE },
+    });
+  });
+
+  it('pins void.json when the build output fallback is missing too', () => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    mkdirSync(tmpDir, { recursive: true });
+    expect(ensureWranglerCompat(tmpDir, undefined, join(tmpDir, 'nonexistent'))).toEqual({
+      compatibilityDate: LATEST_KNOWN_COMPAT_DATE,
+    });
+    expect(JSON.parse(readFileSync(join(tmpDir, 'void.json'), 'utf-8'))).toEqual({
+      worker: { compatibility_date: LATEST_KNOWN_COMPAT_DATE },
     });
   });
 
@@ -269,7 +289,7 @@ describe('readWranglerCompat', () => {
         worker: { compatibility_flags: ['nodejs_compat'] },
       }),
     );
-    expect(readWranglerCompat(tmpDir)).toEqual({
+    expect(ensureWranglerCompat(tmpDir)).toEqual({
       compatibilityDate: LATEST_KNOWN_COMPAT_DATE,
       compatibilityFlags: ['nodejs_compat'],
     });

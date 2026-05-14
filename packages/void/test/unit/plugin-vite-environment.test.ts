@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { resolveConfig } from 'vite';
@@ -32,6 +32,23 @@ afterEach(() => {
 });
 
 describe('voidPlugin Vite environments', () => {
+  it('does not create void.json during Vite config resolution', async () => {
+    const root = createProjectRoot();
+    rmSync(join(root, 'void.json'), { force: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+
+    await resolveConfig(
+      {
+        root,
+        plugins: [voidPlugin()],
+      },
+      'serve',
+      'development',
+    );
+
+    expect(existsSync(join(root, 'void.json'))).toBe(false);
+  });
+
   it('does not claim Vite SSR environments configured by test runners', async () => {
     const root = createProjectRoot();
     vi.spyOn(process, 'cwd').mockReturnValue(root);

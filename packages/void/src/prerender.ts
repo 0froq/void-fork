@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { dirname, join, relative } from 'pathe';
 import { loadEnv } from 'vite';
 import { getToken, isStagingMode } from './cli/auth.ts';
-import { readWranglerCompat } from './cli/wrangler.ts';
+import { ensureWranglerCompat } from './cli/wrangler.ts';
 import { readConfig } from './config.ts';
 import { voidLog, voidWarn } from './log.ts';
 import { filterLoadedEnv, stripInternalEnvKeys } from './shared/env.ts';
@@ -249,7 +249,7 @@ async function createCloudflarePrerenderRunner(options: {
     throw new Error(`prerender: wrangler.json not found in '${workerDir}'.`);
   }
   const wranglerConfig = JSON.parse(readFileSync(wranglerPath, 'utf-8'));
-  const wranglerCompat = readWranglerCompat(root, readConfig(root), workerDir);
+  const wranglerCompat = ensureWranglerCompat(root, readConfig(root), workerDir);
   const workerMain = wranglerConfig.main ?? 'index.js';
 
   const env = filterLoadedEnv(loadEnv('production', root, ''));

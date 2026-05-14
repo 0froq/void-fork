@@ -105,7 +105,7 @@ import type {
 import {
   readExistingLiveBindingConfig,
   normalizeWranglerCompatibilityFlags,
-  readWranglerCompat,
+  ensureWranglerCompat,
   resolveLiveBindingConfig,
   syncWranglerBindings,
   type LiveBindingConfig,
@@ -280,7 +280,7 @@ export function resolveDeployWranglerCompat(
   if (isNodeTarget(config.target)) {
     return undefined;
   }
-  const compat = readWranglerCompat(root, config, buildOutputDir);
+  const compat = ensureWranglerCompat(root, config, buildOutputDir);
   const compatibilityFlags = normalizeWranglerCompatibilityFlags(compat.compatibilityFlags, {
     needsNodejsCompat:
       requirements?.authEnabled === true ||

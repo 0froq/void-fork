@@ -1,7 +1,8 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { LATEST_KNOWN_COMPAT_DATE } from '../../src/cli/wrangler.ts';
 import { voidPlugin } from '../../src/index.ts';
 import { inferProjectBindings, detectFramework } from '../../src/plugin-inference.ts';
 
@@ -266,6 +267,74 @@ describe('detectFramework', () => {
       expect(() =>
         handler?.call({} as never, { command: 'serve' } as import('vite').ResolvedConfig),
       ).not.toThrow();
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
+  it('does not create void.json during plugin construction', () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root);
+
+    try {
+      voidPlugin();
+      expect(existsSync(join(root, 'void.json'))).toBe(false);
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
+  it('pins framework default compatibility before syncing wrangler config', () => {
+    const root = createTempRoot();
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ dependencies: { astro: '^5.0.0' } }),
+    );
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root);
+
+    try {
+      const plugins = voidPlugin();
+      const compatPlugin = plugins.find((plugin) => plugin.name === 'void:wrangler-compat');
+      const config = getHookHandler(compatPlugin?.config) as (
+        this: object,
+        config: Record<string, never>,
+        env: import('vite').ConfigEnv,
+      ) => void;
+
+      expect(compatPlugin).toBeTruthy();
+      expect(existsSync(join(root, 'void.json'))).toBe(false);
+
+      config.call({}, {}, { command: 'serve', mode: 'development' } as import('vite').ConfigEnv);
+
+      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        worker: { compatibility_date: LATEST_KNOWN_COMPAT_DATE },
+      });
+      expect(JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'))).toMatchObject({
+        compatibility_date: LATEST_KNOWN_COMPAT_DATE,
+      });
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
+  it('persists default void.json compatibility during build startup', () => {
+    const root = createTempRoot();
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root);
+
+    try {
+      const plugins = voidPlugin();
+      const persistPlugin = plugins.find(
+        (plugin) => plugin.name === 'void:wrangler-compat-persist',
+      );
+      const buildStart = getHookHandler(persistPlugin?.buildStart) as (this: object) => void;
+
+      expect(persistPlugin).toBeTruthy();
+      buildStart.call({});
+      expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        worker: { compatibility_date: LATEST_KNOWN_COMPAT_DATE },
+      });
     } finally {
       cwd.mockRestore();
     }

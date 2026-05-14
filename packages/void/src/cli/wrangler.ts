@@ -40,6 +40,16 @@ export interface WranglerCompat {
   compatibilityFlags?: Array<string>;
 }
 
+interface WranglerCompatFields {
+  voidConfig: VoidConfig | undefined;
+  voidDate: string | undefined;
+  voidFlags: Array<string> | undefined;
+  wranglerDate: string | undefined;
+  wranglerFlags: Array<string> | undefined;
+  buildDate: string | undefined;
+  buildFlags: Array<string> | undefined;
+}
+
 export function normalizeWranglerCompatibilityFlags(
   flags: Array<string> | undefined,
   options?: { needsNodejsCompat?: boolean },
@@ -182,11 +192,14 @@ function resolveGeneratedName(base: string, used: Set<string>, kind: string): st
 }
 
 /**
- * Read compatibility settings from `wrangler.jsonc`/`wrangler.json` and
- * `void.json`, with priority: void.json > wrangler.jsonc > build output.
+ * Read compatibility settings from `wrangler.jsonc`/`wrangler.json`,
+ * `void.json`, and build output, with priority:
+ * void.json > wrangler.jsonc > build output > latest known-good date.
  *
- * If no explicit `compatibility_date` is configured, pins the latest known-good
- * date in `void.json` so subsequent runs are explicit and stable.
+ * This function is read-only: when no explicit `compatibility_date` exists, it
+ * returns the latest known-good date without writing it anywhere. Use
+ * `ensureWranglerCompat()` when the caller is in a real dev/build/deploy
+ * lifecycle and wants to persist the default in `void.json`.
  *
  * @param buildOutputDir - Optional path to the build output directory (e.g.
  *   `dist/ssr`) which may contain a plugin-generated `wrangler.json` with the
@@ -197,6 +210,32 @@ export function readWranglerCompat(
   config?: VoidConfig,
   buildOutputDir?: string,
 ): WranglerCompat {
+  return resolveWranglerCompat(readWranglerCompatFields(root, config, buildOutputDir));
+}
+
+/**
+ * Read compatibility settings and ensure the default date is pinned in
+ * `void.json` when no explicit date exists in void.json, wrangler config, or
+ * build output.
+ */
+export function ensureWranglerCompat(
+  root: string,
+  config?: VoidConfig,
+  buildOutputDir?: string,
+): WranglerCompat {
+  const fields = readWranglerCompatFields(root, config, buildOutputDir);
+  const hasExplicitDate = fields.voidDate ?? fields.wranglerDate ?? fields.buildDate;
+  const defaultDate = hasExplicitDate
+    ? undefined
+    : ensureVoidCompatibilityDate(root, fields.voidConfig);
+  return resolveWranglerCompat(fields, defaultDate ? { defaultDate } : undefined);
+}
+
+function readWranglerCompatFields(
+  root: string,
+  config?: VoidConfig,
+  buildOutputDir?: string,
+): WranglerCompatFields {
   const voidConfig = config ?? readVoidConfigIfExists(root);
 
   // 1. Read wrangler.jsonc / wrangler.json from project root
@@ -255,15 +294,34 @@ export function readWranglerCompat(
     validateCompatDate(voidDate, 'void.json worker config');
   }
 
+  return {
+    voidConfig,
+    voidDate,
+    voidFlags,
+    wranglerDate,
+    wranglerFlags,
+    buildDate,
+    buildFlags,
+  };
+}
+
+function resolveWranglerCompat(
+  fields: WranglerCompatFields,
+  options?: { defaultDate?: string },
+): WranglerCompat {
   // 3. Merge: void.json > project wrangler.jsonc > build output
   const compatibilityDate =
-    voidDate ?? wranglerDate ?? buildDate ?? ensureVoidCompatibilityDate(root, voidConfig);
+    fields.voidDate ??
+    fields.wranglerDate ??
+    fields.buildDate ??
+    options?.defaultDate ??
+    LATEST_KNOWN_COMPAT_DATE;
 
   const result: WranglerCompat = {
     compatibilityDate,
   };
 
-  const flags = voidFlags ?? wranglerFlags ?? buildFlags;
+  const flags = fields.voidFlags ?? fields.wranglerFlags ?? fields.buildFlags;
   if (flags && flags.length > 0) {
     result.compatibilityFlags = flags;
   }
