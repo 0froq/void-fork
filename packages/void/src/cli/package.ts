@@ -351,7 +351,7 @@ export async function collectAndHashAssets(
       dir,
       opts.ignorePatterns,
     );
-    const files = collectFiles(dir);
+    const files = collectAssetFiles(dir);
     let processed = 0;
     for (const filePath of files) {
       processed++;
@@ -861,6 +861,28 @@ function collectFiles(dir: string): Array<string> {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...collectFiles(fullPath));
+    } else {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+/**
+ * Recursively collect static asset file paths, refusing symlinks so deploys
+ * cannot publish bytes from outside the intended asset root.
+ */
+function collectAssetFiles(root: string, dir: string = root): Array<string> {
+  const files: Array<string> = [];
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      const relativePath = '/' + toSlash(relative(root, fullPath));
+      throw new Error(`deploy: Refusing to upload symlink as an asset: ${relativePath}`);
+    }
+    if (entry.isDirectory()) {
+      files.push(...collectAssetFiles(root, fullPath));
     } else {
       files.push(fullPath);
     }

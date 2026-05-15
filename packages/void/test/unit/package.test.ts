@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { hash as blake3hash } from 'blake3-jit';
 import { join } from 'pathe';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
@@ -16,6 +16,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(TMP, { recursive: true, force: true });
+  rmSync(join(import.meta.dirname, 'outside-secret.txt'), { force: true });
 });
 
 describe('resolveSpaFallbackChain', () => {
@@ -245,6 +246,16 @@ describe('collectAndHashAssets', () => {
 });
 
 describe('_worker.js safety guard (collectAndHashAssets)', () => {
+  it('throws when a static asset is a symlink', async () => {
+    writeFileSync(join(TMP, 'index.html'), '<html></html>');
+    writeFileSync(join(import.meta.dirname, 'outside-secret.txt'), 'secret');
+    symlinkSync('../outside-secret.txt', join(TMP, 'linked-secret.txt'));
+
+    await expect(collectAndHashAssets(TMP)).rejects.toThrow(
+      'deploy: Refusing to upload symlink as an asset',
+    );
+  });
+
   it('throws when _worker.js file exists without .assetsignore', async () => {
     writeFileSync(join(TMP, 'index.html'), '<html></html>');
     writeFileSync(join(TMP, '_worker.js'), 'export default {}');
