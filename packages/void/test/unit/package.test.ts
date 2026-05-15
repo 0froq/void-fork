@@ -256,6 +256,31 @@ describe('_worker.js safety guard (collectAndHashAssets)', () => {
     );
   });
 
+  it('allows symlinks excluded by .assetsignore', async () => {
+    writeFileSync(join(TMP, 'index.html'), '<html></html>');
+    writeFileSync(join(import.meta.dirname, 'outside-secret.txt'), 'secret');
+    symlinkSync('../outside-secret.txt', join(TMP, 'linked-secret.txt'));
+    writeFileSync(join(TMP, '.assetsignore'), 'linked-secret.txt');
+
+    const { assetManifest, assetFiles } = await collectAndHashAssets(TMP);
+
+    expect(Object.keys(assetManifest)).toEqual(['/index.html']);
+    expect(assetFiles.size).toBe(1);
+  });
+
+  it('allows symlinks excluded by deploy ignore patterns', async () => {
+    writeFileSync(join(TMP, 'index.html'), '<html></html>');
+    writeFileSync(join(import.meta.dirname, 'outside-secret.txt'), 'secret');
+    symlinkSync('../outside-secret.txt', join(TMP, 'linked-secret.txt'));
+
+    const { assetManifest, assetFiles } = await collectAndHashAssets(TMP, undefined, {
+      ignorePatterns: ['/linked-secret.txt'],
+    });
+
+    expect(Object.keys(assetManifest)).toEqual(['/index.html']);
+    expect(assetFiles.size).toBe(1);
+  });
+
   it('throws when _worker.js file exists without .assetsignore', async () => {
     writeFileSync(join(TMP, 'index.html'), '<html></html>');
     writeFileSync(join(TMP, '_worker.js'), 'export default {}');
