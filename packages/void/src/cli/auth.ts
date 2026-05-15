@@ -271,11 +271,12 @@ export async function runLogin(
       }
 
       const port = addr.port;
-      const redirect = `http://localhost:${port}/callback`;
+      const redirect = new URL(`http://localhost:${port}/callback`);
+      redirect.searchParams.set('state', state);
+
       const loginUrl = new URL('auth/login', apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`);
-      loginUrl.searchParams.set('redirect', redirect);
+      loginUrl.searchParams.set('redirect', redirect.href);
       loginUrl.searchParams.set('provider', provider);
-      loginUrl.searchParams.set('state', state);
 
       onUrl?.(loginUrl.href);
       openBrowser(loginUrl.href, exec);

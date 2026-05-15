@@ -21,23 +21,24 @@ describe('runLogin', () => {
     const loginPromise = runLogin('/project', 'github', resolveLoginUrl);
     const loginUrl = new URL(await loginUrlPromise);
     const redirect = loginUrl.searchParams.get('redirect');
-    const state = loginUrl.searchParams.get('state');
 
     expect(redirect).toBeTruthy();
+    expect(loginUrl.searchParams.has('state')).toBe(false);
 
-    const attackUrl = new URL(redirect!);
+    const redirectUrl = new URL(redirect!);
+    const state = redirectUrl.searchParams.get('state');
+    expect(state).toEqual(expect.any(String));
+    expect(state).toHaveLength(64);
+
+    const attackUrl = new URL(redirectUrl);
     attackUrl.searchParams.set('token', 'attacker-controlled-token');
     attackUrl.searchParams.set('state', 'wrong-state');
 
     const attackResponse = await fetch(attackUrl);
     expect(attackResponse.status).toBe(400);
 
-    expect(state).toEqual(expect.any(String));
-    expect(state).toHaveLength(64);
-
-    const validUrl = new URL(redirect!);
+    const validUrl = new URL(redirectUrl);
     validUrl.searchParams.set('token', 'real-token');
-    validUrl.searchParams.set('state', state!);
 
     const validResponse = await fetch(validUrl);
     expect(validResponse.status).toBe(200);
