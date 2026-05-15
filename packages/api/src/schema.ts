@@ -256,6 +256,9 @@ export const oauthNonces = pgTable('oauth_nonces', {
 export const authCodes = pgTable('auth_codes', {
   code: text('code').primaryKey(),
   jwt: text('jwt').notNull(),
+  cli_state: text('cli_state'),
+  code_challenge: text('code_challenge'),
+  code_challenge_method: text('code_challenge_method'),
   expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
 });
 

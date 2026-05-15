@@ -25,6 +25,7 @@ import {
   consumeOAuthNonce,
   storeAuthCode,
   consumeAuthCode,
+  consumeCliAuthCode,
 } from '../db.ts';
 import { sendWelcomeEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
@@ -32,6 +33,8 @@ import { isSignupAllowed, getAllowlist } from '../signup-allowlist.ts';
 
 const DEFAULT_REDIRECT_URI = 'https://api.void.cloud/auth/callback';
 const DASHBOARD_AUTH_CODE_TTL_SECONDS = 5 * 60;
+const CLI_AUTH_CODE_TTL_SECONDS = 5 * 60;
+const CLI_CODE_CHALLENGE_METHOD = 'S256';
 
 const app = new Hono<ApiEnv>();
 
@@ -60,6 +63,32 @@ export function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
   }
 }
 
+function isLocalhostRedirect(url: URL): boolean {
+  return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+}
+
+function isValidCodeVerifier(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= 43 &&
+    value.length <= 128 &&
+    /^[A-Za-z0-9._~-]+$/.test(value)
+  );
+}
+
+function base64Url(buffer: ArrayBuffer): string {
+  let value = '';
+  for (const byte of new Uint8Array(buffer)) {
+    value += String.fromCharCode(byte);
+  }
+  return btoa(value).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+}
+
+async function createCodeChallenge(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return base64Url(digest);
+}
+
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
 app.get('/login', async (context) => {
   const redirect = context.req.query('redirect');
@@ -76,6 +105,25 @@ app.get('/login', async (context) => {
     return context.json({ error: 'provider must be github or google' }, 400);
   }
 
+  const codeChallenge = context.req.query('code_challenge');
+  const codeChallengeMethod = context.req.query('code_challenge_method');
+  let cliState: string | null = null;
+
+  if (codeChallenge || codeChallengeMethod) {
+    const redirectUrl = new URL(redirect);
+    cliState = redirectUrl.searchParams.get('state');
+
+    if (!isLocalhostRedirect(redirectUrl)) {
+      return context.json({ error: 'CLI code exchange requires a localhost redirect' }, 400);
+    }
+    if (!cliState) {
+      return context.json({ error: 'CLI code exchange requires callback state' }, 400);
+    }
+    if (!codeChallenge || codeChallengeMethod !== CLI_CODE_CHALLENGE_METHOD) {
+      return context.json({ error: 'code_challenge_method must be S256' }, 400);
+    }
+  }
+
   const nonce = crypto.randomUUID();
 
   // Store nonce in PostgreSQL so callback can validate it (prevents login CSRF / replay).
@@ -84,7 +132,14 @@ app.get('/login', async (context) => {
   const db = context.get('db');
   await storeOAuthNonce(db, nonce, 600);
 
-  const stateData = JSON.stringify({ redirect, nonce, provider });
+  const stateData = JSON.stringify({
+    redirect,
+    nonce,
+    provider,
+    cliState,
+    codeChallenge,
+    codeChallengeMethod,
+  });
   const stateEncoded = btoa(stateData);
   const signature = await hmacSignState(stateEncoded, context.env.JWT_SECRET);
   const state = `${stateEncoded}.${signature}`;
@@ -132,10 +187,15 @@ app.get('/callback', async (context) => {
     return context.json({ error: 'invalid state signature' }, 400);
   }
 
-  const { redirect, nonce, provider } = JSON.parse(atob(stateEncoded)) as {
+  const { redirect, nonce, provider, cliState, codeChallenge, codeChallengeMethod } = JSON.parse(
+    atob(stateEncoded),
+  ) as {
     redirect: string;
     nonce: string;
     provider?: string;
+    cliState?: string | null;
+    codeChallenge?: string;
+    codeChallengeMethod?: string;
   };
 
   // Verify the nonce matches the cookie set during login redirect.
@@ -289,9 +349,20 @@ app.get('/callback', async (context) => {
 
   const redirectUrl = new URL(redirect);
 
-  if (redirectUrl.hostname === 'localhost' || redirectUrl.hostname === '127.0.0.1') {
-    // CLI / local dev: token in query param (localhost-only, safe)
-    redirectUrl.searchParams.set('token', jwt);
+  if (isLocalhostRedirect(redirectUrl)) {
+    if (codeChallenge && codeChallengeMethod === CLI_CODE_CHALLENGE_METHOD && cliState) {
+      const authCode = crypto.randomUUID();
+      await storeAuthCode(db, authCode, jwt, CLI_AUTH_CODE_TTL_SECONDS, {
+        cliState,
+        codeChallenge,
+        codeChallengeMethod,
+      });
+      redirectUrl.searchParams.set('code', authCode);
+      redirectUrl.searchParams.delete('token');
+    } else {
+      // Legacy CLI / local dev: token in query param (localhost-only, safe).
+      redirectUrl.searchParams.set('token', jwt);
+    }
   } else {
     // Dashboard: short-lived auth code exchanged server-side, so the JWT never appears in the URL.
     // Stored in PostgreSQL (not KV) for strong cross-colo consistency and atomic single-use
@@ -313,6 +384,39 @@ app.post('/exchange', async (context) => {
 
   const db = context.get('db');
   const jwt = await consumeAuthCode(db, code);
+  if (!jwt) {
+    return context.json({ error: 'invalid or expired code' }, 400);
+  }
+
+  return context.json({ token: jwt });
+});
+
+// POST /auth/cli/token — single-use CLI code + PKCE verifier → JWT
+app.post('/cli/token', async (context) => {
+  const body = await context.req.json<{
+    code?: unknown;
+    state?: unknown;
+    code_verifier?: unknown;
+  }>();
+
+  if (
+    typeof body.code !== 'string' ||
+    typeof body.state !== 'string' ||
+    !isValidCodeVerifier(body.code_verifier)
+  ) {
+    return context.json({ error: 'code, state, and code_verifier are required' }, 400);
+  }
+
+  const codeChallenge = await createCodeChallenge(body.code_verifier);
+  const db = context.get('db');
+  const jwt = await consumeCliAuthCode(
+    db,
+    body.code,
+    body.state,
+    codeChallenge,
+    CLI_CODE_CHALLENGE_METHOD,
+  );
+
   if (!jwt) {
     return context.json({ error: 'invalid or expired code' }, 400);
   }

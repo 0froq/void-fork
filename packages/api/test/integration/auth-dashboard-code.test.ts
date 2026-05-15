@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   describe,
   it,
@@ -40,8 +41,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function buildSignedState(redirect: string): Promise<string> {
-  const stateData = JSON.stringify({ redirect, nonce: 'oauth-test-nonce', provider: 'github' });
+function codeChallengeFor(verifier: string): string {
+  return createHash('sha256')
+    .update(verifier)
+    .digest('base64')
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
+}
+
+async function buildSignedState(
+  redirect: string,
+  options?: {
+    cliState?: string;
+    codeChallenge?: string;
+    codeChallengeMethod?: string;
+  },
+): Promise<string> {
+  const stateData = JSON.stringify({
+    redirect,
+    nonce: 'oauth-test-nonce',
+    provider: 'github',
+    ...options,
+  });
   const stateEncoded = btoa(stateData);
   const signature = await hmacSignState(stateEncoded, JWT_SECRET);
   return `${stateEncoded}.${signature}`;
@@ -71,6 +93,41 @@ function mockGitHubApi() {
 }
 
 describe('dashboard auth code exchange', () => {
+  it('preserves CLI PKCE fields through the OAuth provider state', async () => {
+    const redirect = 'http://localhost:9999/callback?state=cli-state';
+    const loginRes = await app.fetch(
+      new Request(
+        `http://localhost/auth/login?redirect=${encodeURIComponent(
+          redirect,
+        )}&provider=github&code_challenge=cli-challenge&code_challenge_method=S256`,
+      ),
+      env,
+      executionCtx,
+    );
+
+    expect(loginRes.status).toBe(302);
+    const location = new URL(loginRes.headers.get('Location')!);
+    expect(location.origin).toBe('https://github.com');
+
+    const providerState = location.searchParams.get('state');
+    expect(providerState).toBeTruthy();
+
+    const stateEncoded = providerState!.slice(0, providerState!.lastIndexOf('.'));
+    const stateData = JSON.parse(atob(stateEncoded)) as {
+      redirect: string;
+      cliState: string;
+      codeChallenge: string;
+      codeChallengeMethod: string;
+    };
+
+    expect(stateData).toMatchObject({
+      redirect,
+      cliState: 'cli-state',
+      codeChallenge: 'cli-challenge',
+      codeChallengeMethod: 'S256',
+    });
+  });
+
   it('redirects dashboards with a single-use auth code and preserves login_nonce', async () => {
     const redirect = 'https://dash.staging.void.cloud/auth/callback?login_nonce=dashboard-nonce';
     const state = await buildSignedState(redirect);
@@ -113,6 +170,111 @@ describe('dashboard auth code exchange', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
+      }),
+      env,
+      executionCtx,
+    );
+    expect(replayRes.status).toBe(400);
+  });
+
+  it('redirects CLI logins with a single-use PKCE auth code', async () => {
+    const codeVerifier = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG';
+    const cliState = 'cli-state';
+    const codeChallenge = codeChallengeFor(codeVerifier);
+    const redirect = `http://localhost:9999/callback?state=${cliState}`;
+    const state = await buildSignedState(redirect, {
+      cliState,
+      codeChallenge,
+      codeChallengeMethod: 'S256',
+    });
+    await seedOAuthNonce(env.db, 'oauth-test-nonce');
+    vi.stubGlobal('fetch', mockGitHubApi());
+
+    const callbackRes = await app.fetch(
+      new Request(`http://localhost/auth/callback?code=provider-code&state=${state}`, {
+        headers: { Cookie: 'oauth_nonce=oauth-test-nonce' },
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(callbackRes.status).toBe(302);
+    const location = new URL(callbackRes.headers.get('Location')!);
+    expect(location.origin).toBe('http://localhost:9999');
+    expect(location.pathname).toBe('/callback');
+    expect(location.searchParams.get('state')).toBe(cliState);
+    expect(location.searchParams.has('token')).toBe(false);
+
+    const cliCode = location.searchParams.get('code');
+    expect(cliCode).toBeTruthy();
+
+    const dashboardExchangeRes = await app.fetch(
+      new Request('http://localhost/auth/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: cliCode }),
+      }),
+      env,
+      executionCtx,
+    );
+    expect(dashboardExchangeRes.status).toBe(400);
+
+    const wrongStateRes = await app.fetch(
+      new Request('http://localhost/auth/cli/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: cliCode,
+          state: 'wrong-state',
+          code_verifier: codeVerifier,
+        }),
+      }),
+      env,
+      executionCtx,
+    );
+    expect(wrongStateRes.status).toBe(400);
+
+    const wrongVerifierRes = await app.fetch(
+      new Request('http://localhost/auth/cli/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: cliCode,
+          state: cliState,
+          code_verifier: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGx',
+        }),
+      }),
+      env,
+      executionCtx,
+    );
+    expect(wrongVerifierRes.status).toBe(400);
+
+    const exchangeRes = await app.fetch(
+      new Request('http://localhost/auth/cli/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: cliCode,
+          state: cliState,
+          code_verifier: codeVerifier,
+        }),
+      }),
+      env,
+      executionCtx,
+    );
+
+    expect(exchangeRes.status).toBe(200);
+    await expect(exchangeRes.json()).resolves.toMatchObject({ token: expect.any(String) });
+
+    const replayRes = await app.fetch(
+      new Request('http://localhost/auth/cli/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: cliCode,
+          state: cliState,
+          code_verifier: codeVerifier,
+        }),
       }),
       env,
       executionCtx,

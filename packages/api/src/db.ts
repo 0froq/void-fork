@@ -1711,17 +1711,58 @@ export async function storeAuthCode(
   code: string,
   jwt: string,
   ttlSeconds: number,
+  options?: {
+    cliState?: string;
+    codeChallenge?: string;
+    codeChallengeMethod?: string;
+  },
 ): Promise<void> {
-  await db
-    .insert(authCodes)
-    .values({ code, jwt, expires_at: sql`now() + ${String(ttlSeconds)} * interval '1 second'` });
+  await db.insert(authCodes).values({
+    code,
+    jwt,
+    cli_state: options?.cliState,
+    code_challenge: options?.codeChallenge,
+    code_challenge_method: options?.codeChallengeMethod,
+    expires_at: sql`now() + ${String(ttlSeconds)} * interval '1 second'`,
+  });
 }
 
 /** Atomically consume an auth code — returns the JWT if valid, null otherwise. */
 export async function consumeAuthCode(db: Db, code: string): Promise<string | null> {
   const rows = await db
     .delete(authCodes)
-    .where(and(eq(authCodes.code, code), sql`expires_at > now()`))
+    .where(
+      and(
+        eq(authCodes.code, code),
+        isNull(authCodes.cli_state),
+        isNull(authCodes.code_challenge),
+        isNull(authCodes.code_challenge_method),
+        sql`expires_at > now()`,
+      ),
+    )
+    .returning({ jwt: authCodes.jwt });
+  return rows[0]?.jwt ?? null;
+}
+
+/** Atomically consume a CLI auth code after matching its PKCE challenge. */
+export async function consumeCliAuthCode(
+  db: Db,
+  code: string,
+  state: string,
+  codeChallenge: string,
+  codeChallengeMethod: string,
+): Promise<string | null> {
+  const rows = await db
+    .delete(authCodes)
+    .where(
+      and(
+        eq(authCodes.code, code),
+        eq(authCodes.cli_state, state),
+        eq(authCodes.code_challenge, codeChallenge),
+        eq(authCodes.code_challenge_method, codeChallengeMethod),
+        sql`expires_at > now()`,
+      ),
+    )
     .returning({ jwt: authCodes.jwt });
   return rows[0]?.jwt ?? null;
 }

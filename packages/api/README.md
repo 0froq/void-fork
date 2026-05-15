@@ -98,7 +98,10 @@ drizzle/
 4. if needed, links the provider to an existing user with the same email
 5. otherwise creates a new user
 6. for GitHub logins, optionally grants preview access to a configured GitHub repository
-7. signs a JWT and redirects back with `?token=...`
+7. signs a JWT and redirects back:
+   - dashboard redirects receive a short-lived `?code=...` for `POST /auth/exchange`
+   - new CLI redirects with `code_challenge_method=S256` receive a short-lived `?code=...` for `POST /auth/cli/token`
+   - legacy localhost CLI redirects still receive `?token=...`
 
 The CLI entrypoint is `void auth login`, not `void login`.
 
