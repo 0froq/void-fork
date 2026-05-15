@@ -218,6 +218,19 @@ describe('collectAndHashAssets', () => {
     expect(assetFiles.size).toBe(1);
   });
 
+  it('excludes dotenv files from manifest', async () => {
+    mkdirSync(join(TMP, 'nested'), { recursive: true });
+    writeFileSync(join(TMP, 'index.html'), '<html></html>');
+    writeFileSync(join(TMP, '.env.local'), 'SECRET_TOKEN=should-not-be-public');
+    writeFileSync(join(TMP, '.env.production.local'), 'PROD_SECRET=should-not-be-public');
+    writeFileSync(join(TMP, 'nested', '.env'), 'NESTED_SECRET=should-not-be-public');
+
+    const { assetManifest, assetFiles } = await collectAndHashAssets(TMP);
+
+    expect(Object.keys(assetManifest)).toEqual(['/index.html']);
+    expect(assetFiles.size).toBe(1);
+  });
+
   it('honors custom .assetsignore patterns', async () => {
     mkdirSync(join(TMP, 'secret'), { recursive: true });
     writeFileSync(join(TMP, 'index.html'), '<html></html>');
