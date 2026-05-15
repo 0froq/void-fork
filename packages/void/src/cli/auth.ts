@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { Entry } from '@napi-rs/keyring';
@@ -212,6 +213,7 @@ export async function runLogin(
   const { exec } = await import('node:child_process');
 
   const apiUrl = getApiUrl(root);
+  const state = randomBytes(32).toString('hex');
 
   return new Promise<string>((resolve, reject) => {
     const server = http.createServer((req, res) => {
@@ -219,6 +221,12 @@ export async function runLogin(
       if (url.pathname !== '/callback') {
         res.writeHead(404);
         res.end('Not found');
+        return;
+      }
+
+      if (url.searchParams.get('state') !== state) {
+        res.writeHead(400, { 'Content-Type': 'text/html' });
+        res.end(page('Login failed', 'Invalid login callback. Please try again.'));
         return;
       }
 
@@ -264,10 +272,13 @@ export async function runLogin(
 
       const port = addr.port;
       const redirect = `http://localhost:${port}/callback`;
-      const loginUrl = `${apiUrl}/auth/login?redirect=${encodeURIComponent(redirect)}&provider=${provider}`;
+      const loginUrl = new URL('auth/login', apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`);
+      loginUrl.searchParams.set('redirect', redirect);
+      loginUrl.searchParams.set('provider', provider);
+      loginUrl.searchParams.set('state', state);
 
-      onUrl?.(loginUrl);
-      openBrowser(loginUrl, exec);
+      onUrl?.(loginUrl.href);
+      openBrowser(loginUrl.href, exec);
     });
 
     // 5-minute timeout
