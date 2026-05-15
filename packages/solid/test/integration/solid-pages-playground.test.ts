@@ -627,6 +627,19 @@ describe('solid-pages client (dev)', () => {
     }
   });
 
+  it('dev: does not prebundle @void/solid in the worker environment', () => {
+    const workerDepsDir = join(ROOT, 'playground/solid-pages/node_modules/.vite/deps_void_worker');
+    const metadataPath = join(workerDepsDir, '_metadata.json');
+
+    expect(existsSync(metadataPath)).toBe(true);
+    const metadata = JSON.parse(readFileSync(metadataPath, 'utf-8')) as {
+      optimized?: Record<string, unknown>;
+    };
+
+    expect(metadata.optimized).not.toHaveProperty('@void/solid');
+    expect(existsSync(join(workerDepsDir, '@void_solid.js'))).toBe(false);
+  });
+
   it('dev: SSR pages, Inertia protocol, form handling, API coexistence', async () => {
     // 1. Initial page load returns SSR HTML with embedded page data
     const rootRes = await fetch(`${DEV_BASE}/`);

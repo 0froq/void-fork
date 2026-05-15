@@ -4,6 +4,8 @@ import solid from 'vite-plugin-solid';
 import { islandsPlugin } from './plugin-islands.ts';
 import { pagesPlugin } from './plugin-pages.ts';
 
+const SOLID_RUNTIME_PACKAGE = '@void/solid';
+
 type PrefetchConfig = {
   hoverDelay?: number;
   cacheFor?: number | string | [string, string];
@@ -20,17 +22,24 @@ export type VoidSolidOptions = Readonly<{
 // transform, emitting `import { jsx } from "react/jsx-runtime"` — which then
 // fails to resolve in a Solid project. Letting `vite-plugin-solid` see the
 // source directly keeps JSX compilation correct.
+function excludeRuntimeFromOptimizeDeps() {
+  return { exclude: [SOLID_RUNTIME_PACKAGE] };
+}
+
 function configPlugin(): Plugin {
   return {
     name: 'void:solid:config',
     config() {
       return {
-        optimizeDeps: { exclude: ['@void/solid'] },
+        optimizeDeps: excludeRuntimeFromOptimizeDeps(),
         ssr: {
-          noExternal: ['@void/solid'],
-          optimizeDeps: { exclude: ['@void/solid'] },
+          noExternal: [SOLID_RUNTIME_PACKAGE],
+          optimizeDeps: excludeRuntimeFromOptimizeDeps(),
         },
       };
+    },
+    configEnvironment() {
+      return { optimizeDeps: excludeRuntimeFromOptimizeDeps() };
     },
   };
 }
