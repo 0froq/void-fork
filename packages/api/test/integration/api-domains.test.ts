@@ -44,13 +44,29 @@ describe('POST /projects/:id/domains', () => {
   it('adds a custom domain', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'domain-app');
-    mockCfApi({
+    const fetchMock = mockCfApi({
       createCustomHostname: () =>
         cfSuccess({
           id: 'ch-123',
           hostname: 'app.example.com',
           status: 'pending',
-          ssl: { status: 'pending' },
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [
+              {
+                txt_name: '_acme-challenge.app.example.com',
+                txt_value: 'acme-v',
+                status: 'pending_validation',
+              },
+            ],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.app.example.com',
+            value: 'ownership-v',
+          },
         }),
     });
 
@@ -72,11 +88,32 @@ describe('POST /projects/:id/domains', () => {
       hostname: string;
       status: string;
       cname_target: string;
+      ownership_verification?: { name: string; value: string };
+      ssl_validation_records?: Array<{ txt_name?: string; txt_value?: string }>;
     };
     expect(body.id).toMatch(/^dom_/);
     expect(body.hostname).toBe('app.example.com');
     expect(body.status).toBe('pending');
     expect(body.cname_target).toBe('cname.void.app');
+    expect(body.ownership_verification?.name).toBe('_cf-custom-hostname.app.example.com');
+    expect(body.ssl_validation_records).toBeDefined();
+
+    // Verify the CF request body has the TXT-DCV shape with custom_metadata.
+    const cfCreateCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
+      const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
+      const init = call[1] as RequestInit | undefined;
+      return url.includes('/custom_hostnames') && init?.method === 'POST';
+    });
+    expect(cfCreateCall).toBeDefined();
+    const cfBody = JSON.parse((cfCreateCall![1] as RequestInit).body as string) as {
+      hostname: string;
+      ssl: { method: string; type: string };
+      custom_metadata: { project_id: string; user_id: string; created_at: string };
+    };
+    expect(cfBody.ssl.method).toBe('txt');
+    expect(cfBody.custom_metadata.project_id).toBe(project.id);
+    expect(cfBody.custom_metadata.user_id).toBe(user.id);
+    expect(typeof cfBody.custom_metadata.created_at).toBe('string');
   });
 
   it('returns 404 for non-existent project', async () => {
@@ -244,7 +281,23 @@ describe('GET /projects/:id/domains/:domainId', () => {
           id: 'ch-status',
           hostname: 'status.example.com',
           status: 'pending',
-          ssl: { status: 'pending_validation' },
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [
+              {
+                txt_name: '_acme-challenge.status.example.com',
+                txt_value: 'acme-v',
+                status: 'pending_validation',
+              },
+            ],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.status.example.com',
+            value: 'ownership-v',
+          },
         }),
     });
 
@@ -268,10 +321,14 @@ describe('GET /projects/:id/domains/:domainId', () => {
       hostname: string;
       status: string;
       ssl_status: string;
+      ownership_verification?: { name: string; value: string };
+      ssl_validation_records?: Array<{ txt_name?: string; txt_value?: string }>;
     };
     expect(body.hostname).toBe('status.example.com');
     expect(body.status).toBe('pending');
     expect(body.ssl_status).toBe('pending_validation');
+    expect(body.ownership_verification?.name).toBe('_cf-custom-hostname.status.example.com');
+    expect(body.ssl_validation_records).toBeDefined();
   });
 
   it('activates domain and writes KV when CF reports active', async () => {
@@ -283,7 +340,12 @@ describe('GET /projects/:id/domains/:domainId', () => {
           id: 'ch-active',
           hostname: 'active.example.com',
           status: 'active',
-          ssl: { status: 'active' },
+          ssl: { status: 'active', method: 'txt', type: 'dv' },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.active.example.com',
+            value: 'ownership-v',
+          },
         }),
     });
 
@@ -325,6 +387,175 @@ describe('GET /projects/:id/domains/:domainId', () => {
       workerName: 'user-activate-domain',
       projectId: project.id,
     });
+  });
+
+  it('does not write KV routing when CF reports active hostname but SSL is still validating', async () => {
+    // Defense-in-depth path: CF returned `status: 'active'` (e.g. carried over
+    // from a prior active state), but `ssl.status` is `pending_validation` —
+    // the rare "active hostname with SSL re-validation" window during cert
+    // renewal. The CF for SaaS docs require `ssl.status === 'active'` before
+    // serving production traffic, so the gate must keep the domain pending.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pending-ssl');
+    mockCfApi({
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-pending-ssl',
+          hostname: 'pending-ssl.example.com',
+          status: 'active',
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [
+              {
+                txt_name: '_acme-challenge.pending-ssl.example.com',
+                txt_value: 'acme-v',
+                status: 'pending_validation',
+              },
+            ],
+          },
+        }),
+    });
+
+    await env.db.insert(domains).values({
+      id: 'dom_pending_ssl',
+      project_id: project.id,
+      hostname: 'pending-ssl.example.com',
+      cf_hostname_id: 'ch-pending-ssl',
+      status: 'pending',
+    });
+
+    // Seed slug routing so the activation path COULD theoretically write.
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: 'user-pending-ssl', projectId: project.id }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains/dom_pending_ssl`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      status: string;
+      ssl_status: string;
+      ssl_validation_records?: Array<{ txt_name?: string; txt_value?: string }>;
+    };
+    // Response status reflects the gate, not CF's raw status.
+    expect(body.status).toBe('pending');
+    expect(body.ssl_status).toBe('pending_validation');
+    expect(body.ssl_validation_records).toBeDefined();
+
+    // DB row must still be pending.
+    const [row] = await env.db
+      .select({ status: domains.status })
+      .from(domains)
+      .where(eq(domains.id, 'dom_pending_ssl'));
+    expect(row?.status).toBe('pending');
+
+    // Critical assertion: KV routing entry must NOT have been written.
+    const domainRouting = await env.ROUTING.get('domain:pending-ssl.example.com');
+    expect(domainRouting).toBeNull();
+  });
+
+  it('does not activate legacy HTTP-DCV hostnames even when CF reports active', async () => {
+    // Regression: a custom hostname created before the switch to TXT DCV could
+    // still be polled by the status endpoint. Its `ssl.method` is `http`, which
+    // remains vulnerable to the wildcard-CNAME hijack the TXT switch closes,
+    // so the activation gate must keep the domain pending until it's recreated
+    // with TXT DCV.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'legacy-http');
+    mockCfApi({
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-legacy-http',
+          hostname: 'legacy-http.example.com',
+          status: 'active',
+          ssl: { status: 'active', method: 'http', type: 'dv' },
+        }),
+    });
+
+    await env.db.insert(domains).values({
+      id: 'dom_legacy_http',
+      project_id: project.id,
+      hostname: 'legacy-http.example.com',
+      cf_hostname_id: 'ch-legacy-http',
+      status: 'pending',
+    });
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: 'user-legacy-http', projectId: project.id }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains/dom_legacy_http`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe('pending');
+
+    const [row] = await env.db
+      .select({ status: domains.status })
+      .from(domains)
+      .where(eq(domains.id, 'dom_legacy_http'));
+    expect(row?.status).toBe('pending');
+
+    expect(await env.ROUTING.get('domain:legacy-http.example.com')).toBeNull();
+  });
+
+  it('keeps domain pending when slug routing is absent', async () => {
+    // Regression: CF reports active but the project has never been deployed,
+    // so `project.slug` is missing from KV. Flipping the DB row to active
+    // without writing `domain:<hostname>` would leave traffic 404ing forever
+    // (the gate would no longer fire on subsequent polls). DB and KV must
+    // stay in sync — both pending until the next poll, or until a deploy
+    // populates the slug entry.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'no-slug-routing');
+    mockCfApi({
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-no-slug',
+          hostname: 'no-slug.example.com',
+          status: 'active',
+          ssl: { status: 'active', method: 'txt', type: 'dv' },
+        }),
+    });
+
+    await env.db.insert(domains).values({
+      id: 'dom_no_slug',
+      project_id: project.id,
+      hostname: 'no-slug.example.com',
+      cf_hostname_id: 'ch-no-slug',
+      status: 'pending',
+    });
+    // Intentionally do NOT seed `project.slug` in ROUTING.
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains/dom_no_slug`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe('pending');
+
+    const [row] = await env.db
+      .select({ status: domains.status })
+      .from(domains)
+      .where(eq(domains.id, 'dom_no_slug'));
+    expect(row?.status).toBe('pending');
+
+    expect(await env.ROUTING.get('domain:no-slug.example.com')).toBeNull();
   });
 });
 

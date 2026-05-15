@@ -896,14 +896,46 @@ const baseDefaultMocks: Omit<CfApiMocks, 'uploadWorker' | 'listWorkerBindings' |
       id: 'ch-test-id',
       hostname: 'test.example.com',
       status: 'pending',
-      ssl: { status: 'pending' },
+      ssl: {
+        status: 'pending_validation',
+        method: 'txt',
+        type: 'dv',
+        validation_records: [
+          {
+            txt_name: '_acme-challenge.test.example.com',
+            txt_value: 'test-acme-token',
+            status: 'pending_validation',
+          },
+        ],
+      },
+      ownership_verification: {
+        type: 'txt',
+        name: '_cf-custom-hostname.test.example.com',
+        value: 'test-ownership-token',
+      },
     }),
   getCustomHostname: () =>
     cfSuccess({
       id: 'ch-test-id',
       hostname: 'test.example.com',
       status: 'pending',
-      ssl: { status: 'pending' },
+      ssl: {
+        status: 'pending_validation',
+        method: 'txt',
+        type: 'dv',
+        validation_records: [
+          {
+            txt_name: '_acme-challenge.test.example.com',
+            txt_value: 'test-acme-token',
+            status: 'pending_validation',
+          },
+        ],
+      },
+      ownership_verification: {
+        type: 'txt',
+        name: '_cf-custom-hostname.test.example.com',
+        value: 'test-ownership-token',
+      },
     }),
   deleteCustomHostname: () => cfSuccess(null),
   purgeCache: () => cfSuccess({ id: 'purge-test-id' }),

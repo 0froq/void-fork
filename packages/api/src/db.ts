@@ -32,6 +32,7 @@ import {
   authCodes,
   migrationRenames,
 } from './schema.ts';
+import type { DomainVerificationData } from './schema.ts';
 import type { AllowlistEntry } from './signup-allowlist.ts';
 import type { PlanId } from './tiers.ts';
 import type {
@@ -1036,11 +1037,18 @@ export async function createDomain(
   projectId: string,
   hostname: string,
   cfHostnameId: string,
+  verificationData?: DomainVerificationData | null,
 ): Promise<Domain> {
   const id = generateId('dom');
   const [row] = await db
     .insert(domains)
-    .values({ id, project_id: projectId, hostname, cf_hostname_id: cfHostnameId })
+    .values({
+      id,
+      project_id: projectId,
+      hostname,
+      cf_hostname_id: cfHostnameId,
+      verification_data: verificationData ?? null,
+    })
     .returning();
   return row;
 }
@@ -1091,6 +1099,14 @@ export async function updateDomainStatus(
   status: Domain['status'],
 ): Promise<void> {
   await db.update(domains).set({ status }).where(eq(domains.id, id));
+}
+
+export async function updateDomainVerificationData(
+  db: Db,
+  id: string,
+  data: DomainVerificationData | null,
+): Promise<void> {
+  await db.update(domains).set({ verification_data: data }).where(eq(domains.id, id));
 }
 
 export async function deleteDomain(db: Db, id: string): Promise<void> {

@@ -7,6 +7,7 @@ import {
   getDomain,
   getDomainByHostname,
   updateDomainStatus,
+  updateDomainVerificationData,
   deleteDomain,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
@@ -15,6 +16,7 @@ import {
   getCustomHostname,
   deleteCustomHostname,
 } from '../provisioning/cloudflare-api.ts';
+import type { DomainVerificationData } from '../schema.ts';
 
 const CNAME_TARGET = `cname.${SITE_DOMAIN}`;
 
@@ -60,14 +62,31 @@ const app = new Hono<ApiEnv>()
       context.env.CF_ZONE_ID,
       context.env.CF_API_TOKEN,
       hostname,
+      {
+        project_id: projectId,
+        user_id: context.get('user').id,
+      },
     );
 
+    const verificationData: DomainVerificationData = {
+      ownership_verification: cfHostname.ownership_verification,
+      ssl_validation_records: cfHostname.ssl.validation_records,
+    };
+
     // Insert domain record
-    const domain = await createDomain(context.get('db'), projectId, hostname, cfHostname.id);
+    const domain = await createDomain(
+      context.get('db'),
+      projectId,
+      hostname,
+      cfHostname.id,
+      verificationData,
+    );
 
     return context.json({
       ...domain,
       cname_target: CNAME_TARGET,
+      ownership_verification: cfHostname.ownership_verification,
+      ssl_validation_records: cfHostname.ssl.validation_records ?? [],
     });
   })
 
@@ -113,22 +132,49 @@ const app = new Hono<ApiEnv>()
       domain.cf_hostname_id,
     );
 
-    // If CF says active and DB says pending, update DB + write KV routing entry
-    if (cfHostname.status === 'active' && domain.status === 'pending') {
-      await updateDomainStatus(context.get('db'), domain.id, 'active');
+    // CF only flips status to `active` after BOTH ownership verification and
+    // SSL DV complete, so `status === 'active'` is itself the verified signal.
+    // Also require `ssl.status === 'active'` per CF for SaaS docs, which call
+    // this out as the production-traffic precondition. Require `ssl.method`
+    // to be `txt` so legacy HTTP-DCV hostnames — vulnerable to the wildcard
+    // CNAME hijack this change closes — cannot be activated by a poll.
+    const gateOk =
+      cfHostname.status === 'active' &&
+      cfHostname.ssl.status === 'active' &&
+      cfHostname.ssl.method === 'txt';
 
-      // Write KV routing entry for this domain
+    // Only activate after KV routing is in place. If the project has never
+    // been deployed, `project.slug` is absent from KV; leaving the DB row in
+    // 'pending' ensures the next poll retries (a future deploy populates the
+    // slug entry). Flipping DB→active before writing KV would leave traffic
+    // 404ing forever, since `domain.status === 'pending'` would no longer
+    // fire on subsequent polls.
+    let routingWritten = false;
+    if (gateOk && domain.status === 'pending') {
       const slugRouting = await context.env.ROUTING.get(project.slug);
       if (slugRouting) {
         await context.env.ROUTING.put(`domain:${domain.hostname}`, slugRouting);
+        await updateDomainStatus(context.get('db'), domain.id, 'active');
+        routingWritten = true;
       }
+    }
+
+    if (cfHostname.ownership_verification || cfHostname.ssl.validation_records) {
+      const verificationData: DomainVerificationData = {
+        ownership_verification: cfHostname.ownership_verification,
+        ssl_validation_records: cfHostname.ssl.validation_records,
+      };
+      await updateDomainVerificationData(context.get('db'), domain.id, verificationData);
+      domain.verification_data = verificationData;
     }
 
     return context.json({
       ...domain,
-      status: cfHostname.status === 'active' ? 'active' : domain.status,
+      status: routingWritten || domain.status === 'active' ? 'active' : domain.status,
       ssl_status: cfHostname.ssl.status,
       verification_errors: cfHostname.verification_errors,
+      ownership_verification: cfHostname.ownership_verification,
+      ssl_validation_records: cfHostname.ssl.validation_records ?? [],
     });
   })
 

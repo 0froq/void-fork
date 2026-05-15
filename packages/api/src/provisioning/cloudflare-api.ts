@@ -339,7 +339,26 @@ export type CustomHostnameInfo = Readonly<{
   id: string;
   hostname: string;
   status: string;
-  ssl: { status: string };
+  ssl: Readonly<{
+    status: string;
+    method?: 'http' | 'txt' | 'email';
+    type?: string;
+    txt_name?: string;
+    txt_value?: string;
+    validation_records?: ReadonlyArray<
+      Readonly<{
+        txt_name?: string;
+        txt_value?: string;
+        status?: string;
+      }>
+    >;
+  }>;
+  ownership_verification?: Readonly<{
+    type: 'txt';
+    name: string;
+    value: string;
+  }>;
+  custom_metadata?: Readonly<Record<string, string>>;
   verification_errors?: ReadonlyArray<string>;
 }>;
 
@@ -347,10 +366,19 @@ export async function createCustomHostname(
   zoneId: string,
   apiToken: string,
   hostname: string,
+  metadata: { project_id: string; user_id: string },
 ): Promise<CustomHostnameInfo> {
   return cfFetch<CustomHostnameInfo>(`${CF_ZONE_API_BASE}/${zoneId}/custom_hostnames`, apiToken, {
     method: 'POST',
-    body: JSON.stringify({ hostname, ssl: { method: 'http', type: 'dv' } }),
+    body: JSON.stringify({
+      hostname,
+      ssl: { method: 'txt', type: 'dv' },
+      custom_metadata: {
+        project_id: metadata.project_id,
+        user_id: metadata.user_id,
+        created_at: new Date().toISOString(),
+      },
+    }),
   });
 }
 

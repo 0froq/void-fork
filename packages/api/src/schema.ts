@@ -178,6 +178,21 @@ export const resources = pgTable(
 // ---------------------------------------------------------------------------
 // domains
 // ---------------------------------------------------------------------------
+export type DomainVerificationData = Readonly<{
+  ownership_verification?: Readonly<{
+    type: 'txt';
+    name: string;
+    value: string;
+  }>;
+  ssl_validation_records?: ReadonlyArray<
+    Readonly<{
+      txt_name?: string;
+      txt_value?: string;
+      status?: string;
+    }>
+  >;
+}>;
+
 export const domains = pgTable(
   'domains',
   {
@@ -188,6 +203,7 @@ export const domains = pgTable(
     hostname: text('hostname').notNull().unique(),
     cf_hostname_id: text('cf_hostname_id').notNull(),
     status: text('status').notNull().default('pending').$type<'pending' | 'active'>(),
+    verification_data: jsonb('verification_data').$type<DomainVerificationData | null>(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (table) => [index('idx_domains_project_id').on(table.project_id, table.created_at)],
