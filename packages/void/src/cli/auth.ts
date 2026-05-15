@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { Entry } from '@napi-rs/keyring';
@@ -157,6 +157,59 @@ export function removeToken(root: string = process.cwd()): boolean {
 const DEFAULT_API_URL = 'https://api.void.cloud';
 const STAGING_API_URL = 'https://api.staging.void.cloud';
 
+function base64Url(buffer: Buffer): string {
+  return buffer.toString('base64').replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+}
+
+function createCodeVerifier(): string {
+  return base64Url(randomBytes(32));
+}
+
+function createCodeChallenge(verifier: string): string {
+  return base64Url(createHash('sha256').update(verifier).digest());
+}
+
+async function exchangeLoginCode(
+  apiUrl: string,
+  code: string,
+  state: string,
+  codeVerifier: string,
+): Promise<string> {
+  const base = apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`;
+  const res = await fetch(new URL('auth/cli/token', base), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code,
+      state,
+      code_verifier: codeVerifier,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`auth: Failed to exchange login code (${res.status}). Try logging in again.`);
+  }
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    throw new Error('auth: Login code exchange returned an invalid response.');
+  }
+
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    !('token' in body) ||
+    typeof body.token !== 'string' ||
+    body.token.length === 0
+  ) {
+    throw new Error('auth: Login code exchange did not return a token.');
+  }
+
+  return body.token;
+}
+
 /**
  * Read the API URL from environment or config file.
  * Priority: VOID_API_URL env var > ~/.void/config.json > default
@@ -198,7 +251,8 @@ function openBrowser(url: string, exec: typeof import('node:child_process').exec
 
 /**
  * Start a local HTTP server, open the browser to the platform login page,
- * and wait for the OAuth callback with a JWT token.
+ * and wait for the OAuth callback with a short-lived code. The CLI exchanges
+ * the code itself so the localhost callback never accepts bearer tokens.
  *
  * `onUrl` is invoked with the login URL once the local server is listening,
  * so callers can show the URL to the user as a manual fallback when the
@@ -214,9 +268,31 @@ export async function runLogin(
 
   const apiUrl = getApiUrl(root);
   const state = randomBytes(32).toString('hex');
+  const codeVerifier = createCodeVerifier();
+  const codeChallenge = createCodeChallenge(codeVerifier);
 
   return new Promise<string>((resolve, reject) => {
-    const server = http.createServer((req, res) => {
+    let settled = false;
+
+    const fail = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      server.close();
+      reject(error);
+    };
+
+    const succeed = (token: string): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      server.close();
+      resolve(token);
+    };
+
+    const server = http.createServer(async (req, res) => {
       const url = new URL(req.url!, `http://localhost`);
       if (url.pathname !== '/callback') {
         res.writeHead(404);
@@ -236,8 +312,7 @@ export async function runLogin(
         res.end(
           page('Signup restricted', 'Your email is not on the approved list for this environment.'),
         );
-        server.close();
-        reject(
+        fail(
           new Error(
             'Signup restricted: your email is not on the approved list for this environment.',
           ),
@@ -245,19 +320,32 @@ export async function runLogin(
         return;
       }
 
-      const token = url.searchParams.get('token');
-      if (!token) {
+      if (url.searchParams.has('token')) {
         res.writeHead(400, { 'Content-Type': 'text/html' });
-        res.end(page('Login failed', 'No token received. Please try again.'));
-        server.close();
-        reject(new Error('auth: No token received from callback. Try logging in again.'));
+        res.end(page('Login failed', 'Invalid login callback. Please try again.'));
+        return;
+      }
+
+      const code = url.searchParams.get('code');
+      if (!code) {
+        res.writeHead(400, { 'Content-Type': 'text/html' });
+        res.end(page('Login failed', 'No authorization code received. Please try again.'));
+        return;
+      }
+
+      let token: string;
+      try {
+        token = await exchangeLoginCode(apiUrl, code, state, codeVerifier);
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'text/html' });
+        res.end(page('Login failed', 'Could not complete login. Please try again.'));
+        fail(err instanceof Error ? err : new Error('auth: Failed to complete login.'));
         return;
       }
 
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(page('Login successful!', 'You can close this tab and return to the terminal.'));
-      server.close();
-      resolve(token);
+      succeed(token);
     });
 
     // Close immediately after callback — don't wait for keep-alive timeout
@@ -277,6 +365,8 @@ export async function runLogin(
       const loginUrl = new URL('auth/login', apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`);
       loginUrl.searchParams.set('redirect', redirect.href);
       loginUrl.searchParams.set('provider', provider);
+      loginUrl.searchParams.set('code_challenge', codeChallenge);
+      loginUrl.searchParams.set('code_challenge_method', 'S256');
 
       onUrl?.(loginUrl.href);
       openBrowser(loginUrl.href, exec);
@@ -285,8 +375,7 @@ export async function runLogin(
     // 5-minute timeout
     const timeout = setTimeout(
       () => {
-        server.close();
-        reject(new Error('auth: Login timed out after 5 minutes. Try again.'));
+        fail(new Error('auth: Login timed out after 5 minutes. Try again.'));
       },
       5 * 60 * 1000,
     );

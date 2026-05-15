@@ -1,7 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { createHash } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { runLogin } from '../../src/cli/auth.ts';
 
 const mockExec = vi.fn();
+const exchangeRequests: Array<{ url: string; body: unknown }> = [];
+const originalFetch = globalThis.fetch.bind(globalThis);
+
+function codeChallengeFor(verifier: string): string {
+  return createHash('sha256')
+    .update(verifier)
+    .digest('base64')
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
+}
 
 vi.mock('node:child_process', () => ({
   exec: (...args: Array<unknown>) => mockExec(...args),
@@ -9,6 +21,29 @@ vi.mock('node:child_process', () => ({
 
 beforeEach(() => {
   mockExec.mockReset();
+  exchangeRequests.length = 0;
+  process.env.VOID_API_URL = 'https://api.test';
+
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      input instanceof Request ? input.url : input instanceof URL ? input.href : input.toString();
+
+    if (url.startsWith('http://localhost:')) {
+      return originalFetch(input, init);
+    }
+
+    exchangeRequests.push({
+      url,
+      body: init?.body ? JSON.parse(init.body.toString()) : null,
+    });
+
+    return Response.json({ token: 'real-token' });
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env.VOID_API_URL;
 });
 
 describe('runLogin', () => {
@@ -24,6 +59,8 @@ describe('runLogin', () => {
 
     expect(redirect).toBeTruthy();
     expect(loginUrl.searchParams.has('state')).toBe(false);
+    expect(loginUrl.searchParams.get('code_challenge')).toEqual(expect.any(String));
+    expect(loginUrl.searchParams.get('code_challenge_method')).toBe('S256');
 
     const redirectUrl = new URL(redirect!);
     const state = redirectUrl.searchParams.get('state');
@@ -38,7 +75,54 @@ describe('runLogin', () => {
     expect(attackResponse.status).toBe(400);
 
     const validUrl = new URL(redirectUrl);
-    validUrl.searchParams.set('token', 'real-token');
+    validUrl.searchParams.set('code', 'real-code');
+
+    const validResponse = await fetch(validUrl);
+    expect(validResponse.status).toBe(200);
+    await expect(loginPromise).resolves.toBe('real-token');
+
+    const exchange = exchangeRequests[0];
+    expect(exchange?.body).toEqual(
+      expect.objectContaining({
+        code_verifier: expect.any(String),
+      }),
+    );
+    const codeVerifier = (exchange!.body as { code_verifier: string }).code_verifier;
+
+    expect(exchangeRequests).toEqual([
+      {
+        url: 'https://api.test/auth/cli/token',
+        body: {
+          code: 'real-code',
+          state,
+          code_verifier: expect.any(String),
+        },
+      },
+    ]);
+    expect(loginUrl.searchParams.get('code_challenge')).toBe(codeChallengeFor(codeVerifier));
+  });
+
+  it('rejects attacker tokens when the callback state is copied from the login URL', async () => {
+    let resolveLoginUrl!: (url: string) => void;
+    const loginUrlPromise = new Promise<string>((resolve) => {
+      resolveLoginUrl = resolve;
+    });
+
+    const loginPromise = runLogin('/project', 'github', resolveLoginUrl);
+    const loginUrl = new URL(await loginUrlPromise);
+    const redirect = loginUrl.searchParams.get('redirect');
+
+    expect(redirect).toBeTruthy();
+
+    const redirectUrl = new URL(redirect!);
+    const attackUrl = new URL(redirectUrl);
+    attackUrl.searchParams.set('token', 'attacker-controlled-token');
+
+    const attackResponse = await fetch(attackUrl);
+    expect(attackResponse.status).toBe(400);
+
+    const validUrl = new URL(redirectUrl);
+    validUrl.searchParams.set('code', 'real-code');
 
     const validResponse = await fetch(validUrl);
     expect(validResponse.status).toBe(200);
