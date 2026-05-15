@@ -343,6 +343,15 @@ const SANDBOX_SDK_IMPORT = '@cloudflare/sandbox';
 const SANDBOX_SDK_IMPORT_FILTER = /^@cloudflare\/sandbox$/;
 const DEFAULT_WORKER_ENVIRONMENT_NAME = 'void_worker';
 const DEFAULT_WORKER_OUT_DIR = 'dist/ssr';
+const DEV_ASSET_ROUTING_EXCLUSIONS = [
+  '!/@vite/*',
+  '!/@id/*',
+  '!/@fs/*',
+  '!/@react-refresh',
+  '!/@svelte/*',
+  '!/node_modules/*',
+  '!/__uno.css',
+];
 
 function resolveSandboxSdkEntry(): string {
   return fileURLToPath(import.meta.resolve(SANDBOX_SDK_IMPORT));
@@ -1124,13 +1133,17 @@ export function voidPlugin(options?: {
       }
       workerConfig.vars = { ...(workerConfig.vars as Record<string, string> | undefined), ...env };
 
-      // In dev, remove run_worker_first so Vite's middleware handles
-      // virtual modules (/@vite/*, /__uno.css, etc.) before the CF plugin's
-      // final handler routes unmatched requests to workerd.
-      // run_worker_first is only needed in production for CF edge routing.
+      // In dev, keep document requests on the user worker. If this is deleted,
+      // the CF router may route a page request to the user worker, the dev
+      // override sends that request back through Vite middleware, and Vite's
+      // final Cloudflare handler routes it to the CF router again. Workerd
+      // reports that loop as a hung request.
+      //
+      // Vite's own module URLs still need to bypass the worker so HMR,
+      // virtual modules, and dev CSS are served by Vite middleware directly.
       const assets = workerConfig.assets as { run_worker_first?: Array<string> } | undefined;
-      if (command === 'serve' && assets) {
-        delete (assets as Record<string, unknown>).run_worker_first;
+      if (command === 'serve' && assets?.run_worker_first) {
+        assets.run_worker_first = [...DEV_ASSET_ROUTING_EXCLUSIONS, '/**'];
       }
 
       const watchConfig = { server: { watch: { ignored } } };
