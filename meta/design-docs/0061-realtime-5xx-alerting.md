@@ -81,13 +81,13 @@ One instance per project, keyed by `projectId` via `idFromName`.
 **State:**
 
 ```ts
-interface ErrorAlertState {
+type ErrorAlertState = {
   count: number; // accumulated 5xx errors in current window
   projectId: string;
   userId: string; // project owner (for email lookup)
   slug: string; // project slug (for email copy)
   lastAlertAt: number | null; // epoch ms of last sent alert
-}
+};
 ```
 
 **Constants:**

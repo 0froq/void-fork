@@ -13,10 +13,10 @@
 
 const MAX_CACHE = 256;
 
-export interface CompiledPattern {
+export type CompiledPattern = {
   regex: RegExp;
   paramNames: Array<string>;
-}
+};
 
 const compileCache = new Map<string, CompiledPattern>();
 

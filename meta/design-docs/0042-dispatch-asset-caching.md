@@ -69,10 +69,10 @@ The hashed assets prefix varies by framework:
 Add optional field:
 
 ```typescript
-export interface DeployManifest {
+export type DeployManifest = {
   // ... existing fields ...
   hashedAssetsPrefix?: string;
-}
+};
 ```
 
 ### 2. Deploy CLI (framework)
@@ -88,10 +88,10 @@ Read `hashedAssetsPrefix` from the manifest and include it in the KV routing ent
 Add optional field:
 
 ```typescript
-interface RoutingEntry {
+type RoutingEntry = {
   // ... existing fields ...
   hashedAssetsPrefix?: string;
-}
+};
 ```
 
 ### 5. Dispatch `fetch()`

@@ -4,12 +4,12 @@ import type { User, Project } from '../../types.ts';
 import { formatLimit, formatNumber, formatBytes } from './format.ts';
 import { Layout } from './layout.tsx';
 
-interface ProjectUsage {
+type ProjectUsage = {
   projectId: string;
   slug: string;
   requests: number;
   bandwidthBytes: number;
-}
+};
 
 export function UserDetailPage({
   user,

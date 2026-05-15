@@ -1,7 +1,7 @@
 import { retryWithBackoff } from '../cf-api.ts';
 import { CF_API_BASE, cfFetch, CloudflareApiError } from './cloudflare-api.ts';
 
-export interface ContainerApplicationInfo {
+export type ContainerApplicationInfo = {
   id: string;
   name: string;
   scheduling_policy?: string;
@@ -13,22 +13,22 @@ export interface ContainerApplicationInfo {
     namespace_id?: string;
   };
   max_instances?: number;
-}
+};
 
-export interface SandboxContainerConfig {
+export type SandboxContainerConfig = {
   name: string;
   image: string;
   namespaceId: string;
   instanceType?: string;
   maxInstances?: number;
-}
+};
 
-interface ScriptBinding {
+type ScriptBinding = {
   type: string;
   name?: string;
   class_name?: string;
   namespace_id?: string;
-}
+};
 
 /**
  * Resolve a Durable Object namespace ID for a class on a WfP script.

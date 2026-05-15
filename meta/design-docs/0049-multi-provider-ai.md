@@ -137,7 +137,7 @@ type ThirdPartyModel =
   | `grok/${string}`;
 
 // Overloaded ai.run()
-interface VoidAi {
+type VoidAi = {
   // Workers AI — existing CF Workers AI types
   run<M extends WorkersAiModel>(
     model: M,
@@ -159,10 +159,10 @@ interface VoidAi {
   // Workers AI only (unchanged)
   models(params?: AiModelsParams): Promise<AiModelsResponse>;
   toMarkdown(items: AiToMarkdownInput[], options?: AiOptions): Promise<string>;
-}
+};
 
 // OpenAI-compatible types
-interface ChatCompletionInputs {
+type ChatCompletionInputs = {
   messages: ChatMessage[];
   temperature?: number;
   max_tokens?: number;
@@ -171,26 +171,26 @@ interface ChatCompletionInputs {
   presence_penalty?: number;
   stop?: string | string[];
   stream?: boolean;
-}
+};
 
-interface ChatMessage {
+type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
-}
+};
 
-interface ChatCompletionResponse {
+type ChatCompletionResponse = {
   id: string;
   choices: { index: number; message: ChatMessage; finish_reason: string }[];
   usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-}
+};
 
-interface ChatCompletionChunk {
+type ChatCompletionChunk = {
   choices: {
     index: number;
     delta: { content?: string; role?: string };
     finish_reason: string | null;
   }[];
-}
+};
 ```
 
 ## Proxy Changes

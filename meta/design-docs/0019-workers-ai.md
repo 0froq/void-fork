@@ -342,14 +342,14 @@ Match `(*.env).AI` member expressions in the existing `MemberExpression` visitor
 ### `InferredBindings`
 
 ```ts
-export interface InferredBindings {
+export type InferredBindings = {
   needsD1: boolean;
   needsKV: boolean;
   needsR2: boolean;
   needsAuth: boolean;
   needsQueues: boolean;
   needsAI: boolean; // new
-}
+};
 ```
 
 ## Deploy-Time Wiring
@@ -359,7 +359,7 @@ export interface InferredBindings {
 Add `ai` flag to the bindings schema:
 
 ```ts
-interface DeployManifest {
+type DeployManifest = {
   bindings: {
     d1?: string[];
     kv?: string[];
@@ -367,7 +367,7 @@ interface DeployManifest {
     ai?: boolean; // new — boolean, not string[], since there's only one AI binding
   };
   // ...
-}
+};
 ```
 
 ### Platform provisioning
@@ -416,12 +416,12 @@ if (needsAI) {
 
 ```ts
 declare namespace Cloudflare {
-  interface Env {
+  type Env = {
     DB: D1Database;
     KV: KVNamespace;
     STORAGE: R2Bucket;
     AI: Ai; // new
-  }
+  };
 }
 ```
 

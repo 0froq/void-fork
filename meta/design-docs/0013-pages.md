@@ -87,11 +87,11 @@ export const action = defineHandler.withValidator({ body: createUserSchema })(as
 <script setup lang="ts">
 import { useForm, useShared, Link } from '@void/vue';
 
-interface User {
+type User = {
   id: number;
   name: string;
   email: string;
-}
+};
 defineProps<{ users: User[] }>();
 
 const { auth, flash } = useShared();
@@ -141,13 +141,13 @@ The `<script server lang="ts">` block is extracted by the adapter's Vite plugin 
 
 #### Vue: `<script server>` Props Sharing
 
-In Vue SFCs, `<script server>` and `<script setup>` share module scope in `vue-tsc`. This means a `Props` interface exported from `<script server>` is directly available in `<script setup>` — no import needed:
+In Vue SFCs, `<script server>` and `<script setup>` share module scope in `vue-tsc`. This means a `Props` type exported from `<script server>` is directly available in `<script setup>` — no import needed:
 
 ```vue
 <script server lang="ts">
-export interface Props {
+export type Props = {
   users: User[];
-}
+};
 export const loader = defineHandler<Props>(async (c) => {
   return { users: await db.list('users') };
 });
@@ -162,13 +162,13 @@ The `defineHandler<Props>` generic constrains the handler return type, and the s
 
 #### Companion `.server.ts` Props Pattern
 
-For companion `.server.ts` files (React, or Vue without `<script server>`), the server file exports a `Props` interface that the client component imports:
+For companion `.server.ts` files (React, or Vue without `<script server>`), the server file exports a `Props` type that the client component imports:
 
 ```ts
 // pages/users/index.server.ts
-export interface Props {
+export type Props = {
   users: User[];
-}
+};
 export const loader = defineHandler<Props>(async (c) => {
   return { users: await db.list('users') };
 });

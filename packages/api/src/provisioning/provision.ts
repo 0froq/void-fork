@@ -14,7 +14,7 @@ import {
   getQueueByName,
 } from './cloudflare-api.ts';
 
-export interface WorkerBinding {
+export type WorkerBinding = {
   type: 'd1' | 'kv_namespace' | 'r2_bucket' | 'queue' | 'service' | 'plain_text' | 'hyperdrive';
   name: string;
   id?: string;
@@ -24,7 +24,7 @@ export interface WorkerBinding {
   queue_id?: string;
   service?: string;
   text?: string;
-}
+};
 
 export async function provisionBindings(
   db: Db,

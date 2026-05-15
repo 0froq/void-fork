@@ -11,9 +11,9 @@ const badgeVariants: Record<BadgeVariant, string> = {
     'border-transparent bg-beige text-primary hover:bg-beige/80 dark:bg-slate dark:text-white',
 };
 
-export interface BadgeProps extends HTMLAttributes<HTMLDivElement> {
+export type BadgeProps = HTMLAttributes<HTMLDivElement> & {
   variant?: BadgeVariant;
-}
+};
 
 function Badge({ className, variant = 'default', ...props }: BadgeProps) {
   return (

@@ -1,43 +1,43 @@
 export type IconOption = string | { dark: string; light: string };
 
-export interface FooterLink {
+export type FooterLink = {
   link: string;
   text: string;
-}
+};
 
-export interface FooterColumn {
+export type FooterColumn = {
   items: Array<FooterLink>;
   title: string;
-}
+};
 
-export interface FooterSocialLink {
+export type FooterSocialLink = {
   icon: string;
   label?: string;
   link: string;
-}
+};
 
-export interface FooterConfig {
+export type FooterConfig = {
   copyright?: string;
   message?: string;
   nav?: Array<FooterColumn>;
   social?: Array<FooterSocialLink>;
-}
+};
 
-export interface BannerConfig {
+export type BannerConfig = {
   icon?: 'vite' | 'vitest' | 'rolldown' | 'oxc' | 'viteplus';
   id: string;
   target?: '_self' | '_blank';
   text: string;
   url: string;
-}
+};
 
-export interface HeroAction {
+export type HeroAction = {
   link?: string;
   text: string;
   theme?: 'brand' | 'alt';
-}
+};
 
-export interface HeroConfig {
+export type HeroConfig = {
   actions?: Array<HeroAction>;
   image?: {
     alt?: string;
@@ -45,11 +45,11 @@ export interface HeroConfig {
   };
   tagline?: string;
   text?: string;
-}
+};
 
-export interface FeatureConfig {
+export type FeatureConfig = {
   details?: string;
   icon?: string;
   iconify?: string;
   title: string;
-}
+};

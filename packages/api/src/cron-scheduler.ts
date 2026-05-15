@@ -2,11 +2,11 @@ import { DurableObject } from 'cloudflare:workers';
 import { CronExpressionParser } from 'cron-parser';
 import type { ApiEnv } from './env.ts';
 
-interface CronState {
+type CronState = {
   workerName: string;
   schedules: Array<{ name: string; cron: string }>;
   proxyToken?: string;
-}
+};
 
 /**
  * Convert a CF/Quartz-style cron expression to Unix-style for cron-parser.

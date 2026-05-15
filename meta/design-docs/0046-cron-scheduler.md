@@ -37,10 +37,10 @@ New DO class on the API worker, keyed by project ID (`env.CRON_SCHEDULER.idFromN
 **Storage:**
 
 ```typescript
-interface CronSchedulerState {
+type CronSchedulerState = {
   workerName: string; // e.g. "user-kitchen-sink"
   schedules: ScheduleMeta[]; // [{ name: "heartbeat", cron: "* * * * *" }]
-}
+};
 ```
 
 **Endpoints (via internal fetch):**

@@ -1,12 +1,12 @@
 import { verifyJwt } from './jwt.ts';
 
-export interface DashboardSession {
+export type DashboardSession = {
   token: string;
   user: {
     id: string;
     login: string;
   };
-}
+};
 
 export async function authenticateDashboardToken(
   token: string | undefined,

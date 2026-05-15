@@ -20,10 +20,10 @@ Add browser-native [View Transition API](https://developer.mozilla.org/en-US/doc
 ### Plugin Config
 
 ```ts
-export interface VoidVueOptions {
+export type VoidVueOptions = {
   vue?: Parameters<typeof vue>[0];
   viewTransitions?: boolean; // default: false
-}
+};
 ```
 
 ### Link Component

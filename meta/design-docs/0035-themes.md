@@ -221,11 +221,11 @@ Theme authors ship a typed composable:
 // composables/useThemeConfig.ts
 import { inject } from '@void/vue';
 
-interface DocsThemeConfig {
+type DocsThemeConfig = {
   logo?: string;
   nav?: { text: string; link: string }[];
   sidebar?: Record<string, string[]>;
-}
+};
 
 export function useThemeConfig(): DocsThemeConfig {
   return inject<DocsThemeConfig>('void-theme-options', {});

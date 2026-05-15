@@ -15,7 +15,7 @@ export function isDevBypass(env: { DEV_AUTH_BYPASS?: string; PLATFORM_ENV?: stri
   return pe === undefined || pe === '' || pe === 'staging';
 }
 
-export interface ApiEnv extends Env {
+export type ApiEnv = Env & {
   Bindings: {
     HYPERDRIVE: Hyperdrive;
     ISR_CACHE: KVNamespace;
@@ -94,4 +94,4 @@ export interface ApiEnv extends Env {
     user: User;
     db: Db;
   };
-}
+};

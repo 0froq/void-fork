@@ -183,7 +183,7 @@ async function hmacSign(data: string, secret: string): Promise<string> {
 
 **Step 2: Update types.ts**
 
-Remove `DB: D1Database` from the `Env` interface in `packages/proxy/src/types.ts`.
+Remove `DB: D1Database` from the `Env` type in `packages/proxy/src/types.ts`.
 
 ---
 

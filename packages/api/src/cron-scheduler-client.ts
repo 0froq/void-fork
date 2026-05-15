@@ -1,10 +1,10 @@
 import type { ApiEnv } from './env.ts';
 
-interface CronSyncState {
+type CronSyncState = {
   workerName: string;
   schedules: Array<{ name: string; cron: string }>;
   proxyToken?: string;
-}
+};
 
 /**
  * Retry an async DO RPC a small number of times before giving up. Same-account

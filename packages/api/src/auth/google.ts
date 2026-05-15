@@ -1,9 +1,9 @@
-export interface GoogleUser {
+export type GoogleUser = {
   id: string;
   email: string;
   name: string;
   emailVerified: boolean;
-}
+};
 
 export function getGoogleAuthorizeUrl(
   clientId: string,

@@ -1,6 +1,6 @@
 import { compilePattern, substituteParams } from './pattern.ts';
 
-export interface RedirectRule {
+export type RedirectRule = {
   source: string;
   destination: string;
   status: number;
@@ -12,7 +12,7 @@ export interface RedirectRule {
    * apply to every host bound to the project.
    */
   host?: string;
-}
+};
 
 export type RoutingRuleResult =
   | { type: 'redirect'; destination: string; status: number }

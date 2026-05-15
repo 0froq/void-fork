@@ -140,14 +140,14 @@ If the Worker hits its CPU limit before all groups resolve, the stream closes. T
 ### PageObject extension
 
 ```ts
-interface PageObject {
+type PageObject = {
   component: string;
   props: Record<string, unknown>;
   shared: Record<string, unknown>;
   url: string;
   errors: Record<string, string> | null;
   deferred: string[]; // NEW — group names
-}
+};
 ```
 
 ## Client Implementation
@@ -155,11 +155,11 @@ interface PageObject {
 ### `Deferred<T>` type
 
 ```ts
-interface Deferred<T> {
+type Deferred<T> = {
   readonly value: T | null;
   readonly loading: boolean;
   readonly error: Error | null;
-}
+};
 ```
 
 At runtime, created as a Vue reactive object:

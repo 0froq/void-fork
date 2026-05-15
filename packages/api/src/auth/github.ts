@@ -1,9 +1,9 @@
-export interface GitHubUser {
+export type GitHubUser = {
   id: number;
   login: string;
   email: string | null;
   emailVerified: boolean;
-}
+};
 
 export function getGitHubAuthorizeUrl(
   clientId: string,

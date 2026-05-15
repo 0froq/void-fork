@@ -378,7 +378,7 @@ Durable Object instance naming should also be deterministic:
 The deploy manifest needs richer WebSocket metadata than a bare list of class names.
 
 ```ts
-interface DeployManifest {
+type DeployManifest = {
   version: number;
   bindings: {
     d1?: string[];
@@ -402,7 +402,7 @@ interface DeployManifest {
       deletedClasses?: string[];
     }[];
   };
-}
+};
 ```
 
 ### Provisioning Flow

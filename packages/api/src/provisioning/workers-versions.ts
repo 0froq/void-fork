@@ -1,25 +1,25 @@
 import { cfFetch, CF_API_BASE } from './cloudflare-api.ts';
 
-export interface WorkerVersion {
+export type WorkerVersion = {
   id: string;
   number: number;
   metadata: {
     created_on: string;
     author_email: string;
   };
-}
+};
 
-export interface DeploymentVersionEntry {
+export type DeploymentVersionEntry = {
   version_id: string;
   percentage: number;
-}
+};
 
-export interface WorkerDeployment {
+export type WorkerDeployment = {
   id: string;
   versions: Array<DeploymentVersionEntry>;
   created_on: string;
   author_email: string;
-}
+};
 
 export async function listWorkerVersions(
   accountId: string,

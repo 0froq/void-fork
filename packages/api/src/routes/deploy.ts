@@ -1396,12 +1396,12 @@ const HEX_32_REGEX = /^[0-9a-f]{32}$/;
 // which is the whole reason this endpoint exists.
 const MAX_JSON_DEPLOY_BODY_BYTES = 64 * 1024 * 1024;
 
-interface UploadUrlsRequestAsset {
+type UploadUrlsRequestAsset = {
   blake3: string;
   md5: string;
   size: number;
   contentType: string;
-}
+};
 
 /**
  * Validate a single `assets[]` entry from `POST /:id/deploy/upload-urls`.

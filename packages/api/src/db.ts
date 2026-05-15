@@ -1159,14 +1159,14 @@ export async function getSystemStats(
   };
 }
 
-export interface CliVersionDeploymentStats {
+export type CliVersionDeploymentStats = {
   cli_version: string | null;
   deployments: number;
   projects: number;
   users: number;
   first_seen: string;
   last_seen: string;
-}
+};
 
 export async function getCliVersionDeploymentStats(
   db: Db,

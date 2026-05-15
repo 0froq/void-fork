@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 import { type CronFireMessage, processCronFiresBatch } from '../../src/cron-fires-queue.ts';
 import type { ApiEnv } from '../../src/env.ts';
 
-interface QueueMessageStub {
+type QueueMessageStub = {
   body: CronFireMessage;
   ack: ReturnType<typeof vi.fn>;
   retry: ReturnType<typeof vi.fn>;
-}
+};
 
 function makeMessage(body: CronFireMessage): QueueMessageStub {
   return { body, ack: vi.fn(), retry: vi.fn() };

@@ -1,10 +1,10 @@
-export interface JwtPayload {
+export type JwtPayload = {
   sub: string;
   login: string;
   aud: string;
   iat: number;
   exp: number;
-}
+};
 
 const EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
 

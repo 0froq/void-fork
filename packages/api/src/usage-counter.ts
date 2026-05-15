@@ -7,7 +7,7 @@ import { getPlanLimits, isWithinLimit } from './tiers.ts';
 
 // --- Exported types ---
 
-export interface CounterState {
+export type CounterState = {
   totalRequests: number;
   totalNeurons: number;
   plan: string;
@@ -15,16 +15,16 @@ export interface CounterState {
   requestsSuspended: boolean;
   aiSuspended: boolean;
   projectSlugs: Record<string, string>; // projectId → slug
-}
+};
 
-export interface UsageEvent {
+export type UsageEvent = {
   projectId: string;
   userId: string;
   slug: string;
   requests: number;
   responseBytes: number;
   status?: number;
-}
+};
 
 // --- Pure functions (exported for unit testing) ---
 

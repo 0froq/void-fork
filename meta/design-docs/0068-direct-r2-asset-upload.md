@@ -169,7 +169,7 @@ not yet a workspace dep, add it via `npm view aws4fetch version` →
 catalog.
 
 ```ts
-export interface PresignAssetPutOptions {
+export type PresignAssetPutOptions = {
   accountId: string;
   accessKeyId: string;
   secretAccessKey: string;
@@ -178,7 +178,7 @@ export interface PresignAssetPutOptions {
   md5: string; // 32 hex chars
   contentType: string;
   ttlSeconds?: number; // default 600
-}
+};
 
 export async function presignAssetPut(
   opts: PresignAssetPutOptions,

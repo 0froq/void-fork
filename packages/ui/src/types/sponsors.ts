@@ -1,14 +1,14 @@
-export interface Sponsor {
+export type Sponsor = {
   hasDark?: true;
   img: string;
   name: string;
   url: string;
-}
+};
 
 export type SponsorSize = 'big' | 'medium' | 'small' | 'avatar';
 
-export interface SponsorTier {
+export type SponsorTier = {
   items: Array<Sponsor>;
   size: SponsorSize;
   tier: string;
-}
+};

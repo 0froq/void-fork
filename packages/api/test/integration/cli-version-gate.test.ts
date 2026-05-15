@@ -28,12 +28,12 @@ beforeEach(async () => {
   await clearTables(env.db);
 });
 
-interface OutdatedBody {
+type OutdatedBody = {
   error: string;
   message: string;
   minVersion: string;
   clientVersion?: string;
-}
+};
 
 /**
  * Confirms `checkCliVersionOrRespond` rejects stale CLIs at every deploy

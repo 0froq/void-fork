@@ -8,13 +8,13 @@ const DEBOUNCE_MS = 120_000; // 2 minutes
 const COUNT_CAP = 100; // immediate fire
 const COOLDOWN_MS = 86_400_000; // 24 hours
 
-interface ErrorAlertState {
+type ErrorAlertState = {
   count: number;
   projectId: string;
   userId: string;
   slug: string;
   lastAlertAt: number | null;
-}
+};
 
 export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
   private state: ErrorAlertState | null = null;

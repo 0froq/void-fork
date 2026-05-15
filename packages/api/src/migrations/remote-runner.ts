@@ -2,17 +2,17 @@ import { tokenizeSql } from '../sql/tokenize.ts';
 
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 
-export interface RemoteMigration {
+export type RemoteMigration = {
   name: string;
   sql: string;
-}
+};
 
-export interface MigrationFailure {
+export type MigrationFailure = {
   name: string;
   error: string;
-}
+};
 
-export interface MigrationResult {
+export type MigrationResult = {
   applied: Array<string>;
   skipped: Array<string>;
   /**
@@ -30,7 +30,7 @@ export interface MigrationResult {
    * migration and the caller should treat the request as failed (500).
    */
   failed?: MigrationFailure;
-}
+};
 
 /**
  * drizzle-kit unconditionally emits `--> statement-breakpoint` between
@@ -397,10 +397,10 @@ export async function runRemoteMigrations(
   return result;
 }
 
-interface D1Query {
+type D1Query = {
   sql: string;
   params?: Array<unknown>;
-}
+};
 
 /**
  * D1 REST query response shape. `meta` is optional because older callers
@@ -411,17 +411,17 @@ interface D1Query {
  * to detect concurrent-rename conflicts where the winner already renamed
  * the row out from under us and our own UPDATE was a no-op.
  */
-interface D1QueryResponseMeta {
+type D1QueryResponseMeta = {
   changes?: number;
   rows_written?: number;
   rows_read?: number;
   [key: string]: unknown;
-}
+};
 
-interface D1QueryResponse {
+type D1QueryResponse = {
   results: Array<Record<string, unknown>>;
   meta?: D1QueryResponseMeta;
-}
+};
 
 export const D1_REQUEST_TIMEOUT_MS = 30_000;
 

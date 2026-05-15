@@ -281,12 +281,12 @@ The generated page component provides the frontmatter; layout components consume
 Generated at build time by scanning all `.md` files in `pages/`. Each entry contains:
 
 ```ts
-interface MdPage {
+type MdPage = {
   path: string; // route path, e.g. "/docs/getting-started"
   title: string; // from frontmatter.title or first h1
   frontmatter: Record<string, unknown>; // full parsed frontmatter
   headings: { depth: number; slug: string; text: string }[]; // extracted headings
-}
+};
 ```
 
 Flat array, sorted by path. Users filter/sort/group as needed for sidebars and nav. The plugin resolves `@void/md/pages` to a virtual module that exports this array. Updates on HMR in dev when `.md` files are added, removed, or their frontmatter changes.

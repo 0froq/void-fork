@@ -1,9 +1,9 @@
 import { matchLiteralPattern } from './pattern.ts';
 
-export interface HeaderRule {
+export type HeaderRule = {
   pattern: string;
   headers: Array<[string, string]>;
-}
+};
 
 /**
  * Headers that user header rules are not allowed to set.

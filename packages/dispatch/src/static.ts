@@ -1,15 +1,15 @@
-export interface AssetConfig {
+export type AssetConfig = {
   not_found_handling?: 'none' | 'single-page-application' | '404-page';
   html_handling?: 'auto-trailing-slash' | 'force-trailing-slash' | 'drop-trailing-slash' | 'none';
-}
+};
 
-export interface ResolvedAsset {
+export type ResolvedAsset = {
   path: string;
   hash: string;
   redirect?: string;
   notFound?: boolean;
   spa?: boolean;
-}
+};
 
 /**
  * Resolve a request pathname to a manifest entry using AssetConfig rules.

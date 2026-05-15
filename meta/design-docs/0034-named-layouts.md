@@ -222,12 +222,12 @@ The page scanner gains:
 1. **Named layout detection**: Scan `_layouts/` directories for component files. Each file becomes a `NamedLayoutDefinition`:
 
 ```typescript
-interface NamedLayoutDefinition {
+type NamedLayoutDefinition = {
   name: string; // e.g., "home", "post"
   directory: string; // e.g., "" (root) or "guide"
   filePath: string; // e.g., "_layouts/home.vue"
   island?: boolean;
-}
+};
 ```
 
 2. **`layout` extraction**: For all page types, extract the `layout` field. For `.vue`/`.tsx`/`.svelte` pages, parse the exported `layout` constant (same mechanism used for `revalidate` and `prerender`). For `.md` pages, read from frontmatter.

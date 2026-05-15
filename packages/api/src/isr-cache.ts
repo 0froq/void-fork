@@ -3,19 +3,19 @@
  * `@voidcloud/isr-shared` — import from there directly.
  */
 
-export interface IsrRoutingTarget {
+export type IsrRoutingTarget = {
   /** Hostname users visit (e.g., `myproject.void.app` or `example.com`). */
   hostname: string;
   /** KV routing key (e.g., project slug or `domain:<hostname>`). */
   routingKey: string;
-}
+};
 
-export interface IsrDeploymentResolution {
+export type IsrDeploymentResolution = {
   /** Deployment ids dispatch may be serving from, per hostname. */
   perHostname: Map<string, Set<string>>;
   /** Union of every deployment id across every hostname (for KV scans). */
   union: Set<string>;
-}
+};
 
 /**
  * Resolve the set of deployment ids that dispatch may be serving ISR content

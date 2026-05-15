@@ -12,11 +12,11 @@ type ProjectSecretBindings = Pick<
 
 type WorkerSecretBindings = Pick<ApiEnv['Bindings'], 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>;
 
-interface ParsedProjectSecretKeys {
+type ParsedProjectSecretKeys = {
   activeVersion: string;
   rawKeys: Map<string, ArrayBuffer>;
   cryptoKeys: Map<string, Promise<CryptoKey>>;
-}
+};
 
 let cachedKeyConfig:
   | {

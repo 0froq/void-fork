@@ -5,10 +5,10 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { defineHandler, defineHead } from 'void';
 import { getPublicApiUrl } from '../lib/api.ts';
 
-export interface Props {
+export type Props = {
   githubUrl: string;
   googleUrl: string;
-}
+};
 
 export const head = defineHead<Props>(() => ({
   link: [

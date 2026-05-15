@@ -23,7 +23,7 @@ function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
-interface StaticRoutingEntry {
+type StaticRoutingEntry = {
   staticDeploymentId: string;
   projectId: string;
   userId?: string;
@@ -32,9 +32,9 @@ interface StaticRoutingEntry {
   version?: string;
   redirectRules?: Array<{ source: string; destination: string; status: number }>;
   fallbackRules?: Array<{ source: string; destination: string; status: number }>;
-}
+};
 
-interface WorkerRoutingEntry {
+type WorkerRoutingEntry = {
   workerName: string;
   projectId: string;
   type?: 'void' | 'spa' | 'static' | 'framework';
@@ -44,7 +44,7 @@ interface WorkerRoutingEntry {
   redirectRules?: Array<{ source: string; destination: string; status: number }>;
   fallbackRules?: Array<{ source: string; destination: string; status: number }>;
   queryAllowlist?: Record<string, Array<string>>;
-}
+};
 
 type RoutingEntry = StaticRoutingEntry | WorkerRoutingEntry;
 

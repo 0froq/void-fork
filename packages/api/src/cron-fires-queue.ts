@@ -10,21 +10,21 @@ import type { ApiEnv } from './env.ts';
  * runs as a fresh fetch event outside of any DO/RPC context, so the
  * dispatched call resolves to the user worker's default entrypoint.
  */
-export interface CronFireMessage {
+export type CronFireMessage = {
   workerName: string;
   cron: string;
   scheduledTime: number;
   proxyToken?: string;
-}
+};
 
-interface InvokeOutcome {
+type InvokeOutcome = {
   /** True if a Response was received, regardless of status code. */
   responseReceived: boolean;
   status?: number;
   bodySnippet?: string;
   /** True only when the worker script no longer exists. */
   unreachable?: boolean;
-}
+};
 
 /**
  * Cloudflare's WfP dispatch surfaces a missing-worker error as a thrown

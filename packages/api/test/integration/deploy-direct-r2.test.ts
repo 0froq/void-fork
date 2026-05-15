@@ -78,9 +78,9 @@ async function stageAssetInR2(
   );
 }
 
-interface DeployEventBase {
+type DeployEventBase = {
   event: string;
-}
+};
 function isEvent(v: unknown, name: string): v is DeployEventBase {
   return typeof v === 'object' && v !== null && (v as DeployEventBase).event === name;
 }

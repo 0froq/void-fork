@@ -59,12 +59,12 @@ async function signAiToken(projectId: string, secret: string): Promise<string> {
 
 // --- Mock env factory ---
 
-interface MockAi {
+type MockAi = {
   run: ReturnType<typeof vi.fn>;
   models: ReturnType<typeof vi.fn>;
   toMarkdown: ReturnType<typeof vi.fn>;
   gateway: ReturnType<typeof vi.fn>;
-}
+};
 
 function createMockKv(data: Record<string, string> = {}) {
   return {

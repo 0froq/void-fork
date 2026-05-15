@@ -213,12 +213,12 @@ export class MemoryKVNamespace {
   }
 }
 
-interface MemoryR2Entry {
+type MemoryR2Entry = {
   body: ArrayBuffer;
   httpMetadata?: unknown;
   etag: string;
   uploaded: Date;
-}
+};
 
 function memoryR2Etag(): string {
   // Stable-ish etag: monotonically increasing counter is enough for tests
@@ -603,7 +603,7 @@ export function cfError(message: string, status = 400): Response {
 // The state container is fresh per `mockCfApi()` call.
 // ---------------------------------------------------------------------------
 
-export interface SandboxMockHostScript {
+export type SandboxMockHostScript = {
   /** wrangler-style migration_tag — present once `migrations` has been applied. */
   migration_tag?: string;
   /** className -> namespace_id (stable per-script-per-class). */
@@ -619,25 +619,25 @@ export interface SandboxMockHostScript {
   }>;
   /** Raw last-PUT metadata object. */
   metadata: Record<string, unknown>;
-}
+};
 
-export interface SandboxMockContainerApp {
+export type SandboxMockContainerApp = {
   id: string;
   name: string;
   scheduling_policy?: string;
   configuration: { image?: string; instance_type?: string };
   max_instances: number;
   durable_objects: { namespace_id: string };
-}
+};
 
-export interface SandboxMockState {
+export type SandboxMockState = {
   /** scriptName -> recorded dispatch namespace script state. */
   hostScripts: Map<string, SandboxMockHostScript>;
   /** appId -> recorded container application state. */
   containerApps: Map<string, SandboxMockContainerApp>;
   /** Structured ordered recording of every method-modifying call. */
   recordedCalls: Array<{ method: string; url: string; body?: string | undefined }>;
-}
+};
 
 function createSandboxMockState(): SandboxMockState {
   return {
@@ -811,7 +811,7 @@ function parseAppNameQuery(url: string): string | null {
   }
 }
 
-export interface CfApiMocks {
+export type CfApiMocks = {
   createD1: (url: string, init?: RequestInit) => Response;
   createKV: (url: string, init?: RequestInit) => Response;
   createR2: (url: string, init?: RequestInit) => Response;
@@ -846,7 +846,7 @@ export interface CfApiMocks {
   getContainerApp?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   listContainerApps?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   postContainerAppRollout?: (url: string, init?: RequestInit) => Response | Promise<Response>;
-}
+};
 
 const baseDefaultMocks: Omit<CfApiMocks, 'uploadWorker' | 'listWorkerBindings' | 'deleteWorker'> = {
   createD1: () => cfSuccess({ uuid: 'd1-test-uuid', name: 'test-db' }),

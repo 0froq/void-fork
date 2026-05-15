@@ -12,33 +12,33 @@
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
-export interface DeployLogContext {
+export type DeployLogContext = {
   projectId: string;
   projectSlug?: string;
   userId?: string;
   deploymentId?: string;
   branch?: 'wfp' | 'static' | null;
   routingSwitched?: boolean;
-}
+};
 
-export interface DeployLogger {
+export type DeployLogger = {
   with(fields: Partial<DeployLogContext>): DeployLogger;
   debug(phase: string, msg: string, fields?: Record<string, unknown>): void;
   info(phase: string, msg: string, fields?: Record<string, unknown>): void;
   warn(phase: string, msg: string, fields?: Record<string, unknown>): void;
   error(phase: string, msg: string, err: unknown, fields?: Record<string, unknown>): void;
-}
+};
 
 const MAX_CAUSE_DEPTH = 6;
 
-interface SerializedError {
+type SerializedError = {
   name?: string;
   message: string;
   code?: unknown;
   errno?: unknown;
   stack?: string;
   cause?: SerializedError;
-}
+};
 
 function serializeError(input: unknown): SerializedError {
   // Walk the .cause chain up to MAX_CAUSE_DEPTH levels deep, defensively

@@ -109,7 +109,7 @@ No `pnpm overrides` or cross-workspace linking — the platform repo never impor
 
 ## Deploy Protocol Versioning
 
-The `DeployManifest` interface is the only cross-repo coupling — the CLI sends it to the platform API over HTTP. After the split, independent releases could break this contract silently.
+The `DeployManifest` type is the only cross-repo coupling — the CLI sends it to the platform API over HTTP. After the split, independent releases could break this contract silently.
 
 **Strategy:**
 

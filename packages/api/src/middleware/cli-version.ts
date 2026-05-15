@@ -49,12 +49,12 @@ export function compareVersions(a: string, b: string): number | null {
   return 0;
 }
 
-export interface CliOutdatedBody {
+export type CliOutdatedBody = {
   error: 'cli_outdated';
   message: string;
   minVersion: string;
   clientVersion?: string;
-}
+};
 
 /**
  * Returns a 426 response if the request comes from a stale CLI; `null`

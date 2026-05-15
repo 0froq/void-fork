@@ -277,10 +277,10 @@ function isMissingTableError(err: unknown): boolean {
   return /no such table/i.test(msg);
 }
 
-interface LineComment {
+type LineComment = {
   text: string;
   standalone: boolean;
-}
+};
 
 /**
  * Tokenize SQL into executable code and the set of line-comment lines.

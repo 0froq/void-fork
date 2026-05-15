@@ -70,12 +70,12 @@ wire. The manifest `RedirectRule` gains an optional `host` field:
 
 ```ts
 // packages/void/src/cli/types.ts
-export interface RedirectRule {
+export type RedirectRule = {
   source: string; // path pattern, unchanged
   destination: string;
   status: number;
   host?: string; // NEW: literal host the rule is scoped to
-}
+};
 ```
 
 Dispatch matching (`packages/dispatch/src/redirects.ts:21`) adds a host check:

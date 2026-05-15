@@ -157,10 +157,10 @@ Island pages use the exact same `.server.ts` convention as regular pages. The se
 import { defineHandler } from 'vite-cloud';
 import { db } from 'vite-cloud/db';
 
-export interface Props {
+export type Props = {
   post: { title: string; body: string; publishedAt: string };
   comments: Array<{ id: number; author: string; body: string }>;
-}
+};
 
 export const loader = defineHandler<Props>(async (c) => {
   const slug = c.req.param('slug');

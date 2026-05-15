@@ -1,6 +1,6 @@
-interface Env {
+type Env = {
   ANALYTICS: AnalyticsEngineDataset;
-}
+};
 
 function isFetchEvent(event: TraceItem['event']): event is TraceItemFetchEventInfo {
   return event !== null && 'request' in event;

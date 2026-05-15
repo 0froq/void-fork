@@ -4,7 +4,7 @@ import {
   type ProxyTokenLookup,
 } from '../provisioning/cloudflare-api.ts';
 
-export interface BackfillQueueTokensOptions {
+export type BackfillQueueTokensOptions = {
   accountId: string;
   apiToken: string;
   dispatchNamespace: string;
@@ -14,9 +14,9 @@ export interface BackfillQueueTokensOptions {
    * reads `__VOID_PROXY_TOKEN` from the target worker's bindings.
    */
   fetchToken?: (workerName: string) => Promise<ProxyTokenLookup>;
-}
+};
 
-export interface BackfillQueueTokensResult {
+export type BackfillQueueTokensResult = {
   scanned: number;
   updated: number;
   skipped: number;
@@ -35,15 +35,15 @@ export interface BackfillQueueTokensResult {
    * cannot masquerade as a successful migration.
    */
   errored: number;
-}
+};
 
-interface QueueRoutingEntry {
+type QueueRoutingEntry = {
   workerName?: string;
   projectId?: string;
   queueName?: string;
   proxyToken?: string;
   [key: string]: unknown;
-}
+};
 
 /**
  * Iterate every `queue:*` KV entry and stamp `proxyToken` on any entry

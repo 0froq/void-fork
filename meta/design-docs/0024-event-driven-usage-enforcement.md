@@ -80,12 +80,12 @@ Producer: dispatch worker (new `USAGE_QUEUE` binding).
 Consumer: api worker (new queue handler).
 
 ```ts
-interface UsageEvent {
+type UsageEvent = {
   projectId: string;
   userId: string;
   requests: number; // always 1
   responseBytes: number;
-}
+};
 ```
 
 #### Durable Object: `UsageCounter` (in api worker)
@@ -95,14 +95,14 @@ One instance per user, keyed by `userId`.
 Persistent state (DO storage):
 
 ```ts
-interface CounterState {
+type CounterState = {
   totalRequests: number;
   totalNeurons: number;
   billingPeriodStart: string; // ISO date
   requestsSuspended: boolean; // tracking suspension state
   aiSuspended: boolean;
   projectSlugs: Record<string, string>; // projectId → slug (for KV writes)
-}
+};
 ```
 
 HTTP API (called by queue consumer and cron):
@@ -117,10 +117,10 @@ The DO sets an alarm for AI checks (every 15 min if user has projects, otherwise
 #### Updated RoutingEntry
 
 ```ts
-interface RoutingEntry {
+type RoutingEntry = {
   // ... existing fields
   userId: string; // NEW — set at deploy time
-}
+};
 ```
 
 Dispatch needs `userId` to include in queue events. This is immutable per project and set when the deploy endpoint writes the KV routing entry.

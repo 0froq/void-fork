@@ -25,7 +25,7 @@ beforeEach(() => {
   edgeCacheStore.clear();
 });
 
-interface RoutingEntry {
+type RoutingEntry = {
   workerName: string;
   projectId: string;
   userId?: string;
@@ -39,19 +39,19 @@ interface RoutingEntry {
   headerRules?: Array<{ pattern: string; headers: Array<[string, string]> }>;
   redirectRules?: Array<{ source: string; destination: string; status: number; host?: string }>;
   queryAllowlist?: Record<string, Array<string>>;
-}
+};
 
 function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
-interface MockIsrEntry {
+type MockIsrEntry = {
   body: string;
   status?: number;
   createdAt: number;
   ttl: number;
   headers?: Record<string, string>;
-}
+};
 
 function packMockEntry(entry: MockIsrEntry): {
   value: ArrayBuffer;
@@ -1537,14 +1537,14 @@ describe('header rules', () => {
 });
 
 describe('queue relay', () => {
-  interface MockMessage {
+  type MockMessage = {
     id: string;
     timestamp: Date;
     body: unknown;
     attempts: number;
     ack: ReturnType<typeof vi.fn>;
     retry: ReturnType<typeof vi.fn>;
-  }
+  };
 
   function createMockBatch(
     queue: string,

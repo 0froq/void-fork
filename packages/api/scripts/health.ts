@@ -17,11 +17,11 @@ import { join, resolve } from 'node:path';
 
 const isStaging = process.argv.includes('--staging');
 
-interface Config {
+type Config = {
   token?: string;
   stagingToken?: string;
   api?: string;
-}
+};
 
 function readConfig(): Config {
   try {
@@ -43,10 +43,10 @@ if (!token) {
 
 // ── Route discovery ─────────────────────────────────────────────────
 
-interface Route {
+type Route = {
   method: string;
   path: string;
-}
+};
 
 const platformSrc = resolve(import.meta.dirname, '..', 'src');
 

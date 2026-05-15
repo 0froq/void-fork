@@ -82,7 +82,7 @@ form.post('/users'); // explicit URL, no type narrowing
 ### Typed Form Return Type
 
 ```typescript
-interface TypedForm<A extends { body: Record<string, unknown> }> {
+type TypedForm<A extends { body: Record<string, unknown> }> = {
   // Reactive data fields (existing behavior, spread onto form object)
   [K in keyof A["body"]]: A["body"][K];
 
@@ -102,7 +102,7 @@ interface TypedForm<A extends { body: Record<string, unknown> }> {
   recentlySuccessful: boolean;
   reset(...fields: (keyof A["body"] & string)[]): void;
   clearErrors(...fields: (keyof A["body"] & string)[]): void;
-}
+};
 ```
 
 For pages without validators (`body: Record<string, unknown>`), errors falls back to `Partial<Record<string, string>>` — no regression from current behavior.

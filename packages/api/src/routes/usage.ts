@@ -102,36 +102,36 @@ const accountUsage = new Hono<ApiEnv>()
     return c.json({ billingPeriodStart: since.toISOString(), ...totals, projects: projectUsages });
   });
 
-interface AnalyticsRow {
+type AnalyticsRow = {
   requests: number;
   bandwidth_bytes: number;
-}
+};
 
-interface BatchAnalyticsRow extends AnalyticsRow {
+type BatchAnalyticsRow = AnalyticsRow & {
   blob1: string;
-}
+};
 
-interface TopProjectTrafficRow extends BatchAnalyticsRow {
+type TopProjectTrafficRow = BatchAnalyticsRow & {
   last_seen: string;
-}
+};
 
-interface TopProjectTrafficEntry {
+type TopProjectTrafficEntry = {
   projectId: string;
   requests: number;
   bandwidthBytes: number;
   lastSeen: string;
-}
+};
 
-interface ProjectRequestOverviewRow {
+type ProjectRequestOverviewRow = {
   project_id: string;
   bucket: number;
   last_seen: string;
   requests: number;
   responses_4xx: number;
   responses_5xx: number;
-}
+};
 
-interface ProjectRequestOverview {
+type ProjectRequestOverview = {
   requests5m: number;
   requests15m: number;
   lastSeenAt: string | null;
@@ -139,7 +139,7 @@ interface ProjectRequestOverview {
   responses4xx15m: number;
   responses5xx15m: number;
   errorRate5xx15m: number;
-}
+};
 
 function getRequestsDataset(env: { REQUESTS_DATASET?: string; PLATFORM_ENV?: string }): string {
   if (env.REQUESTS_DATASET) {
@@ -423,7 +423,7 @@ async function queryProjectRequestOverview(
   return overview;
 }
 
-interface AiGatewayResponse {
+type AiGatewayResponse = {
   data: {
     viewer: {
       accounts: Array<{
@@ -431,7 +431,7 @@ interface AiGatewayResponse {
       }>;
     };
   };
-}
+};
 
 const COST_PER_NEURON = 0.000011;
 

@@ -22,17 +22,17 @@ function cloudDomainFromHost(host: string): string {
   return host.replace(/^api\./, '');
 }
 
-export interface HealthCheck {
+export type HealthCheck = {
   name: string;
   ok: boolean;
   latencyMs: number;
   error?: string;
-}
+};
 
-export interface HealthResult {
+export type HealthResult = {
   checks: Array<HealthCheck>;
   allOk: boolean;
-}
+};
 
 async function checkUrl(
   name: string,

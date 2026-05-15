@@ -1,4 +1,4 @@
-export interface Env {
+export type Env = {
   DISPATCH: DispatchNamespace;
   ISR_CACHE: KVNamespace;
   ROUTING: KVNamespace;
@@ -7,4 +7,4 @@ export interface Env {
   ANALYTICS: AnalyticsEngineDataset;
   USAGE_QUEUE: Queue<unknown>;
   BASE_HOSTNAME?: string;
-}
+};

@@ -37,7 +37,7 @@ function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
-interface Harness {
+type Harness = {
   routing: {
     workerName: string;
     projectId: string;
@@ -51,7 +51,7 @@ interface Harness {
   servingManifest?: Record<string, string>;
   staticAssets?: Record<string, { content: ArrayBuffer; ct?: string }>;
   workerResponse: Response | ((req: Request) => Response);
-}
+};
 
 function createEnv(h: Harness): { env: Env; workerFetch: ReturnType<typeof vi.fn> } {
   const workerFetch = vi.fn(async (req: Request) =>

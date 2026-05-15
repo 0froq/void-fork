@@ -22,7 +22,7 @@ import { resolveStaticPath, getContentType } from './static.ts';
 import type { AssetConfig } from './static.ts';
 import { buildVariantOriginalUrl, type QueryAllowlist } from './variant-key.ts';
 
-interface RoutingEntry {
+type RoutingEntry = {
   workerName: string;
   projectId: string;
   userId?: string;
@@ -45,9 +45,9 @@ interface RoutingEntry {
   staticDeploymentId?: string;
   assetManifestId?: string;
   assetConfig?: AssetConfig;
-}
+};
 
-interface QueueRoutingEntry {
+type QueueRoutingEntry = {
   workerName: string;
   projectId: string;
   queueName: string;
@@ -56,7 +56,7 @@ interface QueueRoutingEntry {
   // without a matching `x-void-internal` header with 401. Absent on entries
   // written by older API versions.
   proxyToken?: string;
-}
+};
 
 const CLIENT_REVALIDATE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 

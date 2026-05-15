@@ -24,60 +24,60 @@ export type Domain = InferSelectModel<typeof domains>;
 export type PlatformEvent = InferSelectModel<typeof platformEvents>;
 export type Invitation = InferSelectModel<typeof invitations>;
 
-export interface MigrationMeta {
+export type MigrationMeta = {
   name: string;
   destructive: boolean;
-}
+};
 
-export interface ScheduleMeta {
+export type ScheduleMeta = {
   name: string;
   cron: string;
-}
+};
 
-export interface QueueMeta {
+export type QueueMeta = {
   name: string;
   bindingName: string;
   maxBatchSize?: number;
   maxBatchTimeout?: number;
   maxRetries?: number;
   retryDelay?: number;
-}
+};
 
 export const SUPPORTED_MANIFEST_VERSIONS = [3];
 
-export interface AssetConfig {
+export type AssetConfig = {
   not_found_handling?: 'none' | 'single-page-application' | '404-page';
   html_handling?: 'auto-trailing-slash' | 'force-trailing-slash' | 'drop-trailing-slash' | 'none';
-}
+};
 
-export interface WebSocketRouteMeta {
+export type WebSocketRouteMeta = {
   pattern: string;
   filePath: string;
   className: string;
   bindingName?: string;
   mode: 'room' | 'socket';
   hasAuthGate: boolean;
-}
+};
 
-export interface WebSocketMigrationMeta {
+export type WebSocketMigrationMeta = {
   tag: string;
   newClasses?: Array<string>;
   deletedClasses?: Array<string>;
-}
+};
 
-export interface WebSocketManifestMeta {
+export type WebSocketManifestMeta = {
   routes: Array<WebSocketRouteMeta>;
   classes: Array<string>;
   migrations?: Array<WebSocketMigrationMeta>;
-}
+};
 
-export interface SandboxMigrationMeta {
+export type SandboxMigrationMeta = {
   tag: string;
   newSqliteClasses?: Array<string>;
   deletedClasses?: Array<string>;
-}
+};
 
-export interface SandboxManifestMeta {
+export type SandboxManifestMeta = {
   bindingName: string;
   className: string;
   containerName: string;
@@ -85,20 +85,20 @@ export interface SandboxManifestMeta {
   instanceType?: string;
   maxInstances?: number;
   migrations?: Array<SandboxMigrationMeta>;
-}
+};
 
-export interface LiveMigrationMeta {
+export type LiveMigrationMeta = {
   tag: string;
   newSqliteClasses?: Array<string>;
-}
+};
 
-export interface LiveManifestMeta {
+export type LiveManifestMeta = {
   bindingName: string;
   className: string;
   storage: 'sqlite';
   classes: Array<string>;
   migrations?: Array<LiveMigrationMeta>;
-}
+};
 
 /**
  * Manifest header-rule shape. Mirrors `HeaderRule` in `dispatch/src/headers.ts`
@@ -106,10 +106,10 @@ export interface LiveManifestMeta {
  * Structural equivalence across the three is pinned by
  * `packages/dispatch/test/unit/framework-contract.test.ts`.
  */
-export interface HeaderRule {
+export type HeaderRule = {
   pattern: string;
   headers: Array<[string, string]>;
-}
+};
 
 /**
  * Manifest redirect/rewrite rule shape. Mirrors `RedirectRule` in
@@ -117,7 +117,7 @@ export interface HeaderRule {
  * `packages/void/src/cli/types.ts`. Structural equivalence across the three
  * is pinned by `packages/dispatch/test/unit/framework-contract.test.ts`.
  */
-export interface RedirectRule {
+export type RedirectRule = {
   source: string;
   destination: string;
   status: number;
@@ -133,7 +133,7 @@ export interface RedirectRule {
    * to the project.
    */
   host?: string;
-}
+};
 
 /**
  * Statuses accepted on manifest `redirectRules` entries at ingest:
@@ -149,7 +149,7 @@ export const MANIFEST_REDIRECT_RULE_STATUSES: ReadonlySet<number> = new Set([
   200, 301, 302, 303, 307, 308,
 ]);
 
-export interface DeployManifest {
+export type DeployManifest = {
   version: number;
   /**
    * Asset manifest schema version. Absent / 1 = legacy
@@ -199,7 +199,7 @@ export interface DeployManifest {
   websocket?: WebSocketManifestMeta;
   sandbox?: SandboxManifestMeta;
   live?: LiveManifestMeta;
-}
+};
 
 export type DeployEvent =
   | { event: 'start'; deploymentId: string }

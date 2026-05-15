@@ -160,7 +160,7 @@ Dispatch gets significantly simpler. It no longer serves static assets — CF's 
 ### Simplified RoutingEntry
 
 ```ts
-interface RoutingEntry {
+type RoutingEntry = {
   workerName: string; // no longer optional — every deploy has a worker
   projectId: string;
   userId?: string;
@@ -169,7 +169,7 @@ interface RoutingEntry {
   version?: string; // kept for ISR cache invalidation
   limits?: Record<string, number>;
   suspended?: string;
-}
+};
 ```
 
 ### Simplified fetch handler
@@ -242,14 +242,14 @@ async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response
 ### Env
 
 ```ts
-export interface Env {
+export type Env = {
   DISPATCH: DispatchNamespace;
   ASSETS: R2Bucket; // kept — used for ISR cache only
   ROUTING: KVNamespace;
   ANALYTICS: AnalyticsEngineDataset;
   USAGE_QUEUE: Queue<unknown>;
   BASE_HOSTNAME?: string;
-}
+};
 ```
 
 R2 bucket stays for ISR. Future cleanup could rename binding to `ISR_CACHE`.
@@ -303,7 +303,7 @@ This is viable because Void is pre-launch — there are no third-party CLI consu
 ### Version 2 manifest
 
 ```ts
-interface DeployManifest {
+type DeployManifest = {
   version: 2;
   bindings: { ... };          // unchanged
   // Removed: assetHashes, assetsDir, static, headers
@@ -324,7 +324,7 @@ interface DeployManifest {
   schedules?: ScheduleMeta[];
   queues?: QueueMeta[];
   framework?: boolean;
-}
+};
 ```
 
 The `assetConfig` maps directly to CF's asset config in the upload session. For static-only deploys (previously `manifest.static`), the CLI sets `assetConfig.not_found_handling` to `"single-page-application"` or `"404-page"` and omits worker files — the API generates the passthrough worker.

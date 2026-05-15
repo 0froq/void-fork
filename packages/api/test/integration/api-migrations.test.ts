@@ -67,16 +67,16 @@ afterEach(() => {
  * rows as in-memory maps, and always returns success for unknown
  * application SQL unless a failing pattern says otherwise.
  */
-interface FailingRule {
+type FailingRule = {
   match: RegExp;
   message: string;
   status?: number;
   // If true, only fail the first N matches then succeed afterwards
   maxHits?: number;
   hits?: number;
-}
+};
 
-interface D1MockState {
+type D1MockState = {
   trackingRows: Map<string, string>;
   legacyRows?: Map<string, string>;
   failingSqlPatterns: Array<FailingRule>;
@@ -101,7 +101,7 @@ interface D1MockState {
    */
   simulateDuplicateCreate?: boolean;
   _seenCreateSql?: Set<string>;
-}
+};
 
 function createD1State(init: Partial<D1MockState> = {}): D1MockState {
   const trackingRows = new Map(init.trackingRows ?? []);

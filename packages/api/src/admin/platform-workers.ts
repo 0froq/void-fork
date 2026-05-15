@@ -1,17 +1,17 @@
 export type PlatformWorkerName = 'proxy' | 'tail' | 'api' | 'dashboard' | 'dispatch';
 
-interface PlatformWorkerDef {
+type PlatformWorkerDef = {
   name: PlatformWorkerName;
   prodScript: string;
   stagingScript: string;
   dependsOn: Array<PlatformWorkerName>;
   deployOrder: number;
   rollbackWarning?: string;
-}
+};
 
-export interface PlatformWorker extends PlatformWorkerDef {
+export type PlatformWorker = PlatformWorkerDef & {
   dependedBy: Array<PlatformWorkerName>;
-}
+};
 
 const WORKER_DEFS: Array<PlatformWorkerDef> = [
   {

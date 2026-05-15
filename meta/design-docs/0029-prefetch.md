@@ -97,7 +97,7 @@ Multiple strategies compose: `['mount', 'hover']` prefetches on mount, then re-p
 A singleton `PrefetchCache` on the router, keyed by `url + method`.
 
 ```ts
-interface CacheEntry {
+type CacheEntry = {
   url: string;
   method: string;
   response: Promise<PageObject>;
@@ -105,7 +105,7 @@ interface CacheEntry {
   expiresAt: number; // Date.now() + expires ms
   singleUse: boolean; // true when cacheFor === 0
   timer: ReturnType<typeof setTimeout>; // auto-eviction
-}
+};
 ```
 
 ### Lookup flow in `router.visit()`

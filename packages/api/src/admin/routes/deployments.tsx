@@ -320,7 +320,7 @@ app.get('/:id/logs', async (c) => {
   return c.json({ data });
 });
 
-interface LogRow {
+type LogRow = {
   outcome: string;
   logData: string;
   exceptionData: string;
@@ -328,7 +328,7 @@ interface LogRow {
   method: string;
   statusCode: string;
   ts: number;
-}
+};
 
 function tryParse(json: string): Array<unknown> {
   try {

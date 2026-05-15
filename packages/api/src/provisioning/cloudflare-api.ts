@@ -1,11 +1,11 @@
 export const CF_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 const CF_ZONE_API_BASE = 'https://api.cloudflare.com/client/v4/zones';
 
-interface CfApiResult<T> {
+type CfApiResult<T> = {
   success: boolean;
   errors: Array<{ code: number; message: string }>;
   result: T;
-}
+};
 
 /**
  * Error thrown by `cfFetch` when the Cloudflare API returns a non-success
@@ -41,10 +41,10 @@ export async function cfFetch<T>(url: string, apiToken: string, init?: RequestIn
   return json.result;
 }
 
-export interface D1DatabaseInfo {
+export type D1DatabaseInfo = {
   uuid: string;
   name: string;
-}
+};
 
 export async function createD1Database(
   accountId: string,
@@ -57,10 +57,10 @@ export async function createD1Database(
   });
 }
 
-export interface KVNamespaceInfo {
+export type KVNamespaceInfo = {
   id: string;
   title: string;
-}
+};
 
 export async function createKVNamespace(
   accountId: string,
@@ -73,9 +73,9 @@ export async function createKVNamespace(
   });
 }
 
-export interface R2BucketInfo {
+export type R2BucketInfo = {
   name: string;
-}
+};
 
 export async function createR2Bucket(
   accountId: string,
@@ -165,10 +165,10 @@ export async function deleteR2Bucket(
 
 // --- Queues ---
 
-export interface QueueInfo {
+export type QueueInfo = {
   queue_id: string;
   queue_name: string;
-}
+};
 
 export async function createQueue(
   accountId: string,
@@ -181,14 +181,14 @@ export async function createQueue(
   });
 }
 
-interface QueueConsumerSettings {
+type QueueConsumerSettings = {
   batch_size?: number;
   max_wait_time_ms?: number;
   max_retries?: number;
   retry_delay?: number;
-}
+};
 
-interface QueueConsumerInfo {
+type QueueConsumerInfo = {
   consumer_id: string;
   // CF Queues API asymmetry: POST/PUT bodies use `script_name`, but
   // GET /queues/{id}/consumers returns the subscribed worker under
@@ -200,7 +200,7 @@ interface QueueConsumerInfo {
   script: string;
   type: string;
   settings: QueueConsumerSettings;
-}
+};
 
 /**
  * Result of a queue consumer upsert. `created` = a new consumer was
@@ -282,11 +282,11 @@ export async function deleteQueue(
   });
 }
 
-interface DispatchWorkerBinding {
+type DispatchWorkerBinding = {
   type: string;
   name: string;
   text?: string;
-}
+};
 
 export type ProxyTokenLookup =
   | { kind: 'found'; token: string }
@@ -335,13 +335,13 @@ export async function getDispatchWorkerProxyToken(
 
 // --- Custom Hostnames (CF for SaaS) ---
 
-export interface CustomHostnameInfo {
+export type CustomHostnameInfo = {
   id: string;
   hostname: string;
   status: string;
   ssl: { status: string };
   verification_errors?: Array<string>;
-}
+};
 
 export async function createCustomHostname(
   zoneId: string,
@@ -377,10 +377,10 @@ export async function deleteCustomHostname(
 
 // --- Hyperdrive ---
 
-export interface HyperdriveInfo {
+export type HyperdriveInfo = {
   id: string;
   name: string;
-}
+};
 
 export async function createHyperdrive(
   accountId: string,

@@ -4,7 +4,7 @@ import { Layout } from './layout.tsx';
 import type { ProjectRow } from './projects-table.tsx';
 import { ProjectsTable } from './projects-table.tsx';
 
-export interface TopProjectRow {
+export type TopProjectRow = {
   id: string;
   user_id: string;
   slug: string;
@@ -13,9 +13,9 @@ export interface TopProjectRow {
   requests: number;
   bandwidthBytes: number;
   lastSeen: string;
-}
+};
 
-interface DashboardProps {
+type DashboardProps = {
   stats: {
     users: number;
     projects: number;
@@ -26,7 +26,7 @@ interface DashboardProps {
   topProjects: Array<TopProjectRow>;
   siteDomain: string;
   username?: string;
-}
+};
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US').format(value);

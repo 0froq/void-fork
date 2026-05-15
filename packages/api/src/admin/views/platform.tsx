@@ -4,13 +4,13 @@ import type { ActivityEntry } from '../routes/platform.tsx';
 import { formatDateTime, STATUS_COLORS } from './format.ts';
 import { Layout } from './layout.tsx';
 
-interface WorkerStatus {
+type WorkerStatus = {
   worker: PlatformWorker;
   scriptName: string;
   deployment?: WorkerDeployment;
   previousVersionId?: string;
   error?: string;
-}
+};
 
 export function PlatformPage({
   workers,

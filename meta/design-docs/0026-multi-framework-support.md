@@ -24,10 +24,10 @@ Detection via `package.json` dependencies:
 ```typescript
 type FrameworkClass = 'a' | 'b' | 'c';
 
-interface DetectedFramework {
+type DetectedFramework = {
   name: string;
   class: FrameworkClass;
-}
+};
 
 const FRAMEWORK_PACKAGES: Record<string, DetectedFramework> = {
   '@tanstack/react-start': { name: 'tanstack-start', class: 'a' },
@@ -102,12 +102,12 @@ Non-intrusive DX outcome:
 Each framework has a preset defining its build output conventions:
 
 ```typescript
-interface FrameworkPreset {
+type FrameworkPreset = {
   buildCommand: string;
   workerDir: string;
   workerMain: string;
   assetsDir: string;
-}
+};
 
 const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
   sveltekit: {
@@ -191,12 +191,12 @@ auth?: boolean | AuthProvider[];  // already exists, used by Class C for explici
 New optional fields on v1 (backward compatible, no version bump):
 
 ```typescript
-interface DeployManifest {
+type DeployManifest = {
   // ... existing fields ...
   workerMain?: string; // entry module filename (default: "index.js")
   compatibilityDate?: string; // from framework's wrangler config
   compatibilityFlags?: string[]; // from framework's wrangler config
-}
+};
 ```
 
 ---

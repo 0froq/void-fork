@@ -45,9 +45,9 @@ const ACCOUNT = 'acc_test';
 const TOKEN = 'token_test';
 const NAMESPACE = 'void-users';
 
-interface FetchTokenOptions {
+type FetchTokenOptions = {
   fetchToken?: (workerName: string) => Promise<ProxyTokenLookup>;
-}
+};
 
 function makeOpts(overrides: FetchTokenOptions = {}) {
   return {

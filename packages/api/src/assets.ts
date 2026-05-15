@@ -16,22 +16,22 @@ class AssetUploadError extends Error {
 /** Non-retriable error — the hash will never appear locally. */
 class AssetHashMissError extends Error {}
 
-export interface AssetManifestEntry {
+export type AssetManifestEntry = {
   hash: string;
   size: number;
-}
+};
 
-export interface AssetEntry {
+export type AssetEntry = {
   bytes: Uint8Array;
   contentType: string;
-}
+};
 
-interface UploadSessionResponse {
+type UploadSessionResponse = {
   result: {
     jwt: string;
     buckets: Array<Array<string>>;
   };
-}
+};
 
 function tryParseJson<T>(text: string): T | null {
   if (!text.trim()) {
@@ -351,10 +351,10 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 const textEncoder = new TextEncoder();
 
-interface AssetUploadPart {
+type AssetUploadPart = {
   hash: string;
   entry: AssetEntry;
-}
+};
 
 function resolveAssetUploadParts(
   bucket: Array<string>,

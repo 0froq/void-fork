@@ -10,12 +10,12 @@ const ALLOWED_GATEWAY_ENDPOINTS = new Set([
 ]);
 const VOID_FILE_MARKER = '__voidFile';
 
-interface SerializedFileInput {
+type SerializedFileInput = {
   [VOID_FILE_MARKER]: true;
   data: string;
   name?: string;
   type?: string;
-}
+};
 
 class BadRequestError extends Error {}
 

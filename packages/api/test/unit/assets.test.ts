@@ -768,10 +768,10 @@ describe('normalizeForCfAssetSession', () => {
   });
 });
 
-interface BundleR2Entry {
+type BundleR2Entry = {
   bytes: ArrayBuffer;
   contentType: string;
-}
+};
 
 function createBundleR2Mock(opts?: { listPageSize?: number }) {
   const store = new Map<string, BundleR2Entry>();

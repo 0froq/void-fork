@@ -1,6 +1,6 @@
 export type PlanId = 'free' | 'solo' | 'pro' | 'sponsored' | 'custom';
 
-export interface PlanLimits {
+export type PlanLimits = {
   /** Max requests per month (0 = unlimited) */
   requestsPerMonth: number;
   /** Max CPU milliseconds per request (0 = unlimited) */
@@ -19,7 +19,7 @@ export interface PlanLimits {
   aiNeuronsPerMonth: number;
   /** Max retained deployment scripts (0 = unlimited) */
   retainedDeployments: number;
-}
+};
 
 const GB = 1024 * 1024 * 1024;
 
