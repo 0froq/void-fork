@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { runLogin } from '../../src/cli/auth.ts';
 
 const mockExec = vi.fn();
-const exchangeRequests: Array<{ url: string; body: unknown }> = [];
+const exchangeRequests: Array<{
+  url: string;
+  headers: Record<string, string>;
+  body: unknown;
+}> = [];
 const originalFetch = globalThis.fetch.bind(globalThis);
 
 function codeChallengeFor(verifier: string): string {
@@ -34,6 +38,7 @@ beforeEach(() => {
 
     exchangeRequests.push({
       url,
+      headers: Object.fromEntries(new Headers(init?.headers).entries()),
       body: init?.body ? JSON.parse(init.body.toString()) : null,
     });
 
@@ -44,6 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.VOID_API_URL;
+  delete process.env.CF_ACCESS_TOKEN;
 });
 
 describe('runLogin', () => {
@@ -92,6 +98,9 @@ describe('runLogin', () => {
     expect(exchangeRequests).toEqual([
       {
         url: 'https://api.test/auth/cli/token',
+        headers: {
+          'content-type': 'application/json',
+        },
         body: {
           code: 'real-code',
           state,
@@ -127,5 +136,31 @@ describe('runLogin', () => {
     const validResponse = await fetch(validUrl);
     expect(validResponse.status).toBe(200);
     await expect(loginPromise).resolves.toBe('real-token');
+  });
+
+  it('sends Cloudflare Access headers when exchanging the login code', async () => {
+    process.env.CF_ACCESS_TOKEN = 'cf-access-token';
+
+    let resolveLoginUrl!: (url: string) => void;
+    const loginUrlPromise = new Promise<string>((resolve) => {
+      resolveLoginUrl = resolve;
+    });
+
+    const loginPromise = runLogin('/project', 'github', resolveLoginUrl);
+    const loginUrl = new URL(await loginUrlPromise);
+    const redirect = loginUrl.searchParams.get('redirect');
+    expect(redirect).toBeTruthy();
+
+    const validUrl = new URL(redirect!);
+    validUrl.searchParams.set('code', 'real-code');
+
+    const validResponse = await fetch(validUrl);
+    expect(validResponse.status).toBe(200);
+    await expect(loginPromise).resolves.toBe('real-token');
+
+    expect(exchangeRequests[0]?.headers).toMatchObject({
+      'cf-access-token': 'cf-access-token',
+      'content-type': 'application/json',
+    });
   });
 });

@@ -3,6 +3,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { Entry } from '@napi-rs/keyring';
 import { join } from 'pathe';
+import { cfAccessHeaders } from '../shared/cf-access.ts';
+import { ensureCloudflaredToken } from './cf-access.ts';
 import { pc } from './output.ts';
 import { isVoidInternalStaging } from './project.ts';
 
@@ -176,9 +178,10 @@ async function exchangeLoginCode(
   codeVerifier: string,
 ): Promise<string> {
   const base = apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`;
+  ensureCloudflaredToken(apiUrl);
   const res = await fetch(new URL('auth/cli/token', base), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...cfAccessHeaders(process.env) },
     body: JSON.stringify({
       code,
       state,
