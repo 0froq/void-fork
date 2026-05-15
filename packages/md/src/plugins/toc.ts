@@ -1,13 +1,13 @@
 import type { RenderOptions, Renderer, RuleBlock, StateBlock, Token } from 'markdown-exit';
 import type MarkdownExit from 'markdown-exit';
 
-export type TocOptions = {
+export type TocOptions = Readonly<{
   pattern?: RegExp;
-  level?: Array<number>;
+  level?: ReadonlyArray<number>;
   containerTag?: string;
   containerClass?: string;
   listTag?: string;
-};
+}>;
 
 type Header = {
   depth: number;
@@ -15,7 +15,7 @@ type Header = {
   text: string;
 };
 
-function renderHeaders(headers: Array<Header>, listTag: string): string {
+function renderHeaders(headers: ReadonlyArray<Header>, listTag: string): string {
   if (headers.length === 0) {
     return '';
   }

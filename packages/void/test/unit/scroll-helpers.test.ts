@@ -34,7 +34,12 @@ describe('scroll restoration helpers', () => {
       preserveScroll?: boolean;
       scrollPosition?: { x: number; y: number } | null;
       hash?: string;
-    }): { action: 'none' | 'restore' | 'hash' | 'top'; x?: number; y?: number; hash?: string } {
+    }): {
+      action: 'none' | 'restore' | 'hash' | 'top';
+      x?: number;
+      y?: number;
+      hash?: string;
+    } {
       if (opts.preserveScroll) {
         return { action: 'none' };
       }

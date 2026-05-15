@@ -1,13 +1,13 @@
-export type EdgeRequestSample = {
+export type EdgeRequestSample = Readonly<{
   path: string;
   colo: string;
   status: number;
   durationMs: number;
   cache: 'hit' | 'miss' | 'bypass';
   botScore: number;
-};
+}>;
 
-export const sampleRequests: Array<EdgeRequestSample> = [
+export const sampleRequests: ReadonlyArray<EdgeRequestSample> = [
   { path: '/', colo: 'SJC', status: 200, durationMs: 31, cache: 'hit', botScore: 92 },
   { path: '/docs', colo: 'LHR', status: 200, durationMs: 84, cache: 'hit', botScore: 88 },
   { path: '/api/search', colo: 'SJC', status: 200, durationMs: 142, cache: 'miss', botScore: 74 },

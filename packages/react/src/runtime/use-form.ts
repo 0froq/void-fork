@@ -25,8 +25,8 @@ type UntypedForm = {
   put(formData: FormData): void;
   patch(formData: FormData): void;
   delete(formData: FormData): void;
-  reset(...fields: Array<string>): void;
-  clearErrors(...fields: Array<string>): void;
+  reset(...fields: ReadonlyArray<string>): void;
+  clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
 };
 
@@ -66,8 +66,8 @@ export function useForm<U extends ActionUrl & string>(
   put(formData: FormData): void;
   patch(formData: FormData): void;
   delete(formData: FormData): void;
-  reset(...fields: Array<keyof ResolveActionBody<U> & string>): void;
-  clearErrors(...fields: Array<keyof ResolveActionBody<U> & string>): void;
+  reset(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
+  clearErrors(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
   clearError(): void;
 };
 
@@ -119,7 +119,7 @@ export function useForm(
     setDataState(dataRef.current);
   }, []);
 
-  const reset = useCallback((...fields: Array<string>) => {
+  const reset = useCallback((...fields: ReadonlyArray<string>) => {
     if (fields.length === 0) {
       dataRef.current = { ...defaultsRef.current };
     } else {
@@ -132,7 +132,7 @@ export function useForm(
     setDataState(dataRef.current);
   }, []);
 
-  const clearErrors = useCallback((...fields: Array<string>) => {
+  const clearErrors = useCallback((...fields: ReadonlyArray<string>) => {
     if (fields.length === 0) {
       setErrors({});
     } else {

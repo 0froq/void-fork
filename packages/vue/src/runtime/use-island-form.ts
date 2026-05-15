@@ -1,7 +1,7 @@
 import { VoidActionError, categorizeActionError, isEqualFormValue } from 'void/pages-client';
 import { reactive, ref, watch } from 'vue';
 
-export type IslandFormReturn<T extends Record<string, unknown>> = {
+export type IslandFormReturn<T extends Record<string, unknown>> = Readonly<{
   data: T;
   errors: Record<string, string>;
   error: VoidActionError | null;
@@ -14,10 +14,10 @@ export type IslandFormReturn<T extends Record<string, unknown>> = {
   put(url: string): Promise<void>;
   patch(url: string): Promise<void>;
   delete(url: string): Promise<void>;
-  reset(...fields: Array<keyof T & string>): void;
-  clearErrors(...fields: Array<string>): void;
+  reset(...fields: ReadonlyArray<keyof T & string>): void;
+  clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
-};
+}>;
 
 function getValidationErrors(body: unknown): Record<string, string> | null {
   if (
@@ -72,7 +72,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     { deep: true },
   );
 
-  function reset(...fields: Array<keyof T & string>) {
+  function reset(...fields: ReadonlyArray<keyof T & string>) {
     if (fields.length === 0) {
       Object.assign(data, { ...defaults_ });
     } else {
@@ -82,7 +82,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     }
   }
 
-  function clearErrors(...fields: Array<string>) {
+  function clearErrors(...fields: ReadonlyArray<string>) {
     if (fields.length === 0) {
       for (const key of Object.keys(errors)) {
         delete errors[key];

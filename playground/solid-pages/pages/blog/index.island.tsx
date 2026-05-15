@@ -3,7 +3,7 @@ import Counter from './_Counter.tsx' with { island: 'load' };
 import PostForm from './_PostForm.tsx' with { island: 'load' };
 
 type Props = {
-  posts: Array<{ slug: string; title: string }>;
+  posts: ReadonlyArray<{ slug: string; title: string }>;
 };
 
 export default function BlogIndex(props: Props) {

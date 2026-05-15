@@ -56,9 +56,9 @@ describe('compileWorkerClient', () => {
 describe('worker fetch runtime behavior', () => {
   // Replicate the generated FetchError class
   class FetchError extends Error {
-    status: number;
-    statusText: string;
-    data: unknown;
+    readonly status: number;
+    readonly statusText: string;
+    readonly data: unknown;
     constructor(status: number, statusText: string, data: unknown) {
       super(`Request failed with status ${status}`);
       this.name = 'FetchError';

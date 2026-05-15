@@ -2019,7 +2019,7 @@ describe('default-target dev parity', () => {
       readonly opts: { nodeTarget: boolean; dev: boolean };
       readonly trustsHeader: boolean;
     };
-    const permutations: ReadonlyArray<Permutation> = [
+    const permutations: Array<Permutation> = [
       { label: 'cfProd', opts: { nodeTarget: false, dev: false }, trustsHeader: true },
       { label: 'cfDev', opts: { nodeTarget: false, dev: true }, trustsHeader: false },
       { label: 'nodeProd', opts: { nodeTarget: true, dev: false }, trustsHeader: false },

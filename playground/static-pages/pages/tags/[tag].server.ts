@@ -1,9 +1,9 @@
 import { tags } from 'virtual:tags';
 import { defineHandler } from 'void';
 
-export type Props = {
+export type Props = Readonly<{
   tag: string;
-};
+}>;
 
 export const prerender = true;
 

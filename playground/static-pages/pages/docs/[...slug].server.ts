@@ -1,8 +1,8 @@
 import { defineHandler } from 'void';
 
-export type Props = {
+export type Props = Readonly<{
   slug: string;
-};
+}>;
 
 export const prerender = true;
 

@@ -4,12 +4,12 @@ import type { Plugin } from 'vite';
 import { islandsPlugin } from './plugin-islands.ts';
 import { pagesPlugin } from './plugin-pages.ts';
 
-export type VoidVueOptions = {
+export type VoidVueOptions = Readonly<{
   vue?: Parameters<typeof vue>[0];
   viewTransitions?: boolean;
-};
+}>;
 
-export function voidVue(options?: VoidVueOptions): Array<Plugin> {
+export function voidVue(options?: VoidVueOptions): ReadonlyArray<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     vue(options?.vue) as Plugin,

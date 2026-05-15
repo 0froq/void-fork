@@ -45,7 +45,7 @@ async function prepareForViteHmr(page: Page) {
     }
 
     const originalDebug = console.debug.bind(console);
-    console.debug = (...args: Array<unknown>) => {
+    console.debug = (...args: ReadonlyArray<unknown>) => {
       if (args.some((arg) => typeof arg === 'string' && arg.includes('[vite] connected.'))) {
         trackedWindow[marker] = true;
       }
@@ -695,7 +695,7 @@ describe('vue-pages client (dev)', () => {
     expect(inertiaUsers.status).toBe(200);
     const usersPage = (await inertiaUsers.json()) as {
       component: string;
-      props: { users: Array<{ id: number; name: string }> };
+      props: { users: ReadonlyArray<{ id: number; name: string }> };
     };
     expect(usersPage.component).toBe('users');
     expect(usersPage.props.users).toHaveLength(2);
@@ -716,7 +716,7 @@ describe('vue-pages client (dev)', () => {
     expect(postValid.status).toBe(200);
     const validPage = (await postValid.json()) as {
       component: string;
-      props: { users: Array<{ id: number; name: string }> };
+      props: { users: ReadonlyArray<{ id: number; name: string }> };
       errors: Record<string, string> | null;
     };
     expect(validPage.errors).toBeNull();
@@ -732,7 +732,7 @@ describe('vue-pages client (dev)', () => {
     expect(postInvalid.status).toBe(200);
     const invalidPage = (await postInvalid.json()) as {
       component: string;
-      props: { users: Array<{ id: number; name: string }> };
+      props: { users: ReadonlyArray<{ id: number; name: string }> };
       errors: Record<string, string> | null;
     };
     expect(invalidPage.errors).not.toBeNull();

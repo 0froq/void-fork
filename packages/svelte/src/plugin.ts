@@ -9,16 +9,16 @@ type PrefetchConfig = {
   cacheFor?: number | string | [string, string];
 };
 
-export type VoidSvelteOptions = {
+export type VoidSvelteOptions = Readonly<{
   svelte?: Parameters<typeof svelte>[0];
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
-};
+}>;
 
-export function voidSvelte(options?: VoidSvelteOptions): Array<Plugin> {
+export function voidSvelte(options?: VoidSvelteOptions): ReadonlyArray<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
-    ...(svelte(options?.svelte) as Array<Plugin>),
+    ...(svelte(options?.svelte) as ReadonlyArray<Plugin>),
     pagesPlugin(pagesDir, {
       viewTransitions: options?.viewTransitions,
       prefetch: options?.prefetch,

@@ -3,9 +3,9 @@ import type MarkdownExit from 'markdown-exit';
 
 const EXTERNAL_URL_RE = /^[a-z]+:/i;
 
-export type LinkOptions = {
+export type LinkOptions = Readonly<{
   externalAttrs?: Record<string, string>;
-};
+}>;
 
 /**
  * Adds target="_blank" and rel="noreferrer" to external links.

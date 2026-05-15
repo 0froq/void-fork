@@ -19,7 +19,7 @@ function SubmitButton({
 }
 
 class BoundaryErrorBoundary extends Component<{ children: ReactNode }, { error: unknown | null }> {
-  state: { error: unknown | null } = { error: null };
+  readonly state: { error: unknown | null } = { error: null };
 
   static getDerivedStateFromError(error: unknown) {
     return { error };

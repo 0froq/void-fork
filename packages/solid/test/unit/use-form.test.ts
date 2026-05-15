@@ -36,7 +36,7 @@ describe('useForm core logic', () => {
       data = { ...data, [field]: value };
     }
 
-    function reset(...fields: Array<string>) {
+    function reset(...fields: ReadonlyArray<string>) {
       if (fields.length === 0) {
         data = { ...defaults_ };
       } else {
@@ -47,7 +47,7 @@ describe('useForm core logic', () => {
       }
     }
 
-    function clearErrors(...fields: Array<string>) {
+    function clearErrors(...fields: ReadonlyArray<string>) {
       if (fields.length === 0) {
         errors = {};
       } else {

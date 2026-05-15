@@ -635,7 +635,7 @@ export type AuthCompileOptions = {
   authDatabasePath: string | null;
   authSchemaPath: string | null;
   dialect: 'sqlite' | 'postgresql';
-  providers: ReadonlyArray<VoidAuthProvider> | null;
+  providers: Array<VoidAuthProvider> | null;
 };
 
 export type CompileOptions = {

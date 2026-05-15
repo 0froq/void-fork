@@ -79,7 +79,7 @@ export function defineEnv<S>(_schema: S): typeof env {
 export class EnvValidationError extends Error {
   constructor(
     public readonly key: string,
-    public readonly issues: ReadonlyArray<{ message: string }>,
+    public readonly issues: Array<{ message: string }>,
   ) {
     super(`Invalid env "${key}": ${issues.map((i) => i.message).join(', ')}`);
     this.name = 'EnvValidationError';

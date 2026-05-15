@@ -2,9 +2,9 @@ import * as v from 'valibot';
 import { defineHandler } from 'void';
 import { POSTS } from './_data.ts';
 
-export type Props = {
+export type Props = Readonly<{
   posts: typeof POSTS;
-};
+}>;
 
 export const loader = defineHandler<Props>(() => {
   return { posts: POSTS };

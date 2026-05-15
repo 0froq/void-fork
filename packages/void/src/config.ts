@@ -42,7 +42,7 @@ export type InferenceConfig = {
     storage?: boolean | string;
     ai?: boolean;
   };
-  scanDirs?: Array<string>;
+  scanDirs?: ReadonlyArray<string>;
   build?: string;
   outputDir?: string;
   appType?: 'spa' | 'static' | 'void' | 'framework';

@@ -12,12 +12,12 @@ export type IslandImport = {
   islandId?: string;
 };
 
-export type ScriptExtraction = {
+export type ScriptExtraction = Readonly<{
   script: string | null;
   body: string;
   islandImports: Array<IslandImport>;
   clientCode: string | null;
-};
+}>;
 
 export function extractScript(source: string): ScriptExtraction {
   const match = source.match(SCRIPT_RE);

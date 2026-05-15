@@ -1,9 +1,9 @@
 import { defineHandler } from 'void';
 import { POSTS } from './_data.ts';
 
-export type Props = {
+export type Props = Readonly<{
   post: (typeof POSTS)[number];
-};
+}>;
 
 export const loader = defineHandler<Props>((c) => {
   const slug = c.req.param('slug');

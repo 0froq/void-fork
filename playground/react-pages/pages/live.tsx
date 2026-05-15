@@ -13,7 +13,7 @@ type Status = 'connecting' | 'connected' | 'closed' | 'error';
 export default function LivePage({ topic }: Props) {
   const [status, setStatus] = useState<Status>('connecting');
   const [message, setMessage] = useState('Hello from the browser');
-  const [events, setEvents] = useState<Array<LiveClientEvent<PlaygroundEvent>>>([]);
+  const [events, setEvents] = useState<ReadonlyArray<LiveClientEvent<PlaygroundEvent>>>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const endpoint = '/api/live';

@@ -19,7 +19,7 @@ function getMetadataCompiler(): MarkdownExit {
   return md;
 }
 
-function extractHeadings(tokens: Array<Token>): Array<Heading> {
+function extractHeadings(tokens: ReadonlyArray<Token>): ReadonlyArray<Heading> {
   const headings: Array<Heading> = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
@@ -39,11 +39,11 @@ function extractHeadings(tokens: Array<Token>): Array<Heading> {
   return headings;
 }
 
-export type MetadataResult = {
+export type MetadataResult = Readonly<{
   frontmatter: Record<string, unknown>;
-  headings: Array<Heading>;
+  headings: ReadonlyArray<Heading>;
   title: string;
-};
+}>;
 
 export function extractMetadata(source: string): MetadataResult {
   const { data: frontmatter, content } = matter(source);

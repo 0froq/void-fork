@@ -22,15 +22,15 @@ const MAX_R2_PUT_RETRIES = 3;
 const RETRY_BACKOFF_MS = [250, 500, 1000];
 
 export class DirectR2PutError extends Error {
-  status: number;
-  hash: string;
-  path: string;
+  readonly status: number;
+  readonly hash: string;
+  readonly path: string;
   /**
    * `body` is the response body text (may be empty / non-text). Useful in
    * the surface error so users can correlate against R2-side errors like
    * `BadDigest` (Content-MD5 mismatch) or signature errors.
    */
-  body: string;
+  readonly body: string;
 
   constructor(status: number, hash: string, path: string, body: string) {
     super(`R2 PUT failed for ${path} (${hash}): ${status}${body ? ` ${body}` : ''}`);

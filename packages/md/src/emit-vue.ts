@@ -35,7 +35,7 @@ type IslandMatch = {
   children: string;
 };
 
-function findIslandTags(html: string, names: Set<string>): Array<IslandMatch> {
+function findIslandTags(html: string, names: Set<string>): ReadonlyArray<IslandMatch> {
   const matches: Array<IslandMatch> = [];
   let m;
   ISLAND_TAG_RE.lastIndex = 0;
@@ -66,7 +66,7 @@ function parseAttrs(attrStr: string): Record<string, string> {
 
 export function emitVueComponentWithIslands(
   result: CompileResult,
-  islandImports: Array<IslandImport>,
+  islandImports: ReadonlyArray<IslandImport>,
 ): string {
   const nameSet = new Set(islandImports.map((i) => i.name));
   const islandTags = findIslandTags(result.html, nameSet);

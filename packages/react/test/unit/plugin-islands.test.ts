@@ -7,7 +7,11 @@ const TMP = join(import.meta.dirname, '__tmp_islands_plugin__');
 const PAGES_DIR = join(TMP, 'pages');
 type HookWithHandler<T> = { handler: T };
 type IslandsPluginHooks = {
-  configResolved?: (config: { root: string; command: 'build'; plugins: Array<unknown> }) => void;
+  configResolved?: (config: {
+    root: string;
+    command: 'build';
+    plugins: ReadonlyArray<unknown>;
+  }) => void;
   buildStart?: (() => Promise<void>) | HookWithHandler<() => Promise<void>>;
   load?: ((id: string) => string | undefined) | HookWithHandler<(id: string) => string | undefined>;
 };

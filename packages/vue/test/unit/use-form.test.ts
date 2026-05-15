@@ -42,7 +42,7 @@ describe('useForm reactive logic', () => {
       { deep: true },
     );
 
-    function reset(...fields: Array<string>) {
+    function reset(...fields: ReadonlyArray<string>) {
       if (fields.length === 0) {
         Object.assign(data, { ...defaults_ });
       } else {
@@ -52,7 +52,7 @@ describe('useForm reactive logic', () => {
       }
     }
 
-    function clearErrors(...fields: Array<string>) {
+    function clearErrors(...fields: ReadonlyArray<string>) {
       if (fields.length === 0) {
         for (const key of Object.keys(errors)) {
           delete errors[key];

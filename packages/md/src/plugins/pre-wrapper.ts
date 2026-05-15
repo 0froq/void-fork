@@ -3,7 +3,7 @@ import type { RenderOptions, Renderer, Token } from 'markdown-exit';
 
 type MarkdownEnv = { [key: string]: unknown };
 type FenceRender = (
-  tokens: Array<Token>,
+  tokens: ReadonlyArray<Token>,
   idx: number,
   options: RenderOptions,
   env: MarkdownEnv,
@@ -27,9 +27,9 @@ export function extractTitle(info: string, html = false): string {
   return info.match(/\[(.*)\]/)?.[1] || extractLang(info) || 'txt';
 }
 
-export type PreWrapperOptions = {
+export type PreWrapperOptions = Readonly<{
   codeCopyButtonTitle?: string;
-};
+}>;
 
 /**
  * Wraps fenced code blocks with a language label and copy button.

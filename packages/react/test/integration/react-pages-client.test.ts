@@ -25,7 +25,7 @@ declare global {
 type NavElement = HTMLElement & { __stamp?: number };
 type PageHead = {
   title: string;
-  meta: Array<Record<string, unknown>>;
+  meta: ReadonlyArray<Record<string, unknown>>;
 };
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
@@ -967,7 +967,7 @@ describe('react-pages client (dev)', () => {
     expect(inertiaUsers.status).toBe(200);
     const usersPage = (await inertiaUsers.json()) as {
       component: string;
-      props: { users: Array<{ id: number; name: string }> };
+      props: { users: ReadonlyArray<{ id: number; name: string }> };
     };
     expect(usersPage.component).toBe('users');
     expect(usersPage.props.users).toHaveLength(2);
@@ -988,7 +988,7 @@ describe('react-pages client (dev)', () => {
     expect(postValid.status).toBe(200);
     const validPage = (await postValid.json()) as {
       component: string;
-      props: { users: Array<{ id: number; name: string }> };
+      props: { users: ReadonlyArray<{ id: number; name: string }> };
       errors: Record<string, string> | null;
     };
     expect(validPage.errors).toBeNull();
@@ -1004,7 +1004,7 @@ describe('react-pages client (dev)', () => {
     expect(postInvalid.status).toBe(200);
     const invalidPage = (await postInvalid.json()) as {
       component: string;
-      props: { users: Array<{ id: number; name: string }> };
+      props: { users: ReadonlyArray<{ id: number; name: string }> };
       errors: Record<string, string> | null;
     };
     expect(invalidPage.errors).not.toBeNull();

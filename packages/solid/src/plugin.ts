@@ -9,11 +9,11 @@ type PrefetchConfig = {
   cacheFor?: number | string | [string, string];
 };
 
-export type VoidSolidOptions = {
+export type VoidSolidOptions = Readonly<{
   solid?: Parameters<typeof solid>[0];
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
-};
+}>;
 
 // The runtime entry exports raw `.tsx` source. Without these hints, Vite's SSR
 // dep optimizer prebundles the package with esbuild's default `automatic` JSX
@@ -35,7 +35,7 @@ function configPlugin(): Plugin {
   };
 }
 
-export function voidSolid(options?: VoidSolidOptions): Array<Plugin> {
+export function voidSolid(options?: VoidSolidOptions): ReadonlyArray<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     configPlugin(),

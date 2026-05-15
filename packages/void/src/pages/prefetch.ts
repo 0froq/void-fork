@@ -45,7 +45,7 @@ export type CacheEntry = {
 };
 
 export class PrefetchCache {
-  private entries = new Map<string, CacheEntry>();
+  private readonly entries = new Map<string, CacheEntry>();
 
   private key(url: string, method = 'GET'): string {
     return `${method}:${url}`;

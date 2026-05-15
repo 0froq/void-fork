@@ -20,7 +20,10 @@ type HookWithHandler<T> = { handler: T };
 
 type ContextHooks = {
   errors: Array<{ message: string; loc?: { line: number; column: number; file: string } }>;
-  warnings: Array<{ message: string; loc?: { line: number; column: number; file: string } }>;
+  warnings: Array<{
+    message: string;
+    loc?: { line: number; column: number; file: string };
+  }>;
   environmentName: string;
 };
 

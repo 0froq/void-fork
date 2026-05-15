@@ -5,7 +5,7 @@ class HeadElement {
   readonly tagName: string;
   nextSibling: HeadElement | null = null;
   removed = false;
-  private attrs = new Map<string, string>();
+  private readonly attrs = new Map<string, string>();
   private onRemove: ((el: HeadElement) => void) | null = null;
 
   constructor(tag: string, attrs: Record<string, string> = {}) {

@@ -1,11 +1,11 @@
 import type { RenderOptions, Token } from 'markdown-exit';
 import type MarkdownExit from 'markdown-exit';
 
-export type HeadingData = {
+export type HeadingData = Readonly<{
   depth: number;
   slug: string;
   text: string;
-};
+}>;
 
 type MarkdownEnv = Record<string, unknown> & {
   headings?: Array<HeadingData>;

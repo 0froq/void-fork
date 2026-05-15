@@ -42,7 +42,7 @@ type ReactPageData = PageObject;
 type ReactPageComponent = ComponentType<Record<string, unknown>>;
 type ReactLayoutComponent = ComponentType<{ children?: React.ReactNode }>;
 
-export type ReactPagesConfig = {
+export type ReactPagesConfig = Readonly<{
   components: Record<string, () => Promise<ComponentModule>>;
   layoutTree: Record<string, Array<string>>;
   routeMeta: Record<string, { island?: boolean }>;
@@ -52,11 +52,11 @@ export type ReactPagesConfig = {
   viewTransitions: boolean;
   prefetchHoverDelay: number;
   prefetchDefaultCacheFor: CacheForResult;
-};
+}>;
 
-export type ReactPagesClient = {
+export type ReactPagesClient = Readonly<{
   router: VoidRouter;
-};
+}>;
 
 type DeferredResource = Promise<unknown>;
 

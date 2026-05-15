@@ -3,7 +3,7 @@ import type { RuleCore, Token } from 'markdown-exit';
 
 const markerRE = /^\[!(TIP|NOTE|INFO|IMPORTANT|WARNING|CAUTION|DANGER)\]([^\n\r]*)/i;
 
-export type GitHubAlertsOptions = {
+export type GitHubAlertsOptions = Readonly<{
   tipLabel?: string;
   noteLabel?: string;
   infoLabel?: string;
@@ -11,7 +11,7 @@ export type GitHubAlertsOptions = {
   warningLabel?: string;
   cautionLabel?: string;
   dangerLabel?: string;
-};
+}>;
 
 type AlertToken = Token & {
   meta?: { title: string; type: string };
@@ -37,7 +37,7 @@ export function gitHubAlertsPlugin(md: MarkdownExit, options?: GitHubAlertsOptio
   };
 
   const rule: RuleCore = (state) => {
-    const tokens = state.tokens as Array<AlertToken>;
+    const tokens = state.tokens as ReadonlyArray<AlertToken>;
     for (let i = 0; i < tokens.length; i++) {
       if (tokens[i].type === 'blockquote_open') {
         const startIndex = i;
@@ -77,7 +77,7 @@ export function gitHubAlertsPlugin(md: MarkdownExit, options?: GitHubAlertsOptio
 
   md.core.ruler.after('block', 'github-alerts', rule);
 
-  md.renderer.rules.github_alert_open = function (tokens: Array<AlertToken>, idx: number) {
+  md.renderer.rules.github_alert_open = function (tokens: ReadonlyArray<AlertToken>, idx: number) {
     const { title, type } = tokens[idx].meta!;
     return `<div class="${type} custom-block github-alert"><p class="custom-block-title">${title}</p>\n`;
   };

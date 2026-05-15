@@ -23,7 +23,7 @@ type CommonProps = {
   replace?: boolean;
   reloadDocument?: boolean;
   viewTransition?: boolean;
-  prefetch?: boolean | PrefetchStrategy | Array<PrefetchStrategy>;
+  prefetch?: boolean | PrefetchStrategy | ReadonlyArray<PrefetchStrategy>;
   cacheFor?: number | string | [string, string];
   onNavigate?: (event: { preventDefault(): void }) => void;
 };
@@ -129,7 +129,7 @@ export function Link({
     () => (isGet ? mergeDataIntoHref(href, data) : href),
     [data, href, isGet],
   );
-  const strategies = useMemo<Array<PrefetchStrategy>>(() => {
+  const strategies = useMemo<ReadonlyArray<PrefetchStrategy>>(() => {
     if (prefetchProp === false || reloadDocument) {
       return [];
     }

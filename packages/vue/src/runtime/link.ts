@@ -14,7 +14,10 @@ import {
 type PrefetchStrategy = 'hover' | 'click' | 'mount' | 'visible';
 type LinkMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 type NavigateEvent = { preventDefault(): void };
-type PrefetchOptions = { cacheFor?: number | string | [string, string]; method?: LinkMethod };
+type PrefetchOptions = {
+  cacheFor?: number | string | [string, string];
+  method?: LinkMethod;
+};
 
 function appendQueryValue(params: URLSearchParams, key: string, value: unknown): boolean {
   if (value === null || value === undefined) {
@@ -66,7 +69,9 @@ function mergeDataIntoHref(href: string, data?: Record<string, unknown>): string
   return `${path}${query ? `?${query}` : ''}${hash}`;
 }
 
-function hasPrefetch(prefetch: boolean | PrefetchStrategy | Array<PrefetchStrategy>): boolean {
+function hasPrefetch(
+  prefetch: boolean | PrefetchStrategy | ReadonlyArray<PrefetchStrategy>,
+): boolean {
   return prefetch !== false;
 }
 
@@ -108,7 +113,7 @@ export const Link: Component = defineComponent({
     onNavigate: { type: Function as PropType<(event: NavigateEvent) => void>, default: undefined },
     prefetch: {
       type: [Boolean, String, Array] as PropType<
-        boolean | PrefetchStrategy | Array<PrefetchStrategy>
+        boolean | PrefetchStrategy | ReadonlyArray<PrefetchStrategy>
       >,
       default: false,
     },
@@ -125,7 +130,7 @@ export const Link: Component = defineComponent({
     const hrefWithData = computed(() =>
       isGet.value ? mergeDataIntoHref(props.href, props.data) : props.href,
     );
-    const strategies = computed<Array<PrefetchStrategy>>(() => {
+    const strategies = computed<ReadonlyArray<PrefetchStrategy>>(() => {
       if (props.prefetch === false || props.reloadDocument) {
         return [];
       }

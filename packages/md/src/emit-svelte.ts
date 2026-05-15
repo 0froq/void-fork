@@ -29,7 +29,7 @@ setFrontmatter(__frontmatter);
 
 export function emitSvelteComponentWithIslands(
   result: CompileResult,
-  islandImports: Array<IslandImport>,
+  islandImports: ReadonlyArray<IslandImport>,
 ): string {
   const chunks = buildRenderChunks(result.html, islandImports);
 

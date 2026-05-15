@@ -41,7 +41,13 @@ export type DbArgs =
   | { action: 'execute'; command?: string; file?: string }
   | { action: 'migrate'; remote?: boolean }
   | { action: 'studio' }
-  | { action: 'export'; output?: string; noData?: boolean; noSchema?: boolean; table?: string }
+  | {
+      action: 'export';
+      output?: string;
+      noData?: boolean;
+      noSchema?: boolean;
+      table?: string;
+    }
   | { action: 'set-url' }
   | { action: 'rename-migrations' };
 

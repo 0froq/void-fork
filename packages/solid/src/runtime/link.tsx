@@ -16,7 +16,7 @@ type CommonProps = {
   replace?: boolean;
   reloadDocument?: boolean;
   viewTransition?: boolean;
-  prefetch?: boolean | PrefetchStrategy | Array<PrefetchStrategy>;
+  prefetch?: boolean | PrefetchStrategy | ReadonlyArray<PrefetchStrategy>;
   cacheFor?: number | string | [string, string];
   onNavigate?: (event: NavigateEvent) => void;
   children?: JSX.Element;
@@ -159,7 +159,7 @@ export function Link(props: LinkProps): JSX.Element {
   const normalizedMethod = () => linkState().method;
   const isGet = () => linkState().isGet;
   const hrefWithData = () => linkState().href;
-  const strategies = createMemo<Array<PrefetchStrategy>>(() => {
+  const strategies = createMemo<ReadonlyArray<PrefetchStrategy>>(() => {
     if (local.prefetch === false || local.prefetch === undefined || local.reloadDocument) {
       return [];
     }

@@ -34,7 +34,11 @@ const spawnMockState = vi.hoisted(() => ({
         error?: Error;
       })
     | null,
-  calls: [] as Array<{ command: string; args: Array<string>; options: { cwd?: string } }>,
+  calls: [] as Array<{
+    command: string;
+    args: Array<string>;
+    options: { cwd?: string };
+  }>,
 }));
 
 vi.mock('node:child_process', async () => {

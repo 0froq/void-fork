@@ -18,11 +18,11 @@ declare module 'void/routes' {
 
 class MockWebSocket {
   static instances: Array<MockWebSocket> = [];
-  static OPEN = 1;
+  static readonly OPEN = 1;
 
   readyState = 0;
   sent: Array<string> = [];
-  listeners = new Map<string, Set<(event: MockSocketEvent) => void>>();
+  readonly listeners = new Map<string, Set<(event: MockSocketEvent) => void>>();
 
   constructor(
     readonly url: string,

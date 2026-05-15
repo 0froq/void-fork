@@ -143,7 +143,7 @@ function pushHit(node: AstMemberExpression, hits: Array<FoldHit>): void {
 }
 
 /** Default Vite `envPrefix`. */
-const DEFAULT_ENV_PREFIXES = ['VITE_'] as const;
+const DEFAULT_ENV_PREFIXES: ReadonlyArray<string> = ['VITE_'];
 
 /**
  * Build-time constant folding for client-only `env.FOO` reads.

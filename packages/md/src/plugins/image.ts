@@ -2,9 +2,9 @@ import type MarkdownExit from 'markdown-exit';
 
 const EXTERNAL_URL_RE = /^[a-z]+:/i;
 
-export type ImageOptions = {
+export type ImageOptions = Readonly<{
   lazyLoading?: boolean;
-};
+}>;
 
 type MarkdownToken = {
   attrGet(name: string): string | null;
@@ -12,7 +12,7 @@ type MarkdownToken = {
 };
 
 type ImageRenderRule = (
-  tokens: Array<MarkdownToken>,
+  tokens: ReadonlyArray<MarkdownToken>,
   idx: number,
   mdOptions: unknown,
   env: unknown,
@@ -26,7 +26,7 @@ type ImageRenderRule = (
 export function imagePlugin(md: MarkdownExit, options?: ImageOptions): void {
   const imageRule = md.renderer.rules.image as ImageRenderRule;
   md.renderer.rules.image = (
-    tokens: Array<MarkdownToken>,
+    tokens: ReadonlyArray<MarkdownToken>,
     idx: number,
     mdOptions: unknown,
     env: unknown,

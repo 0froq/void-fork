@@ -71,9 +71,9 @@ export function isCliOutdatedError(err: unknown): err is PlatformApiError {
 }
 
 export class PlatformApiError extends Error {
-  status: number;
-  body: string;
-  code?: string;
+  readonly status: number;
+  readonly body: string;
+  readonly code?: string;
 
   constructor(action: string, status: number, body: string) {
     const parsed = parsePlatformErrorBody(body);
@@ -213,9 +213,9 @@ export type ManifestOnlyDeployPayload = {
  * HTTP client for the Void platform API.
  */
 export class PlatformClient {
-  private baseUrl: string;
-  private authHeaders: Record<string, string>;
-  private cliLog?: CliLogger;
+  private readonly baseUrl: string;
+  private readonly authHeaders: Record<string, string>;
+  private readonly cliLog?: CliLogger;
 
   constructor(
     token: string,
@@ -291,7 +291,9 @@ export class PlatformClient {
     migrationDiff?: Array<string>;
     error?: string;
   }> {
-    const body: { deploymentId: string; allowDestructive?: Array<string> } = { deploymentId };
+    const body: { deploymentId: string; allowDestructive?: Array<string> } = {
+      deploymentId,
+    };
     if (options?.allowDestructive && options.allowDestructive.length > 0) {
       body.allowDestructive = options.allowDestructive;
     }
@@ -599,7 +601,12 @@ export class PlatformClient {
   async applyRemoteMigrations(
     projectId: string,
     migrations: Array<{ name: string; sql: string }>,
-  ): Promise<{ ok: boolean; applied: Array<string>; skipped: Array<string>; error?: string }> {
+  ): Promise<{
+    ok: boolean;
+    applied: Array<string>;
+    skipped: Array<string>;
+    error?: string;
+  }> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/migrations/apply`, {
       method: 'POST',
       headers: {

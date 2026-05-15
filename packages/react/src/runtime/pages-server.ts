@@ -18,13 +18,13 @@ const DEFERRED_SHELL_CANCEL_REASON = 'Void deferred shell complete';
 const DEFERRED_SHELL_END_ID = '__VOID_DEFERRED_SHELL_END__';
 const DEFERRED_SHELL_END_MARKER = `<template id="${DEFERRED_SHELL_END_ID}"></template>`;
 
-export type ReactPagesServerConfig = {
+export type ReactPagesServerConfig = Readonly<{
   pageObj: PageObject;
   assetTags: { css: string; preloads: string; body: string };
   components: Record<string, () => Promise<ComponentModule>>;
   layoutTree: Record<string, Array<string>>;
   preambleScript?: string;
-};
+}>;
 
 function createPendingDeferred(): Promise<never> {
   return new Promise(() => {});
@@ -51,7 +51,9 @@ function textStream(text: string): ReadableStream<Uint8Array> {
   });
 }
 
-function concatStreams(streams: Array<ReadableStream<Uint8Array>>): ReadableStream<Uint8Array> {
+function concatStreams(
+  streams: ReadonlyArray<ReadableStream<Uint8Array>>,
+): ReadableStream<Uint8Array> {
   return new ReadableStream({
     async start(controller) {
       try {

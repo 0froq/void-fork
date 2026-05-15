@@ -1,12 +1,12 @@
 import { defineHandler, defineHead } from 'void';
 
-export type Props = {
-  highlights: Array<{
+export type Props = Readonly<{
+  highlights: ReadonlyArray<{
     title: string;
     body: string;
     href: string;
   }>;
-};
+}>;
 
 export const loader = defineHandler<Props>(() => {
   return {

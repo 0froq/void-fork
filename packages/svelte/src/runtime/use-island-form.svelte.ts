@@ -13,8 +13,8 @@ type UntypedIslandForm = {
   put(url: string): Promise<void>;
   patch(url: string): Promise<void>;
   delete(url: string): Promise<void>;
-  reset(...fields: Array<string>): void;
-  clearErrors(...fields: Array<string>): void;
+  reset(...fields: ReadonlyArray<string>): void;
+  clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
 };
 
@@ -64,7 +64,7 @@ export function useIslandForm(defaults: Record<string, unknown>): UntypedIslandF
     Object.keys(defaults_).some((key) => !isEqualFormValue(data[key], defaults_[key])),
   );
 
-  function reset(...fields: Array<string>) {
+  function reset(...fields: ReadonlyArray<string>) {
     if (fields.length === 0) {
       data = { ...defaults_ };
     } else {
@@ -74,7 +74,7 @@ export function useIslandForm(defaults: Record<string, unknown>): UntypedIslandF
     }
   }
 
-  function clearErrors(...fields: Array<string>) {
+  function clearErrors(...fields: ReadonlyArray<string>) {
     if (fields.length === 0) {
       errors = {};
     } else {

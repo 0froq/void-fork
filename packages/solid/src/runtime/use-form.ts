@@ -26,8 +26,8 @@ type UntypedForm = {
   put(opts?: FormSubmitOptions): Promise<void>;
   patch(opts?: FormSubmitOptions): Promise<void>;
   delete(opts?: FormSubmitOptions): Promise<void>;
-  reset(...fields: Array<string>): void;
-  clearErrors(...fields: Array<string>): void;
+  reset(...fields: ReadonlyArray<string>): void;
+  clearErrors(...fields: ReadonlyArray<string>): void;
   clearError(): void;
 };
 
@@ -67,8 +67,8 @@ export function useForm<U extends ActionUrl & string>(
   put(opts?: FormSubmitOptions): Promise<void>;
   patch(opts?: FormSubmitOptions): Promise<void>;
   delete(opts?: FormSubmitOptions): Promise<void>;
-  reset(...fields: Array<keyof ResolveActionBody<U> & string>): void;
-  clearErrors(...fields: Array<keyof ResolveActionBody<U> & string>): void;
+  reset(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
+  clearErrors(...fields: ReadonlyArray<keyof ResolveActionBody<U> & string>): void;
   clearError(): void;
 };
 
@@ -135,7 +135,7 @@ export function useForm(
     setDataStore(field, value);
   }
 
-  function reset(...fields: Array<string>) {
+  function reset(...fields: ReadonlyArray<string>) {
     if (fields.length === 0) {
       setDataStore(reconcile({ ...defaults_ }));
     } else {
@@ -145,7 +145,7 @@ export function useForm(
     }
   }
 
-  function clearErrors(...fields: Array<string>) {
+  function clearErrors(...fields: ReadonlyArray<string>) {
     if (fields.length === 0) {
       setLocalErrors({});
     } else {

@@ -25,7 +25,7 @@ export default function MarkdownPage() {
 
 export function emitSolidComponentWithIslands(
   result: CompileResult,
-  islandImports: Array<IslandImport>,
+  islandImports: ReadonlyArray<IslandImport>,
 ): string {
   const chunks = buildRenderChunks(result.html, islandImports);
   const importAliasByName = new Map<string, string>();

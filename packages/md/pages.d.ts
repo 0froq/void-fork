@@ -4,12 +4,12 @@
  */
 export {};
 
-export type VoidMdPage = {
+export type VoidMdPage = Readonly<{
   path: string;
   title: string;
   frontmatter: Record<string, unknown>;
-  headings: Array<{ depth: number; slug: string; text: string }>;
-};
+  headings: ReadonlyArray<{ depth: number; slug: string; text: string }>;
+}>;
 
-declare const pages: Array<VoidMdPage>;
+declare const pages: ReadonlyArray<VoidMdPage>;
 export default pages;

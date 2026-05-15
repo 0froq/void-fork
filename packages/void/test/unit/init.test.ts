@@ -68,9 +68,9 @@ vi.mock('../../src/cli/auth', () => ({
 
 vi.mock('../../src/cli/client', () => ({
   PlatformApiError: class PlatformApiError extends Error {
-    status = 500;
-    code = undefined;
-    body = undefined;
+    readonly status = 500;
+    readonly code = undefined;
+    readonly body = undefined;
   },
   PlatformClient: class {
     listProjects(...args: Array<unknown>) {

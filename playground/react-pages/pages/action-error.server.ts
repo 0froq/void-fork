@@ -4,10 +4,10 @@ import { defineHandler } from 'void';
 let successfulSubmissions = 0;
 let lastMessage = 'No successful submission yet.';
 
-export type Props = {
+export type Props = Readonly<{
   successfulSubmissions: number;
   lastMessage: string;
-};
+}>;
 
 const messageSchema = v.object({
   message: v.pipe(v.string(), v.minLength(1, 'Message is required')),

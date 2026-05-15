@@ -334,7 +334,7 @@ export default {
 }
 
 /** Check whether a binding name already exists in a resolved bindings array. */
-function hasBinding(list: ReadonlyArray<{ binding: string }> | undefined, name: string): boolean {
+function hasBinding(list: Array<{ binding: string }> | undefined, name: string): boolean {
   return Array.isArray(list) && list.some((b) => b.binding === name);
 }
 

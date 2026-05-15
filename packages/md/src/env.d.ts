@@ -1,5 +1,5 @@
 declare module 'markdown-it-attrs' {
-  const plugin: (md: unknown, ...args: Array<unknown>) => void;
+  const plugin: (md: unknown, ...args: ReadonlyArray<unknown>) => void;
   export default plugin;
 }
 

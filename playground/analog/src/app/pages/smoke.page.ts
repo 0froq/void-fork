@@ -17,8 +17,8 @@ import { toSignal } from '@angular/core/rxjs-interop';
   `,
 })
 export default class SmokePage {
-  private http = inject(HttpClient);
-  data = toSignal(
+  private readonly http = inject(HttpClient);
+  readonly data = toSignal(
     this.http.get<{ user: { name: string } | null; kvValue: string | null }>('/api/smoke'),
   );
 }

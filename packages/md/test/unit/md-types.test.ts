@@ -34,8 +34,8 @@ describe('md type declarations', () => {
     expect(dts).toContain('path: string');
     expect(dts).toContain('title: string');
     expect(dts).toContain('frontmatter: Record<string, unknown>');
-    expect(dts).toContain('headings: Array<{ depth: number; slug: string; text: string }>');
-    expect(dts).toContain('declare const pages: Array<VoidMdPage>');
+    expect(dts).toContain('headings: ReadonlyArray<{ depth: number; slug: string; text: string }>');
+    expect(dts).toContain('declare const pages: ReadonlyArray<VoidMdPage>');
     expect(dts).toContain('export default pages');
   });
 
@@ -58,11 +58,15 @@ describe('md type declarations', () => {
     expect(stub).toContain('path: string');
     expect(stub).toContain('title: string');
     expect(stub).toContain('frontmatter: Record<string, unknown>');
-    expect(stub).toContain('headings: Array<{ depth: number; slug: string; text: string }>');
+    expect(stub).toContain(
+      'headings: ReadonlyArray<{ depth: number; slug: string; text: string }>',
+    );
     expect(generated).toContain('path: string');
     expect(generated).toContain('title: string');
     expect(generated).toContain('frontmatter: Record<string, unknown>');
-    expect(generated).toContain('headings: Array<{ depth: number; slug: string; text: string }>');
+    expect(generated).toContain(
+      'headings: ReadonlyArray<{ depth: number; slug: string; text: string }>',
+    );
 
     // Both should export pages as default
     expect(stub).toContain('export default pages');

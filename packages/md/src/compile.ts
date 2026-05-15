@@ -21,25 +21,25 @@ import { linkPlugin } from './plugins/link.ts';
 import { preWrapperPlugin } from './plugins/pre-wrapper.ts';
 import { tocPlugin } from './plugins/toc.ts';
 
-export type Heading = {
+export type Heading = Readonly<{
   depth: number;
   slug: string;
   text: string;
-};
+}>;
 
-export type CompileResult = {
+export type CompileResult = Readonly<{
   html: string;
   frontmatter: Record<string, unknown>;
-  headings: Array<Heading>;
+  headings: ReadonlyArray<Heading>;
   title: string;
-};
+}>;
 
-export type CompileOptions = {
+export type CompileOptions = Readonly<{
   shiki?: {
     themes?: { light: string; dark: string };
-    langs?: Array<string>;
+    langs?: ReadonlyArray<string>;
   };
-};
+}>;
 
 let compilerPromise: Promise<MarkdownExit> | null = null;
 
@@ -71,7 +71,7 @@ async function createCompiler(options?: CompileOptions): Promise<MarkdownExit> {
     transformerNotationFocus(),
     transformerNotationErrorLevel(),
   ];
-  md.renderer.rules.fence = async (tokens: Array<Token>, idx: number) => {
+  md.renderer.rules.fence = async (tokens: ReadonlyArray<Token>, idx: number) => {
     const token = tokens[idx];
     const code = token.content;
     let lang = token.info ? token.info.split(/\s+/g)[0] : 'text';
@@ -127,7 +127,7 @@ async function createCompiler(options?: CompileOptions): Promise<MarkdownExit> {
   return md;
 }
 
-function extractHeadings(tokens: Array<Token>): Array<Heading> {
+function extractHeadings(tokens: ReadonlyArray<Token>): ReadonlyArray<Heading> {
   const headings: Array<Heading> = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];

@@ -2,13 +2,13 @@ import type MarkdownExit from 'markdown-exit';
 import type { Token } from 'markdown-exit';
 import container from 'markdown-it-container';
 
-export type ContainerOptions = {
+export type ContainerOptions = Readonly<{
   tipLabel?: string;
   infoLabel?: string;
   warningLabel?: string;
   dangerLabel?: string;
   detailsLabel?: string;
-};
+}>;
 
 type MarkdownEnv = {
   references?: Record<string, { title: string; href: string }>;
@@ -24,7 +24,7 @@ function createContainer(
     container,
     klass,
     {
-      render(tokens: Array<Token>, idx: number, _options: unknown, env: MarkdownEnv) {
+      render(tokens: ReadonlyArray<Token>, idx: number, _options: unknown, env: MarkdownEnv) {
         const token = tokens[idx];
         if (token.nesting === 1) {
           token.attrJoin('class', `${klass} custom-block`);

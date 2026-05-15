@@ -26,16 +26,16 @@ const ADAPTER_PLUGIN_NAMES: Record<string, FrameworkAdapter> = {
 const SVELTE_VIRTUAL_PREFIX = '/@void-md-svelte/';
 const SOLID_VIRTUAL_PREFIX = '/@void-md-solid/';
 
-export type MdPage = {
+export type MdPage = Readonly<{
   path: string;
   title: string;
   frontmatter: Record<string, unknown>;
-  headings: Array<{ depth: number; slug: string; text: string }>;
-};
+  headings: ReadonlyArray<{ depth: number; slug: string; text: string }>;
+}>;
 
-export type MarkdownOptions = {
+export type MarkdownOptions = Readonly<{
   shiki?: CompileOptions['shiki'];
-};
+}>;
 
 function hasMdFilesWithScript(dir: string): boolean {
   try {
@@ -67,9 +67,9 @@ function hasIslandFiles(dir: string): boolean {
   return false;
 }
 
-export function voidMarkdown(options?: MarkdownOptions): Array<Plugin> {
+export function voidMarkdown(options?: MarkdownOptions): ReadonlyArray<Plugin> {
   let adapter: FrameworkAdapter | null = null;
-  let mdPages: Array<MdPage> = [];
+  let mdPages: ReadonlyArray<MdPage> = [];
   let root = '';
   const svelteModules = new Map<string, string>();
   const solidModules = new Map<string, string>();
@@ -86,7 +86,7 @@ export function voidMarkdown(options?: MarkdownOptions): Array<Plugin> {
     return `${prefix}${encoded}.${hash}.${extension}`;
   }
 
-  async function scanMdPages(): Promise<Array<MdPage>> {
+  async function scanMdPages(): Promise<ReadonlyArray<MdPage>> {
     const pagesDir = join(root, 'pages');
     if (!existsSync(pagesDir)) {
       return [];

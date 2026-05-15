@@ -55,7 +55,7 @@ export class ProxyD1Database {
  */
 export class ProxyD1PreparedStatement {
   /** @internal */
-  _sql: string;
+  readonly _sql: string;
   /** @internal */
   _params: Array<unknown>;
 
@@ -119,7 +119,10 @@ export class ProxyD1PreparedStatement {
       params: this._params,
       method: 'raw',
     });
-    const data = (await res.json()) as { columns: Array<string>; results: Array<Array<unknown>> };
+    const data = (await res.json()) as {
+      columns: Array<string>;
+      results: Array<Array<unknown>>;
+    };
     if (options?.columnNames) {
       return [data.columns, ...data.results] as Array<T>;
     }

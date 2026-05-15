@@ -25,7 +25,7 @@ type IslandChunk = {
 
 export type RenderChunk = HtmlChunk | IslandChunk;
 
-function findIslandTags(html: string, names: Set<string>): Array<IslandMatch> {
+function findIslandTags(html: string, names: Set<string>): ReadonlyArray<IslandMatch> {
   const matches: Array<IslandMatch> = [];
   let match: RegExpExecArray | null;
   ISLAND_TAG_RE.lastIndex = 0;
@@ -59,8 +59,8 @@ export function toIslandId(imp: IslandImport): string {
 
 export function buildRenderChunks(
   html: string,
-  islandImports: Array<IslandImport>,
-): Array<RenderChunk> {
+  islandImports: ReadonlyArray<IslandImport>,
+): ReadonlyArray<RenderChunk> {
   const islandByName = new Map(islandImports.map((item) => [item.name, item]));
   const tags = findIslandTags(html, new Set(islandByName.keys()));
 

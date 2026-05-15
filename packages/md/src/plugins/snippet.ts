@@ -16,7 +16,7 @@ type SnippetToken = {
   title: string;
 };
 
-type FenceRender = (...args: Array<unknown>) => string;
+type FenceRender = (...args: ReadonlyArray<unknown>) => string;
 
 function rawPathToToken(rawPath: string): SnippetToken {
   const [
@@ -53,7 +53,7 @@ type RegionMarker = {
   end: RegExp;
 };
 
-const markers: Array<RegionMarker> = [
+const markers: ReadonlyArray<RegionMarker> = [
   { start: /^\/\/\s*#?region\b/, end: /^\/\/\s*#?endregion\b/ },
   { start: /^\/\*\s*#?region\b/, end: /^\/\*\s*#?endregion\b/ },
   { start: /^<!--\s*#?region\b/, end: /^<!--\s*#?endregion\b/ },
@@ -62,7 +62,7 @@ const markers: Array<RegionMarker> = [
 ];
 
 function findRegion(
-  lines: Array<string>,
+  lines: ReadonlyArray<string>,
   regionName: string,
 ): { start: number; end: number; re: RegionMarker } | null {
   for (const re of markers) {
@@ -128,8 +128,8 @@ export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
   };
 
   const fence = md.renderer.rules.fence as FenceRender;
-  md.renderer.rules.fence = (...args: Array<unknown>) => {
-    const [tokens, idx] = args as [Array<Token>, number];
+  md.renderer.rules.fence = (...args: ReadonlyArray<unknown>) => {
+    const [tokens, idx] = args as [ReadonlyArray<Token>, number];
     const token = tokens[idx] as Token & { src?: [string, string] };
     const [src, regionName] = token.src ?? [];
     if (!src) {

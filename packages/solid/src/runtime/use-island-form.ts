@@ -29,7 +29,7 @@ async function readActionErrorBody(response: Response): Promise<unknown> {
   }
 }
 
-export type IslandFormReturn<T extends Record<string, unknown>> = {
+export type IslandFormReturn<T extends Record<string, unknown>> = Readonly<{
   data: T;
   setData: <K extends keyof T & string>(field: K, value: T[K]) => void;
   errors: Record<string, string>;
@@ -38,14 +38,14 @@ export type IslandFormReturn<T extends Record<string, unknown>> = {
   hasChanges: boolean;
   wasSuccessful: boolean;
   recentlySuccessful: boolean;
-  reset: (...fields: Array<keyof T & string>) => void;
-  clearErrors: (...fields: Array<string>) => void;
+  reset: (...fields: ReadonlyArray<keyof T & string>) => void;
+  clearErrors: (...fields: ReadonlyArray<string>) => void;
   clearError: () => void;
   post: (url: string) => Promise<void>;
   put: (url: string) => Promise<void>;
   patch: (url: string) => Promise<void>;
   delete: (url: string) => Promise<void>;
-};
+}>;
 
 /**
  * Form composable for island pages. Uses fetch + page reload instead of the
@@ -70,7 +70,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     setDataStore(field, value);
   }
 
-  function reset(...fields: Array<string>) {
+  function reset(...fields: ReadonlyArray<string>) {
     if (fields.length === 0) {
       setDataStore(reconcile({ ...defaults_ }));
     } else {
@@ -80,7 +80,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     }
   }
 
-  function clearErrors(...fields: Array<string>) {
+  function clearErrors(...fields: ReadonlyArray<string>) {
     if (fields.length === 0) {
       setErrors({});
     } else {

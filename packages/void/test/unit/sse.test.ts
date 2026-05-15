@@ -12,7 +12,7 @@ import {
 class MockEventSource {
   static instances: Array<MockEventSource> = [];
 
-  listeners = new Map<string, Set<(event: Event) => void>>();
+  readonly listeners = new Map<string, Set<(event: Event) => void>>();
   closed = false;
 
   constructor(

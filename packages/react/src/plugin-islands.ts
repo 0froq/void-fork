@@ -24,7 +24,7 @@ type MdPluginWithApi = Plugin & {
 };
 type ScannableEntry = { filePath: string; island: boolean | undefined };
 
-export function islandsPlugin(pagesDir: string): Array<Plugin> {
+export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
   let pageScan: PageScanResult | null = null;
   let isDev = false;
   const root = dirname(pagesDir);
@@ -65,7 +65,7 @@ export function islandsPlugin(pagesDir: string): Array<Plugin> {
           const importAttrRe =
             /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
           // Scan both pages AND layouts for island imports
-          const filesToScan: Array<ScannableEntry> = [
+          const filesToScan: ReadonlyArray<ScannableEntry> = [
             ...pageScan.pages.map((p) => ({ filePath: p.componentPath, island: p.island })),
             ...pageScan.layouts.map((l) => ({ filePath: l.filePath, island: l.island })),
             ...pageScan.namedLayouts.map((nl) => ({

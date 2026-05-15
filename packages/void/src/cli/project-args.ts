@@ -21,7 +21,13 @@ export type ProjectArgs =
   | { subcommand: 'status'; name: string }
   | { subcommand: 'link'; name: string }
   | { subcommand: 'list' }
-  | { subcommand: 'logs'; filter: string; range: string; deployment: string; level: string }
+  | {
+      subcommand: 'logs';
+      filter: string;
+      range: string;
+      deployment: string;
+      level: string;
+    }
   | { subcommand: 'rollback'; deployId: string }
   | { subcommand: 'cancel'; deployId: string }
   | { subcommand: 'delete'; name: string; force: boolean }

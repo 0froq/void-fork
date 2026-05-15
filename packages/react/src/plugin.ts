@@ -9,13 +9,13 @@ type PrefetchConfig = {
   cacheFor?: number | string | [string, string];
 };
 
-export type VoidReactOptions = {
+export type VoidReactOptions = Readonly<{
   react?: Parameters<typeof react>[0];
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
-};
+}>;
 
-export function voidReact(options?: VoidReactOptions): Array<Plugin> {
+export function voidReact(options?: VoidReactOptions): ReadonlyArray<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     ...react(options?.react),

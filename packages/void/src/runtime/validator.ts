@@ -52,7 +52,7 @@ export async function runValidation<V extends ValidatorSlots>(
   const input: Record<string, unknown> = {};
   const allIssues: Array<{
     slot: string;
-    issues: ReadonlyArray<{ message: string; path?: string }>;
+    issues: Array<{ message: string; path?: string }>;
   }> = [];
 
   if (validators.params) {

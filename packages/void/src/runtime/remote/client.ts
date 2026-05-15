@@ -7,7 +7,7 @@ import { cfAccessHeaders } from '../../shared/cf-access.ts';
  * binding operations to the platform proxy during local development.
  */
 export class ProxyClient {
-  private authHeaders: Record<string, string>;
+  private readonly authHeaders: Record<string, string>;
 
   constructor(
     private proxyUrl: string,

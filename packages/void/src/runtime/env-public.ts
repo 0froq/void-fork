@@ -219,7 +219,7 @@ export function _getSchemaDefaults(): Record<string, string> {
 export class EnvValidationError extends Error {
   constructor(
     public readonly key: string,
-    public readonly issues: ReadonlyArray<StandardSchemaV1.Issue>,
+    public readonly issues: Array<StandardSchemaV1.Issue>,
   ) {
     // Messages supplied to this constructor are expected to be pre-redacted
     // by the caller (readKey / _validateEnvOnce / validateAllEnvWithValues).

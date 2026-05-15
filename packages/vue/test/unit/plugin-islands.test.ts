@@ -11,14 +11,16 @@ type IslandsPluginHooks = {
   configResolved?: (config: {
     root: string;
     command: 'serve' | 'build';
-    plugins: Array<unknown>;
+    plugins: ReadonlyArray<unknown>;
   }) => void;
   buildStart?: (() => Promise<void>) | HookWithHandler<() => Promise<void>>;
   configureServer?:
     | ((server: {
         watcher: EventEmitter;
         environments: {
-          client: { moduleGraph: { getModuleById(): null; invalidateModule(): void } };
+          client: {
+            moduleGraph: { getModuleById(): null; invalidateModule(): void };
+          };
         };
         middlewares: { use(): void };
       }) => void)
@@ -26,7 +28,9 @@ type IslandsPluginHooks = {
         (server: {
           watcher: EventEmitter;
           environments: {
-            client: { moduleGraph: { getModuleById(): null; invalidateModule(): void } };
+            client: {
+              moduleGraph: { getModuleById(): null; invalidateModule(): void };
+            };
           };
           middlewares: { use(): void };
         }) => void

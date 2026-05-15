@@ -193,7 +193,7 @@ function recordHit(node: AstMemberExpression, hits: Array<Hit>): void {
  * are skipped — only the `client` environment is checked.
  */
 /** Default value matches Vite's default `envPrefix`. */
-const DEFAULT_ENV_PREFIXES = ['VITE_'] as const;
+const DEFAULT_ENV_PREFIXES: ReadonlyArray<string> = ['VITE_'];
 
 export function envClientGuardPlugin(root: string): Plugin {
   let envPrefixes: ReadonlyArray<string> = DEFAULT_ENV_PREFIXES;

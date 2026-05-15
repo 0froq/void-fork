@@ -242,7 +242,9 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
+    const result = (res as Record<string, unknown>).result as {
+      content: Array<{ text: string }>;
+    };
     const data = JSON.parse(result.content[0].text);
     expect(data).toHaveLength(1);
     expect(data[0].slug).toBe('my-app');
@@ -299,7 +301,9 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
+    const result = (res as Record<string, unknown>).result as {
+      content: Array<{ text: string }>;
+    };
     const data = JSON.parse(result.content[0].text);
     expect(data.deployments).toHaveLength(1);
     expect(data.deployments[0].status).toBe('active');
@@ -360,7 +364,9 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
+    const result = (res as Record<string, unknown>).result as {
+      content: Array<{ text: string }>;
+    };
     const data = JSON.parse(result.content[0].text);
     expect(data.ok).toBe(true);
     expect(data.deploymentId).toBe('d2');
@@ -443,7 +449,9 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
+    const result = (res as Record<string, unknown>).result as {
+      content: Array<{ text: string }>;
+    };
     const data = JSON.parse(result.content[0].text);
     expect(data.hostname).toBe('example.com');
     expect(data.cname_target).toBe('p1.void.app');
@@ -465,7 +473,9 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
+    const result = (res as Record<string, unknown>).result as {
+      content: Array<{ text: string }>;
+    };
     const data = JSON.parse(result.content[0].text);
     expect(data.ok).toBe(true);
     expect(data.name).toBe('API_KEY');
@@ -489,7 +499,9 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
+    const result = (res as Record<string, unknown>).result as {
+      content: Array<{ text: string }>;
+    };
     const data = JSON.parse(result.content[0].text);
     expect(data.applied).toHaveLength(1);
     expect(data.applied[0].name).toBe('001_init');
@@ -506,7 +518,9 @@ describe('query tool', () => {
       },
     });
 
-    const result = (res as Record<string, unknown>).result as { content: Array<{ text: string }> };
+    const result = (res as Record<string, unknown>).result as {
+      content: Array<{ text: string }>;
+    };
     const data = JSON.parse(result.content[0].text);
     expect(data.token).toBeUndefined();
     expect(data.baseUrl).toBeUndefined();

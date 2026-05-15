@@ -28,7 +28,7 @@ async function readActionErrorBody(response: Response): Promise<unknown> {
   }
 }
 
-export type IslandFormReturn<T extends Record<string, unknown>> = {
+export type IslandFormReturn<T extends Record<string, unknown>> = Readonly<{
   data: T;
   setData: <K extends keyof T & string>(field: K, value: T[K]) => void;
   errors: Record<string, string>;
@@ -37,14 +37,14 @@ export type IslandFormReturn<T extends Record<string, unknown>> = {
   hasChanges: boolean;
   wasSuccessful: boolean;
   recentlySuccessful: boolean;
-  reset: (...fields: Array<keyof T & string>) => void;
-  clearErrors: (...fields: Array<string>) => void;
+  reset: (...fields: ReadonlyArray<keyof T & string>) => void;
+  clearErrors: (...fields: ReadonlyArray<string>) => void;
   clearError: () => void;
   post: (url: string) => Promise<void>;
   put: (url: string) => Promise<void>;
   patch: (url: string) => Promise<void>;
   delete: (url: string) => Promise<void>;
-};
+}>;
 
 /**
  * Form hook for island pages. Uses fetch + page reload instead of the
@@ -71,7 +71,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     setDataState((prev) => ({ ...prev, [field]: value }));
   }, []);
 
-  const reset = useCallback((...fields: Array<keyof T & string>) => {
+  const reset = useCallback((...fields: ReadonlyArray<keyof T & string>) => {
     if (fields.length === 0) {
       setDataState({ ...defaultsRef.current } as T);
     } else {
@@ -85,7 +85,7 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     }
   }, []);
 
-  const clearErrors = useCallback((...fields: Array<string>) => {
+  const clearErrors = useCallback((...fields: ReadonlyArray<string>) => {
     if (fields.length === 0) {
       setErrors({});
     } else {

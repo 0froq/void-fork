@@ -179,11 +179,11 @@ export function email(): EnvSchema<string> {
 }
 
 /** One of a fixed set of literal string values. */
-export function oneOf<const Values extends ReadonlyArray<string>>(
+export function oneOf<const Values extends Array<string>>(
   values: Values,
 ): EnvSchema<Values[number]> {
   return build<Values[number]>((raw) => {
-    if ((values as ReadonlyArray<string>).includes(raw)) {
+    if ((values as Array<string>).includes(raw)) {
       return { ok: true, value: raw as Values[number] };
     }
     return {

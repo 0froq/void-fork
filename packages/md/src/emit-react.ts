@@ -26,7 +26,7 @@ export default function MarkdownPage() {
 
 export function emitReactComponentWithIslands(
   result: CompileResult,
-  islandImports: Array<IslandImport>,
+  islandImports: ReadonlyArray<IslandImport>,
 ): string {
   const chunks = buildRenderChunks(result.html, islandImports);
 

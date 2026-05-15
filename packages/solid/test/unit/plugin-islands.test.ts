@@ -15,7 +15,11 @@ function writeFile(relativePath: string, content: string): void {
 function setupPlugin() {
   const plugins = islandsPlugin(PAGES_DIR);
   const plugin = plugins[0] as unknown as {
-    configResolved(config: { root: string; command: 'build'; plugins: Array<unknown> }): void;
+    configResolved(config: {
+      root: string;
+      command: 'build';
+      plugins: ReadonlyArray<unknown>;
+    }): void;
     buildStart: { call(thisArg: unknown): Promise<void> | void };
     load: { handler(id: string): string | undefined };
   };

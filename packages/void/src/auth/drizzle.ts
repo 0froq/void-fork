@@ -38,7 +38,7 @@ export type VoidAuthMigrationTable = {
 export type VoidAuthMigrationSchema = {
   dialect: 'sqlite' | 'postgresql';
   idStrategy: AuthIdStrategy;
-  tables: ReadonlyArray<VoidAuthMigrationTable>;
+  tables: Array<VoidAuthMigrationTable>;
 };
 
 type GenerateVoidAuthDatabaseModuleOptions = {
@@ -48,7 +48,7 @@ type GenerateVoidAuthDatabaseModuleOptions = {
 };
 
 function resolveEmailAndPassword(
-  configuredProviders: ReadonlyArray<VoidAuthProvider> | null,
+  configuredProviders: Array<VoidAuthProvider> | null,
 ): BetterAuthOptions['emailAndPassword'] | undefined {
   if (!configuredProviders || configuredProviders.includes(VOID_EMAIL_AUTH_PROVIDER)) {
     return { enabled: true };
@@ -57,7 +57,7 @@ function resolveEmailAndPassword(
 }
 
 function resolvePlaceholderSocialProviders(
-  configuredProviders: ReadonlyArray<VoidAuthProvider> | null,
+  configuredProviders: Array<VoidAuthProvider> | null,
 ): BetterAuthOptions['socialProviders'] | undefined {
   if (!configuredProviders) {
     return undefined;
@@ -140,7 +140,7 @@ function isJsonField(field: DBFieldAttribute): boolean {
   return field.type === 'json' || field.type === 'string[]' || field.type === 'number[]';
 }
 
-function renderEnumValues(values: ReadonlyArray<string>): string {
+function renderEnumValues(values: Array<string>): string {
   return `[${values.map((value) => JSON.stringify(value)).join(', ')}] as const`;
 }
 

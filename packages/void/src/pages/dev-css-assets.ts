@@ -183,7 +183,7 @@ function createOrderedEdgeStore(root: string): OrderedEdgeStore {
 }
 
 class DevCssProvider {
-  private cache = new Map<string, Array<DevCssAsset>>();
+  private readonly cache = new Map<string, Array<DevCssAsset>>();
   private graphVersion = 0;
 
   constructor(

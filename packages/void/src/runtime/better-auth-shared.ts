@@ -15,7 +15,7 @@ export type VoidAuthDialect = 'sqlite' | 'postgresql';
 
 export type VoidAuthRuntimeOptions = {
   dialect: VoidAuthDialect;
-  providers: ReadonlyArray<VoidAuthProvider> | null;
+  providers: Array<VoidAuthProvider> | null;
   userConfig?: VoidAuthConfig;
 };
 
@@ -161,7 +161,7 @@ export const voidAuthPassword: VoidAuthPasswordOptions = {
 };
 
 function resolveEmailAndPassword(
-  configuredProviders: ReadonlyArray<VoidAuthProvider> | null,
+  configuredProviders: Array<VoidAuthProvider> | null,
 ): BetterAuthOptions['emailAndPassword'] | undefined {
   if (!configuredProviders || configuredProviders.includes(VOID_EMAIL_AUTH_PROVIDER)) {
     return {
@@ -199,7 +199,7 @@ function resolveSocialProviderCredentials(
 
 function resolveSocialProviders(
   env: VoidAuthEnv,
-  configuredProviders: ReadonlyArray<VoidAuthProvider> | null,
+  configuredProviders: Array<VoidAuthProvider> | null,
 ): BetterAuthOptions['socialProviders'] | undefined {
   if (!configuredProviders) {
     return undefined;
