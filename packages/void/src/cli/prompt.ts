@@ -3,14 +3,14 @@ import { getSiteDomain } from './auth.ts';
 import type { ProjectResponse } from './client.ts';
 import { validateProjectSlug } from './project-slug.ts';
 
-interface SelectResult {
+type SelectResult = {
   action: 'select';
   project: ProjectResponse;
-}
+};
 
-interface CreateResult {
+type CreateResult = {
   action: 'create';
-}
+};
 
 export type PromptResult = SelectResult | CreateResult;
 export type ProjectSetupAction = 'create' | 'link';

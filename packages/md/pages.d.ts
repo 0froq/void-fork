@@ -4,12 +4,12 @@
  */
 export {};
 
-export interface VoidMdPage {
+export type VoidMdPage = {
   path: string;
   title: string;
   frontmatter: Record<string, unknown>;
   headings: Array<{ depth: number; slug: string; text: string }>;
-}
+};
 
 declare const pages: Array<VoidMdPage>;
 export default pages;

@@ -26,11 +26,11 @@ const COMPONENT_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js'];
  */
 const WRAPPER_PREFIX = '/@void-island-wrap/';
 
-interface WrapperMeta {
+type WrapperMeta = {
   src: string;
   islandId: string;
   hydrate: string;
-}
+};
 type MdPluginWithApi = Plugin & {
   api?: {
     getClientScripts?: () => Map<string, unknown>;

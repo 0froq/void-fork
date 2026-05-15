@@ -22,10 +22,10 @@ import type { DevRedirectRule, HeaderRule } from './types.ts';
  * (a redirect always "forces" by nature — it changes the URL), so we silently
  * strip it and let callers aggregate a single friendly warning at deploy time.
  */
-export interface ParsedRedirects {
+export type ParsedRedirects = {
   rules: Array<DevRedirectRule>;
   redundantForceOn3xx: number;
-}
+};
 
 /**
  * Parse a Cloudflare/Netlify `_headers` file into HeaderRule[].

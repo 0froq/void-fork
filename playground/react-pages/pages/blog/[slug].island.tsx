@@ -1,6 +1,6 @@
-interface Props {
+type Props = {
   post: { slug: string; title: string; body: string };
-}
+};
 
 export default function BlogPost({ post }: Props) {
   return (

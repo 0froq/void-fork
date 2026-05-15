@@ -1,9 +1,9 @@
 import { relative } from 'pathe';
 import type { ScanResult } from '../router/scan.ts';
 
-export interface RouteTypesResult {
+export type RouteTypesResult = {
   dts: string;
-}
+};
 
 /**
  * Generate .void/routes.d.ts content.
@@ -26,7 +26,7 @@ export function generateRouteTypes(
   lines.push('export {}');
   // Inline the Standard Schema types so the generated file is self-contained
   // (no external dependency on @standard-schema/spec)
-  lines.push('interface StandardSchemaV1<Input = unknown, Output = Input> {');
+  lines.push('type StandardSchemaV1<Input = unknown, Output = Input> = {');
   lines.push('  readonly "~standard": {');
   lines.push('    readonly version: 1;');
   lines.push('    readonly vendor: string;');
@@ -35,7 +35,7 @@ export function generateRouteTypes(
     '    readonly types?: { readonly input: Input; readonly output: Output } | undefined;',
   );
   lines.push('  };');
-  lines.push('}');
+  lines.push('};');
   lines.push('declare namespace StandardSchemaV1 {');
   lines.push('  type InferInput<Schema extends StandardSchemaV1> = NonNullable<');
   lines.push('    Schema["~standard"]["types"]');

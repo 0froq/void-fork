@@ -1,8 +1,8 @@
 import { defineHandler } from 'void';
 
-export interface Props {
+export type Props = {
   title: string;
-}
+};
 
 export const loader = defineHandler<Props>(() => {
   return { title: 'Initial Redirect' };

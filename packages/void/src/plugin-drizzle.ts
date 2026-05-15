@@ -17,10 +17,10 @@ const pgResolved = fileURLToPath(import.meta.resolve('pg'));
 
 const VIRTUAL_DB_ID = '\0virtual:void-db';
 const VIRTUAL_SCHEMA_DB_ID = '\0virtual:void-db-schema';
-interface DrizzlePluginOptions {
+type DrizzlePluginOptions = {
   forceVirtualDb?: boolean;
   redirectDbTypePaths?: boolean;
-}
+};
 
 /**
  * Vite plugin for Drizzle integration.

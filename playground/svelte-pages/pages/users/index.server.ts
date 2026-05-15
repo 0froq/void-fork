@@ -2,9 +2,9 @@ import * as v from 'valibot';
 import { defineHandler } from 'void';
 import { USERS } from './_data.ts';
 
-export interface Props {
+export type Props = {
   users: typeof USERS;
-}
+};
 
 export const loader = defineHandler<Props>(() => {
   return { users: USERS };

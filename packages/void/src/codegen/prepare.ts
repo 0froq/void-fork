@@ -14,10 +14,10 @@ import { ensureProjectTsconfig } from './project-tsconfig.ts';
 import { generateQueueTypes } from './queue-types.ts';
 import { generateRouteTypes } from './route-types.ts';
 
-export interface PrepareProjectResult {
+export type PrepareProjectResult = {
   written: Array<string>;
   removed: Array<string>;
-}
+};
 
 function writeGeneratedFile(
   outDir: string,

@@ -7,11 +7,11 @@ export const domainSubcommands: Array<SubcommandDef> = [
   { name: 'status', arg: '<hostname>', description: 'Check domain verification status' },
 ];
 
-export interface DomainArgs {
+export type DomainArgs = {
   subcommand: 'add' | 'delete' | 'list' | 'status';
   hostname?: string;
   projectSlug?: string;
-}
+};
 
 export function parseDomainArgs(args: Array<string>): DomainArgs {
   const subcommand = args[0] as DomainArgs['subcommand'];

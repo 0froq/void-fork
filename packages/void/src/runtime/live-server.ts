@@ -84,14 +84,14 @@ type ActiveConnection = {
   limits: LiveLimits;
 };
 
-export interface LiveDurableObjectInstance {
+export type LiveDurableObjectInstance = {
   fetch(request: Request): Promise<Response>;
   alarm?(): Promise<void>;
-}
+};
 
-export interface LiveDurableObjectClass {
+export type LiveDurableObjectClass = {
   new (state: DurableObjectState, env: LiveDurableObjectEnv): LiveDurableObjectInstance;
-}
+};
 
 const GENERATION_KEY = 'connection:generation';
 const TOPIC_PRUNE_ALARM_DELAY_MS = 60_000;

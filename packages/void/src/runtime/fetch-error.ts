@@ -1,10 +1,10 @@
 import { FetchError as OFetchError } from 'ofetch';
 
-export interface FetchResponse<T = unknown> extends Response {
+export type FetchResponse<T = unknown> = Response & {
   _data?: T;
-}
+};
 
-export interface FetchError<T = unknown> extends Error {
+export type FetchError<T = unknown> = Error & {
   request?: RequestInfo;
   options?: RequestInit & Record<string, unknown>;
   response?: FetchResponse<T>;
@@ -13,7 +13,7 @@ export interface FetchError<T = unknown> extends Error {
   statusText?: string;
   statusCode?: number;
   statusMessage?: string;
-}
+};
 
 type FetchErrorConstructor = new <T = unknown>(
   message: string,

@@ -40,9 +40,9 @@ export function findEnvFile(root: string): string | null {
   return matches[0] ?? null;
 }
 
-export interface EnvTypesResult {
+export type EnvTypesResult = {
   dts: string;
-}
+};
 
 /**
  * Generate `.void/env.d.ts` content. Augments:

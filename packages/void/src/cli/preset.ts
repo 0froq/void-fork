@@ -3,7 +3,7 @@ import { join, resolve } from 'pathe';
 import { hasSsrEntry } from '../ssr/entry.ts';
 
 /** Build output conventions for a known SSG (static site generator). */
-export interface SsgPreset {
+export type SsgPreset = {
   /** Package name to detect in package.json dependencies. */
   dep: string;
   /** Default build command (binary name — localBin resolves the full path). */
@@ -14,7 +14,7 @@ export interface SsgPreset {
   appType: 'static' | 'spa';
   /** Optional project-aware overrides. */
   resolve?: (root: string) => Partial<Pick<StaticPreset, 'buildCommand' | 'outputDir'>> | undefined;
-}
+};
 
 /**
  * Known output conventions for SSGs.
@@ -44,7 +44,7 @@ export const SSG_PRESETS: Record<string, SsgPreset> = {
 };
 
 /** Build output conventions for a meta-framework. */
-export interface FrameworkPreset {
+export type FrameworkPreset = {
   /** Default build command (overridable via void.json `build`). */
   buildCommand: string;
   /** Directory containing the worker entry, relative to project root. */
@@ -57,7 +57,7 @@ export interface FrameworkPreset {
   hashedAssetsPrefix?: string;
   /** Whether the worker entry needs bundling (bare imports not resolved by framework build). */
   bundle?: boolean;
-}
+};
 
 /**
  * Known output conventions for meta-frameworks.
@@ -128,11 +128,11 @@ export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
   },
 };
 
-export interface StaticPreset {
+export type StaticPreset = {
   buildCommand: string | null;
   outputDir: string;
   appType: 'spa' | 'static';
-}
+};
 
 /**
  * Resolve a project-local command, rewriting `vite` to `vp` when the project

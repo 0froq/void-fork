@@ -1,24 +1,24 @@
-export interface MigrationMeta {
+export type MigrationMeta = {
   name: string;
   destructive: boolean;
-}
+};
 
-export interface ScheduleMeta {
+export type ScheduleMeta = {
   name: string;
   cron: string;
-}
+};
 
-export interface QueueMeta {
+export type QueueMeta = {
   name: string;
   bindingName: string;
   maxBatchSize?: number;
   maxBatchTimeout?: number;
-}
+};
 
-export interface HeaderRule {
+export type HeaderRule = {
   pattern: string;
   headers: Array<[string, string]>;
-}
+};
 
 /**
  * Public wire-shape of a redirect / rewrite / fallback rule as shipped in the
@@ -30,7 +30,7 @@ export interface HeaderRule {
  * `cli/package.ts` narrows `DevRedirectRule[]` to `RedirectRule[]` before the
  * manifest is serialised.
  */
-export interface RedirectRule {
+export type RedirectRule = {
   source: string;
   destination: string;
   status: number;
@@ -51,7 +51,7 @@ export interface RedirectRule {
    * `https://` requests reach the runtime).
    */
   host?: string;
-}
+};
 
 /**
  * Internal rule shape — `RedirectRule` plus dev-only metadata used during
@@ -59,7 +59,7 @@ export interface RedirectRule {
  * re-exported publicly; consumers should never see `force` or `origin` in
  * their autocomplete.
  */
-export interface DevRedirectRule extends RedirectRule {
+export type DevRedirectRule = RedirectRule & {
   /**
    * Netlify-compatible force flag. Only meaningful for `status: 200` rewrites.
    *
@@ -87,40 +87,40 @@ export interface DevRedirectRule extends RedirectRule {
    * to end users and does not bloat the deployed bundle.
    */
   origin?: string;
-}
+};
 
-export interface AssetConfig {
+export type AssetConfig = {
   not_found_handling?: 'none' | 'single-page-application' | '404-page';
   html_handling?: 'auto-trailing-slash' | 'force-trailing-slash' | 'drop-trailing-slash' | 'none';
-}
+};
 
-export interface WebSocketRouteMeta {
+export type WebSocketRouteMeta = {
   pattern: string;
   filePath: string;
   className: string;
   mode: 'room' | 'socket';
   hasAuthGate: boolean;
-}
+};
 
-export interface WebSocketMigrationMeta {
+export type WebSocketMigrationMeta = {
   tag: string;
   newClasses?: Array<string>;
   deletedClasses?: Array<string>;
-}
+};
 
-export interface WebSocketManifestMeta {
+export type WebSocketManifestMeta = {
   routes: Array<WebSocketRouteMeta>;
   classes: Array<string>;
   migrations?: Array<WebSocketMigrationMeta>;
-}
+};
 
-export interface SandboxMigrationMeta {
+export type SandboxMigrationMeta = {
   tag: string;
   newSqliteClasses?: Array<string>;
   deletedClasses?: Array<string>;
-}
+};
 
-export interface SandboxManifestMeta {
+export type SandboxManifestMeta = {
   bindingName: string;
   className: string;
   containerName: string;
@@ -128,22 +128,22 @@ export interface SandboxManifestMeta {
   instanceType?: string;
   maxInstances?: number;
   migrations?: Array<SandboxMigrationMeta>;
-}
+};
 
-export interface LiveMigrationMeta {
+export type LiveMigrationMeta = {
   tag: string;
   newSqliteClasses?: Array<string>;
-}
+};
 
-export interface LiveManifestMeta {
+export type LiveManifestMeta = {
   bindingName: string;
   className: string;
   storage: 'sqlite';
   classes: Array<string>;
   migrations?: Array<LiveMigrationMeta>;
-}
+};
 
-export interface DeployManifest {
+export type DeployManifest = {
   version: number;
   /**
    * Wire-format version of the per-asset entries in the sibling
@@ -190,7 +190,7 @@ export interface DeployManifest {
   websocket?: WebSocketManifestMeta;
   sandbox?: SandboxManifestMeta;
   live?: LiveManifestMeta;
-}
+};
 
 export type DeployEvent =
   | { event: 'start'; deploymentId: string }

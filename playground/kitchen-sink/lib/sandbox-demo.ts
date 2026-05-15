@@ -1,11 +1,11 @@
-export interface EdgeRequestSample {
+export type EdgeRequestSample = {
   path: string;
   colo: string;
   status: number;
   durationMs: number;
   cache: 'hit' | 'miss' | 'bypass';
   botScore: number;
-}
+};
 
 export const sampleRequests: Array<EdgeRequestSample> = [
   { path: '/', colo: 'SJC', status: 200, durationMs: 31, cache: 'hit', botScore: 92 },

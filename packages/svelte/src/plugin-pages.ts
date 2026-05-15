@@ -8,15 +8,15 @@ import { generateComponentManifest } from './pages-manifest.ts';
 const RENDERER_ID = 'virtual:void-pages-renderer';
 const CLIENT_ENTRY_ID = 'virtual:void-pages-client';
 
-interface PrefetchConfig {
+type PrefetchConfig = {
   hoverDelay?: number;
   cacheFor?: number | string | [string, string];
-}
+};
 
-interface PagesPluginOptions {
+type PagesPluginOptions = {
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
-}
+};
 
 /** Check if the pages directory has any non-island Svelte page files. */
 function hasNonIslandPages(dir: string): boolean {

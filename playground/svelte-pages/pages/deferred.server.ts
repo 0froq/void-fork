@@ -1,10 +1,10 @@
 import { defineHandler, defer } from 'void';
 import type { Deferred } from 'void';
 
-export interface Props {
+export type Props = {
   title: string;
   stats: Deferred<{ count: number }>;
-}
+};
 
 export const loader = defineHandler<Props>(() => {
   return {

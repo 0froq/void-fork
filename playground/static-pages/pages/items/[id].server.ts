@@ -1,8 +1,8 @@
 import { defineHandler } from 'void';
 
-export interface Props {
+export type Props = {
   id: string;
-}
+};
 
 export const loader = defineHandler<Props>((c) => {
   return { id: c.req.param('id') };

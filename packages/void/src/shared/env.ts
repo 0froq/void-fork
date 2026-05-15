@@ -73,10 +73,10 @@ export const INTERNAL_ENV_KEYS = [
 
 const INTERNAL_ENV_KEY_SET: ReadonlySet<string> = new Set(INTERNAL_ENV_KEYS);
 
-export interface StripInternalEnvKeysResult<T> {
+export type StripInternalEnvKeysResult<T> = {
   sanitized: T;
   stripped: Array<string>;
-}
+};
 
 /**
  * Remove any internal Void env keys from a user-supplied env record. Returns

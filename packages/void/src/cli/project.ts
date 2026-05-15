@@ -1,11 +1,11 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'pathe';
 
-export interface ProjectConfig {
+export type ProjectConfig = {
   projectId: string;
   slug: string;
   voidInternalStaging?: boolean;
-}
+};
 
 const PROJECT_FILE = '.void/project.json';
 

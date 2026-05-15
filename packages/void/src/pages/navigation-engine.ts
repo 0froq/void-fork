@@ -7,21 +7,21 @@ import { PrefetchCache, parseCacheFor } from './prefetch.ts';
 import type { CacheForInput, CacheForResult } from './prefetch.ts';
 import type { PageObject } from './protocol.ts';
 
-export interface PageComponentModule {
+export type PageComponentModule = {
   default: unknown;
-}
+};
 
 export type PageData = PageObject;
 
-interface DeferredWindow extends Window {
+type DeferredWindow = Window & {
   __resolveDeferred?: (group: string, data: unknown) => void;
   __rejectDeferred?: (group: string, error: unknown) => void;
   __deferredQueue?: Array<[string, unknown] | [string, 0, unknown]>;
-}
+};
 
 type PageFetchOptions = RequestInit & { headers: Record<string, string> };
 
-export interface VisitOptions {
+export type VisitOptions = {
   method?: string;
   data?: unknown;
   preserveScroll?: boolean;
@@ -34,22 +34,22 @@ export interface VisitOptions {
   _scrollPosition?: { x: number; y: number } | null;
   /** @internal Used by popstate handler to avoid writing history while traversing */
   _popstate?: boolean;
-}
+};
 
-export interface PrefetchOptions {
+export type PrefetchOptions = {
   method?: string;
   cacheFor?: CacheForInput;
-}
+};
 
-export interface VoidRouterAdapter {
+export type VoidRouterAdapter = {
   createDeferred(): unknown;
   resolveDeferred(ref: unknown, value: unknown): unknown;
   rejectDeferred(ref: unknown, error: string): unknown;
   isLoading(ref: unknown): boolean;
   onDeferredUpdate?(props: Record<string, unknown>): void;
-}
+};
 
-export interface PageNavigationEngineConfig {
+export type PageNavigationEngineConfig = {
   adapter: VoidRouterAdapter;
   components: Record<string, () => Promise<PageComponentModule>>;
   layoutTree: Record<string, Array<string>>;
@@ -60,15 +60,15 @@ export interface PageNavigationEngineConfig {
   viewTransitions: boolean;
   prefetchHoverDelay: number;
   prefetchDefaultCacheFor: CacheForResult;
-}
+};
 
-export interface PageNavigationResult {
+export type PageNavigationResult = {
   pageData: PageData;
   component: unknown;
   layouts: Array<unknown>;
-}
+};
 
-export interface PageNavigationResource {
+export type PageNavigationResource = {
   id: number;
   url: string;
   fetchUrl: string;
@@ -80,9 +80,9 @@ export interface PageNavigationResource {
   abort(): void;
   commit(): Promise<void>;
   dispose(): void;
-}
+};
 
-export interface PageNavigationEngine {
+export type PageNavigationEngine = {
   _hoverDelay: number;
   initialPageData: PageData;
   initialComponent: unknown;
@@ -93,7 +93,7 @@ export interface PageNavigationEngine {
   flushAll(): void;
   setPopStateHandler(handler: (url: string, options: VisitOptions) => void): void;
   start(): void;
-}
+};
 
 const PAGE_DATA_SCRIPT_ID = '__VOID_PAGE_DATA__';
 const STATIC_PAGE_DATA_PREFIX = '/_void/pages';

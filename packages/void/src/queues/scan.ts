@@ -4,7 +4,7 @@ import { glob, globSync } from 'tinyglobby';
 
 const QUEUE_EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
 
-export interface QueueDefinition {
+export type QueueDefinition = {
   /** Relative file path from queues/ */
   filePath: string;
   /** Deterministic name (path without extension) */
@@ -19,7 +19,7 @@ export interface QueueDefinition {
   maxRetries?: number;
   /** Optional delay (seconds) between retries */
   retryDelay?: number;
-}
+};
 
 function extractName(filePath: string): string {
   return filePath.replace(/\.[^.]+$/, '');

@@ -1,7 +1,7 @@
 import { VoidActionError, categorizeActionError, isEqualFormValue } from 'void/pages-client';
 import { reactive, ref, watch } from 'vue';
 
-export interface IslandFormReturn<T extends Record<string, unknown>> {
+export type IslandFormReturn<T extends Record<string, unknown>> = {
   data: T;
   errors: Record<string, string>;
   error: VoidActionError | null;
@@ -17,7 +17,7 @@ export interface IslandFormReturn<T extends Record<string, unknown>> {
   reset(...fields: Array<keyof T & string>): void;
   clearErrors(...fields: Array<string>): void;
   clearError(): void;
-}
+};
 
 function getValidationErrors(body: unknown): Record<string, string> | null {
   if (

@@ -1,15 +1,15 @@
 import type { RenderOptions, Token } from 'markdown-exit';
 import type MarkdownExit from 'markdown-exit';
 
-export interface HeadingData {
+export type HeadingData = {
   depth: number;
   slug: string;
   text: string;
-}
+};
 
-interface MarkdownEnv extends Record<string, unknown> {
+type MarkdownEnv = Record<string, unknown> & {
   headings?: Array<HeadingData>;
-}
+};
 
 /**
  * Extracts heading metadata into env.headings during rendering.

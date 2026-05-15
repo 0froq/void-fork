@@ -4,18 +4,18 @@ import type {
   VoidAuthMigrationTable,
 } from '../auth/drizzle.ts';
 
-export interface SqliteMigrationRunner {
+export type SqliteMigrationRunner = {
   all<T extends Record<string, unknown> = Record<string, unknown>>(sql: string): Promise<Array<T>>;
   run(sql: string): Promise<void>;
-}
+};
 
-export interface PgMigrationRunner {
+export type PgMigrationRunner = {
   all<T extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
     params?: Array<unknown>,
   ): Promise<Array<T>>;
   run(sql: string, params?: Array<unknown>): Promise<void>;
-}
+};
 
 function quoteIdentifier(name: string): string {
   return `"${name.replaceAll('"', '""')}"`;

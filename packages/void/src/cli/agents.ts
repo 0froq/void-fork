@@ -16,19 +16,19 @@ export function getPackageDir(): string {
   throw new Error('Could not find void package root');
 }
 
-export interface McpConfigTarget {
+export type McpConfigTarget = {
   /** Config file path relative to project root, e.g. ".claude/settings.json" */
   filePath: string;
   /** JSON key that holds MCP server entries, e.g. "mcpServers" or "servers" */
   rootKey: string;
   /** Extra fields merged into the server entry, e.g. { type: "stdio" } for VS Code */
   extraFields?: Record<string, string>;
-}
+};
 
 // Agent configs: project-local skillsDir and how to detect presence in the project root.
 // Skill directory locations are aligned with:
 // https://github.com/vercel-labs/skills/blob/main/README.md
-export interface AgentConfig {
+export type AgentConfig = {
   displayName: string;
   skillsDir: string;
   detect: (root: string) => boolean;
@@ -36,7 +36,7 @@ export interface AgentConfig {
   mcpConfig?: Array<McpConfigTarget>;
   /** Fallback hint printed when the agent has no project-level config support */
   mcpHint?: string;
-}
+};
 
 const agents: Record<string, AgentConfig> = {
   'claude-code': {

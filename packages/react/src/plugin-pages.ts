@@ -18,15 +18,15 @@ const REACT_OPTIMIZE_DEPS = [
   'react-dom/server',
 ];
 
-interface PrefetchConfig {
+type PrefetchConfig = {
   hoverDelay?: number;
   cacheFor?: number | string | [string, string];
-}
+};
 
-interface PagesPluginOptions {
+type PagesPluginOptions = {
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
-}
+};
 
 /** Check if the pages directory has any non-island page files (.tsx/.jsx without .island.). */
 function hasNonIslandPages(dir: string): boolean {

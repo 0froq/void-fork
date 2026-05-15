@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 
-export interface PrepareArgs {}
+export type PrepareArgs = {};
 
 export function parsePrepareArgs(args: Array<string>): PrepareArgs {
   const parsed = parseArgs({

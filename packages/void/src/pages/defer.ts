@@ -2,11 +2,11 @@ import type { CloudContext } from '../runtime/handler.ts';
 
 export const DEFERRED: unique symbol = Symbol('deferred');
 
-export interface DeferredSentinel {
+export type DeferredSentinel = {
   [DEFERRED]: true;
   group: string | null;
   resolver: (c: CloudContext) => Promise<unknown>;
-}
+};
 
 /** Reactive wrapper for a deferred prop on non-React clients. */
 export type DeferredState<T> =
@@ -38,10 +38,10 @@ export function defer(
   return { [DEFERRED]: true, group, resolver } as unknown as Deferred<unknown>;
 }
 
-export interface ResolvedDeferredGroup {
+export type ResolvedDeferredGroup = {
   resolver: (c: CloudContext) => Promise<unknown>;
   keys: Array<string>;
-}
+};
 
 /**
  * Separate a loader's return value into immediate props and deferred sentinels.

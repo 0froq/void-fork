@@ -1,9 +1,9 @@
 import { defineHandler, defineHead } from 'void';
 
-export interface Props {
+export type Props = {
   initialRoom: string;
   initialName: string;
-}
+};
 
 export const loader = defineHandler<Props>(() => {
   return {

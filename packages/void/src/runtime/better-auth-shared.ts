@@ -13,13 +13,13 @@ import { authContext, type AuthState, type VoidAuthConfig } from './auth.ts';
 
 export type VoidAuthDialect = 'sqlite' | 'postgresql';
 
-export interface VoidAuthRuntimeOptions {
+export type VoidAuthRuntimeOptions = {
   dialect: VoidAuthDialect;
   providers: ReadonlyArray<VoidAuthProvider> | null;
   userConfig?: VoidAuthConfig;
-}
+};
 
-export interface VoidAuthEnv extends Record<string, unknown> {
+export type VoidAuthEnv = Record<string, unknown> & {
   DB?: D1Database;
   DATABASE_URL?: string;
   HYPERDRIVE?: { connectionString?: string };
@@ -28,12 +28,12 @@ export interface VoidAuthEnv extends Record<string, unknown> {
   GITHUB_OAUTH_SECRET?: string;
   GOOGLE_OAUTH_ID?: string;
   GOOGLE_OAUTH_SECRET?: string;
-}
+};
 
-export interface ResolvedDatabase {
+export type ResolvedDatabase = {
   database: NonNullable<BetterAuthOptions['database']>;
   dispose(): Promise<void>;
-}
+};
 
 type ResolveDatabase = (env: VoidAuthEnv) => Promise<ResolvedDatabase>;
 type EmailPasswordOptions = NonNullable<BetterAuthOptions['emailAndPassword']>;
@@ -43,7 +43,7 @@ type VoidAuthPasswordOptions = PasswordOptions & {
   verify: NonNullable<PasswordOptions['verify']>;
 };
 
-export interface VoidAuthRuntimeApi {
+export type VoidAuthRuntimeApi = {
   resolveVoidAuthOptions(
     request: Request,
     env: VoidAuthEnv,
@@ -84,7 +84,7 @@ export interface VoidAuthRuntimeApi {
     runtime: VoidAuthRuntimeOptions,
     migrationSchema: VoidAuthMigrationSchema,
   ): Promise<void>;
-}
+};
 
 function isLocalHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.local');

@@ -3,16 +3,16 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'pathe';
 import { collectMigrations } from './collect.ts';
 
-interface SqliteStatement<T = unknown> {
+type SqliteStatement<T = unknown> = {
   get(...params: Array<unknown>): T | undefined;
   all(...params: Array<unknown>): Array<T>;
   run(...params: Array<unknown>): unknown;
-}
+};
 
-interface SqliteTransaction<T = unknown> {
+type SqliteTransaction<T = unknown> = {
   (): T;
   immediate(): T;
-}
+};
 
 type SqliteDatabase = {
   prepare<T = unknown>(sql: string): SqliteStatement<T>;
@@ -21,10 +21,10 @@ type SqliteDatabase = {
   transaction<T>(fn: () => T): SqliteTransaction<T>;
 };
 
-export interface AppliedMigration {
+export type AppliedMigration = {
   name: string;
   applied_at: string;
-}
+};
 
 function toBetterSqlite3Error(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);

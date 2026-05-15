@@ -6,7 +6,7 @@ import { loadUserEnvFile } from './host/load-user-env.ts';
 import { voidLog, voidWarn } from './log.ts';
 import { filterLoadedEnv } from './shared/env.ts';
 
-interface RegisteredSchemaModule {
+type RegisteredSchemaModule = {
   _getRegisteredSchema(): Record<
     string,
     { '~standard': { validate: (v: unknown) => unknown } }
@@ -18,9 +18,9 @@ interface RegisteredSchemaModule {
     missing: Array<string>;
     invalid: Array<{ key: string; messages: Array<string> }>;
   }>;
-}
+};
 
-export interface EnvSchemaPluginOptions {
+export type EnvSchemaPluginOptions = {
   /**
    * Called with the schema's `.default(value)` entries (stringified) so the
    * caller can seed worker bindings, deploy manifest vars, or any other env
@@ -30,7 +30,7 @@ export interface EnvSchemaPluginOptions {
    * "skip if already set" semantics.
    */
   onDefaults?: (defaults: Record<string, string>) => void;
-}
+};
 
 let cachedSchemaModule: RegisteredSchemaModule | null = null;
 

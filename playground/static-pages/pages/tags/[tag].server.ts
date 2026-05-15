@@ -1,9 +1,9 @@
 import { tags } from 'virtual:tags';
 import { defineHandler } from 'void';
 
-export interface Props {
+export type Props = {
   tag: string;
-}
+};
 
 export const prerender = true;
 

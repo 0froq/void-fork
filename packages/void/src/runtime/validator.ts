@@ -1,21 +1,21 @@
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 import type { CloudContext } from './handler.ts';
 
-export interface ValidatorSlots {
+export type ValidatorSlots = {
   body?: StandardSchemaV1;
   query?: StandardSchemaV1;
   params?: StandardSchemaV1;
-}
+};
 
-interface ValidationSuccess<V extends ValidatorSlots> {
+type ValidationSuccess<V extends ValidatorSlots> = {
   ok: true;
   input: HandlerInput<V>;
-}
+};
 
-interface ValidationFailure {
+type ValidationFailure = {
   ok: false;
   response: Response;
-}
+};
 
 export type HandlerInput<V extends ValidatorSlots> = {
   [K in keyof V as V[K] extends StandardSchemaV1 ? K : never]: V[K] extends StandardSchemaV1

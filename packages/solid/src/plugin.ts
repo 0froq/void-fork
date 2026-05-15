@@ -4,16 +4,16 @@ import solid from 'vite-plugin-solid';
 import { islandsPlugin } from './plugin-islands.ts';
 import { pagesPlugin } from './plugin-pages.ts';
 
-interface PrefetchConfig {
+type PrefetchConfig = {
   hoverDelay?: number;
   cacheFor?: number | string | [string, string];
-}
+};
 
-export interface VoidSolidOptions {
+export type VoidSolidOptions = {
   solid?: Parameters<typeof solid>[0];
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
-}
+};
 
 // The runtime entry exports raw `.tsx` source. Without these hints, Vite's SSR
 // dep optimizer prebundles the package with esbuild's default `automatic` JSX

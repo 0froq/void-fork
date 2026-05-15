@@ -18,11 +18,11 @@ type ConfigResolvedHandler = (
 ) => unknown | Promise<unknown>;
 type HookWithHandler<T> = { handler: T };
 
-interface ContextHooks {
+type ContextHooks = {
   errors: Array<{ message: string; loc?: { line: number; column: number; file: string } }>;
   warnings: Array<{ message: string; loc?: { line: number; column: number; file: string } }>;
   environmentName: string;
-}
+};
 
 function makeContext(environmentName = 'client'): ContextHooks & {
   error: (e: MessagePayload) => never;
@@ -76,9 +76,9 @@ function getConfigResolvedHandler(
   return null;
 }
 
-interface RunTransformOptions {
+type RunTransformOptions = {
   envPrefix?: string | Array<string>;
-}
+};
 
 async function runTransform(
   ctx: ReturnType<typeof makeContext>,

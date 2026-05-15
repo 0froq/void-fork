@@ -39,11 +39,11 @@ function extractHeadings(tokens: Array<Token>): Array<Heading> {
   return headings;
 }
 
-export interface MetadataResult {
+export type MetadataResult = {
   frontmatter: Record<string, unknown>;
   headings: Array<Heading>;
   title: string;
-}
+};
 
 export function extractMetadata(source: string): MetadataResult {
   const { data: frontmatter, content } = matter(source);

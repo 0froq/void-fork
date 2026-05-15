@@ -3,7 +3,7 @@ import { walk } from 'estree-walker';
 import { parseSync } from 'vite';
 import { isIdentifier, isMemberExpression, type AstNode, type AstProgram } from '../shared/ast.ts';
 
-export interface InferredBindings {
+export type InferredBindings = {
   needsD1: boolean;
   needsKV: boolean;
   needsR2: boolean;
@@ -12,7 +12,7 @@ export interface InferredBindings {
   needsAI: boolean;
   needsSandbox: boolean;
   needsLive?: boolean;
-}
+};
 
 const ENV_BINDING_RE = /\benv\s*\.\s*(DB|KV|STORAGE|QUEUE_\w+|AI|SANDBOX)\b/;
 

@@ -10,11 +10,11 @@ import { log } from '@clack/prompts';
 import { join, relative } from 'pathe';
 import { detectAgents, getPackageDir, type AgentConfig } from './agents.ts';
 
-interface SkillInfo {
+type SkillInfo = {
   dirName: string;
   name: string;
   description: string;
-}
+};
 
 function parseSkills(skillsDir: string): Array<SkillInfo> {
   if (!existsSync(skillsDir)) {

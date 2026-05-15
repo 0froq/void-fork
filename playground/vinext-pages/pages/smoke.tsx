@@ -2,10 +2,10 @@ import { users } from '@schema';
 import { db } from 'void/db';
 import { kv } from 'void/kv';
 
-interface SmokeProps {
+type SmokeProps = {
   d1User: string;
   kvValue: string;
-}
+};
 
 export async function getServerSideProps() {
   const rows = await db.select().from(users).limit(1);

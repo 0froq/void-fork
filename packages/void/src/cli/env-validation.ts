@@ -16,12 +16,12 @@ import type { EnvValidationReport } from '../runtime/env-public.ts';
 import { mergeAndExpand, parseDotenvFile } from '../shared/dotenv.ts';
 import type { PlatformClient } from './client.ts';
 
-interface EnvPublicModule {
+type EnvPublicModule = {
   _getRegisteredSchema(): Record<string, unknown> | null;
   _hasRegisteredSchema(): boolean;
   _getSchemaDefaults(): Record<string, string>;
   validateAllEnv(values: Record<string, unknown>): Promise<EnvValidationReport>;
-}
+};
 
 /**
  * After the user's env.ts has been imported (via `validateProdEnv` or
@@ -50,17 +50,17 @@ async function loadSchema(envFile: string): Promise<EnvPublicModule | null> {
   return mod;
 }
 
-export interface ValidateProdEnvOptions {
+export type ValidateProdEnvOptions = {
   /** When true (deploy mode), only `.env` + `.env.production` are read. */
   productionOnly: boolean;
   /** Optional remote secret list (names only). Treated as "value present". */
   remoteSecrets?: Array<string>;
-}
+};
 
-export interface ProdEnvValidationResult {
+export type ProdEnvValidationResult = {
   hasSchema: boolean;
   report: EnvValidationReport;
-}
+};
 
 function emptyReport(): EnvValidationReport {
   return { valid: true, missing: [], invalid: [], values: new Map() };

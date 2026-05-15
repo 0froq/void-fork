@@ -1,19 +1,19 @@
 import type { RenderOptions, Renderer, RuleBlock, StateBlock, Token } from 'markdown-exit';
 import type MarkdownExit from 'markdown-exit';
 
-export interface TocOptions {
+export type TocOptions = {
   pattern?: RegExp;
   level?: Array<number>;
   containerTag?: string;
   containerClass?: string;
   listTag?: string;
-}
+};
 
-interface Header {
+type Header = {
   depth: number;
   slug: string;
   text: string;
-}
+};
 
 function renderHeaders(headers: Array<Header>, listTag: string): string {
   if (headers.length === 0) {

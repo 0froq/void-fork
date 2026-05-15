@@ -1,9 +1,9 @@
 import { defineHandler, defineHead } from 'void';
 import { POSTS } from './_data.ts';
 
-export interface Props {
+export type Props = {
   post: (typeof POSTS)[number];
-}
+};
 
 export const loader = defineHandler<Props>((c) => {
   const slug = c.req.param('slug');

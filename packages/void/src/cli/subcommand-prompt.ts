@@ -10,11 +10,11 @@ import {
 } from '@clack/prompts';
 import { pc } from './output.ts';
 
-export interface FlagDef {
+export type FlagDef = {
   name: string; // e.g. "--output" (include dashes)
   description: string;
   arg?: string; // e.g. "<path>" — flag takes a value
-}
+};
 
 export type FollowUpDef =
   | {
@@ -27,21 +27,21 @@ export type FollowUpDef =
       placeholder: string;
     };
 
-export interface SubcommandDef {
+export type SubcommandDef = {
   name: string;
   description: string;
   arg?: string; // e.g. "<name>" — shown as dim hint, enables inline text input
   hint?: string; // e.g. "login | logout | whoami" — shown dim after name
   flags?: Array<FlagDef>;
   followUp?: FollowUpDef;
-}
+};
 
-export interface SubcommandResult {
+export type SubcommandResult = {
   subcommand: string;
   arg?: string;
   flags?: Record<string, string | true>;
   extraArgs?: Array<string>;
-}
+};
 
 export function promptSubcommand(
   command: string,

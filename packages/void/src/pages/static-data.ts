@@ -2,14 +2,14 @@ import { join } from 'pathe';
 import { parseRedirectsFile } from '../cli/headers.ts';
 import { readConfig } from '../config.ts';
 
-export interface StaticPageDataBuildOptions {
+export type StaticPageDataBuildOptions = {
   enabled: boolean;
   fastPath: boolean;
-}
+};
 
-interface ResolveStaticPageDataBuildOptionsInput {
+type ResolveStaticPageDataBuildOptionsInput = {
   publicDir?: string | false;
-}
+};
 
 export function resolveStaticPageDataBuildOptions(
   root: string,

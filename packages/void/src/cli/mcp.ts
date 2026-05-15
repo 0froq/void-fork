@@ -8,25 +8,25 @@ import { writeProjectConfig } from './project.ts';
 
 // --- Types ---
 
-interface DocPage {
+type DocPage = {
   slug: string;
   title: string;
   content: string;
-}
+};
 
-interface SearchResult {
+type SearchResult = {
   slug: string;
   title: string;
   snippet: string;
   score: number;
-}
+};
 
-interface JsonRpcRequest {
+type JsonRpcRequest = {
   jsonrpc: string;
   id?: number | string;
   method: string;
   params?: Record<string, unknown>;
-}
+};
 
 // --- Doc loading ---
 
@@ -296,10 +296,10 @@ Example: async () => { const ps = await void_.listProjects(); return ps.map(p =>
 
 // --- JSON-RPC dispatch ---
 
-export interface McpContext {
+export type McpContext = {
   pages: Array<DocPage>;
   token: string | null;
-}
+};
 
 export function handleRequest(
   ctx: McpContext,

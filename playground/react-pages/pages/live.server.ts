@@ -1,9 +1,9 @@
 import { defineHandler, defineHead } from 'void';
 import { LIVE_PLAYGROUND_TOPIC } from '../lib/live.ts';
 
-export interface Props {
+export type Props = {
   topic: string;
-}
+};
 
 export const loader = defineHandler<Props>(() => {
   return { topic: LIVE_PLAYGROUND_TOPIC };

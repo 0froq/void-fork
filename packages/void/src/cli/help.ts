@@ -5,18 +5,18 @@ import { getPackageDir } from './agents.ts';
 import { asciiArts } from './ascii.ts';
 import { categoryTitle, helpLine, pc, sectionTitle } from './output.ts';
 
-interface HelpCommand {
+type HelpCommand = {
   command: string;
   description: string;
-}
+};
 
-interface HelpPage {
+type HelpPage = {
   summary: string;
   usage: Array<string>;
   commands?: Array<HelpCommand>;
   options?: Array<HelpCommand>;
   examples?: Array<HelpCommand>;
-}
+};
 
 type HelpNode = HelpPage & { children?: HelpTree };
 type HelpTree = Record<string, HelpNode>;

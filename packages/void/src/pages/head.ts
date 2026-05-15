@@ -1,18 +1,18 @@
 /** Shape of a single page's head metadata. */
-export interface HeadDescriptor {
+export type HeadDescriptor = {
   title?: string;
   meta?: Array<{ name?: string; property?: string; content?: string; charset?: string }>;
   link?: Array<{ rel: string; href: string; [key: string]: string | undefined }>;
   script?: Array<{ src?: string; innerHTML?: string; [key: string]: string | undefined }>;
   htmlAttrs?: Record<string, string>;
   bodyAttrs?: Record<string, string>;
-}
+};
 
 /** Extended head config with template support (used in void.json). */
-export interface HeadConfig extends HeadDescriptor {
+export type HeadConfig = HeadDescriptor & {
   /** Title template — `%s` is replaced with the page title. */
   titleTemplate?: string;
-}
+};
 
 /**
  * Merge head descriptors with precedence: page > middleware > config.

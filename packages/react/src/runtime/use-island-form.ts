@@ -28,7 +28,7 @@ async function readActionErrorBody(response: Response): Promise<unknown> {
   }
 }
 
-export interface IslandFormReturn<T extends Record<string, unknown>> {
+export type IslandFormReturn<T extends Record<string, unknown>> = {
   data: T;
   setData: <K extends keyof T & string>(field: K, value: T[K]) => void;
   errors: Record<string, string>;
@@ -44,7 +44,7 @@ export interface IslandFormReturn<T extends Record<string, unknown>> {
   put: (url: string) => Promise<void>;
   patch: (url: string) => Promise<void>;
   delete: (url: string) => Promise<void>;
-}
+};
 
 /**
  * Form hook for island pages. Uses fetch + page reload instead of the

@@ -11,22 +11,22 @@ import type { SecretOverride } from '../shared/env-mask.ts';
  */
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 
-interface ParseResult<T> {
+type ParseResult<T> = {
   ok: true;
   value: T;
-}
-interface ParseError {
+};
+type ParseError = {
   ok: false;
   message: string;
-}
+};
 
 type Parser<T> = (raw: string) => ParseResult<T> | ParseError;
 
-interface BuilderState<T> {
+type BuilderState<T> = {
   optional: boolean;
   defaultValue: T | undefined;
   secretOverride: SecretOverride;
-}
+};
 
 /**
  * Marker property read by the mask helpers. Present only on built-in
@@ -50,7 +50,7 @@ export function getSecretOverride(
   return (validator as { [SECRET_OVERRIDE_SYMBOL]?: SecretOverride })[SECRET_OVERRIDE_SYMBOL];
 }
 
-export interface EnvSchema<T> extends StandardSchemaV1<unknown, T> {
+export type EnvSchema<T> = StandardSchemaV1<unknown, T> & {
   optional(): EnvSchema<T | undefined>;
   default(value: NonNullable<T>): EnvSchema<NonNullable<T>>;
   /**
@@ -63,7 +63,7 @@ export interface EnvSchema<T> extends StandardSchemaV1<unknown, T> {
    * titles) that happens to match the heuristic (`PUBLIC_KEY`, `…_TOKEN_URL`).
    */
   public(): EnvSchema<T>;
-}
+};
 
 function build<T>(parse: Parser<T>, state: BuilderState<T>): EnvSchema<T> {
   const schema: EnvSchema<T> = {

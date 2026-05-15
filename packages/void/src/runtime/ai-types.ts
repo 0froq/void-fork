@@ -31,12 +31,12 @@ export type ChatContent =
       | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
     >;
 
-export interface ChatMessage {
+export type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
   content: ChatContent;
-}
+};
 
-export interface ChatCompletionInputs {
+export type ChatCompletionInputs = {
   messages: Array<ChatMessage>;
   temperature?: number;
   max_tokens?: number;
@@ -45,37 +45,37 @@ export interface ChatCompletionInputs {
   presence_penalty?: number;
   stop?: string | Array<string>;
   stream?: boolean;
-}
+};
 
-export interface ChatCompletionResponse {
+export type ChatCompletionResponse = {
   id: string;
   object: string;
   created: number;
   model: string;
   choices: Array<ChatCompletionChoice>;
   usage: ChatCompletionUsage;
-}
+};
 
-export interface ChatCompletionChoice {
+export type ChatCompletionChoice = {
   index: number;
   message: ChatMessage;
   finish_reason: string;
-}
+};
 
-export interface ChatCompletionUsage {
+export type ChatCompletionUsage = {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
-}
+};
 
-export interface ChatCompletionChunk {
+export type ChatCompletionChunk = {
   id: string;
   choices: Array<{
     index: number;
     delta: { role?: string; content?: string };
     finish_reason: string | null;
   }>;
-}
+};
 
 export type ImageGatewayEndpoint = 'images/generations' | 'images/edits';
 
@@ -89,7 +89,7 @@ export type ImageFileInput =
       type?: string;
     };
 
-export interface ImageGenerationInputs {
+export type ImageGenerationInputs = {
   prompt: string;
   n?: number;
   size?: string;
@@ -97,32 +97,32 @@ export interface ImageGenerationInputs {
   response_format?: 'url' | 'b64_json';
   user?: string;
   [key: string]: unknown;
-}
+};
 
-export interface ImageGenerationData {
+export type ImageGenerationData = {
   url?: string;
   b64_json?: string;
   revised_prompt?: string;
-}
+};
 
-export interface ImageGenerationResponse {
+export type ImageGenerationResponse = {
   created?: number;
   data: Array<ImageGenerationData>;
   usage?: unknown;
   [key: string]: unknown;
-}
+};
 
-export interface ImageGenerationOptions {
+export type ImageGenerationOptions = {
   endpoint?: 'images/generations';
   [key: string]: unknown;
-}
+};
 
-export interface ImageEditOptions {
+export type ImageEditOptions = {
   endpoint: 'images/edits';
   [key: string]: unknown;
-}
+};
 
-export interface ImageEditInputs {
+export type ImageEditInputs = {
   prompt: string;
   image: ImageFileInput | Array<ImageFileInput>;
   mask?: ImageFileInput;
@@ -131,7 +131,7 @@ export interface ImageEditInputs {
   response_format?: 'url' | 'b64_json';
   user?: string;
   [key: string]: unknown;
-}
+};
 
 /** Maps provider prefix to expected env var name for the API key */
 export const PROVIDER_KEY_MAP: Record<string, string> = {

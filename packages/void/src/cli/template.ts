@@ -36,7 +36,7 @@ export const SCAFFOLD_FRAMEWORK_OPTIONS = [
   },
 ] as const;
 
-interface ScaffoldFrameworkConfig {
+type ScaffoldFrameworkConfig = {
   label: string;
   adapterPackage: string;
   adapterImport: string;
@@ -45,7 +45,7 @@ interface ScaffoldFrameworkConfig {
   dependencies: Record<string, string>;
   devDependencies?: Record<string, string>;
   tsconfigCompilerOptions: Record<string, string>;
-}
+};
 
 export const SCAFFOLD_FRAMEWORKS: Record<ScaffoldFramework, ScaffoldFrameworkConfig> = {
   react: {
@@ -110,12 +110,12 @@ export const SCAFFOLD_FRAMEWORKS: Record<ScaffoldFramework, ScaffoldFrameworkCon
   },
 };
 
-export interface PagesStarterTemplate {
+export type PagesStarterTemplate = {
   scripts: Record<string, string>;
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
   files: Record<string, string>;
-}
+};
 
 export function detectScaffoldFrameworkFromDependencies(
   deps: Record<string, unknown>,

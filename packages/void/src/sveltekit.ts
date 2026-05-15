@@ -4,12 +4,12 @@ import { isAbsolute, join, relative, resolve } from 'pathe';
 type Tsconfig = Record<string, unknown>;
 type TsconfigHook = (config: Tsconfig) => Tsconfig | void;
 
-export interface VoidSvelteKitTsconfigOptions {
+export type VoidSvelteKitTsconfigOptions = {
   /** Project root. Defaults to process.cwd(). */
   root?: string;
   /** SvelteKit output directory. Defaults to ".svelte-kit". */
   outDir?: string;
-}
+};
 
 /**
  * Merge Void's generated tsconfig fragment into SvelteKit's generated

@@ -15,19 +15,19 @@ const PROXY_URL = 'https://proxy.void.cloud/ai';
 const STAGING_PROXY_URL = 'https://proxy.staging.void.cloud/ai';
 const VOID_FILE_MARKER = '__voidFile';
 
-interface SerializedFileInput {
+type SerializedFileInput = {
   [VOID_FILE_MARKER]: true;
   data: string;
   name?: string;
   type?: string;
-}
+};
 
-interface AiBackend {
+type AiBackend = {
   run(model: string, inputs: unknown, options?: unknown): Promise<unknown>;
   image(model: string, inputs: unknown, options?: unknown): Promise<Response>;
   models(params?: unknown): Promise<unknown>;
   toMarkdown(items: unknown, options?: unknown): Promise<unknown>;
-}
+};
 
 function hasStreamFlag(value: unknown): value is { stream?: boolean } {
   return typeof value === 'object' && value !== null && 'stream' in value;
@@ -413,12 +413,12 @@ function backend(): AiBackend {
 }
 
 /**
- * Extended AI interface with a convenience `stream()` method.
+ * Extended AI type with a convenience `stream()` method.
  *
  * `stream()` calls `ai.run()` with `stream: true` and wraps the result
  * in a `Response` with SSE headers — ready to return from a route handler.
  */
-export interface VoidAi extends Omit<Ai, 'run'> {
+export type VoidAi = Omit<Ai, 'run'> & {
   /** Workers AI inference (existing) */
   run<Name extends keyof AiModels>(
     model: Name,
@@ -467,7 +467,7 @@ export interface VoidAi extends Omit<Ai, 'run'> {
     inputs: Omit<ChatCompletionInputs, 'stream'>,
     options?: AiOptions,
   ): Promise<Response>;
-}
+};
 
 export const ai: VoidAi = new Proxy({} as VoidAi, {
   get(_, prop) {

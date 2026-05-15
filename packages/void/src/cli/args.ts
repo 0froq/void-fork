@@ -1,12 +1,12 @@
 import { parseArgs } from 'node:util';
 
-export interface DeployArgs {
+export type DeployArgs = {
   projectSlug?: string;
   dir?: string;
   spa?: boolean;
   skipBuild?: boolean;
   debug?: boolean;
-}
+};
 
 export function parseDeployArgs(args: Array<string>): DeployArgs {
   let parsed: ReturnType<typeof parseArgs>;

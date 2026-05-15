@@ -58,10 +58,10 @@ type NotificationServerEvent =
   | { type: 'notifications.acked'; id: string }
   | { type: 'notifications.done'; sent: number };
 
-interface NotificationState {
+type NotificationState = {
   streamId?: string;
   pending: number;
-}
+};
 
 const STREAM_DELAY_MS = 1000;
 

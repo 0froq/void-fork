@@ -42,7 +42,7 @@ export class DirectR2PutError extends Error {
   }
 }
 
-export interface DirectR2PutItem {
+export type DirectR2PutItem = {
   /** Asset path relative to the build output (with leading `/`). */
   path: string;
   /** BLAKE3 storage hash — used for log correlation and R2 key. */
@@ -58,7 +58,7 @@ export interface DirectR2PutItem {
   url: string;
   /** Headers the platform required us to send (incl. Content-Md5, Content-Type). */
   headers: Record<string, string>;
-}
+};
 
 /**
  * Issue direct-to-R2 PUTs for every item in `items`, bounded to

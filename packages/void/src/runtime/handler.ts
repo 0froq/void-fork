@@ -53,10 +53,10 @@ export interface CloudBindings {
   [key: string]: unknown;
 }
 
-export interface CloudEnv extends Env {
+export type CloudEnv = Env & {
   Bindings: CloudBindings;
   Variables: CloudContextVariables;
-}
+};
 
 declare module 'hono' {
   interface Context {
@@ -124,14 +124,14 @@ type HandlerFn = (c: CloudContext) => unknown | Promise<unknown>;
 type MiddlewareFn = MiddlewareHandler<CloudEnv>;
 
 /** Pre-rendered asset tags injected by the SSR build. */
-export interface RenderAssetTags {
+export type RenderAssetTags = {
   /** CSS stylesheet links for `<head>`. */
   css: string;
   /** JS modulepreload links for `<head>` (only when page needs JS). */
   preloads: string;
   /** Script tags for `</body>` (only when page needs JS). */
   body: string;
-}
+};
 type RenderFn = (c: CloudContext, assetTags: RenderAssetTags) => Response | Promise<Response>;
 type JobController = ScheduledController;
 type JobExecutionContext = ExecutionContext;
@@ -171,21 +171,21 @@ type QueueFn<T = unknown> = (
  * `__payload` exists at the type level only —
  * TypeScript's `typeof import(...)` reads it for codegen.
  */
-export interface TypedQueueHandler<T = unknown> {
+export type TypedQueueHandler<T = unknown> = {
   (batch: QueueBatch<T>, env: CloudEnv['Bindings']): void | Promise<void>;
   readonly __payload: T;
-}
+};
 
 /**
  * A typed handler with phantom type carriers for validators and return type.
  * `__validators` and `__output` exist at the type level only —
  * TypeScript's `typeof import(...)` reads them for codegen.
  */
-export interface TypedHandler<V extends ValidatorSlots = {}, R = unknown> {
+export type TypedHandler<V extends ValidatorSlots = {}, R = unknown> = {
   (c: CloudContext): Promise<Response> | Response | unknown | Promise<unknown>;
   readonly __validators: V;
   readonly __output: R;
-}
+};
 
 /**
  * Define a route handler, optionally composed with per-route middleware.

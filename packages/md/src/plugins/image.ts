@@ -2,14 +2,14 @@ import type MarkdownExit from 'markdown-exit';
 
 const EXTERNAL_URL_RE = /^[a-z]+:/i;
 
-export interface ImageOptions {
+export type ImageOptions = {
   lazyLoading?: boolean;
-}
+};
 
-interface MarkdownToken {
+type MarkdownToken = {
   attrGet(name: string): string | null;
   attrSet(name: string, value: string): void;
-}
+};
 
 type ImageRenderRule = (
   tokens: Array<MarkdownToken>,

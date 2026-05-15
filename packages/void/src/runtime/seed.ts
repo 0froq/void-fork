@@ -1,21 +1,17 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-export interface SqliteSeedContext<
-  TSchema extends Record<string, unknown> = Record<string, never>,
-> {
+export type SqliteSeedContext<TSchema extends Record<string, unknown> = Record<string, never>> = {
   dialect: 'sqlite';
   db: BetterSQLite3Database<TSchema>;
   schema: TSchema;
-}
+};
 
-export interface PostgresSeedContext<
-  TSchema extends Record<string, unknown> = Record<string, never>,
-> {
+export type PostgresSeedContext<TSchema extends Record<string, unknown> = Record<string, never>> = {
   dialect: 'postgresql';
   db: NodePgDatabase<TSchema>;
   schema: TSchema;
-}
+};
 
 type DrizzleTableForDialect<TDialect extends string> = {
   readonly _: {

@@ -4,10 +4,10 @@ import type { Plugin } from 'vite';
 import { islandsPlugin } from './plugin-islands.ts';
 import { pagesPlugin } from './plugin-pages.ts';
 
-export interface VoidVueOptions {
+export type VoidVueOptions = {
   vue?: Parameters<typeof vue>[0];
   viewTransitions?: boolean;
-}
+};
 
 export function voidVue(options?: VoidVueOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');

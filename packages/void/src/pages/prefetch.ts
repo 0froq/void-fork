@@ -1,7 +1,7 @@
-export interface CacheForResult {
+export type CacheForResult = {
   stale: number;
   expires: number;
-}
+};
 
 export type CacheForInput = number | string | [string, string];
 
@@ -34,7 +34,7 @@ export function parseCacheFor(value: CacheForInput): CacheForResult {
   return { stale: ms, expires: ms };
 }
 
-export interface CacheEntry {
+export type CacheEntry = {
   url: string;
   method: string;
   response: Promise<unknown>;
@@ -42,7 +42,7 @@ export interface CacheEntry {
   expiresAt: number;
   singleUse: boolean;
   timer: ReturnType<typeof setTimeout> | null;
-}
+};
 
 export class PrefetchCache {
   private entries = new Map<string, CacheEntry>();

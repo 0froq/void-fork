@@ -18,12 +18,12 @@ import { parseWebSocketFilename, type RouteDefinition } from './parse-filename.t
 const HANDLER_EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
 const WEBSOCKET_ROUTE_RE = /(?:\.(?:dev|prod))?\.ws\.(?:ts|mts|js|mjs)$/;
 
-export interface WebSocketRouteDefinition extends RouteDefinition {
+export type WebSocketRouteDefinition = RouteDefinition & {
   className: string;
   bindingName: string;
   mode: 'room' | 'socket';
   hasAuthGate: boolean;
-}
+};
 
 type WebSocketSourceInfo = {
   mode: 'room' | 'socket';

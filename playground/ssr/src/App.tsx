@@ -1,10 +1,10 @@
 import { useState } from 'react';
 
-interface AppProps {
+type AppProps = {
   url: string;
   visitCount: number;
   blogContent?: string | null;
-}
+};
 
 export default function App({ url, visitCount, blogContent }: AppProps) {
   const [count, setCount] = useState(0);

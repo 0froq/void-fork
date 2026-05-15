@@ -34,7 +34,7 @@ import { getSecretOverride } from './env-helpers.ts';
 import { getRawRuntimeEnv } from './env-raw.ts';
 import { getRuntimeEnv } from './env.ts';
 
-interface AnyValidator extends StandardSchemaV1<unknown, unknown> {}
+type AnyValidator = StandardSchemaV1<unknown, unknown>;
 type AnySchema = Record<string, AnyValidator>;
 
 let registeredSchema: AnySchema | null = null;
@@ -317,7 +317,7 @@ export const env = new Proxy({} as Record<string, unknown>, {
 }) as ValidatedEnv;
 
 /** Aggregate report from validating an entire env object against the schema. */
-export interface EnvValidationReport {
+export type EnvValidationReport = {
   valid: boolean;
   missing: Array<string>;
   invalid: Array<{ key: string; messages: Array<string> }>;
@@ -327,7 +327,7 @@ export interface EnvValidationReport {
    * cache.
    */
   values: Map<string, unknown>;
-}
+};
 
 /**
  * Validate an env record (e.g. merged `.env*` + remote secret list) against

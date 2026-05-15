@@ -13,10 +13,10 @@ type ConfigResolvedHandler = (
 ) => unknown | Promise<unknown>;
 type HookWithHandler<T> = { handler: T };
 
-interface TransformResult {
+type TransformResult = {
   code?: string;
   map?: unknown;
-}
+};
 
 function makeContext(environmentName = 'client') {
   return {
@@ -55,11 +55,11 @@ function getConfigResolvedHandler(plugin: ReturnType<typeof envClientFoldPlugin>
   return null;
 }
 
-interface RunOpts {
+type RunOpts = {
   envPrefix?: string | Array<string>;
   env?: Record<string, string>;
   environmentName?: string;
-}
+};
 
 async function runFold(
   code: string,

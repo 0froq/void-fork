@@ -99,11 +99,11 @@ function getNextMiddlewareNumber(middlewareDir: string): string {
 // Column type mapping
 // ---------------------------------------------------------------------------
 
-interface ColumnSpec {
+type ColumnSpec = {
   name: string;
   type: string;
   nullable: boolean;
-}
+};
 
 function drizzleColumnDef(col: ColumnSpec): string {
   const { name, type } = col;
@@ -929,7 +929,7 @@ function runQueue(root: string, name: string): void {
   const filePath = join(root, 'queues', name + '.ts');
   const content = `import { defineQueue } from "void";
 
-interface Message {}
+type Message = {};
 
 // export const maxBatchSize = 10;
 // export const maxBatchTimeout = 5;

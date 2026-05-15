@@ -1,8 +1,8 @@
 import { defineHandler, defineHead } from 'void';
 
-export interface Props {
+export type Props = {
   title: string;
-}
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

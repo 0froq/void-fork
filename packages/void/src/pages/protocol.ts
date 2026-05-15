@@ -21,7 +21,7 @@ export function safeJsonStringify(value: unknown): string {
     .replaceAll('\u2029', '\\u2029');
 }
 
-export interface PageObject {
+export type PageObject = {
   component: string;
   props: Record<string, unknown>;
   params: Record<string, string>;
@@ -31,23 +31,23 @@ export interface PageObject {
   head?: HeadDescriptor;
   deferred?: Array<string>;
   deferredKeys?: Record<string, string>;
-}
+};
 
 export type PageRenderResult = string | ReadableStream<Uint8Array>;
 
-interface ValidationIssue {
+type ValidationIssue = {
   message?: string;
   path?: string;
-}
+};
 
-interface ValidationSlotIssue {
+type ValidationSlotIssue = {
   slot?: string;
   issues?: Array<ValidationIssue>;
-}
+};
 
-interface ValidationErrorBody {
+type ValidationErrorBody = {
   issues?: Array<ValidationSlotIssue>;
-}
+};
 
 type PageHandler = ((c: CloudContext) => unknown | Promise<unknown>) | undefined;
 type PageHeadHandler =

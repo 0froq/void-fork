@@ -1,36 +1,36 @@
-export interface PutOptions {
+export type PutOptions = {
   ttl?: number;
   expiration?: number;
   metadata?: Record<string, unknown>;
-}
+};
 
-export interface ListOptions {
+export type ListOptions = {
   prefix?: string;
   limit?: number;
   cursor?: string;
-}
+};
 
-export interface ListKey<M = unknown> {
+export type ListKey<M = unknown> = {
   name: string;
   expiration?: number;
   metadata?: M;
-}
+};
 
-export interface ListResult<M = unknown> {
+export type ListResult<M = unknown> = {
   keys: Array<ListKey<M>>;
   list_complete: boolean;
   cursor?: string;
-}
+};
 
-export interface KVMap<T> {
+export type KVMap<T> = {
   get(key: string): Promise<T | null>;
   put(key: string, value: T, options?: PutOptions): Promise<void>;
   delete(key: string): Promise<void>;
   list<M = unknown>(options?: Omit<ListOptions, 'prefix'>): Promise<ListResult<M>>;
   getWithMetadata<M = unknown>(key: string): Promise<{ value: T | null; metadata: M | null }>;
-}
+};
 
-export interface KVClient {
+export type KVClient = {
   get<T = string>(key: string): Promise<T | null>;
   put(key: string, value: unknown, options?: PutOptions): Promise<void>;
   delete(key: string): Promise<void>;
@@ -39,7 +39,7 @@ export interface KVClient {
     key: string,
   ): Promise<{ value: T | null; metadata: M | null }>;
   map<T = unknown>(prefix: string): KVMap<T>;
-}
+};
 
 function parseValue<T>(raw: string | null): T | null {
   if (raw === null) {

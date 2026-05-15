@@ -21,25 +21,25 @@ import { linkPlugin } from './plugins/link.ts';
 import { preWrapperPlugin } from './plugins/pre-wrapper.ts';
 import { tocPlugin } from './plugins/toc.ts';
 
-export interface Heading {
+export type Heading = {
   depth: number;
   slug: string;
   text: string;
-}
+};
 
-export interface CompileResult {
+export type CompileResult = {
   html: string;
   frontmatter: Record<string, unknown>;
   headings: Array<Heading>;
   title: string;
-}
+};
 
-export interface CompileOptions {
+export type CompileOptions = {
   shiki?: {
     themes?: { light: string; dark: string };
     langs?: Array<string>;
   };
-}
+};
 
 let compilerPromise: Promise<MarkdownExit> | null = null;
 

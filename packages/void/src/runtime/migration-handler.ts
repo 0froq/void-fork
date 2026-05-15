@@ -1,20 +1,20 @@
-export interface MigrationEntry {
+export type MigrationEntry = {
   name: string;
   sql: string;
-}
+};
 
-export interface MigrationResult {
+export type MigrationResult = {
   name: string;
   applied: boolean;
   durationMs: number;
   error?: string;
-}
+};
 
-export interface MigrationResponse {
+export type MigrationResponse = {
   ok: boolean;
   migrations: Array<MigrationResult>;
   error?: string;
-}
+};
 
 export function createMigrationHandler(
   env: Record<string, unknown>,

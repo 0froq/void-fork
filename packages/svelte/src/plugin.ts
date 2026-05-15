@@ -4,16 +4,16 @@ import type { Plugin } from 'vite';
 import { islandsPlugin } from './plugin-islands.ts';
 import { pagesPlugin } from './plugin-pages.ts';
 
-interface PrefetchConfig {
+type PrefetchConfig = {
   hoverDelay?: number;
   cacheFor?: number | string | [string, string];
-}
+};
 
-export interface VoidSvelteOptions {
+export type VoidSvelteOptions = {
   svelte?: Parameters<typeof svelte>[0];
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
-}
+};
 
 export function voidSvelte(options?: VoidSvelteOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');

@@ -1,8 +1,8 @@
 import { defineHandler } from 'void';
 
-export interface Props {
+export type Props = {
   slug: string;
-}
+};
 
 export const prerender = true;
 

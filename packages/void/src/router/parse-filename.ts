@@ -1,4 +1,4 @@
-export interface RouteDefinition {
+export type RouteDefinition = {
   /** URL pattern, e.g. "/api/users/:id" */
   pattern: string;
   /** HTTP methods detected from named exports (e.g. ["GET", "POST"]) */
@@ -11,7 +11,7 @@ export interface RouteDefinition {
   env: string | null;
   /** Original relative file path */
   filePath: string;
-}
+};
 
 const EXTENSIONS = ['.ts', '.mts', '.js', '.mjs'];
 const ENV_SUFFIXES = ['dev', 'prod'];

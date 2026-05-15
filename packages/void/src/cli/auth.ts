@@ -43,14 +43,14 @@ function keyringDelete(account: string): boolean {
 
 // ---------------------------------------------------------------------------
 // Config file — non-sensitive fields only (api).
-// Token fields are kept in the interface for migration reads.
+// Token fields are kept in the type for migration reads.
 // ---------------------------------------------------------------------------
 
-interface Config {
+type Config = {
   token?: string;
   stagingToken?: string;
   api?: string;
-}
+};
 
 function readConfig(): Config {
   try {

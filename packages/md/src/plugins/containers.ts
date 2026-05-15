@@ -2,13 +2,13 @@ import type MarkdownExit from 'markdown-exit';
 import type { Token } from 'markdown-exit';
 import container from 'markdown-it-container';
 
-export interface ContainerOptions {
+export type ContainerOptions = {
   tipLabel?: string;
   infoLabel?: string;
   warningLabel?: string;
   dangerLabel?: string;
   detailsLabel?: string;
-}
+};
 
 type MarkdownEnv = {
   references?: Record<string, { title: string; href: string }>;

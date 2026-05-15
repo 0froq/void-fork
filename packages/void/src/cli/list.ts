@@ -84,7 +84,7 @@ async function showDeployments(
   outro(`${slug} — ${deployments.length} deployment(s)`);
 }
 
-interface DeploymentRow {
+type DeploymentRow = {
   id: string;
   appType: string;
   statusRaw: string;
@@ -93,7 +93,7 @@ interface DeploymentRow {
   commit: string;
   isr: string;
   deployed: string;
-}
+};
 
 function computeDisplayStatus(d: DeploymentResponse, activeDeploymentId: string | null): string {
   if (d.status === 'failed') {

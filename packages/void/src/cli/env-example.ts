@@ -31,9 +31,9 @@ import { findEnvFile } from '../codegen/env-types.ts';
 import { loadUserEnvFile } from '../host/load-user-env.ts';
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 
-interface EnvPublicModule {
+type EnvPublicModule = {
   _getRegisteredSchema(): Record<string, StandardSchemaV1<unknown, unknown>> | null;
-}
+};
 
 /** Load the user's env.ts so `defineEnv` registers the schema. */
 async function loadRegisteredSchema(
@@ -50,10 +50,10 @@ export type EntryKind =
   | { kind: 'default'; defaultValue: unknown; enumValues?: Array<string> }
   | { kind: 'optional'; enumValues?: Array<string> };
 
-export interface EnvExampleEntry {
+export type EnvExampleEntry = {
   key: string;
   classification: EntryKind;
-}
+};
 
 /**
  * Introspect a single schema into an {@link EntryKind}.
@@ -210,11 +210,11 @@ function buildMarkerBlock(body: string): string {
 
 export type ApplyMarkerAction = 'create' | 'replace' | 'append' | 'error';
 
-export interface ApplyMarkerResult {
+export type ApplyMarkerResult = {
   content: string;
   action: ApplyMarkerAction;
   reason?: string;
-}
+};
 
 /**
  * Pure helper that produces the new `.env.example` content given the
@@ -287,10 +287,10 @@ export function applyMarkerBlock(existing: string | null, body: string): ApplyMa
   return { content: trimmed + separator + block, action: 'append' };
 }
 
-export interface RunEnvExampleOptions {
+export type RunEnvExampleOptions = {
   /** Suppress informational notes (e.g. the "appended block" message) for scripts. */
   force: boolean;
-}
+};
 
 /** CLI entrypoint: load schema, manage marker block, write `.env.example`. */
 export async function runEnvExample(root: string, options: RunEnvExampleOptions): Promise<void> {

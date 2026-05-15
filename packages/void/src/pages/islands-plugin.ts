@@ -7,20 +7,20 @@ import type { PageScanResult } from './types.ts';
 export const ISLANDS_RENDERER_ID = 'virtual:void-islands-renderer';
 export const ISLANDS_CLIENT_ENTRY_ID = 'virtual:void-islands-client';
 
-export interface IslandEntry {
+export type IslandEntry = {
   componentPath: string;
   islandId: string;
   hydrate: string;
-}
+};
 
-interface VoidMdPluginApi {
+type VoidMdPluginApi = {
   getClientScripts?(): Map<string, unknown>;
-}
+};
 
-interface VoidMdPlugin {
+type VoidMdPlugin = {
   name: string;
   api?: VoidMdPluginApi;
-}
+};
 
 /** Resolve a relative import specifier to an absolute path by checking extensions. */
 export function resolveSpecifier(

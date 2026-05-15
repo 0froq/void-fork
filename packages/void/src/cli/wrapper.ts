@@ -11,8 +11,8 @@ import {
 import { join, extname } from 'pathe';
 import { build } from 'vite';
 
-export interface WrapperFeatures {
-  /** Auth providers (kept for interface compat, no longer used by wrapper). */
+export type WrapperFeatures = {
+  /** Auth providers (kept for type compatibility, no longer used by wrapper). */
   auth: Array<string> | null;
   /** Cron job definitions (from scanJobsSync). */
   crons: Array<{ name: string; filePath: string; crons: Array<string> }>;
@@ -22,14 +22,14 @@ export interface WrapperFeatures {
   hasMigrations?: boolean;
   /** Database dialect for migration handler. */
   migrationDialect?: 'sqlite' | 'postgresql';
-}
+};
 
-export interface WrapperResult {
+export type WrapperResult = {
   /** Filename of the bundled entry module. */
   entryFilename: string;
   /** Absolute path to the directory containing the bundled output. */
   outputDir: string;
-}
+};
 
 const BUNDLED_ENTRY_RE = /^index\.(?:m?js|cjs)$/;
 

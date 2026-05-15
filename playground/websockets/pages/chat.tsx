@@ -7,13 +7,13 @@ type ChatSocket = VoidSocket<'/ws/chat/:room'>;
 type ChatClientEvent = WebSocketRouteMap['/ws/chat/:room']['client'];
 type ChatServerEvent = WebSocketRouteMap['/ws/chat/:room']['server'];
 
-interface TimelineEntry {
+type TimelineEntry = {
   id: string;
   kind: 'system' | 'message';
   title: string;
   body: string;
   meta: string;
-}
+};
 
 function toTimelineEntry(event: ChatServerEvent): TimelineEntry {
   if (event.type === 'chat.message') {

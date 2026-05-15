@@ -1,14 +1,14 @@
 import { collectMigrations } from './collect.ts';
 
 /**
- * Minimal client interface satisfied by both pg.Client and PGlite.
+ * Minimal client shape satisfied by both pg.Client and PGlite.
  */
-export interface PgClient {
+export type PgClient = {
   query<T extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
     params?: Array<unknown>,
   ): Promise<{ rows: Array<T> }>;
-}
+};
 
 /**
  * Apply unapplied SQL migrations via a connected PostgreSQL client.

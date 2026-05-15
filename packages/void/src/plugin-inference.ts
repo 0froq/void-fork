@@ -9,10 +9,10 @@ const SOURCE_GLOB = '**/*.{ts,tsx,mts,js,jsx,mjs,astro}';
 /** Framework class determines integration depth. */
 export type FrameworkClass = 'a' | 'b' | 'c';
 
-export interface DetectedFramework {
+export type DetectedFramework = {
   name: string;
   class: FrameworkClass;
-}
+};
 
 /** Class A framework names (used for entry point lookup). */
 export type Framework = 'tanstack-start' | 'react-router' | 'vinext-app' | 'vinext-pages';
@@ -81,7 +81,7 @@ export function detectFramework(root: string): DetectedFramework | undefined {
   return undefined;
 }
 
-export interface InferenceOptions {
+export type InferenceOptions = {
   /** Explicit binding overrides — takes precedence over inference */
   bindings?: {
     db?: boolean | string;
@@ -89,7 +89,7 @@ export interface InferenceOptions {
     storage?: boolean | string;
     ai?: boolean;
   };
-}
+};
 
 function extractAstroFrontmatter(code: string): string {
   const match = code.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);

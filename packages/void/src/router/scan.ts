@@ -12,21 +12,21 @@ import {
   type WebSocketRouteDefinition,
 } from './websocket.ts';
 
-export interface ScanResult {
+export type ScanResult = {
   routes: Array<RouteDefinition>;
   websockets?: Array<WebSocketRouteDefinition>;
   middleware: Array<MiddlewareDefinition>;
   jobs: Array<JobDefinition>;
   queues: Array<QueueDefinition>;
   pages: PageScanResult;
-}
+};
 
-export interface MiddlewareDefinition {
+export type MiddlewareDefinition = {
   /** Numeric order prefix (e.g. 1 for "01.logger.ts") */
   order: number;
   /** Original filename */
   filePath: string;
-}
+};
 
 const HANDLER_EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
 

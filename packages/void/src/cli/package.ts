@@ -312,13 +312,13 @@ function checkWorkerJsAsset(relativePath: string, assetsIgnoreFilePresent: boole
  * existing CLI/test code that reads `entry.hash` keeps working for one
  * release. Remove in a follow-up PR after consumers migrate to `blake3`.
  */
-export interface AssetManifestEntry {
+export type AssetManifestEntry = {
   blake3: string;
   md5: string;
   size: number;
   /** @deprecated v1 alias of `blake3`; remove in next release. */
   hash: string;
-}
+};
 
 /**
  * Collect all files in a directory, compute hashes, and return both the
@@ -381,7 +381,7 @@ export async function collectAndHashAssets(
 }
 
 /** Optional overrides for binding names and worker metadata. */
-export interface PackageOptions {
+export type PackageOptions = {
   /** Custom binding names (e.g. { d1: "MY_DB" }). Defaults: DB, KV, STORAGE. */
   bindingNames?: { d1?: string; kv?: string; r2?: string; sandbox?: string };
   /** Worker entry module filename (e.g. "index.mjs"). */
@@ -396,7 +396,7 @@ export interface PackageOptions {
   live?: LiveBindingConfig;
   /** Query params that participate in ISR variant keys for dispatch rewrites. */
   revalidateQueryAllowlist?: Record<string, Array<string>>;
-}
+};
 
 function toWebSocketManifest(
   routes: Array<WebSocketRouteDefinition> | undefined,

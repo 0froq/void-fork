@@ -18,7 +18,7 @@ export type SandboxInstanceType =
   | 'standard-3'
   | 'standard-4';
 
-export interface SandboxConfig {
+export type SandboxConfig = {
   binding?: string;
   className?: string;
   containerName?: string;
@@ -27,9 +27,9 @@ export interface SandboxConfig {
   platformImage?: string;
   instanceType?: SandboxInstanceType;
   maxInstances?: number;
-}
+};
 
-export interface ResolvedSandboxConfig {
+export type ResolvedSandboxConfig = {
   binding: string;
   className: string;
   containerName: string;
@@ -38,7 +38,7 @@ export interface ResolvedSandboxConfig {
   platformImage: string;
   instanceType?: SandboxInstanceType;
   maxInstances?: number;
-}
+};
 
 const require = createRequire(import.meta.url);
 

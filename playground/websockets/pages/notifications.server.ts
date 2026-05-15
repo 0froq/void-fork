@@ -1,8 +1,8 @@
 import { defineHandler, defineHead } from 'void';
 
-export interface Props {
+export type Props = {
   defaultCount: number;
-}
+};
 
 export const loader = defineHandler<Props>(() => {
   return { defaultCount: 5 };

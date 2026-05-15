@@ -116,20 +116,20 @@ import { needsWrapper, generateWrapper, bundleEntry, cleanupWrapper } from './wr
 class DeployEventError extends Error {}
 import type { WrapperFeatures } from './wrapper.ts';
 
-export interface RunDeployOptions {
+export type RunDeployOptions = {
   projectSlug?: string;
   dir?: string;
   spa?: boolean;
   skipBuild?: boolean;
   debug?: boolean;
-}
+};
 
 type DeployDoneEvent = Extract<DeployEvent, { event: 'done' }>;
 type StreamDeployResult = DeployDoneEvent;
 
-interface ResourceSummary {
+type ResourceSummary = {
   type?: string;
-}
+};
 
 const EMPTY_BINDINGS = {
   needsD1: false,

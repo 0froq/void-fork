@@ -61,12 +61,12 @@ export function isLikelySecretValue(value: unknown): boolean {
 /** Per-key override set by `.secret()` / `.public()` on built-in helpers. */
 export type SecretOverride = 'secret' | 'public' | undefined;
 
-export interface MaskOptions {
+export type MaskOptions = {
   /** Explicit per-key override; wins over every heuristic. */
   override?: SecretOverride;
   /** When true, the env unmask escape hatch has been honoured. */
   unmask?: boolean;
-}
+};
 
 /**
  * Return `value` verbatim when it's safe to display, else `<redacted>`.

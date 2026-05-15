@@ -4,14 +4,14 @@ import { glob, globSync } from 'tinyglobby';
 
 const JOB_EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
 
-export interface JobDefinition {
+export type JobDefinition = {
   /** Relative file path from jobs/ */
   filePath: string;
   /** Deterministic job name (path without extension) */
   name: string;
   /** Cron expressions from `export const cron = "..."` or `export const cron = ["...", "..."]` */
   crons: Array<string>;
-}
+};
 
 function extractJobName(filePath: string): string {
   return filePath.replace(/\.[^.]+$/, '');

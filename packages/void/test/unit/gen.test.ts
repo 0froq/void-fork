@@ -2244,7 +2244,7 @@ describe('gen queue', () => {
 
     const content = read('queues/emails.ts');
     expect(content).toContain('import { defineQueue } from "void"');
-    expect(content).toContain('interface Message {}');
+    expect(content).toContain('type Message = {};');
     expect(content).toContain('// export const maxBatchSize = 10;');
     expect(content).toContain('// export const maxBatchTimeout = 5;');
     expect(content).toContain('export default defineQueue<Message>(');

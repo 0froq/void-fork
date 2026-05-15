@@ -16,7 +16,7 @@ import {
 type AuthIdStrategy = 'serial' | 'text' | 'uuid';
 const DEFAULT_TABLE_ORDER = Number.MAX_SAFE_INTEGER;
 
-export interface VoidAuthMigrationField {
+export type VoidAuthMigrationField = {
   type: DBFieldAttribute['type'];
   required: boolean;
   unique: boolean;
@@ -27,25 +27,25 @@ export interface VoidAuthMigrationField {
     field: string;
     onDelete?: 'no action' | 'restrict' | 'cascade' | 'set null' | 'set default';
   };
-}
+};
 
-export interface VoidAuthMigrationTable {
+export type VoidAuthMigrationTable = {
   name: string;
   order: number;
   fields: Record<string, VoidAuthMigrationField>;
-}
+};
 
-export interface VoidAuthMigrationSchema {
+export type VoidAuthMigrationSchema = {
   dialect: 'sqlite' | 'postgresql';
   idStrategy: AuthIdStrategy;
   tables: ReadonlyArray<VoidAuthMigrationTable>;
-}
+};
 
-interface GenerateVoidAuthDatabaseModuleOptions {
+type GenerateVoidAuthDatabaseModuleOptions = {
   dialect: 'sqlite' | 'postgresql';
   schemaImportPath: string;
   drizzleAdapterPath: string;
-}
+};
 
 function resolveEmailAndPassword(
   configuredProviders: ReadonlyArray<VoidAuthProvider> | null,

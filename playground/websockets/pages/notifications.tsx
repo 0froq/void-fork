@@ -7,7 +7,7 @@ type NotificationSocket = VoidSocket<'/ws/notifications'>;
 type NotificationClientEvent = WebSocketRouteMap['/ws/notifications']['client'];
 type NotificationServerEvent = WebSocketRouteMap['/ws/notifications']['server'];
 
-interface NotificationItemView {
+type NotificationItemView = {
   id: string;
   title: string;
   body: string;
@@ -15,12 +15,12 @@ interface NotificationItemView {
   index: number;
   total: number;
   acknowledged: boolean;
-}
+};
 
-interface ActivityEntry {
+type ActivityEntry = {
   id: string;
   text: string;
-}
+};
 
 export default function NotificationsPage({ defaultCount }: Props) {
   const [status, setStatus] = useState('connecting');

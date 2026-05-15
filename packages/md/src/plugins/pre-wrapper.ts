@@ -27,9 +27,9 @@ export function extractTitle(info: string, html = false): string {
   return info.match(/\[(.*)\]/)?.[1] || extractLang(info) || 'txt';
 }
 
-export interface PreWrapperOptions {
+export type PreWrapperOptions = {
   codeCopyButtonTitle?: string;
-}
+};
 
 /**
  * Wraps fenced code blocks with a language label and copy button.

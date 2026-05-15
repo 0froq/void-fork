@@ -19,19 +19,19 @@ export function collectMigrations(migrationsDir: string): Array<{ name: string; 
     }));
 }
 
-export interface DrizzleJournalEntry {
+export type DrizzleJournalEntry = {
   idx: number;
   version: string;
   when: number;
   tag: string;
   breakpoints: boolean;
-}
+};
 
-export interface DrizzleJournal {
+export type DrizzleJournal = {
   version: string;
   dialect: string;
   entries: Array<DrizzleJournalEntry>;
-}
+};
 
 /**
  * Read `db/migrations/meta/_journal.json` if it exists. Drizzle maintains

@@ -20,10 +20,10 @@ export const DEFAULT_LIVE_BINDING = 'VOID_LIVE';
 export const DEFAULT_LIVE_CLASS = 'VoidLiveStreamDurableObject';
 export const LIVE_MIGRATION_TAG = 'live-v1';
 
-export interface LiveBindingConfig {
+export type LiveBindingConfig = {
   bindingName: string;
   className: string;
-}
+};
 
 type DurableObjectMigration = {
   tag?: string;
@@ -35,12 +35,12 @@ type DurableObjectMigration = {
 export const LATEST_KNOWN_COMPAT_DATE = '2026-02-24';
 
 /** Subset of wrangler config fields we extract. */
-export interface WranglerCompat {
+export type WranglerCompat = {
   compatibilityDate: string;
   compatibilityFlags?: Array<string>;
-}
+};
 
-interface WranglerCompatFields {
+type WranglerCompatFields = {
   voidConfig: VoidConfig | undefined;
   voidDate: string | undefined;
   voidFlags: Array<string> | undefined;
@@ -48,7 +48,7 @@ interface WranglerCompatFields {
   wranglerFlags: Array<string> | undefined;
   buildDate: string | undefined;
   buildFlags: Array<string> | undefined;
-}
+};
 
 export function normalizeWranglerCompatibilityFlags(
   flags: Array<string> | undefined,

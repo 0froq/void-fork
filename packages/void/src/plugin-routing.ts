@@ -44,7 +44,7 @@ const LOAD_ID_FILTER = /^virtual:void-(routes|client-worker|client-browser)$/;
  * - Generates virtual modules for the route table and worker entry
  * - Watches for file changes and triggers HMR
  */
-interface RoutingPluginOptions {
+type RoutingPluginOptions = {
   isAuthEnabled: () => boolean;
   devTriggerToken?: string;
   headConfig?: import('./pages/head.ts').HeadConfig;
@@ -71,7 +71,7 @@ interface RoutingPluginOptions {
   sandboxBindingName?: string;
   sandboxClassName?: string;
   live?: { bindingName: string; className: string };
-}
+};
 
 export function routingPlugin(root: string, options: RoutingPluginOptions): Plugin {
   let scan: ScanResult | null = null;

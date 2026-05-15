@@ -3,7 +3,7 @@ import type { RuleCore, Token } from 'markdown-exit';
 
 const markerRE = /^\[!(TIP|NOTE|INFO|IMPORTANT|WARNING|CAUTION|DANGER)\]([^\n\r]*)/i;
 
-export interface GitHubAlertsOptions {
+export type GitHubAlertsOptions = {
   tipLabel?: string;
   noteLabel?: string;
   infoLabel?: string;
@@ -11,7 +11,7 @@ export interface GitHubAlertsOptions {
   warningLabel?: string;
   cautionLabel?: string;
   dangerLabel?: string;
-}
+};
 
 type AlertToken = Token & {
   meta?: { title: string; type: string };

@@ -12,9 +12,9 @@
  * tripping bundler errors.
  */
 
-interface ImportMetaEnvLike {
+type ImportMetaEnvLike = {
   readonly env?: Record<string, unknown>;
-}
+};
 
 function getClientEnv(): Record<string, unknown> | undefined {
   return (import.meta as unknown as ImportMetaEnvLike).env;

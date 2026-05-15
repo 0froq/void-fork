@@ -7,11 +7,11 @@ import {
   type DrizzleJournalEntry,
 } from './collect.ts';
 
-export interface MigrationFile {
+export type MigrationFile = {
   name: string;
   sql: string;
   destructive: boolean;
-}
+};
 
 /**
  * Destructive SQL patterns that are rejected unless the migration

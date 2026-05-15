@@ -1,12 +1,12 @@
 import { defineHandler, defineHead } from 'void';
 
-export interface Props {
+export type Props = {
   highlights: Array<{
     title: string;
     body: string;
     href: string;
   }>;
-}
+};
 
 export const loader = defineHandler<Props>(() => {
   return {

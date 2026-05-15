@@ -29,7 +29,7 @@ import { existsSync, readFileSync } from 'node:fs';
 /** Valid dotenv key — ASCII letter/underscore followed by letters/digits/underscore. */
 const VALID_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-export interface ParseDotenvOptions {
+export type ParseDotenvOptions = {
   /** When true, run `${VAR}` / `$VAR` expansion after parsing. Default: true. */
   expand?: boolean;
   /**
@@ -40,12 +40,12 @@ export interface ParseDotenvOptions {
   skipInvalidKeys?: boolean;
   /** Callback for expansion warnings (cycles). Caller routes to `voidWarn`. */
   onWarn?: (message: string) => void;
-}
+};
 
-export interface ParseDotenvLineResult {
+export type ParseDotenvLineResult = {
   key: string;
   value: string;
-}
+};
 
 /**
  * Parse a single `KEY=VALUE` line into `{ key, value }`, stripping matching

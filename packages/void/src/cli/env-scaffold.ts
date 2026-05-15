@@ -24,12 +24,12 @@ export const SCAFFOLD_SOURCE_FILES = [
 
 export type InferredHelper = 'string' | 'number' | 'boolean' | 'url';
 
-export interface InferredEntry {
+export type InferredEntry = {
   key: string;
   helper: InferredHelper;
   /** First non-empty value seen for this key, if any (used for diagnostics only). */
   sampleValue?: string;
-}
+};
 
 const BOOLEAN_LITERAL = /^(true|false)$/i;
 const HTTP_URL = /^https?:\/\/\S+$/;
@@ -156,13 +156,13 @@ export function renderEnvTs(entries: Array<InferredEntry>): string {
   return lines.join('\n');
 }
 
-export interface ScaffoldResult {
+export type ScaffoldResult = {
   /** Path written (absolute), or `null` if nothing was written. */
   written: string | null;
   /** Reason we skipped, when `written` is null. */
   skipReason?: 'env-ts-exists' | 'no-dotenv-files';
   entries: Array<InferredEntry>;
-}
+};
 
 /**
  * If the project has no `env.ts`, scaffold one based on `.env*` files the

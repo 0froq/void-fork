@@ -6,7 +6,7 @@ import { resolve, dirname } from 'pathe';
 const rawPathRegexp =
   /^(.+?(?:(?:\.([a-z0-9]+))?))(?:(#[\w-]+))?(?: ?(?:\{(\d+(?:[,-]\d+)*)? ?(\S+)? ?(\S+)?}))? ?(?:\[(.+)\])?$/;
 
-interface SnippetToken {
+type SnippetToken = {
   filepath: string;
   extension: string;
   region: string;
@@ -14,7 +14,7 @@ interface SnippetToken {
   lang: string;
   attrs: string;
   title: string;
-}
+};
 
 type FenceRender = (...args: Array<unknown>) => string;
 
@@ -48,10 +48,10 @@ function dedent(text: string): string {
   return text;
 }
 
-interface RegionMarker {
+type RegionMarker = {
   start: RegExp;
   end: RegExp;
-}
+};
 
 const markers: Array<RegionMarker> = [
   { start: /^\/\/\s*#?region\b/, end: /^\/\/\s*#?endregion\b/ },

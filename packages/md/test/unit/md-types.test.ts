@@ -30,7 +30,7 @@ describe('md type declarations', () => {
 
   it('generates a valid TypeScript declaration', () => {
     const dts = generateMdTypes();
-    expect(dts).toContain('interface VoidMdPage');
+    expect(dts).toContain('type VoidMdPage');
     expect(dts).toContain('path: string');
     expect(dts).toContain('title: string');
     expect(dts).toContain('frontmatter: Record<string, unknown>');

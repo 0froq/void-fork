@@ -28,9 +28,9 @@ const ChatServerMessage = v.variant('type', [
   }),
 ]);
 
-interface ChatConnectionState {
+type ChatConnectionState = {
   name?: string;
-}
+};
 
 function activeConnectionCount(
   room: Parameters<NonNullable<typeof definition.onConnect>>[0]['room'],

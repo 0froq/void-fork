@@ -629,16 +629,16 @@ function pushDefaultErrorPageHelpers(lines: Array<string>, options: CompileOptio
   lines.push('');
 }
 
-export interface AuthCompileOptions {
+export type AuthCompileOptions = {
   authRuntimePath: string;
   authConfigPath: string | null;
   authDatabasePath: string | null;
   authSchemaPath: string | null;
   dialect: 'sqlite' | 'postgresql';
   providers: ReadonlyArray<VoidAuthProvider> | null;
-}
+};
 
-export interface CompileOptions {
+export type CompileOptions = {
   /** Absolute path to the hono module entry */
   honoPath: string;
   /** Absolute path to the void/response module */
@@ -692,16 +692,16 @@ export interface CompileOptions {
   liveRuntimePath?: string;
   /** Whether the app uses void/live. */
   hasLive?: boolean;
-}
+};
 
-export interface SsrCompileOptions {
+export type SsrCompileOptions = {
   /** Absolute path to src/main.ssr.ts(x) */
   serverEntryPath: string;
   /** Relative project path for src/main.client.ts(x), e.g. src/main.client.tsx */
   clientEntryRelativePath: string;
-}
+};
 
-export interface PagesCompileOptions {
+export type PagesCompileOptions = {
   /** Absolute path to pages/ directory */
   pagesDir: string;
   /** Pages directory relative to Vite root, e.g. "pages" — used for manifest key lookup */
@@ -718,7 +718,7 @@ export interface PagesCompileOptions {
   mdClientEntryId?: string;
   /** Head config from void.json */
   headConfig?: import('../pages/head.ts').HeadConfig;
-}
+};
 
 /**
  * Generate the code for the virtual route table module (virtual:void-routes).

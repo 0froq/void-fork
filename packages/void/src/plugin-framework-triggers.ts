@@ -5,9 +5,9 @@ import { scanJobsSync, type JobDefinition } from './crons/scan.ts';
 import { voidWarn } from './log.ts';
 import { scanQueuesSync, type QueueDefinition } from './queues/scan.ts';
 
-interface FrameworkTriggersOptions {
+type FrameworkTriggersOptions = {
   devTriggerToken: string;
-}
+};
 
 /** Absolute path of the generated dispatch file. Stable across the dev process. */
 export function frameworkTriggersDispatchPath(root: string): string {

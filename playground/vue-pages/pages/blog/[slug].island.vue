@@ -1,7 +1,7 @@
 <script setup lang="ts">
-interface Props {
+type Props = {
   post: { slug: string; title: string; body: string };
-}
+};
 
 defineProps<Props>();
 </script>

@@ -9,18 +9,18 @@ export const DEV_CSS_ASSET_GUARD_VALUE = 'pages-css';
 
 export type DevCssRootPhases = Array<Array<string>>;
 
-interface DevCssRequestBody {
+type DevCssRequestBody = {
   componentId?: string;
   kind?: 'pages' | 'islands';
   rootPhases?: DevCssRootPhases;
-}
+};
 
-interface OrderedEdgeStore {
+type OrderedEdgeStore = {
   version: number;
   set(importer: string, edges: Array<string>): void;
   deleteForId(id: string): void;
   getForNode(node: EnvironmentModuleNode): Array<string> | undefined;
-}
+};
 
 const CSS_REQUEST_RE = /\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)(?:$|[?#])/;
 const STYLE_QUERY_RE = /[?&](?:vue|svelte|island-style)\b.*[?&]type=style\b|[?&]type=style\b/;

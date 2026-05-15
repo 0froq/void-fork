@@ -47,11 +47,11 @@ import {
   hasLocalLockfile,
 } from './yarn-pnp.ts';
 
-export interface InitArgs {
+export type InitArgs = {
   tsconfig: boolean;
   github: boolean;
   agents: boolean;
-}
+};
 
 export function parseInitArgs(args: Array<string>): InitArgs {
   let parsed: ReturnType<typeof parseArgs>;
@@ -137,10 +137,10 @@ const VITE_CONFIG_FILES = [
 const VOID_CONFIG_FILE = 'void.json';
 type DatabaseSetupChoice = DatabaseDialect | 'none';
 type JsonObject = Record<string, unknown>;
-interface TsconfigInheritancePatch {
+type TsconfigInheritancePatch = {
   files: Array<string>;
   paths: Record<string, Array<string>>;
-}
+};
 
 function asRecord(value: unknown): JsonObject | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -432,7 +432,7 @@ export function isScaffoldableEmptyProject(root: string): boolean {
   return true;
 }
 
-interface ProjectState {
+type ProjectState = {
   hasTypescript: boolean;
   hasTsconfig: boolean;
   hasGithubWorkflows: boolean;
@@ -441,7 +441,7 @@ interface ProjectState {
   hasPages: boolean;
   packageManager: 'pnpm' | 'yarn' | 'bun' | 'npm';
   typescriptWanted: boolean;
-}
+};
 
 function parsePackageManagerField(pkg: unknown): ProjectState['packageManager'] | undefined {
   if (!pkg || typeof pkg !== 'object') {
@@ -2185,10 +2185,10 @@ function scaffoldPagesApp(
   return dependencyAdded;
 }
 
-interface ExistingProjectPackageSetupResult {
+type ExistingProjectPackageSetupResult = {
   dependencyAdded: boolean;
   packageJsonMutated: boolean;
-}
+};
 
 function hasDeclaredDependency(pkg: JsonObject, name: string): boolean {
   return DEPENDENCY_FIELDS.some((field) => {
@@ -2946,10 +2946,10 @@ export function ensureVoidDependency(root: string): boolean {
   return changed || pnpmConfigChanged;
 }
 
-interface AgentSetupSelection {
+type AgentSetupSelection = {
   instructionFilePath: 'CLAUDE.md' | 'AGENTS.md';
   agents: Array<AgentConfig>;
-}
+};
 
 function detectInstructionFilePath(
   root: string,

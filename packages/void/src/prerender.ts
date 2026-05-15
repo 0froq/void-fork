@@ -23,20 +23,20 @@ const STATIC_PAGE_DATA_DIR = '_void/pages';
 
 type PrerenderWorkerModuleType = 'ESModule' | 'CommonJS' | 'CompiledWasm' | 'Text' | 'Data';
 
-export interface PrerenderWorkerModule {
+export type PrerenderWorkerModule = {
   path: string;
   type: PrerenderWorkerModuleType;
   contents: string | Uint8Array;
-}
+};
 
-export interface PrerenderResult {
+export type PrerenderResult = {
   rendered: Array<string>;
   failed: Array<{ path: string; error: string }>;
-}
+};
 
-export interface PrerenderRunResult extends PrerenderResult {
+export type PrerenderRunResult = PrerenderResult & {
   paths: Array<string>;
-}
+};
 
 function outputFileForPath(path: string): string {
   return path === '/' ? 'index.html' : `${path.slice(1)}.html`;
@@ -198,14 +198,14 @@ export function collectPrerenderWorkerModules(
   return modules.map(({ relativePath: _relativePath, ...module }) => module);
 }
 
-export interface PrerenderBindingsInput {
+export type PrerenderBindingsInput = {
   wranglerVars: Record<string, unknown> | undefined;
   env: Record<string, string>;
   voidToken: string | null | undefined;
   voidProjectId: string | undefined;
   voidStaging: boolean;
   remoteMode: boolean | undefined;
-}
+};
 
 export function buildPrerenderBindings(input: PrerenderBindingsInput): Record<string, unknown> {
   const { sanitized: wranglerVars, stripped: wranglerStripped } = stripInternalEnvKeys(

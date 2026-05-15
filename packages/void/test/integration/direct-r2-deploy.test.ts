@@ -94,12 +94,12 @@ afterEach(() => {
   }
 });
 
-interface MockState {
+type MockState = {
   preflightCalls: Array<unknown>;
   uploadUrlsCalls: Array<unknown>;
   r2PutCalls: Array<{ url: string; init: RequestInit }>;
   finalizeCalls: Array<{ url: string; init: RequestInit }>;
-}
+};
 
 function installPlatformMocks(opts?: {
   preflightSkipped?: number;

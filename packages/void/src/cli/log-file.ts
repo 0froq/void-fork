@@ -4,7 +4,7 @@ import { join } from 'pathe';
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
-export interface CliLogger {
+export type CliLogger = {
   info(msg: string, fields?: Record<string, unknown>): void;
   warn(msg: string, fields?: Record<string, unknown>): void;
   error(msg: string, err?: unknown, fields?: Record<string, unknown>): void;
@@ -13,15 +13,15 @@ export interface CliLogger {
   readonly path: string | null;
   /** Close stream and return final path. Idempotent. */
   close(): Promise<void>;
-}
+};
 
-interface ErrChainNode {
+type ErrChainNode = {
   name?: string;
   message?: string;
   code?: string | number;
   errno?: string | number;
   cause?: ErrChainNode;
-}
+};
 
 /**
  * Walk `err.cause` up to 6 levels and return a plain JSON-friendly chain.

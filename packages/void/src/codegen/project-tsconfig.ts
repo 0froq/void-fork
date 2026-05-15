@@ -1,16 +1,16 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'pathe';
 
-export interface ProjectTsconfigOptions {
+export type ProjectTsconfigOptions = {
   redirectDbModule?: boolean;
-}
+};
 
-export interface ProjectTsconfig {
+export type ProjectTsconfig = {
   files: Array<string>;
   compilerOptions?: {
     paths?: Record<string, Array<string>>;
   };
-}
+};
 
 /**
  * Build the generated .void/tsconfig.json contents. Lists the generated

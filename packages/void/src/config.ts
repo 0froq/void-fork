@@ -18,13 +18,13 @@ export type RedirectDestination = string | { to: string; status?: 301 | 302 | 30
 export type DatabaseDialect = 'sqlite' | 'postgresql';
 
 /** Curated wrangler fields that can be set via void.json. */
-export interface WranglerConfig {
+export type WranglerConfig = {
   compatibility_date?: string;
   compatibility_flags?: Array<string>;
-}
+};
 
 /** Routing configuration — headers, redirects, rewrites, fallbacks, revalidation, prerendering. */
-export interface RoutingConfig {
+export type RoutingConfig = {
   revalidate?: number | Record<string, number>;
   revalidateQueryAllowlist?: Record<string, Array<string>>;
   prerender?: Array<string>;
@@ -32,10 +32,10 @@ export interface RoutingConfig {
   redirects?: Record<string, RedirectDestination>;
   rewrites?: Record<string, RewriteDestination>;
   fallbacks?: Record<string, RewriteDestination>;
-}
+};
 
 /** Inference configuration — bindings, scanDirs, build, outputDir, appType. */
-export interface InferenceConfig {
+export type InferenceConfig = {
   bindings?: {
     db?: boolean | string;
     kv?: boolean | string;
@@ -46,15 +46,15 @@ export interface InferenceConfig {
   build?: string;
   outputDir?: string;
   appType?: 'spa' | 'static' | 'void' | 'framework';
-}
+};
 
 /** Auth configuration — high-level provider selection for Better Auth defaults. */
-export interface AuthConfig {
+export type AuthConfig = {
   providers?: Array<VoidAuthProvider>;
-}
+};
 
 /** Shape of the `void.json` config file. All fields optional. */
-export interface VoidConfig {
+export type VoidConfig = {
   $schema?: string;
   target?: 'cloudflare' | 'node' | 'bun' | 'deno';
   output?: 'server' | 'static';
@@ -66,7 +66,7 @@ export interface VoidConfig {
   remote?: boolean;
   worker?: WranglerConfig;
   database?: 'pg';
-}
+};
 
 const CONFIG_FILE = 'void.json';
 
@@ -218,10 +218,10 @@ function assertNotProtocolRelative(
  */
 const LITERAL_HOSTNAME_REGEX = /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/;
 
-export interface ParsedRuleSource {
+export type ParsedRuleSource = {
   host: string | undefined;
   path: string;
-}
+};
 
 /**
  * Split an optional `https://host/path` prefix from a rule source.

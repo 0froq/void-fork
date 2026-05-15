@@ -4,20 +4,20 @@ const ISLAND_IMPORT_RE =
 const ISLAND_IMPORT_LINE_RE =
   /^[ \t]*import\s+\w+\s+from\s+(?:"[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*(?:"[^"]+"|'[^']+')\s*\}\s*;?\s*$/gm;
 
-export interface IslandImport {
+export type IslandImport = {
   name: string;
   specifier: string;
   strategy: string;
   /** Root-relative island ID (set during transform when file context is available). */
   islandId?: string;
-}
+};
 
-export interface ScriptExtraction {
+export type ScriptExtraction = {
   script: string | null;
   body: string;
   islandImports: Array<IslandImport>;
   clientCode: string | null;
-}
+};
 
 export function extractScript(source: string): ScriptExtraction {
   const match = source.match(SCRIPT_RE);

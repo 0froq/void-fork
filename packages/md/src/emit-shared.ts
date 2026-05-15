@@ -5,23 +5,23 @@ import type { IslandImport } from './extract-script.ts';
 const ISLAND_TAG_RE =
   /<([A-Z]\w*)\s*((?:[^>/"']|"[^"]*"|'[^']*')*)\/\s*>|<([A-Z]\w*)\s*((?:[^>/"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/\3\s*>/g;
 
-interface IslandMatch {
+type IslandMatch = {
   name: string;
   start: number;
   end: number;
   attrs: string;
-}
+};
 
-interface HtmlChunk {
+type HtmlChunk = {
   type: 'html';
   html: string;
-}
+};
 
-interface IslandChunk {
+type IslandChunk = {
   type: 'island';
   islandImport: IslandImport;
   props: Record<string, string>;
-}
+};
 
 export type RenderChunk = HtmlChunk | IslandChunk;
 

@@ -26,16 +26,16 @@ const ADAPTER_PLUGIN_NAMES: Record<string, FrameworkAdapter> = {
 const SVELTE_VIRTUAL_PREFIX = '/@void-md-svelte/';
 const SOLID_VIRTUAL_PREFIX = '/@void-md-solid/';
 
-export interface MdPage {
+export type MdPage = {
   path: string;
   title: string;
   frontmatter: Record<string, unknown>;
   headings: Array<{ depth: number; slug: string; text: string }>;
-}
+};
 
-export interface MarkdownOptions {
+export type MarkdownOptions = {
   shiki?: CompileOptions['shiki'];
-}
+};
 
 function hasMdFilesWithScript(dir: string): boolean {
   try {

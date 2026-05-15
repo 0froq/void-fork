@@ -20,42 +20,42 @@ type HasParams<P extends keyof WebSocketRouteMap> =
       ? false
       : true;
 
-export interface WebSocketConnection<ServerEvent = unknown> {
+export type WebSocketConnection<ServerEvent = unknown> = {
   readonly id: string;
   readonly state: unknown;
   send(event: ServerEvent): Promise<void>;
   close(code?: number, reason?: string): void;
   setState(data: unknown): void;
-}
+};
 
-export interface RoomController<ServerEvent = unknown> {
+export type RoomController<ServerEvent = unknown> = {
   broadcast(event: ServerEvent, excludeIds?: Array<string>): Promise<void>;
   getConnections(): Iterable<WebSocketConnection<ServerEvent>>;
   getConnection(id: string): WebSocketConnection<ServerEvent> | undefined;
-}
+};
 
-export interface WebSocketBaseContext {
+export type WebSocketBaseContext = {
   readonly id: string;
   readonly params: ParamsRecord;
   readonly user: AuthUser | null;
   readonly request: Request;
   readonly env: CloudEnv['Bindings'];
   readonly storage: DurableObjectStorage;
-}
+};
 
-export interface RoomContext<ServerEvent = unknown> extends WebSocketBaseContext {
+export type RoomContext<ServerEvent = unknown> = WebSocketBaseContext & {
   readonly room: RoomController<ServerEvent>;
   readonly connection: WebSocketConnection<ServerEvent>;
-}
+};
 
-export interface SocketContext<ServerEvent = unknown> extends WebSocketBaseContext {
+export type SocketContext<ServerEvent = unknown> = WebSocketBaseContext & {
   readonly socket: WebSocketConnection<ServerEvent>;
-}
+};
 
-export interface RoomDefinition<
+export type RoomDefinition<
   ClientSchema extends StandardSchemaV1 = StandardSchemaV1,
   ServerSchema extends StandardSchemaV1 = StandardSchemaV1,
-> {
+> = {
   readonly __kind: 'room';
   readonly messages: {
     client: ClientSchema;
@@ -76,12 +76,12 @@ export interface RoomDefinition<
   onRequest?: (
     ctx: RoomContext<StandardSchemaV1.InferInput<ServerSchema>>,
   ) => MaybePromise<Response>;
-}
+};
 
-export interface SocketDefinition<
+export type SocketDefinition<
   ClientSchema extends StandardSchemaV1 = StandardSchemaV1,
   ServerSchema extends StandardSchemaV1 = StandardSchemaV1,
-> {
+> = {
   readonly __kind: 'socket';
   readonly messages: {
     client: ClientSchema;
@@ -102,7 +102,7 @@ export interface SocketDefinition<
   onRequest?: (
     ctx: SocketContext<StandardSchemaV1.InferInput<ServerSchema>>,
   ) => MaybePromise<Response>;
-}
+};
 
 export type AnyWebSocketDefinition = RoomDefinition | SocketDefinition;
 
@@ -124,19 +124,19 @@ export function defineWebSocket<
   return { ...definition, __kind: 'socket' };
 }
 
-export interface VoidSocketCloseEvent {
+export type VoidSocketCloseEvent = {
   code?: number;
   reason?: string;
   wasClean?: boolean;
-}
+};
 
-export interface ConnectCommonOptions {
+export type ConnectCommonOptions = {
   baseURL?: string;
   reconnect?: boolean;
   reconnectDelayMs?: number;
   maxReconnectAttempts?: number;
   protocols?: string | Array<string>;
-}
+};
 
 type ConnectOptions<P extends keyof WebSocketRouteMap> = ConnectCommonOptions &
   (HasParams<P> extends true ? { params: ParamsOf<P> } : { params?: never });

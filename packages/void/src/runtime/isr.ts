@@ -1,9 +1,9 @@
 import { getRawRuntimeEnv } from './env-raw.ts';
 
-export interface RevalidateOptions {
+export type RevalidateOptions = {
   paths?: Array<string>;
   all?: boolean;
-}
+};
 
 /**
  * Revalidate ISR-cached pages on demand.

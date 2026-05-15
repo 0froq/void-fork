@@ -6,17 +6,17 @@ import { HTTPException } from 'hono/http-exception';
 export type AuthUser = User;
 export type AuthSession = Session;
 
-export interface AuthState {
+export type AuthState = {
   session: AuthSession;
   user: AuthUser;
-}
+};
 
-export interface VoidAuthConfigContext {
+export type VoidAuthConfigContext = {
   defaults: BetterAuthOptions;
   env: Record<string, unknown>;
   dialect: 'sqlite' | 'postgresql';
   request: Request;
-}
+};
 
 export type VoidAuthConfig =
   | BetterAuthOptions

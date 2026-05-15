@@ -1,9 +1,9 @@
 import { defineHandler, defineHead } from 'void';
 import { USERS } from './_data.ts';
 
-export interface Props {
+export type Props = {
   user: (typeof USERS)[number];
-}
+};
 
 export const loader = defineHandler<Props>((c) => {
   const id = Number(c.req.param('id'));

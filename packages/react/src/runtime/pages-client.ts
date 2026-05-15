@@ -42,7 +42,7 @@ type ReactPageData = PageObject;
 type ReactPageComponent = ComponentType<Record<string, unknown>>;
 type ReactLayoutComponent = ComponentType<{ children?: React.ReactNode }>;
 
-export interface ReactPagesConfig {
+export type ReactPagesConfig = {
   components: Record<string, () => Promise<ComponentModule>>;
   layoutTree: Record<string, Array<string>>;
   routeMeta: Record<string, { island?: boolean }>;
@@ -52,11 +52,11 @@ export interface ReactPagesConfig {
   viewTransitions: boolean;
   prefetchHoverDelay: number;
   prefetchDefaultCacheFor: CacheForResult;
-}
+};
 
-export interface ReactPagesClient {
+export type ReactPagesClient = {
   router: VoidRouter;
-}
+};
 
 type DeferredResource = Promise<unknown>;
 
@@ -77,13 +77,13 @@ type VisitSettler = {
   reject(error: unknown): void;
 };
 
-interface AppState {
+type AppState = {
   resource: ReactPageResource;
   rollbackResource: ReactPageResource | null;
   navigation: NavigationState;
   routeUrl: string;
   pendingId: number | null;
-}
+};
 
 type AppAction =
   | {

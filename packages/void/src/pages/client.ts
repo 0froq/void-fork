@@ -30,7 +30,7 @@ export type {
 
 // --- Types ---
 
-export interface VisitOptions {
+export type VisitOptions = {
   method?: string;
   data?: unknown;
   preserveScroll?: boolean;
@@ -43,23 +43,23 @@ export interface VisitOptions {
   _scrollPosition?: { x: number; y: number } | null;
   /** @internal Used by popstate handler to avoid writing history while traversing */
   _popstate?: boolean;
-}
+};
 
-export interface PrefetchOptions {
+export type PrefetchOptions = {
   method?: string;
   cacheFor?: CacheForInput;
-}
+};
 
 export type NavigationStateType = 'idle' | 'loading' | 'submitting';
 export type NavigationMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-export interface NavigationState {
+export type NavigationState = {
   state: NavigationStateType;
   location: URL | null;
   method: NavigationMethod | null;
-}
+};
 
-export interface VoidRouter {
+export type VoidRouter = {
   _hoverDelay: number;
   readonly url: URL;
   readonly path: string;
@@ -70,9 +70,9 @@ export interface VoidRouter {
   prefetch(url: string | URL, options?: PrefetchOptions): Promise<unknown>;
   flush(url: string | URL, method?: string): void;
   flushAll(): void;
-}
+};
 
-export interface VoidRouterAdapter {
+export type VoidRouterAdapter = {
   createDeferred(): unknown;
   resolveDeferred(ref: unknown, value: unknown): unknown;
   rejectDeferred(ref: unknown, error: string): unknown;
@@ -83,9 +83,9 @@ export interface VoidRouterAdapter {
     layouts: Array<unknown>,
   ): void | Promise<void>;
   onDeferredUpdate?(props: Record<string, unknown>): void;
-}
+};
 
-export interface VoidRouterConfig {
+export type VoidRouterConfig = {
   adapter: VoidRouterAdapter;
   components: Record<string, () => Promise<PageComponentModule>>;
   layoutTree: Record<string, Array<string>>;
@@ -98,7 +98,7 @@ export interface VoidRouterConfig {
   prefetchDefaultCacheFor: CacheForResult;
   onRouteChange?(url: string): void;
   onNavigationChange?(navigation: NavigationState): void;
-}
+};
 
 function currentUrl(): string {
   return window.location.pathname + window.location.search + window.location.hash;

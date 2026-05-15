@@ -2,9 +2,9 @@
   import Counter from "./_Counter.svelte" with { island: "load" };
   import PostForm from "./_PostForm.svelte" with { island: "load" };
 
-  interface Props {
+  type Props = {
     posts: Array<{ slug: string; title: string }>;
-  }
+  };
 
   let { posts }: Props = $props();
 </script>

@@ -10,14 +10,14 @@ import type {
   WebSocketConnection,
 } from './ws.ts';
 
-export interface WebSocketRouteMeta {
+export type WebSocketRouteMeta = {
   pattern: string;
   params: Array<string>;
   className: string;
   bindingName: string;
-}
+};
 
-export interface WebSocketDurableObjectInstance {
+export type WebSocketDurableObjectInstance = {
   fetch(request: Request): Promise<Response>;
   webSocketMessage(
     webSocket: WebSocket,
@@ -29,11 +29,11 @@ export interface WebSocketDurableObjectInstance {
     reason: string,
     wasClean: boolean,
   ): Promise<void>;
-}
+};
 
-export interface WebSocketDurableObjectClass {
+export type WebSocketDurableObjectClass = {
   new (state: DurableObjectState, env: Record<string, unknown>): WebSocketDurableObjectInstance;
-}
+};
 
 type ResolveVoidAuthState = (
   request: Request,
@@ -41,14 +41,14 @@ type ResolveVoidAuthState = (
   runtime: VoidAuthRuntimeOptions,
 ) => Promise<AuthState | null>;
 
-interface StoredConnection {
+type StoredConnection = {
   id: string;
   params: Record<string, string>;
   roomId: string;
   user: AuthUser | null;
   authState?: AuthState | null;
   state?: unknown;
-}
+};
 
 function matchRoute(
   pattern: string,

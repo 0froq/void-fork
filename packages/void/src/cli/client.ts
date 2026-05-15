@@ -103,28 +103,28 @@ export function isExpiredTokenError(error: unknown): boolean {
   return false;
 }
 
-export interface ProjectResponse {
+export type ProjectResponse = {
   id: string;
   user_id: string;
   slug: string;
   type: string;
   created_at: string;
   custom_domain: string | null;
-}
+};
 
-export interface CreateProjectResponse {
+export type CreateProjectResponse = {
   id: string;
   slug: string;
-}
+};
 
-export interface DeleteProjectResponse {
+export type DeleteProjectResponse = {
   ok: boolean;
   id: string;
   slug: string;
   warnings?: Array<string>;
-}
+};
 
-export interface DeploymentResponse {
+export type DeploymentResponse = {
   id: string;
   status: string;
   source: string | null;
@@ -135,19 +135,19 @@ export interface DeploymentResponse {
   applied_migrations: string | null;
   created_at: string;
   deployed_at: string | null;
-}
+};
 
-export interface DeploymentListResponse {
+export type DeploymentListResponse = {
   deployments: Array<DeploymentResponse>;
   activeDeploymentId: string | null;
-}
+};
 
-export interface SecretResponse {
+export type SecretResponse = {
   ok: boolean;
   name: string;
-}
+};
 
-export interface LogEntry {
+export type LogEntry = {
   timestamp: number;
   outcome: string;
   logs: Array<{ level: string; message: Array<unknown>; timestamp: number }>;
@@ -155,9 +155,9 @@ export interface LogEntry {
   url: string;
   method: string;
   status: string;
-}
+};
 
-export interface DomainResponse {
+export type DomainResponse = {
   id: string;
   project_id: string;
   hostname: string;
@@ -165,12 +165,12 @@ export interface DomainResponse {
   status: string;
   created_at: string;
   cname_target?: string;
-}
+};
 
-export interface DomainStatusResponse extends DomainResponse {
+export type DomainStatusResponse = DomainResponse & {
   ssl_status: string;
   verification_errors?: Array<string>;
-}
+};
 
 /**
  * Asset declaration shape for `POST /:id/deploy/upload-urls`. Each entry
@@ -180,12 +180,12 @@ export interface DomainStatusResponse extends DomainResponse {
  *     bakes it into the presigned PUT URL as a SIGNED `Content-Md5`
  *     header so R2 enforces integrity at write time.
  */
-export interface UploadUrlAssetRequest {
+export type UploadUrlAssetRequest = {
   blake3: string;
   md5: string;
   size: number;
   contentType: string;
-}
+};
 
 /**
  * Manifest-only (direct-to-R2) deploy payload. Sent as JSON to
@@ -196,7 +196,7 @@ export interface UploadUrlAssetRequest {
  * to R2 via presigned PUT URLs before this call. The server verifies each
  * declared asset key exists in R2 (parallel HEAD) before flipping routing.
  */
-export interface ManifestOnlyDeployPayload {
+export type ManifestOnlyDeployPayload = {
   manifest: DeployManifest;
   assetManifest: Record<string, AssetManifestEntry>;
   source: string | null;
@@ -207,7 +207,7 @@ export interface ManifestOnlyDeployPayload {
   preflight: 'true' | null;
   /** Worker module bytes keyed by relative path, base64-encoded. */
   workerFiles?: Record<string, string>;
-}
+};
 
 /**
  * HTTP client for the Void platform API.
