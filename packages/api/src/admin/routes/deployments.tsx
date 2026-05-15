@@ -21,46 +21,46 @@ const app = new Hono<ApiEnv>();
 const ACTIVE_DEPLOYMENT_STATUSES = new Set(['pending', 'uploading', 'migrating', 'prerendering']);
 
 // GET /deployments
-app.get('/', async (c) => {
-  const search = c.req.query('search');
-  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
+app.get('/', async (context) => {
+  const search = context.req.query('search');
+  const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
   if (search) {
-    const deployments = await searchDeployments(c.get('db'), search);
-    return c.html(
+    const deployments = await searchDeployments(context.get('db'), search);
+    return context.html(
       <DeploymentsListPage
         deployments={deployments}
         search={search}
-        username={c.get('user').login}
+        username={context.get('user').login}
         tz={tz}
       />,
     );
   }
-  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10) || 1);
+  const page = Math.max(1, parseInt(context.req.query('page') ?? '1', 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
   const [deployments, total] = await Promise.all([
-    getAllDeploymentsWithProject(c.get('db'), PAGE_SIZE, offset),
-    countDeployments(c.get('db')),
+    getAllDeploymentsWithProject(context.get('db'), PAGE_SIZE, offset),
+    countDeployments(context.get('db')),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return c.html(
+  return context.html(
     <DeploymentsListPage
       deployments={deployments}
       page={page}
       totalPages={totalPages}
-      username={c.get('user').login}
+      username={context.get('user').login}
       tz={tz}
     />,
   );
 });
 
 // GET /deployments/:id
-app.get('/:id', async (c) => {
-  const deployment = await getDeployment(c.get('db'), c.req.param('id'));
+app.get('/:id', async (context) => {
+  const deployment = await getDeployment(context.get('db'), context.req.param('id'));
   if (!deployment) {
-    return c.html('<h1>Deployment not found</h1>', 404);
+    return context.html('<h1>Deployment not found</h1>', 404);
   }
-  const project = await getProject(c.get('db'), deployment.project_id);
-  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
+  const project = await getProject(context.get('db'), deployment.project_id);
+  const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
   const canCancel = ACTIVE_DEPLOYMENT_STATUSES.has(deployment.status);
 
   let manifest: DeployManifest | null = null;
@@ -72,8 +72,8 @@ app.get('/:id', async (c) => {
     // invalid JSON — skip manifest display
   }
 
-  return c.html(
-    <Layout title={`Deployment ${deployment.id}`} username={c.get('user').login}>
+  return context.html(
+    <Layout title={`Deployment ${deployment.id}`} username={context.get('user').login}>
       <h1>Deployment {deployment.id}</h1>
 
       {canCancel && (
@@ -238,38 +238,38 @@ app.get('/:id', async (c) => {
 });
 
 // POST /deployments/:id/cancel
-app.post('/:id/cancel', async (c) => {
-  const deployment = await getDeployment(c.get('db'), c.req.param('id'));
+app.post('/:id/cancel', async (context) => {
+  const deployment = await getDeployment(context.get('db'), context.req.param('id'));
   if (!deployment) {
-    return c.html('<h1>Deployment not found</h1>', 404);
+    return context.html('<h1>Deployment not found</h1>', 404);
   }
 
-  await cancelDeployment(c.get('db'), deployment.id, 'canceled by admin');
-  return c.redirect(`/admin/deployments/${deployment.id}`);
+  await cancelDeployment(context.get('db'), deployment.id, 'canceled by admin');
+  return context.redirect(`/admin/deployments/${deployment.id}`);
 });
 
 // GET /deployments/:id/logs — query historical logs via Analytics Engine
-app.get('/:id/logs', async (c) => {
-  const deployment = await getDeployment(c.get('db'), c.req.param('id'));
+app.get('/:id/logs', async (context) => {
+  const deployment = await getDeployment(context.get('db'), context.req.param('id'));
   if (!deployment) {
-    return c.json({ error: 'deployment not found' }, 404);
+    return context.json({ error: 'deployment not found' }, 404);
   }
-  const project = await getProject(c.get('db'), deployment.project_id);
+  const project = await getProject(context.get('db'), deployment.project_id);
   if (!project) {
-    return c.json({ error: 'project not found' }, 404);
+    return context.json({ error: 'project not found' }, 404);
   }
 
-  if (isDevBypass(c.env)) {
-    return c.json({ data: mockLogData() });
+  if (isDevBypass(context.env)) {
+    return context.json({ data: mockLogData() });
   }
 
   const workerName = `user-${project.slug}`;
-  const since = c.req.query('since') ?? '1h';
+  const since = context.req.query('since') ?? '1h';
   const sinceMs = parseSince(since);
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '100', 10) || 100, 500);
+  const limit = Math.min(parseInt(context.req.query('limit') ?? '100', 10) || 100, 500);
 
   const sinceStr = new Date(sinceMs).toISOString().replace('T', ' ').slice(0, 19);
-  const dataset = c.env.LOGS_DATASET ?? 'void_logs';
+  const dataset = context.env.LOGS_DATASET ?? 'void_logs';
   const query = `
     SELECT
       blob1 as outcome,
@@ -290,11 +290,11 @@ app.get('/:id/logs', async (c) => {
   `;
 
   const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/analytics_engine/sql`,
+    `https://api.cloudflare.com/client/v4/accounts/${context.env.CF_ACCOUNT_ID}/analytics_engine/sql`,
     {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
+        Authorization: `Bearer ${context.env.CF_API_TOKEN}`,
         'Content-Type': 'text/plain',
       },
       body: query,
@@ -303,7 +303,10 @@ app.get('/:id/logs', async (c) => {
 
   if (!response.ok) {
     const body = await response.text();
-    return c.json({ error: 'log query failed', status: response.status, detail: body, query }, 502);
+    return context.json(
+      { error: 'log query failed', status: response.status, detail: body, query },
+      502,
+    );
   }
 
   const result = (await response.json()) as { data: ReadonlyArray<LogRow> };
@@ -317,7 +320,7 @@ app.get('/:id/logs', async (c) => {
     status: row.statusCode,
   }));
 
-  return c.json({ data });
+  return context.json({ data });
 });
 
 type LogRow = Readonly<{

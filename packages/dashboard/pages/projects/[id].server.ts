@@ -21,13 +21,13 @@ export type Props = Readonly<{
   siteDomain: string;
 }>;
 
-export const loader = defineHandler<Props>(async (c) => {
-  const id = c.req.param('id');
+export const loader = defineHandler<Props>(async (context) => {
+  const id = context.req.param('id');
   if (!id) {
-    return c.notFound();
+    return context.notFound();
   }
 
-  const client = createClient(c);
+  const client = createClient(context);
   let projectRes: ApiResponse;
   try {
     projectRes = await client.projects[':id'].$get({ param: { id } });
@@ -35,15 +35,15 @@ export const loader = defineHandler<Props>(async (c) => {
     console.warn(
       `[dashboard] /projects/${id} request failed: ${error instanceof Error ? error.message : String(error)}`,
     );
-    return c.notFound();
+    return context.notFound();
   }
 
   if (!projectRes.ok) {
-    return c.notFound();
+    return context.notFound();
   }
   const project = await readApiJson<Props['project']>(projectRes);
   if (!project) {
-    return c.notFound();
+    return context.notFound();
   }
 
   const [deploymentsRes, domainsRes, resourcesRes, usageRes, secretsRes] = await Promise.allSettled(
@@ -82,7 +82,7 @@ export const loader = defineHandler<Props>(async (c) => {
       aiNeurons: 0,
     },
     secrets: (await readSettled<Props['secrets']>(secretsRes)) ?? [],
-    siteDomain: (c.env as Record<string, string>).SITE_DOMAIN ?? 'void.app',
+    siteDomain: (context.env as Record<string, string>).SITE_DOMAIN ?? 'void.app',
   };
 });
 
@@ -90,34 +90,34 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-export const action = defineHandler(async (c) => {
-  const id = c.req.param('id');
+export const action = defineHandler(async (context) => {
+  const id = context.req.param('id');
   if (!id) {
-    return c.notFound();
+    return context.notFound();
   }
 
-  const form = await c.req.parseBody();
+  const form = await context.req.parseBody();
   const intent = stringValue(form._intent);
 
   if (intent === 'add-domain') {
-    await api(c, `/projects/${id}/domains`, {
+    await api(context, `/projects/${id}/domains`, {
       method: 'POST',
       body: JSON.stringify({ hostname: stringValue(form.hostname).trim() }),
     });
   } else if (intent === 'remove-domain') {
-    await api(c, `/projects/${id}/domains/${stringValue(form.domainId)}`, {
+    await api(context, `/projects/${id}/domains/${stringValue(form.domainId)}`, {
       method: 'DELETE',
     });
   } else if (intent === 'add-secret') {
-    await api(c, `/projects/${id}/secrets/${stringValue(form.name).trim()}`, {
+    await api(context, `/projects/${id}/secrets/${stringValue(form.name).trim()}`, {
       method: 'PUT',
       body: JSON.stringify({ value: stringValue(form.value) }),
     });
   } else if (intent === 'remove-secret') {
-    await api(c, `/projects/${id}/secrets/${stringValue(form.name)}`, {
+    await api(context, `/projects/${id}/secrets/${stringValue(form.name)}`, {
       method: 'DELETE',
     });
   }
 
-  return c.redirect(`/projects/${id}`);
+  return context.redirect(`/projects/${id}`);
 });

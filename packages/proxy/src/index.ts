@@ -22,78 +22,83 @@ app.use(
 );
 
 // Health check
-app.get('/health', (c) =>
-  c.json({
+app.get('/health', (context) =>
+  context.json({
     ok: true,
     bindings: {
-      ai: !!c.env.AI,
-      kv: !!c.env.ROUTING,
-      jwt: !!c.env.JWT_SECRET,
-      api: !!c.env.API,
+      ai: !!context.env.AI,
+      kv: !!context.env.ROUTING,
+      jwt: !!context.env.JWT_SECRET,
+      api: !!context.env.API,
     },
   }),
 );
 
 // Reject non-POST for all other routes
-app.all('/*', async (c, next) => {
-  if (c.req.method !== 'POST') {
-    return c.json({ error: 'method not allowed' }, 405);
+app.all('/*', async (context, next) => {
+  if (context.req.method !== 'POST') {
+    return context.json({ error: 'method not allowed' }, 405);
   }
   await next();
 });
 
 // Auth middleware — parses body, authenticates, sets projectId
-app.post('/*', async (c, next) => {
+app.post('/*', async (context, next) => {
   let body: ProxyBody;
   try {
-    const json = await c.req.json<unknown>();
+    const json = await context.req.json<unknown>();
     if (!isProxyBody(json)) {
-      return c.json({ error: 'invalid JSON body' }, 400);
+      return context.json({ error: 'invalid JSON body' }, 400);
     }
     body = json;
   } catch {
-    return c.json({ error: 'invalid JSON body' }, 400);
+    return context.json({ error: 'invalid JSON body' }, 400);
   }
-  c.set('body', body);
+  context.set('body', body);
 
-  const authHeader = c.req.header('authorization');
+  const authHeader = context.req.header('authorization');
   if (authHeader?.startsWith('Bearer ')) {
     // HTTPS path (local dev) — validate JWT
     const token = authHeader.slice(7);
-    const payload = await verifyJwt(token, c.env.JWT_SECRET);
+    const payload = await verifyJwt(token, context.env.JWT_SECRET);
     if (!payload) {
-      return c.json({ error: 'invalid or expired token' }, 401);
+      return context.json({ error: 'invalid or expired token' }, 401);
     }
     const projectId = asString(body.projectId);
     if (!projectId) {
-      return c.json({ error: 'projectId required' }, 400);
+      return context.json({ error: 'projectId required' }, 400);
     }
     // Verify the authenticated user owns this project
-    const owns = await verifyProjectOwner(c.env.API, c.env.JWT_SECRET, projectId, payload.sub);
+    const owns = await verifyProjectOwner(
+      context.env.API,
+      context.env.JWT_SECRET,
+      projectId,
+      payload.sub,
+    );
     if (!owns) {
-      return c.json({ error: 'forbidden' }, 403);
+      return context.json({ error: 'forbidden' }, 403);
     }
-    c.set('projectId', projectId);
+    context.set('projectId', projectId);
   } else {
     // Service binding path (production) — verify HMAC-signed project token
     const projectId = asString(body.projectId);
     const aiToken = asString(body.aiToken);
     if (!projectId || !aiToken) {
-      return c.json({ error: 'projectId and aiToken required' }, 400);
+      return context.json({ error: 'projectId and aiToken required' }, 400);
     }
-    if (!(await verifyHmac(projectId, aiToken, c.env.JWT_SECRET))) {
-      return c.json({ error: 'invalid project token' }, 403);
+    if (!(await verifyHmac(projectId, aiToken, context.env.JWT_SECRET))) {
+      return context.json({ error: 'invalid project token' }, 403);
     }
-    c.set('projectId', projectId);
+    context.set('projectId', projectId);
   }
 
   await next();
 });
 
 // AI usage limit check — only applies to AI routes
-app.post('/ai/*', async (c, next) => {
-  if (await c.env.ROUTING.get(`ai-block:${c.get('projectId')}`, { cacheTtl: 60 })) {
-    return c.json({ error: 'AI usage limit exceeded' }, 429);
+app.post('/ai/*', async (context, next) => {
+  if (await context.env.ROUTING.get(`ai-block:${context.get('projectId')}`, { cacheTtl: 60 })) {
+    return context.json({ error: 'AI usage limit exceeded' }, 429);
   }
   await next();
 });
@@ -145,7 +150,7 @@ async function verifyHmac(data: string, signature: string, secret: string): Prom
 function base64urlDecode(str: string): Uint8Array {
   const padded = str.replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(padded);
-  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return Uint8Array.from(binary, (context) => context.charCodeAt(0));
 }
 
 async function verifyJwt(token: string, secret: string): Promise<JwtPayload | null> {

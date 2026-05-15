@@ -149,12 +149,12 @@ async function applyWorkerFallbackRules(opts: {
     buildVariantOriginalUrl(opts.originalRequestUrl, opts.pathname, opts.routing.queryAllowlist);
   const fallbackUrl = new URL(opts.url.toString());
   fallbackUrl.pathname = fallback.destination;
-  const fallbackReq = rebuildRequest(opts.dispatchReq, fallbackUrl.toString(), (h) =>
-    h.set('X-Void-Original-URL', fallbackHeader),
+  const fallbackRequest = rebuildRequest(opts.dispatchReq, fallbackUrl.toString(), (headers) =>
+    headers.set('X-Void-Original-URL', fallbackHeader),
   );
 
   return {
-    response: await opts.worker.fetch(fallbackReq),
+    response: await opts.worker.fetch(fallbackRequest),
     pathname: fallback.destination,
     originalUrlVariant,
     applied: true,
@@ -191,16 +191,16 @@ function isLikelyCfAssetStub(response: Response): boolean {
   if (response.status !== 200) {
     return false;
   }
-  const ct = response.headers.get('content-type')?.toLowerCase();
-  if (!ct?.startsWith('text/plain')) {
+  const contentType = response.headers.get('content-type')?.toLowerCase();
+  if (!contentType?.startsWith('text/plain')) {
     return false;
   }
-  const clRaw = response.headers.get('content-length');
-  if (!clRaw) {
+  const contentLengthRaw = response.headers.get('content-length');
+  if (!contentLengthRaw) {
     return false;
   }
-  const cl = Number.parseInt(clRaw, 10);
-  return cl > 0 && cl < 200;
+  const contentLength = Number.parseInt(contentLengthRaw, 10);
+  return contentLength > 0 && contentLength < 200;
 }
 
 // Serve the requested asset from platform R2/KV using the mirror written
@@ -311,20 +311,20 @@ export function rebuildRequest(
   // `cf` (country, colo, botManagement, tlsClientAuth, …) is populated by
   // the CF edge and read by user workers. A plain `new Request(url, init)`
   // does not propagate it; we have to thread it through init.cf explicitly.
-  const cf = request.cf;
+  const cfProperties = request.cf;
   if (request.bodyUsed || request.body?.locked) {
     headers.delete('content-length');
     headers.delete('transfer-encoding');
-    return new Request(url, { method: request.method, headers, cf });
+    return new Request(url, { method: request.method, headers, cf: cfProperties });
   }
   if (request.method === 'GET' || request.method === 'HEAD') {
-    return new Request(url, { method: request.method, headers, cf });
+    return new Request(url, { method: request.method, headers, cf: cfProperties });
   }
   return new Request(url, {
     method: request.method,
     headers,
     body: request.body,
-    cf,
+    cf: cfProperties,
     // @ts-expect-error -- duplex required for streaming bodies in CF Workers
     duplex: 'half',
   });
@@ -380,7 +380,9 @@ export default {
     // value to flow through would let callers spoof the "original URL" seen by
     // user workers that trust the header.
     if (request.headers.has('X-Void-Original-URL')) {
-      request = rebuildRequest(request, request.url, (h) => h.delete('X-Void-Original-URL'));
+      request = rebuildRequest(request, request.url, (headers) =>
+        headers.delete('X-Void-Original-URL'),
+      );
     }
     let pathname = url.pathname;
     let requestType: RequestType =
@@ -451,8 +453,8 @@ export default {
     // URL + original-URL header).
     let workerRequest = request;
     if (originalUrlHeader) {
-      workerRequest = rebuildRequest(request, url.toString(), (h) =>
-        h.set('X-Void-Original-URL', originalUrlHeader),
+      workerRequest = rebuildRequest(request, url.toString(), (headers) =>
+        headers.set('X-Void-Original-URL', originalUrlHeader),
       );
     }
 
@@ -946,11 +948,11 @@ export default {
     const { workerName, queueName, proxyToken } = JSON.parse(routingRaw) as QueueRoutingEntry;
 
     // Serialize batch for relay
-    const messages = Array.from(batch.messages, (m) => ({
-      id: m.id,
-      timestamp: m.timestamp.toISOString(),
-      body: m.body,
-      attempts: m.attempts,
+    const messages = Array.from(batch.messages, (message) => ({
+      id: message.id,
+      timestamp: message.timestamp.toISOString(),
+      body: message.body,
+      attempts: message.attempts,
     }));
 
     const worker = env.DISPATCH.get(workerName);
@@ -1019,16 +1021,16 @@ export default {
       }
 
       // Apply per-message decisions
-      const msgMap = new Map(batch.messages.map((m) => [m.id, m]));
+      const messageMap = new Map(batch.messages.map((message) => [message.id, message]));
       for (const [id, decision] of Object.entries(result.decisions)) {
-        const cfMsg = msgMap.get(id);
-        if (!cfMsg) {
+        const cfMessage = messageMap.get(id);
+        if (!cfMessage) {
           continue;
         }
         if (decision.action === 'ack') {
-          cfMsg.ack();
+          cfMessage.ack();
         } else if (decision.action === 'retry') {
-          cfMsg.retry(
+          cfMessage.retry(
             decision.delaySeconds != null ? { delaySeconds: decision.delaySeconds } : undefined,
           );
         }
@@ -1075,14 +1077,14 @@ async function fetchStaticAsset(
     if (!obj) {
       return null;
     }
-    const ct = obj.httpMetadata?.contentType ?? getContentType(path);
+    const contentType = obj.httpMetadata?.contentType ?? getContentType(path);
     const headers: HeadersInit = {
       ETag: obj.httpEtag,
       ...(obj.size ? { 'Content-Length': String(obj.size) } : {}),
     };
     // "application/null" is a sentinel meaning "no Content-Type header" (matches Wrangler)
-    if (ct && ct !== 'application/null') {
-      (headers as Record<string, string>)['Content-Type'] = ct;
+    if (contentType && contentType !== 'application/null') {
+      (headers as Record<string, string>)['Content-Type'] = contentType;
     }
     return new Response(obj.body, { headers });
   }
@@ -1153,7 +1155,9 @@ async function revalidateInBackground(
     // Use rebuildRequest so request.cf (country/colo/botManagement/tlsClientAuth)
     // survives the rebuild — otherwise the background re-render runs with
     // cf === undefined and writes wrong-geo/wrong-bot HTML into the ISR cache.
-    const cleanRequest = rebuildRequest(request, request.url, (h) => h.delete('X-VoidPages'));
+    const cleanRequest = rebuildRequest(request, request.url, (headers) =>
+      headers.delete('X-VoidPages'),
+    );
     let response = await worker.fetch(cleanRequest);
     if (isEventStreamResponse(response)) {
       return;
@@ -1231,9 +1235,9 @@ function hasExtension(pathname: string): boolean {
 }
 
 function hasCacheOptOut(response: Response): boolean {
-  const cc = response.headers.get('Cache-Control');
-  if (!cc) {
+  const cacheControl = response.headers.get('Cache-Control');
+  if (!cacheControl) {
     return false;
   }
-  return /\b(private|no-store|no-cache)\b/.test(cc);
+  return /\b(private|no-store|no-cache)\b/.test(cacheControl);
 }

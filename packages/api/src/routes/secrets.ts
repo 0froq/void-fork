@@ -24,53 +24,53 @@ function isValidSecretName(name: string): boolean {
 
 const app = new Hono<ApiEnv>()
 
-  .get('/:id/secrets', async (c) => {
-    const projectId = c.req.param('id');
-    const project = await getProject(c.get('db'), projectId);
+  .get('/:id/secrets', async (context) => {
+    const projectId = context.req.param('id');
+    const project = await getProject(context.get('db'), projectId);
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
-    return c.json(await listProjectSecretNames(c.get('db'), projectId));
+    return context.json(await listProjectSecretNames(context.get('db'), projectId));
   })
 
-  .put('/:id/secrets/:name', async (c) => {
-    const projectId = c.req.param('id');
-    const secretName = c.req.param('name');
+  .put('/:id/secrets/:name', async (context) => {
+    const projectId = context.req.param('id');
+    const secretName = context.req.param('name');
     if (!isValidSecretName(secretName)) {
-      return c.json({ error: 'invalid secret name' }, 400);
+      return context.json({ error: 'invalid secret name' }, 400);
     }
     if (secretName.length > MAX_SECRET_NAME_LENGTH) {
-      return c.json({ error: 'secret name too long' }, 400);
+      return context.json({ error: 'secret name too long' }, 400);
     }
 
-    const project = await getProject(c.get('db'), projectId);
+    const project = await getProject(context.get('db'), projectId);
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
     let body: { value?: string } = {};
     try {
-      body = await c.req.json<{ value?: string }>();
+      body = await context.req.json<{ value?: string }>();
     } catch {
       body = {};
     }
     if (typeof body.value !== 'string' || body.value.length === 0) {
-      return c.json({ error: 'value is required' }, 400);
+      return context.json({ error: 'value is required' }, 400);
     }
     if (new TextEncoder().encode(body.value).byteLength > MAX_SECRET_VALUE_BYTES) {
-      return c.json({ error: 'secret value too large' }, 400);
+      return context.json({ error: 'secret value too large' }, 400);
     }
 
-    const encrypted = await encryptProjectSecret(c.env, projectId, secretName, body.value);
+    const encrypted = await encryptProjectSecret(context.env, projectId, secretName, body.value);
     await upsertProjectSecret(
-      c.get('db'),
+      context.get('db'),
       projectId,
       secretName,
       encrypted.ciphertext,
@@ -79,12 +79,12 @@ const app = new Hono<ApiEnv>()
     );
 
     if (project.active_deployment_id) {
-      const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+      const dispatchNamespace = context.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
       const workerName = getVersionedWorkerName(project.slug, project.active_deployment_id);
       try {
-        await putWorkerSecret(c.env, dispatchNamespace, workerName, secretName, body.value);
+        await putWorkerSecret(context.env, dispatchNamespace, workerName, secretName, body.value);
       } catch (error) {
-        return c.json(
+        return context.json(
           {
             error: 'secret stored but live propagation failed',
             name: secretName,
@@ -96,33 +96,33 @@ const app = new Hono<ApiEnv>()
       }
     }
 
-    return c.json({ ok: true, name: secretName });
+    return context.json({ ok: true, name: secretName });
   })
 
-  .delete('/:id/secrets/:name', async (c) => {
-    const projectId = c.req.param('id');
-    const secretName = c.req.param('name');
+  .delete('/:id/secrets/:name', async (context) => {
+    const projectId = context.req.param('id');
+    const secretName = context.req.param('name');
     if (!isValidSecretName(secretName)) {
-      return c.json({ error: 'invalid secret name' }, 400);
+      return context.json({ error: 'invalid secret name' }, 400);
     }
 
-    const project = await getProject(c.get('db'), projectId);
+    const project = await getProject(context.get('db'), projectId);
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
-    await deleteProjectSecret(c.get('db'), projectId, secretName);
+    await deleteProjectSecret(context.get('db'), projectId, secretName);
 
     if (project.active_deployment_id) {
-      const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+      const dispatchNamespace = context.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
       const workerName = getVersionedWorkerName(project.slug, project.active_deployment_id);
       try {
-        await deleteWorkerSecret(c.env, dispatchNamespace, workerName, secretName);
+        await deleteWorkerSecret(context.env, dispatchNamespace, workerName, secretName);
       } catch (error) {
-        return c.json(
+        return context.json(
           {
             error: 'secret deleted from storage but live propagation failed',
             name: secretName,
@@ -134,7 +134,7 @@ const app = new Hono<ApiEnv>()
       }
     }
 
-    return c.json({ ok: true, name: secretName });
+    return context.json({ ok: true, name: secretName });
   });
 
 export default app;

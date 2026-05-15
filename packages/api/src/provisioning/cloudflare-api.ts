@@ -35,8 +35,8 @@ export async function cfFetch<T>(url: string, apiToken: string, init?: RequestIn
   });
   const json = (await response.json()) as CfApiResult<T>;
   if (!json.success) {
-    const msg = json.errors.map((e) => e.message).join(', ');
-    throw new CloudflareApiError(`Cloudflare API error: ${msg}`, response.status);
+    const message = json.errors.map((error) => error.message).join(', ');
+    throw new CloudflareApiError(`Cloudflare API error: ${message}`, response.status);
   }
   return json.result;
 }
@@ -253,9 +253,9 @@ export async function addQueueConsumer(
 
   // Consumer exists — find ours and update settings
   const consumers = await cfFetch<ReadonlyArray<QueueConsumerInfo>>(consumersUrl, apiToken);
-  const ours = consumers.find((c) => c.script === scriptName);
+  const existingConsumer = consumers.find((consumer) => consumer.script === scriptName);
 
-  if (!ours) {
+  if (!existingConsumer) {
     // A different script owns this consumer. Surface the owner so the
     // caller can emit a deploy warning; do not throw — the deploy should
     // still complete so other queues in the same manifest can succeed.
@@ -264,7 +264,7 @@ export async function addQueueConsumer(
   }
 
   if (settings) {
-    await cfFetch(`${consumersUrl}/${ours.consumer_id}`, apiToken, {
+    await cfFetch(`${consumersUrl}/${existingConsumer.consumer_id}`, apiToken, {
       method: 'PUT',
       body: JSON.stringify(consumerBody),
     });
@@ -325,7 +325,7 @@ export async function getDispatchWorkerProxyToken(
     return { kind: 'error', error };
   }
   const token = bindings.find(
-    (b) => b.type === 'plain_text' && b.name === '__VOID_PROXY_TOKEN',
+    (binding) => binding.type === 'plain_text' && binding.name === '__VOID_PROXY_TOKEN',
   )?.text;
   if (!token) {
     return { kind: 'missing' };
@@ -429,7 +429,7 @@ export async function getHyperdriveByName(
     `${CF_API_BASE}/${accountId}/hyperdrive/configs`,
     apiToken,
   );
-  const match = result.find((h) => h.name === name);
+  const match = result.find((hyperdrive) => hyperdrive.name === name);
   if (!match) {
     throw new Error(`Hyperdrive config not found: ${name}`);
   }

@@ -75,18 +75,18 @@ function deleteCloudflareResource(
  * `deleteProjectCascade` if this throws.
  */
 async function cleanupCriticalResources(
-  c: Context<ApiEnv>,
+  context: Context<ApiEnv>,
   projectId: string,
   _project: Pick<Project, 'slug'>,
 ): Promise<void> {
-  const resources = await getProjectResources(c.get('db'), projectId);
+  const resources = await getProjectResources(context.get('db'), projectId);
   for (const resource of resources) {
     if (resource.type !== 'container') {
       continue;
     }
     await deleteContainerApplicationIdempotent(
-      c.env.CF_ACCOUNT_ID,
-      c.env.CF_API_TOKEN,
+      context.env.CF_ACCOUNT_ID,
+      context.env.CF_API_TOKEN,
       resource.cf_id,
     );
   }
@@ -116,9 +116,9 @@ async function cleanupCriticalResources(
   const alreadyDeletedCfIds = new Set(
     resources.filter((r) => r.type === 'container').map((r) => r.cf_id),
   );
-  await sweepPerDeployContainerOrphans(c, projectId, alreadyDeletedCfIds);
+  await sweepPerDeployContainerOrphans(context, projectId, alreadyDeletedCfIds);
   await new Promise((resolve) => setTimeout(resolve, 2000));
-  await sweepPerDeployContainerOrphans(c, projectId, alreadyDeletedCfIds);
+  await sweepPerDeployContainerOrphans(context, projectId, alreadyDeletedCfIds);
 }
 
 /**
@@ -127,11 +127,11 @@ async function cleanupCriticalResources(
  * subsequent passes skip already-handled orphans.
  */
 async function sweepPerDeployContainerOrphans(
-  c: Context<ApiEnv>,
+  context: Context<ApiEnv>,
   projectId: string,
   alreadyDeletedCfIds: Set<string>,
 ): Promise<void> {
-  const allDeployments = await getAllProjectDeployments(c.get('db'), projectId);
+  const allDeployments = await getAllProjectDeployments(context.get('db'), projectId);
   for (const deployment of allDeployments) {
     const manifest = parseDeploymentManifest(deployment.manifest);
     if (!manifest?.sandbox) {
@@ -143,14 +143,14 @@ async function sweepPerDeployContainerOrphans(
       manifest.sandbox.containerName ?? 'void-sandbox',
     );
     const orphan = await findContainerApplication(
-      c.env.CF_ACCOUNT_ID,
-      c.env.CF_API_TOKEN,
+      context.env.CF_ACCOUNT_ID,
+      context.env.CF_API_TOKEN,
       orphanName,
     );
     if (orphan && !alreadyDeletedCfIds.has(orphan.id)) {
       await deleteContainerApplicationIdempotent(
-        c.env.CF_ACCOUNT_ID,
-        c.env.CF_API_TOKEN,
+        context.env.CF_ACCOUNT_ID,
+        context.env.CF_API_TOKEN,
         orphan.id,
       );
       alreadyDeletedCfIds.add(orphan.id);
@@ -181,7 +181,7 @@ function parseDeploymentManifest(raw: string | null): DeployManifest | null {
  * recovery story (D1 / KV / R2 retention via CF account-level cleanup).
  */
 async function cleanupBestEffortResources(
-  c: Context<ApiEnv>,
+  context: Context<ApiEnv>,
   projectId: string,
   project: Pick<Project, 'slug'>,
 ): Promise<ReadonlyArray<string>> {
@@ -191,12 +191,12 @@ async function cleanupBestEffortResources(
   };
 
   const [projectDeployments, resources, projectDomains] = await Promise.all([
-    getAllProjectDeployments(c.get('db'), projectId),
-    getProjectResources(c.get('db'), projectId),
-    getDomainsByProjectId(c.get('db'), projectId),
+    getAllProjectDeployments(context.get('db'), projectId),
+    getProjectResources(context.get('db'), projectId),
+    getDomainsByProjectId(context.get('db'), projectId),
   ]);
 
-  const dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+  const dispatchNamespace = context.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
   const workerNames = new Set([
     getLegacyProjectWorkerName(project.slug),
     ...projectDeployments.map((deployment) =>
@@ -209,8 +209,8 @@ async function cleanupBestEffortResources(
   await Promise.all(
     Array.from(workerNames, (workerName) =>
       fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
-        { method: 'DELETE', headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` } },
+        `https://api.cloudflare.com/client/v4/accounts/${context.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`,
+        { method: 'DELETE', headers: { Authorization: `Bearer ${context.env.CF_API_TOKEN}` } },
       )
         .then(async (cfRes) => {
           if (!cfRes.ok && cfRes.status !== 404) {
@@ -228,7 +228,7 @@ async function cleanupBestEffortResources(
   // that never stored a bundle, so we don't need to gate on `bundle_stored`.
   await Promise.all(
     projectDeployments.map((deployment) =>
-      deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, deployment.id).catch(
+      deleteWorkerBundle(context.env.STATIC_ASSETS_R2, projectId, deployment.id).catch(
         warn(`Failed to delete worker bundle for deployment ${deployment.id}`),
       ),
     ),
@@ -240,7 +240,7 @@ async function cleanupBestEffortResources(
   // finalized deploy (TOCTOU race against teardown, abandoned upload, etc.)
   // are durable orphans without this sweep. Best-effort: failures here become
   // warnings — the surrounding teardown still cascades the DB rows.
-  await deleteProjectAssets(c.env.STATIC_ASSETS_R2, projectId).catch(
+  await deleteProjectAssets(context.env.STATIC_ASSETS_R2, projectId).catch(
     warn(`Failed to delete static assets for project ${projectId}`),
   );
 
@@ -252,7 +252,11 @@ async function cleanupBestEffortResources(
     if (resource.type === 'container') {
       continue;
     }
-    const del = deleteCloudflareResource(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resource);
+    const del = deleteCloudflareResource(
+      context.env.CF_ACCOUNT_ID,
+      context.env.CF_API_TOKEN,
+      resource,
+    );
     cleanup.push(del.catch(warn(`Failed to delete ${resource.type} resource ${resource.cf_id}`)));
   }
 
@@ -260,15 +264,17 @@ async function cleanupBestEffortResources(
   // (deleteAll + deleteAlarm). KV `hasCrons` is omitted when false and
   // missing on older entries; the PG manifest is the authoritative source,
   // and unconditional clear avoids a stale-KV gate.
-  cleanup.push(clearCronScheduler(c.env, projectId));
+  cleanup.push(clearCronScheduler(context.env, projectId));
 
   // KV routing entry
-  cleanup.push(c.env.ROUTING.delete(project.slug).catch(warn('Failed to delete routing entry')));
+  cleanup.push(
+    context.env.ROUTING.delete(project.slug).catch(warn('Failed to delete routing entry')),
+  );
 
   // Queue routing KV entries
   for (const q of resources.filter((r) => r.type === 'queue')) {
     cleanup.push(
-      c.env.ROUTING.delete(`queue:${getProjectQueueName(projectId, q.binding_name)}`).catch(
+      context.env.ROUTING.delete(`queue:${getProjectQueueName(projectId, q.binding_name)}`).catch(
         warn('Failed to delete queue routing entry'),
       ),
     );
@@ -277,12 +283,14 @@ async function cleanupBestEffortResources(
   // Custom hostnames from CF + KV
   for (const domain of projectDomains) {
     cleanup.push(
-      deleteCustomHostname(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, domain.cf_hostname_id).catch(
-        warn(`Failed to delete custom hostname ${domain.hostname}`),
-      ),
+      deleteCustomHostname(
+        context.env.CF_ZONE_ID,
+        context.env.CF_API_TOKEN,
+        domain.cf_hostname_id,
+      ).catch(warn(`Failed to delete custom hostname ${domain.hostname}`)),
     );
     cleanup.push(
-      c.env.ROUTING.delete(`domain:${domain.hostname}`).catch(
+      context.env.ROUTING.delete(`domain:${domain.hostname}`).catch(
         warn('Failed to delete domain routing entry'),
       ),
     );
@@ -362,7 +370,7 @@ async function lockAndMarkDeleting(db: Db, projectId: string): Promise<void> {
  * be bypassed.
  */
 export async function teardownProject(
-  c: Context<ApiEnv>,
+  context: Context<ApiEnv>,
   projectId: string,
   project: Pick<Project, 'slug' | 'status'>,
 ): Promise<{ warnings: ReadonlyArray<string> }> {
@@ -370,10 +378,10 @@ export async function teardownProject(
   // skips the flip and just (re-)marks any non-terminal deployments). This
   // covers retried teardown after partial failure where the previous attempt
   // crashed before deployment cancellations committed.
-  await lockAndMarkDeleting(c.get('db'), projectId);
+  await lockAndMarkDeleting(context.get('db'), projectId);
 
-  await cleanupCriticalResources(c, projectId, project);
-  const warnings = await cleanupBestEffortResources(c, projectId, project);
-  await deleteProjectCascade(c.get('db'), projectId);
+  await cleanupCriticalResources(context, projectId, project);
+  const warnings = await cleanupBestEffortResources(context, projectId, project);
+  await deleteProjectCascade(context.get('db'), projectId);
   return { warnings };
 }

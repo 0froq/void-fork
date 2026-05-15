@@ -32,8 +32,8 @@ export type SqlSegment =
   | { kind: 'ident-quote'; open: '"' | '`' | '['; start: number; end: number };
 
 export function* tokenizeSql(sql: string): Generator<SqlSegment> {
-  const n = sql.length;
-  let i = 0;
+  const sqlLength = sql.length;
+  let index = 0;
   let runStart = 0;
 
   const flushRun = (upTo: number): SqlSegment | undefined => {
@@ -43,92 +43,97 @@ export function* tokenizeSql(sql: string): Generator<SqlSegment> {
     return undefined;
   };
 
-  while (i < n) {
-    const c = sql[i];
-    const next = i + 1 < n ? sql[i + 1] : '';
+  while (index < sqlLength) {
+    const character = sql[index];
+    const next = index + 1 < sqlLength ? sql[index + 1] : '';
 
-    if (c === '-' && next === '-') {
-      const run = flushRun(i);
+    if (character === '-' && next === '-') {
+      const run = flushRun(index);
       if (run) {
         yield run;
       }
-      let j = i + 2;
-      while (j < n && sql[j] !== '\n') {
-        j++;
+      let scanIndex = index + 2;
+      while (scanIndex < sqlLength && sql[scanIndex] !== '\n') {
+        scanIndex++;
       }
-      yield { kind: 'line-comment', start: i, end: j };
-      i = j;
-      runStart = i;
+      yield { kind: 'line-comment', start: index, end: scanIndex };
+      index = scanIndex;
+      runStart = index;
       continue;
     }
 
-    if (c === '/' && next === '*') {
-      const run = flushRun(i);
+    if (character === '/' && next === '*') {
+      const run = flushRun(index);
       if (run) {
         yield run;
       }
-      let j = i + 2;
-      while (j < n - 1 && !(sql[j] === '*' && sql[j + 1] === '/')) {
-        j++;
+      let scanIndex = index + 2;
+      while (scanIndex < sqlLength - 1 && !(sql[scanIndex] === '*' && sql[scanIndex + 1] === '/')) {
+        scanIndex++;
       }
-      const end = Math.min(j + 2, n);
-      yield { kind: 'block-comment', start: i, end };
-      i = end;
-      runStart = i;
+      const end = Math.min(scanIndex + 2, sqlLength);
+      yield { kind: 'block-comment', start: index, end };
+      index = end;
+      runStart = index;
       continue;
     }
 
-    if (c === "'") {
-      const run = flushRun(i);
+    if (character === "'") {
+      const run = flushRun(index);
       if (run) {
         yield run;
       }
-      let j = i + 1;
-      while (j < n) {
-        if (sql[j] === "'" && sql[j + 1] === "'") {
-          j += 2;
+      let scanIndex = index + 1;
+      while (scanIndex < sqlLength) {
+        if (sql[scanIndex] === "'" && sql[scanIndex + 1] === "'") {
+          scanIndex += 2;
           continue;
         }
-        if (sql[j] === "'") {
-          j++;
+        if (sql[scanIndex] === "'") {
+          scanIndex++;
           break;
         }
-        j++;
+        scanIndex++;
       }
-      yield { kind: 'string', start: i, end: j };
-      i = j;
-      runStart = i;
+      yield { kind: 'string', start: index, end: scanIndex };
+      index = scanIndex;
+      runStart = index;
       continue;
     }
 
-    if (c === '"' || c === '`' || c === '[') {
-      const run = flushRun(i);
+    if (character === '"' || character === '`' || character === '[') {
+      const run = flushRun(index);
       if (run) {
         yield run;
       }
-      const close = c === '[' ? ']' : c;
-      let j = i + 1;
-      while (j < n) {
-        if (close !== ']' && sql[j] === close && sql[j + 1] === close) {
-          j += 2;
+      const close = character === '[' ? ']' : character;
+      let scanIndex = index + 1;
+      while (scanIndex < sqlLength) {
+        if (close !== ']' && sql[scanIndex] === close && sql[scanIndex + 1] === close) {
+          scanIndex += 2;
           continue;
         }
-        if (sql[j] === close) {
-          j++;
+        if (sql[scanIndex] === close) {
+          scanIndex++;
           break;
         }
-        j++;
+        scanIndex++;
       }
-      yield { kind: 'ident-quote', open: c as '"' | '`' | '[', start: i, end: j };
-      i = j;
-      runStart = i;
+      yield {
+        kind: 'ident-quote',
+        open: character as '"' | '`' | '[',
+        start: index,
+        end: scanIndex,
+      };
+      index = scanIndex;
+      runStart = index;
       continue;
     }
 
-    i++;
+    index++;
   }
 
-  const tail = flushRun(n);
+  const tail = flushRun(sqlLength);
   if (tail) {
     yield tail;
   }

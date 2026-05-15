@@ -13,13 +13,13 @@ export type Props =
       siteDomain: string;
     };
 
-export const loader = defineHandler<Props>(async (c) => {
-  const user = c.get('dashboardUser');
-  if (!c.get('canAccessDashboard')) {
+export const loader = defineHandler<Props>(async (context) => {
+  const user = context.get('dashboardUser');
+  if (!context.get('canAccessDashboard')) {
     return { canAccessDashboard: false, user };
   }
 
-  const client = createClient(c);
+  const client = createClient(context);
   let projects: API<'projects'> = [];
   try {
     const projectsRes = await client.projects.$get();
@@ -29,7 +29,7 @@ export const loader = defineHandler<Props>(async (c) => {
       `[dashboard] /projects request failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const siteDomain = (c.env as Record<string, string>).SITE_DOMAIN ?? 'void.app';
+  const siteDomain = (context.env as Record<string, string>).SITE_DOMAIN ?? 'void.app';
 
   return {
     canAccessDashboard: true,

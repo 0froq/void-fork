@@ -36,30 +36,30 @@ export function compilePattern(source: string): CompiledPattern {
   const paramNames: Array<string> = [];
   let legacySplatCaptured = false;
   let pattern = '';
-  let i = 0;
-  while (i < source.length) {
-    const ch = source[i]!;
-    if (ch === ':') {
-      let j = i + 1;
-      while (j < source.length && PARAM_CHAR.test(source[j]!)) {
-        j++;
+  let index = 0;
+  while (index < source.length) {
+    const character = source[index]!;
+    if (character === ':') {
+      let nameEnd = index + 1;
+      while (nameEnd < source.length && PARAM_CHAR.test(source[nameEnd]!)) {
+        nameEnd++;
       }
-      const name = source.slice(i + 1, j);
+      const name = source.slice(index + 1, nameEnd);
       if (!name) {
         pattern += '\\:';
-        i++;
+        index++;
         continue;
       }
-      if (source[j] === '*') {
+      if (source[nameEnd] === '*') {
         paramNames.push(name);
         pattern += `(?<${name}>.*)`;
-        i = j + 1;
+        index = nameEnd + 1;
       } else {
         paramNames.push(name);
         pattern += `(?<${name}>[^/]+)`;
-        i = j;
+        index = nameEnd;
       }
-    } else if (ch === '*') {
+    } else if (character === '*') {
       if (legacySplatCaptured) {
         pattern += `.*`;
       } else {
@@ -67,13 +67,13 @@ export function compilePattern(source: string): CompiledPattern {
         pattern += `(?<splat>.*)`;
         legacySplatCaptured = true;
       }
-      i++;
+      index++;
     } else {
-      if (REGEX_SPECIAL.test(ch)) {
+      if (REGEX_SPECIAL.test(character)) {
         pattern += '\\';
       }
-      pattern += ch;
-      i++;
+      pattern += character;
+      index++;
     }
   }
 
@@ -106,11 +106,11 @@ export function matchPatternCaptures(
   } catch {
     return null;
   }
-  const m = compiled.regex.exec(pathname);
-  if (!m) {
+  const match = compiled.regex.exec(pathname);
+  if (!match) {
     return null;
   }
-  return m.groups ?? {};
+  return match.groups ?? {};
 }
 
 /**

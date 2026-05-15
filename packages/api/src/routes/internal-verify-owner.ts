@@ -14,28 +14,28 @@ const app = new Hono<ApiEnv>();
  * Body: { "userId": "..." }
  * Returns: 200 { ok: true } or 403 { error: "forbidden" }
  */
-app.post('/:projectId', async (c) => {
-  const projectId = c.req.param('projectId');
+app.post('/:projectId', async (context) => {
+  const projectId = context.req.param('projectId');
 
-  const token = c.req.header('x-void-internal');
+  const token = context.req.header('x-void-internal');
   if (!token) {
-    return c.json({ error: 'missing internal auth' }, 401);
+    return context.json({ error: 'missing internal auth' }, 401);
   }
-  if (!(await hmacVerifyState(projectId, token, c.env.JWT_SECRET))) {
-    return c.json({ error: 'invalid internal auth' }, 403);
+  if (!(await hmacVerifyState(projectId, token, context.env.JWT_SECRET))) {
+    return context.json({ error: 'invalid internal auth' }, 403);
   }
 
-  const { userId } = await c.req.json<{ userId: string }>();
+  const { userId } = await context.req.json<{ userId: string }>();
   if (!userId) {
-    return c.json({ error: 'userId required' }, 400);
+    return context.json({ error: 'userId required' }, 400);
   }
 
-  const project = await getProject(c.get('db'), projectId);
+  const project = await getProject(context.get('db'), projectId);
   if (!project || project.user_id !== userId) {
-    return c.json({ error: 'forbidden' }, 403);
+    return context.json({ error: 'forbidden' }, 403);
   }
 
-  return c.json({ ok: true });
+  return context.json({ ok: true });
 });
 
 export default app;

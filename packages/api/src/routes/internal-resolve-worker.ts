@@ -13,23 +13,23 @@ const app = new Hono<ApiEnv>();
  * POST /internal/resolve-worker/:projectId
  * Returns: { "workerName": "user-<slug>" } or 404
  */
-app.post('/:projectId', async (c) => {
-  const projectId = c.req.param('projectId');
+app.post('/:projectId', async (context) => {
+  const projectId = context.req.param('projectId');
 
-  const token = c.req.header('x-void-internal');
+  const token = context.req.header('x-void-internal');
   if (!token) {
-    return c.json({ error: 'missing internal auth' }, 401);
+    return context.json({ error: 'missing internal auth' }, 401);
   }
-  if (!(await hmacVerifyState(projectId, token, c.env.JWT_SECRET))) {
-    return c.json({ error: 'invalid internal auth' }, 403);
+  if (!(await hmacVerifyState(projectId, token, context.env.JWT_SECRET))) {
+    return context.json({ error: 'invalid internal auth' }, 403);
   }
 
-  const project = await getProject(c.get('db'), projectId);
+  const project = await getProject(context.get('db'), projectId);
   if (!project) {
-    return c.json({ error: 'project not found' }, 404);
+    return context.json({ error: 'project not found' }, 404);
   }
 
-  return c.json({ workerName: `user-${project.slug}` });
+  return context.json({ workerName: `user-${project.slug}` });
 });
 
 export default app;

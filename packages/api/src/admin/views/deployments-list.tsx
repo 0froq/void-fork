@@ -48,9 +48,9 @@ export function DeploymentsListPage({
           var input = document.getElementById('search-input');
           var rows = document.querySelectorAll('table tbody tr');
           input.addEventListener('input', function() {
-            var q = this.value.toLowerCase();
+            var query = this.value.toLowerCase();
             rows.forEach(function(row) {
-              row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+              row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
             });
           });
         })();

@@ -22,7 +22,7 @@ export async function processUsageEventBatch(
   batch: MessageBatch<unknown>,
   env: ApiEnv['Bindings'],
 ): Promise<void> {
-  const events = batch.messages.map((m) => m.body as UsageEvent);
+  const events = batch.messages.map((message) => message.body as UsageEvent);
   const grouped = groupEventsByUser(events);
   const db = createDb(env.HYPERDRIVE.connectionString);
 
@@ -58,12 +58,12 @@ export async function processUsageEventBatch(
 
   // If any UsageCounter DO calls failed, retry the whole batch
   // Route 5xx events only on the ack path to avoid double-counting on redelivery
-  const failures = results.filter((r) => r.status === 'rejected');
+  const failures = results.filter((result) => result.status === 'rejected');
   if (failures.length > 0) {
     batch.retryAll();
   } else {
     // Best-effort: route 5xx events to ErrorAlertMonitor (failures don't block ack)
-    const errorEvents = events.filter((e) => e.status !== undefined && e.status >= 500);
+    const errorEvents = events.filter((event) => event.status !== undefined && event.status >= 500);
     if (errorEvents.length > 0) {
       const errorsByProject = new Map<string, { count: number; userId: string; slug: string }>();
       for (const event of errorEvents) {

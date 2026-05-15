@@ -42,13 +42,13 @@ type RevalidateRequestBody = Readonly<{
  * internally at 100 URLs per CF API request).
  */
 export async function runRevalidate(
-  c: Context<ApiEnv>,
+  context: Context<ApiEnv>,
   projectId: string,
   project: RevalidateProject,
   body: RevalidateRequestBody,
 ): Promise<Response> {
-  const db = c.get('db');
-  const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+  const db = context.get('db');
+  const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
 
   const customDomains = await getDomainsByProjectId(db, projectId);
   // Only active domains are actually routed by the deploy handler (see
@@ -64,7 +64,7 @@ export async function runRevalidate(
   ];
 
   const { perHostname, union } = await resolveCurrentIsrDeployments(
-    c.env.ROUTING,
+    context.env.ROUTING,
     targets,
     project.active_deployment_id,
   );
@@ -83,7 +83,7 @@ export async function runRevalidate(
       let cursor: string | undefined;
 
       do {
-        const listed = await c.env.ISR_CACHE.list({ prefix, cursor });
+        const listed = await context.env.ISR_CACHE.list({ prefix, cursor });
         if (listed.keys.length > 0) {
           // Per-page accumulators: dedup pathnames within a page, allow
           // duplicates across pages (CF tolerates them).
@@ -99,8 +99,15 @@ export async function runRevalidate(
               pageBatchVariants.push({ pathname, variantToken: split.variantToken });
             }
           }
-          await uploadPool(listed.keys, R2_CONCURRENCY, (key) => c.env.ISR_CACHE.delete(key.name));
-          await purgeEdgeCache(c, perHostname, Array.from(pageBatchPathnames), pageBatchVariants);
+          await uploadPool(listed.keys, R2_CONCURRENCY, (key) =>
+            context.env.ISR_CACHE.delete(key.name),
+          );
+          await purgeEdgeCache(
+            context,
+            perHostname,
+            Array.from(pageBatchPathnames),
+            pageBatchVariants,
+          );
         }
         cursor = listed.list_complete ? undefined : listed.cursor;
       } while (cursor);
@@ -108,11 +115,11 @@ export async function runRevalidate(
 
     // `purged` = unique pathnames purged (mirrors what the caller asked for,
     // not the raw count of KV keys deleted across all deployment namespaces).
-    return c.json({ purged: pathnameSet.size });
+    return context.json({ purged: pathnameSet.size });
   }
 
   if (!body.paths || !Array.isArray(body.paths) || body.paths.length === 0) {
-    return c.json({ error: 'provide `paths` array or `all: true`' }, 400);
+    return context.json({ error: 'provide `paths` array or `all: true`' }, 400);
   }
 
   // Purge specific paths across every deployment namespace. Each path may
@@ -122,12 +129,12 @@ export async function runRevalidate(
   const variantTuples: Array<PurgeVariantTuple> = [];
   for (const deploymentId of union) {
     for (const path of body.paths) {
-      await c.env.ISR_CACHE.delete(isrCacheKey(projectId, deploymentId, path));
+      await context.env.ISR_CACHE.delete(isrCacheKey(projectId, deploymentId, path));
 
       const variantPrefix = isrCacheVariantPrefix(projectId, deploymentId, path);
       let cursor: string | undefined;
       do {
-        const listed = await c.env.ISR_CACHE.list({ prefix: variantPrefix, cursor });
+        const listed = await context.env.ISR_CACHE.list({ prefix: variantPrefix, cursor });
         if (listed.keys.length > 0) {
           for (const key of listed.keys) {
             const tail = key.name.slice(isrCachePrefix(projectId, deploymentId).length);
@@ -136,17 +143,19 @@ export async function runRevalidate(
               variantTuples.push({ pathname: path, variantToken: split.variantToken });
             }
           }
-          await uploadPool(listed.keys, R2_CONCURRENCY, (key) => c.env.ISR_CACHE.delete(key.name));
+          await uploadPool(listed.keys, R2_CONCURRENCY, (key) =>
+            context.env.ISR_CACHE.delete(key.name),
+          );
         }
         cursor = listed.list_complete ? undefined : listed.cursor;
       } while (cursor);
     }
   }
 
-  await purgeEdgeCache(c, perHostname, body.paths, variantTuples);
+  await purgeEdgeCache(context, perHostname, body.paths, variantTuples);
   // `purged` = unique path entries the caller asked for. The cross-namespace
   // KV deletes above are an implementation detail of the drift-handling hedge.
-  return c.json({ purged: body.paths.length });
+  return context.json({ purged: body.paths.length });
 }
 
 type PurgeVariantTuple = Readonly<{
@@ -160,7 +169,7 @@ type PurgeVariantTuple = Readonly<{
 }>;
 
 async function purgeEdgeCache(
-  c: Context<ApiEnv>,
+  context: Context<ApiEnv>,
   perHostname: Map<string, Set<string>>,
   pathnames: ReadonlyArray<string>,
   variantTuples: ReadonlyArray<PurgeVariantTuple> = [],
@@ -191,7 +200,7 @@ async function purgeEdgeCache(
       return;
     }
     // `purgeZoneCache` batches internally at 100 URLs per CF API request.
-    await purgeZoneCache(c.env.CF_ZONE_ID, c.env.CF_API_TOKEN, urls);
+    await purgeZoneCache(context.env.CF_ZONE_ID, context.env.CF_API_TOKEN, urls);
   } catch {
     // Best-effort: KV is already purged, worst case is stale edge for remaining TTL.
   }

@@ -5,10 +5,10 @@ export async function uploadPool<T>(
   concurrency: number,
   fn: (item: T) => Promise<unknown>,
 ): Promise<void> {
-  let i = 0;
+  let nextIndex = 0;
   async function worker() {
-    while (i < items.length) {
-      const item = items[i++];
+    while (nextIndex < items.length) {
+      const item = items[nextIndex++];
       await fn(item);
     }
   }

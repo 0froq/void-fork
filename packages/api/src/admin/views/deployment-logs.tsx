@@ -89,8 +89,8 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
       header += '<span style="margin-right:8px">' + escapeHtml(entry.url) + '</span>';
     }
     if (entry.status) {
-      var sc = parseInt(entry.status);
-      var statusColor = sc >= 500 ? '#dc2626' : sc >= 400 ? '#d97706' : '#16a34a';
+      var statusCode = parseInt(entry.status);
+      var statusColor = statusCode >= 500 ? '#dc2626' : statusCode >= 400 ? '#d97706' : '#16a34a';
       header += '<span style="color:' + statusColor + ';font-weight:600;margin-right:8px">' + escapeHtml(entry.status) + '</span>';
     }
     header += '<span style="color:' + (entry.outcome === 'ok' ? '#16a34a' : '#dc2626') + '">' + escapeHtml(entry.outcome) + '</span>';
@@ -109,12 +109,12 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
 
     var body = '';
     if (messages.length > 0) {
-      var lines = messages.map(function(m) { return m.text; }).join('\\n');
-      var badges = messages.map(function(m) {
-        return '<div>' + levelBadge(m.level) + '<span>' + m.text + '</span></div>';
+      var lines = messages.map(function(message) { return message.text; }).join('\\n');
+      var badges = messages.map(function(message) {
+        return '<div>' + levelBadge(message.level) + '<span>' + message.text + '</span></div>';
       }).join('');
       body = '<div style="position:relative;margin-top:4px;margin-left:24px">'
-        + '<button onclick="navigator.clipboard.writeText(this.dataset.text).then(function(){this.textContent=\\'Copied!\\';var b=this;setTimeout(function(){b.textContent=\\'Copy\\'},1500)}.bind(this))" '
+        + '<button onclick="navigator.clipboard.writeText(this.dataset.text).then(function(){this.textContent=\\'Copied!\\';var button=this;setTimeout(function(){button.textContent=\\'Copy\\'},1500)}.bind(this))" '
         + 'data-text="' + lines.replace(/"/g, '&quot;') + '" '
         + 'style="position:absolute;top:4px;right:4px;font-size:0.7rem;padding:2px 6px;cursor:pointer;background:#f3f4f6;border:1px solid #d1d5db;border-radius:3px">Copy</button>'
         + '<pre style="margin:0;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:0.78rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all">'
@@ -132,22 +132,22 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
     return escapeHtml(JSON.stringify(msg).substring(0, 500));
   }
 
-  function escapeHtml(s) {
-    var d = document.createElement('span');
-    d.textContent = s;
-    return d.innerHTML;
+  function escapeHtml(value) {
+    var element = document.createElement('span');
+    element.textContent = value;
+    return element.innerHTML;
   }
 
-  function entryText(e) {
-    var parts = [e.outcome, e.method, e.url, e.status];
-    if (e.logs) e.logs.forEach(function(l) { parts.push(l.message); });
-    if (e.exceptions) e.exceptions.forEach(function(x) { parts.push(x.name, x.message); });
+  function entryText(entry) {
+    var parts = [entry.outcome, entry.method, entry.url, entry.status];
+    if (entry.logs) entry.logs.forEach(function(log) { parts.push(log.message); });
+    if (entry.exceptions) entry.exceptions.forEach(function(exception) { parts.push(exception.name, exception.message); });
     return parts.join(' ').toLowerCase();
   }
 
   function renderData(data) {
-    var q = filterText.value.toLowerCase().trim();
-    var filtered = q ? data.filter(function(e) { return entryText(e).indexOf(q) !== -1; }) : data;
+    var query = filterText.value.toLowerCase().trim();
+    var filtered = query ? data.filter(function(entry) { return entryText(entry).indexOf(query) !== -1; }) : data;
     container.innerHTML = '';
     if (filtered.length === 0) {
       container.innerHTML = '<p style="color:#999;font-size:0.8rem">No logs found' + (q ? ' matching filter' : ' for this time range') + '. New logs may take up to 2 minutes to appear.</p>';

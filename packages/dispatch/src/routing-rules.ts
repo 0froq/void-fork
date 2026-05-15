@@ -61,12 +61,12 @@ export function applyRoutingRules(
       );
       continue;
     }
-    const m = regex.exec(pathname);
-    if (!m) {
+    const match = regex.exec(pathname);
+    if (!match) {
       continue;
     }
 
-    const destination = substituteParams(rule.destination, m.groups ?? {});
+    const destination = substituteParams(rule.destination, match.groups ?? {});
 
     if (rule.status === 200) {
       return { type: 'rewrite', destination };

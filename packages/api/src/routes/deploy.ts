@@ -199,12 +199,18 @@ async function deleteContainerApplicationWithRetry(
 
 const app = new Hono<ApiEnv>();
 
-function sameClassSet(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
+function sameClassSet(
+  leftClasses: ReadonlyArray<string>,
+  rightClasses: ReadonlyArray<string>,
+): boolean {
+  return (
+    leftClasses.length === rightClasses.length &&
+    leftClasses.every((value, index) => value === rightClasses[index])
+  );
 }
 
 function sortUnique(values: ReadonlyArray<string> | undefined): ReadonlyArray<string> {
-  return [...new Set(values ?? [])].sort((a, b) => a.localeCompare(b));
+  return [...new Set(values ?? [])].sort((left, right) => left.localeCompare(right));
 }
 
 // Runtime shape validation for incoming deploy manifests. Downstream code
@@ -236,26 +242,26 @@ const LITERAL_HOSTNAME_REGEX = /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/;
 
 /**
  * Validate and lowercase-normalize an optional `host` field on a redirect or
- * fallback rule. Mutates `ro.host` in place so the persisted manifest carries
+ * fallback rule. Mutates `ruleObject.host` in place so the persisted manifest carries
  * the canonical form. Returns an error message string on failure, or `null`
  * on success (including the absent-field case).
  */
 function validateRuleHost(
-  ro: Record<string, unknown>,
+  ruleObject: Record<string, unknown>,
   ruleKind: 'redirectRules' | 'fallbackRules',
   sourceRef: string,
 ): string | null {
-  if (ro.host === undefined) {
+  if (ruleObject.host === undefined) {
     return null;
   }
-  if (typeof ro.host !== 'string') {
+  if (typeof ruleObject.host !== 'string') {
     return `invalid manifest shape: ${ruleKind} entry ${sourceRef} host must be a string`;
   }
-  const normalized = ro.host.toLowerCase();
+  const normalized = ruleObject.host.toLowerCase();
   if (!LITERAL_HOSTNAME_REGEX.test(normalized)) {
-    return `invalid manifest shape: ${ruleKind} entry ${sourceRef} host must be a literal hostname (e.g. "www.example.com"; no scheme, port, path, or wildcards): ${JSON.stringify(ro.host)}`;
+    return `invalid manifest shape: ${ruleKind} entry ${sourceRef} host must be a literal hostname (e.g. "www.example.com"; no scheme, port, path, or wildcards): ${JSON.stringify(ruleObject.host)}`;
   }
-  ro.host = normalized;
+  ruleObject.host = normalized;
   return null;
 }
 
@@ -274,11 +280,11 @@ export function validateManifestShape(parsed: unknown): string | null {
   }
   const bindings = manifest.bindings as Record<string, unknown>;
   for (const key of ['d1', 'kv', 'r2', 'hyperdrive'] as const) {
-    const v = bindings[key];
-    if (v === undefined) {
+    const bindingValue = bindings[key];
+    if (bindingValue === undefined) {
       continue;
     }
-    if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) {
+    if (!Array.isArray(bindingValue) || !bindingValue.every((value) => typeof value === 'string')) {
       return `invalid manifest shape: bindings.${key} must be an array of strings`;
     }
   }
@@ -287,12 +293,12 @@ export function validateManifestShape(parsed: unknown): string | null {
     if (!Array.isArray(manifest.queues)) {
       return 'invalid manifest shape: queues must be an array';
     }
-    for (const q of manifest.queues) {
-      if (q == null || typeof q !== 'object' || Array.isArray(q)) {
+    for (const queue of manifest.queues) {
+      if (queue == null || typeof queue !== 'object' || Array.isArray(queue)) {
         return 'invalid manifest shape: queues entries must be objects';
       }
-      const qo = q as Record<string, unknown>;
-      if (typeof qo.name !== 'string' || typeof qo.bindingName !== 'string') {
+      const queueObject = queue as Record<string, unknown>;
+      if (typeof queueObject.name !== 'string' || typeof queueObject.bindingName !== 'string') {
         return 'invalid manifest shape: queues entries must have string name and bindingName';
       }
       for (const tuning of [
@@ -301,11 +307,11 @@ export function validateManifestShape(parsed: unknown): string | null {
         'maxRetries',
         'retryDelay',
       ] as const) {
-        const v = qo[tuning];
-        if (v === undefined) {
+        const tuningValue = queueObject[tuning];
+        if (tuningValue === undefined) {
           continue;
         }
-        if (typeof v !== 'number' || !Number.isFinite(v)) {
+        if (typeof tuningValue !== 'number' || !Number.isFinite(tuningValue)) {
           return `invalid manifest shape: queues entry ${tuning} must be a finite number`;
         }
       }
@@ -316,12 +322,12 @@ export function validateManifestShape(parsed: unknown): string | null {
     if (!Array.isArray(manifest.schedules)) {
       return 'invalid manifest shape: schedules must be an array';
     }
-    for (const s of manifest.schedules) {
-      if (s == null || typeof s !== 'object' || Array.isArray(s)) {
+    for (const schedule of manifest.schedules) {
+      if (schedule == null || typeof schedule !== 'object' || Array.isArray(schedule)) {
         return 'invalid manifest shape: schedules entries must be objects';
       }
-      const so = s as Record<string, unknown>;
-      if (typeof so.name !== 'string' || typeof so.cron !== 'string') {
+      const scheduleObject = schedule as Record<string, unknown>;
+      if (typeof scheduleObject.name !== 'string' || typeof scheduleObject.cron !== 'string') {
         return 'invalid manifest shape: schedules entries must have string name and cron';
       }
     }
@@ -428,17 +434,19 @@ export function validateManifestShape(parsed: unknown): string | null {
     ) {
       return 'invalid manifest shape: assetConfig must be an object';
     }
-    const ac = manifest.assetConfig as Record<string, unknown>;
+    const assetConfig = manifest.assetConfig as Record<string, unknown>;
     if (
-      ac.not_found_handling !== undefined &&
-      !['none', 'single-page-application', '404-page'].includes(ac.not_found_handling as string)
+      assetConfig.not_found_handling !== undefined &&
+      !['none', 'single-page-application', '404-page'].includes(
+        assetConfig.not_found_handling as string,
+      )
     ) {
       return 'invalid manifest shape: assetConfig.not_found_handling must be one of none, single-page-application, 404-page';
     }
     if (
-      ac.html_handling !== undefined &&
+      assetConfig.html_handling !== undefined &&
       !['auto-trailing-slash', 'force-trailing-slash', 'drop-trailing-slash', 'none'].includes(
-        ac.html_handling as string,
+        assetConfig.html_handling as string,
       )
     ) {
       return 'invalid manifest shape: assetConfig.html_handling must be one of auto-trailing-slash, force-trailing-slash, drop-trailing-slash, none';
@@ -455,9 +463,11 @@ export function validateManifestShape(parsed: unknown): string | null {
     ) {
       return 'invalid manifest shape: revalidate must be a number or object';
     } else {
-      for (const [k, v] of Object.entries(manifest.revalidate as Record<string, unknown>)) {
-        if (typeof v !== 'number') {
-          return `invalid manifest shape: revalidate.${k} must be a number`;
+      for (const [pathname, value] of Object.entries(
+        manifest.revalidate as Record<string, unknown>,
+      )) {
+        if (typeof value !== 'number') {
+          return `invalid manifest shape: revalidate.${pathname} must be a number`;
         }
       }
     }
@@ -471,14 +481,14 @@ export function validateManifestShape(parsed: unknown): string | null {
       if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
         return 'invalid manifest shape: headerRules entries must be objects';
       }
-      const ro = rule as Record<string, unknown>;
-      if (typeof ro.pattern !== 'string') {
+      const ruleObject = rule as Record<string, unknown>;
+      if (typeof ruleObject.pattern !== 'string') {
         return 'invalid manifest shape: headerRules entries must have a string pattern';
       }
-      if (!Array.isArray(ro.headers)) {
+      if (!Array.isArray(ruleObject.headers)) {
         return 'invalid manifest shape: headerRules entries must have a headers array';
       }
-      for (const pair of ro.headers) {
+      for (const pair of ruleObject.headers) {
         if (
           !Array.isArray(pair) ||
           pair.length !== 2 ||
@@ -506,25 +516,25 @@ export function validateManifestShape(parsed: unknown): string | null {
       if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
         return 'invalid manifest shape: redirectRules entries must be objects';
       }
-      const ro = rule as Record<string, unknown>;
+      const ruleObject = rule as Record<string, unknown>;
       if (
-        typeof ro.source !== 'string' ||
-        typeof ro.destination !== 'string' ||
-        typeof ro.status !== 'number'
+        typeof ruleObject.source !== 'string' ||
+        typeof ruleObject.destination !== 'string' ||
+        typeof ruleObject.status !== 'number'
       ) {
         return 'invalid manifest shape: redirectRules entries must have string source, string destination, and numeric status';
       }
       // `JSON.stringify` safely quotes and escapes the user-supplied source
       // string in the error message (handles embedded quotes, newlines, etc).
-      const sourceRef = JSON.stringify(ro.source as string);
-      if (!MANIFEST_REDIRECT_RULE_STATUSES.has(ro.status)) {
+      const sourceRef = JSON.stringify(ruleObject.source as string);
+      if (!MANIFEST_REDIRECT_RULE_STATUSES.has(ruleObject.status)) {
         return `invalid manifest shape: redirectRules entry ${sourceRef} status must be one of ${[...MANIFEST_REDIRECT_RULE_STATUSES].join(', ')} (200 = rewrite, 3xx = redirect)`;
       }
       // Rewrites (status=200) must stay internal: no query string, path-absolute,
       // and not protocol-relative (`//evil.com/x` parses cross-origin). 3xx
       // redirects may include query strings and external Location values.
-      const destination = ro.destination as string;
-      const isRewrite = ro.status === 200;
+      const destination = ruleObject.destination as string;
+      const isRewrite = ruleObject.status === 200;
       if (isRewrite && destination.includes('?')) {
         return `invalid manifest shape: redirectRules entry ${sourceRef} destination must not contain a query string when status is 200`;
       }
@@ -534,7 +544,7 @@ export function validateManifestShape(parsed: unknown): string | null {
       if (isRewrite && destination.startsWith('//')) {
         return `invalid manifest shape: redirectRules entry ${sourceRef} destination must not start with "//" (protocol-relative URLs parse cross-origin; use a single-slash path-absolute destination)`;
       }
-      const hostError = validateRuleHost(ro, 'redirectRules', sourceRef);
+      const hostError = validateRuleHost(ruleObject, 'redirectRules', sourceRef);
       if (hostError) {
         return hostError;
       }
@@ -588,19 +598,19 @@ export function validateManifestShape(parsed: unknown): string | null {
       if (rule == null || typeof rule !== 'object' || Array.isArray(rule)) {
         return 'invalid manifest shape: fallbackRules entries must be objects';
       }
-      const ro = rule as Record<string, unknown>;
+      const ruleObject = rule as Record<string, unknown>;
       if (
-        typeof ro.source !== 'string' ||
-        typeof ro.destination !== 'string' ||
-        typeof ro.status !== 'number'
+        typeof ruleObject.source !== 'string' ||
+        typeof ruleObject.destination !== 'string' ||
+        typeof ruleObject.status !== 'number'
       ) {
         return 'invalid manifest shape: fallbackRules entries must have string source, string destination, and numeric status';
       }
-      const sourceRef = JSON.stringify(ro.source as string);
-      if (ro.status !== 200) {
+      const sourceRef = JSON.stringify(ruleObject.source as string);
+      if (ruleObject.status !== 200) {
         return `invalid manifest shape: fallbackRules entry ${sourceRef} status must be 200 (fallbacks are rewrites only)`;
       }
-      const destination = ro.destination as string;
+      const destination = ruleObject.destination as string;
       if (destination.includes('?')) {
         return `invalid manifest shape: fallbackRules entry ${sourceRef} destination must not contain a query string`;
       }
@@ -610,7 +620,7 @@ export function validateManifestShape(parsed: unknown): string | null {
       if (destination.startsWith('//')) {
         return `invalid manifest shape: fallbackRules entry ${sourceRef} destination must not start with "//" (protocol-relative URLs parse cross-origin; use a single-slash path-absolute destination)`;
       }
-      const hostError = validateRuleHost(ro, 'fallbackRules', sourceRef);
+      const hostError = validateRuleHost(ruleObject, 'fallbackRules', sourceRef);
       if (hostError) {
         return hostError;
       }
@@ -625,31 +635,34 @@ export function validateManifestShape(parsed: unknown): string | null {
     ) {
       return 'invalid manifest shape: websocket must be an object';
     }
-    const ws = manifest.websocket as Record<string, unknown>;
-    if (!Array.isArray(ws.routes)) {
+    const websocket = manifest.websocket as Record<string, unknown>;
+    if (!Array.isArray(websocket.routes)) {
       return 'invalid manifest shape: websocket.routes must be an array';
     }
-    for (const r of ws.routes) {
-      if (r == null || typeof r !== 'object' || Array.isArray(r)) {
+    for (const route of websocket.routes) {
+      if (route == null || typeof route !== 'object' || Array.isArray(route)) {
         return 'invalid manifest shape: websocket.routes entries must be objects';
       }
-      const ro = r as Record<string, unknown>;
-      if (typeof ro.className !== 'string') {
+      const routeObject = route as Record<string, unknown>;
+      if (typeof routeObject.className !== 'string') {
         return 'invalid manifest shape: websocket.routes entries must have a string className';
       }
-      if (ro.bindingName !== undefined && typeof ro.bindingName !== 'string') {
+      if (routeObject.bindingName !== undefined && typeof routeObject.bindingName !== 'string') {
         return 'invalid manifest shape: websocket.routes entry bindingName must be a string';
       }
     }
-    if (!Array.isArray(ws.classes) || !ws.classes.every((x) => typeof x === 'string')) {
+    if (
+      !Array.isArray(websocket.classes) ||
+      !websocket.classes.every((x) => typeof x === 'string')
+    ) {
       return 'invalid manifest shape: websocket.classes must be an array of strings';
     }
-    if (ws.migrations !== undefined) {
-      if (!Array.isArray(ws.migrations)) {
+    if (websocket.migrations !== undefined) {
+      if (!Array.isArray(websocket.migrations)) {
         return 'invalid manifest shape: websocket.migrations must be an array';
       }
-      for (const mg of ws.migrations) {
-        if (mg == null || typeof mg !== 'object' || Array.isArray(mg)) {
+      for (const migration of websocket.migrations) {
+        if (migration == null || typeof migration !== 'object' || Array.isArray(migration)) {
           return 'invalid manifest shape: websocket.migrations entries must be objects';
         }
       }
@@ -696,21 +709,21 @@ export function validateManifestShape(parsed: unknown): string | null {
         if (migration == null || typeof migration !== 'object' || Array.isArray(migration)) {
           return 'invalid manifest shape: sandbox.migrations entries must be objects';
         }
-        const mg = migration as Record<string, unknown>;
-        if (typeof mg.tag !== 'string') {
+        const migrationObject = migration as Record<string, unknown>;
+        if (typeof migrationObject.tag !== 'string') {
           return 'invalid manifest shape: sandbox.migrations entries must have a string tag';
         }
         if (
-          mg.newSqliteClasses !== undefined &&
-          (!Array.isArray(mg.newSqliteClasses) ||
-            !mg.newSqliteClasses.every((x) => typeof x === 'string'))
+          migrationObject.newSqliteClasses !== undefined &&
+          (!Array.isArray(migrationObject.newSqliteClasses) ||
+            !migrationObject.newSqliteClasses.every((value) => typeof value === 'string'))
         ) {
           return 'invalid manifest shape: sandbox.migrations newSqliteClasses must be an array of strings';
         }
         if (
-          mg.deletedClasses !== undefined &&
-          (!Array.isArray(mg.deletedClasses) ||
-            !mg.deletedClasses.every((x) => typeof x === 'string'))
+          migrationObject.deletedClasses !== undefined &&
+          (!Array.isArray(migrationObject.deletedClasses) ||
+            !migrationObject.deletedClasses.every((value) => typeof value === 'string'))
         ) {
           return 'invalid manifest shape: sandbox.migrations deletedClasses must be an array of strings';
         }
@@ -746,14 +759,14 @@ export function validateManifestShape(parsed: unknown): string | null {
         if (migration == null || typeof migration !== 'object' || Array.isArray(migration)) {
           return 'invalid manifest shape: live.migrations entries must be objects';
         }
-        const mg = migration as Record<string, unknown>;
-        if (typeof mg.tag !== 'string') {
+        const migrationObject = migration as Record<string, unknown>;
+        if (typeof migrationObject.tag !== 'string') {
           return 'invalid manifest shape: live.migrations entries must have a string tag';
         }
         if (
-          mg.newSqliteClasses !== undefined &&
-          (!Array.isArray(mg.newSqliteClasses) ||
-            !mg.newSqliteClasses.every((x) => typeof x === 'string'))
+          migrationObject.newSqliteClasses !== undefined &&
+          (!Array.isArray(migrationObject.newSqliteClasses) ||
+            !migrationObject.newSqliteClasses.every((value) => typeof value === 'string'))
         ) {
           return 'invalid manifest shape: live.migrations newSqliteClasses must be an array of strings';
         }
@@ -1010,15 +1023,15 @@ export function buildDurableObjectUploadMigrations(
 }
 
 function compareDurableObjectMigrationSteps(
-  a: { tag: string; index: number },
-  b: { tag: string; index: number },
+  firstStep: { tag: string; index: number },
+  secondStep: { tag: string; index: number },
 ): number {
-  const aVersion = parseMigrationTagVersion(a.tag);
-  const bVersion = parseMigrationTagVersion(b.tag);
-  if (aVersion !== null && bVersion !== null && aVersion !== bVersion) {
-    return aVersion - bVersion;
+  const firstVersion = parseMigrationTagVersion(firstStep.tag);
+  const secondVersion = parseMigrationTagVersion(secondStep.tag);
+  if (firstVersion !== null && secondVersion !== null && firstVersion !== secondVersion) {
+    return firstVersion - secondVersion;
   }
-  return a.index - b.index;
+  return firstStep.index - secondStep.index;
 }
 
 function parseMigrationTagVersion(tag: string): number | null {
@@ -1415,22 +1428,22 @@ function validateUploadUrlsAsset(asset: unknown, index: number): string | null {
   if (asset == null || typeof asset !== 'object' || Array.isArray(asset)) {
     return `invalid assets[${index}]: must be an object`;
   }
-  const a = asset as Record<string, unknown>;
-  if (typeof a.blake3 !== 'string' || !HEX_32_REGEX.test(a.blake3)) {
+  const assetObject = asset as Record<string, unknown>;
+  if (typeof assetObject.blake3 !== 'string' || !HEX_32_REGEX.test(assetObject.blake3)) {
     return `invalid assets[${index}].blake3: must be 32 lowercase hex characters`;
   }
-  if (typeof a.md5 !== 'string' || !HEX_32_REGEX.test(a.md5)) {
+  if (typeof assetObject.md5 !== 'string' || !HEX_32_REGEX.test(assetObject.md5)) {
     return `invalid assets[${index}].md5: must be 32 lowercase hex characters`;
   }
   if (
-    typeof a.size !== 'number' ||
-    !Number.isInteger(a.size) ||
-    a.size < 0 ||
-    !Number.isFinite(a.size)
+    typeof assetObject.size !== 'number' ||
+    !Number.isInteger(assetObject.size) ||
+    assetObject.size < 0 ||
+    !Number.isFinite(assetObject.size)
   ) {
     return `invalid assets[${index}].size: must be a non-negative integer`;
   }
-  if (typeof a.contentType !== 'string' || a.contentType.length === 0) {
+  if (typeof assetObject.contentType !== 'string' || assetObject.contentType.length === 0) {
     return `invalid assets[${index}].contentType: must be a non-empty string`;
   }
   return null;
@@ -1463,14 +1476,14 @@ function validateUploadUrlsAsset(asset: unknown, index: number): string | null {
 // `PROJECT_DELETING_ERROR_MESSAGE` pattern used by `handleManifestOnlyDeploy`.
 const UPLOAD_URLS_PROJECT_DELETING = 'upload_urls:project_deleting';
 
-app.post('/:id/deploy/upload-urls', async (c) => {
-  const projectId = c.req.param('id');
-  const project = await getProject(c.get('db'), projectId);
+app.post('/:id/deploy/upload-urls', async (context) => {
+  const projectId = context.req.param('id');
+  const project = await getProject(context.get('db'), projectId);
   if (!project) {
-    return c.json({ error: 'project not found' }, 404);
+    return context.json({ error: 'project not found' }, 404);
   }
-  if (project.user_id !== c.get('user').id) {
-    return c.json({ error: 'forbidden' }, 403);
+  if (project.user_id !== context.get('user').id) {
+    return context.json({ error: 'forbidden' }, 403);
   }
   // Fast 410 — mirror `handleManifestOnlyDeploy`. The unlocked read here
   // is a TOCTOU best-effort: it short-circuits the common case (project
@@ -1481,7 +1494,7 @@ app.post('/:id/deploy/upload-urls', async (c) => {
   // teardown that already committed before we acquired the lock will be
   // observed by the in-tx re-read and surface as a 410.
   if (project.status === 'deleting') {
-    return c.json({ error: 'project is being deleted' }, 410);
+    return context.json({ error: 'project is being deleted' }, 410);
   }
   // CLI version gate runs BEFORE body parsing so a stale CLI sending a
   // multipart body gets the friendly 426 upgrade message instead of an
@@ -1493,7 +1506,7 @@ app.post('/:id/deploy/upload-urls', async (c) => {
   // — is microseconds (no I/O between them) and surfaces as 426 to the
   // CLI; that's a UX wart, not a correctness bug, since the user does
   // need to upgrade anyway.
-  const versionReject = checkCliVersionOrRespond(c);
+  const versionReject = checkCliVersionOrRespond(context);
   if (versionReject) {
     return versionReject;
   }
@@ -1508,22 +1521,22 @@ app.post('/:id/deploy/upload-urls', async (c) => {
   const logger = createDeployLogger({
     projectId,
     projectSlug: project.slug,
-    userId: c.get('user').id,
+    userId: context.get('user').id,
     branch: null,
   });
 
-  // Stream the body with a hard size cap before JSON.parse — `c.req.json()`
+  // Stream the body with a hard size cap before JSON.parse — `context.req.json()`
   // would otherwise buffer arbitrary bytes from a malicious / buggy client
   // before parsing, peaking at body bytes plus a UTF-16 string plus the
   // parsed object. The cap is enforced via TransformStream so we abort the
   // moment the threshold is crossed; native `Response.json()` then handles
   // streaming + parsing efficiently. Mirrors `handleManifestOnlyDeploy`.
-  if (!c.req.raw.body) {
-    return c.json({ error: 'request body is required' }, 400);
+  if (!context.req.raw.body) {
+    return context.json({ error: 'request body is required' }, 400);
   }
   let totalBytes = 0;
   let overflowed = false;
-  const limited = c.req.raw.body.pipeThrough(
+  const limited = context.req.raw.body.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
         totalBytes += chunk.byteLength;
@@ -1543,27 +1556,27 @@ app.post('/:id/deploy/upload-urls', async (c) => {
     }).json();
   } catch (err) {
     if (overflowed) {
-      return c.json(
+      return context.json(
         {
           error: `request body exceeds ${MAX_UPLOAD_URLS_BODY_BYTES} bytes`,
         },
         413,
       );
     }
-    return c.json(
+    return context.json(
       { error: `invalid JSON body: ${err instanceof Error ? err.message : String(err)}` },
       400,
     );
   }
   if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return c.json({ error: 'request body must be a JSON object' }, 400);
+    return context.json({ error: 'request body must be a JSON object' }, 400);
   }
   const body = parsed as Record<string, unknown>;
   if (!Array.isArray(body.assets)) {
-    return c.json({ error: 'request body must include an `assets` array' }, 400);
+    return context.json({ error: 'request body must include an `assets` array' }, 400);
   }
   if (body.assets.length > MAX_UPLOAD_URLS_BATCH) {
-    return c.json(
+    return context.json(
       {
         error: `assets[] has ${body.assets.length} entries, exceeds the ${MAX_UPLOAD_URLS_BATCH} per-request limit`,
       },
@@ -1573,7 +1586,7 @@ app.post('/:id/deploy/upload-urls', async (c) => {
   for (let i = 0; i < body.assets.length; i++) {
     const err = validateUploadUrlsAsset(body.assets[i], i);
     if (err) {
-      return c.json({ error: err }, 400);
+      return context.json({ error: err }, 400);
     }
   }
   const assets = body.assets as ReadonlyArray<UploadUrlsRequestAsset>;
@@ -1596,7 +1609,7 @@ app.post('/:id/deploy/upload-urls', async (c) => {
     // beyond the initial SELECT FOR SHARE). A 5000-entry batch fans out
     // to 50 concurrent crypto.subtle signs and finishes in ~250 ms, so
     // teardown never waits long for the share lock to release.
-    await c.get('db').transaction(async (tx) => {
+    await context.get('db').transaction(async (tx) => {
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR SHARE`);
       const txDb = tx as unknown as Db;
       const lockedProject = await getProject(txDb, projectId);
@@ -1605,10 +1618,10 @@ app.post('/:id/deploy/upload-urls', async (c) => {
       }
       await uploadPool(assets, PRESIGN_BATCH_CONCURRENCY, async (asset) => {
         const result = await presignAssetPut({
-          accountId: c.env.CF_ACCOUNT_ID,
-          accessKeyId: c.env.R2_ACCESS_KEY_ID,
-          secretAccessKey: c.env.R2_SECRET_ACCESS_KEY,
-          bucket: c.env.R2_STATIC_ASSETS_BUCKET,
+          accountId: context.env.CF_ACCOUNT_ID,
+          accessKeyId: context.env.R2_ACCESS_KEY_ID,
+          secretAccessKey: context.env.R2_SECRET_ACCESS_KEY,
+          bucket: context.env.R2_STATIC_ASSETS_BUCKET,
           key: `assets/${projectId}/${asset.blake3}`,
           md5: asset.md5,
           contentType: asset.contentType,
@@ -1628,10 +1641,10 @@ app.post('/:id/deploy/upload-urls', async (c) => {
     });
   } catch (err) {
     if (err instanceof Error && err.message === UPLOAD_URLS_PROJECT_DELETING) {
-      return c.json({ error: 'project is being deleted' }, 410);
+      return context.json({ error: 'project is being deleted' }, 410);
     }
     logger.error('upload_urls', 'presign_error', err, { assetCount: assets.length });
-    return c.json(
+    return context.json(
       {
         error: `failed to presign upload URLs: ${err instanceof Error ? err.message : String(err)}`,
       },
@@ -1644,7 +1657,7 @@ app.post('/:id/deploy/upload-urls', async (c) => {
     durationMs: Date.now() - startedAt,
   });
 
-  return c.json({ urls });
+  return context.json({ urls });
 });
 
 // Deploy to a project
@@ -1674,36 +1687,36 @@ app.post('/:id/deploy', handleManifestOnlyDeploy);
  * bypasses the user's request pipe, which is the whole point of the
  * direct-to-R2 flow.
  */
-async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
-  // Hono's `c.req.param('id')` types as `string | undefined` when called
+async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Response> {
+  // Hono's `context.req.param('id')` types as `string | undefined` when called
   // from a non-route-typed context (we receive `Context<ApiEnv>` rather
   // than the route-typed callback Hono synthesises for `app.post`). The
   // route literal is `/:id/deploy`, so this is always a string at
   // runtime — narrow by hand. The ApiEnv route registry guarantees the
   // path matched.
-  const projectId = c.req.param('id') as string;
-  const project = await getProject(c.get('db'), projectId);
+  const projectId = context.req.param('id') as string;
+  const project = await getProject(context.get('db'), projectId);
   if (!project) {
-    return c.json({ error: 'project not found' }, 404);
+    return context.json({ error: 'project not found' }, 404);
   }
-  if (project.user_id !== c.get('user').id) {
-    return c.json({ error: 'forbidden' }, 403);
+  if (project.user_id !== context.get('user').id) {
+    return context.json({ error: 'forbidden' }, 403);
   }
   if (project.status === 'deleting') {
-    return c.json({ error: 'project is being deleted' }, 410);
+    return context.json({ error: 'project is being deleted' }, 410);
   }
   // CLI version gate runs AFTER project authz so a stale CLI hitting a
   // missing/foreign/deleting project still gets the more specific
   // 404/403/410 first. The multipart sniff inside the helper is
   // header-only — it does not read the request body, so calling it
   // here does not interfere with the streaming JSON parse below.
-  const versionReject = checkCliVersionOrRespond(c);
+  const versionReject = checkCliVersionOrRespond(context);
   if (versionReject) {
     return versionReject;
   }
-  const cliVersion = c.req.header('x-void-cli-version') ?? null;
+  const cliVersion = context.req.header('x-void-cli-version') ?? null;
 
-  const user = c.get('user');
+  const user = context.get('user');
 
   let logger: DeployLogger = createDeployLogger({
     projectId,
@@ -1724,12 +1737,12 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
   // in residency for a body that can legitimately reach 64 MiB. Native
   // Response.json() consumes the stream incrementally and reuses internal
   // buffers; the only retained allocation at the end is the parsed object.
-  if (!c.req.raw.body) {
-    return c.json({ error: 'request body is required' }, 400);
+  if (!context.req.raw.body) {
+    return context.json({ error: 'request body is required' }, 400);
   }
   let totalBytes = 0;
   let overflowed = false;
-  const limited = c.req.raw.body.pipeThrough(
+  const limited = context.req.raw.body.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
         totalBytes += chunk.byteLength;
@@ -1749,20 +1762,20 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
     }).json();
   } catch (err) {
     if (overflowed) {
-      return c.json(
+      return context.json(
         {
           error: `request body exceeds ${MAX_JSON_DEPLOY_BODY_BYTES} bytes (asset bytes must be uploaded direct-to-R2, not in the request body)`,
         },
         413,
       );
     }
-    return c.json(
+    return context.json(
       { error: `invalid JSON body: ${err instanceof Error ? err.message : String(err)}` },
       400,
     );
   }
   if (parsedBody == null || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
-    return c.json({ error: 'request body must be a JSON object' }, 400);
+    return context.json({ error: 'request body must be a JSON object' }, 400);
   }
   const body = parsedBody as Record<string, unknown>;
 
@@ -1771,24 +1784,27 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
   // requires the v2 wire shape (blake3 + md5 + size per asset) that
   // direct-to-R2 deploys depend on.
   if (body.manifest == null || typeof body.manifest !== 'object' || Array.isArray(body.manifest)) {
-    return c.json({ event: 'error', message: 'manifest is required and must be an object' }, 400);
+    return context.json(
+      { event: 'error', message: 'manifest is required and must be an object' },
+      400,
+    );
   }
   const shapeError = validateManifestShape(body.manifest);
   if (shapeError) {
-    return c.json({ event: 'error', message: shapeError }, 400);
+    return context.json({ event: 'error', message: shapeError }, 400);
   }
   const incomingManifest = body.manifest as DeployManifest;
   if (
     incomingManifest.version == null ||
     !SUPPORTED_MANIFEST_VERSIONS.includes(incomingManifest.version)
   ) {
-    return c.json(
+    return context.json(
       { event: 'error', message: 'Unsupported deploy manifest version. Please update void.' },
       400,
     );
   }
   if (incomingManifest.assetManifestVersion !== 2) {
-    return c.json(
+    return context.json(
       {
         event: 'error',
         message: 'deploy requires assetManifestVersion: 2; please upgrade your void CLI',
@@ -1810,7 +1826,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
     typeof body.assetManifest !== 'object' ||
     Array.isArray(body.assetManifest)
   ) {
-    return c.json(
+    return context.json(
       { event: 'error', message: 'assetManifest is required and must be an object' },
       400,
     );
@@ -1818,7 +1834,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
   const rawAssetManifest = body.assetManifest as Record<string, unknown>;
   const assetEntries = Object.entries(rawAssetManifest);
   if (assetEntries.length > MAX_UPLOAD_URLS_BATCH) {
-    return c.json(
+    return context.json(
       {
         event: 'error',
         message: `assetManifest has ${assetEntries.length} entries, exceeds the ${MAX_UPLOAD_URLS_BATCH} per-deploy limit`,
@@ -1829,14 +1845,14 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
   const incomingAssetManifest: Record<string, AssetManifestEntry> = {};
   for (const [path, raw] of assetEntries) {
     if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
-      return c.json(
+      return context.json(
         { event: 'error', message: `invalid assetManifest entry for ${path}: must be an object` },
         400,
       );
     }
     const entry = raw as Record<string, unknown>;
     if (typeof entry.blake3 !== 'string' || !HEX_32_REGEX.test(entry.blake3)) {
-      return c.json(
+      return context.json(
         {
           event: 'error',
           message: `invalid assetManifest entry for ${path}: blake3 must be 32 lowercase hex characters`,
@@ -1845,7 +1861,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       );
     }
     if (typeof entry.md5 !== 'string' || !HEX_32_REGEX.test(entry.md5)) {
-      return c.json(
+      return context.json(
         {
           event: 'error',
           message: `invalid assetManifest entry for ${path}: md5 must be 32 lowercase hex characters`,
@@ -1859,7 +1875,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       entry.size < 0 ||
       !Number.isFinite(entry.size)
     ) {
-      return c.json(
+      return context.json(
         {
           event: 'error',
           message: `invalid assetManifest entry for ${path}: size must be a non-negative integer`,
@@ -1889,7 +1905,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       typeof body.workerFiles !== 'object' ||
       Array.isArray(body.workerFiles)
     ) {
-      return c.json(
+      return context.json(
         { event: 'error', message: 'workerFiles must be an object mapping relative path → base64' },
         400,
       );
@@ -1913,7 +1929,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
     for (const filePath of Object.keys(workerFilesMap)) {
       const raw = workerFilesMap[filePath];
       if (typeof raw !== 'string') {
-        return c.json(
+        return context.json(
           {
             event: 'error',
             message: `workerFiles entry for ${filePath} must be a base64-encoded string`,
@@ -1925,7 +1941,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       try {
         decoded = decodeBase64ToBytes(raw);
       } catch (err) {
-        return c.json(
+        return context.json(
           {
             event: 'error',
             message: `workerFiles entry for ${filePath} is not valid base64: ${err instanceof Error ? err.message : String(err)}`,
@@ -1937,7 +1953,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       // materialized — see the block comment above.
       delete workerFilesMap[filePath];
       if (decoded.byteLength > MAX_WORKER_FILE_BYTES) {
-        return c.json(
+        return context.json(
           {
             event: 'error',
             message: `workerFiles entry for ${filePath} exceeds ${MAX_WORKER_FILE_BYTES} bytes`,
@@ -1964,7 +1980,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
   // invariants. Done BEFORE placeholder insert so a rejected request
   // doesn't leave a phantom row to reap.
   if (hasWorkerFiles && (incomingManifest.type === 'spa' || incomingManifest.type === 'static')) {
-    return c.json(
+    return context.json(
       {
         event: 'error',
         message: 'worker parts are not allowed when manifest.type is spa or static',
@@ -1983,12 +1999,12 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
   // later failure must route through the catch / finally below to avoid
   // leaving it stranded in `pending`.
   const currentLiveDeployment = project.active_deployment_id
-    ? await getDeployment(c.get('db'), project.active_deployment_id)
+    ? await getDeployment(context.get('db'), project.active_deployment_id)
     : null;
 
   let preDeployment: Awaited<ReturnType<typeof createDeployment>>;
   try {
-    preDeployment = await c.get('db').transaction(async (tx) => {
+    preDeployment = await context.get('db').transaction(async (tx) => {
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
       const txDb = tx as unknown as Db;
       const lockedProject = await getProject(txDb, projectId);
@@ -2023,10 +2039,10 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
     });
   } catch (err) {
     if (err instanceof ConcurrentDeployError) {
-      return c.json({ error: 'deploy in progress', deployment: err.deploymentId }, 409);
+      return context.json({ error: 'deploy in progress', deployment: err.deploymentId }, 409);
     }
     if (err instanceof Error && err.message === PROJECT_DELETING_ERROR_MESSAGE) {
-      return c.json({ error: 'project is being deleted' }, 410);
+      return context.json({ error: 'project is being deleted' }, 410);
     }
     throw err;
   }
@@ -2061,7 +2077,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       logger.warn('emit', 'stream_closed', { event: event.event, err: String(err) });
     });
   };
-  const heartbeatOverride = c.env.DEPLOY_HEARTBEAT_INTERVAL_MS;
+  const heartbeatOverride = context.env.DEPLOY_HEARTBEAT_INTERVAL_MS;
   const heartbeatIntervalMs =
     typeof heartbeatOverride === 'number' &&
     Number.isFinite(heartbeatOverride) &&
@@ -2130,7 +2146,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       // supposed to direct-upload them via a presigned URL.
       currentStep = 'asset_verify';
       markPhase('asset_verify');
-      const priorAssetManifest = await getLastLiveAssetManifest(c.get('db'), projectId);
+      const priorAssetManifest = await getLastLiveAssetManifest(context.get('db'), projectId);
       const carryForwardHashes = new Set<string>();
       if (priorAssetManifest) {
         for (const entry of Object.values(priorAssetManifest)) {
@@ -2146,7 +2162,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       const r2HeadCache = new Map<string, { size: number } | null>();
       await uploadPool(newHashes, R2_HEAD_VERIFY_CONCURRENCY, async (hash) => {
         const key = `assets/${projectId}/${hash}`;
-        const head = await c.env.STATIC_ASSETS_R2.head(key);
+        const head = await context.env.STATIC_ASSETS_R2.head(key);
         // Single-writer atomicity: this `set` is synchronous so concurrent
         // pool tasks don't actually race the map even though they share
         // it. Cache it so the WfP path below can reuse the head metadata
@@ -2212,8 +2228,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       const hostScopedRedirects = manifest.redirectRules?.some((r) => r.host) ?? false;
       const hostScopedFallbacks = manifest.fallbackRules?.some((r) => r.host) ?? false;
       if (hostScopedRedirects || hostScopedFallbacks) {
-        const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-        projectDomains ??= await getDomainsByProjectId(c.get('db'), projectId);
+        const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+        projectDomains ??= await getDomainsByProjectId(context.get('db'), projectId);
         const boundHosts = new Set<string>([`${project.slug}.${siteDomain}`]);
         for (const d of projectDomains) {
           boundHosts.add(d.hostname);
@@ -2238,7 +2254,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       // the comparison shape and returns it.
       const builtAssetManifest = incomingAssetManifest;
       const comparableAssetManifest = await buildComparableAssetManifestForDedupe(
-        c.get('db'),
+        context.get('db'),
         projectId,
         builtAssetManifest,
         incomingAssetManifest,
@@ -2252,8 +2268,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           parseAssetManifest(currentLiveDeployment.asset_hashes),
         );
         if (sameManifest && sameAssets) {
-          const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-          projectDomains ??= await getDomainsByProjectId(c.get('db'), projectId);
+          const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+          projectDomains ??= await getDomainsByProjectId(context.get('db'), projectId);
           const activeDomains = projectDomains.filter((d) => d.status === 'active');
           const fullUrl =
             activeDomains.length > 0
@@ -2273,7 +2289,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             workers: 0,
           });
           // Release the placeholder row — verified no-op.
-          await c.get('db').delete(deployments).where(eq(deployments.id, preDeployment.id));
+          await context.get('db').delete(deployments).where(eq(deployments.id, preDeployment.id));
           return;
         }
       }
@@ -2283,7 +2299,10 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       // we can defer the cap check until AFTER the dedupe short-circuit
       // — same as the multipart path's worker-backed branch.
       if (planLimits.deploysPerDay > 0) {
-        const todayCount = await countUserDeploymentsToday(c.get('db'), c.get('user').id);
+        const todayCount = await countUserDeploymentsToday(
+          context.get('db'),
+          context.get('user').id,
+        );
         if (!isWithinLimit(planLimits.deploysPerDay, todayCount)) {
           emit({ event: 'error', message: 'deploy limit exceeded', step: currentStep });
           return;
@@ -2294,7 +2313,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       // multipart). Once this completes the deployment row is no longer
       // a precheck placeholder — every subsequent failure must transition
       // it to a terminal status via the catch path.
-      deployment = await c.get('db').transaction(async (tx) => {
+      deployment = await context.get('db').transaction(async (tx) => {
         await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
         const txDb = tx as unknown as Db;
         const lockedProject = await getProject(txDb, projectId);
@@ -2318,9 +2337,13 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       currentDeploymentId = deployment.id;
       logger = logger.with({ deploymentId: deployment.id });
       if (manifestVersionChanged) {
-        await updateProjectWebSocketVersion(c.get('db'), projectId, liveManifestResult.nextVersion);
+        await updateProjectWebSocketVersion(
+          context.get('db'),
+          projectId,
+          liveManifestResult.nextVersion,
+        );
       }
-      dispatchNamespace = c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+      dispatchNamespace = context.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
       workerName = `user-${project.slug}-${deployment.id}`;
 
       const pipelineDeployment = deployment;
@@ -2343,18 +2366,18 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           from: currentStatus,
           to: 'uploading',
         });
-        await updateDeploymentStatus(c.get('db'), deployment.id, 'uploading');
+        await updateDeploymentStatus(context.get('db'), deployment.id, 'uploading');
         currentStatus = 'uploading';
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        await assertProjectNotDeleting(c.get('db'), projectId);
+        await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+        await assertProjectNotDeleting(context.get('db'), projectId);
 
         // JSON-mode CLI always sends the full assetManifest including
         // preflight-skipped paths; no server-side fill-in needed. Clone so
         // the cache-buster injection below mutates a fresh object rather
         // than the validated incoming map.
         const assetManifest: Record<string, AssetManifestEntry> = { ...incomingAssetManifest };
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        await assertProjectNotDeleting(c.get('db'), projectId);
+        await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+        await assertProjectNotDeleting(context.get('db'), projectId);
 
         const preflightUsed = preflightRaw === 'true';
         const isStaticOnly = !hasWorkerFiles;
@@ -2384,7 +2407,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
 
         const assetCount = Object.keys(assetManifest).length;
 
-        projectDomains ??= await getDomainsByProjectId(c.get('db'), projectId);
+        projectDomains ??= await getDomainsByProjectId(context.get('db'), projectId);
 
         if (isStaticOnly) {
           // Static-only branch: bytes already in R2; build the serving
@@ -2408,8 +2431,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             new: 0,
             cached: assetCount,
           });
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          await assertProjectNotDeleting(c.get('db'), projectId);
+          await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+          await assertProjectNotDeleting(context.get('db'), projectId);
           emit({ event: 'asset_upload_done' });
 
           // Build serving manifest. Carry-forward hashes (declared in the
@@ -2426,7 +2449,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           // serve those bytes from their existing KV/R2 home.
           let prevServingManifest: Record<string, string> | null = null;
           if (project.active_deployment_id) {
-            const prev = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
+            const prev = await context.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
             if (prev) {
               prevServingManifest = JSON.parse(prev) as Record<string, string>;
             }
@@ -2458,9 +2481,12 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             }
           }
 
-          await c.env.ROUTING.put(`manifest:${deployment.id}`, JSON.stringify(servingManifest));
+          await context.env.ROUTING.put(
+            `manifest:${deployment.id}`,
+            JSON.stringify(servingManifest),
+          );
 
-          await c
+          await context
             .get('db')
             .update(deployments)
             .set({ asset_hashes: JSON.stringify(assetManifest) })
@@ -2470,7 +2496,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             manifest.type ??
             (assetConfig.not_found_handling === 'single-page-application' ? 'spa' : 'static');
 
-          const existingRouting = await c.env.ROUTING.get(project.slug);
+          const existingRouting = await context.env.ROUTING.get(project.slug);
           const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
           const routingJson = buildStaticRoutingJson({
             projectId,
@@ -2480,10 +2506,10 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             manifest,
             suspended: existingEntry?.suspended,
           });
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          await assertProjectNotDeleting(c.get('db'), projectId);
+          await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+          await assertProjectNotDeleting(context.get('db'), projectId);
           markPhase('routing_switch');
-          await c.env.ROUTING.put(project.slug, routingJson);
+          await context.env.ROUTING.put(project.slug, routingJson);
           writtenRoutingKeys.push(project.slug);
           routingSwitched = true;
           logger = logger.with({ routingSwitched: true });
@@ -2492,7 +2518,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           for (const domain of projectDomains) {
             if (domain.status === 'active') {
               const domainKey = `domain:${domain.hostname}`;
-              await c.env.ROUTING.put(domainKey, routingJson);
+              await context.env.ROUTING.put(domainKey, routingJson);
               writtenRoutingKeys.push(domainKey);
             }
           }
@@ -2503,7 +2529,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             to: 'live',
             reason: 'static_deploy',
           });
-          await c.get('db').transaction(async (tx) => {
+          await context.get('db').transaction(async (tx) => {
             await tx.execute(
               drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
             );
@@ -2518,28 +2544,28 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             await updateProjectType(txDb, projectId, type);
           });
           currentStatus = 'live';
-          await setActiveDeployment(c.get('db'), projectId, deployment.id);
-          await markDeploymentRetained(c.get('db'), deployment.id, true);
+          await setActiveDeployment(context.get('db'), projectId, deployment.id);
+          await markDeploymentRetained(context.get('db'), deployment.id, true);
 
-          await clearCronScheduler(c.env, projectId);
+          await clearCronScheduler(context.env, projectId);
 
           const legacyName = `user-${project.slug}`;
           await deleteDispatchScript(
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
             dispatchNamespace,
             legacyName,
           );
 
           const retained = await getRetainedDeploymentsExcluding(
-            c.get('db'),
+            context.get('db'),
             projectId,
             deployment.id,
           );
           for (const old of retained) {
             await deleteDispatchScript(
-              c.env.CF_ACCOUNT_ID,
-              c.env.CF_API_TOKEN,
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
               dispatchNamespace,
               `user-${project.slug}-${old.id}`,
             );
@@ -2585,15 +2611,15 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
                 >;
                 const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
                 await deleteUnreferencedAssets(
-                  c.env.STATIC_ASSETS,
-                  c.env.STATIC_ASSETS_R2,
+                  context.env.STATIC_ASSETS,
+                  context.env.STATIC_ASSETS_R2,
                   evictedHashes,
                   retainedHashes,
                   projectId,
                 );
               }
-              await c.env.ROUTING.delete(`manifest:${old.id}`);
-              await markDeploymentRetained(c.get('db'), old.id, false);
+              await context.env.ROUTING.delete(`manifest:${old.id}`);
+              await markDeploymentRetained(context.get('db'), old.id, false);
             }
 
             // Direct-to-R2 orphan sweep. See WfP branch for rationale —
@@ -2602,7 +2628,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             // Best-effort: a failed sweep should not fail the deploy.
             try {
               const orphans = await sweepProjectAssetOrphans(
-                c.env.STATIC_ASSETS_R2,
+                context.env.STATIC_ASSETS_R2,
                 projectId,
                 retainedHashes,
               );
@@ -2616,7 +2642,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             }
           }
 
-          const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+          const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
           const activeDomains = projectDomains.filter((d) => d.status === 'active');
           const url =
             activeDomains.length > 0
@@ -2657,24 +2683,24 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         for (const name of manifest.bindings.r2 ?? []) {
           bindingLabels.push(`r2:${name}`);
         }
-        for (const q of manifest.queues ?? []) {
-          bindingLabels.push(`queue:${q.name}`);
+        for (const queue of manifest.queues ?? []) {
+          bindingLabels.push(`queue:${queue.name}`);
         }
         if (bindingLabels.length > 0) {
           emit({ event: 'provisioning', bindings: bindingLabels });
         }
 
         const workerBindings = await provisionBindings(
-          c.get('db'),
-          c.env.CF_ACCOUNT_ID,
-          c.env.CF_API_TOKEN,
+          context.get('db'),
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
           projectId,
           manifest,
-          c.env.JWT_SECRET,
-          c.env.VOID_PROXY_SERVICE ?? 'void-proxy',
+          context.env.JWT_SECRET,
+          context.env.VOID_PROXY_SERVICE ?? 'void-proxy',
         );
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        await assertProjectNotDeleting(c.get('db'), projectId);
+        await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+        await assertProjectNotDeleting(context.get('db'), projectId);
 
         if (bindingLabels.length > 0) {
           emit({ event: 'provisioning_done' });
@@ -2686,7 +2712,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           );
         }
 
-        let projectSecretRows = await getProjectSecrets(c.get('db'), projectId);
+        let projectSecretRows = await getProjectSecrets(context.get('db'), projectId);
         if (manifest.auth) {
           const existingAuthSecret = projectSecretRows.find(
             (row) => row.name === BETTER_AUTH_SECRET_NAME,
@@ -2694,13 +2720,13 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           if (!existingAuthSecret) {
             const managedSecret = generateManagedAuthSecret();
             const encrypted = await encryptProjectSecret(
-              c.env,
+              context.env,
               projectId,
               BETTER_AUTH_SECRET_NAME,
               managedSecret,
             );
             await upsertProjectSecret(
-              c.get('db'),
+              context.get('db'),
               projectId,
               BETTER_AUTH_SECRET_NAME,
               encrypted.ciphertext,
@@ -2708,14 +2734,14 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               encrypted.keyVersion,
               'auth-default',
             );
-            projectSecretRows = await getProjectSecrets(c.get('db'), projectId);
+            projectSecretRows = await getProjectSecrets(context.get('db'), projectId);
           }
         }
         const secretBindings = await Promise.all(
           projectSecretRows.map(async (row) => ({
             type: 'secret_text' as const,
             name: row.name,
-            text: await decryptProjectSecret(c.env, projectId, row),
+            text: await decryptProjectSecret(context.env, projectId, row),
           })),
         );
 
@@ -2733,7 +2759,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             (h) => !assetsByHash.has(h),
           );
           await uploadPool(hashesNeedingBytes, R2_HEAD_VERIFY_CONCURRENCY, async (hash) => {
-            const obj = await c.env.STATIC_ASSETS_R2.get(`assets/${projectId}/${hash}`);
+            const obj = await context.env.STATIC_ASSETS_R2.get(`assets/${projectId}/${hash}`);
             if (!obj) {
               // Should be impossible — we already head-verified above.
               // Surface as a hard error: a missing object after head
@@ -2742,7 +2768,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
                 `R2 object ${`assets/${projectId}/${hash}`} disappeared between head and get`,
               );
             }
-            const ab = await obj.arrayBuffer();
+            const assetBytes = await obj.arrayBuffer();
             // Find a path in the asset manifest with this hash so we
             // can derive the content type for the CF asset upload.
             // Multiple paths can share a hash; any one is correct.
@@ -2754,7 +2780,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               }
             }
             assetsByHash.set(hash, {
-              bytes: new Uint8Array(ab),
+              bytes: new Uint8Array(assetBytes),
               contentType: getContentType(path),
             });
           });
@@ -2772,8 +2798,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           });
 
           const session = await createAssetUploadSession(
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
             dispatchNamespace,
             workerName,
             // Strip extras (e.g. v2 `blake3`/`md5`) at the CF API boundary —
@@ -2787,19 +2813,19 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           });
 
           completionJwt = await uploadAssetBuckets(
-            c.env.CF_ACCOUNT_ID,
+            context.env.CF_ACCOUNT_ID,
             session.jwt,
             session.buckets,
             assetsByHash,
           );
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          await assertProjectNotDeleting(c.get('db'), projectId);
+          await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+          await assertProjectNotDeleting(context.get('db'), projectId);
           logger.info('asset_upload', 'upload_complete', {
             hasCompletionJwt: completionJwt !== undefined,
           });
           emit({ event: 'asset_upload_done' });
 
-          await c
+          await context
             .get('db')
             .update(deployments)
             .set({ asset_hashes: JSON.stringify(assetManifest) })
@@ -2812,7 +2838,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           const declaredHashes2 = new Set(Object.values(incomingAssetManifest).map((e) => e.hash));
           let prevServingManifest: Record<string, string> | null = null;
           if (preflightUsed && project.active_deployment_id) {
-            const prev = await c.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
+            const prev = await context.env.ROUTING.get(`manifest:${project.active_deployment_id}`);
             if (prev) {
               prevServingManifest = JSON.parse(prev) as Record<string, string>;
             }
@@ -2835,7 +2861,10 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             // else: preflight-skipped with no prior mirror — same gap
             // case as multipart; serving manifest omits.
           }
-          await c.env.ROUTING.put(`manifest:${deployment.id}`, JSON.stringify(servingManifest));
+          await context.env.ROUTING.put(
+            `manifest:${deployment.id}`,
+            JSON.stringify(servingManifest),
+          );
           wfpMirroredManifestDeploymentId = deployment.id;
         }
 
@@ -2889,7 +2918,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           manifest.live?.migrations,
         );
         const containers = buildSandboxUploadContainers(manifest.sandbox);
-        const tailServiceName = c.env.TAIL_SERVICE_NAME ?? DEFAULT_TAIL_SERVICE_NAME;
+        const tailServiceName = context.env.TAIL_SERVICE_NAME ?? DEFAULT_TAIL_SERVICE_NAME;
         const metadata: Record<string, unknown> = {
           main_module: manifest.workerMain ?? 'index.js',
           compatibility_date: manifest.compatibilityDate ?? '2026-02-12',
@@ -2912,13 +2941,13 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           workerFormData.append(file.name, file.content, file.name);
         }
 
-        workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
+        workerUploadUrl = `https://api.cloudflare.com/client/v4/accounts/${context.env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${workerName}`;
         await retryWithBackoff(
           async (attempt) => {
             const attemptStart = Date.now();
             const cfResponse = await fetch(workerUploadUrl!, {
               method: 'PUT',
-              headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
+              headers: { Authorization: `Bearer ${context.env.CF_API_TOKEN}` },
               body: workerFormData,
             });
 
@@ -2957,25 +2986,26 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         if (hasWorkerFiles) {
           try {
             await persistWorkerBundle(
-              c.env.STATIC_ASSETS_R2,
+              context.env.STATIC_ASSETS_R2,
               projectId,
               deployment.id,
               workerFiles,
             );
           } catch (err) {
-            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, deployment.id).catch((e) =>
-              logger.error('worker_upload', 'partial_bundle_cleanup_failed', e, {
-                deploymentId: deployment!.id,
-              }),
+            await deleteWorkerBundle(context.env.STATIC_ASSETS_R2, projectId, deployment.id).catch(
+              (e) =>
+                logger.error('worker_upload', 'partial_bundle_cleanup_failed', e, {
+                  deploymentId: deployment!.id,
+                }),
             );
             throw err;
           }
-          await markDeploymentBundleStored(c.get('db'), deployment.id);
+          await markDeploymentBundleStored(context.get('db'), deployment.id);
           bundleStored = true;
         }
 
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        await assertProjectNotDeleting(c.get('db'), projectId);
+        await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+        await assertProjectNotDeleting(context.get('db'), projectId);
 
         if (manifest.sandbox && hasWorkerFiles) {
           currentStep = 'sandbox_container';
@@ -2986,8 +3016,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             manifest.sandbox.containerName ?? 'void-sandbox',
           );
           const { containerApplicationId } = await provisionPerDeployContainer(
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
             dispatchNamespace,
             workerName,
             sandboxContainerAppName,
@@ -3000,8 +3030,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             },
           );
           sandboxContainerAppId = containerApplicationId;
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          await assertProjectNotDeleting(c.get('db'), projectId);
+          await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+          await assertProjectNotDeleting(context.get('db'), projectId);
         }
 
         emit({ event: 'worker_upload_done' });
@@ -3015,10 +3045,10 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             from: currentStatus,
             to: 'migrating',
           });
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'migrating');
+          await updateDeploymentStatus(context.get('db'), deployment.id, 'migrating');
           currentStatus = 'migrating';
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          await assertProjectNotDeleting(c.get('db'), projectId);
+          await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+          await assertProjectNotDeleting(context.get('db'), projectId);
           emit({ event: 'migration_start', pending: manifest.migrations.pending });
 
           const proxyTokenBinding = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN');
@@ -3027,7 +3057,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               const attemptStart = Date.now();
               const maxAttempts = CF_READINESS_RETRY.maxRetries + 1;
               try {
-                const userWorker = c.env.DISPATCH.get(workerName);
+                const userWorker = context.env.DISPATCH.get(workerName);
                 const readyResponse = await userWorker.fetch(
                   new Request('https://internal/__void/ready', {
                     signal: AbortSignal.timeout(10_000),
@@ -3096,7 +3126,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             async (attempt) => {
               const attemptStart = Date.now();
               const maxAttempts = migrationRetry.maxRetries + 1;
-              const userWorker = c.env.DISPATCH.get(workerName);
+              const userWorker = context.env.DISPATCH.get(workerName);
               const migrateResponse = await userWorker.fetch(
                 new Request('https://internal/__void/migrate', {
                   method: 'POST',
@@ -3152,9 +3182,9 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             }
           }
           const allApplied = result.migrations.map((m) => m.name);
-          await setAppliedMigrations(c.get('db'), deployment.id, allApplied);
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          await assertProjectNotDeleting(c.get('db'), projectId);
+          await setAppliedMigrations(context.get('db'), deployment.id, allApplied);
+          await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+          await assertProjectNotDeleting(context.get('db'), projectId);
         }
 
         // Queue setup
@@ -3164,7 +3194,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         if (queueNames.length > 0) {
           emit({ event: 'queue_setup', queues: queueNames });
         }
-        const dispatchWorkerName = c.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
+        const dispatchWorkerName = context.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
         const queueProxyToken = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN')?.text;
         const queueConflicts: Array<{ queue: string; ownerScript: string }> = [];
         const consumerOutcomes = await Promise.all(
@@ -3176,8 +3206,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               return null;
             }
             const consumerResult = await addQueueConsumer(
-              c.env.CF_ACCOUNT_ID,
-              c.env.CF_API_TOKEN,
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
               queueBinding.queue_id,
               dispatchWorkerName,
               {
@@ -3211,7 +3241,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             continue;
           }
           const queueKey = `queue:${outcome.queueBinding.queue_name}`;
-          await c.env.ROUTING.put(
+          await context.env.ROUTING.put(
             queueKey,
             JSON.stringify({
               workerName,
@@ -3222,14 +3252,14 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           );
           writtenRoutingKeys.push(queueKey);
         }
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        await assertProjectNotDeleting(c.get('db'), projectId);
+        await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+        await assertProjectNotDeleting(context.get('db'), projectId);
 
         const hasCrons = manifest.schedules && manifest.schedules.length > 0;
 
-        await clearIsrCache(c.env.ISR_CACHE, projectId, deployment.id);
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        await assertProjectNotDeleting(c.get('db'), projectId);
+        await clearIsrCache(context.env.ISR_CACHE, projectId, deployment.id);
+        await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+        await assertProjectNotDeleting(context.get('db'), projectId);
 
         currentStep = 'prerender';
         if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
@@ -3239,11 +3269,11 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             from: currentStatus,
             to: 'prerendering',
           });
-          await updateDeploymentStatus(c.get('db'), deployment.id, 'prerendering');
+          await updateDeploymentStatus(context.get('db'), deployment.id, 'prerendering');
           currentStatus = 'prerendering';
-          await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-          await assertProjectNotDeleting(c.get('db'), projectId);
-          const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+          await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+          await assertProjectNotDeleting(context.get('db'), projectId);
+          const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
 
           await uploadPool(manifest.prerender, 3, async (pathname) => {
             const ttl = resolvePathTtl(manifest.revalidate, pathname);
@@ -3251,7 +3281,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               return;
             }
             try {
-              const userWorker = c.env.DISPATCH.get(workerName);
+              const userWorker = context.env.DISPATCH.get(workerName);
               const url = `https://${project.slug}.${siteDomain}${pathname}`;
               const response = await userWorker.fetch(new Request(url));
               if (response.ok) {
@@ -3259,8 +3289,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
                 const headers = serializePrerenderHeaders(response);
                 const body = await response.arrayBuffer();
                 const packed = packIsrValue(headers, body);
-                await c.env.ISR_CACHE.put(key, packed, {
-                  metadata: { s: response.status, c: Date.now(), t: ttl },
+                await context.env.ISR_CACHE.put(key, packed, {
+                  metadata: { s: response.status, context: Date.now(), t: ttl },
                 });
               }
             } catch {
@@ -3269,11 +3299,11 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           });
           emit({ event: 'prerender_done' });
         }
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        await assertProjectNotDeleting(c.get('db'), projectId);
+        await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+        await assertProjectNotDeleting(context.get('db'), projectId);
 
         // Routing switch
-        const existingRouting = await c.env.ROUTING.get(project.slug);
+        const existingRouting = await context.env.ROUTING.get(project.slug);
         const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
         const dispatchLimits =
           planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
@@ -3296,10 +3326,10 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           assetManifestId: assetCount > 0 ? deployment.id : undefined,
           assetConfig: assetCount > 0 ? assetConfig : undefined,
         });
-        await assertDeploymentNotCanceled(c.get('db'), deployment.id);
-        await assertProjectNotDeleting(c.get('db'), projectId);
+        await assertDeploymentNotCanceled(context.get('db'), deployment.id);
+        await assertProjectNotDeleting(context.get('db'), projectId);
         markPhase('routing_switch');
-        await c.env.ROUTING.put(project.slug, routingJson);
+        await context.env.ROUTING.put(project.slug, routingJson);
         writtenRoutingKeys.push(project.slug);
         routingSwitched = true;
         logger = logger.with({ routingSwitched: true });
@@ -3308,7 +3338,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         for (const domain of projectDomains) {
           if (domain.status === 'active') {
             const domainKey = `domain:${domain.hostname}`;
-            await c.env.ROUTING.put(domainKey, routingJson);
+            await context.env.ROUTING.put(domainKey, routingJson);
             writtenRoutingKeys.push(domainKey);
           }
         }
@@ -3319,7 +3349,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           to: 'live',
           reason: 'wfp_deploy',
         });
-        await c.get('db').transaction(async (tx) => {
+        await context.get('db').transaction(async (tx) => {
           await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
           const txDb = tx as unknown as Db;
           const lockedProject = await getProject(txDb, projectId);
@@ -3336,8 +3366,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           );
         });
         currentStatus = 'live';
-        await setActiveDeployment(c.get('db'), projectId, deployment.id);
-        await markDeploymentRetained(c.get('db'), deployment.id, true);
+        await setActiveDeployment(context.get('db'), projectId, deployment.id);
+        await markDeploymentRetained(context.get('db'), deployment.id, true);
 
         // Cron sync
         currentStep = 'cron_setup';
@@ -3348,20 +3378,20 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               const cronProxyToken = workerBindings.find(
                 (b) => b.name === '__VOID_PROXY_TOKEN',
               )?.text;
-              await syncCronScheduler(c.env, projectId, {
+              await syncCronScheduler(context.env, projectId, {
                 workerName,
                 schedules: manifest.schedules!,
                 proxyToken: cronProxyToken,
               });
             } else {
-              await clearCronScheduler(c.env, projectId);
+              await clearCronScheduler(context.env, projectId);
             }
           } catch (err) {
             logger.error('cron_sync', 'cron_sync_failed_post_routing', err);
           }
         })();
         try {
-          c.executionCtx.waitUntil(cronSyncPromise);
+          context.executionCtx.waitUntil(cronSyncPromise);
         } catch {
           await cronSyncPromise;
         }
@@ -3369,8 +3399,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         // Legacy + retention cleanup (mirror of multipart's WfP path)
         const legacyWorkerName = `user-${project.slug}`;
         await deleteDispatchScript(
-          c.env.CF_ACCOUNT_ID,
-          c.env.CF_API_TOKEN,
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
           dispatchNamespace,
           legacyWorkerName,
         );
@@ -3379,7 +3409,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         const retentionLimit = planLimits.retainedDeployments;
         if (retentionLimit > 0) {
           const retained = await getRetainedDeploymentsExcluding(
-            c.get('db'),
+            context.get('db'),
             projectId,
             deployment.id,
           );
@@ -3419,7 +3449,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           }
 
           for (const old of toEvict) {
-            const evictionSkipped = await c.get('db').transaction(async (tx) => {
+            const evictionSkipped = await context.get('db').transaction(async (tx) => {
               await tx.execute(
                 drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
               );
@@ -3438,8 +3468,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             try {
               const oldWorkerName = `user-${project.slug}-${old.id}`;
               await deleteDispatchScript(
-                c.env.CF_ACCOUNT_ID,
-                c.env.CF_API_TOKEN,
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
                 dispatchNamespace,
                 oldWorkerName,
               ).catch((e) => {
@@ -3456,8 +3486,8 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
                   >;
                   const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
                   await deleteUnreferencedAssets(
-                    c.env.STATIC_ASSETS,
-                    c.env.STATIC_ASSETS_R2,
+                    context.env.STATIC_ASSETS,
+                    context.env.STATIC_ASSETS_R2,
                     evictedHashes,
                     retainedHashes,
                     projectId,
@@ -3467,7 +3497,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
                       err: e instanceof Error ? e.message : String(e),
                     });
                   });
-                  await c.env.ROUTING.delete(`manifest:${old.id}`).catch((e) => {
+                  await context.env.ROUTING.delete(`manifest:${old.id}`).catch((e) => {
                     logger.warn('retention_cleanup', 'evicted_routing_manifest_delete_failed', {
                       evictedDeploymentId: old.id,
                       err: e instanceof Error ? e.message : String(e),
@@ -3490,14 +3520,14 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
                       oldManifest.sandbox.containerName ?? 'void-sandbox',
                     );
                     const existing = await findContainerApplication(
-                      c.env.CF_ACCOUNT_ID,
-                      c.env.CF_API_TOKEN,
+                      context.env.CF_ACCOUNT_ID,
+                      context.env.CF_API_TOKEN,
                       oldContainerAppName,
                     );
                     if (existing) {
                       await deleteContainerApplicationIdempotent(
-                        c.env.CF_ACCOUNT_ID,
-                        c.env.CF_API_TOKEN,
+                        context.env.CF_ACCOUNT_ID,
+                        context.env.CF_API_TOKEN,
                         existing.id,
                       );
                     }
@@ -3510,14 +3540,14 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               }
               if (old.bundle_stored) {
                 try {
-                  await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, old.id);
+                  await deleteWorkerBundle(context.env.STATIC_ASSETS_R2, projectId, old.id);
                 } catch (e) {
                   logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', e, {
                     evictedDeploymentId: old.id,
                   });
                 }
               }
-              await clearIsrCache(c.env.ISR_CACHE, projectId, old.id).catch((e) =>
+              await clearIsrCache(context.env.ISR_CACHE, projectId, old.id).catch((e) =>
                 logger.error('retention_cleanup', 'evicted_isr_cache_clear_failed', e, {
                   evictedDeploymentId: old.id,
                 }),
@@ -3540,7 +3570,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           // sweep should not fail the deploy.
           try {
             const orphans = await sweepProjectAssetOrphans(
-              c.env.STATIC_ASSETS_R2,
+              context.env.STATIC_ASSETS_R2,
               projectId,
               retainedHashes,
             );
@@ -3554,7 +3584,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
           }
         }
 
-        const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+        const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
         const activeDomains = projectDomains.filter((d) => d.status === 'active');
         const fullUrl =
           activeDomains.length > 0
@@ -3594,7 +3624,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
         if (!routingSwitched && wfpMirroredManifestDeploymentId) {
           const id = wfpMirroredManifestDeploymentId;
           wfpMirroredManifestDeploymentId = null;
-          await c.env.ROUTING.delete(`manifest:${id}`).catch((e) =>
+          await context.env.ROUTING.delete(`manifest:${id}`).catch((e) =>
             logger.warn('catch', 'mirrored_manifest_evict_failed', {
               deploymentId: id,
               err: e instanceof Error ? e.message : String(e),
@@ -3614,14 +3644,14 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             writtenRoutingKeyCount: writtenRoutingKeys.length,
           });
           for (const key of writtenRoutingKeys) {
-            await c.env.ROUTING.delete(key).catch((e) =>
+            await context.env.ROUTING.delete(key).catch((e) =>
               logger.error('catch', 'routing_rollback_failed', e, { key }),
             );
           }
           if (workerUploaded && workerUploadUrl) {
             await fetch(workerUploadUrl, {
               method: 'DELETE',
-              headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
+              headers: { Authorization: `Bearer ${context.env.CF_API_TOKEN}` },
             }).catch((e) =>
               logger.error('catch', 'orphan_worker_delete_failed', e, {
                 workerName: failedWorkerName,
@@ -3629,30 +3659,33 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             );
           }
           if (bundleStored) {
-            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, failedDeployment.id).catch(
-              (e) =>
-                logger.error('catch', 'worker_bundle_delete_failed', e, {
-                  deploymentId: failedDeployment.id,
-                }),
+            await deleteWorkerBundle(
+              context.env.STATIC_ASSETS_R2,
+              projectId,
+              failedDeployment.id,
+            ).catch((e) =>
+              logger.error('catch', 'worker_bundle_delete_failed', e, {
+                deploymentId: failedDeployment.id,
+              }),
             );
           }
           if (sandboxContainerAppId) {
             await deleteContainerApplicationWithRetry(
-              c.env.CF_ACCOUNT_ID,
-              c.env.CF_API_TOKEN,
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
               sandboxContainerAppId,
             );
           } else if (sandboxContainerAppName) {
             try {
               const orphan = await findContainerApplication(
-                c.env.CF_ACCOUNT_ID,
-                c.env.CF_API_TOKEN,
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
                 sandboxContainerAppName,
               );
               if (orphan) {
                 await deleteContainerApplicationWithRetry(
-                  c.env.CF_ACCOUNT_ID,
-                  c.env.CF_API_TOKEN,
+                  context.env.CF_ACCOUNT_ID,
+                  context.env.CF_API_TOKEN,
                   orphan.id,
                 );
               }
@@ -3668,7 +3701,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             to: 'failed',
             reason: 'teardown_race_lost',
           });
-          await updateDeploymentStatus(c.get('db'), failedDeployment.id, 'failed', msg).catch(
+          await updateDeploymentStatus(context.get('db'), failedDeployment.id, 'failed', msg).catch(
             () => {},
           );
           currentStatus = 'failed';
@@ -3684,18 +3717,22 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             to: 'live',
             reason: 'post_routing_recovery',
           });
-          await updateDeploymentStatus(c.get('db'), failedDeployment.id, 'live', undefined, {
+          await updateDeploymentStatus(context.get('db'), failedDeployment.id, 'live', undefined, {
             force: true,
           }).catch(() => {});
           currentStatus = 'live';
           await updateProjectType(
-            c.get('db'),
+            context.get('db'),
             projectId,
             failedManifest.type ?? (failedManifest.framework ? 'framework' : 'void'),
           ).catch(() => {});
-          await setActiveDeployment(c.get('db'), projectId, failedDeployment.id).catch(() => {});
-          await markDeploymentRetained(c.get('db'), failedDeployment.id, true).catch(() => {});
-          const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+          await setActiveDeployment(context.get('db'), projectId, failedDeployment.id).catch(
+            () => {},
+          );
+          await markDeploymentRetained(context.get('db'), failedDeployment.id, true).catch(
+            () => {},
+          );
+          const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
           const slugUrl = `https://${project.slug}.${siteDomain}`;
           emit({
             event: 'done',
@@ -3706,17 +3743,17 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             workers: 0,
           });
         } else {
-          const latest = await getDeployment(c.get('db'), failedDeployment.id);
+          const latest = await getDeployment(context.get('db'), failedDeployment.id);
           const wasCanceled =
             latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
           for (const key of writtenRoutingKeys) {
-            await c.env.ROUTING.delete(key).catch((e) =>
+            await context.env.ROUTING.delete(key).catch((e) =>
               logger.error('catch', 'routing_rollback_failed', e, { key }),
             );
           }
           await deleteDispatchScript(
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
             failedDispatchNamespace,
             failedWorkerName,
           ).catch((e) =>
@@ -3725,30 +3762,33 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             }),
           );
           if (bundleStored) {
-            await deleteWorkerBundle(c.env.STATIC_ASSETS_R2, projectId, failedDeployment.id).catch(
-              (e) =>
-                logger.error('catch', 'worker_bundle_delete_failed', e, {
-                  deploymentId: failedDeployment.id,
-                }),
+            await deleteWorkerBundle(
+              context.env.STATIC_ASSETS_R2,
+              projectId,
+              failedDeployment.id,
+            ).catch((e) =>
+              logger.error('catch', 'worker_bundle_delete_failed', e, {
+                deploymentId: failedDeployment.id,
+              }),
             );
           }
           if (sandboxContainerAppId) {
             await deleteContainerApplicationWithRetry(
-              c.env.CF_ACCOUNT_ID,
-              c.env.CF_API_TOKEN,
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
               sandboxContainerAppId,
             );
           } else if (sandboxContainerAppName) {
             try {
               const orphan = await findContainerApplication(
-                c.env.CF_ACCOUNT_ID,
-                c.env.CF_API_TOKEN,
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
                 sandboxContainerAppName,
               );
               if (orphan) {
                 await deleteContainerApplicationWithRetry(
-                  c.env.CF_ACCOUNT_ID,
-                  c.env.CF_API_TOKEN,
+                  context.env.CF_ACCOUNT_ID,
+                  context.env.CF_API_TOKEN,
                   orphan.id,
                 );
               }
@@ -3758,7 +3798,7 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
               });
             }
           }
-          await clearIsrCache(c.env.ISR_CACHE, projectId, failedDeployment.id).catch((e) =>
+          await clearIsrCache(context.env.ISR_CACHE, projectId, failedDeployment.id).catch((e) =>
             logger.error('catch', 'isr_cache_clear_failed', e, {
               deploymentId: failedDeployment.id,
             }),
@@ -3771,23 +3811,28 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
             wasCanceled,
           });
           if (!wasCanceled) {
-            await updateDeploymentStatus(c.get('db'), failedDeployment.id, 'failed', msg);
+            await updateDeploymentStatus(context.get('db'), failedDeployment.id, 'failed', msg);
             currentStatus = 'failed';
           } else {
-            await updateDeploymentStatus(c.get('db'), failedDeployment.id, 'canceled', msg, {
+            await updateDeploymentStatus(context.get('db'), failedDeployment.id, 'canceled', msg, {
               force: true,
             });
             currentStatus = 'canceled';
           }
           emit({ event: 'error', message: msg, step: currentStep });
-          if (!wasCanceled && c.env.EMAIL && user.email) {
-            const dashboardUrl = c.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
-            c.executionCtx.waitUntil(
-              sendDeployFailedEmail(c.env.EMAIL, user.email, project.slug, msg, dashboardUrl).catch(
-                (err) =>
-                  logger.error('catch', 'failed_email_send_failed', err, {
-                    projectSlug: project.slug,
-                  }),
+          if (!wasCanceled && context.env.EMAIL && user.email) {
+            const dashboardUrl = context.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
+            context.executionCtx.waitUntil(
+              sendDeployFailedEmail(
+                context.env.EMAIL,
+                user.email,
+                project.slug,
+                msg,
+                dashboardUrl,
+              ).catch((err) =>
+                logger.error('catch', 'failed_email_send_failed', err, {
+                  projectSlug: project.slug,
+                }),
               ),
             );
           }
@@ -3815,13 +3860,13 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
       // DELETE alongside `pending` placeholders — both represent no real
       // deploy attempt (manifest is still null).
       try {
-        const latest = await getDeployment(c.get('db'), preDeployment.id);
+        const latest = await getDeployment(context.get('db'), preDeployment.id);
         if (
           latest &&
           (latest.status === 'pending' || latest.status === 'canceling') &&
           latest.manifest === null
         ) {
-          await c.get('db').delete(deployments).where(eq(deployments.id, preDeployment.id));
+          await context.get('db').delete(deployments).where(eq(deployments.id, preDeployment.id));
           logger.info('placeholder_reap', 'placeholder_deleted', {
             placeholderId: preDeployment.id,
             priorStatus: latest.status,
@@ -3854,15 +3899,15 @@ async function handleManifestOnlyDeploy(c: Context<ApiEnv>): Promise<Response> {
 }
 
 // Deploy preflight — returns which assets need uploading based on diff with last deploy
-app.post('/:id/deploy/preflight', async (c) => {
-  const projectId = c.req.param('id');
-  const project = await getProject(c.get('db'), projectId);
+app.post('/:id/deploy/preflight', async (context) => {
+  const projectId = context.req.param('id');
+  const project = await getProject(context.get('db'), projectId);
   if (!project) {
-    return c.json({ error: 'project not found' }, 404);
+    return context.json({ error: 'project not found' }, 404);
   }
 
-  if (project.user_id !== c.get('user').id) {
-    return c.json({ error: 'forbidden' }, 403);
+  if (project.user_id !== context.get('user').id) {
+    return context.json({ error: 'forbidden' }, 403);
   }
   // Mirror /upload-urls and handleManifestOnlyDeploy: short-circuit when
   // the project is being torn down so callers get the more specific 410
@@ -3870,27 +3915,27 @@ app.post('/:id/deploy/preflight', async (c) => {
   // deleting project should see "project is being deleted", not "upgrade
   // your CLI" — upgrading won't make the project come back.
   if (project.status === 'deleting') {
-    return c.json({ error: 'project is being deleted' }, 410);
+    return context.json({ error: 'project is being deleted' }, 410);
   }
   // CLI version gate runs AFTER project authz + status so a stale CLI
   // hitting a missing/foreign/deleting project gets the more specific
   // 404/403/410 first instead of a misleading "upgrade your CLI" 426.
-  const versionReject = checkCliVersionOrRespond(c);
+  const versionReject = checkCliVersionOrRespond(context);
   if (versionReject) {
     return versionReject;
   }
 
-  const body = await c.req.json<{
+  const body = await context.req.json<{
     assetManifest: Record<string, { hash: string; size: number }>;
     hasWorker?: boolean;
   }>();
   const { assetManifest, hasWorker } = body;
   const total = Object.keys(assetManifest).length;
 
-  const prevManifest = await getLastLiveAssetManifest(c.get('db'), projectId);
+  const prevManifest = await getLastLiveAssetManifest(context.get('db'), projectId);
 
   if (!prevManifest) {
-    return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
+    return context.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
   }
 
   // Preflight dedup is only safe when both the previous and current deploys
@@ -3902,7 +3947,7 @@ app.post('/:id/deploy/preflight', async (c) => {
   // (KV/R2); anything else — including a missing or malformed entry — is
   // treated as non-static so we conservatively return all assets.
   if (project.active_deployment_id) {
-    const routingRaw = await c.env.ROUTING.get(project.slug);
+    const routingRaw = await context.env.ROUTING.get(project.slug);
     let prevIsStatic = false;
     if (routingRaw) {
       try {
@@ -3916,7 +3961,7 @@ app.post('/:id/deploy/preflight', async (c) => {
     if (!(prevIsStatic && currentIsStatic)) {
       // Backend transition, or previous deploy was WfP whose bytes live
       // in CF's asset store (preflight cannot safely dedup those).
-      return c.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
+      return context.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
     }
   }
 
@@ -3928,7 +3973,7 @@ app.post('/:id/deploy/preflight', async (c) => {
     }
   }
 
-  return c.json({ needed, total, skipped: total - needed.length });
+  return context.json({ needed, total, skipped: total - needed.length });
 });
 
 export async function clearIsrCache(

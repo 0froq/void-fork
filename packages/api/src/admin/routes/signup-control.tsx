@@ -18,55 +18,59 @@ function parseAllowlistPatterns(input: string): ReadonlyArray<string> {
 }
 
 // GET /signup-control
-app.get('/', async (c) => {
-  const db = c.get('db');
-  const enabled = (await c.env.ROUTING.get('signup:enabled')) === 'true';
-  const entries = await getAllowlist(c.env.ROUTING);
+app.get('/', async (context) => {
+  const db = context.get('db');
+  const enabled = (await context.env.ROUTING.get('signup:enabled')) === 'true';
+  const entries = await getAllowlist(context.env.ROUTING);
   const entryStatuses = await getAllowlistEntryStatuses(db, entries);
-  return c.html(
-    <SignupControlPage enabled={enabled} entries={entryStatuses} username={c.get('user').login} />,
+  return context.html(
+    <SignupControlPage
+      enabled={enabled}
+      entries={entryStatuses}
+      username={context.get('user').login}
+    />,
   );
 });
 
 // POST /signup-control/toggle
-app.post('/toggle', async (c) => {
-  const current = (await c.env.ROUTING.get('signup:enabled')) === 'true';
-  await c.env.ROUTING.put('signup:enabled', String(!current));
-  return c.redirect('/admin/signup-control');
+app.post('/toggle', async (context) => {
+  const current = (await context.env.ROUTING.get('signup:enabled')) === 'true';
+  await context.env.ROUTING.put('signup:enabled', String(!current));
+  return context.redirect('/admin/signup-control');
 });
 
 // POST /signup-control/add
-app.post('/add', async (c) => {
-  const body = await c.req.parseBody();
+app.post('/add', async (context) => {
+  const body = await context.req.parseBody();
   const type = body.type as string;
   const patterns = parseAllowlistPatterns((body.pattern as string) ?? '');
   const note = ((body.note as string) || '').trim();
 
   if (patterns.length === 0 || (type !== 'github' && type !== 'email')) {
-    return c.html('<h1>Invalid entry</h1>', 400);
+    return context.html('<h1>Invalid entry</h1>', 400);
   }
 
-  const entries = await getAllowlist(c.env.ROUTING);
+  const entries = await getAllowlist(context.env.ROUTING);
   for (const pattern of patterns) {
     entries.push({ type: type as 'github' | 'email', pattern, note: note || undefined });
   }
-  await putAllowlist(c.env.ROUTING, entries);
-  return c.redirect('/admin/signup-control');
+  await putAllowlist(context.env.ROUTING, entries);
+  return context.redirect('/admin/signup-control');
 });
 
 // POST /signup-control/delete
-app.post('/delete', async (c) => {
-  const body = await c.req.parseBody();
+app.post('/delete', async (context) => {
+  const body = await context.req.parseBody();
   const index = parseInt(body.index as string, 10);
-  const entries = await getAllowlist(c.env.ROUTING);
+  const entries = await getAllowlist(context.env.ROUTING);
 
   if (isNaN(index) || index < 0 || index >= entries.length) {
-    return c.html('<h1>Invalid index</h1>', 400);
+    return context.html('<h1>Invalid index</h1>', 400);
   }
 
   entries.splice(index, 1);
-  await putAllowlist(c.env.ROUTING, entries);
-  return c.redirect('/admin/signup-control');
+  await putAllowlist(context.env.ROUTING, entries);
+  return context.redirect('/admin/signup-control');
 });
 
 export default app;

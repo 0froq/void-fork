@@ -19,7 +19,7 @@ function base64url(buffer: ArrayBuffer): string {
 function base64urlDecode(str: string): Uint8Array {
   const padded = str.replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(padded);
-  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 // Cache CryptoKeys per secret — importKey is expensive and the secret never changes per isolate

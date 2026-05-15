@@ -11,8 +11,8 @@ export function isDevBypass(env: { DEV_AUTH_BYPASS?: string; PLATFORM_ENV?: stri
   if (!env.DEV_AUTH_BYPASS) {
     return false;
   }
-  const pe = env.PLATFORM_ENV;
-  return pe === undefined || pe === '' || pe === 'staging';
+  const platformEnv = env.PLATFORM_ENV;
+  return platformEnv === undefined || platformEnv === '' || platformEnv === 'staging';
 }
 
 export type ApiEnv = Env & {

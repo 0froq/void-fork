@@ -20,58 +20,58 @@ const PAGE_SIZE = 20;
 const app = new Hono<ApiEnv>();
 
 // GET /projects
-app.get('/', async (c) => {
-  const search = c.req.query('search');
-  const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+app.get('/', async (context) => {
+  const search = context.req.query('search');
+  const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
   if (search) {
-    const projects = await searchProjects(c.get('db'), search);
-    return c.html(
+    const projects = await searchProjects(context.get('db'), search);
+    return context.html(
       <ProjectsListPage
         projects={projects}
         search={search}
         siteDomain={siteDomain}
-        username={c.get('user').login}
+        username={context.get('user').login}
       />,
     );
   }
-  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10) || 1);
+  const page = Math.max(1, parseInt(context.req.query('page') ?? '1', 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
   const [projects, total] = await Promise.all([
-    getAllProjectsWithOwner(c.get('db'), PAGE_SIZE, offset),
-    countProjects(c.get('db')),
+    getAllProjectsWithOwner(context.get('db'), PAGE_SIZE, offset),
+    countProjects(context.get('db')),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return c.html(
+  return context.html(
     <ProjectsListPage
       projects={projects}
       page={page}
       totalPages={totalPages}
       siteDomain={siteDomain}
-      username={c.get('user').login}
+      username={context.get('user').login}
     />,
   );
 });
 
 // GET /projects/:id
-app.get('/:id', async (c) => {
-  const project = await getProject(c.get('db'), c.req.param('id'));
+app.get('/:id', async (context) => {
+  const project = await getProject(context.get('db'), context.req.param('id'));
   if (!project) {
-    return c.html('<h1>Project not found</h1>', 404);
+    return context.html('<h1>Project not found</h1>', 404);
   }
   const [deployments, resources, owner, domains] = await Promise.all([
-    getProjectDeployments(c.get('db'), project.id, 10),
-    getProjectResources(c.get('db'), project.id),
-    getUser(c.get('db'), project.user_id),
-    getDomainsByProjectId(c.get('db'), project.id),
+    getProjectDeployments(context.get('db'), project.id, 10),
+    getProjectResources(context.get('db'), project.id),
+    getUser(context.get('db'), project.user_id),
+    getDomainsByProjectId(context.get('db'), project.id),
   ]);
 
-  const cfAccountId = c.env.CF_ACCOUNT_ID;
-  const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+  const cfAccountId = context.env.CF_ACCOUNT_ID;
+  const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
   const deployUrl = `https://${project.slug}.${siteDomain}`;
-  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
+  const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
 
-  return c.html(
-    <Layout title={project.slug} username={c.get('user').login}>
+  return context.html(
+    <Layout title={project.slug} username={context.get('user').login}>
       <h1>{project.slug}</h1>
 
       <table>
@@ -193,13 +193,13 @@ app.get('/:id', async (c) => {
 });
 
 // POST /projects/:id/delete
-app.post('/:id/delete', async (c) => {
-  const project = await getProject(c.get('db'), c.req.param('id'));
+app.post('/:id/delete', async (context) => {
+  const project = await getProject(context.get('db'), context.req.param('id'));
   if (!project) {
-    return c.html('<h1>Project not found</h1>', 404);
+    return context.html('<h1>Project not found</h1>', 404);
   }
-  await teardownProject(c, project.id, project);
-  return c.redirect('/admin/projects');
+  await teardownProject(context, project.id, project);
+  return context.redirect('/admin/projects');
 });
 
 export default app;

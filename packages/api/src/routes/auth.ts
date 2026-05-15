@@ -61,19 +61,19 @@ export function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
 }
 
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
-app.get('/login', async (c) => {
-  const redirect = c.req.query('redirect');
+app.get('/login', async (context) => {
+  const redirect = context.req.query('redirect');
   if (!redirect) {
-    return c.json({ error: 'redirect parameter is required' }, 400);
+    return context.json({ error: 'redirect parameter is required' }, 400);
   }
 
-  if (!isAllowedRedirect(redirect, c.env.DASHBOARD_URL)) {
-    return c.json({ error: 'redirect must be a localhost or dashboard URL' }, 400);
+  if (!isAllowedRedirect(redirect, context.env.DASHBOARD_URL)) {
+    return context.json({ error: 'redirect must be a localhost or dashboard URL' }, 400);
   }
 
-  const provider = c.req.query('provider') ?? 'github';
+  const provider = context.req.query('provider') ?? 'github';
   if (provider !== 'github' && provider !== 'google') {
-    return c.json({ error: 'provider must be github or google' }, 400);
+    return context.json({ error: 'provider must be github or google' }, 400);
   }
 
   const nonce = crypto.randomUUID();
@@ -81,18 +81,18 @@ app.get('/login', async (c) => {
   // Store nonce in PostgreSQL so callback can validate it (prevents login CSRF / replay).
   // Not KV: login and callback can hit different CF colos, and KV's eventual consistency
   // would make the lookup flaky. PG also gives us atomic DELETE for true single-use.
-  const db = c.get('db');
+  const db = context.get('db');
   await storeOAuthNonce(db, nonce, 600);
 
   const stateData = JSON.stringify({ redirect, nonce, provider });
   const stateEncoded = btoa(stateData);
-  const signature = await hmacSignState(stateEncoded, c.env.JWT_SECRET);
+  const signature = await hmacSignState(stateEncoded, context.env.JWT_SECRET);
   const state = `${stateEncoded}.${signature}`;
 
-  const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
+  const redirectUri = context.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
 
   // Bind nonce to this browser to prevent login CSRF / session swapping
-  setCookie(c, 'oauth_nonce', nonce, {
+  setCookie(context, 'oauth_nonce', nonce, {
     httpOnly: true,
     secure: true,
     sameSite: 'Lax',
@@ -101,35 +101,35 @@ app.get('/login', async (c) => {
   });
 
   if (provider === 'google') {
-    const url = getGoogleAuthorizeUrl(c.env.GOOGLE_CLIENT_ID, redirectUri, state);
-    return c.redirect(url);
+    const url = getGoogleAuthorizeUrl(context.env.GOOGLE_CLIENT_ID, redirectUri, state);
+    return context.redirect(url);
   }
 
-  const url = getGitHubAuthorizeUrl(c.env.GITHUB_CLIENT_ID, redirectUri, state);
-  return c.redirect(url);
+  const url = getGitHubAuthorizeUrl(context.env.GITHUB_CLIENT_ID, redirectUri, state);
+  return context.redirect(url);
 });
 
 // GET /auth/callback?code=...&state=...
-app.get('/callback', async (c) => {
-  const code = c.req.query('code');
-  const state = c.req.query('state');
+app.get('/callback', async (context) => {
+  const code = context.req.query('code');
+  const state = context.req.query('state');
 
   if (!code || !state) {
-    return c.json({ error: 'missing code or state' }, 400);
+    return context.json({ error: 'missing code or state' }, 400);
   }
 
   // Verify state HMAC
   const dotIndex = state.lastIndexOf('.');
   if (dotIndex === -1) {
-    return c.json({ error: 'invalid state' }, 400);
+    return context.json({ error: 'invalid state' }, 400);
   }
 
   const stateEncoded = state.slice(0, dotIndex);
   const signature = state.slice(dotIndex + 1);
 
-  const valid = await hmacVerifyState(stateEncoded, signature, c.env.JWT_SECRET);
+  const valid = await hmacVerifyState(stateEncoded, signature, context.env.JWT_SECRET);
   if (!valid) {
-    return c.json({ error: 'invalid state signature' }, 400);
+    return context.json({ error: 'invalid state signature' }, 400);
   }
 
   const { redirect, nonce, provider } = JSON.parse(atob(stateEncoded)) as {
@@ -141,26 +141,26 @@ app.get('/callback', async (c) => {
   // Verify the nonce matches the cookie set during login redirect.
   // This binds the OAuth flow to the browser that initiated it,
   // preventing login CSRF / session swapping attacks.
-  const cookieNonce = getCookie(c, 'oauth_nonce');
+  const cookieNonce = getCookie(context, 'oauth_nonce');
   if (!cookieNonce || cookieNonce !== nonce) {
-    return c.json({ error: 'OAuth session mismatch' }, 400);
+    return context.json({ error: 'OAuth session mismatch' }, 400);
   }
 
   // Validate and consume nonce atomically (single-use, 10-minute TTL).
   // Uses PostgreSQL — not KV — for strong consistency across colos.
-  const db = c.get('db');
+  const db = context.get('db');
   const nonceValid = await consumeOAuthNonce(db, nonce);
   if (!nonceValid) {
-    return c.json({ error: 'invalid or expired OAuth state' }, 400);
+    return context.json({ error: 'invalid or expired OAuth state' }, 400);
   }
 
   // Clear the cookie only after successful validation so stale callbacks
   // from duplicate tabs don't invalidate a legitimate in-progress login.
-  deleteCookie(c, 'oauth_nonce', { path: '/auth/callback' });
+  deleteCookie(context, 'oauth_nonce', { path: '/auth/callback' });
 
   // Re-validate redirect after decoding
-  if (!isAllowedRedirect(redirect, c.env.DASHBOARD_URL)) {
-    return c.json({ error: 'invalid redirect' }, 400);
+  if (!isAllowedRedirect(redirect, context.env.DASHBOARD_URL)) {
+    return context.json({ error: 'invalid redirect' }, 400);
   }
 
   const resolvedProvider = provider ?? 'github';
@@ -170,10 +170,10 @@ app.get('/callback', async (c) => {
   let emailVerified: boolean;
 
   if (resolvedProvider === 'google') {
-    const redirectUri = c.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
+    const redirectUri = context.env.AUTH_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
     const googleToken = await exchangeGoogleCode(
-      c.env.GOOGLE_CLIENT_ID,
-      c.env.GOOGLE_CLIENT_SECRET,
+      context.env.GOOGLE_CLIENT_ID,
+      context.env.GOOGLE_CLIENT_SECRET,
       code,
       redirectUri,
     );
@@ -184,8 +184,8 @@ app.get('/callback', async (c) => {
     emailVerified = googleUser.emailVerified;
   } else {
     const ghToken = await exchangeCodeForToken(
-      c.env.GITHUB_CLIENT_ID,
-      c.env.GITHUB_CLIENT_SECRET,
+      context.env.GITHUB_CLIENT_ID,
+      context.env.GITHUB_CLIENT_SECRET,
       code,
     );
     const ghUser = await getGitHubUser(ghToken);
@@ -194,7 +194,8 @@ app.get('/callback', async (c) => {
     email = ghUser.email;
     emailVerified = ghUser.emailVerified;
   }
-  const previewRepo = resolvedProvider === 'github' ? getGitHubPreviewRepoConfig(c.env) : null;
+  const previewRepo =
+    resolvedProvider === 'github' ? getGitHubPreviewRepoConfig(context.env) : null;
 
   // Upsert user — check oauth_accounts first, then email, then create
   let user = await getUserByOAuthAccount(db, resolvedProvider, providerId);
@@ -222,7 +223,7 @@ app.get('/callback', async (c) => {
   let createdUser = false;
   if (!user) {
     // Check signup allowlist (new users only)
-    const enabled = await c.env.ROUTING.get('signup:enabled');
+    const enabled = await context.env.ROUTING.get('signup:enabled');
     if (enabled === 'true') {
       let allowedByRepoAccess = false;
       if (resolvedProvider === 'github' && previewRepo) {
@@ -233,12 +234,12 @@ app.get('/callback', async (c) => {
         }
       }
 
-      const entries = allowedByRepoAccess ? [] : await getAllowlist(c.env.ROUTING);
+      const entries = allowedByRepoAccess ? [] : await getAllowlist(context.env.ROUTING);
       if (
         !allowedByRepoAccess &&
         !isSignupAllowed(resolvedProvider, login, emailVerified ? email : null, entries)
       ) {
-        return c.redirect('/signup-restricted');
+        return context.redirect('/signup-restricted');
       }
     }
     user = await db.transaction(async (tx) => {
@@ -263,9 +264,9 @@ app.get('/callback', async (c) => {
       console.error(`Failed to accept invitation for ${email} (user ${user.id}):`, err);
     }
     if (createdUser) {
-      if (c.env.EMAIL) {
-        c.executionCtx.waitUntil(
-          sendWelcomeEmail(c.env.EMAIL, email, login).catch((err) =>
+      if (context.env.EMAIL) {
+        context.executionCtx.waitUntil(
+          sendWelcomeEmail(context.env.EMAIL, email, login).catch((err) =>
             console.error(`[welcome-email] Failed for ${email}:`, err),
           ),
         );
@@ -275,7 +276,7 @@ app.get('/callback', async (c) => {
 
   if (resolvedProvider === 'github') {
     if (previewRepo) {
-      c.executionCtx.waitUntil(
+      context.executionCtx.waitUntil(
         ensureGitHubPreviewRepoAccess(previewRepo, login).catch((err) =>
           console.error(`[github-preview] Failed to grant void-sdk/void access to ${login}:`, err),
         ),
@@ -284,7 +285,7 @@ app.get('/callback', async (c) => {
   }
 
   // Sign JWT
-  const jwt = await signJwt({ sub: user.id, login, aud: 'api' }, c.env.JWT_SECRET);
+  const jwt = await signJwt({ sub: user.id, login, aud: 'api' }, context.env.JWT_SECRET);
 
   const redirectUrl = new URL(redirect);
 
@@ -300,23 +301,23 @@ app.get('/callback', async (c) => {
     redirectUrl.searchParams.set('code', authCode);
   }
 
-  return c.redirect(redirectUrl.toString());
+  return context.redirect(redirectUrl.toString());
 });
 
 // POST /auth/exchange — single-use code → JWT (called by dashboard callback)
-app.post('/exchange', async (c) => {
-  const { code } = await c.req.json<{ code: string }>();
+app.post('/exchange', async (context) => {
+  const { code } = await context.req.json<{ code: string }>();
   if (!code) {
-    return c.json({ error: 'missing code' }, 400);
+    return context.json({ error: 'missing code' }, 400);
   }
 
-  const db = c.get('db');
+  const db = context.get('db');
   const jwt = await consumeAuthCode(db, code);
   if (!jwt) {
-    return c.json({ error: 'invalid or expired code' }, 400);
+    return context.json({ error: 'invalid or expired code' }, 400);
   }
 
-  return c.json({ token: jwt });
+  return context.json({ token: jwt });
 });
 
 export default app;

@@ -6,19 +6,19 @@ import { getCurrentBillingPeriodStart } from '../tiers.ts';
 const projectUsage = new Hono<ApiEnv>()
 
   // Project usage for current billing period
-  .get('/:id/usage', async (c) => {
-    const projectId = c.req.param('id');
-    const project = await getProject(c.get('db'), projectId);
+  .get('/:id/usage', async (context) => {
+    const projectId = context.req.param('id');
+    const project = await getProject(context.get('db'), projectId);
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
     // Dev bypass — skip slow CF Analytics Engine API calls
-    if (isDevBypass(c.env)) {
-      return c.json({
+    if (isDevBypass(context.env)) {
+      return context.json({
         projectId,
         billingPeriodStart: new Date().toISOString(),
         requests: 0,
@@ -27,14 +27,20 @@ const projectUsage = new Hono<ApiEnv>()
       });
     }
 
-    const since = getCurrentBillingPeriodStart(c.get('user').billing_cycle_start);
-    const requestsDataset = getRequestsDataset(c.env);
+    const since = getCurrentBillingPeriodStart(context.get('user').billing_cycle_start);
+    const requestsDataset = getRequestsDataset(context.env);
     const [usage, aiUsage] = await Promise.all([
-      queryProjectUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, requestsDataset, projectId, since),
-      queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, projectId, since),
+      queryProjectUsage(
+        context.env.CF_ACCOUNT_ID,
+        context.env.CF_API_TOKEN,
+        requestsDataset,
+        projectId,
+        since,
+      ),
+      queryProjectAiUsage(context.env.CF_ACCOUNT_ID, context.env.CF_API_TOKEN, projectId, since),
     ]);
 
-    return c.json({
+    return context.json({
       projectId,
       billingPeriodStart: since.toISOString(),
       ...usage,
@@ -45,15 +51,15 @@ const projectUsage = new Hono<ApiEnv>()
 const accountUsage = new Hono<ApiEnv>()
 
   // Aggregate usage across all user's projects
-  .get('/', async (c) => {
-    const projects = await getProjectsByUserId(c.get('db'), c.get('user').id);
+  .get('/', async (context) => {
+    const projects = await getProjectsByUserId(context.get('db'), context.get('user').id);
     if (projects.length === 0) {
-      return c.json({ requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] });
+      return context.json({ requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] });
     }
 
     // Dev bypass — skip slow CF Analytics Engine API calls
-    if (isDevBypass(c.env)) {
-      return c.json({
+    if (isDevBypass(context.env)) {
+      return context.json({
         billingPeriodStart: new Date().toISOString(),
         requests: 0,
         bandwidthBytes: 0,
@@ -68,19 +74,19 @@ const accountUsage = new Hono<ApiEnv>()
       });
     }
 
-    const since = getCurrentBillingPeriodStart(c.get('user').billing_cycle_start);
-    const requestsDataset = getRequestsDataset(c.env);
+    const since = getCurrentBillingPeriodStart(context.get('user').billing_cycle_start);
+    const requestsDataset = getRequestsDataset(context.env);
 
     const [usageMap, ...aiUsages] = await Promise.all([
       queryBatchProjectUsage(
-        c.env.CF_ACCOUNT_ID,
-        c.env.CF_API_TOKEN,
+        context.env.CF_ACCOUNT_ID,
+        context.env.CF_API_TOKEN,
         requestsDataset,
         projects.map((p) => p.id),
         since,
       ),
       ...projects.map((p) =>
-        queryProjectAiUsage(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, p.id, since),
+        queryProjectAiUsage(context.env.CF_ACCOUNT_ID, context.env.CF_API_TOKEN, p.id, since),
       ),
     ]);
     const projectUsages = projects.map((p, i) => ({
@@ -99,7 +105,11 @@ const accountUsage = new Hono<ApiEnv>()
       { requests: 0, bandwidthBytes: 0, aiNeurons: 0 },
     );
 
-    return c.json({ billingPeriodStart: since.toISOString(), ...totals, projects: projectUsages });
+    return context.json({
+      billingPeriodStart: since.toISOString(),
+      ...totals,
+      projects: projectUsages,
+    });
   });
 
 type AnalyticsRow = Readonly<{

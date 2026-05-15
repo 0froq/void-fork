@@ -81,17 +81,17 @@ function mockHealthResult(): HealthResult {
 
 export const adminSystem = new Hono<ApiEnv>();
 
-adminSystem.get('/cli-versions', async (c) => {
-  const tz = (c.req.raw.cf?.timezone as string | undefined) ?? undefined;
+adminSystem.get('/cli-versions', async (context) => {
+  const tz = (context.req.raw.cf?.timezone as string | undefined) ?? undefined;
   const [last30Days, allTime] = await Promise.all([
-    getCliVersionDeploymentStats(c.get('db'), { sinceDays: 30 }),
-    getCliVersionDeploymentStats(c.get('db')),
+    getCliVersionDeploymentStats(context.get('db'), { sinceDays: 30 }),
+    getCliVersionDeploymentStats(context.get('db')),
   ]);
-  return c.html(
+  return context.html(
     <CliVersionsPage
       last30Days={last30Days}
       allTime={allTime}
-      username={c.get('user').login}
+      username={context.get('user').login}
       tz={tz}
     />,
   );
@@ -99,15 +99,15 @@ adminSystem.get('/cli-versions', async (c) => {
 const TOP_PROJECT_LIMIT = 10;
 const TOP_PROJECT_WINDOW_MS = 60 * 60 * 1000;
 
-async function getTopProjectsLastHour(c: Parameters<Handler<ApiEnv>>[0]) {
-  if (isDevBypass(c.env)) {
+async function getTopProjectsLastHour(context: Parameters<Handler<ApiEnv>>[0]) {
+  if (isDevBypass(context.env)) {
     return [];
   }
 
   const topTraffic = await queryTopProjectTraffic(
-    c.env.CF_ACCOUNT_ID,
-    c.env.CF_API_TOKEN,
-    getRequestsDataset(c.env),
+    context.env.CF_ACCOUNT_ID,
+    context.env.CF_API_TOKEN,
+    getRequestsDataset(context.env),
     new Date(Date.now() - TOP_PROJECT_WINDOW_MS),
     TOP_PROJECT_LIMIT,
   );
@@ -116,7 +116,7 @@ async function getTopProjectsLastHour(c: Parameters<Handler<ApiEnv>>[0]) {
   }
 
   const projects = await getProjectsWithOwnerByIds(
-    c.get('db'),
+    context.get('db'),
     topTraffic.map((row) => row.projectId),
   );
   const projectMap = new Map(projects.map((project) => [project.id, project]));
@@ -137,13 +137,13 @@ async function getTopProjectsLastHour(c: Parameters<Handler<ApiEnv>>[0]) {
     .filter((row): row is NonNullable<typeof row> => row !== null);
 }
 
-adminSystem.get('/health', async (c) => {
-  if (isDevBypass(c.env)) {
-    return c.json(mockHealthResult());
+adminSystem.get('/health', async (context) => {
+  if (isDevBypass(context.env)) {
+    return context.json(mockHealthResult());
   }
 
-  const cloudDomain = cloudDomainFromHost(new URL(c.req.url).hostname);
-  const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
+  const cloudDomain = cloudDomainFromHost(new URL(context.req.url).hostname);
+  const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
 
   // API check is implicit — we're serving this request, so the API is up.
   const apiCheck: HealthCheck = { name: 'api', ok: true, latencyMs: 0 };
@@ -156,43 +156,43 @@ adminSystem.get('/health', async (c) => {
       checkUrl('dispatch', `https://test.${siteDomain}/health`, {
         'X-Health-Check': 'void-admin',
       }),
-      checkDb(c.get('db')),
+      checkDb(context.get('db')),
     ])),
   ];
 
-  return c.json({ checks, allOk: checks.every((ch) => ch.ok) } satisfies HealthResult);
+  return context.json({ checks, allOk: checks.every((ch) => ch.ok) } satisfies HealthResult);
 });
 
 // One-shot migration endpoint for the queue relay token rollout:
 // stamps `proxyToken` on any legacy `queue:*` KV entry written before
 // dispatch started forwarding `x-void-internal`. Idempotent — re-running
 // only touches entries missing a token.
-adminSystem.post('/backfill-queue-tokens', async (c) => {
-  const result = await backfillQueueTokens(c.env.ROUTING, {
-    accountId: c.env.CF_ACCOUNT_ID,
-    apiToken: c.env.CF_API_TOKEN,
-    dispatchNamespace: c.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE,
-    jwtSecret: c.env.JWT_SECRET,
+adminSystem.post('/backfill-queue-tokens', async (context) => {
+  const result = await backfillQueueTokens(context.env.ROUTING, {
+    accountId: context.env.CF_ACCOUNT_ID,
+    apiToken: context.env.CF_API_TOKEN,
+    dispatchNamespace: context.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE,
+    jwtSecret: context.env.JWT_SECRET,
   });
-  return c.json(result);
+  return context.json(result);
 });
 
-export const dashboardHandler: Handler<ApiEnv> = async (c) => {
+export const dashboardHandler: Handler<ApiEnv> = async (context) => {
   const [stats, projects, deployments, topProjects] = await Promise.all([
-    getSystemStats(c.get('db')),
-    getAllProjectsWithOwner(c.get('db'), 5, 0),
-    getAllDeploymentsWithProject(c.get('db'), 5, 0),
-    getTopProjectsLastHour(c),
+    getSystemStats(context.get('db')),
+    getAllProjectsWithOwner(context.get('db'), 5, 0),
+    getAllDeploymentsWithProject(context.get('db'), 5, 0),
+    getTopProjectsLastHour(context),
   ]);
-  const siteDomain = c.env.SITE_DOMAIN ?? SITE_DOMAIN;
-  return c.html(
+  const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+  return context.html(
     <DashboardPage
       stats={stats}
       projects={projects}
       deployments={deployments}
       topProjects={topProjects}
       siteDomain={siteDomain}
-      username={c.get('user').login}
+      username={context.get('user').login}
     />,
   );
 };

@@ -233,13 +233,13 @@ async function responseFromGateway(response: Response, streamAsSse: boolean): Pr
   });
 }
 
-ai.post('/run', async (c) => {
-  const body = c.get('body');
-  const projectId = c.get('projectId');
+ai.post('/run', async (context) => {
+  const body = context.get('body');
+  const projectId = context.get('projectId');
   const model = asString(body.model);
 
   if (!model) {
-    return c.json({ error: 'model required' }, 400);
+    return context.json({ error: 'model required' }, 400);
   }
 
   const options = {
@@ -248,36 +248,36 @@ ai.post('/run', async (c) => {
   };
 
   try {
-    const result = await c.env.AI.run(model, body.inputs, options);
+    const result = await context.env.AI.run(model, body.inputs, options);
     return responseFromAiResult(result, hasStreamFlag(body.inputs) && body.inputs.stream === true);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('AI inference error:', message);
-    return c.json({ error: 'inference error' }, 502);
+    return context.json({ error: 'inference error' }, 502);
   }
 });
 
-ai.post('/gateway', async (c) => {
-  const body = c.get('body');
-  const projectId = c.get('projectId');
+ai.post('/gateway', async (context) => {
+  const body = context.get('body');
+  const projectId = context.get('projectId');
   const modelPath = asString(body.model);
   const providerKey = asString(body.providerKey);
   const endpoint = asString(body.endpoint) ?? 'chat/completions';
 
   if (!modelPath) {
-    return c.json({ error: 'model required' }, 400);
+    return context.json({ error: 'model required' }, 400);
   }
   if (!providerKey) {
-    return c.json({ error: 'providerKey required' }, 400);
+    return context.json({ error: 'providerKey required' }, 400);
   }
   if (!ALLOWED_GATEWAY_ENDPOINTS.has(endpoint)) {
-    return c.json({ error: 'unsupported endpoint' }, 400);
+    return context.json({ error: 'unsupported endpoint' }, 400);
   }
 
   // Parse "provider/model" format (e.g. "openai/gpt-4o")
   const slashIdx = modelPath.indexOf('/');
   if (slashIdx <= 0 || slashIdx === modelPath.length - 1) {
-    return c.json({ error: 'model must use provider/model format' }, 400);
+    return context.json({ error: 'model must use provider/model format' }, 400);
   }
   const provider = modelPath.slice(0, slashIdx);
   const model = modelPath.slice(slashIdx + 1);
@@ -285,7 +285,7 @@ ai.post('/gateway', async (c) => {
   const { stream } = asRecord(body.inputs);
   const streamAsSse = endpoint === 'chat/completions' && stream === true;
   try {
-    const gateway = c.env.AI.gateway(GATEWAY_ID);
+    const gateway = context.env.AI.gateway(GATEWAY_ID);
     const query =
       endpoint === 'images/edits'
         ? imageEditForm(model, body.inputs)
@@ -308,41 +308,41 @@ ai.post('/gateway', async (c) => {
       } catch {
         error = text;
       }
-      return c.json({ error }, response.status as 400);
+      return context.json({ error }, response.status as 400);
     }
 
     return responseFromGateway(response, streamAsSse);
   } catch (err) {
     if (err instanceof BadRequestError) {
-      return c.json({ error: err.message }, 400);
+      return context.json({ error: err.message }, 400);
     }
     const message = err instanceof Error ? err.message : String(err);
     console.error('AI Gateway error:', message);
-    return c.json({ error: 'gateway error' }, 502);
+    return context.json({ error: 'gateway error' }, 502);
   }
 });
 
-ai.post('/models', async (c) => {
-  const body = c.get('body');
+ai.post('/models', async (context) => {
+  const body = context.get('body');
   try {
-    const result = await c.env.AI.models(body.inputs);
-    return c.json(result);
+    const result = await context.env.AI.models(body.inputs);
+    return context.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('AI inference error:', message);
-    return c.json({ error: 'inference error' }, 502);
+    return context.json({ error: 'inference error' }, 502);
   }
 });
 
-ai.post('/toMarkdown', async (c) => {
-  const body = c.get('body');
+ai.post('/toMarkdown', async (context) => {
+  const body = context.get('body');
   try {
-    const result = await c.env.AI.toMarkdown(body.inputs, body.options);
-    return c.json(result);
+    const result = await context.env.AI.toMarkdown(body.inputs, body.options);
+    return context.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('AI inference error:', message);
-    return c.json({ error: 'inference error' }, 502);
+    return context.json({ error: 'inference error' }, 502);
   }
 });
 

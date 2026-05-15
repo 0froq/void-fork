@@ -31,36 +31,36 @@ function isLocalHost(host: string | undefined): boolean {
   return host.startsWith('localhost') || host.startsWith('127.0.0.1');
 }
 
-export default defineMiddleware(async (c, next) => {
-  const path = c.req.path;
+export default defineMiddleware(async (context, next) => {
+  const path = context.req.path;
 
   if (isPublicDashboardPath(path)) {
-    c.set('shared', { user: null, canAccessDashboard: false });
+    context.set('shared', { user: null, canAccessDashboard: false });
     return next();
   }
 
-  const token = getCookie(c, 'void_token');
+  const token = getCookie(context, 'void_token');
   if (!token) {
-    c.set('shared', { user: null, canAccessDashboard: false });
-    return c.redirect('/login');
+    context.set('shared', { user: null, canAccessDashboard: false });
+    return context.redirect('/login');
   }
 
-  c.set('token', token);
-  const user = await getCurrentUser(c);
+  context.set('token', token);
+  const user = await getCurrentUser(context);
   if (!user) {
-    deleteCookie(c, 'void_token', { path: '/' });
-    c.set('shared', { user: null, canAccessDashboard: false });
-    return c.redirect('/login');
+    deleteCookie(context, 'void_token', { path: '/' });
+    context.set('shared', { user: null, canAccessDashboard: false });
+    return context.redirect('/login');
   }
 
-  const canAccessDashboard = user.role === 'admin' || isLocalHost(c.req.header('host'));
-  c.set('userId', user.id);
-  c.set('dashboardUser', user);
-  c.set('canAccessDashboard', canAccessDashboard);
-  c.set('shared', { user, canAccessDashboard });
+  const canAccessDashboard = user.role === 'admin' || isLocalHost(context.req.header('host'));
+  context.set('userId', user.id);
+  context.set('dashboardUser', user);
+  context.set('canAccessDashboard', canAccessDashboard);
+  context.set('shared', { user, canAccessDashboard });
 
   if (!canAccessDashboard && path !== '/') {
-    return c.redirect('/');
+    return context.redirect('/');
   }
 
   return next();

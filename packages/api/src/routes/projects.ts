@@ -416,23 +416,23 @@ function hasUnauthorizedDestructive(
 const app = new Hono<ApiEnv>()
 
   // List all projects for the current user
-  .get('/', async (c) => {
-    const userId = c.get('user').id;
-    const projects = await getProjectsByUserId(c.get('db'), userId);
+  .get('/', async (context) => {
+    const userId = context.get('user').id;
+    const projects = await getProjectsByUserId(context.get('db'), userId);
 
     // Batch-fetch domains for all projects in a single query
     const projectIds = projects.map((p) => p.id);
     const [domainMap, latestDeployments, requestOverview] =
       projectIds.length > 0
         ? await Promise.all([
-            getDomainsByProjectIds(c.get('db'), projectIds),
-            getLatestDeploymentsByProjectIds(c.get('db'), projectIds),
-            isDevBypass(c.env)
+            getDomainsByProjectIds(context.get('db'), projectIds),
+            getLatestDeploymentsByProjectIds(context.get('db'), projectIds),
+            isDevBypass(context.env)
               ? Promise.resolve(new Map())
               : queryProjectRequestOverview(
-                  c.env.CF_ACCOUNT_ID,
-                  c.env.CF_API_TOKEN,
-                  getRequestsDataset(c.env),
+                  context.env.CF_ACCOUNT_ID,
+                  context.env.CF_API_TOKEN,
+                  getRequestsDataset(context.env),
                   projectIds,
                 ),
           ])
@@ -460,131 +460,137 @@ const app = new Hono<ApiEnv>()
       };
     });
 
-    return c.json(projectsWithSummaries.sort(sortProjectList));
+    return context.json(projectsWithSummaries.sort(sortProjectList));
   })
 
   // Create a new project
-  .post('/', async (c) => {
-    const body = await c.req.json<{ slug: string }>();
+  .post('/', async (context) => {
+    const body = await context.req.json<{ slug: string }>();
 
     if (!body.slug) {
-      return c.json({ error: 'slug is required' }, 400);
+      return context.json({ error: 'slug is required' }, 400);
     }
 
     // Validate slug format: lowercase alphanumeric + dashes, no leading/trailing dashes
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(body.slug)) {
-      return c.json({ error: 'slug must be lowercase alphanumeric with dashes' }, 400);
+      return context.json({ error: 'slug must be lowercase alphanumeric with dashes' }, 400);
     }
 
     if (RESERVED_SLUGS.has(body.slug)) {
-      return c.json({ error: 'this name is reserved' }, 400);
+      return context.json({ error: 'this name is reserved' }, 400);
     }
 
     // Short slugs (5 chars or fewer) are reserved for paid plans
     if (body.slug.length <= 5) {
-      if (c.get('user').plan === 'free') {
-        return c.json({ error: 'short slugs (5 characters or fewer) require a paid plan' }, 403);
+      if (context.get('user').plan === 'free') {
+        return context.json(
+          { error: 'short slugs (5 characters or fewer) require a paid plan' },
+          403,
+        );
       }
     }
 
     // Check for slug uniqueness
-    const existing = await getProjectBySlug(c.get('db'), body.slug);
+    const existing = await getProjectBySlug(context.get('db'), body.slug);
     if (existing) {
-      return c.json({ error: 'slug already taken' }, 409);
+      return context.json({ error: 'slug already taken' }, 409);
     }
 
-    const userId = c.get('user').id;
+    const userId = context.get('user').id;
     try {
-      const project = await createProject(c.get('db'), userId, body.slug);
-      return c.json(project, 201);
+      const project = await createProject(context.get('db'), userId, body.slug);
+      return context.json(project, 201);
     } catch (err) {
       // Unique constraint violation — slug was taken between check and insert
       if (
         err instanceof Error &&
         err.message.includes('duplicate key value violates unique constraint')
       ) {
-        return c.json({ error: 'slug already taken' }, 409);
+        return context.json({ error: 'slug already taken' }, 409);
       }
       throw err;
     }
   })
 
   // Get project by ID
-  .get('/:id', async (c) => {
-    const project = await getProject(c.get('db'), c.req.param('id'));
+  .get('/:id', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
-    return c.json(project);
+    return context.json(project);
   })
 
   // List deployments for a project
-  .get('/:id/deployments', async (c) => {
-    const project = await getProject(c.get('db'), c.req.param('id'));
+  .get('/:id/deployments', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
 
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
-    const deployments = await getProjectDeployments(c.get('db'), project.id, 20);
-    return c.json({
+    const deployments = await getProjectDeployments(context.get('db'), project.id, 20);
+    return context.json({
       deployments,
       activeDeploymentId: project.active_deployment_id,
     });
   })
 
   // Request cancellation of an active deployment
-  .post('/:id/deployments/:deploymentId/cancel', async (c) => {
-    const projectId = c.req.param('id');
-    const deploymentId = c.req.param('deploymentId');
-    const project = await getProject(c.get('db'), projectId);
+  .post('/:id/deployments/:deploymentId/cancel', async (context) => {
+    const projectId = context.req.param('id');
+    const deploymentId = context.req.param('deploymentId');
+    const project = await getProject(context.get('db'), projectId);
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
-    const deployment = await getDeployment(c.get('db'), deploymentId);
+    const deployment = await getDeployment(context.get('db'), deploymentId);
     if (!deployment || deployment.project_id !== projectId) {
-      return c.json({ error: 'deployment not found' }, 404);
+      return context.json({ error: 'deployment not found' }, 404);
     }
 
-    const canceling = await cancelDeployment(c.get('db'), deploymentId, 'canceled by user');
+    const canceling = await cancelDeployment(context.get('db'), deploymentId, 'canceled by user');
     if (!canceling) {
-      return c.json({ error: 'deployment already completed', status: deployment.status }, 409);
+      return context.json(
+        { error: 'deployment already completed', status: deployment.status },
+        409,
+      );
     }
 
-    return c.json({ ok: true, deploymentId, status: 'canceling' });
+    return context.json({ ok: true, deploymentId, status: 'canceling' });
   })
 
   // Rollback to a previous deployment
-  .post('/:id/rollback', async (c) => {
-    const projectId = c.req.param('id');
-    const project = await getProject(c.get('db'), projectId);
+  .post('/:id/rollback', async (context) => {
+    const projectId = context.req.param('id');
+    const project = await getProject(context.get('db'), projectId);
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
-    const { deploymentId, allowDestructive } = await c.req.json<{
+    const { deploymentId, allowDestructive } = await context.req.json<{
       deploymentId: string;
       allowDestructive?: ReadonlyArray<string>;
     }>();
     if (!deploymentId) {
-      return c.json({ error: 'deploymentId is required' }, 400);
+      return context.json({ error: 'deploymentId is required' }, 400);
     }
     if (allowDestructive !== undefined) {
       if (!Array.isArray(allowDestructive) || allowDestructive.some((m) => typeof m !== 'string')) {
-        return c.json(
+        return context.json(
           { error: 'allowDestructive must be an array of migration name strings' },
           400,
         );
@@ -594,15 +600,15 @@ const app = new Hono<ApiEnv>()
     // Pre-lock sanity check: reject fast if the deployment plainly does
     // not belong to this project. The authoritative check runs inside
     // the lock below against a freshly-read row.
-    const preCheck = await getDeployment(c.get('db'), deploymentId);
+    const preCheck = await getDeployment(context.get('db'), deploymentId);
     if (!preCheck || preCheck.project_id !== projectId) {
-      return c.json({ error: 'deployment not found' }, 404);
+      return context.json({ error: 'deployment not found' }, 404);
     }
     if (!preCheck.retained) {
-      return c.json({ error: 'deployment not retained (worker script evicted)' }, 400);
+      return context.json({ error: 'deployment not retained (worker script evicted)' }, 400);
     }
 
-    const planLimits = getPlanLimits(c.get('user').plan);
+    const planLimits = getPlanLimits(context.get('user').plan);
     const dispatchLimits =
       planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
         ? {
@@ -633,7 +639,7 @@ const app = new Hono<ApiEnv>()
     // renameAppliedMigrationsForProject.
     let rollbackResult: { migrationDiff: ReadonlyArray<string> };
     try {
-      rollbackResult = await c.get('db').transaction(async (tx) => {
+      rollbackResult = await context.get('db').transaction(async (tx) => {
         // Lock the project row via `SELECT … FOR UPDATE` — per-project,
         // collision-free, released automatically at tx end. MUST be the
         // first statement in the locked section so serialization is
@@ -726,7 +732,7 @@ const app = new Hono<ApiEnv>()
         // snapshot or the eagerly-written resources table. See queue
         // sweep below for why the union uses `deployed_at IS NOT NULL`.
         const workerName = getProjectDeploymentWorkerName(lockedProject.slug, target.id);
-        const existingRouting = await c.env.ROUTING.get(lockedProject.slug);
+        const existingRouting = await context.env.ROUTING.get(lockedProject.slug);
         const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
         const isStaticDeployment = lockedProject.type === 'static' || lockedProject.type === 'spa';
 
@@ -766,7 +772,7 @@ const app = new Hono<ApiEnv>()
         // already landed but subsequent external retries are
         // idempotent (KV PUT is an overwrite; queue/domain routes are
         // keyed by slug/hostname; cron DO sync is a replace).
-        await c.env.ROUTING.put(lockedProject.slug, routingJson);
+        await context.env.ROUTING.put(lockedProject.slug, routingJson);
 
         // Resolve the target worker's baked __VOID_PROXY_TOKEN once if
         // either cron or queues need it. Re-fetching on each path would
@@ -779,7 +785,7 @@ const app = new Hono<ApiEnv>()
         // is authoritative for both.
         const needsProxyToken = !!manifest?.schedules?.length || !!manifest?.queues?.length;
         const targetProxyToken = needsProxyToken
-          ? await resolveRollbackProxyToken(c.env, workerName, projectId)
+          ? await resolveRollbackProxyToken(context.env, workerName, projectId)
           : null;
 
         // Sync cron scheduler to point at the rollback target.
@@ -797,8 +803,8 @@ const app = new Hono<ApiEnv>()
         // is retried atomically; swallowing here would silently desync DO
         // state from the rolled-back manifest.
         if (manifest?.schedules?.length) {
-          const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-          await c.env.CRON_SCHEDULER.get(cronId).fetch(
+          const cronId = context.env.CRON_SCHEDULER.idFromName(projectId);
+          await context.env.CRON_SCHEDULER.get(cronId).fetch(
             new Request('https://do/sync', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -810,8 +816,8 @@ const app = new Hono<ApiEnv>()
             }),
           );
         } else {
-          const cronId = c.env.CRON_SCHEDULER.idFromName(projectId);
-          await c.env.CRON_SCHEDULER.get(cronId).fetch(
+          const cronId = context.env.CRON_SCHEDULER.idFromName(projectId);
+          await context.env.CRON_SCHEDULER.get(cronId).fetch(
             new Request('https://do/clear', { method: 'POST' }),
           );
         }
@@ -820,7 +826,7 @@ const app = new Hono<ApiEnv>()
         const projectDomains = await getDomainsByProjectId(txDb, projectId);
         for (const domain of projectDomains) {
           if (domain.status === 'active') {
-            await c.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
+            await context.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
           }
         }
 
@@ -871,7 +877,7 @@ const app = new Hono<ApiEnv>()
         }
         if (manifest?.queues?.length) {
           for (const q of manifest.queues) {
-            await c.env.ROUTING.put(
+            await context.env.ROUTING.put(
               `queue:${getProjectQueueName(projectId, q.name)}`,
               JSON.stringify({
                 workerName,
@@ -886,7 +892,7 @@ const app = new Hono<ApiEnv>()
           if (targetQueueNames.has(name)) {
             continue;
           }
-          await c.env.ROUTING.delete(`queue:${getProjectQueueName(projectId, name)}`);
+          await context.env.ROUTING.delete(`queue:${getProjectQueueName(projectId, name)}`);
         }
 
         return { migrationDiff: diff };
@@ -894,17 +900,17 @@ const app = new Hono<ApiEnv>()
     } catch (err) {
       if (err instanceof RollbackError) {
         if (err.destructiveMigrations) {
-          return c.json(
+          return context.json(
             { error: err.message, destructiveMigrations: err.destructiveMigrations },
             err.status,
           );
         }
-        return c.json({ error: err.message }, err.status);
+        return context.json({ error: err.message }, err.status);
       }
       throw err;
     }
 
-    return c.json({
+    return context.json({
       ok: true,
       deploymentId,
       migrationDiff: rollbackResult.migrationDiff,
@@ -912,20 +918,20 @@ const app = new Hono<ApiEnv>()
   })
 
   // Get migration status for a project
-  .get('/:id/migrations', async (c) => {
-    const project = await getProject(c.get('db'), c.req.param('id'));
+  .get('/:id/migrations', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
 
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
-    const resources = await getProjectResources(c.get('db'), project.id);
+    const resources = await getProjectResources(context.get('db'), project.id);
     const d1Resource = resources.find((r) => r.type === 'd1');
     if (!d1Resource) {
-      return c.json({ applied: [] });
+      return context.json({ applied: [] });
     }
 
     // Torn-read safety across an in-flight legacy → _void_migrations upgrade.
@@ -954,57 +960,69 @@ const app = new Hono<ApiEnv>()
     const byName = new Map<string, string>();
 
     try {
-      const legacy = await queryD1(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.cf_id, {
-        sql: 'SELECT name, applied_at FROM _migrations ORDER BY name',
-      });
+      const legacy = await queryD1(
+        context.env.CF_ACCOUNT_ID,
+        context.env.CF_API_TOKEN,
+        d1Resource.cf_id,
+        {
+          sql: 'SELECT name, applied_at FROM _migrations ORDER BY name',
+        },
+      );
       for (const r of legacy.results) {
         byName.set(r.name as string, r.applied_at as string);
       }
     } catch (err) {
       if (!isMissingTableError(err)) {
-        return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+        return context.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
     }
 
     try {
-      const result = await queryD1(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.cf_id, {
-        sql: 'SELECT name, applied_at FROM _void_migrations ORDER BY name',
-      });
+      const result = await queryD1(
+        context.env.CF_ACCOUNT_ID,
+        context.env.CF_API_TOKEN,
+        d1Resource.cf_id,
+        {
+          sql: 'SELECT name, applied_at FROM _void_migrations ORDER BY name',
+        },
+      );
       for (const r of result.results) {
         byName.set(r.name as string, r.applied_at as string);
       }
     } catch (err) {
       if (!isMissingTableError(err)) {
-        return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+        return context.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
     }
 
     const applied = Array.from(byName, ([name, applied_at]) => ({ name, applied_at })).sort(
       (a, b) => a.name.localeCompare(b.name),
     );
-    return c.json({ applied });
+    return context.json({ applied });
   })
 
   // Apply migrations to a project's remote D1 database
-  .post('/:id/migrations/apply', async (c) => {
-    const projectId = c.req.param('id');
-    const project = await getProject(c.get('db'), projectId);
+  .post('/:id/migrations/apply', async (context) => {
+    const projectId = context.req.param('id');
+    const project = await getProject(context.get('db'), projectId);
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
-    const body = await c.req.json<{ migrations: ReadonlyArray<{ name: string; sql: string }> }>();
+    const body = await context.req.json<{
+      migrations: ReadonlyArray<{ name: string; sql: string }>;
+    }>();
     if (!body.migrations || !Array.isArray(body.migrations)) {
-      return c.json({ error: 'migrations array required' }, 400);
+      return context.json({ error: 'migrations array required' }, 400);
     }
     const invalidEntry = body.migrations.find(
       (m) => typeof m.name !== 'string' || !m.name || typeof m.sql !== 'string',
     );
     if (invalidEntry) {
-      return c.json(
+      return context.json(
         { error: 'each migration must have a non-empty string "name" and string "sql"' },
         400,
       );
@@ -1012,7 +1030,7 @@ const app = new Hono<ApiEnv>()
     const nameSet = new Set<string>();
     for (const m of body.migrations) {
       if (nameSet.has(m.name)) {
-        return c.json({ error: `duplicate migration name: ${m.name}` }, 400);
+        return context.json({ error: `duplicate migration name: ${m.name}` }, 400);
       }
       nameSet.add(m.name);
     }
@@ -1026,7 +1044,7 @@ const app = new Hono<ApiEnv>()
     // overtaken by a /rename whose snapshot misses the unwritten row,
     // which would leave D1 and pg permanently diverged.
     try {
-      const outcome = await c.get('db').transaction(async (tx) => {
+      const outcome = await context.get('db').transaction(async (tx) => {
         const txDb = tx as unknown as Db;
         // Per-project row lock. Must be the first statement so all
         // subsequent reads/writes serialize against any concurrent
@@ -1041,8 +1059,8 @@ const app = new Hono<ApiEnv>()
 
         // Filter to pending-only before validating destructive patterns
         const applied = await ensureTrackingTable(
-          c.env.CF_ACCOUNT_ID,
-          c.env.CF_API_TOKEN,
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
           d1Resource.cf_id,
         );
         const pending = body.migrations.filter((m) => !applied.has(m.name));
@@ -1059,8 +1077,8 @@ const app = new Hono<ApiEnv>()
         }
 
         const result = await runRemoteMigrations(
-          c.env.CF_ACCOUNT_ID,
-          c.env.CF_API_TOKEN,
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
           d1Resource.cf_id,
           body.migrations,
           applied,
@@ -1117,32 +1135,35 @@ const app = new Hono<ApiEnv>()
           body: { ok: true, applied: result.applied, skipped: result.skipped },
         };
       });
-      return c.json(outcome.body, outcome.status);
+      return context.json(outcome.body, outcome.status);
     } catch (err) {
-      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+      return context.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        500,
+      );
     }
   })
 
   // Rename migration records in a project's remote D1 database
-  .post('/:id/migrations/rename', async (c) => {
-    const projectId = c.req.param('id');
-    const project = await getProject(c.get('db'), projectId);
+  .post('/:id/migrations/rename', async (context) => {
+    const projectId = context.req.param('id');
+    const project = await getProject(context.get('db'), projectId);
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
-    const body = await c.req.json<{ renames: ReadonlyArray<{ from: string; to: string }> }>();
+    const body = await context.req.json<{ renames: ReadonlyArray<{ from: string; to: string }> }>();
     if (!body.renames || !Array.isArray(body.renames) || body.renames.length === 0) {
-      return c.json({ error: 'renames array required' }, 400);
+      return context.json({ error: 'renames array required' }, 400);
     }
     const invalidRename = body.renames.find(
       (r) => typeof r.from !== 'string' || !r.from || typeof r.to !== 'string' || !r.to,
     );
     if (invalidRename) {
-      return c.json({ error: 'each rename must have non-empty string "from" and "to"' }, 400);
+      return context.json({ error: 'each rename must have non-empty string "from" and "to"' }, 400);
     }
 
     // Batch-level validation: the remote UPDATEs are non-atomic, so any
@@ -1153,13 +1174,13 @@ const app = new Hono<ApiEnv>()
     const toSet = new Set<string>();
     for (const { from } of body.renames) {
       if (fromSet.has(from)) {
-        return c.json({ error: 'duplicate "from" in rename batch' }, 400);
+        return context.json({ error: 'duplicate "from" in rename batch' }, 400);
       }
       fromSet.add(from);
     }
     for (const { to } of body.renames) {
       if (toSet.has(to)) {
-        return c.json({ error: 'duplicate "to" in rename batch' }, 400);
+        return context.json({ error: 'duplicate "to" in rename batch' }, 400);
       }
       toSet.add(to);
     }
@@ -1169,7 +1190,7 @@ const app = new Hono<ApiEnv>()
     // requests and keeps this handler's execution path strictly linear.
     for (const { to } of body.renames) {
       if (fromSet.has(to)) {
-        return c.json(
+        return context.json(
           {
             error:
               'rename "to" conflicts with another rename "from" in batch — chains not supported',
@@ -1186,7 +1207,7 @@ const app = new Hono<ApiEnv>()
     // (missing the new row), and /apply finally appends the pre-rename
     // name to pg.
     try {
-      const outcome = await c.get('db').transaction(async (tx) => {
+      const outcome = await context.get('db').transaction(async (tx) => {
         const txDb = tx as unknown as Db;
         // Per-project row lock. Must be the first statement so all
         // subsequent reads/writes serialize against any concurrent
@@ -1203,8 +1224,8 @@ const app = new Hono<ApiEnv>()
         // The returned set is the current applied state — reused for validation
         // below so we don't issue a redundant SELECT.
         const existing = await ensureTrackingTable(
-          c.env.CF_ACCOUNT_ID,
-          c.env.CF_API_TOKEN,
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
           d1Resource.cf_id,
         );
 
@@ -1343,10 +1364,15 @@ const app = new Hono<ApiEnv>()
         for (const { from, to } of effective) {
           let update: Awaited<ReturnType<typeof queryD1>>;
           try {
-            update = await queryD1(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.cf_id, {
-              sql: 'UPDATE _void_migrations SET name = ? WHERE name = ?',
-              params: [to, from],
-            });
+            update = await queryD1(
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
+              d1Resource.cf_id,
+              {
+                sql: 'UPDATE _void_migrations SET name = ? WHERE name = ?',
+                params: [to, from],
+              },
+            );
           } catch (err) {
             pairFailure = {
               kind: 'error',
@@ -1365,10 +1391,15 @@ const app = new Hono<ApiEnv>()
           // the same `to` we wanted (benign) or a different target (conflict).
           let recheck: Awaited<ReturnType<typeof queryD1>>;
           try {
-            recheck = await queryD1(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, d1Resource.cf_id, {
-              sql: 'SELECT name FROM _void_migrations WHERE name = ? OR name = ?',
-              params: [from, to],
-            });
+            recheck = await queryD1(
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
+              d1Resource.cf_id,
+              {
+                sql: 'SELECT name FROM _void_migrations WHERE name = ? OR name = ?',
+                params: [from, to],
+              },
+            );
           } catch (err) {
             pairFailure = {
               kind: 'error',
@@ -1445,45 +1476,48 @@ const app = new Hono<ApiEnv>()
 
         return { status: 200 as const, body: { ok: true } };
       });
-      return c.json(outcome.body, outcome.status);
+      return context.json(outcome.body, outcome.status);
     } catch (err) {
-      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+      return context.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        500,
+      );
     }
   })
 
   // List resources for a project
-  .get('/:id/resources', async (c) => {
-    const project = await getProject(c.get('db'), c.req.param('id'));
+  .get('/:id/resources', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
-    const resources = await getProjectResources(c.get('db'), project.id);
-    return c.json(resources);
+    const resources = await getProjectResources(context.get('db'), project.id);
+    return context.json(resources);
   })
 
   // Fetch logs for a project
-  .get('/:id/logs', async (c) => {
-    const project = await getProject(c.get('db'), c.req.param('id'));
+  .get('/:id/logs', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
     if (!project) {
-      return c.json({ error: 'project not found' }, 404);
+      return context.json({ error: 'project not found' }, 404);
     }
-    if (project.user_id !== c.get('user').id) {
-      return c.json({ error: 'forbidden' }, 403);
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
     }
 
-    const since = c.req.query('since') ?? '1h';
+    const since = context.req.query('since') ?? '1h';
     const sinceMs = parseDuration(since);
     if (sinceMs === null) {
-      return c.json({ error: 'invalid since parameter, use format like 15m, 2h, 3d' }, 400);
+      return context.json({ error: 'invalid since parameter, use format like 15m, 2h, 3d' }, 400);
     }
 
-    const limit = Math.min(parseInt(c.req.query('limit') ?? '200', 10) || 200, 500);
-    const deploymentId = c.req.query('deploymentId');
+    const limit = Math.min(parseInt(context.req.query('limit') ?? '200', 10) || 200, 500);
+    const deploymentId = context.req.query('deploymentId');
     if (deploymentId && !/^dpl_[0-9a-z]+$/.test(deploymentId)) {
-      return c.json({ error: 'invalid deploymentId format' }, 400);
+      return context.json({ error: 'invalid deploymentId format' }, 400);
     }
 
     // Optional level filter applied at the AE SQL layer so sparse error rows
@@ -1491,13 +1525,13 @@ const app = new Hono<ApiEnv>()
     // 'all' value is treated as absence; any other value must be in the fixed
     // allowlist (allowlist check, not regex, so future code can't widen this
     // accidentally and let a tainted value reach the SQL string).
-    const levelParam = c.req.query('level');
+    const levelParam = context.req.query('level');
     const ALLOWED_LEVELS = ['error', 'warn', 'info', 'log', 'debug'] as const;
     type LogLevel = (typeof ALLOWED_LEVELS)[number];
     let level: LogLevel | null = null;
     if (levelParam !== undefined && levelParam !== 'all') {
       if (!(ALLOWED_LEVELS as ReadonlyArray<string>).includes(levelParam)) {
-        return c.json(
+        return context.json(
           {
             error: `invalid level parameter, must be one of: error, warn, info, log, debug, all`,
           },
@@ -1509,7 +1543,7 @@ const app = new Hono<ApiEnv>()
 
     const workerName = `user-${project.slug}`;
     const sinceStr = new Date(Date.now() - sinceMs).toISOString().replace('T', ' ').slice(0, 19);
-    const dataset = c.env.LOGS_DATASET ?? 'void_logs';
+    const dataset = context.env.LOGS_DATASET ?? 'void_logs';
 
     const deployFilter = deploymentId ? `\n        AND blob7 = '${deploymentId}'` : '';
     let levelFilter = '';
@@ -1540,11 +1574,11 @@ const app = new Hono<ApiEnv>()
     `;
 
     const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/analytics_engine/sql`,
+      `https://api.cloudflare.com/client/v4/accounts/${context.env.CF_ACCOUNT_ID}/analytics_engine/sql`,
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
+          Authorization: `Bearer ${context.env.CF_API_TOKEN}`,
           'Content-Type': 'text/plain',
         },
         body: query,
@@ -1556,7 +1590,7 @@ const app = new Hono<ApiEnv>()
       console.error(
         `[logs] query failed for project ${project.id} (${response.status}): ${responseText.slice(0, 500)}`,
       );
-      return c.json(
+      return context.json(
         { error: 'log query failed', status: response.status, detail: responseText.slice(0, 500) },
         502,
       );
@@ -1583,7 +1617,7 @@ const app = new Hono<ApiEnv>()
       console.error(
         `[logs] non-JSON response for project ${project.id} (${response.status} ${response.headers.get('content-type') ?? 'unknown'}): ${responseText.slice(0, 500)}`,
       );
-      return c.json(
+      return context.json(
         {
           error: 'log query returned non-JSON response',
           status: response.status,
@@ -1605,20 +1639,20 @@ const app = new Hono<ApiEnv>()
       status: row.statusCode,
     }));
 
-    return c.json({ data });
+    return context.json({ data });
   })
 
   // Provision Hyperdrive for a PostgreSQL project
-  .post('/:id/database', async (c) => {
-    const projectId = c.req.param('id');
-    const project = await getProject(c.get('db'), projectId);
-    if (!project || project.user_id !== c.get('user').id) {
-      return c.json({ error: 'Not found' }, 404);
+  .post('/:id/database', async (context) => {
+    const projectId = context.req.param('id');
+    const project = await getProject(context.get('db'), projectId);
+    if (!project || project.user_id !== context.get('user').id) {
+      return context.json({ error: 'Not found' }, 404);
     }
 
-    const { connectionString } = await c.req.json<{ connectionString: string }>();
+    const { connectionString } = await context.req.json<{ connectionString: string }>();
     if (!connectionString?.startsWith('postgres')) {
-      return c.json({ error: 'Invalid connection string' }, 400);
+      return context.json({ error: 'Invalid connection string' }, 400);
     }
 
     const { createHyperdrive, getHyperdriveByName } =
@@ -1626,10 +1660,10 @@ const app = new Hono<ApiEnv>()
     const { createResource, getProjectResources } = await import('../db.ts');
 
     // Check if Hyperdrive already exists
-    const existing = await getProjectResources(c.get('db'), projectId);
+    const existing = await getProjectResources(context.get('db'), projectId);
     const found = existing.find((r) => r.type === 'hyperdrive');
     if (found) {
-      return c.json(
+      return context.json(
         { error: 'Hyperdrive already provisioned. Use PUT /database-url to update.' },
         409,
       );
@@ -1639,50 +1673,54 @@ const app = new Hono<ApiEnv>()
     let hyperdriveId: string;
     try {
       const hd = await createHyperdrive(
-        c.env.CF_ACCOUNT_ID,
-        c.env.CF_API_TOKEN,
+        context.env.CF_ACCOUNT_ID,
+        context.env.CF_API_TOKEN,
         resourceName,
         connectionString,
       );
       hyperdriveId = hd.id;
     } catch (err: unknown) {
       if (isAlreadyExistsError(err)) {
-        const hd = await getHyperdriveByName(c.env.CF_ACCOUNT_ID, c.env.CF_API_TOKEN, resourceName);
+        const hd = await getHyperdriveByName(
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
+          resourceName,
+        );
         hyperdriveId = hd.id;
       } else {
         throw err;
       }
     }
 
-    await createResource(c.get('db'), projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
-    return c.json({ ok: true });
+    await createResource(context.get('db'), projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
+    return context.json({ ok: true });
   })
 
   // Update PostgreSQL connection string (updates Hyperdrive config)
-  .put('/:id/database-url', async (c) => {
-    const projectId = c.req.param('id');
-    const project = await getProject(c.get('db'), projectId);
-    if (!project || project.user_id !== c.get('user').id) {
-      return c.json({ error: 'Not found' }, 404);
+  .put('/:id/database-url', async (context) => {
+    const projectId = context.req.param('id');
+    const project = await getProject(context.get('db'), projectId);
+    if (!project || project.user_id !== context.get('user').id) {
+      return context.json({ error: 'Not found' }, 404);
     }
 
-    const { connectionString } = await c.req.json<{ connectionString: string }>();
+    const { connectionString } = await context.req.json<{ connectionString: string }>();
     if (!connectionString?.startsWith('postgres')) {
-      return c.json({ error: 'Invalid connection string' }, 400);
+      return context.json({ error: 'Invalid connection string' }, 400);
     }
 
     const { createHyperdrive, updateHyperdrive, getHyperdriveByName } =
       await import('../provisioning/cloudflare-api.ts');
     const { createResource, getProjectResources } = await import('../db.ts');
 
-    const existing = await getProjectResources(c.get('db'), projectId);
+    const existing = await getProjectResources(context.get('db'), projectId);
     const found = existing.find((r) => r.type === 'hyperdrive');
 
     if (found) {
       // Update existing Hyperdrive config
       await updateHyperdrive(
-        c.env.CF_ACCOUNT_ID,
-        c.env.CF_API_TOKEN,
+        context.env.CF_ACCOUNT_ID,
+        context.env.CF_API_TOKEN,
         found.cf_id,
         connectionString,
       );
@@ -1692,8 +1730,8 @@ const app = new Hono<ApiEnv>()
       let hyperdriveId: string;
       try {
         const hd = await createHyperdrive(
-          c.env.CF_ACCOUNT_ID,
-          c.env.CF_API_TOKEN,
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
           resourceName,
           connectionString,
         );
@@ -1701,8 +1739,8 @@ const app = new Hono<ApiEnv>()
       } catch (err: unknown) {
         if (isAlreadyExistsError(err)) {
           const hd = await getHyperdriveByName(
-            c.env.CF_ACCOUNT_ID,
-            c.env.CF_API_TOKEN,
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
             resourceName,
           );
           hyperdriveId = hd.id;
@@ -1710,10 +1748,10 @@ const app = new Hono<ApiEnv>()
           throw err;
         }
       }
-      await createResource(c.get('db'), projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
+      await createResource(context.get('db'), projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
     }
 
-    return c.json({ ok: true });
+    return context.json({ ok: true });
   });
 
 function parseDuration(input: string): number | null {

@@ -8,18 +8,18 @@ const CF_API = 'https://api.cloudflare.com/client/v4';
 
 const kv = new Hono<ProxyEnv>();
 
-kv.post('/get', async (c) => {
-  const body = c.get('body');
-  const projectId = c.get('projectId');
+kv.post('/get', async (context) => {
+  const body = context.get('body');
+  const projectId = context.get('projectId');
   const binding = asString(body.binding);
   const key = asString(body.key);
 
   if (!binding || !key) {
-    return c.json({ error: 'binding and key required' }, 400);
+    return context.json({ error: 'binding and key required' }, 400);
   }
 
   // Try WfP dispatch first
-  const dispatchRes = await dispatchToWorker(c.env, projectId, '/kv/get', body);
+  const dispatchRes = await dispatchToWorker(context.env, projectId, '/kv/get', body);
   if (dispatchRes) {
     return dispatchRes;
   }
@@ -27,27 +27,27 @@ kv.post('/get', async (c) => {
   // Fallback: CF REST API
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', binding);
+    nsId = await resolveResource(context.env.API, context.env.JWT_SECRET, projectId, 'kv', binding);
   } catch {
-    return c.json({ error: `unknown binding "${binding}"` }, 404);
+    return context.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(key)}`,
-    { headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` } },
+    `${CF_API}/accounts/${context.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(key)}`,
+    { headers: { Authorization: `Bearer ${context.env.CF_API_TOKEN}` } },
   );
 
   if (cfRes.status === 404) {
-    return c.json(null);
+    return context.json(null);
   }
 
   if (!cfRes.ok) {
-    return c.json({ error: 'KV get failed', status: cfRes.status }, 502);
+    return context.json({ error: 'KV get failed', status: cfRes.status }, 502);
   }
 
   const type = asString(body.type) ?? 'text';
   if (type === 'json') {
-    return c.json(await cfRes.json());
+    return context.json(await cfRes.json());
   }
   if (type === 'arrayBuffer') {
     return new Response(await cfRes.arrayBuffer(), {
@@ -60,21 +60,21 @@ kv.post('/get', async (c) => {
     });
   }
   // Default: text
-  return c.json(await cfRes.text());
+  return context.json(await cfRes.text());
 });
 
-kv.post('/put', async (c) => {
-  const body = c.get('body');
-  const projectId = c.get('projectId');
+kv.post('/put', async (context) => {
+  const body = context.get('body');
+  const projectId = context.get('projectId');
   const binding = asString(body.binding);
   const key = asString(body.key);
 
   if (!binding || !key) {
-    return c.json({ error: 'binding and key required' }, 400);
+    return context.json({ error: 'binding and key required' }, 400);
   }
 
   // Try WfP dispatch first
-  const dispatchRes = await dispatchToWorker(c.env, projectId, '/kv/put', body);
+  const dispatchRes = await dispatchToWorker(context.env, projectId, '/kv/put', body);
   if (dispatchRes) {
     return dispatchRes;
   }
@@ -82,9 +82,9 @@ kv.post('/put', async (c) => {
   // Fallback: CF REST API
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', binding);
+    nsId = await resolveResource(context.env.API, context.env.JWT_SECRET, projectId, 'kv', binding);
   } catch {
-    return c.json({ error: `unknown binding "${binding}"` }, 404);
+    return context.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const params = new URLSearchParams();
@@ -94,7 +94,7 @@ kv.post('/put', async (c) => {
   if (isQueryValue(body.expiration_ttl)) {
     params.set('expiration_ttl', String(body.expiration_ttl));
   }
-  const qs = params.toString() ? `?${params.toString()}` : '';
+  const queryString = params.toString() ? `?${params.toString()}` : '';
 
   let value: string | ArrayBuffer;
   let contentType = 'text/plain';
@@ -112,11 +112,11 @@ kv.post('/put', async (c) => {
   }
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(key)}${qs}`,
+    `${CF_API}/accounts/${context.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(key)}${queryString}`,
     {
       method: 'PUT',
       headers: {
-        Authorization: `Bearer ${c.env.CF_API_TOKEN}`,
+        Authorization: `Bearer ${context.env.CF_API_TOKEN}`,
         'Content-Type': contentType,
       },
       body: value,
@@ -124,24 +124,24 @@ kv.post('/put', async (c) => {
   );
 
   if (!cfRes.ok) {
-    return c.json({ error: 'KV put failed', status: cfRes.status }, 502);
+    return context.json({ error: 'KV put failed', status: cfRes.status }, 502);
   }
 
-  return c.json({ success: true });
+  return context.json({ success: true });
 });
 
-kv.post('/delete', async (c) => {
-  const body = c.get('body');
-  const projectId = c.get('projectId');
+kv.post('/delete', async (context) => {
+  const body = context.get('body');
+  const projectId = context.get('projectId');
   const binding = asString(body.binding);
   const key = asString(body.key);
 
   if (!binding || !key) {
-    return c.json({ error: 'binding and key required' }, 400);
+    return context.json({ error: 'binding and key required' }, 400);
   }
 
   // Try WfP dispatch first
-  const dispatchRes = await dispatchToWorker(c.env, projectId, '/kv/delete', body);
+  const dispatchRes = await dispatchToWorker(context.env, projectId, '/kv/delete', body);
   if (dispatchRes) {
     return dispatchRes;
   }
@@ -149,38 +149,38 @@ kv.post('/delete', async (c) => {
   // Fallback: CF REST API
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', binding);
+    nsId = await resolveResource(context.env.API, context.env.JWT_SECRET, projectId, 'kv', binding);
   } catch {
-    return c.json({ error: `unknown binding "${binding}"` }, 404);
+    return context.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(key)}`,
+    `${CF_API}/accounts/${context.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/values/${encodeURIComponent(key)}`,
     {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` },
+      headers: { Authorization: `Bearer ${context.env.CF_API_TOKEN}` },
     },
   );
 
   // 404 is fine — delete is idempotent
   if (!cfRes.ok && cfRes.status !== 404) {
-    return c.json({ error: 'KV delete failed', status: cfRes.status }, 502);
+    return context.json({ error: 'KV delete failed', status: cfRes.status }, 502);
   }
 
-  return c.json({ success: true });
+  return context.json({ success: true });
 });
 
-kv.post('/list', async (c) => {
-  const body = c.get('body');
-  const projectId = c.get('projectId');
+kv.post('/list', async (context) => {
+  const body = context.get('body');
+  const projectId = context.get('projectId');
   const binding = asString(body.binding);
 
   if (!binding) {
-    return c.json({ error: 'binding required' }, 400);
+    return context.json({ error: 'binding required' }, 400);
   }
 
   // Try WfP dispatch first
-  const dispatchRes = await dispatchToWorker(c.env, projectId, '/kv/list', body);
+  const dispatchRes = await dispatchToWorker(context.env, projectId, '/kv/list', body);
   if (dispatchRes) {
     return dispatchRes;
   }
@@ -188,9 +188,9 @@ kv.post('/list', async (c) => {
   // Fallback: CF REST API
   let nsId: string;
   try {
-    nsId = await resolveResource(c.env.API, c.env.JWT_SECRET, projectId, 'kv', binding);
+    nsId = await resolveResource(context.env.API, context.env.JWT_SECRET, projectId, 'kv', binding);
   } catch {
-    return c.json({ error: `unknown binding "${binding}"` }, 404);
+    return context.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
   const params = new URLSearchParams();
@@ -205,22 +205,22 @@ kv.post('/list', async (c) => {
   if (cursor) {
     params.set('cursor', cursor);
   }
-  const qs = params.toString() ? `?${params.toString()}` : '';
+  const queryString = params.toString() ? `?${params.toString()}` : '';
 
   const cfRes = await fetch(
-    `${CF_API}/accounts/${c.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/keys${qs}`,
-    { headers: { Authorization: `Bearer ${c.env.CF_API_TOKEN}` } },
+    `${CF_API}/accounts/${context.env.CF_ACCOUNT_ID}/storage/kv/namespaces/${nsId}/keys${queryString}`,
+    { headers: { Authorization: `Bearer ${context.env.CF_API_TOKEN}` } },
   );
 
   if (!cfRes.ok) {
-    return c.json({ error: 'KV list failed', status: cfRes.status }, 502);
+    return context.json({ error: 'KV list failed', status: cfRes.status }, 502);
   }
 
   const data = (await cfRes.json()) as {
     result?: ReadonlyArray<{ name: string }>;
     result_info?: { cursor?: string };
   };
-  return c.json({
+  return context.json({
     keys: data.result ?? [],
     list_complete: !data.result_info?.cursor,
     cursor: data.result_info?.cursor ?? null,

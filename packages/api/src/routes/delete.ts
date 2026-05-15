@@ -5,15 +5,15 @@ import { teardownProject } from '../provisioning/cleanup.ts';
 
 const app = new Hono<ApiEnv>();
 
-app.delete('/:id', async (c) => {
-  const projectId = c.req.param('id');
-  const project = await getProject(c.get('db'), projectId);
+app.delete('/:id', async (context) => {
+  const projectId = context.req.param('id');
+  const project = await getProject(context.get('db'), projectId);
   if (!project) {
-    return c.json({ error: 'project not found' }, 404);
+    return context.json({ error: 'project not found' }, 404);
   }
 
-  if (project.user_id !== c.get('user').id) {
-    return c.json({ error: 'forbidden' }, 403);
+  if (project.user_id !== context.get('user').id) {
+    return context.json({ error: 'forbidden' }, 403);
   }
 
   // `teardownProject` handles the FOR UPDATE lock, status='deleting' flip,
@@ -22,9 +22,9 @@ app.delete('/:id', async (c) => {
   // name — fatal on failure), best-effort CF cleanup (D1, KV, R2, queues,
   // hyperdrive, custom hostnames, routing entries — warnings), and the DB
   // cascade. Critical-cleanup failure throws and surfaces as a 5xx.
-  const { warnings } = await teardownProject(c, projectId, project);
+  const { warnings } = await teardownProject(context, projectId, project);
 
-  return c.json({
+  return context.json({
     ok: true,
     id: projectId,
     slug: project.slug,

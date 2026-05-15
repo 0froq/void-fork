@@ -34,9 +34,9 @@ export const users = pgTable(
     suspended_reason: text('suspended_reason'),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [
-    uniqueIndex('idx_users_provider_id').on(t.provider, t.provider_id),
-    index('idx_users_email').on(t.email),
+  (table) => [
+    uniqueIndex('idx_users_provider_id').on(table.provider, table.provider_id),
+    index('idx_users_email').on(table.email),
   ],
 );
 
@@ -54,9 +54,9 @@ export const oauthAccounts = pgTable(
     provider_id: text('provider_id').notNull(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [
-    uniqueIndex('idx_oauth_accounts_provider_id').on(t.provider, t.provider_id),
-    index('idx_oauth_accounts_user_id').on(t.user_id),
+  (table) => [
+    uniqueIndex('idx_oauth_accounts_provider_id').on(table.provider, table.provider_id),
+    index('idx_oauth_accounts_user_id').on(table.user_id),
   ],
 );
 
@@ -77,10 +77,10 @@ export const projects = pgTable(
     status: text('status').notNull().default('active').$type<'active' | 'deleting'>(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [
-    unique().on(t.user_id, t.slug),
-    uniqueIndex('idx_projects_slug').on(t.slug),
-    index('idx_projects_user_id').on(t.user_id),
+  (table) => [
+    unique().on(table.user_id, table.slug),
+    uniqueIndex('idx_projects_slug').on(table.slug),
+    index('idx_projects_user_id').on(table.user_id),
   ],
 );
 
@@ -123,9 +123,9 @@ export const deployments = pgTable(
     applied_migrations: text('applied_migrations'),
     bundle_stored: boolean('bundle_stored').notNull().default(false),
   },
-  (t) => [
-    index('idx_deployments_project_id').on(t.project_id, t.created_at),
-    index('idx_deployments_project_status').on(t.project_id, t.status),
+  (table) => [
+    index('idx_deployments_project_id').on(table.project_id, table.created_at),
+    index('idx_deployments_project_status').on(table.project_id, table.status),
   ],
 );
 
@@ -147,9 +147,9 @@ export const projectSecrets = pgTable(
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
     updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [
-    unique().on(t.project_id, t.name),
-    index('idx_project_secrets_project_id').on(t.project_id),
+  (table) => [
+    unique().on(table.project_id, table.name),
+    index('idx_project_secrets_project_id').on(table.project_id),
   ],
 );
 
@@ -172,7 +172,7 @@ export const resources = pgTable(
       .$type<Record<string, unknown>>(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [unique().on(t.project_id, t.type, t.binding_name)],
+  (table) => [unique().on(table.project_id, table.type, table.binding_name)],
 );
 
 // ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ export const domains = pgTable(
     status: text('status').notNull().default('pending').$type<'pending' | 'active'>(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [index('idx_domains_project_id').on(t.project_id, t.created_at)],
+  (table) => [index('idx_domains_project_id').on(table.project_id, table.created_at)],
 );
 
 // ---------------------------------------------------------------------------
@@ -215,9 +215,9 @@ export const platformEvents = pgTable(
     admin_login: text('admin_login').notNull(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [
-    index('idx_platform_events_batch_id').on(t.batch_id),
-    index('idx_platform_events_env_created').on(t.environment, t.created_at),
+  (table) => [
+    index('idx_platform_events_batch_id').on(table.batch_id),
+    index('idx_platform_events_env_created').on(table.environment, table.created_at),
   ],
 );
 
@@ -268,9 +268,9 @@ export const migrationRenames = pgTable(
     to_name: text('to_name').notNull(),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
-  (t) => [
-    primaryKey({ columns: [t.project_id, t.from_name, t.to_name] }),
-    index('idx_migration_renames_project_id').on(t.project_id),
+  (table) => [
+    primaryKey({ columns: [table.project_id, table.from_name, table.to_name] }),
+    index('idx_migration_renames_project_id').on(table.project_id),
   ],
 );
 
@@ -292,5 +292,8 @@ export const invitations = pgTable(
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
     accepted_at: timestamp('accepted_at', { mode: 'string' }),
   },
-  (t) => [index('idx_invitations_email').on(t.email), index('idx_invitations_status').on(t.status)],
+  (table) => [
+    index('idx_invitations_email').on(table.email),
+    index('idx_invitations_status').on(table.status),
+  ],
 );

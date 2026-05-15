@@ -163,7 +163,7 @@ export async function uploadAssetBuckets(
     gatewayDelayMs = GATEWAY_BACKOFF_BASE_MS,
   }: { retryDelayMs?: number; gatewayDelayMs?: number } = {},
 ): Promise<string> {
-  if (!buckets.some((b) => b.length > 0)) {
+  if (!buckets.some((bucket) => bucket.length > 0)) {
     console.log('[assets] all assets cached — session JWT is completion token');
     return jwt;
   }
@@ -177,7 +177,7 @@ export async function uploadAssetBuckets(
 
   async function acquireSlot(): Promise<void> {
     while (activeCount >= concurrency) {
-      await new Promise<void>((r) => waiters.push(r));
+      await new Promise<void>((resolve) => waiters.push(resolve));
     }
     activeCount++;
   }
@@ -233,7 +233,7 @@ export async function uploadAssetBuckets(
         lastErr instanceof Error ? lastErr.message : lastErr,
       );
 
-      await new Promise((r) => setTimeout(r, Math.pow(2, attempts) * retryDelayMs));
+      await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempts) * retryDelayMs));
 
       if (lastErr instanceof AssetUploadError && lastErr.status === 524) {
         // Gateway error — throttle concurrency + additional backoff
@@ -242,7 +242,9 @@ export async function uploadAssetBuckets(
           waiters.shift()!();
         }
 
-        await new Promise((r) => setTimeout(r, Math.pow(2, bucketGatewayErrors) * gatewayDelayMs));
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.pow(2, bucketGatewayErrors) * gatewayDelayMs),
+        );
         bucketGatewayErrors++;
         console.warn(
           `[assets] bucket ${bucketIndex + 1} gateway error (524), ` +
@@ -426,7 +428,7 @@ async function writeBase64Bytes(
 function digestToAssetHash(digest: Uint8Array): string {
   return [...digest]
     .slice(0, 16)
-    .map((b) => b.toString(16).padStart(2, '0'))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
 }
 
@@ -461,21 +463,21 @@ export function applyDeclaredAssetManifest(
     return result;
   }
   for (const [path, entry] of Object.entries(built)) {
-    const d = declared[path];
+    const declaredEntry = declared[path];
     if (
-      d &&
-      typeof d.hash === 'string' &&
-      d.hash.length === 32 &&
-      Number.isFinite(d.size) &&
-      d.size >= 0
+      declaredEntry &&
+      typeof declaredEntry.hash === 'string' &&
+      declaredEntry.hash.length === 32 &&
+      Number.isFinite(declaredEntry.size) &&
+      declaredEntry.size >= 0
     ) {
-      if (d.hash !== entry.hash) {
+      if (declaredEntry.hash !== entry.hash) {
         throw new AssetHashMismatchError(
-          `asset hash mismatch for ${path}: declared ${d.hash}, computed ${entry.hash}`,
+          `asset hash mismatch for ${path}: declared ${declaredEntry.hash}, computed ${entry.hash}`,
         );
       }
-      if (d.size === entry.size) {
-        result[path] = d;
+      if (declaredEntry.size === entry.size) {
+        result[path] = declaredEntry;
       }
     }
   }
@@ -624,7 +626,7 @@ export async function deleteUnreferencedAssets(
   retainedHashes: Set<string>,
   projectId: string,
 ): Promise<void> {
-  const toDelete = evictedHashes.filter((h) => !retainedHashes.has(h));
+  const toDelete = evictedHashes.filter((hash) => !retainedHashes.has(hash));
   if (toDelete.length === 0) {
     return;
   }
@@ -635,7 +637,7 @@ export async function deleteUnreferencedAssets(
 
   // R2 supports batch delete up to 1000 keys at a time
   for (let i = 0; i < toDelete.length; i += 1000) {
-    const batch = toDelete.slice(i, i + 1000).map((h) => `assets/${projectId}/${h}`);
+    const batch = toDelete.slice(i, i + 1000).map((hash) => `assets/${projectId}/${hash}`);
     await r2.delete(batch);
   }
 }

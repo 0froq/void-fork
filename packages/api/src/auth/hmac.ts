@@ -49,6 +49,6 @@ export async function hmacVerifyState(
   const key = await getVerifyKey(secret);
   const padded = signature.replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(padded);
-  const sigBytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  const sigBytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(data));
 }

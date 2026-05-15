@@ -200,7 +200,7 @@ async function isVariantWriteAllowed(
     return true;
   }
   // At or over cap: only allow updates to existing keys.
-  return listed.keys.some((k) => k.name === key);
+  return listed.keys.some((cacheKey) => cacheKey.name === key);
 }
 
 /**

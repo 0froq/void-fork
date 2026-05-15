@@ -13,31 +13,31 @@ const app = new Hono<ApiEnv>();
  * Body: { "type": "d1" | "kv" | "r2", "binding": "DB" }
  * Returns: { "cf_id": "..." } or 404
  */
-app.post('/:projectId', async (c) => {
-  const projectId = c.req.param('projectId');
+app.post('/:projectId', async (context) => {
+  const projectId = context.req.param('projectId');
 
-  const token = c.req.header('x-void-internal');
+  const token = context.req.header('x-void-internal');
   if (!token) {
-    return c.json({ error: 'missing internal auth' }, 401);
+    return context.json({ error: 'missing internal auth' }, 401);
   }
-  if (!(await hmacVerifyState(projectId, token, c.env.JWT_SECRET))) {
-    return c.json({ error: 'invalid internal auth' }, 403);
+  if (!(await hmacVerifyState(projectId, token, context.env.JWT_SECRET))) {
+    return context.json({ error: 'invalid internal auth' }, 403);
   }
 
-  const { type, binding } = await c.req.json<{
+  const { type, binding } = await context.req.json<{
     type: 'd1' | 'kv' | 'r2' | 'queue';
     binding: string;
   }>();
   if (!type || !binding) {
-    return c.json({ error: 'type and binding required' }, 400);
+    return context.json({ error: 'type and binding required' }, 400);
   }
 
-  const resource = await getResourceByBinding(c.get('db'), projectId, type, binding);
+  const resource = await getResourceByBinding(context.get('db'), projectId, type, binding);
   if (!resource) {
-    return c.json({ error: `unknown binding "${binding}"` }, 404);
+    return context.json({ error: `unknown binding "${binding}"` }, 404);
   }
 
-  return c.json({ cf_id: resource.cf_id });
+  return context.json({ cf_id: resource.cf_id });
 });
 
 export default app;

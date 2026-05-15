@@ -42,7 +42,7 @@ export function buildVariantOriginalUrl(
   // insertion order for multi-valued keys, which matters when the user lists
   // a param like `tag` that legitimately appears twice — the original input
   // order is the cache-relevant axis.
-  const sortedKeys = [...new Set(url.searchParams.keys())].filter((k) => allowed.has(k));
+  const sortedKeys = [...new Set(url.searchParams.keys())].filter((key) => allowed.has(key));
   sortedKeys.sort();
   const filtered = new URLSearchParams();
   for (const key of sortedKeys) {

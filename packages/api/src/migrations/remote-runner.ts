@@ -114,15 +114,15 @@ export function isSingleStatement(sql: string): boolean {
     }
     // seg.kind === 'sql' — raw run between special regions.
     for (let i = seg.start; i < seg.end; i++) {
-      const c = sql[i];
-      if (c === ';') {
+      const character = sql[i];
+      if (character === ';') {
         if (inStatement) {
           statements++;
           inStatement = false;
         }
         continue;
       }
-      if (c !== ' ' && c !== '\t' && c !== '\n' && c !== '\r') {
+      if (character !== ' ' && character !== '\t' && character !== '\n' && character !== '\r') {
         inStatement = true;
       }
     }
@@ -486,8 +486,8 @@ export async function queryD1(
   }
 
   if (!json.success) {
-    const msg = json.errors.map((e) => e.message).join(', ');
-    throw new Error(`D1 migration failed: ${msg}`);
+    const message = json.errors.map((error) => error.message).join(', ');
+    throw new Error(`D1 migration failed: ${message}`);
   }
 
   // D1 query API returns an array of results (one per statement). Forward

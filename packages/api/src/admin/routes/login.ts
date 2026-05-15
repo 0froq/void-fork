@@ -16,8 +16,8 @@ import type { ApiEnv } from '../../env.ts';
 const app = new Hono<ApiEnv>();
 
 // GET /login
-app.get('/login', (c) => {
-  return c.html(`<!DOCTYPE html>
+app.get('/login', (context) => {
+  return context.html(`<!DOCTYPE html>
 <html>
 <head><title>Admin Login - Void</title></head>
 <body style="font-family: monospace; line-height: 1.5">
@@ -31,46 +31,46 @@ app.get('/login', (c) => {
 });
 
 // GET /login/google
-app.get('/login/google', async (c) => {
-  const redirectUri = new URL(c.req.url).origin + '/admin/callback';
+app.get('/login/google', async (context) => {
+  const redirectUri = new URL(context.req.url).origin + '/admin/callback';
   const nonce = crypto.randomUUID();
-  await storeOAuthNonce(c.get('db'), nonce, 600);
+  await storeOAuthNonce(context.get('db'), nonce, 600);
   const stateData = JSON.stringify({ nonce });
   const stateEncoded = btoa(stateData);
-  const signature = await hmacSignState(stateEncoded, c.env.JWT_SECRET);
+  const signature = await hmacSignState(stateEncoded, context.env.JWT_SECRET);
   const state = `${stateEncoded}.${signature}`;
-  const url = getGoogleAuthorizeUrl(c.env.GOOGLE_CLIENT_ID, redirectUri, state);
+  const url = getGoogleAuthorizeUrl(context.env.GOOGLE_CLIENT_ID, redirectUri, state);
   // Bind nonce to this browser to prevent login CSRF / session swapping
-  setCookie(c, 'oauth_nonce', nonce, {
+  setCookie(context, 'oauth_nonce', nonce, {
     httpOnly: true,
     secure: true,
     sameSite: 'Lax',
     path: '/admin/callback',
     maxAge: 600,
   });
-  return c.redirect(url);
+  return context.redirect(url);
 });
 
 // GET /callback
-app.get('/callback', async (c) => {
-  const code = c.req.query('code');
-  const state = c.req.query('state');
+app.get('/callback', async (context) => {
+  const code = context.req.query('code');
+  const state = context.req.query('state');
 
   if (!code || !state) {
-    return c.html('<h1>Login failed</h1><p>Missing code or state.</p>', 400);
+    return context.html('<h1>Login failed</h1><p>Missing code or state.</p>', 400);
   }
 
   const dotIndex = state.lastIndexOf('.');
   if (dotIndex === -1) {
-    return c.html('<h1>Login failed</h1><p>Invalid state.</p>', 400);
+    return context.html('<h1>Login failed</h1><p>Invalid state.</p>', 400);
   }
 
   const stateEncoded = state.slice(0, dotIndex);
   const signature = state.slice(dotIndex + 1);
 
-  const valid = await hmacVerifyState(stateEncoded, signature, c.env.JWT_SECRET);
+  const valid = await hmacVerifyState(stateEncoded, signature, context.env.JWT_SECRET);
   if (!valid) {
-    return c.html('<h1>Login failed</h1><p>Invalid state signature.</p>', 400);
+    return context.html('<h1>Login failed</h1><p>Invalid state signature.</p>', 400);
   }
 
   // Consume the nonce atomically — prevents replay of the callback URL
@@ -78,28 +78,28 @@ app.get('/callback', async (c) => {
   try {
     nonce = JSON.parse(atob(stateEncoded)).nonce;
   } catch {
-    return c.html('<h1>Login failed</h1><p>Invalid state data.</p>', 400);
+    return context.html('<h1>Login failed</h1><p>Invalid state data.</p>', 400);
   }
 
   // Verify the nonce matches the cookie set during login redirect.
   // This binds the OAuth flow to the browser that initiated it,
   // preventing login CSRF / session swapping attacks.
-  const cookieNonce = getCookie(c, 'oauth_nonce');
+  const cookieNonce = getCookie(context, 'oauth_nonce');
   if (!cookieNonce || cookieNonce !== nonce) {
-    return c.html('<h1>Login failed</h1><p>OAuth session mismatch.</p>', 400);
+    return context.html('<h1>Login failed</h1><p>OAuth session mismatch.</p>', 400);
   }
 
-  const nonceValid = await consumeOAuthNonce(c.get('db'), nonce);
+  const nonceValid = await consumeOAuthNonce(context.get('db'), nonce);
   if (!nonceValid) {
-    return c.html('<h1>Login failed</h1><p>Invalid or expired login state.</p>', 400);
+    return context.html('<h1>Login failed</h1><p>Invalid or expired login state.</p>', 400);
   }
 
-  deleteCookie(c, 'oauth_nonce', { path: '/admin/callback' });
+  deleteCookie(context, 'oauth_nonce', { path: '/admin/callback' });
 
-  const redirectUri = new URL(c.req.url).origin + '/admin/callback';
+  const redirectUri = new URL(context.req.url).origin + '/admin/callback';
   const googleToken = await exchangeCodeForToken(
-    c.env.GOOGLE_CLIENT_ID,
-    c.env.GOOGLE_CLIENT_SECRET,
+    context.env.GOOGLE_CLIENT_ID,
+    context.env.GOOGLE_CLIENT_SECRET,
     code,
     redirectUri,
   );
@@ -107,7 +107,7 @@ app.get('/callback', async (c) => {
   const providerId = googleUser.id;
   const login = googleUser.email;
 
-  const db = c.get('db');
+  const db = context.get('db');
   let user = await getUserByOAuthAccount(db, 'google', providerId);
 
   // Fall back to email lookup — handles first login after seeding by email
@@ -122,15 +122,15 @@ app.get('/callback', async (c) => {
   }
 
   if (!user || user.role !== 'admin') {
-    return c.html(
+    return context.html(
       '<h1>403 Forbidden</h1><p>Admin access required. You must have an admin account to sign in.</p>',
       403,
     );
   }
 
-  const jwt = await signJwt({ sub: user.id, login, aud: 'admin' }, c.env.JWT_SECRET);
+  const jwt = await signJwt({ sub: user.id, login, aud: 'admin' }, context.env.JWT_SECRET);
 
-  setCookie(c, 'admin_token', jwt, {
+  setCookie(context, 'admin_token', jwt, {
     httpOnly: true,
     secure: true,
     sameSite: 'Lax',
@@ -138,13 +138,13 @@ app.get('/callback', async (c) => {
     maxAge: 30 * 24 * 60 * 60,
   });
 
-  return c.redirect('/admin/');
+  return context.redirect('/admin/');
 });
 
 // GET /logout
-app.get('/logout', (c) => {
-  deleteCookie(c, 'admin_token', { path: '/' });
-  return c.redirect('/admin/login');
+app.get('/logout', (context) => {
+  deleteCookie(context, 'admin_token', { path: '/' });
+  return context.redirect('/admin/login');
 });
 
 export default app;

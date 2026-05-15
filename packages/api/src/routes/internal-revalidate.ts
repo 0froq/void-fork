@@ -10,25 +10,25 @@ const app = new Hono<ApiEnv>();
  * Internal revalidation endpoint — called by the proxy via service binding.
  * Authenticated via HMAC token in X-Void-Internal header (no JWT/userId).
  */
-app.post('/:id', async (c) => {
-  const projectId = c.req.param('id');
+app.post('/:id', async (context) => {
+  const projectId = context.req.param('id');
 
   // Verify HMAC token
-  const token = c.req.header('x-void-internal');
+  const token = context.req.header('x-void-internal');
   if (!token) {
-    return c.json({ error: 'missing internal auth' }, 401);
+    return context.json({ error: 'missing internal auth' }, 401);
   }
-  if (!(await hmacVerifyState(projectId, token, c.env.JWT_SECRET))) {
-    return c.json({ error: 'invalid internal auth' }, 403);
+  if (!(await hmacVerifyState(projectId, token, context.env.JWT_SECRET))) {
+    return context.json({ error: 'invalid internal auth' }, 403);
   }
 
-  const project = await getProject(c.get('db'), projectId);
+  const project = await getProject(context.get('db'), projectId);
   if (!project) {
-    return c.json({ error: 'project not found' }, 404);
+    return context.json({ error: 'project not found' }, 404);
   }
 
-  const body = await c.req.json<{ paths?: ReadonlyArray<string>; all?: boolean }>();
-  return runRevalidate(c, projectId, project, body);
+  const body = await context.req.json<{ paths?: ReadonlyArray<string>; all?: boolean }>();
+  return runRevalidate(context, projectId, project, body);
 });
 
 export default app;

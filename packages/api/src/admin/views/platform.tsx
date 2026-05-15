@@ -187,16 +187,16 @@ export function PlatformPage({
       <script
         dangerouslySetInnerHTML={{
           __html: `
-document.getElementById('rollback-all-form').addEventListener('submit', function(e) {
-  e.preventDefault();
+document.getElementById('rollback-all-form').addEventListener('submit', function(event) {
+  event.preventDefault();
   var rows = document.querySelectorAll('.rollback-row');
   var lines = [];
   rows.forEach(function(row) {
-    var w = row.dataset.worker;
-    var c = row.dataset.current;
-    var t = row.dataset.target;
-    if (c && t) {
-      lines.push('  ' + w.padEnd(12) + c.slice(0, 12) + ' → ' + t.slice(0, 12));
+    var workerName = row.dataset.worker;
+    var current = row.dataset.current;
+    var target = row.dataset.target;
+    if (current && target) {
+      lines.push('  ' + workerName.padEnd(12) + currentarget.slice(0, 12) + ' → ' + target.slice(0, 12));
     }
   });
   var msg = 'Roll back ALL ${env} workers?\\n\\n' + lines.join('\\n') + '\\n\\nThis cannot be undone.';

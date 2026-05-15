@@ -35,7 +35,7 @@ export function cfCronToUnix(expr: string): string {
 
       // Handle range: "2-6" → "1-5"
       if (rangeOrValue.includes('-')) {
-        const [start, end] = rangeOrValue.split('-').map((v) => shiftDow(v));
+        const [start, end] = rangeOrValue.split('-').map((value) => shiftDow(value));
         return `${start}-${end}${stepSuffix}`;
       }
 
@@ -53,8 +53,8 @@ function shiftDow(value: string): string {
   if (!match) {
     return value;
   } // abbreviation like MON, SUN
-  const num = Math.max(0, parseInt(match[1], 10) - 1);
-  return `${num}${match[2]}`;
+  const shiftedDayOfWeek = Math.max(0, parseInt(match[1], 10) - 1);
+  return `${shiftedDayOfWeek}${match[2]}`;
 }
 
 /** Check if a cron expression matches the given minute. */
@@ -80,9 +80,9 @@ export function getNextFireTime(
   now: number,
 ): number | null {
   let earliest = Infinity;
-  for (const s of schedules) {
+  for (const schedule of schedules) {
     try {
-      const interval = CronExpressionParser.parse(cfCronToUnix(s.cron), {
+      const interval = CronExpressionParser.parse(cfCronToUnix(schedule.cron), {
         currentDate: new Date(now),
         tz: 'UTC',
       });
@@ -126,8 +126,8 @@ export function chunkMessages<T>(
     throw new Error('chunkMessages: size must be >= 1');
   }
   const chunks: Array<ReadonlyArray<T>> = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
   }
   return chunks;
 }
@@ -228,7 +228,7 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
     // fallbacks below are defensive — they only matter for unit tests that
     // invoke `alarm()` directly without an `alarmInfo` argument.
     const now = alarmInfo?.scheduledTime ?? Date.now();
-    const matching = state.schedules.filter((s) => cronMatchesMinute(s.cron, now));
+    const matching = state.schedules.filter((schedule) => cronMatchesMinute(schedule.cron, now));
 
     if (matching.length === 0) {
       await this.scheduleNextAlarm();
@@ -243,10 +243,10 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
     // CronScheduler was not found in this worker`. The queue handler runs as
     // a fresh fetch event with no DO context, so the dispatch resolves to the
     // user worker's default entrypoint as expected.
-    const messages = matching.map((s) => ({
+    const messages = matching.map((schedule) => ({
       body: {
         workerName: state.workerName,
-        cron: s.cron,
+        cron: schedule.cron,
         scheduledTime: now,
         ...(state.proxyToken !== undefined && { proxyToken: state.proxyToken }),
       },
@@ -255,11 +255,15 @@ export class CronScheduler extends DurableObject<ApiEnv['Bindings']> {
     const results = await Promise.allSettled(
       chunks.map((chunk) => this.env.CRON_FIRES_QUEUE.sendBatch(chunk)),
     );
-    const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
 
     if (failures.length > 0) {
       const reasons = failures
-        .map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason)))
+        .map((failure) =>
+          failure.reason instanceof Error ? failure.reason.message : String(failure.reason),
+        )
         .join('; ');
       console.error(
         `CronScheduler: ${failures.length}/${chunks.length} sendBatch chunks failed for ${state.workerName}: ${reasons}`,

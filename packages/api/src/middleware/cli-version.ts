@@ -18,9 +18,9 @@ export const MIN_CLI_VERSION = '0.7.0';
 // rejected by the fail-closed gate even though they're newer than MIN.
 const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(?:-[\w.-]+)?(?:\+[\w.-]+)?$/;
 
-function parseSemver(v: string): [number, number, number] | null {
-  const m = SEMVER_RE.exec(v);
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+function parseSemver(version: string): [number, number, number] | null {
+  const match = SEMVER_RE.exec(version);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
 /**
@@ -35,15 +35,15 @@ function parseSemver(v: string): [number, number, number] | null {
  * an unparseable MIN_CLI_VERSION would be a bug we want to surface, so
  * `null` propagates upward.
  */
-export function compareVersions(a: string, b: string): number | null {
-  const pa = parseSemver(a);
-  const pb = parseSemver(b);
-  if (!pa || !pb) {
+export function compareVersions(leftVersion: string, rightVersion: string): number | null {
+  const leftParts = parseSemver(leftVersion);
+  const rightParts = parseSemver(rightVersion);
+  if (!leftParts || !rightParts) {
     return null;
   }
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] !== pb[i]) {
-      return pa[i] - pb[i];
+  for (let index = 0; index < 3; index++) {
+    if (leftParts[index] !== rightParts[index]) {
+      return leftParts[index] - rightParts[index];
     }
   }
   return 0;
@@ -95,8 +95,8 @@ export type CliOutdatedBody = Readonly<{
  * 410 first. The multipart sniff is body-content-free (header only) so
  * delaying it past project lookup is safe.
  */
-export function checkCliVersionOrRespond(c: Context): Response | null {
-  const contentType = c.req.header('content-type') ?? '';
+export function checkCliVersionOrRespond(context: Context): Response | null {
+  const contentType = context.req.header('content-type') ?? '';
   if (contentType.toLowerCase().startsWith('multipart/')) {
     const body: CliOutdatedBody = {
       error: 'cli_outdated',
@@ -105,10 +105,10 @@ export function checkCliVersionOrRespond(c: Context): Response | null {
         `Upgrade with: npm i -g void@latest (minimum version ${MIN_CLI_VERSION}).`,
       minVersion: MIN_CLI_VERSION,
     };
-    return c.json(body, 426);
+    return context.json(body, 426);
   }
 
-  const cliVersion = c.req.header('x-void-cli-version');
+  const cliVersion = context.req.header('x-void-cli-version');
   if (cliVersion !== undefined) {
     const cmp = compareVersions(cliVersion, MIN_CLI_VERSION);
     // Reject both "older than min" (cmp < 0) AND "couldn't parse" (cmp === null).
@@ -126,7 +126,7 @@ export function checkCliVersionOrRespond(c: Context): Response | null {
         minVersion: MIN_CLI_VERSION,
         clientVersion: cliVersion,
       };
-      return c.json(body, 426);
+      return context.json(body, 426);
     }
   }
 

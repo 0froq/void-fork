@@ -45,14 +45,14 @@ import { processUsageEventBatch } from './usage-queue.ts';
 const app = new Hono<ApiEnv>()
 
   // Drizzle middleware — creates a Db instance per request
-  .use('*', async (c, next) => {
-    c.set('db', createDb(c.env.HYPERDRIVE.connectionString));
+  .use('*', async (context, next) => {
+    context.set('db', createDb(context.env.HYPERDRIVE.connectionString));
     await next();
   })
 
-  .get('/health', (c) => c.json({ status: 'ok' }))
-  .get('/signup-restricted', (c) =>
-    c.html(`<!DOCTYPE html>
+  .get('/health', (context) => context.json({ status: 'ok' }))
+  .get('/signup-restricted', (context) =>
+    context.html(`<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -62,9 +62,9 @@ const app = new Hono<ApiEnv>()
 <div class="card"><h1>Private Beta</h1><p>Sorry, we are still in private beta and your login is not currently in the allowed list. Check back later!</p></div>
 </body></html>`),
   )
-  .get('/invite', (c) => {
+  .get('/invite', (context) => {
     const guideUrl = escapeHtml('https://void.cloud/guide/');
-    return c.html(`<!DOCTYPE html>
+    return context.html(`<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

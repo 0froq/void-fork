@@ -17,12 +17,12 @@ export type API<K extends keyof B, B = Client> = InferResponseType<
 const API_URL = 'https://api.void.cloud';
 const DEFAULT_API_TIMEOUT_MS = 10_000;
 
-function getApiUrl(c: Context): string {
-  return (c.env as Record<string, string | undefined>).API_URL ?? API_URL;
+function getApiUrl(context: Context): string {
+  return (context.env as Record<string, string | undefined>).API_URL ?? API_URL;
 }
 
-function isLocalHost(c: Context): boolean {
-  const host = c.req.header('host') ?? '';
+function isLocalHost(context: Context): boolean {
+  const host = context.req.header('host') ?? '';
   return host.startsWith('localhost') || host.startsWith('127.0.0.1');
 }
 
@@ -31,16 +31,16 @@ function isLocalHost(c: Context): boolean {
  * HTTP so production-backed dashboard testing cannot accidentally route to a
  * local or unresolved service binding.
  */
-function getApiFetch(c: Context): typeof fetch {
-  const binding = (c.env as { API?: Fetcher }).API;
-  if (binding && !isLocalHost(c)) {
+function getApiFetch(context: Context): typeof fetch {
+  const binding = (context.env as { API?: Fetcher }).API;
+  if (binding && !isLocalHost(context)) {
     return binding.fetch.bind(binding);
   }
   return globalThis.fetch;
 }
 
-function getApiTimeoutMs(c: Context): number {
-  const raw = (c.env as Record<string, string | undefined>).API_TIMEOUT_MS;
+function getApiTimeoutMs(context: Context): number {
+  const raw = (context.env as Record<string, string | undefined>).API_TIMEOUT_MS;
   if (!raw) {
     return DEFAULT_API_TIMEOUT_MS;
   }
@@ -56,19 +56,19 @@ function withTimeout(init: RequestInit | undefined, timeoutMs: number): RequestI
   return { ...init, signal: AbortSignal.timeout(timeoutMs) };
 }
 
-function getTimedApiFetch(c: Context): typeof fetch {
-  const apiFetch = getApiFetch(c);
-  const timeoutMs = getApiTimeoutMs(c);
+function getTimedApiFetch(context: Context): typeof fetch {
+  const apiFetch = getApiFetch(context);
+  const timeoutMs = getApiTimeoutMs(context);
   return ((input: RequestInfo | URL, init?: RequestInit) =>
     apiFetch(input, withTimeout(init, timeoutMs))) as typeof fetch;
 }
 
-function getToken(c: Context): string | undefined {
-  return c.get('token') as string | undefined;
+function getToken(context: Context): string | undefined {
+  return context.get('token') as string | undefined;
 }
 
-function getCfAccessHeaders(c: Context): Record<string, string> {
-  const env = c.env as Record<string, string | undefined>;
+function getCfAccessHeaders(context: Context): Record<string, string> {
+  const env = context.env as Record<string, string | undefined>;
   if (env.CF_ACCESS_CLIENT_ID && env.CF_ACCESS_CLIENT_SECRET) {
     return {
       'CF-Access-Client-Id': env.CF_ACCESS_CLIENT_ID,
@@ -81,57 +81,61 @@ function getCfAccessHeaders(c: Context): Record<string, string> {
   return {};
 }
 
-export function getHeaders(c: Context, headers?: HeadersInit): Headers {
+export function getHeaders(context: Context, headers?: HeadersInit): Headers {
   const out = new Headers(headers);
   if (!out.has('Accept')) {
     out.set('Accept', 'application/json');
   }
-  for (const [key, value] of Object.entries(getCfAccessHeaders(c))) {
+  for (const [key, value] of Object.entries(getCfAccessHeaders(context))) {
     out.set(key, value);
   }
 
-  const token = getToken(c);
+  const token = getToken(context);
   if (token) {
     out.set('Authorization', `Bearer ${token}`);
   }
   return out;
 }
 
-export function getPublicApiUrl(c: Context): string {
-  return getApiUrl(c);
+export function getPublicApiUrl(context: Context): string {
+  return getApiUrl(context);
 }
 
-export function getApiOrigin(c: Context): string {
-  return new URL(getApiUrl(c)).origin;
+export function getApiOrigin(context: Context): string {
+  return new URL(getApiUrl(context)).origin;
 }
 
-export function getApiClientFetch(c: Context): typeof fetch {
-  return getApiFetch(c);
+export function getApiClientFetch(context: Context): typeof fetch {
+  return getApiFetch(context);
 }
 
-export async function fetchApi(c: Context, path: string, options?: RequestInit): Promise<Response> {
-  const headers = getHeaders(c, options?.headers);
+export async function fetchApi(
+  context: Context,
+  path: string,
+  options?: RequestInit,
+): Promise<Response> {
+  const headers = getHeaders(context, options?.headers);
   if (options?.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  return getTimedApiFetch(c)(`${getApiUrl(c)}${path}`, {
+  return getTimedApiFetch(context)(`${getApiUrl(context)}${path}`, {
     ...options,
     headers,
   });
 }
 
 /** Use service binding when available (production), fall back to HTTP (local dev). */
-export function createClient(c: Context) {
-  const token = getToken(c);
-  const baseUrl = getApiUrl(c);
-  const headers = getCfAccessHeaders(c);
+export function createClient(context: Context) {
+  const token = getToken(context);
+  const baseUrl = getApiUrl(context);
+  const headers = getCfAccessHeaders(context);
   headers.Accept = 'application/json';
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
   return hc<ApiRoutes>(baseUrl, {
-    fetch: getTimedApiFetch(c),
+    fetch: getTimedApiFetch(context),
     headers,
   });
 }
@@ -178,10 +182,10 @@ export async function readApiJson<T>(res: ApiResponse): Promise<T | null> {
   }
 }
 
-export async function getCurrentUser(c: Context): Promise<API<'me'> | null> {
+export async function getCurrentUser(context: Context): Promise<API<'me'> | null> {
   let res: Response;
   try {
-    res = await fetchApi(c, '/me');
+    res = await fetchApi(context, '/me');
   } catch (error) {
     console.warn(
       `[dashboard] /me request failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -205,8 +209,12 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(c: Context, path: string, options?: RequestInit): Promise<Response> {
-  const res = await fetchApi(c, path, options);
+export async function api(
+  context: Context,
+  path: string,
+  options?: RequestInit,
+): Promise<Response> {
+  const res = await fetchApi(context, path, options);
   if (!res.ok) {
     throw new ApiError(res.status, await getApiErrorMessage(res));
   }

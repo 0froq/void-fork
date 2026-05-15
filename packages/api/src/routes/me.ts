@@ -4,10 +4,10 @@ import { getPlanLimits } from '../tiers.ts';
 
 const app = new Hono<ApiEnv>()
 
-  .get('/', async (c) => {
-    const user = c.get('user');
+  .get('/', async (context) => {
+    const user = context.get('user');
     const limits = getPlanLimits(user.plan);
-    return c.json({
+    return context.json({
       id: user.id,
       login: user.login,
       email: user.email,
