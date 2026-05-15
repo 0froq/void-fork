@@ -11,7 +11,7 @@ export function SignupControlPage({
   username,
 }: {
   enabled: boolean;
-  entries: Array<AllowlistEntryStatus>;
+  entries: ReadonlyArray<AllowlistEntryStatus>;
   username?: string;
 }) {
   return (

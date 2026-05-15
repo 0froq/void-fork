@@ -1,9 +1,9 @@
 import cx from '../../lib/cx.tsx';
 
-export type EyebrowProps = {
+export type EyebrowProps = Readonly<{
   ticks?: boolean;
   title: string;
-};
+}>;
 
 export default function Eyebrow({ ticks = true, title }: EyebrowProps) {
   return (

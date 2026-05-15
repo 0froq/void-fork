@@ -10,7 +10,7 @@ export function PlatformRollbackResultPage({
   username,
   tz,
 }: {
-  events: Array<PlatformEvent>;
+  events: ReadonlyArray<PlatformEvent>;
   batchId: string;
   env: PlatformEnv;
   username: string;

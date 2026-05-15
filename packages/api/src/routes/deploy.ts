@@ -96,16 +96,16 @@ function isCfAssetPlainText(text: string): boolean {
   return text.trimStart().startsWith('Assets have');
 }
 
-type UserWorkerMigrationResult = {
+type UserWorkerMigrationResult = Readonly<{
   ok: boolean;
-  migrations: Array<{
+  migrations: ReadonlyArray<{
     name: string;
     applied: boolean;
     durationMs: number;
     error?: string;
   }>;
   error?: string;
-};
+}>;
 
 function formatMigrationFailure(result: UserWorkerMigrationResult): string {
   const failedMigration = result.migrations.find((migration) => migration.error);
@@ -199,11 +199,11 @@ async function deleteContainerApplicationWithRetry(
 
 const app = new Hono<ApiEnv>();
 
-function sameClassSet(a: Array<string>, b: Array<string>): boolean {
+function sameClassSet(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-function sortUnique(values: Array<string> | undefined): Array<string> {
+function sortUnique(values: ReadonlyArray<string> | undefined): ReadonlyArray<string> {
   return [...new Set(values ?? [])].sort((a, b) => a.localeCompare(b));
 }
 
@@ -932,13 +932,13 @@ async function assertProjectNotDeleting(db: Db, projectId: string): Promise<void
 }
 
 export function buildWebSocketUploadMigrations(
-  migrations: Array<WebSocketMigrationMeta> | undefined,
+  migrations: ReadonlyArray<WebSocketMigrationMeta> | undefined,
 ):
   | {
       new_tag: string;
-      steps: Array<{
-        new_classes?: Array<string>;
-        deleted_classes?: Array<string>;
+      steps: ReadonlyArray<{
+        new_classes?: ReadonlyArray<string>;
+        deleted_classes?: ReadonlyArray<string>;
       }>;
     }
   | undefined {
@@ -946,25 +946,25 @@ export function buildWebSocketUploadMigrations(
 }
 
 export function buildDurableObjectUploadMigrations(
-  websocketMigrations: Array<WebSocketMigrationMeta> | undefined,
-  sandboxMigrations: Array<SandboxMigrationMeta> | undefined,
-  liveMigrations: Array<LiveMigrationMeta> | undefined = undefined,
+  websocketMigrations: ReadonlyArray<WebSocketMigrationMeta> | undefined,
+  sandboxMigrations: ReadonlyArray<SandboxMigrationMeta> | undefined,
+  liveMigrations: ReadonlyArray<LiveMigrationMeta> | undefined = undefined,
 ):
   | {
       new_tag: string;
-      steps: Array<{
-        new_classes?: Array<string>;
-        new_sqlite_classes?: Array<string>;
-        deleted_classes?: Array<string>;
+      steps: ReadonlyArray<{
+        new_classes?: ReadonlyArray<string>;
+        new_sqlite_classes?: ReadonlyArray<string>;
+        deleted_classes?: ReadonlyArray<string>;
       }>;
     }
   | undefined {
   const steps: Array<{
     tag: string;
     index: number;
-    new_classes?: Array<string>;
-    new_sqlite_classes?: Array<string>;
-    deleted_classes?: Array<string>;
+    new_classes?: ReadonlyArray<string>;
+    new_sqlite_classes?: ReadonlyArray<string>;
+    deleted_classes?: ReadonlyArray<string>;
   }> = [];
 
   for (const migration of websocketMigrations ?? []) {
@@ -1027,13 +1027,13 @@ function parseMigrationTagVersion(tag: string): number | null {
 }
 
 export function buildLegacyWebSocketUploadMigrations(
-  migrations: Array<WebSocketMigrationMeta> | undefined,
+  migrations: ReadonlyArray<WebSocketMigrationMeta> | undefined,
 ):
   | {
       new_tag: string;
-      steps: Array<{
-        new_classes?: Array<string>;
-        deleted_classes?: Array<string>;
+      steps: ReadonlyArray<{
+        new_classes?: ReadonlyArray<string>;
+        deleted_classes?: ReadonlyArray<string>;
       }>;
     }
   | undefined {
@@ -1051,7 +1051,7 @@ export function buildLegacyWebSocketUploadMigrations(
 
 export function buildWebSocketUploadBindings(
   websocket: DeployManifest['websocket'] | undefined,
-): Array<{
+): ReadonlyArray<{
   type: 'durable_object_namespace';
   name: string;
   class_name: string;
@@ -1086,7 +1086,9 @@ export function buildWebSocketUploadBindings(
  * DO bindings into dispatch namespaces (the resolver only sees account-level
  * scripts), so each deploy declares its own DO namespace + container app.
  */
-export function buildSandboxUploadBindings(sandbox: DeployManifest['sandbox'] | undefined): Array<{
+export function buildSandboxUploadBindings(
+  sandbox: DeployManifest['sandbox'] | undefined,
+): ReadonlyArray<{
   type: 'durable_object_namespace';
   name: string;
   class_name: string;
@@ -1103,7 +1105,7 @@ export function buildSandboxUploadBindings(sandbox: DeployManifest['sandbox'] | 
   ];
 }
 
-export function buildLiveUploadBindings(live: DeployManifest['live'] | undefined): Array<{
+export function buildLiveUploadBindings(live: DeployManifest['live'] | undefined): ReadonlyArray<{
   type: 'durable_object_namespace';
   name: string;
   class_name: string;
@@ -1122,7 +1124,7 @@ export function buildLiveUploadBindings(live: DeployManifest['live'] | undefined
 
 export function buildSandboxUploadContainers(
   sandbox: DeployManifest['sandbox'] | undefined,
-): Array<{ class_name: string }> | undefined {
+): ReadonlyArray<{ class_name: string }> | undefined {
   return sandbox ? [{ class_name: sandbox.className }] : undefined;
 }
 
@@ -1396,12 +1398,12 @@ const HEX_32_REGEX = /^[0-9a-f]{32}$/;
 // which is the whole reason this endpoint exists.
 const MAX_JSON_DEPLOY_BODY_BYTES = 64 * 1024 * 1024;
 
-type UploadUrlsRequestAsset = {
+type UploadUrlsRequestAsset = Readonly<{
   blake3: string;
   md5: string;
   size: number;
   contentType: string;
-};
+}>;
 
 /**
  * Validate a single `assets[]` entry from `POST /:id/deploy/upload-urls`.
@@ -1574,7 +1576,7 @@ app.post('/:id/deploy/upload-urls', async (c) => {
       return c.json({ error: err }, 400);
     }
   }
-  const assets = body.assets as Array<UploadUrlsRequestAsset>;
+  const assets = body.assets as ReadonlyArray<UploadUrlsRequestAsset>;
 
   logger.info('upload_urls', 'request', { assetCount: assets.length });
 

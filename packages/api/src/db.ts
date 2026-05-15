@@ -190,7 +190,7 @@ export async function getProjectBySlug(db: Db, slug: string): Promise<Project | 
   return row ?? null;
 }
 
-export async function getProjectsByUserId(db: Db, userId: string): Promise<Array<Project>> {
+export async function getProjectsByUserId(db: Db, userId: string): Promise<ReadonlyArray<Project>> {
   return db
     .select()
     .from(projects)
@@ -200,7 +200,7 @@ export async function getProjectsByUserId(db: Db, userId: string): Promise<Array
 
 export async function getLatestDeploymentsByProjectIds(
   db: Db,
-  projectIds: Array<string>,
+  projectIds: ReadonlyArray<string>,
 ): Promise<
   Map<
     string,
@@ -239,9 +239,9 @@ export async function getLatestDeploymentsByProjectIds(
 
 export async function getProjectsWithOwnerByIds(
   db: Db,
-  ids: Array<string>,
+  ids: ReadonlyArray<string>,
 ): Promise<
-  Array<
+  ReadonlyArray<
     Project & {
       owner_login: string | null;
     }
@@ -380,7 +380,7 @@ export async function getProjectDeployments(
   db: Db,
   projectId: string,
   limit = 5,
-): Promise<Array<Deployment>> {
+): Promise<ReadonlyArray<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -392,7 +392,7 @@ export async function getProjectDeployments(
 export async function getAllProjectDeployments(
   db: Db,
   projectId: string,
-): Promise<Array<Deployment>> {
+): Promise<ReadonlyArray<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -405,7 +405,7 @@ export async function getAllDeploymentsWithProject(
   limit: number,
   offset: number,
 ): Promise<
-  Array<Deployment & { project_slug: string | null; active_deployment_id: string | null }>
+  ReadonlyArray<Deployment & { project_slug: string | null; active_deployment_id: string | null }>
 > {
   return db
     .select({
@@ -533,7 +533,7 @@ export async function markDeploymentBundleStored(db: Db, deploymentId: string): 
 export async function setAppliedMigrations(
   db: Db,
   deploymentId: string,
-  migrations: Array<string>,
+  migrations: ReadonlyArray<string>,
 ): Promise<void> {
   await db
     .update(deployments)
@@ -557,7 +557,7 @@ export async function setAppliedMigrations(
 export async function appendAppliedMigrations(
   db: Db,
   deploymentId: string,
-  newMigrations: Array<string>,
+  newMigrations: ReadonlyArray<string>,
 ): Promise<void> {
   if (newMigrations.length === 0) {
     return;
@@ -619,7 +619,7 @@ export async function activeDeploymentContainsMigration(
       AND ${deployments.applied_migrations} IS NOT NULL
       AND (${deployments.applied_migrations})::jsonb ? ${migrationName}
     LIMIT 1
-  `)) as { rows: Array<unknown> };
+  `)) as { rows: ReadonlyArray<unknown> };
   return result.rows.length > 0;
 }
 
@@ -636,7 +636,7 @@ export async function activeDeploymentContainsMigration(
 export async function renameAppliedMigrationsForProject(
   db: Db,
   projectId: string,
-  renames: Array<{ from: string; to: string }>,
+  renames: ReadonlyArray<{ from: string; to: string }>,
 ): Promise<void> {
   if (renames.length === 0) {
     return;
@@ -694,7 +694,7 @@ export async function renameAppliedMigrationsForProject(
 export async function recordMigrationRenames(
   db: Db,
   projectId: string,
-  pairs: Array<{ from: string; to: string }>,
+  pairs: ReadonlyArray<{ from: string; to: string }>,
 ): Promise<void> {
   if (pairs.length === 0) {
     return;
@@ -768,7 +768,7 @@ export async function invalidateMigrationRenamesForOldName(
 export async function getRetainedDeployments(
   db: Db,
   projectId: string,
-): Promise<Array<Deployment>> {
+): Promise<ReadonlyArray<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -780,7 +780,7 @@ export async function getRetainedDeploymentsExcluding(
   db: Db,
   projectId: string,
   excludeId: string,
-): Promise<Array<Deployment>> {
+): Promise<ReadonlyArray<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -798,7 +798,7 @@ export async function getInFlightDeploymentsExcluding(
   db: Db,
   projectId: string,
   excludeId?: string | null,
-): Promise<Array<Deployment>> {
+): Promise<ReadonlyArray<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -820,7 +820,7 @@ export async function getInFlightDeploymentsExcluding(
 export async function getActivatedDeployments(
   db: Db,
   projectId: string,
-): Promise<Array<Deployment>> {
+): Promise<ReadonlyArray<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -837,7 +837,7 @@ export async function getActivatedDeployments(
 export async function getTerminalFailedDeployments(
   db: Db,
   projectId: string,
-): Promise<Array<Deployment>> {
+): Promise<ReadonlyArray<Deployment>> {
   return db
     .select()
     .from(deployments)
@@ -856,7 +856,7 @@ export async function getTerminalFailedDeployments(
 export async function listProjectSecretNames(
   db: Db,
   projectId: string,
-): Promise<Array<{ name: string }>> {
+): Promise<ReadonlyArray<{ name: string }>> {
   return db
     .select({ name: projectSecrets.name })
     .from(projectSecrets)
@@ -877,7 +877,10 @@ export async function getProjectSecret(
   return row ?? null;
 }
 
-export async function getProjectSecrets(db: Db, projectId: string): Promise<Array<ProjectSecret>> {
+export async function getProjectSecrets(
+  db: Db,
+  projectId: string,
+): Promise<ReadonlyArray<ProjectSecret>> {
   return db
     .select()
     .from(projectSecrets)
@@ -942,7 +945,10 @@ export async function createResource(
   return row;
 }
 
-export async function getProjectResources(db: Db, projectId: string): Promise<Array<Resource>> {
+export async function getProjectResources(
+  db: Db,
+  projectId: string,
+): Promise<ReadonlyArray<Resource>> {
   return db.select().from(resources).where(eq(resources.project_id, projectId));
 }
 
@@ -1039,7 +1045,10 @@ export async function createDomain(
   return row;
 }
 
-export async function getDomainsByProjectId(db: Db, projectId: string): Promise<Array<Domain>> {
+export async function getDomainsByProjectId(
+  db: Db,
+  projectId: string,
+): Promise<ReadonlyArray<Domain>> {
   return db
     .select()
     .from(domains)
@@ -1049,8 +1058,8 @@ export async function getDomainsByProjectId(db: Db, projectId: string): Promise<
 
 export async function getDomainsByProjectIds(
   db: Db,
-  projectIds: Array<string>,
-): Promise<Map<string, Array<Domain>>> {
+  projectIds: ReadonlyArray<string>,
+): Promise<Map<string, ReadonlyArray<Domain>>> {
   const allDomains = await db
     .select()
     .from(domains)
@@ -1130,11 +1139,15 @@ export async function countProjects(db: Db): Promise<number> {
 
 // --- Admin ---
 
-export async function getAllUsers(db: Db, limit: number, offset: number): Promise<Array<User>> {
+export async function getAllUsers(
+  db: Db,
+  limit: number,
+  offset: number,
+): Promise<ReadonlyArray<User>> {
   return db.select().from(users).orderBy(desc(users.created_at)).limit(limit).offset(offset);
 }
 
-export async function searchUsers(db: Db, query: string): Promise<Array<User>> {
+export async function searchUsers(db: Db, query: string): Promise<ReadonlyArray<User>> {
   const pattern = `%${query}%`;
   return db
     .select()
@@ -1159,19 +1172,19 @@ export async function getSystemStats(
   };
 }
 
-export type CliVersionDeploymentStats = {
+export type CliVersionDeploymentStats = Readonly<{
   cli_version: string | null;
   deployments: number;
   projects: number;
   users: number;
   first_seen: string;
   last_seen: string;
-};
+}>;
 
 export async function getCliVersionDeploymentStats(
   db: Db,
   options?: { sinceDays?: number },
-): Promise<Array<CliVersionDeploymentStats>> {
+): Promise<ReadonlyArray<CliVersionDeploymentStats>> {
   const sinceDays = options?.sinceDays;
   return db
     .select({
@@ -1213,7 +1226,7 @@ export async function getAllProjects(
   db: Db,
   limit: number,
   offset: number,
-): Promise<Array<Project>> {
+): Promise<ReadonlyArray<Project>> {
   return db.select().from(projects).orderBy(desc(projects.created_at)).limit(limit).offset(offset);
 }
 
@@ -1234,7 +1247,7 @@ export async function searchProjects(
   db: Db,
   query: string,
 ): Promise<
-  Array<
+  ReadonlyArray<
     Project & {
       owner_login: string | null;
       last_deploy: string | null;
@@ -1268,7 +1281,7 @@ export async function searchDeployments(
   db: Db,
   query: string,
 ): Promise<
-  Array<Deployment & { project_slug: string | null; active_deployment_id: string | null }>
+  ReadonlyArray<Deployment & { project_slug: string | null; active_deployment_id: string | null }>
 > {
   const pattern = `%${query}%`;
   return db
@@ -1298,7 +1311,7 @@ export async function getAllProjectsWithOwner(
   limit: number,
   offset: number,
 ): Promise<
-  Array<
+  ReadonlyArray<
     Project & {
       owner_login: string | null;
       last_deploy: string | null;
@@ -1388,8 +1401,8 @@ export async function getUsersWithProjectsBatch(db: Db, limit: number, offset: n
 
 export async function getAllowlistEntryStatuses(
   db: Db,
-  entries: Array<AllowlistEntry>,
-): Promise<Array<AllowlistEntryStatus>> {
+  entries: ReadonlyArray<AllowlistEntry>,
+): Promise<ReadonlyArray<AllowlistEntryStatus>> {
   if (entries.length === 0) {
     return [];
   }
@@ -1543,7 +1556,7 @@ export async function skipPendingBatchEvents(db: Db, batchId: string): Promise<v
 export async function getPlatformEventsByBatchId(
   db: Db,
   batchId: string,
-): Promise<Array<PlatformEvent>> {
+): Promise<ReadonlyArray<PlatformEvent>> {
   return db
     .select()
     .from(platformEvents)
@@ -1555,7 +1568,7 @@ export async function getRecentPlatformEvents(
   db: Db,
   environment: PlatformEvent['environment'],
   limit = 20,
-): Promise<Array<PlatformEvent>> {
+): Promise<ReadonlyArray<PlatformEvent>> {
   return db
     .select()
     .from(platformEvents)
@@ -1609,7 +1622,7 @@ export async function getAllInvitations(
   limit: number,
   offset: number,
 ): Promise<
-  Array<Invitation & { invited_by_login: string | null; revoked_by_login: string | null }>
+  ReadonlyArray<Invitation & { invited_by_login: string | null; revoked_by_login: string | null }>
 > {
   const invitedByUser = alias(users, 'invited_by_user');
   const revokedByUser = alias(users, 'revoked_by_user');

@@ -184,7 +184,7 @@ async function cleanupBestEffortResources(
   c: Context<ApiEnv>,
   projectId: string,
   project: Pick<Project, 'slug'>,
-): Promise<Array<string>> {
+): Promise<ReadonlyArray<string>> {
   const warnings: Array<string> = [];
   const warn = (msg: string) => (err: unknown) => {
     warnings.push(`${msg}: ${err instanceof Error ? err.message : String(err)}`);
@@ -365,7 +365,7 @@ export async function teardownProject(
   c: Context<ApiEnv>,
   projectId: string,
   project: Pick<Project, 'slug' | 'status'>,
-): Promise<{ warnings: Array<string> }> {
+): Promise<{ warnings: ReadonlyArray<string> }> {
   // Always run lock + mark — idempotent for `status='deleting'` (the helper
   // skips the flip and just (re-)marks any non-terminal deployments). This
   // covers retried teardown after partial failure where the previous attempt

@@ -1,9 +1,9 @@
-export type GoogleUser = {
+export type GoogleUser = Readonly<{
   id: string;
   email: string;
   name: string;
   emailVerified: boolean;
-};
+}>;
 
 export function getGoogleAuthorizeUrl(
   clientId: string,

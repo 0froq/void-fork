@@ -3,7 +3,9 @@ import type { ApiEnv } from './env.ts';
 import { getPlanLimits } from './tiers.ts';
 import type { UsageEvent } from './usage-counter.ts';
 
-export function groupEventsByUser(events: Array<UsageEvent>): Map<string, Array<UsageEvent>> {
+export function groupEventsByUser(
+  events: ReadonlyArray<UsageEvent>,
+): Map<string, ReadonlyArray<UsageEvent>> {
   const grouped = new Map<string, Array<UsageEvent>>();
   for (const event of events) {
     const existing = grouped.get(event.userId);

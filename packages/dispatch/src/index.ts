@@ -22,7 +22,7 @@ import { resolveStaticPath, getContentType } from './static.ts';
 import type { AssetConfig } from './static.ts';
 import { buildVariantOriginalUrl, type QueryAllowlist } from './variant-key.ts';
 
-type RoutingEntry = {
+type RoutingEntry = Readonly<{
   workerName: string;
   projectId: string;
   userId?: string;
@@ -33,11 +33,11 @@ type RoutingEntry = {
   limits?: Record<string, number>;
   suspended?: string;
   hashedAssetsPrefix?: string;
-  headerRules?: Array<HeaderRule>;
+  headerRules?: ReadonlyArray<HeaderRule>;
   // `redirectRules` fires pre-asset, `fallbackRules` fires post-asset.
   // List identity encodes the pre-vs-post-asset semantic.
-  redirectRules?: Array<RedirectRule>;
-  fallbackRules?: Array<RedirectRule>;
+  redirectRules?: ReadonlyArray<RedirectRule>;
+  fallbackRules?: ReadonlyArray<RedirectRule>;
   // Per-pathname allowlist of query params that are part of the ISR variant
   // key on a rewrite. Default (no entry / no allowlist) drops every param,
   // so an attacker can't fan out the cache by varying `?utm`/`?cb`/etc.
@@ -45,9 +45,9 @@ type RoutingEntry = {
   staticDeploymentId?: string;
   assetManifestId?: string;
   assetConfig?: AssetConfig;
-};
+}>;
 
-type QueueRoutingEntry = {
+type QueueRoutingEntry = Readonly<{
   workerName: string;
   projectId: string;
   queueName: string;
@@ -56,7 +56,7 @@ type QueueRoutingEntry = {
   // without a matching `x-void-internal` header with 401. Absent on entries
   // written by older API versions.
   proxyToken?: string;
-};
+}>;
 
 const CLIENT_REVALIDATE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 

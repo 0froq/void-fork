@@ -1,16 +1,16 @@
 import { useId, useState } from 'react';
 import cx from '../../lib/cx.tsx';
 
-type CodeTab = {
+type CodeTab = Readonly<{
   code: string;
   label: string;
   language?: string;
   prefix?: string;
-};
+}>;
 
-type CodeGroupProps = {
-  tabs: Array<CodeTab>;
-};
+type CodeGroupProps = Readonly<{
+  tabs: ReadonlyArray<CodeTab>;
+}>;
 
 export default function CodeGroup({ tabs }: CodeGroupProps) {
   const [activeTab, setActiveTab] = useState(0);

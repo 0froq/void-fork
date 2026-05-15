@@ -215,7 +215,7 @@ r2.post('/list', async (c) => {
   }
 
   const data = (await cfRes.json()) as {
-    result?: Array<{ key: string; size: number; last_modified?: string }>;
+    result?: ReadonlyArray<{ key: string; size: number; last_modified?: string }>;
     result_info?: { cursor?: string };
   };
 

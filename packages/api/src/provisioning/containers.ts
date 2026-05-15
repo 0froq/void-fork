@@ -1,7 +1,7 @@
 import { retryWithBackoff } from '../cf-api.ts';
 import { CF_API_BASE, cfFetch, CloudflareApiError } from './cloudflare-api.ts';
 
-export type ContainerApplicationInfo = {
+export type ContainerApplicationInfo = Readonly<{
   id: string;
   name: string;
   scheduling_policy?: string;
@@ -13,22 +13,22 @@ export type ContainerApplicationInfo = {
     namespace_id?: string;
   };
   max_instances?: number;
-};
+}>;
 
-export type SandboxContainerConfig = {
+export type SandboxContainerConfig = Readonly<{
   name: string;
   image: string;
   namespaceId: string;
   instanceType?: string;
   maxInstances?: number;
-};
+}>;
 
-type ScriptBinding = {
+type ScriptBinding = Readonly<{
   type: string;
   name?: string;
   class_name?: string;
   namespace_id?: string;
-};
+}>;
 
 /**
  * Resolve a Durable Object namespace ID for a class on a WfP script.
@@ -50,7 +50,7 @@ export async function findDurableObjectNamespaceId(
   bindingName: string,
   className: string,
 ): Promise<string> {
-  const bindings = await cfFetch<Array<ScriptBinding>>(
+  const bindings = await cfFetch<ReadonlyArray<ScriptBinding>>(
     `${CF_API_BASE}/${accountId}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${scriptName}/bindings`,
     apiToken,
   );
@@ -165,7 +165,7 @@ export async function findContainerApplication(
   apiToken: string,
   name: string,
 ): Promise<ContainerApplicationInfo | undefined> {
-  const applications = await cfFetch<Array<ContainerApplicationInfo>>(
+  const applications = await cfFetch<ReadonlyArray<ContainerApplicationInfo>>(
     `${containersUrl(accountId)}/applications?name=${encodeURIComponent(name)}`,
     apiToken,
   );

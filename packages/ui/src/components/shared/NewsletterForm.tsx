@@ -1,11 +1,11 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-type NewsletterFormProps = {
+type NewsletterFormProps = Readonly<{
   endpoint?: string;
   formId?: string;
   onError?: (error: Error) => void;
   onSuccess?: (email: string) => void;
-};
+}>;
 
 type FormState = 'idle' | 'submitting' | 'success' | 'error';
 

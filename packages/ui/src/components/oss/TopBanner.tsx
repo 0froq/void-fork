@@ -7,10 +7,10 @@ import vitestMonoIcon from '../../assets/icons/vitest-mono.svg';
 import { useThemeContext } from '../../context/ThemeContext.tsx';
 import type { BannerConfig } from '../../types/theme-config.ts';
 
-type TopBannerProps = {
+type TopBannerProps = Readonly<{
   banner?: BannerConfig;
   isMarketingPage?: boolean;
-};
+}>;
 
 type BannerIcon = NonNullable<BannerConfig['icon']>;
 

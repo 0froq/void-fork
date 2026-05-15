@@ -44,7 +44,7 @@ export function DeploymentTable({
   showProject,
   tz,
 }: {
-  deployments: Array<
+  deployments: ReadonlyArray<
     Deployment & {
       project_slug?: string | null;
       active_deployment_id?: string | null;

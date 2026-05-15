@@ -2,16 +2,16 @@ import { ReactNode } from 'react';
 import viteplusLogoDark from '../../assets/viteplus/logo-dark.svg';
 import viteplusLogoLight from '../../assets/viteplus/logo.svg';
 
-type NavItem = {
+type NavItem = Readonly<{
   link: string;
   text: string;
-};
+}>;
 
-type VitePlusHeaderProps = {
+type VitePlusHeaderProps = Readonly<{
   currentPath?: string;
-  nav: Array<NavItem>;
+  nav: ReadonlyArray<NavItem>;
   rightSide?: ReactNode;
-};
+}>;
 
 export default function Header({ currentPath, nav, rightSide }: VitePlusHeaderProps) {
   return (

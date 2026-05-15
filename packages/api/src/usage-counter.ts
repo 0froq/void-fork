@@ -17,14 +17,14 @@ export type CounterState = {
   projectSlugs: Record<string, string>; // projectId → slug
 };
 
-export type UsageEvent = {
+export type UsageEvent = Readonly<{
   projectId: string;
   userId: string;
   slug: string;
   requests: number;
   responseBytes: number;
   status?: number;
-};
+}>;
 
 // --- Pure functions (exported for unit testing) ---
 
@@ -95,7 +95,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
 
   private async handleRecord(request: Request): Promise<Response> {
     const body = (await request.json()) as {
-      events: Array<UsageEvent>;
+      events: ReadonlyArray<UsageEvent>;
       plan?: string;
       userId: string;
     };

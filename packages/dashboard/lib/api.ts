@@ -198,7 +198,7 @@ export async function getCurrentUser(c: Context): Promise<API<'me'> | null> {
 
 export class ApiError extends Error {
   constructor(
-    public status: number,
+    public readonly status: number,
     message: string,
   ) {
     super(message);

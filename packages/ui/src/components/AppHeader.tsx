@@ -7,19 +7,19 @@ import type { IconOption } from '../types/theme-config.ts';
 
 const EXTERNAL_URL_RE = /^(?:[a-z]+:|\/\/)/i;
 
-type HeaderActionItem = {
+type HeaderActionItem = Readonly<{
   icon?: IconOption;
   link: string;
   text: string;
-};
+}>;
 
-type AppHeaderProps = {
-  accountMenuItems?: Array<HeaderActionItem>;
+type AppHeaderProps = Readonly<{
+  accountMenuItems?: ReadonlyArray<HeaderActionItem>;
   accountMenuLabel?: string;
   backHref?: string;
   homeHref?: string;
   title?: string;
-};
+}>;
 
 const isExternalLink = (link: string) => EXTERNAL_URL_RE.test(link);
 

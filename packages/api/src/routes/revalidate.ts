@@ -16,7 +16,7 @@ app.post('/:id/revalidate', async (c) => {
     return c.json({ error: 'forbidden' }, 403);
   }
 
-  const body = await c.req.json<{ paths?: Array<string>; all?: boolean }>();
+  const body = await c.req.json<{ paths?: ReadonlyArray<string>; all?: boolean }>();
   return runRevalidate(c, projectId, project, body);
 });
 

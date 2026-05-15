@@ -22,7 +22,7 @@ export function InvitationsPage({
   totalPages,
   username,
 }: {
-  invitations: Array<InvitationRow>;
+  invitations: ReadonlyArray<InvitationRow>;
   page: number;
   totalPages: number;
   username?: string;

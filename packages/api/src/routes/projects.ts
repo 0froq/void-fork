@@ -139,7 +139,7 @@ class RollbackError extends Error {
      * non-empty string), so human-readable hints built via string
      * concatenation are not safe to copy-paste.
      */
-    public readonly destructiveMigrations?: Array<string>,
+    public readonly destructiveMigrations?: ReadonlyArray<string>,
   ) {
     super(message);
     this.name = 'RollbackError';
@@ -157,7 +157,7 @@ type ProjectListItem = Awaited<ReturnType<typeof getProjectsByUserId>>[number] &
   traffic: {
     requests5m: number;
     lastSeenAt: string | null;
-    sparkline5m: Array<number>;
+    sparkline5m: ReadonlyArray<number>;
   };
   health: {
     responses4xx15m: number;
@@ -277,10 +277,10 @@ function isMissingTableError(err: unknown): boolean {
   return /no such table/i.test(msg);
 }
 
-type LineComment = {
+type LineComment = Readonly<{
   text: string;
   standalone: boolean;
-};
+}>;
 
 /**
  * Tokenize SQL into executable code and the set of line-comment lines.
@@ -316,7 +316,7 @@ type LineComment = {
  */
 function stripSqlStringsAndComments(sql: string): {
   code: string;
-  lineComments: Array<LineComment>;
+  lineComments: ReadonlyArray<LineComment>;
 } {
   let code = '';
   const lineComments: Array<LineComment> = [];
@@ -387,8 +387,8 @@ function stripSqlStringsAndComments(sql: string): {
 }
 
 function hasUnauthorizedDestructive(
-  migrations: Array<{ name: string; sql: string }>,
-): Array<string> {
+  migrations: ReadonlyArray<{ name: string; sql: string }>,
+): ReadonlyArray<string> {
   const violations: Array<string> = [];
   for (const m of migrations) {
     const { code, lineComments } = stripSqlStringsAndComments(m.sql);
@@ -577,7 +577,7 @@ const app = new Hono<ApiEnv>()
 
     const { deploymentId, allowDestructive } = await c.req.json<{
       deploymentId: string;
-      allowDestructive?: Array<string>;
+      allowDestructive?: ReadonlyArray<string>;
     }>();
     if (!deploymentId) {
       return c.json({ error: 'deploymentId is required' }, 400);
@@ -631,7 +631,7 @@ const app = new Hono<ApiEnv>()
     // inside the lock because a concurrent /rename can rewrite every
     // deployment's applied_migrations via
     // renameAppliedMigrationsForProject.
-    let rollbackResult: { migrationDiff: Array<string> };
+    let rollbackResult: { migrationDiff: ReadonlyArray<string> };
     try {
       rollbackResult = await c.get('db').transaction(async (tx) => {
         // Lock the project row via `SELECT … FOR UPDATE` — per-project,
@@ -996,7 +996,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: 'forbidden' }, 403);
     }
 
-    const body = await c.req.json<{ migrations: Array<{ name: string; sql: string }> }>();
+    const body = await c.req.json<{ migrations: ReadonlyArray<{ name: string; sql: string }> }>();
     if (!body.migrations || !Array.isArray(body.migrations)) {
       return c.json({ error: 'migrations array required' }, 400);
     }
@@ -1134,7 +1134,7 @@ const app = new Hono<ApiEnv>()
       return c.json({ error: 'forbidden' }, 403);
     }
 
-    const body = await c.req.json<{ renames: Array<{ from: string; to: string }> }>();
+    const body = await c.req.json<{ renames: ReadonlyArray<{ from: string; to: string }> }>();
     if (!body.renames || !Array.isArray(body.renames) || body.renames.length === 0) {
       return c.json({ error: 'renames array required' }, 400);
     }
@@ -1567,7 +1567,7 @@ const app = new Hono<ApiEnv>()
     // interstitials). Parse defensively so the handler returns a clean 502
     // instead of throwing an uncaught SyntaxError that Hono maps to a 500.
     let result: {
-      data: Array<{
+      data: ReadonlyArray<{
         outcome: string;
         logData: string;
         exceptionData: string;
@@ -1735,7 +1735,7 @@ function isAlreadyExistsError(error: unknown): boolean {
   return error instanceof Error && error.message.toLowerCase().includes('already exists');
 }
 
-function tryParse(json: string): Array<unknown> {
+function tryParse(json: string): ReadonlyArray<unknown> {
   try {
     return JSON.parse(json);
   } catch {

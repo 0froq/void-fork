@@ -2,15 +2,15 @@ import { tokenizeSql } from '../sql/tokenize.ts';
 
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 
-export type RemoteMigration = {
+export type RemoteMigration = Readonly<{
   name: string;
   sql: string;
-};
+}>;
 
-export type MigrationFailure = {
+export type MigrationFailure = Readonly<{
   name: string;
   error: string;
-};
+}>;
 
 export type MigrationResult = {
   applied: Array<string>;
@@ -262,7 +262,7 @@ export async function runRemoteMigrations(
   accountId: string,
   apiToken: string,
   databaseId: string,
-  migrations: Array<RemoteMigration>,
+  migrations: ReadonlyArray<RemoteMigration>,
   appliedSet?: Set<string>,
 ): Promise<MigrationResult> {
   const applied = appliedSet ?? (await ensureTrackingTable(accountId, apiToken, databaseId));
@@ -397,10 +397,10 @@ export async function runRemoteMigrations(
   return result;
 }
 
-type D1Query = {
+type D1Query = Readonly<{
   sql: string;
-  params?: Array<unknown>;
-};
+  params?: ReadonlyArray<unknown>;
+}>;
 
 /**
  * D1 REST query response shape. `meta` is optional because older callers
@@ -411,17 +411,17 @@ type D1Query = {
  * to detect concurrent-rename conflicts where the winner already renamed
  * the row out from under us and our own UPDATE was a no-op.
  */
-type D1QueryResponseMeta = {
+type D1QueryResponseMeta = Readonly<{
   changes?: number;
   rows_written?: number;
   rows_read?: number;
   [key: string]: unknown;
-};
+}>;
 
-type D1QueryResponse = {
-  results: Array<Record<string, unknown>>;
+type D1QueryResponse = Readonly<{
+  results: ReadonlyArray<Record<string, unknown>>;
   meta?: D1QueryResponseMeta;
-};
+}>;
 
 export const D1_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -456,8 +456,8 @@ export async function queryD1(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let json: {
     success: boolean;
-    errors: Array<{ code: number; message: string }>;
-    result: Array<D1QueryResponse & { meta?: D1QueryResponseMeta }>;
+    errors: ReadonlyArray<{ code: number; message: string }>;
+    result: ReadonlyArray<D1QueryResponse & { meta?: D1QueryResponseMeta }>;
   };
   try {
     const response = await fetch(url, {

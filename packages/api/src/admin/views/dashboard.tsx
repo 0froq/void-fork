@@ -4,7 +4,7 @@ import { Layout } from './layout.tsx';
 import type { ProjectRow } from './projects-table.tsx';
 import { ProjectsTable } from './projects-table.tsx';
 
-export type TopProjectRow = {
+export type TopProjectRow = Readonly<{
   id: string;
   user_id: string;
   slug: string;
@@ -13,20 +13,20 @@ export type TopProjectRow = {
   requests: number;
   bandwidthBytes: number;
   lastSeen: string;
-};
+}>;
 
-type DashboardProps = {
+type DashboardProps = Readonly<{
   stats: {
     users: number;
     projects: number;
     deployments: number;
   };
-  projects: Array<ProjectRow>;
-  deployments: Array<Deployment & { project_slug: string | null }>;
-  topProjects: Array<TopProjectRow>;
+  projects: ReadonlyArray<ProjectRow>;
+  deployments: ReadonlyArray<Deployment & { project_slug: string | null }>;
+  topProjects: ReadonlyArray<TopProjectRow>;
   siteDomain: string;
   username?: string;
-};
+}>;
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US').format(value);
@@ -99,7 +99,7 @@ function TopProjectsWidget({
   projects,
   siteDomain,
 }: {
-  projects: Array<TopProjectRow>;
+  projects: ReadonlyArray<TopProjectRow>;
   siteDomain: string;
 }) {
   return (

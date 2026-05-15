@@ -22,7 +22,7 @@
 
 import { AwsV4Signer } from 'aws4fetch';
 
-export type PresignAssetPutOptions = {
+export type PresignAssetPutOptions = Readonly<{
   accountId: string;
   accessKeyId: string;
   secretAccessKey: string;
@@ -39,9 +39,9 @@ export type PresignAssetPutOptions = {
    * production callers should leave this unset to use the current time.
    */
   now?: Date;
-};
+}>;
 
-export type PresignedAssetPut = {
+export type PresignedAssetPut = Readonly<{
   /** Presigned R2 PUT URL, valid for `ttlSeconds`. */
   url: string;
   /**
@@ -49,7 +49,7 @@ export type PresignedAssetPut = {
    * values fails the signature check at R2's edge.
    */
   headers: Record<string, string>;
-};
+}>;
 
 /** R2's S3-compatible endpoint host pattern. */
 function r2Endpoint(accountId: string, bucket: string, key: string): string {

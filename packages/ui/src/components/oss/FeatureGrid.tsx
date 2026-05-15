@@ -2,10 +2,10 @@ import { Icon } from '@iconify/react';
 import cx from '../../lib/cx.tsx';
 import type { FeatureConfig } from '../../types/theme-config.ts';
 
-type FeatureGridProps = {
+type FeatureGridProps = Readonly<{
   appearance?: 'dark' | 'surface';
-  features?: Array<FeatureConfig>;
-};
+  features?: ReadonlyArray<FeatureConfig>;
+}>;
 
 export default function FeatureGrid({ appearance = 'dark', features = [] }: FeatureGridProps) {
   if (!features.length) {

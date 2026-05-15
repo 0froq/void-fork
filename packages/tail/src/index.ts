@@ -1,6 +1,6 @@
-type Env = {
+type Env = Readonly<{
   ANALYTICS: AnalyticsEngineDataset;
-};
+}>;
 
 function isFetchEvent(event: TraceItem['event']): event is TraceItemFetchEventInfo {
   return event !== null && 'request' in event;
@@ -35,7 +35,7 @@ export function parseScriptName(
 }
 
 export default {
-  async tail(events: Array<TraceItem>, env: Env) {
+  async tail(events: ReadonlyArray<TraceItem>, env: Env) {
     for (const event of events) {
       const scriptName = event.scriptName;
       if (!scriptName) {

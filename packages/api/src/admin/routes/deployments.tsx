@@ -306,7 +306,7 @@ app.get('/:id/logs', async (c) => {
     return c.json({ error: 'log query failed', status: response.status, detail: body, query }, 502);
   }
 
-  const result = (await response.json()) as { data: Array<LogRow> };
+  const result = (await response.json()) as { data: ReadonlyArray<LogRow> };
   const data = (result.data ?? []).map((row) => ({
     timestamp: row.ts,
     outcome: row.outcome,
@@ -320,7 +320,7 @@ app.get('/:id/logs', async (c) => {
   return c.json({ data });
 });
 
-type LogRow = {
+type LogRow = Readonly<{
   outcome: string;
   logData: string;
   exceptionData: string;
@@ -328,9 +328,9 @@ type LogRow = {
   method: string;
   statusCode: string;
   ts: number;
-};
+}>;
 
-function tryParse(json: string): Array<unknown> {
+function tryParse(json: string): ReadonlyArray<unknown> {
   try {
     return JSON.parse(json);
   } catch {

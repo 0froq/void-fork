@@ -6,12 +6,12 @@ import type { IconOption } from '../../types/theme-config.ts';
 
 const EXTERNAL_URL_RE = /^(?:[a-z]+:|\/\/)/i;
 
-type NavItem = {
+type NavItem = Readonly<{
   icon?: IconOption;
-  items?: Array<NavGroupItem>;
+  items?: ReadonlyArray<NavGroupItem>;
   link?: string;
   text: string;
-};
+}>;
 
 type NavGroupItem =
   | {
@@ -21,33 +21,33 @@ type NavGroupItem =
     }
   | {
       icon?: IconOption;
-      items: Array<{ icon?: IconOption; link: string; text: string }>;
+      items: ReadonlyArray<{ icon?: IconOption; link: string; text: string }>;
       text?: string;
     };
 
-type LocaleLink = {
+type LocaleLink = Readonly<{
   link: string;
   text: string;
-};
+}>;
 
-type CurrentLang = {
+type CurrentLang = Readonly<{
   label?: string;
-};
+}>;
 
-type HeaderActionItem = {
+type HeaderActionItem = Readonly<{
   icon?: IconOption;
   link: string;
   text: string;
-};
+}>;
 
-type HeaderSocialLink = {
+type HeaderSocialLink = Readonly<{
   icon: string;
   label?: string;
   link: string;
-};
+}>;
 
-type HeaderProps = {
-  accountMenuItems?: Array<HeaderActionItem>;
+type HeaderProps = Readonly<{
+  accountMenuItems?: ReadonlyArray<HeaderActionItem>;
   accountMenuLabel?: string;
   currentLang?: CurrentLang;
   currentPath?: string;
@@ -55,12 +55,12 @@ type HeaderProps = {
   isMarketingPage?: boolean;
   isSearchAvailable?: boolean;
   langMenuLabel?: string;
-  localeLinks?: Array<LocaleLink>;
-  nav?: Array<NavItem>;
+  localeLinks?: ReadonlyArray<LocaleLink>;
+  nav?: ReadonlyArray<NavItem>;
   navBarTitleAfter?: ReactNode;
   navBarTitleBefore?: ReactNode;
-  socialLinks?: Array<HeaderSocialLink>;
-};
+  socialLinks?: ReadonlyArray<HeaderSocialLink>;
+}>;
 
 const isDropdown = (item: NavItem) => Boolean(item.items && Array.isArray(item.items));
 

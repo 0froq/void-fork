@@ -102,10 +102,10 @@ const accountUsage = new Hono<ApiEnv>()
     return c.json({ billingPeriodStart: since.toISOString(), ...totals, projects: projectUsages });
   });
 
-type AnalyticsRow = {
+type AnalyticsRow = Readonly<{
   requests: number;
   bandwidth_bytes: number;
-};
+}>;
 
 type BatchAnalyticsRow = AnalyticsRow & {
   blob1: string;
@@ -115,21 +115,21 @@ type TopProjectTrafficRow = BatchAnalyticsRow & {
   last_seen: string;
 };
 
-type TopProjectTrafficEntry = {
+type TopProjectTrafficEntry = Readonly<{
   projectId: string;
   requests: number;
   bandwidthBytes: number;
   lastSeen: string;
-};
+}>;
 
-type ProjectRequestOverviewRow = {
+type ProjectRequestOverviewRow = Readonly<{
   project_id: string;
   bucket: number;
   last_seen: string;
   requests: number;
   responses_4xx: number;
   responses_5xx: number;
-};
+}>;
 
 type ProjectRequestOverview = {
   requests5m: number;
@@ -181,7 +181,7 @@ async function queryProjectUsage(
     return { requests: 0, bandwidthBytes: 0 };
   }
 
-  const result = (await response.json()) as { data: Array<AnalyticsRow> };
+  const result = (await response.json()) as { data: ReadonlyArray<AnalyticsRow> };
   const row = result.data?.[0];
   return {
     requests: Math.round(row?.requests ?? 0),
@@ -189,14 +189,14 @@ async function queryProjectUsage(
   };
 }
 
-type UsageEntry = { requests: number; bandwidthBytes: number };
+type UsageEntry = Readonly<{ requests: number; bandwidthBytes: number }>;
 const ZERO_USAGE: UsageEntry = { requests: 0, bandwidthBytes: 0 };
 
 async function queryBatchProjectUsage(
   accountId: string,
   apiToken: string,
   requestsDataset: string,
-  projectIds: Array<string>,
+  projectIds: ReadonlyArray<string>,
   since: Date,
 ): Promise<Map<string, UsageEntry>> {
   if (projectIds.length === 0) {
@@ -232,7 +232,7 @@ async function queryBatchProjectUsage(
     return new Map();
   }
 
-  const json = (await response.json()) as { data: Array<BatchAnalyticsRow> };
+  const json = (await response.json()) as { data: ReadonlyArray<BatchAnalyticsRow> };
   const result = new Map<string, UsageEntry>();
   for (const row of json.data ?? []) {
     result.set(row.blob1, {
@@ -249,7 +249,7 @@ async function queryTopProjectTraffic(
   requestsDataset: string,
   since: Date,
   limit: number,
-): Promise<Array<TopProjectTrafficEntry>> {
+): Promise<ReadonlyArray<TopProjectTrafficEntry>> {
   if (limit <= 0) {
     return [];
   }
@@ -286,7 +286,7 @@ async function queryTopProjectTraffic(
     return [];
   }
 
-  const json = (await response.json()) as { data: Array<TopProjectTrafficRow> };
+  const json = (await response.json()) as { data: ReadonlyArray<TopProjectTrafficRow> };
   return (json.data ?? []).map((row) => ({
     projectId: row.blob1,
     requests: Math.round(row.requests ?? 0),
@@ -326,7 +326,7 @@ async function queryProjectRequestOverview(
   accountId: string,
   apiToken: string,
   requestsDataset: string,
-  projectIds: Array<string>,
+  projectIds: ReadonlyArray<string>,
   now = new Date(),
 ): Promise<Map<string, ProjectRequestOverview>> {
   const bucketSizeSeconds = 15;
@@ -358,7 +358,7 @@ async function queryProjectRequestOverview(
     ORDER BY bucket ASC
   `;
 
-  let json: { data: Array<ProjectRequestOverviewRow> };
+  let json: { data: ReadonlyArray<ProjectRequestOverviewRow> };
   try {
     const response = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
@@ -376,7 +376,7 @@ async function queryProjectRequestOverview(
       return overview;
     }
 
-    json = (await response.json()) as { data: Array<ProjectRequestOverviewRow> };
+    json = (await response.json()) as { data: ReadonlyArray<ProjectRequestOverviewRow> };
   } catch {
     return overview;
   }
@@ -423,15 +423,15 @@ async function queryProjectRequestOverview(
   return overview;
 }
 
-type AiGatewayResponse = {
+type AiGatewayResponse = Readonly<{
   data: {
     viewer: {
-      accounts: Array<{
-        aiGatewayRequests: Array<{ sum: { cost: number } }>;
+      accounts: ReadonlyArray<{
+        aiGatewayRequests: ReadonlyArray<{ sum: { cost: number } }>;
       }>;
     };
   };
-};
+}>;
 
 const COST_PER_NEURON = 0.000011;
 

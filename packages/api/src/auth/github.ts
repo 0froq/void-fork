@@ -1,9 +1,9 @@
-export type GitHubUser = {
+export type GitHubUser = Readonly<{
   id: number;
   login: string;
   email: string | null;
   emailVerified: boolean;
-};
+}>;
 
 export function getGitHubAuthorizeUrl(
   clientId: string,
@@ -76,7 +76,7 @@ export async function getGitHubUser(accessToken: string): Promise<GitHubUser> {
   let email = user.email;
   let emailVerified = false;
   if (emailsRes.ok) {
-    const emails = (await emailsRes.json()) as Array<{
+    const emails = (await emailsRes.json()) as ReadonlyArray<{
       email: string;
       primary: boolean;
       verified: boolean;

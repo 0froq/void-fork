@@ -17,11 +17,11 @@ import { join, resolve } from 'node:path';
 
 const isStaging = process.argv.includes('--staging');
 
-type Config = {
+type Config = Readonly<{
   token?: string;
   stagingToken?: string;
   api?: string;
-};
+}>;
 
 function readConfig(): Config {
   try {
@@ -43,10 +43,10 @@ if (!token) {
 
 // ── Route discovery ─────────────────────────────────────────────────
 
-type Route = {
+type Route = Readonly<{
   method: string;
   path: string;
-};
+}>;
 
 const platformSrc = resolve(import.meta.dirname, '..', 'src');
 
@@ -56,7 +56,10 @@ const platformSrc = resolve(import.meta.dirname, '..', 'src');
  *  - app.get/post/...("/path", ...) → inline routes
  *  - import importedName from "./routes/file" → file map
  */
-function parseIndex(): { mounts: Map<string, Array<string>>; inlineRoutes: Array<Route> } {
+function parseIndex(): {
+  mounts: Map<string, ReadonlyArray<string>>;
+  inlineRoutes: ReadonlyArray<Route>;
+} {
   const src = readFileSync(join(platformSrc, 'index.ts'), 'utf-8');
 
   // Build import-name → file map
@@ -75,7 +78,7 @@ function parseIndex(): { mounts: Map<string, Array<string>>; inlineRoutes: Array
 
   // Mounts: `app.route("/projects", projects)` or `.route("/projects", projects)` (chained)
   // A file can be mounted at multiple bases (e.g. usage at /projects + /usage)
-  const mounts = new Map<string, Array<string>>();
+  const mounts = new Map<string, ReadonlyArray<string>>();
   for (const m of src.matchAll(/\.route\(["']([^"']+)["'],\s*(\w+)\)/g)) {
     const base = m[1];
     const name = m[2];
@@ -99,7 +102,7 @@ function parseIndex(): { mounts: Map<string, Array<string>>; inlineRoutes: Array
 /**
  * Scan a route file for `app.get("/path", ...)` etc.
  */
-function parseRouteFile(filePath: string): Array<{ method: string; subPath: string }> {
+function parseRouteFile(filePath: string): ReadonlyArray<{ method: string; subPath: string }> {
   const src = readFileSync(filePath, 'utf-8');
   const routes: Array<{ method: string; subPath: string }> = [];
   for (const m of src.matchAll(/\.(get|post|put|delete|patch)\(["'](\/[^"']*)["']/g)) {
@@ -108,7 +111,7 @@ function parseRouteFile(filePath: string): Array<{ method: string; subPath: stri
   return routes;
 }
 
-function discoverRoutes(): Array<Route> {
+function discoverRoutes(): ReadonlyArray<Route> {
   const { mounts, inlineRoutes } = parseIndex();
   const routes: Array<Route> = [...inlineRoutes];
 
@@ -180,7 +183,7 @@ async function run() {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.ok) {
-      const projects = (await res.json()) as Array<{ id: string }>;
+      const projects = (await res.json()) as ReadonlyArray<{ id: string }>;
       if (projects.length > 0) {
         projectId = projects[0].id;
       }

@@ -1,8 +1,8 @@
-export type AllowlistEntry = {
+export type AllowlistEntry = Readonly<{
   type: 'github' | 'email';
   pattern: string;
   note?: string;
-};
+}>;
 
 const KV_KEY = 'signup:allowlist';
 
@@ -11,7 +11,10 @@ export async function getAllowlist(kv: KVNamespace): Promise<Array<AllowlistEntr
   return raw ? JSON.parse(raw) : [];
 }
 
-export async function putAllowlist(kv: KVNamespace, entries: Array<AllowlistEntry>): Promise<void> {
+export async function putAllowlist(
+  kv: KVNamespace,
+  entries: ReadonlyArray<AllowlistEntry>,
+): Promise<void> {
   await kv.put(KV_KEY, JSON.stringify(entries));
 }
 
@@ -23,7 +26,7 @@ export function isSignupAllowed(
   provider: string,
   login: string,
   email: string | null,
-  entries: Array<AllowlistEntry>,
+  entries: ReadonlyArray<AllowlistEntry>,
 ): boolean {
   if (entries.length === 0) {
     return false;

@@ -20,22 +20,22 @@ export { isrCacheKey };
  */
 export const MAX_ISR_VARIANTS_PER_PATH = 200;
 
-export type IsrCacheEntry = {
+export type IsrCacheEntry = Readonly<{
   body: ReadableStream;
   status: number;
   headers: Record<string, string>;
   createdAt: number;
   ttl: number;
-};
+}>;
 
-export type IsrCacheMetadata = {
+export type IsrCacheMetadata = Readonly<{
   /** HTTP status code */
   s: number;
   /** createdAt (ms) */
   c: number;
   /** TTL (seconds) */
   t: number;
-};
+}>;
 
 const PAGE_DATA_SCRIPT_RE =
   /<script\b[^>]*\bid=(["'])__VOID_PAGE_DATA__\1[^>]*>([\s\S]*?)<\/script>/i;

@@ -2,13 +2,13 @@ import { useThemeContext } from '../../context/ThemeContext.tsx';
 import type { FooterConfig } from '../../types/theme-config.ts';
 import FooterNav from './FooterNav.tsx';
 
-type FooterProps = {
+type FooterProps = Readonly<{
   buttonLink?: string;
   buttonText?: string;
   footer?: FooterConfig;
   heading?: string;
   subheading?: string;
-};
+}>;
 
 export default function Footer({
   buttonLink = '/guide/',

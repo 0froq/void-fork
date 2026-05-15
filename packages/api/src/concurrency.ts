@@ -1,7 +1,7 @@
 export const R2_CONCURRENCY = 6;
 
 export async function uploadPool<T>(
-  items: Array<T>,
+  items: ReadonlyArray<T>,
   concurrency: number,
   fn: (item: T) => Promise<unknown>,
 ): Promise<void> {

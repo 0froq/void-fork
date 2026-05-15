@@ -7,7 +7,7 @@ function CliVersionTable({
   title,
   tz,
 }: {
-  rows: Array<CliVersionDeploymentStats>;
+  rows: ReadonlyArray<CliVersionDeploymentStats>;
   title: string;
   tz?: string;
 }) {
@@ -54,8 +54,8 @@ export function CliVersionsPage({
   username,
   tz,
 }: {
-  allTime: Array<CliVersionDeploymentStats>;
-  last30Days: Array<CliVersionDeploymentStats>;
+  allTime: ReadonlyArray<CliVersionDeploymentStats>;
+  last30Days: ReadonlyArray<CliVersionDeploymentStats>;
   username?: string;
   tz?: string;
 }) {

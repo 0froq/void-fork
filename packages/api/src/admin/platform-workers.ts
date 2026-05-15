@@ -1,19 +1,19 @@
 export type PlatformWorkerName = 'proxy' | 'tail' | 'api' | 'dashboard' | 'dispatch';
 
-type PlatformWorkerDef = {
+type PlatformWorkerDef = Readonly<{
   name: PlatformWorkerName;
   prodScript: string;
   stagingScript: string;
-  dependsOn: Array<PlatformWorkerName>;
+  dependsOn: ReadonlyArray<PlatformWorkerName>;
   deployOrder: number;
   rollbackWarning?: string;
-};
+}>;
 
 export type PlatformWorker = PlatformWorkerDef & {
-  dependedBy: Array<PlatformWorkerName>;
+  dependedBy: ReadonlyArray<PlatformWorkerName>;
 };
 
-const WORKER_DEFS: Array<PlatformWorkerDef> = [
+const WORKER_DEFS: ReadonlyArray<PlatformWorkerDef> = [
   {
     name: 'proxy',
     prodScript: 'void-proxy',
@@ -54,7 +54,7 @@ const WORKER_DEFS: Array<PlatformWorkerDef> = [
 ];
 
 // Derive dependedBy from dependsOn (single source of truth for the dependency graph)
-export const PLATFORM_WORKERS: Array<PlatformWorker> = WORKER_DEFS.map((def) => ({
+export const PLATFORM_WORKERS: ReadonlyArray<PlatformWorker> = WORKER_DEFS.map((def) => ({
   ...def,
   dependedBy: WORKER_DEFS.filter((other) => other.dependsOn.includes(def.name)).map(
     (other) => other.name,

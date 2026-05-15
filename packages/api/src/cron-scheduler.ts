@@ -2,11 +2,11 @@ import { DurableObject } from 'cloudflare:workers';
 import { CronExpressionParser } from 'cron-parser';
 import type { ApiEnv } from './env.ts';
 
-type CronState = {
+type CronState = Readonly<{
   workerName: string;
-  schedules: Array<{ name: string; cron: string }>;
+  schedules: ReadonlyArray<{ name: string; cron: string }>;
   proxyToken?: string;
-};
+}>;
 
 /**
  * Convert a CF/Quartz-style cron expression to Unix-style for cron-parser.
@@ -75,7 +75,10 @@ export function cronMatchesMinute(cronExpr: string, now: number): boolean {
 }
 
 /** Compute the earliest next fire time across all schedules. Returns null if none. */
-export function getNextFireTime(schedules: Array<{ cron: string }>, now: number): number | null {
+export function getNextFireTime(
+  schedules: ReadonlyArray<{ cron: string }>,
+  now: number,
+): number | null {
   let earliest = Infinity;
   for (const s of schedules) {
     try {
@@ -115,11 +118,14 @@ const SEND_BATCH_CHUNK_SIZE = 100;
 const ALARM_RETRY_BUDGET = 5;
 
 /** Split `items` into chunks of at most `size` (size must be >= 1). */
-export function chunkMessages<T>(items: ReadonlyArray<T>, size: number): Array<Array<T>> {
+export function chunkMessages<T>(
+  items: ReadonlyArray<T>,
+  size: number,
+): ReadonlyArray<ReadonlyArray<T>> {
   if (size < 1) {
     throw new Error('chunkMessages: size must be >= 1');
   }
-  const chunks: Array<Array<T>> = [];
+  const chunks: Array<ReadonlyArray<T>> = [];
   for (let i = 0; i < items.length; i += size) {
     chunks.push(items.slice(i, i + size));
   }

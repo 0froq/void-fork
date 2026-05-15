@@ -11,7 +11,7 @@ import {
 
 type ProjectRoutes = Client['projects'][':id'];
 
-export type Props = {
+export type Props = Readonly<{
   project: InferResponseType<ProjectRoutes['$get'], 200>;
   deployments: InferResponseType<ProjectRoutes['deployments']['$get'], 200>;
   domains: InferResponseType<ProjectRoutes['domains']['$get'], 200>;
@@ -19,7 +19,7 @@ export type Props = {
   usage: API<'usage', ProjectRoutes>;
   secrets: API<'secrets', ProjectRoutes>;
   siteDomain: string;
-};
+}>;
 
 export const loader = defineHandler<Props>(async (c) => {
   const id = c.req.param('id');

@@ -7,7 +7,7 @@ type Logo = Readonly<{
 }>;
 
 type LogoGridProps = Readonly<{
-  logos: Array<Logo>;
+  logos: ReadonlyArray<Logo>;
 }>;
 
 const LOGO_WIDTH = 120;

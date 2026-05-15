@@ -24,81 +24,81 @@ export type Domain = InferSelectModel<typeof domains>;
 export type PlatformEvent = InferSelectModel<typeof platformEvents>;
 export type Invitation = InferSelectModel<typeof invitations>;
 
-export type MigrationMeta = {
+export type MigrationMeta = Readonly<{
   name: string;
   destructive: boolean;
-};
+}>;
 
-export type ScheduleMeta = {
+export type ScheduleMeta = Readonly<{
   name: string;
   cron: string;
-};
+}>;
 
-export type QueueMeta = {
+export type QueueMeta = Readonly<{
   name: string;
   bindingName: string;
   maxBatchSize?: number;
   maxBatchTimeout?: number;
   maxRetries?: number;
   retryDelay?: number;
-};
+}>;
 
 export const SUPPORTED_MANIFEST_VERSIONS = [3];
 
-export type AssetConfig = {
+export type AssetConfig = Readonly<{
   not_found_handling?: 'none' | 'single-page-application' | '404-page';
   html_handling?: 'auto-trailing-slash' | 'force-trailing-slash' | 'drop-trailing-slash' | 'none';
-};
+}>;
 
-export type WebSocketRouteMeta = {
+export type WebSocketRouteMeta = Readonly<{
   pattern: string;
   filePath: string;
   className: string;
   bindingName?: string;
   mode: 'room' | 'socket';
   hasAuthGate: boolean;
-};
+}>;
 
-export type WebSocketMigrationMeta = {
+export type WebSocketMigrationMeta = Readonly<{
   tag: string;
-  newClasses?: Array<string>;
-  deletedClasses?: Array<string>;
-};
+  newClasses?: ReadonlyArray<string>;
+  deletedClasses?: ReadonlyArray<string>;
+}>;
 
-export type WebSocketManifestMeta = {
-  routes: Array<WebSocketRouteMeta>;
-  classes: Array<string>;
-  migrations?: Array<WebSocketMigrationMeta>;
-};
+export type WebSocketManifestMeta = Readonly<{
+  routes: ReadonlyArray<WebSocketRouteMeta>;
+  classes: ReadonlyArray<string>;
+  migrations?: ReadonlyArray<WebSocketMigrationMeta>;
+}>;
 
-export type SandboxMigrationMeta = {
+export type SandboxMigrationMeta = Readonly<{
   tag: string;
-  newSqliteClasses?: Array<string>;
-  deletedClasses?: Array<string>;
-};
+  newSqliteClasses?: ReadonlyArray<string>;
+  deletedClasses?: ReadonlyArray<string>;
+}>;
 
-export type SandboxManifestMeta = {
+export type SandboxManifestMeta = Readonly<{
   bindingName: string;
   className: string;
   containerName: string;
   image: string;
   instanceType?: string;
   maxInstances?: number;
-  migrations?: Array<SandboxMigrationMeta>;
-};
+  migrations?: ReadonlyArray<SandboxMigrationMeta>;
+}>;
 
-export type LiveMigrationMeta = {
+export type LiveMigrationMeta = Readonly<{
   tag: string;
-  newSqliteClasses?: Array<string>;
-};
+  newSqliteClasses?: ReadonlyArray<string>;
+}>;
 
-export type LiveManifestMeta = {
+export type LiveManifestMeta = Readonly<{
   bindingName: string;
   className: string;
   storage: 'sqlite';
-  classes: Array<string>;
-  migrations?: Array<LiveMigrationMeta>;
-};
+  classes: ReadonlyArray<string>;
+  migrations?: ReadonlyArray<LiveMigrationMeta>;
+}>;
 
 /**
  * Manifest header-rule shape. Mirrors `HeaderRule` in `dispatch/src/headers.ts`
@@ -106,10 +106,10 @@ export type LiveManifestMeta = {
  * Structural equivalence across the three is pinned by
  * `packages/dispatch/test/unit/framework-contract.test.ts`.
  */
-export type HeaderRule = {
+export type HeaderRule = Readonly<{
   pattern: string;
-  headers: Array<[string, string]>;
-};
+  headers: ReadonlyArray<[string, string]>;
+}>;
 
 /**
  * Manifest redirect/rewrite rule shape. Mirrors `RedirectRule` in
@@ -117,7 +117,7 @@ export type HeaderRule = {
  * `packages/void/src/cli/types.ts`. Structural equivalence across the three
  * is pinned by `packages/dispatch/test/unit/framework-contract.test.ts`.
  */
-export type RedirectRule = {
+export type RedirectRule = Readonly<{
   source: string;
   destination: string;
   status: number;
@@ -133,7 +133,7 @@ export type RedirectRule = {
    * to the project.
    */
   host?: string;
-};
+}>;
 
 /**
  * Statuses accepted on manifest `redirectRules` entries at ingest:
@@ -149,7 +149,7 @@ export const MANIFEST_REDIRECT_RULE_STATUSES: ReadonlySet<number> = new Set([
   200, 301, 302, 303, 307, 308,
 ]);
 
-export type DeployManifest = {
+export type DeployManifest = Readonly<{
   version: number;
   /**
    * Asset manifest schema version. Absent / 1 = legacy
@@ -161,18 +161,18 @@ export type DeployManifest = {
   assetManifestVersion?: 1 | 2;
   auth?: boolean;
   bindings: {
-    d1?: Array<string>;
-    kv?: Array<string>;
-    r2?: Array<string>;
+    d1?: ReadonlyArray<string>;
+    kv?: ReadonlyArray<string>;
+    r2?: ReadonlyArray<string>;
     ai?: boolean;
-    hyperdrive?: Array<string>;
+    hyperdrive?: ReadonlyArray<string>;
   };
   migrations?: {
     dialect: 'sqlite' | 'postgresql';
     pending: number;
   };
-  schedules?: Array<ScheduleMeta>;
-  queues?: Array<QueueMeta>;
+  schedules?: ReadonlyArray<ScheduleMeta>;
+  queues?: ReadonlyArray<QueueMeta>;
   ssr?: boolean;
   framework?: string;
   type?: 'void' | 'spa' | 'static' | 'framework';
@@ -185,34 +185,34 @@ export type DeployManifest = {
    * (pre-rewrite) pathname; first match wins. A `*` entry acts as a
    * catch-all default.
    */
-  revalidateQueryAllowlist?: Record<string, Array<string>>;
-  prerender?: Array<string>;
+  revalidateQueryAllowlist?: Record<string, ReadonlyArray<string>>;
+  prerender?: ReadonlyArray<string>;
   assetConfig?: AssetConfig;
   vars?: Record<string, string>;
   workerMain?: string;
   compatibilityDate?: string;
-  compatibilityFlags?: Array<string>;
+  compatibilityFlags?: ReadonlyArray<string>;
   hashedAssetsPrefix?: string;
-  headerRules?: Array<HeaderRule>;
-  redirectRules?: Array<RedirectRule>;
-  fallbackRules?: Array<RedirectRule>;
+  headerRules?: ReadonlyArray<HeaderRule>;
+  redirectRules?: ReadonlyArray<RedirectRule>;
+  fallbackRules?: ReadonlyArray<RedirectRule>;
   websocket?: WebSocketManifestMeta;
   sandbox?: SandboxManifestMeta;
   live?: LiveManifestMeta;
-};
+}>;
 
 export type DeployEvent =
   | { event: 'start'; deploymentId: string }
   | { event: 'heartbeat'; deploymentId?: string; step: string }
   | { event: 'asset_upload'; total: number; new: number; cached: number }
   | { event: 'asset_upload_done' }
-  | { event: 'provisioning'; bindings: Array<string> }
+  | { event: 'provisioning'; bindings: ReadonlyArray<string> }
   | { event: 'provisioning_done' }
   | { event: 'migration_start'; pending: number }
   | { event: 'migration'; name: string; durationMs: number }
   | { event: 'worker_upload'; modules: number }
   | { event: 'worker_upload_done' }
-  | { event: 'queue_setup'; queues: Array<string> }
+  | { event: 'queue_setup'; queues: ReadonlyArray<string> }
   | { event: 'queue_consumer_conflict'; queue: string; ownerScript: string }
   | { event: 'prerender'; pages: number }
   | { event: 'prerender_done' }
@@ -220,7 +220,7 @@ export type DeployEvent =
       event: 'done';
       deployment: string;
       url: string;
-      urls: Array<string>;
+      urls: ReadonlyArray<string>;
       assets: number;
       workers: number;
       migrations?: number;

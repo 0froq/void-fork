@@ -4,12 +4,12 @@ import type { User, Project } from '../../types.ts';
 import { formatLimit, formatNumber, formatBytes } from './format.ts';
 import { Layout } from './layout.tsx';
 
-type ProjectUsage = {
+type ProjectUsage = Readonly<{
   projectId: string;
   slug: string;
   requests: number;
   bandwidthBytes: number;
-};
+}>;
 
 export function UserDetailPage({
   user,
@@ -19,17 +19,17 @@ export function UserDetailPage({
   username,
 }: {
   user: User;
-  projects: Array<Project>;
+  projects: ReadonlyArray<Project>;
   deploysToday: number;
   usage: {
     billingPeriodStart: string;
     totalRequests: number;
     totalBandwidth: number;
-    projects: Array<ProjectUsage>;
+    projects: ReadonlyArray<ProjectUsage>;
   };
   username?: string;
 }) {
-  const plans = Object.keys(PLAN_LIMITS) as Array<PlanId>;
+  const plans = Object.keys(PLAN_LIMITS) as ReadonlyArray<PlanId>;
   const limits = getPlanLimits(user.plan);
 
   return (

@@ -4,13 +4,13 @@ import type { ActivityEntry } from '../routes/platform.tsx';
 import { formatDateTime, STATUS_COLORS } from './format.ts';
 import { Layout } from './layout.tsx';
 
-type WorkerStatus = {
+type WorkerStatus = Readonly<{
   worker: PlatformWorker;
   scriptName: string;
   deployment?: WorkerDeployment;
   previousVersionId?: string;
   error?: string;
-};
+}>;
 
 export function PlatformPage({
   workers,
@@ -21,11 +21,11 @@ export function PlatformPage({
   page,
   totalPages,
 }: {
-  workers: Array<WorkerStatus>;
+  workers: ReadonlyArray<WorkerStatus>;
   env: PlatformEnv;
   username: string;
   tz?: string;
-  entries: Array<ActivityEntry>;
+  entries: ReadonlyArray<ActivityEntry>;
   page: number;
   totalPages: number;
 }) {

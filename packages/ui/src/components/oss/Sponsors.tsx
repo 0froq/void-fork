@@ -3,15 +3,15 @@ import viteByVoidzero from '../../assets/vite/vite-by-voidzero.png';
 import cx from '../../lib/cx.tsx';
 import type { SponsorSize, SponsorTier } from '../../types/sponsors.ts';
 
-type SponsorsProps = {
+type SponsorsProps = Readonly<{
   description?: string;
   heading?: string;
   logoStyle?: 'opencollective';
   sideBySideTiers?: [string, string];
   sponsorLink?: string;
   sponsorLinkText?: string;
-  sponsors?: Array<SponsorTier>;
-};
+  sponsors?: ReadonlyArray<SponsorTier>;
+}>;
 
 const sizeConfig: Record<
   SponsorSize,

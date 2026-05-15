@@ -13,10 +13,10 @@
 
 const MAX_CACHE = 256;
 
-export type CompiledPattern = {
+export type CompiledPattern = Readonly<{
   regex: RegExp;
-  paramNames: Array<string>;
-};
+  paramNames: ReadonlyArray<string>;
+}>;
 
 const compileCache = new Map<string, CompiledPattern>();
 

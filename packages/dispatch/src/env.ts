@@ -1,4 +1,4 @@
-export type Env = {
+export type Env = Readonly<{
   DISPATCH: DispatchNamespace;
   ISR_CACHE: KVNamespace;
   ROUTING: KVNamespace;
@@ -7,4 +7,4 @@ export type Env = {
   ANALYTICS: AnalyticsEngineDataset;
   USAGE_QUEUE: Queue<unknown>;
   BASE_HOSTNAME?: string;
-};
+}>;

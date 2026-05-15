@@ -1,11 +1,11 @@
 export const CF_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 const CF_ZONE_API_BASE = 'https://api.cloudflare.com/client/v4/zones';
 
-type CfApiResult<T> = {
+type CfApiResult<T> = Readonly<{
   success: boolean;
-  errors: Array<{ code: number; message: string }>;
+  errors: ReadonlyArray<{ code: number; message: string }>;
   result: T;
-};
+}>;
 
 /**
  * Error thrown by `cfFetch` when the Cloudflare API returns a non-success
@@ -41,10 +41,10 @@ export async function cfFetch<T>(url: string, apiToken: string, init?: RequestIn
   return json.result;
 }
 
-export type D1DatabaseInfo = {
+export type D1DatabaseInfo = Readonly<{
   uuid: string;
   name: string;
-};
+}>;
 
 export async function createD1Database(
   accountId: string,
@@ -57,10 +57,10 @@ export async function createD1Database(
   });
 }
 
-export type KVNamespaceInfo = {
+export type KVNamespaceInfo = Readonly<{
   id: string;
   title: string;
-};
+}>;
 
 export async function createKVNamespace(
   accountId: string,
@@ -73,9 +73,9 @@ export async function createKVNamespace(
   });
 }
 
-export type R2BucketInfo = {
+export type R2BucketInfo = Readonly<{
   name: string;
-};
+}>;
 
 export async function createR2Bucket(
   accountId: string,
@@ -93,7 +93,7 @@ export async function getD1DatabaseByName(
   apiToken: string,
   name: string,
 ): Promise<D1DatabaseInfo> {
-  const result = await cfFetch<Array<D1DatabaseInfo>>(
+  const result = await cfFetch<ReadonlyArray<D1DatabaseInfo>>(
     `${CF_API_BASE}/${accountId}/d1/database?name=${encodeURIComponent(name)}`,
     apiToken,
   );
@@ -108,7 +108,7 @@ export async function getKVNamespaceByTitle(
   apiToken: string,
   title: string,
 ): Promise<KVNamespaceInfo> {
-  const result = await cfFetch<Array<KVNamespaceInfo>>(
+  const result = await cfFetch<ReadonlyArray<KVNamespaceInfo>>(
     `${CF_API_BASE}/${accountId}/storage/kv/namespaces?title=${encodeURIComponent(title)}`,
     apiToken,
   );
@@ -123,7 +123,7 @@ export async function getQueueByName(
   apiToken: string,
   name: string,
 ): Promise<QueueInfo> {
-  const result = await cfFetch<Array<QueueInfo>>(
+  const result = await cfFetch<ReadonlyArray<QueueInfo>>(
     `${CF_API_BASE}/${accountId}/queues?name=${encodeURIComponent(name)}`,
     apiToken,
   );
@@ -165,10 +165,10 @@ export async function deleteR2Bucket(
 
 // --- Queues ---
 
-export type QueueInfo = {
+export type QueueInfo = Readonly<{
   queue_id: string;
   queue_name: string;
-};
+}>;
 
 export async function createQueue(
   accountId: string,
@@ -181,14 +181,14 @@ export async function createQueue(
   });
 }
 
-type QueueConsumerSettings = {
+type QueueConsumerSettings = Readonly<{
   batch_size?: number;
   max_wait_time_ms?: number;
   max_retries?: number;
   retry_delay?: number;
-};
+}>;
 
-type QueueConsumerInfo = {
+type QueueConsumerInfo = Readonly<{
   consumer_id: string;
   // CF Queues API asymmetry: POST/PUT bodies use `script_name`, but
   // GET /queues/{id}/consumers returns the subscribed worker under
@@ -200,7 +200,7 @@ type QueueConsumerInfo = {
   script: string;
   type: string;
   settings: QueueConsumerSettings;
-};
+}>;
 
 /**
  * Result of a queue consumer upsert. `created` = a new consumer was
@@ -252,7 +252,7 @@ export async function addQueueConsumer(
   }
 
   // Consumer exists — find ours and update settings
-  const consumers = await cfFetch<Array<QueueConsumerInfo>>(consumersUrl, apiToken);
+  const consumers = await cfFetch<ReadonlyArray<QueueConsumerInfo>>(consumersUrl, apiToken);
   const ours = consumers.find((c) => c.script === scriptName);
 
   if (!ours) {
@@ -282,11 +282,11 @@ export async function deleteQueue(
   });
 }
 
-type DispatchWorkerBinding = {
+type DispatchWorkerBinding = Readonly<{
   type: string;
   name: string;
   text?: string;
-};
+}>;
 
 export type ProxyTokenLookup =
   | { kind: 'found'; token: string }
@@ -317,9 +317,9 @@ export async function getDispatchWorkerProxyToken(
   scriptName: string,
 ): Promise<ProxyTokenLookup> {
   const url = `${CF_API_BASE}/${accountId}/workers/dispatch/namespaces/${dispatchNamespace}/scripts/${scriptName}/bindings`;
-  let bindings: Array<DispatchWorkerBinding>;
+  let bindings: ReadonlyArray<DispatchWorkerBinding>;
   try {
-    bindings = await cfFetch<Array<DispatchWorkerBinding>>(url, apiToken);
+    bindings = await cfFetch<ReadonlyArray<DispatchWorkerBinding>>(url, apiToken);
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
     return { kind: 'error', error };
@@ -335,13 +335,13 @@ export async function getDispatchWorkerProxyToken(
 
 // --- Custom Hostnames (CF for SaaS) ---
 
-export type CustomHostnameInfo = {
+export type CustomHostnameInfo = Readonly<{
   id: string;
   hostname: string;
   status: string;
   ssl: { status: string };
-  verification_errors?: Array<string>;
-};
+  verification_errors?: ReadonlyArray<string>;
+}>;
 
 export async function createCustomHostname(
   zoneId: string,
@@ -377,10 +377,10 @@ export async function deleteCustomHostname(
 
 // --- Hyperdrive ---
 
-export type HyperdriveInfo = {
+export type HyperdriveInfo = Readonly<{
   id: string;
   name: string;
-};
+}>;
 
 export async function createHyperdrive(
   accountId: string,
@@ -425,7 +425,7 @@ export async function getHyperdriveByName(
   apiToken: string,
   name: string,
 ): Promise<HyperdriveInfo> {
-  const result = await cfFetch<Array<HyperdriveInfo>>(
+  const result = await cfFetch<ReadonlyArray<HyperdriveInfo>>(
     `${CF_API_BASE}/${accountId}/hyperdrive/configs`,
     apiToken,
   );
@@ -441,7 +441,7 @@ export async function getHyperdriveByName(
 export async function purgeZoneCache(
   zoneId: string,
   apiToken: string,
-  files: Array<string>,
+  files: ReadonlyArray<string>,
 ): Promise<void> {
   // CF API allows max 100 URLs per purge request (Free/Pro/Business)
   for (let i = 0; i < files.length; i += 100) {

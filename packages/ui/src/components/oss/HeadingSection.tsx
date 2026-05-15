@@ -1,7 +1,7 @@
-type HeadingSectionProps = {
+type HeadingSectionProps = Readonly<{
   heading: string;
   subheading?: string;
-};
+}>;
 
 export default function HeadingSection({ heading, subheading }: HeadingSectionProps) {
   return (

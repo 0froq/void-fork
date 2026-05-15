@@ -1,9 +1,9 @@
 import { matchLiteralPattern } from './pattern.ts';
 
-export type HeaderRule = {
+export type HeaderRule = Readonly<{
   pattern: string;
-  headers: Array<[string, string]>;
-};
+  headers: ReadonlyArray<[string, string]>;
+}>;
 
 /**
  * Headers that user header rules are not allowed to set.
@@ -26,7 +26,7 @@ const BLOCKED_HEADERS = new Set(['set-cookie']);
 export function applyHeaderRules(
   response: Response,
   pathname: string,
-  rules?: Array<HeaderRule>,
+  rules?: ReadonlyArray<HeaderRule>,
 ): Response {
   if (!rules || rules.length === 0) {
     return response;

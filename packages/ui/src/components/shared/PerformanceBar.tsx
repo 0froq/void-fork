@@ -1,17 +1,17 @@
 import cx from '../../lib/cx.tsx';
 
-export type PerformanceBarData = {
+export type PerformanceBarData = Readonly<{
   isPrimary?: boolean;
   name: string;
   percentage: number;
   time: string;
-};
+}>;
 
-type PerformanceBarProps = {
+type PerformanceBarProps = Readonly<{
   backgroundImage?: string;
   data: PerformanceBarData;
   large?: boolean;
-};
+}>;
 
 export default function PerformanceBar({
   backgroundImage,

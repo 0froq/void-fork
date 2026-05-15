@@ -84,7 +84,7 @@ function deployTime(project: Project): string | null {
     : deployment.created_at;
 }
 
-function Sparkline({ values }: { values: Array<number> }) {
+function Sparkline({ values }: { values: ReadonlyArray<number> }) {
   const width = 118;
   const height = 30;
   const gap = 2;

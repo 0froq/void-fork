@@ -6,7 +6,7 @@ import { SignupControlPage } from '../views/signup-control.tsx';
 
 const app = new Hono<ApiEnv>();
 
-function parseAllowlistPatterns(input: string): Array<string> {
+function parseAllowlistPatterns(input: string): ReadonlyArray<string> {
   return Array.from(
     new Set(
       input

@@ -2,11 +2,11 @@ import type { ReactNode } from 'react';
 import voidzeroLogo from '../../assets/logos/voidzero-light.svg';
 import type { HeroConfig } from '../../types/theme-config.ts';
 
-type HeroProps = {
+type HeroProps = Readonly<{
   background?: string;
   hero?: HeroConfig;
   heroImage?: ReactNode;
-};
+}>;
 
 export default function Hero({ background, hero, heroImage }: HeroProps) {
   if (!hero) {

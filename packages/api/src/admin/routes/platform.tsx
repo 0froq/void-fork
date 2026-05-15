@@ -31,9 +31,9 @@ function toErrorMessage(err: unknown): string {
 
 export type ActivityEntry =
   | { kind: 'single'; event: PlatformEvent }
-  | { kind: 'batch'; batchId: string; events: Array<PlatformEvent> };
+  | { kind: 'batch'; batchId: string; events: ReadonlyArray<PlatformEvent> };
 
-function collapseEvents(events: Array<PlatformEvent>): Array<ActivityEntry> {
+function collapseEvents(events: ReadonlyArray<PlatformEvent>): ReadonlyArray<ActivityEntry> {
   const batchMap = new Map<string, Array<PlatformEvent>>();
   for (const event of events) {
     if (event.batch_id) {
@@ -69,7 +69,11 @@ async function fetchWorkerDetail(
   accountId: string,
   apiToken: string,
   scriptName: string,
-): Promise<{ versions: Array<WorkerVersion>; deployment?: WorkerDeployment; error?: string }> {
+): Promise<{
+  versions: ReadonlyArray<WorkerVersion>;
+  deployment?: WorkerDeployment;
+  error?: string;
+}> {
   const [versionsResult, deploymentsResult] = await Promise.allSettled([
     listWorkerVersions(accountId, apiToken, scriptName),
     listWorkerDeployments(accountId, apiToken, scriptName),

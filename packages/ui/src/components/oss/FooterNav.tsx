@@ -6,9 +6,9 @@ import type {
   FooterSocialLink,
 } from '../../types/theme-config.ts';
 
-type FooterNavProps = {
+type FooterNavProps = Readonly<{
   footer?: FooterConfig;
-};
+}>;
 
 const socialIconName = (icon: string) => {
   const key = icon.toLowerCase();
@@ -27,8 +27,8 @@ const getSocialLabel = (social: FooterSocialLink) =>
   social.label ? social.label : socialLabelMap[social.icon.toLowerCase()] || social.icon;
 
 export default function FooterNav({ footer }: FooterNavProps) {
-  const footerNav: Array<FooterColumn> = footer?.nav ?? [];
-  const footerSocial: Array<FooterSocialLink> = footer?.social ?? [];
+  const footerNav: ReadonlyArray<FooterColumn> = footer?.nav ?? [];
+  const footerSocial: ReadonlyArray<FooterSocialLink> = footer?.social ?? [];
   const footerCopyright =
     footer?.copyright || `© ${new Date().getFullYear()} VoidZero Inc. All Rights Reserved.`;
 

@@ -16,22 +16,22 @@ class AssetUploadError extends Error {
 /** Non-retriable error — the hash will never appear locally. */
 class AssetHashMissError extends Error {}
 
-export type AssetManifestEntry = {
+export type AssetManifestEntry = Readonly<{
   hash: string;
   size: number;
-};
+}>;
 
-export type AssetEntry = {
+export type AssetEntry = Readonly<{
   bytes: Uint8Array;
   contentType: string;
-};
+}>;
 
-type UploadSessionResponse = {
+type UploadSessionResponse = Readonly<{
   result: {
     jwt: string;
-    buckets: Array<Array<string>>;
+    buckets: ReadonlyArray<ReadonlyArray<string>>;
   };
-};
+}>;
 
 function tryParseJson<T>(text: string): T | null {
   if (!text.trim()) {
@@ -101,7 +101,7 @@ export async function createAssetUploadSession(
   workerName: string,
   manifest: Record<string, AssetManifestEntry>,
   { retryDelayMs = ASSET_SESSION_RETRY_DELAY_MS }: { retryDelayMs?: number } = {},
-): Promise<{ jwt: string; buckets: Array<Array<string>> }> {
+): Promise<{ jwt: string; buckets: ReadonlyArray<ReadonlyArray<string>> }> {
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${workerName}/assets-upload-session`;
   const headers = {
     Authorization: `Bearer ${apiToken}`,
@@ -156,7 +156,7 @@ export async function createAssetUploadSession(
 export async function uploadAssetBuckets(
   accountId: string,
   jwt: string,
-  buckets: Array<Array<string>>,
+  buckets: ReadonlyArray<ReadonlyArray<string>>,
   assetsByHash: Map<string, AssetEntry>,
   {
     retryDelayMs = ASSET_BUCKET_UPLOAD_RETRY_DELAY_MS,
@@ -190,7 +190,7 @@ export async function uploadAssetBuckets(
     }
   }
 
-  async function uploadBucket(bucket: Array<string>, bucketIndex: number): Promise<void> {
+  async function uploadBucket(bucket: ReadonlyArray<string>, bucketIndex: number): Promise<void> {
     console.log(
       `[assets] uploading bucket ${bucketIndex + 1}/${buckets.length}: ${bucket.length} file(s)`,
     );
@@ -351,16 +351,16 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 const textEncoder = new TextEncoder();
 
-type AssetUploadPart = {
+type AssetUploadPart = Readonly<{
   hash: string;
   entry: AssetEntry;
-};
+}>;
 
 function resolveAssetUploadParts(
-  bucket: Array<string>,
+  bucket: ReadonlyArray<string>,
   bucketIndex: number,
   assetsByHash: Map<string, AssetEntry>,
-): Array<AssetUploadPart> {
+): ReadonlyArray<AssetUploadPart> {
   return bucket.map((hash) => {
     const entry = assetsByHash.get(hash);
     if (!entry) {
@@ -374,7 +374,7 @@ function resolveAssetUploadParts(
   });
 }
 
-function createBase64MultipartBody(parts: Array<AssetUploadPart>): {
+function createBase64MultipartBody(parts: ReadonlyArray<AssetUploadPart>): {
   body: ReadableStream<Uint8Array>;
   contentType: string;
 } {
@@ -620,7 +620,7 @@ export async function uploadStaticAssets(
 export async function deleteUnreferencedAssets(
   kv: KVNamespace,
   r2: R2Bucket,
-  evictedHashes: Array<string>,
+  evictedHashes: ReadonlyArray<string>,
   retainedHashes: Set<string>,
   projectId: string,
 ): Promise<void> {
@@ -665,7 +665,7 @@ export async function persistWorkerBundle(
   r2: R2Bucket,
   projectId: string,
   deploymentId: string,
-  files: Array<{ name: string; content: Blob }>,
+  files: ReadonlyArray<{ name: string; content: Blob }>,
 ): Promise<void> {
   if (files.length === 0) {
     return;
@@ -711,7 +711,7 @@ export async function replayWorkerBundle(
   r2: R2Bucket,
   projectId: string,
   deploymentId: string,
-): Promise<Array<{ name: string; content: Blob }>> {
+): Promise<ReadonlyArray<{ name: string; content: Blob }>> {
   const prefix = workerBundlePrefix(projectId, deploymentId);
   const keys: Array<string> = [];
   let cursor: string | undefined;

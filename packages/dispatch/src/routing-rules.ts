@@ -1,6 +1,6 @@
 import { compilePattern, substituteParams } from './pattern.ts';
 
-export type RedirectRule = {
+export type RedirectRule = Readonly<{
   source: string;
   destination: string;
   status: number;
@@ -12,7 +12,7 @@ export type RedirectRule = {
    * apply to every host bound to the project.
    */
   host?: string;
-};
+}>;
 
 export type RoutingRuleResult =
   | { type: 'redirect'; destination: string; status: number }
@@ -37,7 +37,7 @@ export type RoutingRuleResult =
  */
 export function applyRoutingRules(
   pathname: string,
-  rules?: Array<RedirectRule>,
+  rules?: ReadonlyArray<RedirectRule>,
   requestHost?: string,
 ): RoutingRuleResult | null {
   if (!rules?.length) {

@@ -1,10 +1,10 @@
 import { createContext, ReactNode, useContext } from 'react';
 import type { ThemeAssets } from '../types/theme-context.ts';
 
-type ThemeContextProviderProps = {
+type ThemeContextProviderProps = Readonly<{
   children: ReactNode;
   value: ThemeAssets;
-};
+}>;
 
 const ThemeContext = createContext<ThemeAssets | null>(null);
 

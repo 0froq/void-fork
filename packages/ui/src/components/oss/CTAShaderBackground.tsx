@@ -1,11 +1,11 @@
 type Variant = 'vite' | 'vitest' | 'rolldown' | 'oxc';
 
-type ColorPalette = {
+type ColorPalette = Readonly<{
   circle: string;
   dark: string;
   light: string;
   mid: string;
-};
+}>;
 
 const palettes: Record<Variant, ColorPalette> = {
   oxc: {
@@ -34,9 +34,9 @@ const palettes: Record<Variant, ColorPalette> = {
   },
 };
 
-type CTAShaderBackgroundProps = {
+type CTAShaderBackgroundProps = Readonly<{
   variant?: Variant;
-};
+}>;
 
 export default function CTAShaderBackground({ variant = 'vite' }: CTAShaderBackgroundProps) {
   const colors = palettes[variant] ?? palettes.vite;

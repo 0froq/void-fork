@@ -11,7 +11,7 @@ export function DeploymentsListPage({
   username,
   tz,
 }: {
-  deployments: Array<Deployment & { project_slug: string | null }>;
+  deployments: ReadonlyArray<Deployment & { project_slug: string | null }>;
   search?: string;
   page?: number;
   totalPages?: number;

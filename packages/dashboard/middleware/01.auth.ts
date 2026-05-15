@@ -4,10 +4,10 @@ import { getCurrentUser, type API } from '../lib/api.ts';
 
 export type DashboardUser = API<'me'>;
 
-export type DashboardShared = {
+export type DashboardShared = Readonly<{
   user: DashboardUser | null;
   canAccessDashboard: boolean;
-};
+}>;
 
 declare module 'void' {
   interface CloudContextVariables {

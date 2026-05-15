@@ -15,15 +15,15 @@ import type { ApiEnv } from './env.ts';
 import { resolveCurrentIsrDeployments, type IsrRoutingTarget } from './isr-cache.ts';
 import { purgeZoneCache } from './provisioning/cloudflare-api.ts';
 
-type RevalidateProject = {
+type RevalidateProject = Readonly<{
   slug: string;
   active_deployment_id: string | null;
-};
+}>;
 
-type RevalidateRequestBody = {
-  paths?: Array<string>;
+type RevalidateRequestBody = Readonly<{
+  paths?: ReadonlyArray<string>;
   all?: boolean;
-};
+}>;
 
 /**
  * Purge ISR content for a project.
@@ -149,7 +149,7 @@ export async function runRevalidate(
   return c.json({ purged: body.paths.length });
 }
 
-type PurgeVariantTuple = {
+type PurgeVariantTuple = Readonly<{
   pathname: string;
   /**
    * Pre-hashed variant token from the KV key. The original URL is not
@@ -157,13 +157,13 @@ type PurgeVariantTuple = {
    * `__void_orig=<token>` edge cache URL via `isrEdgeCacheUrlForToken`.
    */
   variantToken: string;
-};
+}>;
 
 async function purgeEdgeCache(
   c: Context<ApiEnv>,
   perHostname: Map<string, Set<string>>,
-  pathnames: Array<string>,
-  variantTuples: Array<PurgeVariantTuple> = [],
+  pathnames: ReadonlyArray<string>,
+  variantTuples: ReadonlyArray<PurgeVariantTuple> = [],
 ): Promise<void> {
   if ((pathnames.length === 0 && variantTuples.length === 0) || perHostname.size === 0) {
     return;

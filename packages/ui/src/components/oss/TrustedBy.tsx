@@ -9,7 +9,7 @@ type TrustedByLogo =
     };
 
 type TrustedByProps = Readonly<{
-  logos: Array<TrustedByLogo>;
+  logos: ReadonlyArray<TrustedByLogo>;
 }>;
 
 export default function TrustedBy({ logos }: TrustedByProps) {

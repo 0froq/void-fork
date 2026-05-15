@@ -5,7 +5,7 @@ import { matchLiteralPattern } from './pattern.ts';
  * against the user-facing (pre-rewrite) pathname; first match wins. A `*`
  * entry acts as a catch-all default. An empty array means "no params kept".
  */
-export type QueryAllowlist = Record<string, Array<string>>;
+export type QueryAllowlist = Record<string, ReadonlyArray<string>>;
 
 /**
  * Build the variant-key URL from the original request URL on a rewrite.

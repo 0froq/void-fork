@@ -17,7 +17,7 @@ const PAGE_SIZE = 50;
 
 const app = new Hono<ApiEnv>();
 
-function parseInvitationEmails(input: string): Array<string> {
+function parseInvitationEmails(input: string): ReadonlyArray<string> {
   return Array.from(
     new Set(
       input

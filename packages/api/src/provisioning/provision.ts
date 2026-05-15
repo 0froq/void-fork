@@ -14,7 +14,7 @@ import {
   getQueueByName,
 } from './cloudflare-api.ts';
 
-export type WorkerBinding = {
+export type WorkerBinding = Readonly<{
   type: 'd1' | 'kv_namespace' | 'r2_bucket' | 'queue' | 'service' | 'plain_text' | 'hyperdrive';
   name: string;
   id?: string;
@@ -24,7 +24,7 @@ export type WorkerBinding = {
   queue_id?: string;
   service?: string;
   text?: string;
-};
+}>;
 
 export async function provisionBindings(
   db: Db,
@@ -34,7 +34,7 @@ export async function provisionBindings(
   manifest: DeployManifest,
   jwtSecret: string,
   aiProxyService: string,
-): Promise<Array<WorkerBinding>> {
+): Promise<ReadonlyArray<WorkerBinding>> {
   const existing = await getProjectResources(db, projectId);
 
   // Run all CF API provisioning calls in parallel
@@ -109,7 +109,7 @@ async function ensureResource(
   projectId: string,
   type: Resource['type'],
   bindingName: string,
-  existing: Array<Resource>,
+  existing: ReadonlyArray<Resource>,
 ): Promise<Resource> {
   // Normalize: R2 bucket names only allow lowercase alphanumeric + hyphens
   const resourceName = `${projectId}-${bindingName}`.toLowerCase().replaceAll('_', '-');

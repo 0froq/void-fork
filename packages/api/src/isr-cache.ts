@@ -3,19 +3,19 @@
  * `@voidcloud/isr-shared` — import from there directly.
  */
 
-export type IsrRoutingTarget = {
+export type IsrRoutingTarget = Readonly<{
   /** Hostname users visit (e.g., `myproject.void.app` or `example.com`). */
   hostname: string;
   /** KV routing key (e.g., project slug or `domain:<hostname>`). */
   routingKey: string;
-};
+}>;
 
-export type IsrDeploymentResolution = {
+export type IsrDeploymentResolution = Readonly<{
   /** Deployment ids dispatch may be serving from, per hostname. */
   perHostname: Map<string, Set<string>>;
   /** Union of every deployment id across every hostname (for KV scans). */
   union: Set<string>;
-};
+}>;
 
 /**
  * Resolve the set of deployment ids that dispatch may be serving ISR content
@@ -38,7 +38,7 @@ export type IsrDeploymentResolution = {
  */
 export async function resolveCurrentIsrDeployments(
   routing: KVNamespace,
-  targets: Array<IsrRoutingTarget>,
+  targets: ReadonlyArray<IsrRoutingTarget>,
   activeDeploymentId: string | null,
 ): Promise<IsrDeploymentResolution> {
   const perHostname = new Map<string, Set<string>>();

@@ -4,14 +4,14 @@ const PREVIEW_REPO_OWNER = 'void-sdk';
 const PREVIEW_REPO_NAME = 'void';
 const PREVIEW_REPO_PERMISSION = 'pull';
 
-export type GitHubPreviewRepoConfig = {
+export type GitHubPreviewRepoConfig = Readonly<{
   pat: string;
-};
+}>;
 
-type RepositoryInvitation = {
+type RepositoryInvitation = Readonly<{
   id: number;
   invitee: { login: string } | null;
-};
+}>;
 
 export function getGitHubPreviewRepoConfig(env: {
   GITHUB_PREVIEW_REPO_PAT?: string;
@@ -74,7 +74,7 @@ export async function ensureGitHubPreviewRepoAccess(
     );
   }
 
-  const invitations = (await invitationsRes.json()) as Array<RepositoryInvitation>;
+  const invitations = (await invitationsRes.json()) as ReadonlyArray<RepositoryInvitation>;
   const hasPendingInvite = invitations.some(
     (invitation) => invitation.invitee?.login?.toLowerCase() === login.toLowerCase(),
   );
