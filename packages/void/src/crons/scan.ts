@@ -36,8 +36,8 @@ function extractCronExpressions(source: string, filePath: string): Array<string>
       throw new Error(`cron: Invalid job file '${filePath}'. Cron array cannot be empty.`);
     }
     return items.map((item) => {
-      const m = item.match(/['"`]([^'"`]+)['"`]/);
-      return m![1].trim();
+      const cronMatch = item.match(/['"`]([^'"`]+)['"`]/);
+      return cronMatch![1].trim();
     });
   }
 
@@ -48,8 +48,8 @@ function extractCronExpressions(source: string, filePath: string): Array<string>
 
 function parseJobFiles(root: string, jobsDir: string, files: Array<string>): Array<JobDefinition> {
   return files
-    .filter((f) => !f.split('/').some((segment) => segment.startsWith('_')))
-    .sort((a, b) => a.localeCompare(b))
+    .filter((filePath) => !filePath.split('/').some((segment) => segment.startsWith('_')))
+    .sort((leftFilePath, rightFilePath) => leftFilePath.localeCompare(rightFilePath))
     .map((filePath) => {
       const absPath = join(root, jobsDir, filePath);
       const source = readFileSync(absPath, 'utf-8');

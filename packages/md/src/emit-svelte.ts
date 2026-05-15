@@ -46,11 +46,11 @@ export const headings = ${headings};
 import { setFrontmatter } from "@void/md";
 `;
 
-  for (let i = 0; i < islandImports.length; i++) {
-    const item = islandImports[i];
-    const alias = `RawIsland${i}`;
-    importAliasByName.set(item.name, alias);
-    source += `import ${alias} from ${JSON.stringify(item.specifier)};
+  for (let islandIndex = 0; islandIndex < islandImports.length; islandIndex++) {
+    const islandImport = islandImports[islandIndex];
+    const alias = `RawIsland${islandIndex}`;
+    importAliasByName.set(islandImport.name, alias);
+    source += `import ${alias} from ${JSON.stringify(islandImport.specifier)};
 `;
   }
 

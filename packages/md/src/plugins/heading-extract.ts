@@ -19,12 +19,12 @@ export function headingExtractPlugin(md: MarkdownExit): void {
   const render = md.renderer.render.bind(md.renderer);
   md.renderer.render = (tokens: Array<Token>, options: RenderOptions, env: MarkdownEnv = {}) => {
     env.headings = [];
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
+    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
+      const token = tokens[tokenIndex];
       if (token.type === 'heading_open') {
         const depth = Number(token.tag.slice(1));
         const slug = token.attrGet?.('id') ?? '';
-        const inline = tokens[i + 1];
+        const inline = tokens[tokenIndex + 1];
         const text = (
           inline?.children
             ?.filter((child) => child.type === 'text' || child.type === 'code_inline')

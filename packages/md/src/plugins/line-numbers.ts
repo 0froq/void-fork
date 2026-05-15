@@ -35,7 +35,9 @@ export function lineNumberPlugin(md: MarkdownExit, enable = false): void {
     const code = rawCode.slice(rawCode.indexOf('<code>'), rawCode.indexOf('</code>'));
     const lines = code.split('\n');
     const lineNumbersCode = [...Array(lines.length)]
-      .map((_, i) => `<span class="line-number">${i + startLineNumber}</span><br>`)
+      .map(
+        (_, lineOffset) => `<span class="line-number">${lineOffset + startLineNumber}</span><br>`,
+      )
       .join('');
     const lineNumbersWrapper = `<div class="line-numbers-wrapper" aria-hidden="true">${lineNumbersCode}</div>`;
 

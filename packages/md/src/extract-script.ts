@@ -29,12 +29,12 @@ export function extractScript(source: string): ScriptExtraction {
   const body = source.slice(match[0].length);
 
   const islandImports: Array<IslandImport> = [];
-  let m;
-  while ((m = ISLAND_IMPORT_RE.exec(script)) !== null) {
+  let importMatch: RegExpExecArray | null;
+  while ((importMatch = ISLAND_IMPORT_RE.exec(script)) !== null) {
     islandImports.push({
-      name: m[1],
-      specifier: m[2].slice(1, -1),
-      strategy: m[3].slice(1, -1),
+      name: importMatch[1],
+      specifier: importMatch[2].slice(1, -1),
+      strategy: importMatch[3].slice(1, -1),
     });
   }
 

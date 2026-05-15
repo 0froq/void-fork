@@ -37,17 +37,17 @@ type IslandMatch = {
 
 function findIslandTags(html: string, names: Set<string>): ReadonlyArray<IslandMatch> {
   const matches: Array<IslandMatch> = [];
-  let m;
+  let tagMatch: RegExpExecArray | null;
   ISLAND_TAG_RE.lastIndex = 0;
-  while ((m = ISLAND_TAG_RE.exec(html)) !== null) {
-    const name = m[1] ?? m[3];
+  while ((tagMatch = ISLAND_TAG_RE.exec(html)) !== null) {
+    const name = tagMatch[1] ?? tagMatch[3];
     if (names.has(name)) {
       matches.push({
         name,
-        start: m.index,
-        end: m.index + m[0].length,
-        attrs: (m[2] ?? m[4] ?? '').trim(),
-        children: m[5] ?? '',
+        start: tagMatch.index,
+        end: tagMatch.index + tagMatch[0].length,
+        attrs: (tagMatch[2] ?? tagMatch[4] ?? '').trim(),
+        children: tagMatch[5] ?? '',
       });
     }
   }
@@ -56,10 +56,10 @@ function findIslandTags(html: string, names: Set<string>): ReadonlyArray<IslandM
 
 function parseAttrs(attrStr: string): Record<string, string> {
   const result: Record<string, string> = {};
-  const re = /(\w[\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+)))?/g;
-  let m;
-  while ((m = re.exec(attrStr)) !== null) {
-    result[m[1]] = m[2] ?? m[3] ?? m[4] ?? '';
+  const attrRe = /(\w[\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+)))?/g;
+  let attrMatch: RegExpExecArray | null;
+  while ((attrMatch = attrRe.exec(attrStr)) !== null) {
+    result[attrMatch[1]] = attrMatch[2] ?? attrMatch[3] ?? attrMatch[4] ?? '';
   }
   return result;
 }
@@ -68,27 +68,27 @@ export function emitVueComponentWithIslands(
   result: CompileResult,
   islandImports: ReadonlyArray<IslandImport>,
 ): string {
-  const nameSet = new Set(islandImports.map((i) => i.name));
+  const nameSet = new Set(islandImports.map((islandImport) => islandImport.name));
   const islandTags = findIslandTags(result.html, nameSet);
 
   let code = `import { defineComponent, h, createStaticVNode, provide } from "vue";\n`;
 
   // Import raw island components
-  for (let i = 0; i < islandImports.length; i++) {
-    const imp = islandImports[i];
-    code += `import _raw_island_${i} from ${JSON.stringify(imp.specifier)};\n`;
+  for (let islandIndex = 0; islandIndex < islandImports.length; islandIndex++) {
+    const islandImport = islandImports[islandIndex];
+    code += `import _raw_island_${islandIndex} from ${JSON.stringify(islandImport.specifier)};\n`;
   }
 
   // Create island wrapper components
-  for (let i = 0; i < islandImports.length; i++) {
-    const imp = islandImports[i];
-    code += `const ${imp.name} = { inheritAttrs: false, render() {
+  for (let islandIndex = 0; islandIndex < islandImports.length; islandIndex++) {
+    const islandImport = islandImports[islandIndex];
+    code += `const ${islandImport.name} = { inheritAttrs: false, render() {
   const props = this.$attrs;
   return h("div", {
-    "data-island": ${JSON.stringify(toIslandId(imp))},
+    "data-island": ${JSON.stringify(toIslandId(islandImport))},
     "data-props": JSON.stringify(props),
-    "data-hydrate": ${JSON.stringify(imp.strategy)}
-  }, h(_raw_island_${i}, props));
+    "data-hydrate": ${JSON.stringify(islandImport.strategy)}
+  }, h(_raw_island_${islandIndex}, props));
 }};\n`;
   }
 

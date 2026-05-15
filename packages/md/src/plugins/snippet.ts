@@ -35,15 +35,15 @@ function rawPathToToken(rawPath: string): SnippetToken {
 function dedent(text: string): string {
   const lines = text.split('\n');
   const minIndent = lines.reduce((acc, line) => {
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] !== ' ' && line[i] !== '\t') {
-        return Math.min(i, acc);
+    for (let characterIndex = 0; characterIndex < line.length; characterIndex++) {
+      if (line[characterIndex] !== ' ' && line[characterIndex] !== '\t') {
+        return Math.min(characterIndex, acc);
       }
     }
     return acc;
   }, Infinity);
   if (minIndent < Infinity) {
-    return lines.map((x) => x.slice(minIndent)).join('\n');
+    return lines.map((line) => line.slice(minIndent)).join('\n');
   }
   return text;
 }
@@ -65,13 +65,13 @@ function findRegion(
   lines: ReadonlyArray<string>,
   regionName: string,
 ): { start: number; end: number; re: RegionMarker } | null {
-  for (const re of markers) {
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (re.start.test(line) && line.includes(regionName)) {
-        for (let j = i + 1; j < lines.length; j++) {
-          if (re.end.test(lines[j].trim())) {
-            return { start: i, end: j, re };
+  for (const marker of markers) {
+    for (let startLineIndex = 0; startLineIndex < lines.length; startLineIndex++) {
+      const line = lines[startLineIndex].trim();
+      if (marker.start.test(line) && line.includes(regionName)) {
+        for (let endLineIndex = startLineIndex + 1; endLineIndex < lines.length; endLineIndex++) {
+          if (marker.end.test(lines[endLineIndex].trim())) {
+            return { start: startLineIndex, end: endLineIndex, re: marker };
           }
         }
       }
@@ -86,7 +86,7 @@ function findRegion(
  * Ported from VitePress.
  */
 export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
-  const CH = '<'.charCodeAt(0);
+  const lessThanCharCode = '<'.charCodeAt(0);
 
   const parser: RuleBlock = (state, startLine, _endLine, silent): boolean => {
     const pos = state.bMarks[startLine] + state.tShift[startLine];
@@ -94,9 +94,9 @@ export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
     if (state.sCount[startLine] - state.blkIndent >= 4) {
       return false;
     }
-    for (let i = 0; i < 3; ++i) {
-      const ch = state.src.charCodeAt(pos + i);
-      if (ch !== CH || pos + i >= max) {
+    for (let markerOffset = 0; markerOffset < 3; ++markerOffset) {
+      const charCode = state.src.charCodeAt(pos + markerOffset);
+      if (charCode !== lessThanCharCode || pos + markerOffset >= max) {
         return false;
       }
     }
@@ -150,7 +150,7 @@ export function snippetPlugin(md: MarkdownExit, srcDir?: string): void {
         content = dedent(
           lines
             .slice(region.start, region.end)
-            .filter((l) => !(region.re.start.test(l) || region.re.end.test(l)))
+            .filter((line) => !(region.re.start.test(line) || region.re.end.test(line)))
             .join('\n'),
         );
       }

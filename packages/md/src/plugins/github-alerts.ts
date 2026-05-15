@@ -38,11 +38,11 @@ export function gitHubAlertsPlugin(md: MarkdownExit, options?: GitHubAlertsOptio
 
   const rule: RuleCore = (state) => {
     const tokens = state.tokens as ReadonlyArray<AlertToken>;
-    for (let i = 0; i < tokens.length; i++) {
-      if (tokens[i].type === 'blockquote_open') {
-        const startIndex = i;
+    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
+      if (tokens[tokenIndex].type === 'blockquote_open') {
+        const startIndex = tokenIndex;
         const open = tokens[startIndex];
-        let endIndex = i + 1;
+        let endIndex = tokenIndex + 1;
         while (
           endIndex < tokens.length &&
           (tokens[endIndex].type !== 'blockquote_close' || tokens[endIndex].level !== open.level)

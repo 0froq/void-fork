@@ -144,11 +144,11 @@ export function number(): EnvSchema<number> {
 /** Boolean env value. Accepts "true"/"false"/"1"/"0" (case-insensitive). */
 export function boolean(): EnvSchema<boolean> {
   return build<boolean>((raw) => {
-    const lc = raw.toLowerCase();
-    if (lc === 'true' || lc === '1') {
+    const lowercased = raw.toLowerCase();
+    if (lowercased === 'true' || lowercased === '1') {
       return { ok: true, value: true };
     }
-    if (lc === 'false' || lc === '0') {
+    if (lowercased === 'false' || lowercased === '0') {
       return { ok: true, value: false };
     }
     return { ok: false, message: `Expected boolean (true/false/1/0), got "${raw}"` };

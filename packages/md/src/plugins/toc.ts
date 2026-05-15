@@ -83,13 +83,13 @@ export function tocPlugin(md: MarkdownExit, options?: TocOptions): void {
   md.renderer.rules.toc_body = (tokens: Array<Token>) => {
     // Walk all tokens to find headings at the specified levels
     const headers: Array<Header> = [];
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
+    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
+      const token = tokens[tokenIndex];
       if (token.type === 'heading_open') {
         const depth = Number(token.tag.slice(1));
         if (level.includes(depth)) {
           const slug = token.attrGet?.('id') ?? '';
-          const inline = tokens[i + 1];
+          const inline = tokens[tokenIndex + 1];
           const text = (
             inline?.children
               ?.filter((child) => child.type === 'text' || child.type === 'code_inline')

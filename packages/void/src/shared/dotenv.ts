@@ -57,12 +57,12 @@ export function parseDotenvLine(line: string): ParseDotenvLineResult | null {
   if (!trimmed || trimmed.startsWith('#')) {
     return null;
   }
-  const eq = trimmed.indexOf('=');
-  if (eq === -1) {
+  const equalsIndex = trimmed.indexOf('=');
+  if (equalsIndex === -1) {
     return null;
   }
-  const key = trimmed.slice(0, eq).trim();
-  let value = trimmed.slice(eq + 1).trim();
+  const key = trimmed.slice(0, equalsIndex).trim();
+  let value = trimmed.slice(equalsIndex + 1).trim();
   if (
     (value.startsWith('"') && value.endsWith('"')) ||
     (value.startsWith("'") && value.endsWith("'"))
@@ -172,53 +172,53 @@ export function expandDotenv(
  */
 function expandValue(value: string, resolve: (key: string) => string): string {
   let result = '';
-  let i = 0;
-  while (i < value.length) {
-    const ch = value[i]!;
-    if (ch === '\\' && i + 1 < value.length && value[i + 1] === '$') {
+  let cursor = 0;
+  while (cursor < value.length) {
+    const character = value[cursor]!;
+    if (character === '\\' && cursor + 1 < value.length && value[cursor + 1] === '$') {
       // Literal `$`: consume the backslash and emit `$`.
       result += '$';
-      i += 2;
+      cursor += 2;
       continue;
     }
-    if (ch !== '$') {
-      result += ch;
-      i++;
+    if (character !== '$') {
+      result += character;
+      cursor++;
       continue;
     }
     // `$` — peek at the next char.
-    const next = value[i + 1];
+    const next = value[cursor + 1];
     if (next === '{') {
-      const end = value.indexOf('}', i + 2);
-      if (end === -1) {
+      const endIndex = value.indexOf('}', cursor + 2);
+      if (endIndex === -1) {
         // Unterminated `${...` — treat as literal.
-        result += ch;
-        i++;
+        result += character;
+        cursor++;
         continue;
       }
-      const key = value.slice(i + 2, end);
+      const key = value.slice(cursor + 2, endIndex);
       if (VALID_KEY.test(key)) {
         result += resolve(key);
       } else {
         // Non-identifier inside braces → literal.
-        result += value.slice(i, end + 1);
+        result += value.slice(cursor, endIndex + 1);
       }
-      i = end + 1;
+      cursor = endIndex + 1;
       continue;
     }
     if (next && /[A-Za-z_]/.test(next)) {
-      let j = i + 1;
-      while (j < value.length && /[A-Za-z0-9_]/.test(value[j]!)) {
-        j++;
+      let keyEndIndex = cursor + 1;
+      while (keyEndIndex < value.length && /[A-Za-z0-9_]/.test(value[keyEndIndex]!)) {
+        keyEndIndex++;
       }
-      const key = value.slice(i + 1, j);
+      const key = value.slice(cursor + 1, keyEndIndex);
       result += resolve(key);
-      i = j;
+      cursor = keyEndIndex;
       continue;
     }
     // `$` followed by nothing consumable → literal.
-    result += ch;
-    i++;
+    result += character;
+    cursor++;
   }
   return result;
 }

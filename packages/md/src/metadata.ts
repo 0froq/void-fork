@@ -10,27 +10,27 @@ function getMetadataCompiler(): MarkdownExit {
   if (metadataCompiler) {
     return metadataCompiler;
   }
-  const md = new MarkdownExit({ html: true, linkify: true });
+  const markdown = new MarkdownExit({ html: true, linkify: true });
   // @ts-expect-error markdown-it-anchor types reference @types/markdown-it, structurally incompatible with markdown-exit
-  md.use(anchor, {
+  markdown.use(anchor, {
     permalink: anchor.permalink.ariaHidden({ placement: 'before' }),
   });
-  metadataCompiler = md;
-  return md;
+  metadataCompiler = markdown;
+  return markdown;
 }
 
 function extractHeadings(tokens: ReadonlyArray<Token>): ReadonlyArray<Heading> {
   const headings: Array<Heading> = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
+  for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
+    const token = tokens[tokenIndex];
     if (token.type === 'heading_open') {
       const depth = Number(token.tag.slice(1));
       const slug = token.attrGet?.('id') ?? '';
-      const inline = tokens[i + 1];
+      const inline = tokens[tokenIndex + 1];
       const text = (
         inline?.children
-          ?.filter((t) => t.type === 'text' || t.type === 'code_inline')
-          .map((t) => t.content)
+          ?.filter((child) => child.type === 'text' || child.type === 'code_inline')
+          .map((child) => child.content)
           .join('') ?? ''
       ).trim();
       headings.push({ depth, slug, text });
@@ -53,7 +53,8 @@ export function extractMetadata(source: string): MetadataResult {
   const tokens = compiler.parse(content, env);
   const headings = extractHeadings(tokens);
 
-  const title = (frontmatter.title as string) ?? headings.find((h) => h.depth === 1)?.text ?? '';
+  const title =
+    (frontmatter.title as string) ?? headings.find((heading) => heading.depth === 1)?.text ?? '';
 
   return { frontmatter, headings, title };
 }

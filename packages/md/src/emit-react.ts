@@ -33,22 +33,22 @@ export function emitReactComponentWithIslands(
   let code = `import React from "react";\n`;
   code += `import { FrontmatterContext } from "@void/md";\n`;
 
-  for (let i = 0; i < islandImports.length; i++) {
-    const item = islandImports[i];
-    code += `import _raw_island_${i} from ${JSON.stringify(item.specifier)};\n`;
+  for (let islandIndex = 0; islandIndex < islandImports.length; islandIndex++) {
+    const islandImport = islandImports[islandIndex];
+    code += `import _raw_island_${islandIndex} from ${JSON.stringify(islandImport.specifier)};\n`;
   }
 
-  for (let i = 0; i < islandImports.length; i++) {
-    const item = islandImports[i];
-    code += `function ${item.name}(props) {
+  for (let islandIndex = 0; islandIndex < islandImports.length; islandIndex++) {
+    const islandImport = islandImports[islandIndex];
+    code += `function ${islandImport.name}(props) {
   return React.createElement(
     "div",
     {
-      "data-island": ${JSON.stringify(toIslandId(item))},
+      "data-island": ${JSON.stringify(toIslandId(islandImport))},
       "data-props": JSON.stringify(props),
-      "data-hydrate": ${JSON.stringify(item.strategy)}
+      "data-hydrate": ${JSON.stringify(islandImport.strategy)}
     },
-    React.createElement(_raw_island_${i}, props)
+    React.createElement(_raw_island_${islandIndex}, props)
   );
 }\n`;
   }

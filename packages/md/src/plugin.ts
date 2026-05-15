@@ -123,7 +123,7 @@ export function voidMarkdown(options?: MarkdownOptions): ReadonlyArray<Plugin> {
         };
       }),
     );
-    return pages.sort((a, b) => a.path.localeCompare(b.path));
+    return pages.sort((leftPage, rightPage) => leftPage.path.localeCompare(rightPage.path));
   }
 
   function writeMdTypes() {

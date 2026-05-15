@@ -30,8 +30,8 @@ function deriveBindingName(name: string): string {
 }
 
 function extractConsumerOption(source: string, name: string): number | undefined {
-  const re = new RegExp(`export\\s+const\\s+${name}\\s*=\\s*(\\d+)`);
-  const match = source.match(re);
+  const optionRe = new RegExp(`export\\s+const\\s+${name}\\s*=\\s*(\\d+)`);
+  const match = source.match(optionRe);
   return match ? Number(match[1]) : undefined;
 }
 
@@ -41,8 +41,8 @@ function parseQueueFiles(
   files: Array<string>,
 ): Array<QueueDefinition> {
   return files
-    .filter((f) => !f.split('/').some((segment) => segment.startsWith('_')))
-    .sort((a, b) => a.localeCompare(b))
+    .filter((filePath) => !filePath.split('/').some((segment) => segment.startsWith('_')))
+    .sort((leftFilePath, rightFilePath) => leftFilePath.localeCompare(rightFilePath))
     .map((filePath) => {
       const absPath = join(root, queuesDir, filePath);
       const source = readFileSync(absPath, 'utf-8');

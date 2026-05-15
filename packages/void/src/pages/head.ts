@@ -167,8 +167,8 @@ export function renderHeadToString(head: HeadDescriptor): string {
   if (head.link) {
     for (const entry of head.link) {
       const attrs = Object.entries(entry)
-        .filter(([, v]) => v != null)
-        .map(([k, v]) => `${k}="${escapeHtml(v!)}"`)
+        .filter(([, value]) => value != null)
+        .map(([key, value]) => `${key}="${escapeHtml(value!)}"`)
         .join(' ');
       parts.push(`<link ${attrs}>`);
     }
@@ -178,8 +178,8 @@ export function renderHeadToString(head: HeadDescriptor): string {
     for (const entry of head.script) {
       const { innerHTML, ...rest } = entry;
       const attrs = Object.entries(rest)
-        .filter(([, v]) => v != null)
-        .map(([k, v]) => `${k}="${escapeHtml(v!)}"`)
+        .filter(([, value]) => value != null)
+        .map(([key, value]) => `${key}="${escapeHtml(value!)}"`)
         .join(' ');
       if (innerHTML) {
         parts.push(`<script${attrs ? ' ' + attrs : ''}>${innerHTML}</script>`);
@@ -198,7 +198,7 @@ export function renderHtmlAttrs(head: HeadDescriptor): string {
     return '';
   }
   const attrs = Object.entries(head.htmlAttrs)
-    .map(([k, v]) => `${k}="${escapeHtml(v)}"`)
+    .map(([key, value]) => `${key}="${escapeHtml(value)}"`)
     .join(' ');
   return attrs ? ' ' + attrs : '';
 }
@@ -209,7 +209,7 @@ export function renderBodyAttrs(head: HeadDescriptor): string {
     return '';
   }
   const attrs = Object.entries(head.bodyAttrs)
-    .map(([k, v]) => `${k}="${escapeHtml(v)}"`)
+    .map(([key, value]) => `${key}="${escapeHtml(value)}"`)
     .join(' ');
   return attrs ? ' ' + attrs : '';
 }

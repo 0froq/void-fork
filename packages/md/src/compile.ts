@@ -52,7 +52,7 @@ async function getCompiler(options?: CompileOptions): Promise<MarkdownExit> {
 }
 
 async function createCompiler(options?: CompileOptions): Promise<MarkdownExit> {
-  const md = new MarkdownExit({ html: true, linkify: true });
+  const markdown = new MarkdownExit({ html: true, linkify: true });
 
   // Shiki highlighting with JS RegExp engine (no WASM) + lazy language loading
   const themes = options?.shiki?.themes ?? {
@@ -71,8 +71,8 @@ async function createCompiler(options?: CompileOptions): Promise<MarkdownExit> {
     transformerNotationFocus(),
     transformerNotationErrorLevel(),
   ];
-  md.renderer.rules.fence = async (tokens: ReadonlyArray<Token>, idx: number) => {
-    const token = tokens[idx];
+  markdown.renderer.rules.fence = async (tokens: ReadonlyArray<Token>, tokenIndex: number) => {
+    const token = tokens[tokenIndex];
     const code = token.content;
     let lang = token.info ? token.info.split(/\s+/g)[0] : 'text';
     if (!isSpecialLang(lang) && !highlighter.getLoadedLanguages().includes(lang)) {
@@ -92,49 +92,49 @@ async function createCompiler(options?: CompileOptions): Promise<MarkdownExit> {
   };
 
   // Code block wrapping (must come after shiki, before line-numbers)
-  md.use(preWrapperPlugin);
+  markdown.use(preWrapperPlugin);
 
   // Container blocks: :::tip, :::warning, etc.
-  md.use(containerPlugin);
+  markdown.use(containerPlugin);
 
   // Image path normalization + lazy loading
-  md.use(imagePlugin, { lazyLoading: true });
+  markdown.use(imagePlugin, { lazyLoading: true });
 
   // Link handling: external attrs, .md normalization
-  md.use(linkPlugin);
+  markdown.use(linkPlugin);
 
   // Line numbers (opt-in per code block by default)
-  md.use(lineNumberPlugin, false);
+  markdown.use(lineNumberPlugin, false);
 
   // GitHub alerts: > [!NOTE], > [!TIP], etc.
-  md.use(gitHubAlertsPlugin);
+  markdown.use(gitHubAlertsPlugin);
 
   // Attribute syntax: {.class #id}
-  md.use(attrs);
+  markdown.use(attrs);
 
   // Emoji shortcodes
-  md.use(emoji);
+  markdown.use(emoji);
 
   // Heading anchors
   // @ts-expect-error markdown-it-anchor types reference @types/markdown-it, structurally incompatible with markdown-exit
-  md.use(anchor, {
+  markdown.use(anchor, {
     permalink: anchor.permalink.ariaHidden({ placement: 'before' }),
   });
 
   // [[toc]] directive
-  md.use(tocPlugin);
+  markdown.use(tocPlugin);
 
-  return md;
+  return markdown;
 }
 
 function extractHeadings(tokens: ReadonlyArray<Token>): ReadonlyArray<Heading> {
   const headings: Array<Heading> = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
+  for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
+    const token = tokens[tokenIndex];
     if (token.type === 'heading_open') {
       const depth = Number(token.tag.slice(1));
       const slug = token.attrGet?.('id') ?? '';
-      const inline = tokens[i + 1];
+      const inline = tokens[tokenIndex + 1];
       const text = (
         inline?.children
           ?.filter((child) => child.type === 'text' || child.type === 'code_inline')
@@ -156,7 +156,8 @@ export async function compile(source: string, options?: CompileOptions): Promise
   const headings = extractHeadings(tokens);
   const html = await compiler.renderAsync(content, env);
 
-  const title = (frontmatter.title as string) ?? headings.find((h) => h.depth === 1)?.text ?? '';
+  const title =
+    (frontmatter.title as string) ?? headings.find((heading) => heading.depth === 1)?.text ?? '';
 
   return { html, frontmatter, headings, title };
 }

@@ -29,16 +29,16 @@ export function resolveLayoutChain(
   const chain: Array<LayoutDefinition> = [];
 
   // Check root layout
-  const root = layouts.find((l) => l.directory === '');
+  const root = layouts.find((layout) => layout.directory === '');
   if (root) {
     chain.push(root);
   }
 
   // Check each directory level
   let dir = '';
-  for (let i = 0; i < parts.length - 1; i++) {
-    dir = dir ? `${dir}/${parts[i]}` : parts[i];
-    const layout = layouts.find((l) => l.directory === dir);
+  for (let partIndex = 0; partIndex < parts.length - 1; partIndex++) {
+    dir = dir ? `${dir}/${parts[partIndex]}` : parts[partIndex];
+    const layout = layouts.find((candidate) => candidate.directory === dir);
     if (layout) {
       chain.push(layout);
     }
@@ -57,14 +57,16 @@ export function resolveNamedLayout(
   // Build dirs from closest to root
   const dirs: Array<string> = [];
   let dir = '';
-  for (let i = 0; i < parts.length - 1; i++) {
-    dir = dir ? `${dir}/${parts[i]}` : parts[i];
+  for (let partIndex = 0; partIndex < parts.length - 1; partIndex++) {
+    dir = dir ? `${dir}/${parts[partIndex]}` : parts[partIndex];
     dirs.push(dir);
   }
   dirs.reverse(); // closest first
   dirs.push(''); // root last
-  for (const d of dirs) {
-    const found = namedLayouts.find((nl) => nl.name === name && nl.directory === d);
+  for (const directory of dirs) {
+    const found = namedLayouts.find(
+      (namedLayout) => namedLayout.name === name && namedLayout.directory === directory,
+    );
     if (found) {
       return found;
     }

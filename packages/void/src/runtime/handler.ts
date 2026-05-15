@@ -196,27 +196,31 @@ export type TypedHandler<V extends ValidatorSlots = {}, R = unknown> = {
 export function defineHandler<R>(
   handler: (c: CloudContext) => R | Response | Promise<R | Response>,
 ): TypedHandler<{}, Exclude<Awaited<R>, Response>>;
-export function defineHandler(m1: MiddlewareFn, handler: HandlerFn): TypedHandler;
-export function defineHandler(m1: MiddlewareFn, m2: MiddlewareFn, handler: HandlerFn): TypedHandler;
+export function defineHandler(firstMiddleware: MiddlewareFn, handler: HandlerFn): TypedHandler;
 export function defineHandler(
-  m1: MiddlewareFn,
-  m2: MiddlewareFn,
-  m3: MiddlewareFn,
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
   handler: HandlerFn,
 ): TypedHandler;
 export function defineHandler(
-  m1: MiddlewareFn,
-  m2: MiddlewareFn,
-  m3: MiddlewareFn,
-  m4: MiddlewareFn,
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  thirdMiddleware: MiddlewareFn,
   handler: HandlerFn,
 ): TypedHandler;
 export function defineHandler(
-  m1: MiddlewareFn,
-  m2: MiddlewareFn,
-  m3: MiddlewareFn,
-  m4: MiddlewareFn,
-  m5: MiddlewareFn,
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  thirdMiddleware: MiddlewareFn,
+  fourthMiddleware: MiddlewareFn,
+  handler: HandlerFn,
+): TypedHandler;
+export function defineHandler(
+  firstMiddleware: MiddlewareFn,
+  secondMiddleware: MiddlewareFn,
+  thirdMiddleware: MiddlewareFn,
+  fourthMiddleware: MiddlewareFn,
+  fifthMiddleware: MiddlewareFn,
   handler: HandlerFn,
 ): TypedHandler;
 export function defineHandler(...args: Array<MiddlewareFn | HandlerFn>): TypedHandler {
@@ -230,10 +234,10 @@ export function defineHandler(...args: Array<MiddlewareFn | HandlerFn>): TypedHa
     let index = 0;
     const dispatch = async (): Promise<void> => {
       if (index < middlewares.length) {
-        const mw = middlewares[index++];
-        const res = await mw(c, dispatch);
-        if (res instanceof Response) {
-          c.res = res;
+        const middleware = middlewares[index++];
+        const middlewareResponse = await middleware(c, dispatch);
+        if (middlewareResponse instanceof Response) {
+          c.res = middlewareResponse;
         }
       } else {
         c.res = convertReturnValue(await handler(c));

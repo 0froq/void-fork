@@ -74,11 +74,17 @@ export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
             /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
           // Scan both pages AND layouts for island imports
           const filesToScan: ReadonlyArray<ScannableEntry> = [
-            ...pageScan.pages.map((p) => ({ filePath: p.componentPath, island: p.island })),
-            ...pageScan.layouts.map((l) => ({ filePath: l.filePath, island: l.island })),
-            ...pageScan.namedLayouts.map((nl) => ({
-              filePath: nl.filePath,
-              island: nl.island,
+            ...pageScan.pages.map((page) => ({
+              filePath: page.componentPath,
+              island: page.island,
+            })),
+            ...pageScan.layouts.map((layout) => ({
+              filePath: layout.filePath,
+              island: layout.island,
+            })),
+            ...pageScan.namedLayouts.map((namedLayout) => ({
+              filePath: namedLayout.filePath,
+              island: namedLayout.island,
             })),
           ];
           for (const entry of filesToScan) {
@@ -89,10 +95,10 @@ export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
             const code = readFileSync(filePath, 'utf-8');
             const importerDir = dirname(filePath);
             importAttrRe.lastIndex = 0;
-            let m;
-            while ((m = importAttrRe.exec(code)) !== null) {
-              const spec = m[1].slice(1, -1);
-              const strategy = m[2].slice(1, -1);
+            let importMatch: RegExpExecArray | null;
+            while ((importMatch = importAttrRe.exec(code)) !== null) {
+              const spec = importMatch[1].slice(1, -1);
+              const strategy = importMatch[2].slice(1, -1);
               const absPath = resolveSpecifier(spec, importerDir, COMPONENT_EXTENSIONS);
               if (absPath) {
                 const islandId = normalizePath(relative(root, absPath)).replace(/\.[^.]+$/, '');
@@ -166,7 +172,7 @@ export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
               return "export function renderIslandPage() { throw new Error('No pages found'); }";
             }
             const mdPlugin = resolvedConfig?.plugins?.find(
-              (p): p is MdPluginWithApi => p.name === 'void-md',
+              (plugin): plugin is MdPluginWithApi => plugin.name === 'void-md',
             );
             const mdScriptIds: Set<string> = new Set(
               mdPlugin?.api?.getClientScripts?.()?.keys() ?? [],

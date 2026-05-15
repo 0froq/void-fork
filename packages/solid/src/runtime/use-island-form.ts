@@ -86,8 +86,8 @@ export function useIslandForm<T extends Record<string, unknown>>(defaults: T): I
     } else {
       setErrors((prev) => {
         const next = { ...prev };
-        for (const f of fields) {
-          delete next[f];
+        for (const field of fields) {
+          delete next[field];
         }
         return next;
       });

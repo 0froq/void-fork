@@ -466,11 +466,15 @@ function printTable(rows: Array<Record<string, unknown>>): void {
     return max;
   });
 
-  const header = cols.map((col, i) => col.padEnd(widths[i])).join('  ');
-  const separator = widths.map((w) => '─'.repeat(w)).join('──');
+  const header = cols.map((col, columnIndex) => col.padEnd(widths[columnIndex])).join('  ');
+  const separator = widths.map((width) => '─'.repeat(width)).join('──');
   const lines = [header, separator];
   for (const row of rows) {
-    lines.push(cols.map((col, i) => String(row[col] ?? 'NULL').padEnd(widths[i])).join('  '));
+    lines.push(
+      cols
+        .map((col, columnIndex) => String(row[col] ?? 'NULL').padEnd(widths[columnIndex]))
+        .join('  '),
+    );
   }
   console.log(lines.join('\n'));
 }
@@ -718,22 +722,24 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
   if (timestampFiles.length > 0) {
     // Parse the earliest timestamp (always UTC) and place renamed files before it
     const earliest = timestampFiles[0].slice(0, 14);
-    const y = +earliest.slice(0, 4),
-      mo = +earliest.slice(4, 6) - 1,
-      d = +earliest.slice(6, 8);
-    const h = +earliest.slice(8, 10),
-      mi = +earliest.slice(10, 12),
-      s = +earliest.slice(12, 14);
-    baseTime = new Date(Date.UTC(y, mo, d, h, mi, s - oldStyleFiles.length));
+    const year = +earliest.slice(0, 4);
+    const monthIndex = +earliest.slice(4, 6) - 1;
+    const day = +earliest.slice(6, 8);
+    const hour = +earliest.slice(8, 10);
+    const minute = +earliest.slice(10, 12);
+    const second = +earliest.slice(12, 14);
+    baseTime = new Date(
+      Date.UTC(year, monthIndex, day, hour, minute, second - oldStyleFiles.length),
+    );
   } else {
     baseTime = new Date(Date.now() - oldStyleFiles.length * 1000);
   }
 
   const renames: Array<{ from: string; to: string }> = [];
-  for (let i = 0; i < oldStyleFiles.length; i++) {
-    const oldName = oldStyleFiles[i];
+  for (let fileIndex = 0; fileIndex < oldStyleFiles.length; fileIndex++) {
+    const oldName = oldStyleFiles[fileIndex];
     const description = oldName.replace(/^\d+_/, '');
-    const ts = new Date(baseTime.getTime() + i * 1000);
+    const ts = new Date(baseTime.getTime() + fileIndex * 1000);
     const newName = `${formatTs(ts)}_${description}`;
     renames.push({ from: oldName, to: newName });
   }
@@ -1152,15 +1158,15 @@ async function runExport(
           const rows = await client.query(`SELECT * FROM "${table}"`);
           for (const row of rows.rows) {
             const cols = Object.keys(row);
-            const vals = cols.map((c) => {
-              const v = row[c];
-              if (v === null) {
+            const vals = cols.map((column) => {
+              const value = row[column];
+              if (value === null) {
                 return 'NULL';
               }
-              if (typeof v === 'number') {
-                return String(v);
+              if (typeof value === 'number') {
+                return String(value);
               }
-              return `'${String(v).replace(/'/g, "''")}'`;
+              return `'${String(value).replace(/'/g, "''")}'`;
             });
             parts.push(`INSERT INTO "${table}" (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
           }
@@ -1224,15 +1230,15 @@ async function runExport(
         const rows = db.prepare(`SELECT * FROM "${table}"`).all() as Array<Record<string, unknown>>;
         for (const row of rows) {
           const cols = Object.keys(row);
-          const vals = cols.map((c) => {
-            const v = row[c];
-            if (v === null) {
+          const vals = cols.map((column) => {
+            const value = row[column];
+            if (value === null) {
               return 'NULL';
             }
-            if (typeof v === 'number') {
-              return String(v);
+            if (typeof value === 'number') {
+              return String(value);
             }
-            return `'${String(v).replace(/'/g, "''")}'`;
+            return `'${String(value).replace(/'/g, "''")}'`;
           });
           parts.push(`INSERT INTO "${table}" (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
         }

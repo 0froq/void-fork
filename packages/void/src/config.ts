@@ -153,10 +153,10 @@ export function assertUniqueCaptureNames(source: string, kind: string): void {
   // Same identifier class as both compilers (`__compilePattern` and
   // dispatch's `compilePattern`). Trailing `*` is optional — `:name` and
   // `:name*` both produce a `<name>` capture group.
-  const re = /:([A-Za-z0-9_]+)\*?/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) {
-    const name = m[1]!;
+  const captureNameRe = /:([A-Za-z0-9_]+)\*?/g;
+  let captureMatch: RegExpExecArray | null;
+  while ((captureMatch = captureNameRe.exec(source)) !== null) {
+    const name = captureMatch[1]!;
     if (seen.has(name)) {
       dups.add(name);
     }
@@ -168,7 +168,7 @@ export function assertUniqueCaptureNames(source: string, kind: string): void {
     dups.add('splat');
   }
   if (dups.size > 0) {
-    const names = [...dups].map((n) => `:${n}`).join(', ');
+    const names = [...dups].map((name) => `:${name}`).join(', ');
     throw new Error(
       `${kind} source "${source}" in ${CONFIG_FILE} has duplicate capture group name(s) (${names}); each :name token must be unique within a pattern, and :splat collides with a bare "*"`,
     );

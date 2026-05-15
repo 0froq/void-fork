@@ -109,18 +109,18 @@ function buildOffsetIndex(code: string): OffsetIndex {
 
 function offsetToLineCol(index: OffsetIndex, offset: number): { line: number; column: number } {
   // Binary search for the largest lineStarts[i] <= offset.
-  const arr = index.lineStarts;
-  let lo = 0;
-  let hi = arr.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >>> 1;
-    if (arr[mid]! <= offset) {
-      lo = mid;
+  const lineStarts = index.lineStarts;
+  let lowerBound = 0;
+  let upperBound = lineStarts.length - 1;
+  while (lowerBound < upperBound) {
+    const midpoint = (lowerBound + upperBound + 1) >>> 1;
+    if (lineStarts[midpoint]! <= offset) {
+      lowerBound = midpoint;
     } else {
-      hi = mid - 1;
+      upperBound = midpoint - 1;
     }
   }
-  return { line: lo + 1, column: offset - arr[lo]! + 1 };
+  return { line: lowerBound + 1, column: offset - lineStarts[lowerBound]! + 1 };
 }
 
 type Hit = {

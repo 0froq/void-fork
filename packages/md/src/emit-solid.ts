@@ -32,11 +32,11 @@ export function emitSolidComponentWithIslands(
 
   let code = `import { FrontmatterContext } from "@void/md";\n`;
 
-  for (let i = 0; i < islandImports.length; i++) {
-    const item = islandImports[i];
-    const alias = `RawIsland${i}`;
-    importAliasByName.set(item.name, alias);
-    code += `import ${alias} from ${JSON.stringify(item.specifier)};\n`;
+  for (let islandIndex = 0; islandIndex < islandImports.length; islandIndex++) {
+    const islandImport = islandImports[islandIndex];
+    const alias = `RawIsland${islandIndex}`;
+    importAliasByName.set(islandImport.name, alias);
+    code += `import ${alias} from ${JSON.stringify(islandImport.specifier)};\n`;
   }
 
   code += `

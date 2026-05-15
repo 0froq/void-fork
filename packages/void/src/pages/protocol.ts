@@ -215,8 +215,8 @@ function requestParams(c: CloudContext): Record<string, string> {
 /** Extract props from a handler result, handling Response wrapping from withValidator */
 async function extractProps(result: unknown): Promise<Record<string, unknown>> {
   if (result instanceof Response) {
-    const ct = result.headers.get('content-type') || '';
-    if (ct.includes('application/json')) {
+    const contentType = result.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
       return (await result.json()) as Record<string, unknown>;
     }
     return {};
@@ -359,8 +359,8 @@ export async function handlePageGet(
     // non-JSON 200s (file downloads, streams). JSON 200s are still extracted
     // as props for backward compat with loaders using c.json().
     if (result instanceof Response && !isConvertedResponse(result)) {
-      const ct = result.headers.get('content-type') || '';
-      if (result.status >= 300 || !ct.includes('application/json')) {
+      const contentType = result.headers.get('content-type') || '';
+      if (result.status >= 300 || !contentType.includes('application/json')) {
         return result;
       }
     }

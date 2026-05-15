@@ -21,9 +21,11 @@ export function generateComponentManifest(scan: PageScanResult, pagesDir: string
     const layoutId = layout.directory ? `${layout.directory}/layout` : 'layout';
     lines.push(`  ${JSON.stringify(layoutId)}: () => import(${JSON.stringify(importPath)}),`);
   }
-  for (const nl of scan.namedLayouts) {
-    const importPath = `${pagesDir}/${nl.filePath}`;
-    const layoutId = nl.directory ? `${nl.directory}/_layouts/${nl.name}` : `_layouts/${nl.name}`;
+  for (const namedLayout of scan.namedLayouts) {
+    const importPath = `${pagesDir}/${namedLayout.filePath}`;
+    const layoutId = namedLayout.directory
+      ? `${namedLayout.directory}/_layouts/${namedLayout.name}`
+      : `_layouts/${namedLayout.name}`;
     lines.push(`  ${JSON.stringify(layoutId)}: () => import(${JSON.stringify(importPath)}),`);
   }
   lines.push('};');
@@ -67,11 +69,11 @@ export function generateComponentManifest(scan: PageScanResult, pagesDir: string
 }
 
 function patternToRegex(pattern: string): string {
-  const re = pattern
+  const regexSource = pattern
     .replace(/:[^/{}]+\{\.\+\}/g, '(.+)') // catch-all :path{.+} (before escaping)
     .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // escape regex-special characters
     .replace(/\*/, '(.*)') // wildcard *
     .replace(/:[^/]+/g, '([^/]+)') // dynamic :param
     .replace(/\//g, '\\/'); // escape forward slashes
-  return `/^${re}$/`;
+  return `/^${regexSource}$/`;
 }
