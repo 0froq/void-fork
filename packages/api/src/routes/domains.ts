@@ -62,10 +62,6 @@ const app = new Hono<ApiEnv>()
       context.env.CF_ZONE_ID,
       context.env.CF_API_TOKEN,
       hostname,
-      {
-        project_id: projectId,
-        user_id: context.get('user').id,
-      },
     );
 
     const verificationData: DomainVerificationData = {

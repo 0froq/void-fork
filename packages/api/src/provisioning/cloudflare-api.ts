@@ -362,22 +362,22 @@ export type CustomHostnameInfo = Readonly<{
   verification_errors?: ReadonlyArray<string>;
 }>;
 
+// Do NOT add `custom_metadata` here — it's a paid Enterprise SSL-for-SaaS
+// add-on that our CF account is not provisioned for. Sending the field
+// makes CF reject every create with "No custom metadata access has been
+// allocated for this zone or account", breaking `void domain add`.
+// Forensic attribution is already persisted server-side in the `domains`
+// table (project_id, user_id, created_at) keyed by cf_hostname_id.
 export async function createCustomHostname(
   zoneId: string,
   apiToken: string,
   hostname: string,
-  metadata: { project_id: string; user_id: string },
 ): Promise<CustomHostnameInfo> {
   return cfFetch<CustomHostnameInfo>(`${CF_ZONE_API_BASE}/${zoneId}/custom_hostnames`, apiToken, {
     method: 'POST',
     body: JSON.stringify({
       hostname,
       ssl: { method: 'txt', type: 'dv' },
-      custom_metadata: {
-        project_id: metadata.project_id,
-        user_id: metadata.user_id,
-        created_at: new Date().toISOString(),
-      },
     }),
   });
 }

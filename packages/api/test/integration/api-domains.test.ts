@@ -98,7 +98,10 @@ describe('POST /projects/:id/domains', () => {
     expect(body.ownership_verification?.name).toBe('_cf-custom-hostname.app.example.com');
     expect(body.ssl_validation_records).toBeDefined();
 
-    // Verify the CF request body has the TXT-DCV shape with custom_metadata.
+    // Verify the CF request body has the TXT-DCV shape and does NOT include
+    // `custom_metadata` — that field requires a paid Enterprise SSL-for-SaaS
+    // add-on our account is not provisioned for, and sending it causes CF to
+    // reject every create.
     const cfCreateCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
       const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
       const init = call[1] as RequestInit | undefined;
@@ -108,12 +111,9 @@ describe('POST /projects/:id/domains', () => {
     const cfBody = JSON.parse((cfCreateCall![1] as RequestInit).body as string) as {
       hostname: string;
       ssl: { method: string; type: string };
-      custom_metadata: { project_id: string; user_id: string; created_at: string };
     };
     expect(cfBody.ssl.method).toBe('txt');
-    expect(cfBody.custom_metadata.project_id).toBe(project.id);
-    expect(cfBody.custom_metadata.user_id).toBe(user.id);
-    expect(typeof cfBody.custom_metadata.created_at).toBe('string');
+    expect(cfBody).not.toHaveProperty('custom_metadata');
   });
 
   it('returns 404 for non-existent project', async () => {
