@@ -785,7 +785,10 @@ export function voidPlugin(options?: {
       envSchemaPlugin(root),
       envClientGuardPlugin(root),
       envClientFoldPlugin(),
-      drizzlePlugin(root, false, dialect, { forceVirtualDb: authEnabled }),
+      drizzlePlugin(root, false, dialect, {
+        forceVirtualDb: authEnabled,
+        localD1PersistRoot: frameworkPersistRoot,
+      }),
       migrationPlugin(root, dialect, 'local', frameworkPersistRoot, {
         enabled: false,
       }),
@@ -1365,6 +1368,7 @@ export function voidPlugin(options?: {
       clientStubsPlugin,
       drizzlePlugin(root, false, getDatabaseDialect(config), {
         forceVirtualDb: authEnabled,
+        localD1PersistRoot: options?.persistTo ?? outDir,
         redirectDbTypePaths,
       }),
       migrationPlugin(root, getDatabaseDialect(config)),
@@ -1512,7 +1516,10 @@ export function voidPlugin(options?: {
       sandboxClassName: sandboxConfig?.className,
       live: liveConfig,
     }),
-    drizzlePlugin(root, true, dialect, { forceVirtualDb: authEnabled }),
+    drizzlePlugin(root, true, dialect, {
+      forceVirtualDb: authEnabled,
+      localD1PersistRoot: options?.persistTo ?? outDir,
+    }),
     migrationPlugin(root, dialect, 'local', join(root, '.void'), {
       enabled: authEnabled,
       configPath: authConfigPath,

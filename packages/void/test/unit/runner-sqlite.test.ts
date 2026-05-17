@@ -66,6 +66,51 @@ describe('runMigrations (local SQLite)', () => {
     expect(second).toEqual([]);
   });
 
+  it('fails before replaying migrations when a pushed schema has no tracking rows', async () => {
+    const root = createDir();
+    const migDir = join(root, 'migrations');
+    const dbPath = join(root, 'test.sqlite');
+
+    const db = await openSqliteDatabase(dbPath);
+    try {
+      db.exec('CREATE TABLE users (id TEXT PRIMARY KEY)');
+    } finally {
+      db.close();
+    }
+
+    writeMigration(migDir, '001_init.sql', 'CREATE TABLE users (id TEXT PRIMARY KEY)');
+
+    await expect(runMigrations(migDir, dbPath)).rejects.toThrow(
+      'Local database already has application tables but no Void migration history.',
+    );
+  });
+
+  it('fails before replaying migrations when applied rows refer to missing files', async () => {
+    const root = createDir();
+    const migDir = join(root, 'migrations');
+    const dbPath = join(root, 'test.sqlite');
+
+    const db = await openSqliteDatabase(dbPath);
+    try {
+      db.exec(`
+        CREATE TABLE users (id TEXT PRIMARY KEY);
+        CREATE TABLE _void_migrations (
+          name TEXT PRIMARY KEY,
+          applied_at TEXT DEFAULT (datetime('now'))
+        );
+        INSERT INTO _void_migrations (name) VALUES ('001_old_init.sql');
+      `);
+    } finally {
+      db.close();
+    }
+
+    writeMigration(migDir, '001_init.sql', 'CREATE TABLE users (id TEXT PRIMARY KEY)');
+
+    await expect(runMigrations(migDir, dbPath)).rejects.toThrow(
+      'Local database migration history does not match db/migrations/.',
+    );
+  });
+
   it('applies multi-statement migrations in order', async () => {
     const root = createDir();
     const migDir = join(root, 'migrations');
@@ -331,27 +376,28 @@ describe('runMigrations (local SQLite)', () => {
     const root = createDir();
     const migDir = join(root, 'migrations');
     const dbPath = join(root, 'test.sqlite');
-    writeMigration(migDir, '001.sql', 'CREATE TABLE users (id TEXT PRIMARY KEY)');
+    writeMigration(migDir, '001_bootstrap.sql', 'CREATE TABLE bootstrap (id TEXT PRIMARY KEY)');
+    writeMigration(migDir, '002.sql', 'CREATE TABLE users (id TEXT PRIMARY KEY)');
 
-    // Seed legacy with a DIFFERENT name than the on-disk migration, so the
-    // upgrade preserves it and the apply loop still has something pending.
+    // Seed legacy with the first on-disk migration, so the upgrade preserves
+    // it and the apply loop still has a later migration pending.
     let db = await openSqliteDatabase(dbPath);
     try {
       db.exec(
         "CREATE TABLE _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))",
       );
       db.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)').run(
-        '000_bootstrap.sql',
+        '001_bootstrap.sql',
         '2023-01-01T00:00:00Z',
       );
     } finally {
       db.close();
     }
 
-    // First run: upgrade copies 000_bootstrap.sql into _void_migrations,
-    // drops _migrations, then applies 001.sql.
+    // First run: upgrade copies 001_bootstrap.sql into _void_migrations,
+    // drops _migrations, then applies 002.sql.
     const first = await runMigrations(migDir, dbPath);
-    expect(first).toEqual(['001.sql']);
+    expect(first).toEqual(['002.sql']);
 
     db = await openSqliteDatabase(dbPath, { readonly: true });
     try {
@@ -360,7 +406,7 @@ describe('runMigrations (local SQLite)', () => {
           name: string;
         }>
       ).map((r) => r.name);
-      expect(rows).toEqual(['000_bootstrap.sql', '001.sql']);
+      expect(rows).toEqual(['001_bootstrap.sql', '002.sql']);
       const legacy = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'")
         .get();
@@ -369,7 +415,7 @@ describe('runMigrations (local SQLite)', () => {
       db.close();
     }
 
-    // Second run: legacy is already gone, 001.sql already applied. Must
+    // Second run: legacy is already gone, both migrations already applied. Must
     // no-op, not crash on a "no such table" during the upgrade body.
     const second = await runMigrations(migDir, dbPath);
     expect(second).toEqual([]);

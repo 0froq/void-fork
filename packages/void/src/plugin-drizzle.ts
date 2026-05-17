@@ -19,6 +19,8 @@ const VIRTUAL_DB_ID = '\0virtual:void-db';
 const VIRTUAL_SCHEMA_DB_ID = '\0virtual:void-db-schema';
 type DrizzlePluginOptions = {
   forceVirtualDb?: boolean;
+  localD1DatabaseId?: string;
+  localD1PersistRoot?: string;
   redirectDbTypePaths?: boolean;
 };
 
@@ -205,7 +207,7 @@ export function createDb(d1) {
       },
     },
 
-    configureServer(server) {
+    async configureServer(server) {
       if (!schema) {
         return;
       }
@@ -216,10 +218,23 @@ export function createDb(d1) {
         existsSync(migrationsDir) && readdirSync(migrationsDir).some((f) => f.endsWith('.sql'));
 
       if (!hasMigrations) {
+        if (dialect === 'sqlite') {
+          const { getApplicationTables, getMiniflareDatabasePath } =
+            await import('./migrations/runner.ts');
+          const dbPath = getMiniflareDatabasePath(
+            options.localD1PersistRoot ?? join(root, '.void'),
+            options.localD1DatabaseId ?? 'local',
+          );
+          const tables = await getApplicationTables(dbPath).catch(() => []);
+          if (tables.length > 0) {
+            return;
+          }
+        }
+
         voidWarn(
           'Schema found but no migrations in db/migrations/.\n' +
-            '         Run `void db push` to apply to local DB, or\n' +
-            '         `void db generate` to create migration files.',
+            '         `void db push` syncs the schema to your local DB without creating migration files.\n' +
+            '         Run `void db generate` to create migration files for dev startup and deploy.',
         );
       }
 

@@ -26,6 +26,13 @@ export type AppliedMigration = {
   applied_at: string;
 };
 
+const SQLITE_INTERNAL_TABLES = new Set([
+  '_cf_METADATA',
+  '_migrations',
+  '_void_migrations',
+  '__drizzle_migrations',
+]);
+
 function toBetterSqlite3Error(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
   if (!message.includes('Could not locate the bindings file')) {
@@ -142,6 +149,65 @@ function upgradeTrackingTable(db: SqliteDatabase): void {
   tx.immediate();
 }
 
+function getApplicationTableNames(db: SqliteDatabase): Array<string> {
+  const rows = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    .all() as Array<{ name: string }>;
+
+  return rows
+    .map((row) => row.name)
+    .filter((name) => !name.startsWith('sqlite_') && !SQLITE_INTERNAL_TABLES.has(name));
+}
+
+export async function getApplicationTables(dbPath: string): Promise<Array<string>> {
+  if (!existsSync(dbPath)) {
+    return [];
+  }
+
+  const db = await openSqliteDatabase(dbPath, { readonly: true });
+  try {
+    return getApplicationTableNames(db);
+  } finally {
+    db.close();
+  }
+}
+
+function assertLocalMigrationState(
+  migrations: Array<{ name: string; sql: string }>,
+  appliedNames: Set<string>,
+  applicationTables: Array<string>,
+): void {
+  const migrationNames = new Set(migrations.map((migration) => migration.name));
+  const missingFiles = [...appliedNames].filter((name) => !migrationNames.has(name)).sort();
+
+  if (missingFiles.length > 0) {
+    throw new Error(
+      [
+        'Local database migration history does not match db/migrations/.',
+        '',
+        'These migrations are recorded as applied locally but no longer exist on disk:',
+        ...missingFiles.map((name) => `  - ${name}`),
+        '',
+        'If the migration files were renamed, run `void db rename-migrations`.',
+        'If the migration history was intentionally rewritten, run `void db reset` to recreate the local database from the current files.',
+      ].join('\n'),
+    );
+  }
+
+  if (appliedNames.size === 0 && migrations.length > 0 && applicationTables.length > 0) {
+    throw new Error(
+      [
+        'Local database already has application tables but no Void migration history.',
+        '',
+        `Existing tables: ${applicationTables.join(', ')}`,
+        '',
+        'This usually means the schema was applied with `void db push` or the local database was created before migration tracking existed.',
+        'Run `void db reset` to recreate the local database from db/migrations/, or delete the local D1 state if you do not need its data.',
+      ].join('\n'),
+    );
+  }
+}
+
 /**
  * Apply unapplied SQL migrations from the migrations directory.
  * Tracks applied migrations in the `_void_migrations` table.
@@ -187,6 +253,9 @@ export async function runMigrations(migrationsDir: string, dbPath: string): Prom
         (r) => r.name,
       ),
     );
+    const applicationTables = getApplicationTableNames(db);
+
+    assertLocalMigrationState(allMigrations, appliedSet, applicationTables);
 
     const pending = allMigrations.filter((m) => !appliedSet.has(m.name));
     if (pending.length === 0) {

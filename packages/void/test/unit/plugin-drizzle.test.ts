@@ -1,10 +1,20 @@
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathe';
-import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { dirname, join } from 'pathe';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+
+vi.mock('../../src/log', () => ({
+  voidLog: vi.fn(),
+  voidWarn: vi.fn(),
+  voidError: vi.fn(),
+}));
+
+import { voidWarn } from '../../src/log.ts';
+import { getMiniflareDatabasePath, openSqliteDatabase } from '../../src/migrations/runner.ts';
 import { drizzlePlugin } from '../../src/plugin-drizzle.ts';
 
 const roots: Array<string> = [];
+const warnMock = vi.mocked(voidWarn);
 
 function createProjectRoot(options?: { schema?: boolean }): string {
   const root = mkdtempSync(join(tmpdir(), 'void-drizzle-'));
@@ -30,6 +40,10 @@ afterEach(() => {
   for (const root of roots.splice(0, roots.length)) {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+beforeEach(() => {
+  warnMock.mockReset();
 });
 
 describe('drizzlePlugin db typing generation', () => {
@@ -119,5 +133,41 @@ describe('drizzlePlugin db typing generation', () => {
     const tsconfig = JSON.parse(readFileSync(join(root, '.void', 'tsconfig.json'), 'utf8'));
     expect(tsconfig.compilerOptions.paths['void/db']).toBeUndefined();
     expect(tsconfig.compilerOptions.paths['@schema']).toEqual(['../db/schema.ts']);
+  });
+
+  it('warns when a sqlite schema has neither migrations nor a pushed local database', async () => {
+    const root = createProjectRoot();
+    const plugin = drizzlePlugin(root, false, 'sqlite');
+    const configureServer = getHookHandler(plugin.configureServer) as (
+      server: unknown,
+    ) => Promise<void>;
+
+    await configureServer({ watcher: { on: vi.fn() } });
+
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringContaining('Schema found but no migrations in db/migrations/.'),
+    );
+  });
+
+  it('does not warn after void db push has created local sqlite tables', async () => {
+    const root = createProjectRoot();
+    const persistRoot = join(root, 'local-state');
+    const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const db = await openSqliteDatabase(dbPath);
+    try {
+      db.exec('CREATE TABLE users (id TEXT PRIMARY KEY)');
+    } finally {
+      db.close();
+    }
+
+    const plugin = drizzlePlugin(root, false, 'sqlite', { localD1PersistRoot: persistRoot });
+    const configureServer = getHookHandler(plugin.configureServer) as (
+      server: unknown,
+    ) => Promise<void>;
+
+    await configureServer({ watcher: { on: vi.fn() } });
+
+    expect(warnMock).not.toHaveBeenCalled();
   });
 });
