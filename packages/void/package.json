@@ -336,7 +336,7 @@
     "@void/md": "workspace:*",
     "arktype": ">=2.0.0",
     "valibot": ">=1.0.0-beta.7",
-    "vite": "^8.0.0",
+    "vite": "catalog:",
     "zod": "^3.25.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {

@@ -4,6 +4,8 @@ packages:
   - playground/*
   - playground-local/*
 
+catalogMode: strict
+
 allowBuilds:
   '@parcel/watcher': false
   '@prisma/engines': false
