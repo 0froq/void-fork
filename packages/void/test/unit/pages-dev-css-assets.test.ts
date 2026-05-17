@@ -326,6 +326,73 @@ describe('pages dev CSS assets', () => {
     expect(transformCalls).not.toContain('/src/dynamic.css');
   });
 
+  it('uses Svelte style transform CSS without appending inline', async () => {
+    let middleware: Middleware | undefined;
+    const styleUrl = '/src/page.svelte?svelte&type=style&lang.css';
+    const nodes = new Map([
+      ['/src/page.ts', { id: '/root/src/page.ts', url: '/src/page.ts' }],
+      [styleUrl, { id: `/root${styleUrl}`, url: styleUrl }],
+    ]);
+    const transformCalls: Array<string> = [];
+    const [assetPlugin, edgePlugin] = pagesDevCssAssetsPlugin('/root', 'secret');
+    const configureServer = assetPlugin.configureServer as (server: unknown) => void;
+    configureServer({
+      config: { logger: { warn() {}, warnOnce() {} }, server: {} },
+      environments: {
+        client: {
+          moduleGraph: {
+            getModuleByUrl: async (url: string) => nodes.get(url),
+          },
+          transformRequest: async (url: string) => {
+            transformCalls.push(url);
+            if (url === styleUrl) {
+              return {
+                code:
+                  'const __vite__id = "/root/src/page.svelte?svelte&type=style&lang.css"\n' +
+                  'const __vite__css = ".svelte-page{color:red}"',
+              };
+            }
+            if (url === `${styleUrl}&inline=`) {
+              return { code: 'export default function Component() {}' };
+            }
+            return { code: '' };
+          },
+        },
+      },
+      middlewares: {
+        use(fn: Middleware) {
+          middleware = fn;
+        },
+      },
+      watcher: { on() {} },
+    });
+    const transform = edgePlugin.transform as (
+      this: unknown,
+      code: string,
+      id: string,
+    ) => Promise<void>;
+    await transform.call(
+      {
+        environment: { name: 'client' },
+        resolve: async () => ({ id: `/root${styleUrl}` }),
+      },
+      'import "./page.svelte?svelte&type=style&lang.css";',
+      '/root/src/page.ts',
+    );
+
+    const response = await postCollector(middleware!, { rootPhases: [['/src/page.ts']] });
+    const body = JSON.parse(response.body);
+
+    expect(body.assets).toEqual([
+      {
+        url: styleUrl,
+        id: '/root/src/page.svelte?svelte&type=style&lang.css',
+        css: '.svelte-page{color:red}',
+      },
+    ]);
+    expect(transformCalls).not.toContain(`${styleUrl}&inline=`);
+  });
+
   it('unwraps virtual /@id roots before transforming them', async () => {
     let middleware: Middleware | undefined;
     const nodes = new Map([

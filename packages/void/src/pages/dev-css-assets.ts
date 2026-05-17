@@ -217,6 +217,7 @@ class DevCssProvider {
     const seenCssUrls = new Set<string>();
     const cssUrls: Array<string> = [];
     const cssViteDevIds = new Map<string, string>();
+    const transformedCss = new Map<string, string>();
 
     const addByUrl = async (rawUrl: string): Promise<void> => {
       const url = normalizeDevCssUrl(rawUrl, this.root);
@@ -254,8 +255,17 @@ class DevCssProvider {
           seenCssUrls.add(node.url);
           cssUrls.push(node.url);
         }
-        const viteDevId = transformedCode ? extractViteDevId(transformedCode) : undefined;
-        cssViteDevIds.set(node.url, viteDevId ?? node.id ?? node.url);
+        if (transformedCode) {
+          const viteDevId = extractViteDevId(transformedCode);
+          cssViteDevIds.set(node.url, viteDevId ?? node.id ?? node.url);
+          try {
+            transformedCss.set(node.url, extractInlineCss(transformedCode));
+          } catch {
+            // Some CSS-like modules only become extractable with ?inline.
+          }
+        } else {
+          cssViteDevIds.set(node.url, node.id ?? node.url);
+        }
         return;
       }
 
@@ -284,12 +294,35 @@ class DevCssProvider {
 
     const assets: Array<DevCssAsset> = [];
     for (const url of cssUrls) {
+      const existingCss = transformedCss.get(url);
+      if (existingCss !== undefined) {
+        assets.push({ url, id: cssViteDevIds.get(url) ?? url, css: existingCss });
+        continue;
+      }
       const inlineUrl = appendInlineQuery(url);
-      const result = await environment.transformRequest(inlineUrl);
+      let result: { code: string } | null | undefined;
+      try {
+        result = await environment.transformRequest(inlineUrl);
+      } catch (error) {
+        this.server.config.logger.warnOnce(
+          `[void] Skipping dev CSS asset for ${url}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        continue;
+      }
       if (!result) {
         continue;
       }
-      assets.push({ url, id: cssViteDevIds.get(url) ?? url, css: extractInlineCss(result.code) });
+      try {
+        assets.push({
+          url,
+          id: cssViteDevIds.get(url) ?? url,
+          css: extractInlineCss(result.code),
+        });
+      } catch (error) {
+        this.server.config.logger.warnOnce(
+          `[void] Skipping dev CSS asset for ${url}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
 
     this.cache.set(cacheKey, assets);
