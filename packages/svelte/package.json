@@ -53,7 +53,7 @@
   },
   "peerDependencies": {
     "svelte": "^5.0.0",
-    "vite": "catalog:",
+    "vite": "^8.0.0",
     "void": "workspace:*"
   }
 }

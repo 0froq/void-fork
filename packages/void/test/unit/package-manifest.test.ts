@@ -22,8 +22,12 @@ const dependencyFields = [
 const packageRoots = [
   '',
   'docs',
-  ...readdirSync(join(root, 'packages')).map((name) => `packages/${name}`),
-  ...readdirSync(join(root, 'playground')).map((name) => `playground/${name}`),
+  ...readdirSync(join(root, 'packages'))
+    .sort()
+    .map((name) => `packages/${name}`),
+  ...readdirSync(join(root, 'playground'))
+    .sort()
+    .map((name) => `playground/${name}`),
 ].filter((packageRoot) => existsSync(join(root, packageRoot, 'package.json')));
 
 const readPackageJson = (packageDir: string): PackageJson =>
@@ -66,7 +70,29 @@ const readYamlSectionKeys = (sectionName: string) => {
   return keys;
 };
 
+const readYamlSectionScalars = (sectionName: string) => {
+  const lines = pnpmWorkspace.split('\n');
+  const start = lines.indexOf(`${sectionName}:`);
+  if (start === -1) {
+    return new Map<string, string>();
+  }
+
+  const entries = new Map<string, string>();
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() && !line.startsWith(' ')) {
+      break;
+    }
+
+    const match = /^ {2}(?:"([^"]+)"|'([^']+)'|([^:#]+)):\s*(\S.*)$/u.exec(line);
+    if (match) {
+      entries.set(match[1] ?? match[2] ?? match[3].trim(), match[4].trim());
+    }
+  }
+  return entries;
+};
+
 const catalogPackageNames = readYamlSectionKeys('catalog');
+const catalogPackageSpecifiers = readYamlSectionScalars('catalog');
 
 describe('package manifests', () => {
   it('uses workspace:* for local workspace package dependencies', () => {
@@ -91,7 +117,10 @@ describe('package manifests', () => {
     for (const { manifest, packageRoot } of packages) {
       for (const field of dependencyFields) {
         for (const [name, specifier] of Object.entries(manifest[field] ?? {})) {
-          if (catalogPackageNames.has(name) && specifier !== 'catalog:') {
+          const catalogSpecifier = catalogPackageSpecifiers.get(name);
+          const isAliasedPeer =
+            field === 'peerDependencies' && catalogSpecifier?.startsWith('npm:');
+          if (catalogPackageNames.has(name) && !isAliasedPeer && specifier !== 'catalog:') {
             violations.push(`${packageRoot} ${field}.${name} = ${specifier}`);
           }
         }
@@ -115,6 +144,43 @@ describe('package manifests', () => {
     }
 
     expect(violations).toEqual([]);
+  });
+
+  it('does not use npm aliases for public peer dependency ranges', () => {
+    const violations = [];
+
+    for (const { manifest, packageRoot } of packages) {
+      for (const [name, specifier] of Object.entries(manifest.peerDependencies ?? {})) {
+        const catalogSpecifier = catalogPackageSpecifiers.get(name);
+        if (
+          specifier.startsWith('npm:') ||
+          (specifier === 'catalog:' && catalogSpecifier?.startsWith('npm:'))
+        ) {
+          violations.push(`${packageRoot} peerDependencies.${name} = ${specifier}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('uses a public Vite peer range for published packages', () => {
+    const vitePeers = packages
+      .filter(({ packageRoot }) => packageRoot.startsWith('packages/'))
+      .filter(({ manifest }) => manifest.peerDependencies?.vite)
+      .map(({ manifest, packageRoot }) => [
+        manifest.name ?? packageRoot,
+        manifest.peerDependencies?.vite,
+      ]);
+
+    expect(vitePeers).toEqual([
+      ['@void/md', '^8.0.0'],
+      ['@void/react', '^8.0.0'],
+      ['@void/solid', '^8.0.0'],
+      ['@void/svelte', '^8.0.0'],
+      ['void', '^8.0.0'],
+      ['@void/vue', '^8.0.0'],
+    ]);
   });
 
   it('keeps pnpm catalog additions strict', () => {

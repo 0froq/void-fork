@@ -61,7 +61,7 @@
   "peerDependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "vite": "catalog:",
+    "vite": "^8.0.0",
     "void": "workspace:*"
   }
 }
