@@ -89,6 +89,13 @@ export type ApiEnv = Env & {
      * can exercise the heartbeat timer without waiting 15 seconds per case.
      */
     DEPLOY_HEARTBEAT_INTERVAL_MS?: number;
+    /**
+     * Test-only overrides for the `domainAdd` SSL-validation-record short
+     * poll. Falls back to 8_000 / 500 in production. Tests pass small values
+     * (e.g. 50 / 5) so deadline-miss cases complete quickly with real timers.
+     */
+    CF_HOSTNAME_POLL_DEADLINE_MS?: number;
+    CF_HOSTNAME_POLL_INITIAL_INTERVAL_MS?: number;
   };
   Variables: {
     user: User;

@@ -234,6 +234,372 @@ describe('POST /projects/:id/domains', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid hostname format' });
   });
+
+  it('polls CF until ssl.validation_records appear', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'poll-records');
+    const fetchMock = mockCfApi({
+      createCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-poll',
+          hostname: 'poll.example.com',
+          status: 'pending',
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.poll.example.com',
+            value: 'ownership-v',
+          },
+        }),
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-poll',
+          hostname: 'poll.example.com',
+          status: 'pending',
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [
+              {
+                txt_name: '_acme-challenge.poll.example.com',
+                txt_value: 'acme-v',
+                status: 'pending_validation',
+              },
+            ],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.poll.example.com',
+            value: 'ownership-v',
+          },
+        }),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'poll.example.com' }),
+      }),
+      { ...env, CF_HOSTNAME_POLL_DEADLINE_MS: 500, CF_HOSTNAME_POLL_INITIAL_INTERVAL_MS: 5 },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ssl_validation_records: Array<{ txt_name?: string; txt_value?: string }>;
+    };
+    expect(body.ssl_validation_records).toHaveLength(1);
+    expect(body.ssl_validation_records[0]?.txt_name).toBe('_acme-challenge.poll.example.com');
+
+    const followUpGets = fetchMock.mock.calls.filter((call: Array<unknown>) => {
+      const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
+      const init = call[1] as RequestInit | undefined;
+      const method = init?.method ?? 'GET';
+      return url.includes('/custom_hostnames/ch-poll') && method === 'GET';
+    });
+    expect(followUpGets.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not poll when CF returns SSL records immediately', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'no-poll');
+    const fetchMock = mockCfApi({
+      createCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-no-poll',
+          hostname: 'no-poll.example.com',
+          status: 'pending',
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [
+              {
+                txt_name: '_acme-challenge.no-poll.example.com',
+                txt_value: 'acme-v',
+                status: 'pending_validation',
+              },
+            ],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.no-poll.example.com',
+            value: 'ownership-v',
+          },
+        }),
+      getCustomHostname: () => {
+        throw new Error('getCustomHostname should not be called');
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'no-poll.example.com' }),
+      }),
+      { ...env, CF_HOSTNAME_POLL_DEADLINE_MS: 500, CF_HOSTNAME_POLL_INITIAL_INTERVAL_MS: 5 },
+    );
+
+    expect(res.status).toBe(200);
+
+    const followUpGets = fetchMock.mock.calls.filter((call: Array<unknown>) => {
+      const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
+      const init = call[1] as RequestInit | undefined;
+      const method = init?.method ?? 'GET';
+      return url.includes('/custom_hostnames/ch-no-poll') && method === 'GET';
+    });
+    expect(followUpGets).toHaveLength(0);
+  });
+
+  it('returns gracefully when CF errors during SSL record polling', async () => {
+    // Regression: a transient CF 5xx during the SSL-record short poll must
+    // not orphan the CF hostname. The hostname is created BEFORE polling,
+    // so an exception from `getCustomHostname` mid-poll would kill the
+    // request after CF has the hostname but before the DB row is inserted.
+    // The route catches the helper's error and falls back to the original
+    // create response — the DB row gets inserted and the user/`void domain
+    // status` can pick up the SSL records on the next poll.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'transient-cf');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockCfApi({
+      createCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-transient',
+          hostname: 'transient.example.com',
+          status: 'pending',
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.transient.example.com',
+            value: 'ownership-v',
+          },
+        }),
+      getCustomHostname: () => {
+        throw new Error('CF 502 Bad Gateway');
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'transient.example.com' }),
+      }),
+      { ...env, CF_HOSTNAME_POLL_DEADLINE_MS: 500, CF_HOSTNAME_POLL_INITIAL_INTERVAL_MS: 5 },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: string;
+      hostname: string;
+      ssl_validation_records: Array<unknown>;
+      ownership_verification?: { name: string; value: string };
+    };
+    expect(body.id).toMatch(/^dom_/);
+    expect(body.hostname).toBe('transient.example.com');
+    // The original create response had no SSL records; fall-through preserves that.
+    expect(body.ssl_validation_records).toEqual([]);
+    // Ownership verification from the create response is still surfaced.
+    expect(body.ownership_verification?.name).toBe('_cf-custom-hostname.transient.example.com');
+
+    // DB row exists.
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'transient.example.com'));
+    expect(row).toBeDefined();
+    expect(row?.cf_hostname_id).toBe('ch-transient');
+
+    // A warning was logged for the CF API error.
+    const warnMessages = warn.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(warnMessages.some((msg) => msg.includes('transient.example.com'))).toBe(true);
+    expect(warnMessages.some((msg) => msg.includes('CF 502 Bad Gateway'))).toBe(true);
+  });
+
+  it('returns gracefully on deadline-miss for SSL validation records', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'deadline-miss');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockCfApi({
+      createCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-deadline',
+          hostname: 'deadline.example.com',
+          status: 'pending',
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.deadline.example.com',
+            value: 'ownership-v',
+          },
+        }),
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-deadline',
+          hostname: 'deadline.example.com',
+          status: 'pending',
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.deadline.example.com',
+            value: 'ownership-v',
+          },
+        }),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'deadline.example.com' }),
+      }),
+      { ...env, CF_HOSTNAME_POLL_DEADLINE_MS: 50, CF_HOSTNAME_POLL_INITIAL_INTERVAL_MS: 5 },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: string;
+      ssl_validation_records: Array<unknown>;
+    };
+    expect(body.ssl_validation_records).toEqual([]);
+    expect(body.id).toMatch(/^dom_/);
+
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'deadline.example.com'));
+    expect(row).toBeDefined();
+
+    expect(warn).toHaveBeenCalled();
+    const warnMessage = warn.mock.calls[0]?.[0];
+    expect(typeof warnMessage).toBe('string');
+    expect(warnMessage as string).toContain('deadline.example.com');
+  });
+
+  // Regression: a `CF_HOSTNAME_POLL_DEADLINE_MS` of 1 used to let the
+  // deadline check fire before the first fetch (a single ms could elapse
+  // between the start `Date.now()` and the in-loop `Date.now()`), causing
+  // the helper to return `undefined`. The undefined return slipped past
+  // the route's try/catch and 500'd the request on `.ssl.validation_records`
+  // — orphaning the CF hostname because the DB row hadn't been inserted yet.
+  it('returns gracefully with a tiny poll deadline (regression: no undefined return)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'tiny-deadline');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = mockCfApi({
+      createCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-tiny',
+          hostname: 'tiny.example.com',
+          status: 'pending',
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.tiny.example.com',
+            value: 'ownership-v',
+          },
+        }),
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-tiny',
+          hostname: 'tiny.example.com',
+          status: 'pending',
+          ssl: {
+            status: 'pending_validation',
+            method: 'txt',
+            type: 'dv',
+            validation_records: [],
+          },
+          ownership_verification: {
+            type: 'txt',
+            name: '_cf-custom-hostname.tiny.example.com',
+            value: 'ownership-v',
+          },
+        }),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'tiny.example.com' }),
+      }),
+      { ...env, CF_HOSTNAME_POLL_DEADLINE_MS: 1, CF_HOSTNAME_POLL_INITIAL_INTERVAL_MS: 1 },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: string;
+      ssl_validation_records: Array<unknown>;
+    };
+    expect(body.id).toMatch(/^dom_/);
+    expect(body.ssl_validation_records).toEqual([]);
+
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'tiny.example.com'));
+    expect(row).toBeDefined();
+    expect(row?.hostname).toBe('tiny.example.com');
+
+    // The helper must run at least one GET even when the deadline is tiny;
+    // that's the invariant the fix introduces.
+    const followUpGets = fetchMock.mock.calls.filter((call: Array<unknown>) => {
+      const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
+      const init = call[1] as RequestInit | undefined;
+      const method = init?.method ?? 'GET';
+      return url.includes('/custom_hostnames/ch-tiny') && method === 'GET';
+    });
+    expect(followUpGets.length).toBeGreaterThanOrEqual(1);
+
+    // Sanity: the response should not have logged a CF error — the helper
+    // returned cleanly, it just didn't observe records within the deadline.
+    const warnMessages = warn.mock.calls.map((call) => String(call[0] ?? ''));
+    expect(warnMessages.some((msg) => msg.includes('CF API error'))).toBe(false);
+  });
 });
 
 describe('GET /projects/:id/domains', () => {
@@ -509,6 +875,161 @@ describe('GET /projects/:id/domains/:domainId', () => {
     expect(row?.status).toBe('pending');
 
     expect(await env.ROUTING.get('domain:legacy-http.example.com')).toBeNull();
+  });
+
+  it('returns cf_status matching CF raw status', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cf-status-passthrough');
+    mockCfApi({
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-cf-status',
+          hostname: 'cf-status.example.com',
+          status: 'pending_validation',
+          ssl: { status: 'pending_validation', method: 'txt', type: 'dv' },
+        }),
+    });
+
+    await env.db.insert(domains).values({
+      id: 'dom_cf_status',
+      project_id: project.id,
+      hostname: 'cf-status.example.com',
+      cf_hostname_id: 'ch-cf-status',
+      status: 'pending',
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains/dom_cf_status`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { cf_status: string };
+    expect(body.cf_status).toBe('pending_validation');
+  });
+
+  it('awaiting_deployment is true when CF gate satisfied but slug routing absent', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'awaiting-deploy-true');
+    mockCfApi({
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-awaiting',
+          hostname: 'awaiting.example.com',
+          status: 'active',
+          ssl: { status: 'active', method: 'txt', type: 'dv' },
+        }),
+    });
+
+    await env.db.insert(domains).values({
+      id: 'dom_awaiting',
+      project_id: project.id,
+      hostname: 'awaiting.example.com',
+      cf_hostname_id: 'ch-awaiting',
+      status: 'pending',
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains/dom_awaiting`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; awaiting_deployment: boolean };
+    expect(body.awaiting_deployment).toBe(true);
+    expect(body.status).toBe('pending');
+
+    const [row] = await env.db
+      .select({ status: domains.status })
+      .from(domains)
+      .where(eq(domains.id, 'dom_awaiting'));
+    expect(row?.status).toBe('pending');
+
+    expect(await env.ROUTING.get('domain:awaiting.example.com')).toBeNull();
+  });
+
+  it('awaiting_deployment is false when slug routing is present', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'awaiting-deploy-false');
+    mockCfApi({
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-routing',
+          hostname: 'routed.example.com',
+          status: 'active',
+          ssl: { status: 'active', method: 'txt', type: 'dv' },
+        }),
+    });
+
+    await env.db.insert(domains).values({
+      id: 'dom_routed',
+      project_id: project.id,
+      hostname: 'routed.example.com',
+      cf_hostname_id: 'ch-routing',
+      status: 'pending',
+    });
+
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: 'user-routed', projectId: project.id }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains/dom_routed`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; awaiting_deployment: boolean };
+    expect(body.awaiting_deployment).toBe(false);
+    expect(body.status).toBe('active');
+
+    const [row] = await env.db
+      .select({ status: domains.status })
+      .from(domains)
+      .where(eq(domains.id, 'dom_routed'));
+    expect(row?.status).toBe('active');
+
+    expect(await env.ROUTING.get('domain:routed.example.com')).not.toBeNull();
+  });
+
+  it('awaiting_deployment is false when CF gate is not yet satisfied', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'awaiting-deploy-pending-cf');
+    mockCfApi({
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-cf-pending',
+          hostname: 'cf-pending.example.com',
+          status: 'pending',
+          ssl: { status: 'pending_validation', method: 'txt', type: 'dv' },
+        }),
+    });
+
+    await env.db.insert(domains).values({
+      id: 'dom_cf_pending',
+      project_id: project.id,
+      hostname: 'cf-pending.example.com',
+      cf_hostname_id: 'ch-cf-pending',
+      status: 'pending',
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains/dom_cf_pending`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { awaiting_deployment: boolean };
+    expect(body.awaiting_deployment).toBe(false);
   });
 
   it('keeps domain pending when slug routing is absent', async () => {

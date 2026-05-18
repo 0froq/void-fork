@@ -69,6 +69,9 @@ export type TestEnv = {
   ERROR_ALERT_MONITOR: DurableObjectNamespace;
   /** Test-only override for the deploy handler's heartbeat interval. */
   DEPLOY_HEARTBEAT_INTERVAL_MS?: number;
+  /** Test-only overrides for the `domainAdd` SSL-record short poll. */
+  CF_HOSTNAME_POLL_DEADLINE_MS?: number;
+  CF_HOSTNAME_POLL_INITIAL_INTERVAL_MS?: number;
 };
 
 export function createMockExecutionContext(): ExecutionContext {

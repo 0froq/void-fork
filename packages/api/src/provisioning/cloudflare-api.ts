@@ -393,6 +393,50 @@ export async function getCustomHostname(
   );
 }
 
+// CF's POST /custom_hostnames returns `ownership_verification` synchronously
+// but populates `ssl.validation_records` asynchronously as its cert-provisioning
+// workflow generates the ACME challenge tokens — typically within a few
+// seconds. Short-poll the hostname until the records appear so `domain add`
+// can show the user the complete record set in a single screen.
+//
+// Errors from `getCustomHostname` propagate to the caller — the route is the
+// right place to decide how to recover (e.g. fall back to the original create
+// response so the CF hostname isn't orphaned on a transient 5xx mid-poll).
+//
+// The fetch always runs at least once before the deadline is consulted, so
+// `last` is provably assigned on every return path regardless of how small
+// `deadlineMs` is.
+export async function pollCustomHostnameUntilSslRecords(
+  zoneId: string,
+  apiToken: string,
+  customHostnameId: string,
+  options?: { deadlineMs?: number; initialIntervalMs?: number },
+): Promise<CustomHostnameInfo> {
+  const deadlineMs = options?.deadlineMs ?? 8_000;
+  const initialIntervalMs = options?.initialIntervalMs ?? 500;
+  const subsequentIntervalMs = Math.max(1, Math.round(initialIntervalMs * 1.5));
+  const start = Date.now();
+  let interval = initialIntervalMs;
+  let last: CustomHostnameInfo;
+  while (true) {
+    last = await getCustomHostname(zoneId, apiToken, customHostnameId);
+    if ((last.ssl.validation_records ?? []).length > 0 || last.ssl.status === 'active') {
+      return last;
+    }
+    const elapsed = Date.now() - start;
+    if (elapsed >= deadlineMs) {
+      break;
+    }
+    const remaining = deadlineMs - elapsed;
+    const sleep = Math.min(interval, remaining);
+    if (sleep > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, sleep));
+    }
+    interval = subsequentIntervalMs;
+  }
+  return last;
+}
+
 export async function deleteCustomHostname(
   zoneId: string,
   apiToken: string,
