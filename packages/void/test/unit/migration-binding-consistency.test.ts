@@ -346,7 +346,7 @@ describe('createMigrationHandler with missing D1 binding', () => {
 describe('createMigrationHandler D1 execution', () => {
   const proxyToken = 'test-token-123';
 
-  function createMockD1() {
+  function createMockD1(options?: { failExec?: (sql: string) => Error | undefined }) {
     const calls = {
       batch: 0,
       exec: [] as Array<string>,
@@ -361,6 +361,10 @@ describe('createMigrationHandler D1 execution', () => {
       },
       async exec(sql: string) {
         calls.exec.push(sql);
+        const error = options?.failExec?.(sql);
+        if (error) {
+          throw error;
+        }
       },
       prepare(sql: string) {
         let bound: Array<unknown> = [];
@@ -426,6 +430,49 @@ describe('createMigrationHandler D1 execution', () => {
       'INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)',
     ]);
     expect(calls.batch).toBe(0);
+  });
+
+  it('applies scaffolded multiline single-statement D1 migrations without raw exec', async () => {
+    const sql = [
+      'CREATE TABLE `posts` (',
+      '\t`id` integer PRIMARY KEY NOT NULL,',
+      '\t`title` text NOT NULL',
+      ');',
+    ].join('\n');
+    const { calls, db } = createMockD1({
+      failExec: (executedSql) =>
+        executedSql.includes('\n')
+          ? new Error('D1_EXEC_ERROR: Error in line 1: CREATE TABLE `posts` (: incomplete input')
+          : undefined,
+    });
+    const handler = createMigrationHandler(
+      { __VOID_PROXY_TOKEN: proxyToken, DB: db },
+      [{ name: '0000_generated.sql', sql }],
+      'sqlite',
+    );
+
+    const response = await handler(
+      new Request('https://example.com/__void/migrate', {
+        method: 'POST',
+        headers: { 'x-void-internal': proxyToken },
+      }),
+    );
+    const body = (await response.json()) as MigrationResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.migrations).toEqual([
+      { name: '0000_generated.sql', applied: true, durationMs: expect.any(Number) },
+    ]);
+    expect(calls.exec).toEqual([]);
+    expect(calls.run).toEqual([
+      `CREATE TABLE IF NOT EXISTS _void_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    )`,
+      sql,
+      'INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)',
+    ]);
   });
 
   it('applies Drizzle statement breakpoint chunks separately on D1', async () => {

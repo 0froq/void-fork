@@ -114,8 +114,12 @@ async function runD1Migrations(
     const start = Date.now();
     try {
       const statements = splitMigrationSql(m.sql);
-      if (statements.length === 1 && statements[0] === m.sql) {
-        await db.exec(m.sql);
+      if (statements.length === 1) {
+        if (isSingleSqlStatement(statements[0])) {
+          await db.prepare(statements[0]).run();
+        } else {
+          await db.exec(m.sql);
+        }
       } else {
         for (const statement of statements) {
           await db.prepare(statement).run();
@@ -188,4 +192,89 @@ function isStatementBreakpointLine(line: string): boolean {
 
 function hasInlineStatementBreakpoint(line: string): boolean {
   return /;\s*-->\s*statement-breakpoint\s*$/.test(line.trim());
+}
+
+function isSingleSqlStatement(sql: string): boolean {
+  let statements = 0;
+  let inStatement = false;
+  let index = 0;
+
+  while (index < sql.length) {
+    const character = sql[index];
+    const next = index + 1 < sql.length ? sql[index + 1] : '';
+
+    if (character === '-' && next === '-') {
+      index += 2;
+      while (index < sql.length && sql[index] !== '\n') {
+        index++;
+      }
+      continue;
+    }
+
+    if (character === '/' && next === '*') {
+      index += 2;
+      while (index < sql.length - 1 && !(sql[index] === '*' && sql[index + 1] === '/')) {
+        index++;
+      }
+      index = Math.min(index + 2, sql.length);
+      continue;
+    }
+
+    if (character === "'") {
+      inStatement = true;
+      index++;
+      while (index < sql.length) {
+        if (sql[index] === "'" && sql[index + 1] === "'") {
+          index += 2;
+          continue;
+        }
+        if (sql[index] === "'") {
+          index++;
+          break;
+        }
+        index++;
+      }
+      continue;
+    }
+
+    if (character === '"' || character === '`' || character === '[') {
+      inStatement = true;
+      const close = character === '[' ? ']' : character;
+      index++;
+      while (index < sql.length) {
+        if (close !== ']' && sql[index] === close && sql[index + 1] === close) {
+          index += 2;
+          continue;
+        }
+        if (sql[index] === close) {
+          index++;
+          break;
+        }
+        index++;
+      }
+      continue;
+    }
+
+    if (character === ';') {
+      if (inStatement) {
+        statements++;
+        if (statements > 1) {
+          return false;
+        }
+        inStatement = false;
+      }
+      index++;
+      continue;
+    }
+
+    if (character !== ' ' && character !== '\t' && character !== '\n' && character !== '\r') {
+      inStatement = true;
+    }
+    index++;
+  }
+
+  if (inStatement) {
+    statements++;
+  }
+  return statements === 1;
 }
