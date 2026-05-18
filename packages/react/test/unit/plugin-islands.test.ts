@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'pathe';
 import { describe, expect, it, beforeEach, afterEach } from 'vite-plus/test';
 import { islandsPlugin } from '../../src/plugin-islands.ts';
@@ -14,6 +14,9 @@ type IslandsPluginHooks = {
   }) => void;
   buildStart?: (() => Promise<void>) | HookWithHandler<() => Promise<void>>;
   load?: ((id: string) => string | undefined) | HookWithHandler<(id: string) => string | undefined>;
+  transform?:
+    | ((code: string, id: string) => { code: string; map: null } | undefined)
+    | HookWithHandler<(code: string, id: string) => { code: string; map: null } | undefined>;
 };
 
 function writeFile(relativePath: string, content: string): void {
@@ -42,6 +45,12 @@ function setupPlugin() {
         return plugin.load('\0virtual:void-islands-client');
       }
       return plugin.load?.handler('\0virtual:void-islands-client');
+    },
+    transform(code: string, id: string): { code: string; map: null } | undefined {
+      if (typeof plugin.transform === 'function') {
+        return plugin.transform.call({ warn() {} }, code, id);
+      }
+      return plugin.transform?.handler.call({ warn() {} }, code, id);
     },
   };
 }
@@ -92,6 +101,29 @@ export default function Home() { return <Toggle />; }`,
 
     expect(clientEntry).toBeDefined();
     expect(clientEntry).toContain('pages/Toggle');
+  });
+
+  it('handles multiline island import attributes with trailing commas', async () => {
+    writeFile(
+      'index.island.tsx',
+      `import Counter from "./Counter" with {
+  island: "load",
+}
+export default function Home() { return <Counter />; }`,
+    );
+    writeFile('Counter.tsx', `export default function Counter() { return <button>0</button>; }`);
+
+    const { buildStart, loadClientEntry, transform } = setupPlugin();
+    await buildStart();
+    const clientEntry = loadClientEntry();
+    const transformed = transform(
+      readFileSync(join(PAGES_DIR, 'index.island.tsx'), 'utf-8'),
+      join(PAGES_DIR, 'index.island.tsx'),
+    );
+
+    expect(clientEntry).toBeDefined();
+    expect(clientEntry).toContain('pages/Counter');
+    expect(transformed?.code).toContain('data-island');
   });
 
   it('includes island imports from both pages and layouts', async () => {

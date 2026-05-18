@@ -13,6 +13,9 @@ export type IslandEntry = {
   hydrate: string;
 };
 
+const ISLAND_IMPORT_RE =
+  /import\s+([$_A-Za-z][$_\w]*)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*,?\s*\}/g;
+
 type VoidMdPluginApi = {
   getClientScripts?(): Map<string, unknown>;
 };
@@ -21,6 +24,11 @@ type VoidMdPlugin = {
   name: string;
   api?: VoidMdPluginApi;
 };
+
+function hasIslandImports(code: string): boolean {
+  ISLAND_IMPORT_RE.lastIndex = 0;
+  return ISLAND_IMPORT_RE.test(code);
+}
 
 /** Resolve a relative import specifier to an absolute path by checking extensions. */
 export function resolveSpecifier(
@@ -50,7 +58,6 @@ export function needsIslandClientBundle(
   islandFilePattern: RegExp,
   checkStyleBlocks: boolean,
 ): boolean {
-  const importAttrRe = /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:/;
   const cssImportRe =
     /import\b[^"']*["'][^"']+\.(?:css|scss|sass|less|styl|stylus|pcss|postcss)["']/;
   const mdScriptRe = /^<script\b/m;
@@ -63,7 +70,7 @@ export function needsIslandClientBundle(
       const name = entry.name;
       if (islandFilePattern.test(name) || name.startsWith('layout.') || name.startsWith('_')) {
         const content = readFileSync(resolve(entry.parentPath!, name), 'utf-8');
-        if (importAttrRe.test(content)) {
+        if (hasIslandImports(content)) {
           return true;
         }
         if (styleRe && styleRe.test(content)) {
@@ -126,9 +133,6 @@ export function computePagesNeedingClientJS(
   );
   const mdScriptIds: Set<string> = new Set(mdPlugin?.api?.getClientScripts?.()?.keys() ?? []);
 
-  const importAttrRe =
-    /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
-
   const layoutDirsWithIslands = new Set<string>();
   for (const layout of pageScan.layouts) {
     if (!layout.island) {
@@ -136,8 +140,7 @@ export function computePagesNeedingClientJS(
     }
     const filePath = resolve(pagesDir, layout.filePath);
     const code = readFileSync(filePath, 'utf-8');
-    importAttrRe.lastIndex = 0;
-    if (importAttrRe.test(code)) {
+    if (hasIslandImports(code)) {
       layoutDirsWithIslands.add(layout.directory);
     }
   }
@@ -155,8 +158,7 @@ export function computePagesNeedingClientJS(
 
     const filePath = resolve(pagesDir, page.componentPath);
     const code = readFileSync(filePath, 'utf-8');
-    importAttrRe.lastIndex = 0;
-    if (importAttrRe.test(code)) {
+    if (hasIslandImports(code)) {
       result.add(page.componentId);
       continue;
     }

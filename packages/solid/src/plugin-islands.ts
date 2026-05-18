@@ -17,6 +17,29 @@ import type { IslandEntry } from 'void/pages-islands-plugin';
 import { generateComponentManifest } from './pages-manifest.ts';
 
 const COMPONENT_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js'];
+const ISLAND_IMPORT_RE =
+  /import\s+([$_A-Za-z][$_\w]*)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*,?\s*\}/g;
+
+function findIslandImports(code: string) {
+  const imports: Array<{
+    statement: string;
+    importName: string;
+    specifier: string;
+    hydrate: string;
+  }> = [];
+  let match: RegExpExecArray | null;
+  ISLAND_IMPORT_RE.lastIndex = 0;
+  while ((match = ISLAND_IMPORT_RE.exec(code)) !== null) {
+    const specifierRaw = match[2];
+    imports.push({
+      statement: match[0],
+      importName: match[1],
+      specifier: specifierRaw.slice(1, -1),
+      hydrate: match[3].slice(1, -1),
+    });
+  }
+  return imports;
+}
 
 /**
  * Prefix for virtual island wrapper modules. Must NOT use the `\0` prefix
@@ -80,8 +103,6 @@ export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
           // Pre-scan island pages to populate the manifest eagerly.
           // This is needed because the client build may load the virtual
           // islands-client entry before island page transforms run.
-          const importAttrRe =
-            /import\s+\w+\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
           // Scan both pages AND layouts for island imports
           const filesToScan: ReadonlyArray<ScannableEntry> = [
             ...pageScan.pages.map((page) => ({
@@ -104,11 +125,9 @@ export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
             const filePath = resolve(pagesDir, entry.filePath);
             const code = readFileSync(filePath, 'utf-8');
             const importerDir = dirname(filePath);
-            importAttrRe.lastIndex = 0;
-            let importMatch: RegExpExecArray | null;
-            while ((importMatch = importAttrRe.exec(code)) !== null) {
-              const spec = importMatch[1].slice(1, -1);
-              const strategy = importMatch[2].slice(1, -1);
+            for (const islandImport of findIslandImports(code)) {
+              const spec = islandImport.specifier;
+              const strategy = islandImport.hydrate;
               const absPath = resolveSpecifier(spec, importerDir, COMPONENT_EXTENSIONS);
               if (absPath) {
                 const islandId = normalizePath(relative(root, absPath)).replace(/\.[^.]+$/, '');
@@ -226,19 +245,13 @@ export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
             );
           }
 
-          const importAttrRe =
-            /import\s+(\w+)\s+from\s+("[^"]+"|'[^']+')\s+with\s*\{\s*island\s*:\s*("[^"]+"|'[^']+')\s*\}/g;
-
           const importerDir = dirname(id);
           let transformed = code;
-          let match;
 
-          while ((match = importAttrRe.exec(code)) !== null) {
-            const name = match[1];
-            const specRaw = match[2];
-            const strategyRaw = match[3];
-            const spec = specRaw.slice(1, -1);
-            const strategy = strategyRaw.slice(1, -1);
+          for (const islandImport of findIslandImports(code)) {
+            const name = islandImport.importName;
+            const spec = islandImport.specifier;
+            const strategy = islandImport.hydrate;
 
             // Resolve to absolute path for the island manifest
             const absPath = resolveSpecifier(spec, importerDir, COMPONENT_EXTENSIONS);
@@ -261,7 +274,7 @@ export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
             const wrapperUrl = WRAPPER_PREFIX + 'island_' + wrapperId++ + '.tsx';
             wrapperMeta.set(wrapperUrl, { src: absPath || spec, islandId, hydrate: strategy });
             const replacement = `import ${name} from ${JSON.stringify(wrapperUrl)}`;
-            transformed = transformed.replace(match[0], replacement);
+            transformed = transformed.replace(islandImport.statement, replacement);
           }
 
           if (transformed !== code) {
