@@ -13,7 +13,7 @@ Docs in this skill are bundled from `docs/` during `void` package build and live
 
 ## Command Naming
 
-Use `void` in examples and commands in this skill. For first-time setup, prefer `void init` followed by `void deploy`; in an empty directory, install `void` first and let `void init` add the matching Pages adapter and starter dependencies. In an existing app, `void init` configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`. `void init` can also handle auth and project linking interactively.
+Use `void` in examples and commands in this skill. For first-time setup, prefer `void init` followed by `void deploy`; in an empty directory, install `void` first and let `void init` add the matching Pages adapter and starter dependencies with Vite+ as the default scaffold toolchain. In an existing app, `void init` configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`. `void init` can also handle auth and project linking interactively.
 
 Use `void` and `@void/*` in code examples and package manifests.
 

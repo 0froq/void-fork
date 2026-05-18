@@ -9,6 +9,7 @@ export const SCAFFOLD_GITIGNORE_LINES = [
 
 export type ScaffoldFramework = 'react' | 'vue' | 'svelte' | 'solid';
 export type ScaffoldStarterMode = 'sqlite' | 'postgresql' | 'static';
+export type ScaffoldToolchain = 'vite-plus' | 'vite';
 
 export const SCAFFOLD_BASE_DEPENDENCIES = {
   hono: '^4.11.9',
@@ -18,6 +19,23 @@ export const SCAFFOLD_BASE_DEV_DEPENDENCIES = {
   vite: '^8.0.10',
   typescript: '^5.9.3',
 } as const;
+
+export const SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES = {
+  'vite-plus': '^0.1.21',
+} as const;
+
+export const SCAFFOLD_TOOLCHAIN_OPTIONS = [
+  {
+    value: 'vite-plus',
+    label: 'Vite+',
+    hint: 'Uses the Vite+ toolchain and vp commands.',
+  },
+  {
+    value: 'vite',
+    label: 'Vite',
+    hint: 'Uses plain Vite commands without Vite+.',
+  },
+] as const;
 
 const REACT_SCAFFOLD_COMPILER_DEV_DEPENDENCIES = {
   '@rolldown/plugin-babel': '^0.2.3',
@@ -139,10 +157,17 @@ export function getScaffoldTsconfigCompilerOptions(
 export function createPagesStarterTemplate(options: {
   framework: ScaffoldFramework;
   starterMode: ScaffoldStarterMode;
+  toolchain?: ScaffoldToolchain;
   voidPackageSpec: string;
   adapterPackageSpec: string;
 }): PagesStarterTemplate {
-  const { framework, starterMode, voidPackageSpec, adapterPackageSpec } = options;
+  const {
+    framework,
+    starterMode,
+    toolchain = 'vite',
+    voidPackageSpec,
+    adapterPackageSpec,
+  } = options;
   const config = SCAFFOLD_FRAMEWORKS[framework];
   const files: Record<string, string> = {
     'vite.config.ts': getViteConfig(framework, config),
@@ -158,9 +183,9 @@ export function createPagesStarterTemplate(options: {
 
   return {
     scripts: {
-      dev: 'vite',
-      build: 'vite build',
-      preview: 'vite preview',
+      dev: toolchain === 'vite-plus' ? 'vp dev' : 'vite',
+      build: toolchain === 'vite-plus' ? 'vp build' : 'vite build',
+      preview: toolchain === 'vite-plus' ? 'vp preview' : 'vite preview',
     },
     dependencies: {
       ...SCAFFOLD_BASE_DEPENDENCIES,
@@ -169,6 +194,7 @@ export function createPagesStarterTemplate(options: {
     devDependencies: {
       void: voidPackageSpec,
       ...SCAFFOLD_BASE_DEV_DEPENDENCIES,
+      ...(toolchain === 'vite-plus' ? SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES : {}),
       [config.adapterPackage]: adapterPackageSpec,
       ...config.devDependencies,
     },

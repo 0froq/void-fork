@@ -24,7 +24,7 @@ cd your-project
 pnpm add -D void
 ```
 
-When you run `void init` in a scaffoldable empty directory, it scaffolds the starter and adds the matching framework adapter plus Vite dependencies for you. In an existing app, `void init` configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`.
+When you run `void init` in a scaffoldable empty directory, it scaffolds the starter and adds the matching framework adapter plus Vite+ by default. In an existing app, `void init` configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`.
 
 Then run:
 

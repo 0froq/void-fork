@@ -947,6 +947,7 @@ describe('isScaffoldableEmptyProject', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('react')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic');
@@ -959,6 +960,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.dependencies['react-dom']).toBeDefined();
       expect(pkg.dependencies.hono).toBeDefined();
       expect(pkg.devDependencies.vite).toBeDefined();
+      expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies.typescript).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
@@ -967,6 +969,9 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies['@types/react-dom']).toBeDefined();
       expect(pkg.devDependencies['@vitejs/plugin-react']).toBeDefined();
       expect(pkg.devDependencies['babel-plugin-react-compiler']).toBeDefined();
+      expect(pkg.scripts.dev).toBe('vp dev');
+      expect(pkg.scripts.build).toBe('vp build');
+      expect(pkg.scripts.preview).toBe('vp preview');
 
       const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
       expect(reactViteConfig).toContain('from "@rolldown/plugin-babel"');
@@ -1019,6 +1024,7 @@ describe('isScaffoldableEmptyProject', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('vue')
         .mockResolvedValueOnce('postgresql')
         .mockResolvedValueOnce('generic');
@@ -1051,7 +1057,23 @@ describe('isScaffoldableEmptyProject', () => {
         'CREATE TABLE "messages"',
       );
 
-      const frameworkPrompt = mockSelect.mock.calls[0]?.[0];
+      const toolchainPrompt = mockSelect.mock.calls[0]?.[0];
+      expect(toolchainPrompt.message).toBe('Choose a Pages scaffold toolchain:');
+      expect(toolchainPrompt.initialValue).toBe('vite-plus');
+      expect(toolchainPrompt.options).toEqual([
+        {
+          value: 'vite-plus',
+          label: 'Vite+',
+          hint: 'Uses the Vite+ toolchain and vp commands.',
+        },
+        {
+          value: 'vite',
+          label: 'Vite',
+          hint: 'Uses plain Vite commands without Vite+.',
+        },
+      ]);
+
+      const frameworkPrompt = mockSelect.mock.calls[1]?.[0];
       expect(frameworkPrompt.message).toBe('Choose a Pages framework to scaffold:');
       expect(frameworkPrompt.options).toEqual([
         {
@@ -1076,7 +1098,7 @@ describe('isScaffoldableEmptyProject', () => {
         },
       ]);
 
-      const starterPrompt = mockSelect.mock.calls[1]?.[0];
+      const starterPrompt = mockSelect.mock.calls[2]?.[0];
       expect(starterPrompt.message).toBe('Choose a Pages starter:');
       expect(starterPrompt.options).toEqual([
         {
@@ -1104,6 +1126,7 @@ describe('isScaffoldableEmptyProject', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('react')
         .mockResolvedValueOnce('static')
         .mockResolvedValueOnce('generic');
@@ -1117,6 +1140,8 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.dependencies.hono).toBeDefined();
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
+      expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
+      expect(pkg.scripts.dev).toBe('vp dev');
 
       expect(readFileSync(join(root, 'pages', 'index.tsx'), 'utf-8')).toContain(
         'no database or server code yet',
@@ -1134,6 +1159,29 @@ describe('isScaffoldableEmptyProject', () => {
           compatibility_date: getTodayCompatDate(),
         },
       });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('scaffolds plain Vite scripts when the Vite toolchain is selected', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      mockSelect
+        .mockResolvedValueOnce('vite')
+        .mockResolvedValueOnce('react')
+        .mockResolvedValueOnce('static')
+        .mockResolvedValueOnce('generic');
+      mockConfirm.mockResolvedValueOnce(false);
+
+      await runInitCommand(root);
+
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      expect(pkg.devDependencies.vite).toBe('^8.0.10');
+      expect(pkg.devDependencies['vite-plus']).toBeUndefined();
+      expect(pkg.scripts.dev).toBe('vite');
+      expect(pkg.scripts.build).toBe('vite build');
+      expect(pkg.scripts.preview).toBe('vite preview');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1812,13 +1860,17 @@ export default config;
       );
       writeFileSync(join(root, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
 
-      mockSelect.mockResolvedValueOnce('sqlite').mockResolvedValueOnce('generic');
+      mockSelect
+        .mockResolvedValueOnce('vite-plus')
+        .mockResolvedValueOnce('sqlite')
+        .mockResolvedValueOnce('generic');
       mockConfirm.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
 
       await runInitCommand(root);
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-      expect(pkg.scripts.dev).toBe('vite');
+      expect(pkg.scripts.dev).toBe('vp dev');
+      expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
       expect(pkg.devDependencies.void).toBe('^0.2.3');
       expect(pkg.devDependencies['@void/react']).toBe('^0.2.3');
       expect(pkg.devDependencies['@rolldown/plugin-babel']).toBe('^0.2.3');
@@ -1832,7 +1884,9 @@ export default config;
       expect(reactViteConfig).toContain('reactCompilerPreset()');
       expect(reactViteConfig).toContain('voidReact()');
 
-      expect(mockSelect.mock.calls[0]?.[0].message).toBe('Choose a Pages starter:');
+      expect(mockSelect.mock.calls[0]?.[0].message).toBe('Choose a Pages scaffold toolchain:');
+      expect(mockSelect.mock.calls[0]?.[0].initialValue).toBe('vite-plus');
+      expect(mockSelect.mock.calls[1]?.[0].message).toBe('Choose a Pages starter:');
       expect(mockSelect).not.toHaveBeenCalledWith(
         expect.objectContaining({ message: 'Choose a Pages framework to scaffold:' }),
       );
@@ -1931,6 +1985,7 @@ export default config;
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('react')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic')
@@ -1961,6 +2016,7 @@ export default config;
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('react')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic')
@@ -2000,6 +2056,7 @@ export default config;
         },
       ]);
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('react')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic')
@@ -3479,8 +3536,10 @@ export default config;
       const subpkgRoot = join(wsroot, 'packages', 'my-new-app');
       mkdirSync(subpkgRoot, { recursive: true });
 
-      // Framework prompt → vue, starter mode → sqlite, agent prompt → generic.
+      // Toolchain prompt → Vite+, framework prompt → vue, starter mode → sqlite,
+      // agent prompt → generic.
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('vue')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic');
@@ -3559,6 +3618,7 @@ export default config;
       mkdirSync(subpkgRoot, { recursive: true });
 
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('react')
         .mockResolvedValueOnce('static')
         .mockResolvedValueOnce('generic');
@@ -3704,6 +3764,7 @@ export default config;
       );
 
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('react')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic');
@@ -3754,6 +3815,7 @@ export default config;
       writeFileSync(join(subpkgRoot, 'package-lock.json'), '{}\n');
 
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('vue')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic');
@@ -3794,6 +3856,7 @@ export default config;
       mkdirSync(subpkgRoot, { recursive: true });
 
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('vue')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic');
@@ -3831,6 +3894,7 @@ export default config;
       mkdirSync(appRoot, { recursive: true });
 
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('react')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic');
@@ -3893,6 +3957,7 @@ export default config;
       mkdirSync(subpkgRoot, { recursive: true });
 
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('vue')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic');
@@ -3933,6 +3998,7 @@ export default config;
       mkdirSync(subpkgRoot, { recursive: true });
 
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('react')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic');
@@ -3956,6 +4022,7 @@ export default config;
       writeFileSync(join(root, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
 
       mockSelect
+        .mockResolvedValueOnce('vite-plus')
         .mockResolvedValueOnce('vue')
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic');

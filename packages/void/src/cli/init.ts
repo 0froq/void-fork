@@ -38,8 +38,10 @@ import {
   SCAFFOLD_FRAMEWORKS,
   SCAFFOLD_FRAMEWORK_OPTIONS,
   SCAFFOLD_GITIGNORE_LINES,
+  SCAFFOLD_TOOLCHAIN_OPTIONS,
   type ScaffoldFramework,
   type ScaffoldStarterMode,
+  type ScaffoldToolchain,
 } from './template.ts';
 import {
   buildDrizzleKitSpawnEnv,
@@ -1593,6 +1595,21 @@ async function promptStarterMode(): Promise<ScaffoldStarterMode> {
   return choice as ScaffoldStarterMode;
 }
 
+async function promptScaffoldToolchain(): Promise<ScaffoldToolchain> {
+  const choice = await select({
+    message: 'Choose a Pages scaffold toolchain:',
+    initialValue: 'vite-plus',
+    options: [...SCAFFOLD_TOOLCHAIN_OPTIONS],
+  });
+
+  if (isCancel(choice)) {
+    cancel('Setup cancelled.');
+    process.exit(0);
+  }
+
+  return choice as ScaffoldToolchain;
+}
+
 async function promptScaffoldFramework(): Promise<ScaffoldFramework> {
   const choice = await select({
     message: 'Choose a Pages framework to scaffold:',
@@ -2063,11 +2080,13 @@ function scaffoldPagesApp(
   packageManager: ProjectState['packageManager'],
   framework: ScaffoldFramework,
   starterMode: ScaffoldStarterMode,
+  toolchain: ScaffoldToolchain,
 ): boolean {
   const packageJsonPath = join(root, 'package.json');
   const template = createPagesStarterTemplate({
     framework,
     starterMode,
+    toolchain,
     voidPackageSpec: resolveScaffoldDependencySpec(root, 'void', getOwnVersion()),
     adapterPackageSpec: resolveScaffoldDependencySpec(
       root,
@@ -3162,6 +3181,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   if (!targeted && !framework && isScaffoldableEmptyProject(root)) {
     log.info('Empty project detected. Scaffolding a Pages starter...');
+    const scaffoldToolchain = await promptScaffoldToolchain();
     if (detectedPagesFramework) {
       scaffoldedPagesFramework = detectedPagesFramework;
       log.info(
@@ -3176,6 +3196,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
       preScaffoldState.packageManager,
       scaffoldedPagesFramework,
       starterMode,
+      scaffoldToolchain,
     );
 
     // If this empty directory sits inside a declared workspace subpackage
