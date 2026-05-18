@@ -11,7 +11,7 @@ import {
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { intro, outro, log, confirm, isCancel, cancel, note, select } from '@clack/prompts';
+import { intro, outro, log, confirm, isCancel, cancel, note, select, text } from '@clack/prompts';
 import { parse, type ParseError } from 'jsonc-parser';
 import MagicString from 'magic-string';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathe';
@@ -138,6 +138,7 @@ const VITE_CONFIG_FILES = [
 ];
 const VOID_CONFIG_FILE = 'void.json';
 type DatabaseSetupChoice = DatabaseDialect | 'none';
+type InitLocationChoice = 'subfolder' | 'current';
 type JsonObject = Record<string, unknown>;
 type TsconfigInheritancePatch = {
   files: Array<string>;
@@ -432,6 +433,82 @@ export function isScaffoldableEmptyProject(root: string): boolean {
   }
 
   return true;
+}
+
+function shouldPromptForInitLocation(root: string): boolean {
+  if (isScaffoldableEmptyProject(root)) {
+    return false;
+  }
+  if (existsSync(join(root, 'package.json'))) {
+    return false;
+  }
+  if (existsSync(join(root, VOID_CONFIG_FILE))) {
+    return false;
+  }
+  return findViteConfig(root) === undefined;
+}
+
+function validateSubfolderName(root: string, value: string | undefined): string | undefined {
+  const name = value?.trim() ?? '';
+  if (!name) {
+    return 'Enter a folder name.';
+  }
+  if (name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    return 'Enter a single folder name, not a path.';
+  }
+  if (existsSync(join(root, name))) {
+    return 'That folder already exists.';
+  }
+  return undefined;
+}
+
+async function resolveInitRoot(root: string): Promise<string> {
+  if (!shouldPromptForInitLocation(root)) {
+    return root;
+  }
+
+  const choice = await select({
+    message: 'This folder is not empty. Where should Void initialize?',
+    initialValue: 'subfolder',
+    options: [
+      {
+        value: 'subfolder',
+        label: 'Create a new subfolder',
+        hint: 'Scaffold a new app inside this directory.',
+      },
+      {
+        value: 'current',
+        label: 'Continue here',
+        hint: 'Add package.json, vite.config.ts, and Void files to this directory.',
+      },
+    ],
+  });
+
+  if (isCancel(choice)) {
+    cancel('Setup cancelled.');
+    process.exit(0);
+  }
+
+  if ((choice as InitLocationChoice) === 'current') {
+    return root;
+  }
+
+  const folder = await text({
+    message: 'New project folder name:',
+    placeholder: 'my-void-app',
+    initialValue: 'my-void-app',
+    validate: (value) => validateSubfolderName(root, value),
+  });
+
+  if (isCancel(folder)) {
+    cancel('Setup cancelled.');
+    process.exit(0);
+  }
+
+  const nextRoot = join(root, folder.trim());
+  mkdirSync(nextRoot, { recursive: true });
+  log.info(`Scaffolding in ${nextRoot}`);
+  return nextRoot;
 }
 
 type ProjectState = {
@@ -2175,6 +2252,7 @@ function scaffoldPagesApp(
   // conflict with the root pin on future upgrades.
   if (
     packageManager === 'pnpm' &&
+    resolveWorkspaceDeferral(root, pkg) === undefined &&
     (!pkg.packageManager || typeof pkg.packageManager !== 'string')
   ) {
     pkg.packageManager = 'pnpm@11.0.9';
@@ -3166,6 +3244,9 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   intro(cliTitle('init'));
 
   const targeted = Boolean(initArgs && (initArgs.tsconfig || initArgs.github || initArgs.agents));
+  if (!targeted) {
+    root = await resolveInitRoot(root);
+  }
   const framework = detectFramework(root);
   const preScaffoldState = detectProjectState(root);
   const detectedPagesFramework = detectPagesFramework(root);
@@ -3191,9 +3272,11 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
       scaffoldedPagesFramework = await promptScaffoldFramework();
     }
     const starterMode = await promptStarterMode();
+    const scaffoldPackageManager =
+      scaffoldToolchain === 'vite-plus' ? 'pnpm' : preScaffoldState.packageManager;
     const scaffoldWroteDeps = scaffoldPagesApp(
       root,
-      preScaffoldState.packageManager,
+      scaffoldPackageManager,
       scaffoldedPagesFramework,
       starterMode,
       scaffoldToolchain,

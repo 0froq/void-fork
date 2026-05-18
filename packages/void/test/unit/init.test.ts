@@ -1141,6 +1141,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
       expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
+      expect(pkg.packageManager).toBe('pnpm@11.0.9');
       expect(pkg.scripts.dev).toBe('vp dev');
 
       expect(readFileSync(join(root, 'pages', 'index.tsx'), 'utf-8')).toContain(
@@ -1182,6 +1183,79 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.scripts.dev).toBe('vite');
       expect(pkg.scripts.build).toBe('vite build');
       expect(pkg.scripts.preview).toBe('vite preview');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('offers to scaffold in a subfolder from a non-project parent directory', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      mkdirSync(join(root, 'existing-project'));
+      mockSelect
+        .mockResolvedValueOnce('subfolder')
+        .mockResolvedValueOnce('vite-plus')
+        .mockResolvedValueOnce('react')
+        .mockResolvedValueOnce('static')
+        .mockResolvedValueOnce('generic');
+      mockText.mockResolvedValueOnce('my-new-app');
+      mockConfirm.mockResolvedValueOnce(false);
+
+      await runInitCommand(root);
+
+      expect(existsSync(join(root, 'package.json'))).toBe(false);
+      expect(existsSync(join(root, 'vite.config.ts'))).toBe(false);
+
+      const appRoot = join(root, 'my-new-app');
+      const pkg = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf-8'));
+      expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
+      expect(pkg.scripts.dev).toBe('vp dev');
+      expect(readFileSync(join(appRoot, 'pages', 'index.tsx'), 'utf-8')).toContain(
+        'no database or server code yet',
+      );
+
+      const locationPrompt = mockSelect.mock.calls[0]?.[0];
+      expect(locationPrompt.message).toBe(
+        'This folder is not empty. Where should Void initialize?',
+      );
+      expect(locationPrompt.initialValue).toBe('subfolder');
+      expect(mockText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'New project folder name:',
+          initialValue: 'my-void-app',
+        }),
+      );
+      expect(mockSpawnSync).toHaveBeenCalledWith(
+        'pnpm',
+        ['install'],
+        expect.objectContaining({
+          cwd: appRoot,
+          stdio: 'inherit',
+          shell: process.platform === 'win32',
+        }),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('can continue configuring a non-project parent directory when requested', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      mkdirSync(join(root, 'existing-project'));
+      mockSelect
+        .mockResolvedValueOnce('current')
+        .mockResolvedValueOnce('none')
+        .mockResolvedValueOnce('generic');
+      mockConfirm.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+
+      await runInitCommand(root);
+
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      expect(pkg.devDependencies.void).toBeDefined();
+      expect(pkg.scripts.dev).toBe('vite');
+      expect(existsSync(join(root, 'vite.config.ts'))).toBe(true);
+      expect(mockText).not.toHaveBeenCalled();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
