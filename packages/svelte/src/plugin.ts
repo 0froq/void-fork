@@ -15,7 +15,7 @@ export type VoidSvelteOptions = Readonly<{
   prefetch?: PrefetchConfig;
 }>;
 
-export function voidSvelte(options?: VoidSvelteOptions): ReadonlyArray<Plugin> {
+export function voidSvelte(options?: VoidSvelteOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     ...(svelte(options?.svelte) as ReadonlyArray<Plugin>),

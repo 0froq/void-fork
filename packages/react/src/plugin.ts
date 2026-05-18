@@ -15,7 +15,7 @@ export type VoidReactOptions = Readonly<{
   prefetch?: PrefetchConfig;
 }>;
 
-export function voidReact(options?: VoidReactOptions): ReadonlyArray<Plugin> {
+export function voidReact(options?: VoidReactOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     ...react(options?.react),

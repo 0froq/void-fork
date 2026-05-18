@@ -67,7 +67,7 @@ function hasIslandFiles(dir: string): boolean {
   return false;
 }
 
-export function voidMarkdown(options?: MarkdownOptions): ReadonlyArray<Plugin> {
+export function voidMarkdown(options?: MarkdownOptions): Array<Plugin> {
   let adapter: FrameworkAdapter | null = null;
   let mdPages: ReadonlyArray<MdPage> = [];
   let root = '';

@@ -9,7 +9,7 @@ export type VoidVueOptions = Readonly<{
   viewTransitions?: boolean;
 }>;
 
-export function voidVue(options?: VoidVueOptions): ReadonlyArray<Plugin> {
+export function voidVue(options?: VoidVueOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     vue(options?.vue) as Plugin,

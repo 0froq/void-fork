@@ -44,7 +44,7 @@ function configPlugin(): Plugin {
   };
 }
 
-export function voidSolid(options?: VoidSolidOptions): ReadonlyArray<Plugin> {
+export function voidSolid(options?: VoidSolidOptions): Array<Plugin> {
   const pagesDir = join(process.cwd(), 'pages');
   return [
     configPlugin(),
