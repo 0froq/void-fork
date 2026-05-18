@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import spawn from 'cross-spawn';
 import { join } from 'pathe';
 import { chromium, type Browser, type Page } from 'playwright';
@@ -29,12 +29,135 @@ type PageHead = {
 };
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
+const REACT_PAGES_ROOT = join(ROOT, 'playground/react-pages');
+const REACT_PAGES_LAYOUT = join(REACT_PAGES_ROOT, 'pages/layout.tsx');
+const LATE_WORKER_DEPS_ROOT = join(REACT_PAGES_ROOT, 'node_modules/@void-repro');
 let DEV_PORT: number;
 let DEV_BASE: string;
 let PREVIEW_PORT: number;
 let PREVIEW_BASE: string;
 
 let browser: Browser;
+
+function writeLateWorkerDep(name: string, source: string) {
+  const packageDir = join(LATE_WORKER_DEPS_ROOT, name);
+  mkdirSync(packageDir, { recursive: true });
+  writeFileSync(
+    join(packageDir, 'package.json'),
+    JSON.stringify({
+      name: `@void-repro/${name}`,
+      version: '1.0.0',
+      type: 'module',
+      exports: './index.js',
+    }),
+  );
+  writeFileSync(join(packageDir, 'index.js'), source);
+}
+
+function installLateWorkerDeps() {
+  rmSync(LATE_WORKER_DEPS_ROOT, { recursive: true, force: true });
+  writeLateWorkerDep(
+    'boundary',
+    `import React from 'react';
+export function Boundary({ children }) {
+  return React.createElement(React.Fragment, null, children);
+}
+`,
+  );
+  writeLateWorkerDep(
+    'cva',
+    `export function cva(base) {
+  return () => base;
+}
+`,
+  );
+  writeLateWorkerDep(
+    'merge',
+    `export function merge(...values) {
+  return values.filter(Boolean).join(' ');
+}
+`,
+  );
+  writeLateWorkerDep(
+    'slot',
+    `import React from 'react';
+export function Slot({ children }) {
+  return React.Children.only(children);
+}
+`,
+  );
+  writeLateWorkerDep(
+    'stack',
+    `import React from 'react';
+export default function Stack({ children, className }) {
+  return React.createElement(
+    'div',
+    { className, style: { display: 'flex', flexDirection: 'column' } },
+    children,
+  );
+}
+`,
+  );
+}
+
+function lateWorkerDepLayout() {
+  return `import type { ReactNode } from 'react';
+import { Boundary } from '@void-repro/boundary';
+import { cva } from '@void-repro/cva';
+import { merge } from '@void-repro/merge';
+import { Slot } from '@void-repro/slot';
+import Stack from '@void-repro/stack';
+
+await new Promise((resolve) => setTimeout(resolve, 1000));
+const { Link, useShared } = await import('@void/react');
+
+const rootClass = cva('late-worker-dep-probe');
+
+export default function Layout({ children }: { children: ReactNode }) {
+  const shared = useShared();
+  return (
+    <Boundary>
+      <Slot>
+        <Stack className={merge(rootClass())}>
+          <nav>
+            <Link href="/" prefetch>
+              Home
+            </Link>{' '}
+            |{' '}
+            <Link href="/users" prefetch>
+              Users
+            </Link>{' '}
+            |{' '}
+            <Link href="/blog" prefetch>
+              Blog
+            </Link>{' '}
+            |{' '}
+            <Link href="/deferred" prefetch>
+              Deferred
+            </Link>{' '}
+            |{' '}
+            <Link href="/router-params" prefetch>
+              Router Params
+            </Link>{' '}
+            |{' '}
+            <Link href="/live" prefetch>
+              Live
+            </Link>{' '}
+            |{' '}
+            <Link href="/action-error" prefetch>
+              Form Lab
+            </Link>{' '}
+            | <span>{shared.appName}</span>
+          </nav>
+          <hr />
+          {children}
+        </Stack>
+      </Slot>
+    </Boundary>
+  );
+}
+`;
+}
 
 beforeAll(async () => {
   browser = await chromium.launch();
@@ -833,9 +956,16 @@ function defineIslandTests(getBase: () => string) {
 describe('react-pages client (dev)', () => {
   let child: ReturnType<typeof spawn>;
   let stderr = '';
+  let originalLayout: string | undefined;
+  const coldStartResponses: Array<{ path: string; status: number; body: string }> = [];
 
   beforeAll(
     async () => {
+      originalLayout = readFileSync(REACT_PAGES_LAYOUT, 'utf-8');
+      installLateWorkerDeps();
+      writeFileSync(REACT_PAGES_LAYOUT, lateWorkerDepLayout());
+      rmSync(join(REACT_PAGES_ROOT, 'node_modules/.vite'), { recursive: true, force: true });
+
       DEV_PORT = await getPort();
       DEV_BASE = `http://127.0.0.1:${DEV_PORT}`;
 
@@ -867,21 +997,53 @@ describe('react-pages client (dev)', () => {
 
       const serverTimeout = process.platform === 'win32' ? 45_000 : 20_000;
       await waitForServer(DEV_BASE, serverTimeout);
-      await waitForServer(`${DEV_BASE}/users`, serverTimeout, {
-        expectBody: 'Alice',
-        isAlive: () => child.exitCode === null,
-      });
+      const paths = ['/', '/users', '/action-error', '/router-params/alpha', '/visit-await'];
+      coldStartResponses.push(
+        ...(await Promise.all(
+          paths.map(async (path) => {
+            const response = await fetch(`${DEV_BASE}${path}`);
+            return {
+              path,
+              status: response.status,
+              body: await response.text(),
+            };
+          }),
+        )),
+      );
+
+      writeFileSync(REACT_PAGES_LAYOUT, originalLayout);
+      originalLayout = undefined;
+      await new Promise((resolve) => setTimeout(resolve, 500));
     },
     process.platform === 'win32' ? 60_000 : 30_000,
   );
 
   afterAll(async () => {
+    if (originalLayout !== undefined) {
+      writeFileSync(REACT_PAGES_LAYOUT, originalLayout);
+      originalLayout = undefined;
+    }
     if (child) {
       await killChild(child);
     }
+    rmSync(LATE_WORKER_DEPS_ROOT, { recursive: true, force: true });
     if (stderr.includes('error when starting dev server')) {
       throw new Error(stderr);
     }
+  });
+
+  it('dev: cold SSR startup does not hit invalid React hook calls', () => {
+    expect(coldStartResponses.map(({ path, status }) => ({ path, status }))).toEqual([
+      { path: '/', status: 200 },
+      { path: '/users', status: 200 },
+      { path: '/action-error', status: 200 },
+      { path: '/router-params/alpha', status: 200 },
+      { path: '/visit-await', status: 200 },
+    ]);
+    expect(coldStartResponses.find(({ path, body }) => path === '/')?.body).toContain('Welcome');
+    expect(coldStartResponses.find(({ path, body }) => path === '/users')?.body).toContain('Alice');
+    expect(stderr).not.toContain('Invalid hook call');
+    expect(stderr).not.toMatch(/\(void_worker\).*new dependencies optimized: @void-repro/);
   });
 
   it('dev: SSR pages, Inertia protocol, form handling, API coexistence', async () => {

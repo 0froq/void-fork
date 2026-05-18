@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { dirname } from 'pathe';
+import { dirname, relative } from 'pathe';
 import type { Plugin, ResolvedConfig } from 'vite';
 import { resolveStaticPageDataBuildOptions, scanPages } from 'void/pages';
 import type { PageScanResult, StaticPageDataBuildOptions } from 'void/pages';
@@ -17,6 +17,7 @@ const REACT_OPTIMIZE_DEPS = [
   'react-dom/client',
   'react-dom/server',
 ];
+const WORKER_OPTIMIZE_DEPS = [...REACT_OPTIMIZE_DEPS, 'void/live/client'];
 
 type PrefetchConfig = {
   hoverDelay?: number;
@@ -54,6 +55,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
   let isDev = false;
   let viteConfig: ResolvedConfig | undefined;
   const root = dirname(pagesDir);
+  const pagesOptimizeEntries = `${relative(root, pagesDir)}/**/*.{js,jsx,ts,tsx}`;
 
   return {
     name: 'void-react:pages',
@@ -133,7 +135,12 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
             [WORKER_ENVIRONMENT_NAME]: {
               optimizeDeps: {
                 exclude: ['@void/react'],
-                include: REACT_OPTIMIZE_DEPS,
+                // Crawl page/layout modules before the first Worker request.
+                // If the worker optimizer discovers React component deps while
+                // SSR is already rendering, the program reload can mix React
+                // and react-dom/server from different optimized-dep hashes.
+                entries: [pagesOptimizeEntries],
+                include: WORKER_OPTIMIZE_DEPS,
               },
             },
           },

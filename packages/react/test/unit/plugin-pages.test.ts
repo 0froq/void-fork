@@ -37,7 +37,13 @@ describe('pagesPlugin dev config', () => {
         void_worker: {
           optimizeDeps: {
             exclude: ['@void/react'],
-            include: expect.arrayContaining(['react', 'react-dom', 'react-dom/server']),
+            entries: ['pages/**/*.{js,jsx,ts,tsx}'],
+            include: expect.arrayContaining([
+              'react',
+              'react-dom',
+              'react-dom/server',
+              'void/live/client',
+            ]),
           },
         },
       },
