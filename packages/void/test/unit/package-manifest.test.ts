@@ -43,15 +43,16 @@ const workspacePackageNames = new Set(
 );
 
 const pnpmWorkspace = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf-8');
+const pnpmWorkspaceLines = pnpmWorkspace.split(/\r?\n/u);
 
 const readTopLevelScalar = (key: string) => {
   const match = new RegExp(`^${key}:\\s*(\\S+)`, 'm').exec(pnpmWorkspace);
-  return match?.[1];
+  return match?.[1]?.trim();
 };
 
 const readYamlSectionKeys = (sectionName: string) => {
-  const lines = pnpmWorkspace.split('\n');
-  const start = lines.indexOf(`${sectionName}:`);
+  const lines = pnpmWorkspaceLines;
+  const start = lines.findIndex((line) => line.trimEnd() === `${sectionName}:`);
   if (start === -1) {
     return new Set<string>();
   }
@@ -71,8 +72,8 @@ const readYamlSectionKeys = (sectionName: string) => {
 };
 
 const readYamlSectionScalars = (sectionName: string) => {
-  const lines = pnpmWorkspace.split('\n');
-  const start = lines.indexOf(`${sectionName}:`);
+  const lines = pnpmWorkspaceLines;
+  const start = lines.findIndex((line) => line.trimEnd() === `${sectionName}:`);
   if (start === -1) {
     return new Map<string, string>();
   }
