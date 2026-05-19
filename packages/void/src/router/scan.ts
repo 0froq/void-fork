@@ -1,5 +1,5 @@
 import { join } from 'pathe';
-import { glob } from 'tinyglobby';
+import { glob, globSync } from 'tinyglobby';
 import { scanJobs, type JobDefinition } from '../crons/scan.ts';
 import { scanPages } from '../pages/scan.ts';
 import type { PageScanResult } from '../pages/types.ts';
@@ -29,6 +29,21 @@ export type MiddlewareDefinition = {
 };
 
 const HANDLER_EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
+const ROUTE_PATTERN = `**/*.{${HANDLER_EXTENSIONS.join(',')}}`;
+
+function parseMiddlewareDefinitions(files: Array<string>): Array<MiddlewareDefinition> {
+  return files
+    .filter((f) => !f.startsWith('_'))
+    .map((f) => {
+      const basename = f.split('/').pop()!;
+      const match = basename.match(/^(\d+)\./);
+      return {
+        order: match ? parseInt(match[1], 10) : Infinity,
+        filePath: f,
+      };
+    })
+    .sort((a, b) => a.order - b.order);
+}
 
 /**
  * Scan routes/ and middleware/ directories and return a structured manifest.
@@ -38,12 +53,12 @@ export async function scanRoutes(
   root: string,
   options?: { output?: 'server' | 'static' },
 ): Promise<ScanResult> {
-  const pattern = `**/*.{${HANDLER_EXTENSIONS.join(',')}}`;
-
   const [routeFiles, websockets, middlewareFiles, jobs, queues, pages] = await Promise.all([
-    glob(pattern, { cwd: `${root}/routes`, absolute: false }),
+    glob(ROUTE_PATTERN, { cwd: `${root}/routes`, absolute: false }),
     scanWebSocketRoutes(root),
-    glob(pattern, { cwd: `${root}/middleware`, absolute: false }).catch(() => [] as Array<string>),
+    glob(ROUTE_PATTERN, { cwd: `${root}/middleware`, absolute: false }).catch(
+      () => [] as Array<string>,
+    ),
     scanJobs(root),
     scanQueues(root),
     scanPages(root, { output: options?.output }),
@@ -69,17 +84,38 @@ export async function scanRoutes(
     });
 
   // Parse middleware, sorted by numeric prefix
-  const middleware = middlewareFiles
-    .filter((f) => !f.startsWith('_'))
-    .map((f) => {
-      const basename = f.split('/').pop()!;
-      const match = basename.match(/^(\d+)\./);
-      return {
-        order: match ? parseInt(match[1], 10) : Infinity,
-        filePath: f,
-      };
-    })
-    .sort((a, b) => a.order - b.order);
+  const middleware = parseMiddlewareDefinitions(middlewareFiles);
 
   return { routes, websockets, middleware, jobs, queues, pages };
+}
+
+export function scanMiddlewareSync(root: string): Array<MiddlewareDefinition> {
+  let middlewareFiles: Array<string>;
+  try {
+    middlewareFiles = globSync(ROUTE_PATTERN, { cwd: `${root}/middleware`, absolute: false });
+  } catch {
+    middlewareFiles = [];
+  }
+
+  return parseMiddlewareDefinitions(middlewareFiles);
+}
+
+export function scanRoutePatternsSync(root: string): Array<RouteDefinition> {
+  let routeFiles: Array<string>;
+  try {
+    routeFiles = globSync(ROUTE_PATTERN, { cwd: `${root}/routes`, absolute: false });
+  } catch {
+    routeFiles = [];
+  }
+
+  return routeFiles
+    .filter((f) => !isWebSocketPatternFile(f))
+    .filter((f) => !f.split('/').some((s) => s.startsWith('_')))
+    .map((f) => parseRouteFilename(f))
+    .sort((a, b) => {
+      if (a.catchAll !== b.catchAll) {
+        return a.catchAll ? 1 : -1;
+      }
+      return a.pattern.localeCompare(b.pattern);
+    });
 }
