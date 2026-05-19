@@ -130,4 +130,107 @@ describe('routingPlugin', () => {
     );
     expect(restart).toHaveBeenCalledTimes(1);
   });
+
+  it('invalidates page renderer modules before route table reloads for new pages', async () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, 'pages'), { recursive: true });
+    writeFileSync(
+      join(root, 'pages', 'index.tsx'),
+      'export default function Index() { return null; }',
+    );
+
+    const plugin = routingPlugin(root, { isAuthEnabled: () => false });
+    const configureServer = getHookHandler(plugin.configureServer) as (server: unknown) => void;
+    const handlers = new Map<string, Array<(path: string) => Promise<void> | void>>();
+    const invalidated: Array<string> = [];
+    const modules = new Map(
+      ['\0virtual:void-pages-renderer', '\0virtual:void-pages-client', 'virtual:void-routes'].map(
+        (id) => [id, { id }],
+      ),
+    );
+
+    configureServer({
+      watcher: {
+        on(event: string, handler: (path: string) => Promise<void> | void) {
+          const eventHandlers = handlers.get(event) ?? [];
+          eventHandlers.push(handler);
+          handlers.set(event, eventHandlers);
+        },
+      },
+      environments: {
+        void_worker: {
+          moduleGraph: {
+            getModuleById(id: string) {
+              return modules.get(id);
+            },
+            invalidateModule(mod: { id: string }) {
+              invalidated.push(mod.id);
+            },
+          },
+          hot: { send() {} },
+        },
+      },
+    });
+
+    writeFileSync(
+      join(root, 'pages', 'test.tsx'),
+      'export default function Test() { return null; }',
+    );
+    for (const handler of handlers.get('add') ?? []) {
+      await handler(join(root, 'pages', 'test.tsx'));
+    }
+
+    expect(invalidated).toEqual([
+      '\0virtual:void-pages-renderer',
+      '\0virtual:void-pages-client',
+      'virtual:void-routes',
+    ]);
+  });
+
+  it('does not invalidate page renderer modules for component-only page saves', async () => {
+    const root = createTempRoot();
+    mkdirSync(join(root, 'pages'), { recursive: true });
+    const pagePath = join(root, 'pages', 'index.tsx');
+    writeFileSync(pagePath, 'export default function Index() { return null; }');
+
+    const plugin = routingPlugin(root, { isAuthEnabled: () => false });
+    const configureServer = getHookHandler(plugin.configureServer) as (server: unknown) => void;
+    const handlers = new Map<string, Array<(path: string) => Promise<void> | void>>();
+    const invalidated: Array<string> = [];
+    const modules = new Map(
+      ['\0virtual:void-pages-renderer', '\0virtual:void-pages-client', 'virtual:void-routes'].map(
+        (id) => [id, { id }],
+      ),
+    );
+
+    configureServer({
+      watcher: {
+        on(event: string, handler: (path: string) => Promise<void> | void) {
+          const eventHandlers = handlers.get(event) ?? [];
+          eventHandlers.push(handler);
+          handlers.set(event, eventHandlers);
+        },
+      },
+      environments: {
+        void_worker: {
+          moduleGraph: {
+            getModuleById(id: string) {
+              return modules.get(id);
+            },
+            invalidateModule(mod: { id: string }) {
+              invalidated.push(mod.id);
+            },
+          },
+          hot: { send() {} },
+        },
+      },
+    });
+
+    writeFileSync(pagePath, 'export default function Index() { return <h1>Updated</h1>; }');
+    for (const handler of handlers.get('change') ?? []) {
+      await handler(pagePath);
+    }
+
+    expect(invalidated).toEqual(['virtual:void-routes']);
+  });
 });

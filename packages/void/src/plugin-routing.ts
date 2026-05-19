@@ -38,6 +38,12 @@ import {
 const VIRTUAL_ROUTES_ID = 'virtual:void-routes';
 const VIRTUAL_CLIENT_WORKER_ID = 'virtual:void-client-worker';
 const VIRTUAL_CLIENT_BROWSER_ID = 'virtual:void-client-browser';
+const PAGE_VIRTUAL_MODULE_IDS = [
+  '\0virtual:void-pages-renderer',
+  '\0virtual:void-pages-client',
+  '\0virtual:void-islands-renderer',
+  '\0virtual:void-islands-client',
+];
 // Rolldown resolveId hook filters currently require RegExp for `id`.
 const RESOLVE_ID_FILTER =
   /^(virtual:void-(routes|client-worker|client-browser)|void(\/client|\/queues)?)$/;
@@ -618,7 +624,17 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         // that can break React SSR (dual module instances).
         const structural = event !== 'change';
 
+        const pageManifestChanged =
+          path.startsWith(pagesDir) && (structural || path.endsWith('.md'));
         for (const env of Object.values(devServer.environments)) {
+          if (pageManifestChanged) {
+            for (const id of PAGE_VIRTUAL_MODULE_IDS) {
+              const pageMod = env.moduleGraph.getModuleById(id);
+              if (pageMod) {
+                env.moduleGraph.invalidateModule(pageMod);
+              }
+            }
+          }
           const mod = env.moduleGraph.getModuleById(VIRTUAL_ROUTES_ID);
           if (mod) {
             env.moduleGraph.invalidateModule(mod);

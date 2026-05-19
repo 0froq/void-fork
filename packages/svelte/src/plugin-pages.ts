@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname } from 'pathe';
-import type { Plugin, ResolvedConfig } from 'vite';
+import type { Plugin, ResolvedConfig, ViteDevServer } from 'vite';
 import { resolveStaticPageDataBuildOptions, scanPages } from 'void/pages';
 import type { PageScanResult, StaticPageDataBuildOptions } from 'void/pages';
 import { generateComponentManifest } from './pages-manifest.ts';
@@ -44,14 +44,33 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
   let isDev = false;
   let viteConfig: ResolvedConfig | undefined;
   const root = dirname(pagesDir);
+  let pendingRescan: Promise<void> | null = null;
+  const rescanPages = async () => {
+    pageScan = existsSync(pagesDir) ? await scanPages(root) : null;
+  };
+  const runRescan = () => {
+    pendingRescan ??= rescanPages().finally(() => {
+      pendingRescan = null;
+    });
+    return pendingRescan;
+  };
+
+  const invalidatePageModules = (server: ViteDevServer) => {
+    for (const env of Object.values(server.environments)) {
+      for (const id of ['\0' + RENDERER_ID, '\0' + CLIENT_ENTRY_ID]) {
+        const mod = env.moduleGraph.getModuleById(id);
+        if (mod) {
+          env.moduleGraph.invalidateModule(mod);
+        }
+      }
+    }
+  };
 
   return {
     name: 'void-svelte:pages',
 
     async buildStart() {
-      if (existsSync(pagesDir)) {
-        pageScan = await scanPages(root);
-      }
+      await runRescan();
     },
 
     resolveId: {
@@ -64,7 +83,13 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
     load: {
       // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
       filter: { id: /^\0virtual:void-pages-(renderer|client)$/ },
-      handler(id) {
+      async handler(id) {
+        if (isDev && pendingRescan) {
+          await pendingRescan;
+        }
+        if (!pageScan && existsSync(pagesDir)) {
+          await runRescan();
+        }
         if (id === '\0' + RENDERER_ID) {
           if (!pageScan) {
             return "export function renderPage() { throw new Error('No pages found'); }";
@@ -84,6 +109,23 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
           );
         }
       },
+    },
+
+    configureServer(server) {
+      const handlePagesChange = async (path: string, event: 'add' | 'change' | 'unlink') => {
+        if (!path.startsWith(pagesDir)) {
+          return;
+        }
+        if (event === 'change' && !path.endsWith('.md')) {
+          return;
+        }
+        await runRescan();
+        invalidatePageModules(server);
+      };
+
+      server.watcher.on('add', (path) => handlePagesChange(path, 'add'));
+      server.watcher.on('change', (path) => handlePagesChange(path, 'change'));
+      server.watcher.on('unlink', (path) => handlePagesChange(path, 'unlink'));
     },
 
     configResolved(config) {

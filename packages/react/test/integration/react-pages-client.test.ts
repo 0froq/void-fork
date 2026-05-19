@@ -1288,6 +1288,41 @@ describe('react-pages client (dev)', () => {
   defineClientTests(() => DEV_BASE);
   defineIslandTests(() => DEV_BASE);
 
+  it('dev: newly added page route renders after the program reload', { retry: 2 }, async () => {
+    const newPageFile = join(REACT_PAGES_ROOT, 'pages/hmr-new-route.tsx');
+    rmSync(newPageFile, { force: true });
+
+    try {
+      writeFileSync(
+        newPageFile,
+        `export default function HmrNewRoute() {
+  return <h1>HMR New Route</h1>;
+}
+`,
+      );
+
+      const start = Date.now();
+      let lastStatus = 0;
+      let lastBody = '';
+      while (Date.now() - start < 10_000) {
+        await new Promise((r) => setTimeout(r, 100));
+        const res = await fetch(`${DEV_BASE}/hmr-new-route`);
+        lastStatus = res.status;
+        lastBody = await res.text();
+        expect(lastBody).not.toContain('components[pageObj.component] is not a function');
+        if (lastStatus === 200 && lastBody.includes('HMR New Route')) {
+          break;
+        }
+      }
+
+      expect(lastStatus).toBe(200);
+      expect(lastBody).toContain('HMR New Route');
+    } finally {
+      rmSync(newPageFile, { force: true });
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  });
+
   it('island component HMR updates without full page reload', { retry: 2 }, async () => {
     const counterFile = join(ROOT, 'playground/react-pages/pages/blog/_Counter.tsx');
     const original = readFileSync(counterFile, 'utf-8');
