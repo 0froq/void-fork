@@ -16,6 +16,8 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void prepare`                    | Generate `.void` artifacts without starting Vite |
 | `void gen model <name> [cols...]` | Scaffold migration + CRUD routes                 |
 | `void gen route <path>`           | Create an API route                              |
+| `void db push`                    | Apply schema directly without migration files    |
+| `void db generate`                | Generate SQL migrations from schema changes      |
 | `void db status`                  | Show local/remote migration status               |
 | `void db reset`                   | Drop and re-apply all migrations                 |
 | `void db seed`                    | Reset + seed local database                      |
@@ -233,6 +235,18 @@ If no project is linked and no override is provided, CLI prompts to link or crea
 That fallback is mainly for projects that skipped Void project setup during `void init`.
 
 ## Database
+
+### `void db push`
+
+Apply your Drizzle schema directly to the development database without creating migration files. For D1 projects, this updates the local D1 database used by dev. For PostgreSQL projects, this uses `DATABASE_URL` from `.env.local`.
+
+Use this for quick schema iteration while prototyping. Before deploying, generate and review migration files with `void db generate`.
+
+### `void db generate`
+
+Generate SQL migration files from schema changes.
+
+The command compares your current `db/schema.ts` or `db/schema/` modules against the last generated Drizzle snapshot and writes new migration artifacts under `db/migrations/`. Review and commit the generated files before deploying.
 
 ### `void db status`
 
