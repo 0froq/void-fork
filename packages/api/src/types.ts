@@ -9,6 +9,7 @@ import type {
   domains,
   platformEvents,
   invitations,
+  projectMigrations,
 } from './schema.ts';
 
 export type InvitationStatus = 'pending' | 'accepted' | 'revoked';
@@ -23,6 +24,7 @@ export type Resource = InferSelectModel<typeof resources>;
 export type Domain = InferSelectModel<typeof domains>;
 export type PlatformEvent = InferSelectModel<typeof platformEvents>;
 export type Invitation = InferSelectModel<typeof invitations>;
+export type ProjectMigration = InferSelectModel<typeof projectMigrations>;
 
 export type MigrationMeta = Readonly<{
   name: string;
@@ -170,6 +172,10 @@ export type DeployManifest = Readonly<{
   migrations?: {
     dialect: 'sqlite' | 'postgresql';
     pending: number;
+    protocolVersion?: 2;
+    classifierVersion?: number;
+    migrationListHash?: string;
+    stability?: 'stable' | 'legacy';
   };
   schedules?: ReadonlyArray<ScheduleMeta>;
   queues?: ReadonlyArray<QueueMeta>;
@@ -209,7 +215,8 @@ export type DeployEvent =
   | { event: 'provisioning'; bindings: ReadonlyArray<string> }
   | { event: 'provisioning_done' }
   | { event: 'migration_start'; pending: number }
-  | { event: 'migration'; name: string; durationMs: number }
+  | { event: 'migration'; name: string; durationMs: number; stability?: 'stable' | 'legacy' }
+  | { event: 'migration_warning'; message: string }
   | { event: 'worker_upload'; modules: number }
   | { event: 'worker_upload_done' }
   | { event: 'queue_setup'; queues: ReadonlyArray<string> }

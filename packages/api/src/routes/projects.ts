@@ -19,13 +19,17 @@ import {
   cancelDeployment,
   setActiveDeployment,
   appendAppliedMigrations,
+  appendProjectMigrations,
   activeDeploymentContainsMigration,
+  getProjectMigrationNames,
   renameAppliedMigrationsForProject,
+  renameProjectMigrations,
   recordMigrationRenames,
   migrationRenameExists,
   invalidateMigrationRenamesForOldName,
 } from '../db.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
+import { validateSubmittedExecutionPlans } from '../migrations/execution-plan.ts';
 import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner.ts';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
 import { getDispatchWorkerProxyToken } from '../provisioning/cloudflare-api.ts';
@@ -94,26 +98,10 @@ const DESTRUCTIVE_PATTERNS = [
   /\bALTER\s+TABLE\b[^;]*?\bRENAME\s+(?:TO\b|COLUMN\b|[^;\s]+\s+TO\b)/i,
   /\bTRUNCATE\b/i,
   // Destructive DML forms requiring the same pragma opt-in as DDL:
-  //
-  //   1. `DELETE FROM <t>` with no WHERE — mass delete; irreversible.
-  //   2. `UPDATE <t> SET …` with no WHERE — mass mutation, typically to
-  //      NULL; silently corrupts every row in the table.
-  //   3. `INSERT OR REPLACE INTO …` — silently deletes any row whose
-  //      primary key collides with the insert, dressed up as an insert.
-  //
-  // The DELETE / UPDATE forms use `(?:(?!\bWHERE\b)[^;])*` to scan to the
-  // next statement terminator while asserting that no `WHERE` keyword
-  // appears in the span. We treat a `WHERE` ANYWHERE in the statement as
-  // "bounded" — intentionally simple: a false negative on
-  // `UPDATE a SET b = (SELECT c FROM d WHERE e = 1)` (a WHERE only in a
-  // subquery) is acceptable because the pragma remains available to
-  // authorize such cases. Trigger-body DML is caught transparently:
-  // inside a `BEGIN … END` block the inner `;` acts as a statement
-  // terminator for these regexes just as it does at the top level, so an
-  // unbounded `DELETE FROM x;` nested in a trigger body matches the outer
-  // DELETE pattern without needing a separate parser.
-  /\bDELETE\s+FROM\b(?:(?!\bWHERE\b)[^;])*(?:;|$)/i,
-  /\bUPDATE\b(?:(?!\bWHERE\b)[^;])*?\bSET\b(?:(?!\bWHERE\b)[^;])*(?:;|$)/i,
+  // `INSERT OR REPLACE INTO …` silently deletes any row whose primary key
+  // collides with the insert, dressed up as an insert. Unbounded DELETE and
+  // UPDATE checks are statement-aware below so a later statement or nested
+  // subquery WHERE cannot mask an unbounded write.
   /\bINSERT\s+OR\s+REPLACE\b/i,
 ];
 
@@ -386,13 +374,61 @@ function stripSqlStringsAndComments(sql: string): {
   return { code, lineComments };
 }
 
+function splitExecutableStatements(sql: string): Array<string> {
+  return sql
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+}
+
+function hasTopLevelKeyword(statement: string, keyword: string): boolean {
+  let depth = 0;
+  for (let index = 0; index < statement.length; index++) {
+    const character = statement[index];
+    if (character === '(') {
+      depth++;
+      continue;
+    }
+    if (character === ')') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth !== 0) {
+      continue;
+    }
+    if (
+      statement.slice(index, index + keyword.length).toUpperCase() === keyword &&
+      !/[A-Z0-9_]/i.test(statement[index - 1] ?? '') &&
+      !/[A-Z0-9_]/i.test(statement[index + keyword.length] ?? '')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasUnboundedWrite(statement: string): boolean {
+  if (/\bDELETE\s+FROM\b/i.test(statement)) {
+    return !hasTopLevelKeyword(statement, 'WHERE');
+  }
+  if (/\bUPDATE\b[\s\S]*\bSET\b/i.test(statement)) {
+    return !hasTopLevelKeyword(statement, 'WHERE');
+  }
+  return false;
+}
+
 function hasUnauthorizedDestructive(
   migrations: ReadonlyArray<{ name: string; sql: string }>,
 ): ReadonlyArray<string> {
   const violations: Array<string> = [];
   for (const m of migrations) {
     const { code, lineComments } = stripSqlStringsAndComments(m.sql);
-    const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(code));
+    const isDestructive = splitExecutableStatements(code).some((statement) => {
+      return (
+        DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(statement)) ||
+        hasUnboundedWrite(statement)
+      );
+    });
     if (!isDestructive) {
       continue;
     }
@@ -673,12 +709,16 @@ const app = new Hono<ApiEnv>()
           ? JSON.parse(target.applied_migrations)
           : [];
 
+        const projectMigrationNames = await getProjectMigrationNames(txDb, projectId);
         const currentActive = lockedProject.active_deployment_id
           ? await getDeployment(txDb, lockedProject.active_deployment_id)
           : null;
-        const currentMigrations: Array<string> = currentActive?.applied_migrations
-          ? JSON.parse(currentActive.applied_migrations)
-          : [];
+        const currentMigrations: Array<string> =
+          projectMigrationNames.length > 0
+            ? [...projectMigrationNames]
+            : currentActive?.applied_migrations
+              ? JSON.parse(currentActive.applied_migrations)
+              : [];
         const diff = currentMigrations.filter((m) => !targetMigrations.includes(m));
 
         // Reject destructive rollbacks server-side unless the caller
@@ -1014,6 +1054,8 @@ const app = new Hono<ApiEnv>()
 
     const body = await context.req.json<{
       migrations: ReadonlyArray<{ name: string; sql: string }>;
+      migrationProtocolVersion?: number;
+      executionPlans?: ReadonlyArray<Record<string, unknown>>;
     }>();
     if (!body.migrations || !Array.isArray(body.migrations)) {
       return context.json({ error: 'migrations array required' }, 400);
@@ -1033,6 +1075,13 @@ const app = new Hono<ApiEnv>()
         return context.json({ error: `duplicate migration name: ${m.name}` }, 400);
       }
       nameSet.add(m.name);
+    }
+    const planValidationError = await validateSubmittedExecutionPlans(
+      body.migrations,
+      body.executionPlans,
+    );
+    if (planValidationError) {
+      return context.json({ error: planValidationError }, 400);
     }
 
     // Serialize /apply and /rename per project via a pg transaction-scoped
@@ -1113,26 +1162,51 @@ const app = new Hono<ApiEnv>()
         // the tx (preserving the healing write) while a `throw` would
         // roll it back.
         const effectiveNames = [...result.applied, ...result.skipped];
+        if (effectiveNames.length > 0) {
+          await appendProjectMigrations(
+            txDb,
+            projectId,
+            effectiveNames,
+            locked?.active_deployment_id ?? undefined,
+          );
+        }
         if (effectiveNames.length > 0 && locked?.active_deployment_id) {
           await appendAppliedMigrations(txDb, locked.active_deployment_id, effectiveNames);
         }
 
         if (result.failed) {
+          const responseBody: Record<string, unknown> = {
+            ok: false,
+            error: `migration ${result.failed.name} failed: ${result.failed.error}`,
+            applied: result.applied,
+            skipped: result.skipped,
+            failed: result.failed,
+          };
+          if (body.migrationProtocolVersion === 2) {
+            responseBody.migration_protocol = 'legacy';
+            responseBody.migration_stability = 'legacy';
+          }
           return {
             status: 500 as const,
-            body: {
-              ok: false,
-              error: `migration ${result.failed.name} failed: ${result.failed.error}`,
-              applied: result.applied,
-              skipped: result.skipped,
-              failed: result.failed,
-            },
+            body: responseBody,
           };
         }
 
+        const responseBody: Record<string, unknown> = {
+          ok: true,
+          applied: result.applied,
+          skipped: result.skipped,
+        };
+        if (body.migrationProtocolVersion === 2) {
+          responseBody.migration_protocol = 'legacy';
+          responseBody.migration_stability = 'legacy';
+          responseBody.warnings = [
+            'Remote D1 REST migrations use the legacy compensating runner; deploy-time worker protocol v2 provides the stable migration contract.',
+          ];
+        }
         return {
           status: 200 as const,
-          body: { ok: true, applied: result.applied, skipped: result.skipped },
+          body: responseBody,
         };
       });
       return context.json(outcome.body, outcome.status);
@@ -1446,6 +1520,7 @@ const app = new Hono<ApiEnv>()
         // same locked tx as the heal/record, so a rollback unwinds all
         // three together.
         if (committed.length > 0) {
+          await renameProjectMigrations(txDb, projectId, committed);
           await renameAppliedMigrationsForProject(txDb, projectId, committed);
           for (const { from } of committed) {
             await invalidateMigrationRenamesForOldName(txDb, projectId, from);

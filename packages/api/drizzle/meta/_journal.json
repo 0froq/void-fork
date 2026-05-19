@@ -127,6 +127,13 @@
       "when": 1778859255013,
       "tag": "0017_gorgeous_johnny_blaze",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1779152519000,
+      "tag": "0018_project_migrations",
+      "breakpoints": true
     }
   ]
 }

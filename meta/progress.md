@@ -85,6 +85,7 @@
 - [x] Platform worker rollback admin page (per-worker version history + rollback)
 - [x] Platform rollback audit log (`platform_events` table), unified "Rollback All" with orchestration
 - [x] Move platform DB to PlanetScale Postgres via Hyperdrive
+- [x] Stable deploy-time D1 migration protocol (execution plans, atomic worker batches, app/auth split, project migration truth)
 
 ### Remaining
 

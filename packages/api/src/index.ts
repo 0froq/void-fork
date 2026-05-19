@@ -51,6 +51,13 @@ const app = new Hono<ApiEnv>()
   })
 
   .get('/health', (context) => context.json({ status: 'ok' }))
+  .get('/capabilities', (context) =>
+    context.json({
+      acceptsExecutionPlans: true,
+      migrationProtocolVersion: 2,
+      supportedClassifierVersions: [1],
+    }),
+  )
   .get('/signup-restricted', (context) =>
     context.html(`<!DOCTYPE html>
 <html><head>

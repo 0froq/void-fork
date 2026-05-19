@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import {
   describe,
@@ -11,6 +12,7 @@ import {
 } from 'vite-plus/test';
 import type { Db } from '../../src/db.ts';
 import app from '../../src/index.ts';
+import { canonicalJson } from '../../src/migrations/canonical-json.ts';
 import { deployments, projects, resources } from '../../src/schema.ts';
 import {
   setupEnv,
@@ -310,6 +312,32 @@ function authedReq(path: string, jwt: string, init?: RequestInit): Request {
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
     },
   });
+}
+
+function sha256Hex(value: string): string {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+function buildTestExecutionPlan(input: {
+  name: string;
+  sql: string;
+  kind: 'single-statement' | 'breakpoint-framed' | 'legacy-unsplit-multi-statement';
+  stability: 'stable' | 'legacy';
+  statements?: Array<string>;
+}): Record<string, unknown> {
+  const plan: Record<string, unknown> = {
+    classifierVersion: 1,
+    dialect: 'sqlite',
+    kind: input.kind,
+    name: input.name,
+    sqlHash: sha256Hex(input.sql.replace(/\r\n?/g, '\n')),
+    stability: input.stability,
+  };
+  if (input.kind === 'breakpoint-framed') {
+    plan.statements = input.statements ?? [];
+  }
+  plan.planHash = sha256Hex(canonicalJson(plan));
+  return plan;
 }
 
 describe('GET /projects/:id/migrations', () => {
@@ -688,6 +716,77 @@ describe('POST /projects/:id/migrations/apply', () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'duplicate migration name: 001.sql' });
+  });
+
+  it('accepts protocol v2 execution plans only after server classification matches', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'v2-plan-ok');
+    await insertD1Resource(env.db, project.id);
+    const state = createD1State();
+    mockCfApi({ queryD1: makeQueryD1(state) });
+
+    const sql = 'CREATE TABLE a (id TEXT);\n--> statement-breakpoint\nCREATE TABLE b (id TEXT);';
+    const res = await app.fetch(
+      authedReq(`/projects/${project.id}/migrations/apply`, user.jwt, {
+        method: 'POST',
+        body: JSON.stringify({
+          migrationProtocolVersion: 2,
+          migrations: [{ name: '001_breakpoints.sql', sql }],
+          executionPlans: [
+            buildTestExecutionPlan({
+              name: '001_breakpoints.sql',
+              sql,
+              kind: 'breakpoint-framed',
+              stability: 'stable',
+              statements: ['CREATE TABLE a (id TEXT);', 'CREATE TABLE b (id TEXT);'],
+            }),
+          ],
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { warnings?: Array<string>; applied: Array<string> };
+    expect(body.applied).toEqual(['001_breakpoints.sql']);
+    expect(body.warnings?.[0]).toContain('legacy compensating runner');
+    expect(state.trackingRows.has('001_breakpoints.sql')).toBe(true);
+  });
+
+  it('rejects execution plans whose breakpoint statements only match marker-shaped strings', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'v2-plan-bad');
+    const sql =
+      "INSERT INTO logs(message) VALUES('--> statement-breakpoint');\n" +
+      'CREATE TABLE later (id TEXT);';
+
+    const res = await app.fetch(
+      authedReq(`/projects/${project.id}/migrations/apply`, user.jwt, {
+        method: 'POST',
+        body: JSON.stringify({
+          migrationProtocolVersion: 2,
+          migrations: [{ name: '001_bad_plan.sql', sql }],
+          executionPlans: [
+            buildTestExecutionPlan({
+              name: '001_bad_plan.sql',
+              sql,
+              kind: 'breakpoint-framed',
+              stability: 'stable',
+              statements: [
+                "INSERT INTO logs(message) VALUES('",
+                "');\nCREATE TABLE later (id TEXT);",
+              ],
+            }),
+          ],
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain(
+      'kind does not match server classification',
+    );
   });
 
   it('accepts an empty migrations array and reports zero applied and zero skipped', async () => {
@@ -1927,6 +2026,60 @@ describe('POST /projects/:id/migrations/apply', () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain('001_update.sql');
     expect(body.error).toContain('void:allow-destructive');
+    expect(state.queries.find((q) => /UPDATE\s+users\s+SET/i.test(q.sql))).toBeUndefined();
+  });
+
+  it('blocks unbounded DELETE even when a later statement has a WHERE clause', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'r25f4-delete-later-where');
+    await insertD1Resource(env.db, project.id);
+
+    const state = createD1State();
+    mockCfApi({ queryD1: makeQueryD1(state) });
+
+    const res = await app.fetch(
+      authedReq(`/projects/${project.id}/migrations/apply`, user.jwt, {
+        method: 'POST',
+        body: JSON.stringify({
+          migrations: [
+            {
+              name: '001_mixed.sql',
+              sql: "DELETE FROM users; UPDATE posts SET name = 'ok' WHERE id = '1';",
+            },
+          ],
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('void:allow-destructive');
+    expect(state.queries.find((q) => /DELETE\s+FROM\s+users/i.test(q.sql))).toBeUndefined();
+  });
+
+  it('blocks unbounded UPDATE when WHERE only appears inside a subquery', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'r25f4-update-subquery-where');
+    await insertD1Resource(env.db, project.id);
+
+    const state = createD1State();
+    mockCfApi({ queryD1: makeQueryD1(state) });
+
+    const res = await app.fetch(
+      authedReq(`/projects/${project.id}/migrations/apply`, user.jwt, {
+        method: 'POST',
+        body: JSON.stringify({
+          migrations: [
+            {
+              name: '001_update.sql',
+              sql: "UPDATE users SET name = (SELECT name FROM posts WHERE id = '1');",
+            },
+          ],
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('void:allow-destructive');
     expect(state.queries.find((q) => /UPDATE\s+users\s+SET/i.test(q.sql))).toBeUndefined();
   });
 

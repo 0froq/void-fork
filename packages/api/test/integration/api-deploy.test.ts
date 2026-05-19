@@ -1567,6 +1567,95 @@ describe('POST /projects/:id/deploy', () => {
       }
     });
 
+    it('uses protocol v2 app and auth migration endpoints after capability negotiation', async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'migrate-v2-test');
+      mockCfApi({
+        createD1: () => cfSuccess({ uuid: 'd1-v2-uuid', name: 'test-db' }),
+      });
+
+      const calls: Array<string> = [];
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            calls.push(`${req.method} ${url.pathname}`);
+            if (url.pathname === '/__void/ready') {
+              return Response.json({ ready: true });
+            }
+            if (url.pathname === '/__void/migrate/capabilities') {
+              return Response.json({
+                protocolVersion: 2,
+                endpoints: {
+                  app: '/__void/migrate/app',
+                  auth: '/__void/migrate/auth',
+                  reconcile: '/__void/migrate/app/attempt/:attemptId',
+                },
+                dialect: 'sqlite',
+                classifierVersion: 1,
+                migrationListHash: 'sha256:test-list',
+                destructiveValidation: 'passed',
+              });
+            }
+            if (url.pathname === '/__void/migrate/app') {
+              return Response.json({
+                ok: true,
+                protocolVersion: 2,
+                attemptId: 'attempt_test',
+                confirmedApplied: ['001_create_table.sql'],
+                confirmedSkipped: [],
+                stability: 'stable',
+                migrations: [
+                  {
+                    name: '001_create_table.sql',
+                    applied: true,
+                    status: 'applied',
+                    stability: 'stable',
+                    durationMs: 2,
+                  },
+                ],
+              });
+            }
+            if (url.pathname === '/__void/migrate/auth') {
+              return Response.json({ ok: true, protocolVersion: 2 });
+            }
+            return new Response('unexpected', { status: 500 });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+
+      try {
+        const res = await app.fetch(
+          await buildDeployRequest(env, project.id, user.jwt, {
+            manifest: {
+              version: 3,
+              auth: true,
+              bindings: { d1: ['DB'] },
+              migrations: {
+                dialect: 'sqlite',
+                pending: 1,
+                protocolVersion: 2,
+                classifierVersion: 1,
+                migrationListHash: 'sha256:test-list',
+                stability: 'stable',
+              },
+            },
+          }),
+          env,
+        );
+        expect(res.status).toBe(200);
+        const events = parseDeployStream(await res.text());
+        expect(events.at(-1)).toMatchObject({ event: 'done' });
+        expect(calls).toContain('GET /__void/migrate/capabilities');
+        expect(calls).toContain('POST /__void/migrate/app');
+        expect(calls).toContain('POST /__void/migrate/auth');
+        expect(calls).not.toContain('POST /__void/migrate');
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    });
+
     it('compat path retries migration with longer window when readiness probe returns 404', async () => {
       const user = await createTestUser(env.db);
       const project = await createTestProject(env.db, user.id, 'migrate-compat-retry-test');

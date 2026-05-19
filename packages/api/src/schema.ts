@@ -294,6 +294,28 @@ export const migrationRenames = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// project_migrations — current project database truth
+// ---------------------------------------------------------------------------
+export const projectMigrations = pgTable(
+  'project_migrations',
+  {
+    project_id: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    applied_at: timestamp('applied_at', { mode: 'string' }).notNull().defaultNow(),
+    source_deployment_id: text('source_deployment_id').references(() => deployments.id, {
+      onDelete: 'set null',
+    }),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.project_id, table.name] }),
+    index('idx_project_migrations_project_id').on(table.project_id, table.applied_at),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // invitations
 // ---------------------------------------------------------------------------
 export const invitations = pgTable(

@@ -39,6 +39,7 @@ import {
   markDeploymentRetained,
   markDeploymentBundleStored,
   setAppliedMigrations,
+  appendProjectMigrations,
   getRetainedDeployments,
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
@@ -48,6 +49,7 @@ import {
 } from '../db.ts';
 import { sendDeployFailedEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
+import { generateId } from '../id.ts';
 import { checkCliVersionOrRespond } from '../middleware/cli-version.ts';
 import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
 import {
@@ -98,13 +100,34 @@ function isCfAssetPlainText(text: string): boolean {
 
 type UserWorkerMigrationResult = Readonly<{
   ok: boolean;
+  protocolVersion?: 2;
+  attemptId?: string;
   migrations: ReadonlyArray<{
     name: string;
     applied: boolean;
     durationMs: number;
     error?: string;
+    status?: 'applied' | 'skipped' | 'failed';
+    stability?: 'stable' | 'legacy';
   }>;
+  confirmedApplied?: ReadonlyArray<string>;
+  confirmedSkipped?: ReadonlyArray<string>;
+  stability?: 'stable' | 'legacy';
+  warnings?: ReadonlyArray<string>;
   error?: string;
+}>;
+
+type WorkerMigrationCapabilities = Readonly<{
+  protocolVersion: 2;
+  endpoints: {
+    app: string;
+    auth?: string;
+    reconcile: string;
+  };
+  dialect: 'sqlite';
+  classifierVersion: number;
+  migrationListHash: string;
+  destructiveValidation: 'passed';
 }>;
 
 function formatMigrationFailure(result: UserWorkerMigrationResult): string {
@@ -114,6 +137,122 @@ function formatMigrationFailure(result: UserWorkerMigrationResult): string {
     return result.error?.includes(failedMigration.error) ? result.error : detailed;
   }
   return result.error ?? 'unknown error';
+}
+
+async function probeWorkerMigrationCapabilities(
+  userWorker: Fetcher,
+  token: string,
+  logger: DeployLogger,
+): Promise<WorkerMigrationCapabilities | null> {
+  try {
+    const response = await userWorker.fetch(
+      new Request('https://internal/__void/migrate/capabilities', {
+        headers: { 'x-void-internal': token },
+        signal: AbortSignal.timeout(10_000),
+      }),
+    );
+    if (!response.ok) {
+      return null;
+    }
+    const text = await response.text();
+    if (isCfAssetPlainText(text)) {
+      return null;
+    }
+    const data = JSON.parse(text) as WorkerMigrationCapabilities;
+    if (
+      data?.protocolVersion !== 2 ||
+      data?.dialect !== 'sqlite' ||
+      typeof data.classifierVersion !== 'number' ||
+      typeof data.migrationListHash !== 'string' ||
+      data.destructiveValidation !== 'passed'
+    ) {
+      return null;
+    }
+    return data;
+  } catch (err) {
+    logger.warn('migrate', 'capability_probe_failed', {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+async function dispatchStableAppMigration(
+  userWorker: Fetcher,
+  token: string,
+  attemptId: string,
+  deploymentId: string,
+  logger: DeployLogger,
+): Promise<UserWorkerMigrationResult> {
+  const request = new Request('https://internal/__void/migrate/app', {
+    body: JSON.stringify({ attemptId, deploymentId }),
+    headers: { 'content-type': 'application/json', 'x-void-internal': token },
+    method: 'POST',
+    signal: AbortSignal.timeout(300_000),
+  });
+  try {
+    const response = await userWorker.fetch(request);
+    const text = await response.text();
+    if (isCfAssetPlainText(text)) {
+      return reconcileStableAppMigration(userWorker, token, attemptId);
+    }
+    try {
+      return JSON.parse(text) as UserWorkerMigrationResult;
+    } catch {
+      return reconcileStableAppMigration(userWorker, token, attemptId);
+    }
+  } catch (err) {
+    logger.warn('migrate', 'app_attempt_unknown', {
+      attemptId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return reconcileStableAppMigration(userWorker, token, attemptId);
+  }
+}
+
+async function reconcileStableAppMigration(
+  userWorker: Fetcher,
+  token: string,
+  attemptId: string,
+): Promise<UserWorkerMigrationResult> {
+  const response = await userWorker.fetch(
+    new Request(`https://internal/__void/migrate/app/attempt/${encodeURIComponent(attemptId)}`, {
+      headers: { 'x-void-internal': token },
+      signal: AbortSignal.timeout(30_000),
+    }),
+  );
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as UserWorkerMigrationResult;
+  } catch {
+    return {
+      ok: false,
+      protocolVersion: 2,
+      attemptId,
+      migrations: [],
+      error: `migration outcome unknown and reconciliation returned ${response.status}: ${text.slice(0, 200)}`,
+    };
+  }
+}
+
+async function dispatchStableAuthMigration(userWorker: Fetcher, token: string): Promise<void> {
+  const response = await userWorker.fetch(
+    new Request('https://internal/__void/migrate/auth', {
+      headers: { 'x-void-internal': token },
+      method: 'POST',
+      signal: AbortSignal.timeout(300_000),
+    }),
+  );
+  const text = await response.text();
+  let data: { ok?: boolean; error?: string };
+  try {
+    data = JSON.parse(text) as { ok?: boolean; error?: string };
+  } catch {
+    throw new Error(`auth migration failed (${response.status}): ${text.slice(0, 200)}`);
+  }
+  if (!response.ok || data.ok !== true) {
+    throw new Error(`auth migration failed: ${data.error ?? response.status}`);
+  }
 }
 
 /**
@@ -379,6 +518,21 @@ export function validateManifestShape(parsed: unknown): string | null {
       if (typeof mig.pending !== 'number' || !Number.isInteger(mig.pending) || mig.pending < 0) {
         return 'invalid manifest shape: migrations.pending must be a non-negative integer';
       }
+    }
+    if (mig.protocolVersion !== undefined && mig.protocolVersion !== 2) {
+      return 'invalid manifest shape: migrations.protocolVersion must be 2';
+    }
+    if (
+      mig.classifierVersion !== undefined &&
+      (typeof mig.classifierVersion !== 'number' || !Number.isInteger(mig.classifierVersion))
+    ) {
+      return 'invalid manifest shape: migrations.classifierVersion must be an integer';
+    }
+    if (mig.migrationListHash !== undefined && typeof mig.migrationListHash !== 'string') {
+      return 'invalid manifest shape: migrations.migrationListHash must be a string';
+    }
+    if (mig.stability !== undefined && mig.stability !== 'stable' && mig.stability !== 'legacy') {
+      return 'invalid manifest shape: migrations.stability must be stable or legacy';
     }
   }
 
@@ -3120,69 +3274,154 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             },
           );
 
-          const migrationRetry = probeResult === 'ready' ? CF_MIGRATION_RETRY : CF_READINESS_RETRY;
+          const manifestProtocol = manifest.migrations.protocolVersion;
+          const stableCapabilities =
+            manifestProtocol === 2
+              ? await probeWorkerMigrationCapabilities(
+                  context.env.DISPATCH.get(workerName),
+                  proxyTokenBinding?.text ?? '',
+                  logger,
+                )
+              : null;
+          const canUseStable =
+            stableCapabilities &&
+            stableCapabilities.protocolVersion === 2 &&
+            stableCapabilities.dialect === manifest.migrations.dialect &&
+            stableCapabilities.classifierVersion === manifest.migrations.classifierVersion &&
+            stableCapabilities.migrationListHash === manifest.migrations.migrationListHash &&
+            stableCapabilities.destructiveValidation === 'passed';
 
-          const result = await retryWithBackoff<UserWorkerMigrationResult>(
-            async (attempt) => {
-              const attemptStart = Date.now();
-              const maxAttempts = migrationRetry.maxRetries + 1;
-              const userWorker = context.env.DISPATCH.get(workerName);
-              const migrateResponse = await userWorker.fetch(
-                new Request('https://internal/__void/migrate', {
-                  method: 'POST',
-                  headers: { 'x-void-internal': proxyTokenBinding?.text ?? '' },
-                  signal: AbortSignal.timeout(300_000),
-                }),
-              );
-
-              const text = await migrateResponse.text();
-              if (isCfAssetPlainText(text)) {
-                logger.warn('migrate', 'attempt_failed', {
-                  attempt,
-                  maxAttempts,
-                  latencyMs: Date.now() - attemptStart,
-                  code: 'cf_plain_text',
-                  bodyPreview: text.slice(0, 200),
-                });
-                return undefined;
-              }
-
-              try {
-                return JSON.parse(text) as UserWorkerMigrationResult;
-              } catch {
-                if (migrateResponse.ok) {
-                  logger.warn('migrate', 'attempt_failed', {
-                    attempt,
-                    maxAttempts,
-                    latencyMs: Date.now() - attemptStart,
-                    code: 'non_json_2xx',
-                    status: migrateResponse.status,
-                    bodyPreview: text.slice(0, 500),
-                  });
-                  return undefined;
-                }
-                throw new Error(
-                  `migration failed (${migrateResponse.status}): ${text.slice(0, 200)}`,
-                );
-              }
-            },
-            {
-              ...migrationRetry,
-              errorMessage: 'migration dispatch failed after retries',
-            },
-          );
-
-          if (!result.ok) {
-            throw new Error(`migration failed: ${formatMigrationFailure(result)}`);
+          if (manifestProtocol === 2 && !canUseStable) {
+            throw new Error('migration protocol v2 capability negotiation failed');
           }
-          for (const m of result.migrations) {
-            if (m.applied) {
-              emit({ event: 'migration', name: m.name, durationMs: m.durationMs });
-              migrationsApplied++;
+
+          if (canUseStable) {
+            const attemptId = generateId('migatt');
+            const stableOutcome = await context.get('db').transaction(async (tx) => {
+              await tx.execute(
+                drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
+              );
+              const txDb = tx as unknown as Db;
+              const appResult = await dispatchStableAppMigration(
+                context.env.DISPATCH.get(workerName),
+                proxyTokenBinding?.text ?? '',
+                attemptId,
+                deployment.id,
+                logger,
+              );
+              const confirmed = [
+                ...(appResult.confirmedApplied ?? []),
+                ...(appResult.confirmedSkipped ?? []),
+              ];
+              if (confirmed.length > 0) {
+                await appendProjectMigrations(txDb, projectId, confirmed, deployment.id);
+                await setAppliedMigrations(txDb, deployment.id, confirmed);
+              }
+              return { confirmed, result: appResult };
+            });
+
+            for (const warning of stableOutcome.result.warnings ?? []) {
+              logger.warn('migrate', 'warning', { message: warning });
+              emit({ event: 'migration_warning', message: warning });
+            }
+            if (!stableOutcome.result.ok) {
+              throw new Error(`migration failed: ${formatMigrationFailure(stableOutcome.result)}`);
+            }
+            for (const m of stableOutcome.result.migrations) {
+              if (m.status === 'applied' || m.applied) {
+                emit({
+                  event: 'migration',
+                  name: m.name,
+                  durationMs: m.durationMs,
+                  stability: m.stability,
+                });
+                migrationsApplied++;
+              }
+            }
+            if (stableCapabilities.endpoints.auth) {
+              await dispatchStableAuthMigration(
+                context.env.DISPATCH.get(workerName),
+                proxyTokenBinding?.text ?? '',
+              );
+            }
+          } else {
+            const migrationRetry =
+              probeResult === 'ready' ? CF_MIGRATION_RETRY : CF_READINESS_RETRY;
+
+            const result = await context.get('db').transaction(async (tx) => {
+              await tx.execute(
+                drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
+              );
+              const txDb = tx as unknown as Db;
+              const legacyResult = await retryWithBackoff<UserWorkerMigrationResult>(
+                async (attempt) => {
+                  const attemptStart = Date.now();
+                  const maxAttempts = migrationRetry.maxRetries + 1;
+                  const userWorker = context.env.DISPATCH.get(workerName);
+                  const migrateResponse = await userWorker.fetch(
+                    new Request('https://internal/__void/migrate', {
+                      method: 'POST',
+                      headers: { 'x-void-internal': proxyTokenBinding?.text ?? '' },
+                      signal: AbortSignal.timeout(300_000),
+                    }),
+                  );
+
+                  const text = await migrateResponse.text();
+                  if (isCfAssetPlainText(text)) {
+                    logger.warn('migrate', 'attempt_failed', {
+                      attempt,
+                      bodyPreview: text.slice(0, 200),
+                      code: 'cf_plain_text',
+                      latencyMs: Date.now() - attemptStart,
+                      maxAttempts,
+                    });
+                    return undefined;
+                  }
+
+                  try {
+                    return JSON.parse(text) as UserWorkerMigrationResult;
+                  } catch {
+                    if (migrateResponse.ok) {
+                      logger.warn('migrate', 'attempt_failed', {
+                        attempt,
+                        bodyPreview: text.slice(0, 500),
+                        code: 'non_json_2xx',
+                        latencyMs: Date.now() - attemptStart,
+                        maxAttempts,
+                        status: migrateResponse.status,
+                      });
+                      return undefined;
+                    }
+                    throw new Error(
+                      `migration failed (${migrateResponse.status}): ${text.slice(0, 200)}`,
+                    );
+                  }
+                },
+                {
+                  ...migrationRetry,
+                  errorMessage: 'migration dispatch failed after retries',
+                },
+              );
+              const allApplied = legacyResult.migrations
+                .filter((migration) => !migration.error)
+                .map((migration) => migration.name);
+              if (allApplied.length > 0) {
+                await appendProjectMigrations(txDb, projectId, allApplied, deployment.id);
+                await setAppliedMigrations(txDb, deployment.id, allApplied);
+              }
+              return legacyResult;
+            });
+
+            if (!result.ok) {
+              throw new Error(`migration failed: ${formatMigrationFailure(result)}`);
+            }
+            for (const m of result.migrations) {
+              if (m.applied) {
+                emit({ event: 'migration', name: m.name, durationMs: m.durationMs });
+                migrationsApplied++;
+              }
             }
           }
-          const allApplied = result.migrations.map((m) => m.name);
-          await setAppliedMigrations(context.get('db'), deployment.id, allApplied);
           await assertDeploymentNotCanceled(context.get('db'), deployment.id);
           await assertProjectNotDeleting(context.get('db'), projectId);
         }

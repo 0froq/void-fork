@@ -31,6 +31,7 @@ import {
   oauthNonces,
   authCodes,
   migrationRenames,
+  projectMigrations,
 } from './schema.ts';
 import type { DomainVerificationData } from './schema.ts';
 import type { AllowlistEntry } from './signup-allowlist.ts';
@@ -542,6 +543,40 @@ export async function setAppliedMigrations(
     .where(eq(deployments.id, deploymentId));
 }
 
+export async function getProjectMigrationNames(
+  db: Db,
+  projectId: string,
+): Promise<ReadonlyArray<string>> {
+  const rows = await db
+    .select({ name: projectMigrations.name })
+    .from(projectMigrations)
+    .where(eq(projectMigrations.project_id, projectId))
+    .orderBy(asc(projectMigrations.applied_at), asc(projectMigrations.name));
+  return rows.map((row) => row.name);
+}
+
+export async function appendProjectMigrations(
+  db: Db,
+  projectId: string,
+  names: ReadonlyArray<string>,
+  sourceDeploymentId?: string,
+): Promise<void> {
+  const uniqueNames = [...new Set(names)];
+  if (uniqueNames.length === 0) {
+    return;
+  }
+  await db
+    .insert(projectMigrations)
+    .values(
+      uniqueNames.map((name) => ({
+        name,
+        project_id: projectId,
+        source_deployment_id: sourceDeploymentId,
+      })),
+    )
+    .onConflictDoNothing();
+}
+
 /**
  * Atomically append newly-applied migration names to a deployment's
  * applied_migrations JSON text column, de-duping against what's already there.
@@ -671,6 +706,21 @@ export async function renameAppliedMigrationsForProject(
       }
     }
   });
+}
+
+export async function renameProjectMigrations(
+  db: Db,
+  projectId: string,
+  renames: ReadonlyArray<{ from: string; to: string }>,
+): Promise<void> {
+  for (const rename of renames) {
+    await db
+      .update(projectMigrations)
+      .set({ name: rename.to })
+      .where(
+        and(eq(projectMigrations.project_id, projectId), eq(projectMigrations.name, rename.from)),
+      );
+  }
 }
 
 /**
