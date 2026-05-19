@@ -52,10 +52,20 @@ You can also put `API_URL`, `SITE_DOMAIN`, and `CF_ACCESS_TOKEN` in
 To run against a local API instead:
 
 ```sh
-pnpm -C packages/api setup
-pnpm -C packages/api dev
-API_URL=http://localhost:8787 SITE_DOMAIN=void.app pnpm -C packages/dashboard dev
+pnpm -C packages/api setup   # one-time: provisions Postgres + seeds admin
+pnpm -C packages/api dev     # terminal 1: API on http://localhost:8787
+pnpm -C packages/dashboard dev  # terminal 2 (reads .dev.vars below)
 ```
+
+Put `API_URL=http://localhost:8787` and `SITE_DOMAIN=void.app` in
+`packages/dashboard/.dev.vars` so the dashboard targets the local API.
+
+The login page renders an extra **Dev login (local API)** button whenever
+`API_URL` points at `localhost` / `127.0.0.1`. Clicking it hits the API's
+`/auth/dev-login` endpoint, which mints a JWT for the seeded admin and
+redirects back through `/auth/callback`. The endpoint is guarded by
+`DEV_AUTH_BYPASS === 'true'` on the API side and the login-nonce CSRF cookie
+on the dashboard side, so it never activates in production.
 
 ## Source Layout
 

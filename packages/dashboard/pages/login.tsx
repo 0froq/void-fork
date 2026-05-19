@@ -76,7 +76,7 @@ function LoginPageShell({ children }: { children: ReactNode }) {
   );
 }
 
-export default function LoginPage({ githubUrl, googleUrl }: Props) {
+export default function LoginPage({ githubUrl, googleUrl, devLoginUrl }: Props) {
   return (
     <LoginPageShell>
       <h1 className="max-w-[25rem] text-pretty">Sign in to your dashboard.</h1>
@@ -88,6 +88,16 @@ export default function LoginPage({ githubUrl, googleUrl }: Props) {
           Continue with Google
         </a>
       </Stack>
+      {devLoginUrl && (
+        <div className="mt-4">
+          <a className="button" href={devLoginUrl}>
+            Dev login (local API)
+          </a>
+          <p className="mt-2 text-sm text-secondary">
+            Local-development bypass. Requires <code>DEV_AUTH_BYPASS=true</code> on the API.
+          </p>
+        </div>
+      )}
     </LoginPageShell>
   );
 }

@@ -50,4 +50,16 @@ describe('DEV_AUTH_BYPASS production guard', () => {
     });
     expect(res.status).toBe(200);
   });
+
+  it('ignores DEV_AUTH_BYPASS when value is not the exact string "true"', async () => {
+    await createTestUser(env.db, 'bypass-user');
+
+    for (const value of ['false', '0', 'TRUE', '1']) {
+      const res = await app.fetch(new Request('http://localhost/me'), {
+        ...env,
+        DEV_AUTH_BYPASS: value,
+      });
+      expect(res.status, `DEV_AUTH_BYPASS=${value}`).toBe(401);
+    }
+  });
 });

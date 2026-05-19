@@ -8,6 +8,7 @@ import { getPublicApiUrl } from '../lib/api.ts';
 export type Props = Readonly<{
   githubUrl: string;
   googleUrl: string;
+  devLoginUrl?: string;
 }>;
 
 export const head = defineHead<Props>(() => ({
@@ -46,5 +47,15 @@ export const loader = defineHandler<Props>((context) => {
   const githubUrl = `${platformUrl}/auth/login?provider=github&redirect=${encodeURIComponent(callbackWithNonce)}`;
   const googleUrl = `${platformUrl}/auth/login?provider=google&redirect=${encodeURIComponent(callbackWithNonce)}`;
 
-  return { githubUrl, googleUrl };
+  let devLoginUrl: string | undefined;
+  try {
+    const apiHostname = new URL(platformUrl).hostname;
+    if (apiHostname === 'localhost' || apiHostname === '127.0.0.1') {
+      devLoginUrl = `${platformUrl}/auth/dev-login?redirect=${encodeURIComponent(callbackWithNonce)}`;
+    }
+  } catch {
+    // malformed platformUrl — treat as non-local
+  }
+
+  return { githubUrl, googleUrl, devLoginUrl };
 });

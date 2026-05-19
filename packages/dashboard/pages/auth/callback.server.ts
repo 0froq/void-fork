@@ -70,6 +70,15 @@ export const loader = defineHandler(async (context) => {
     if (!host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
       return context.redirect(loginUrl(context));
     }
+    // Verify login nonce — same protection as the OAuth code path above.
+    const nonceCookie = getCookie(context, 'void_auth_nonce');
+    const nonceParam = context.req.query('login_nonce');
+    if (!nonceCookie || !nonceParam || nonceCookie !== nonceParam) {
+      console.warn('[dashboard] auth callback nonce mismatch');
+      return context.redirect(loginUrl(context));
+    }
+    deleteCookie(context, 'void_auth_nonce', { path: '/' });
+    deleteCookie(context, 'void_auth_nonce', { path: '/auth' });
     setCookie(context, 'void_token', token, {
       httpOnly: true,
       secure: false,

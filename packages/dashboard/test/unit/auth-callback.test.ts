@@ -75,3 +75,133 @@ describe('dashboard auth callback', () => {
     );
   });
 });
+
+describe('localhost token bypass', () => {
+  const noApiFetch = vi.fn(async () => {
+    throw new Error('should not call API');
+  }) as typeof fetch;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('sets void_token cookie when token + matching nonce arrive on localhost', async () => {
+    const app = createApp(noApiFetch);
+
+    const res = await app.request(
+      'http://localhost:5173/auth/callback?token=test-jwt&login_nonce=devnonce',
+      {
+        headers: {
+          Cookie: 'void_auth_nonce=devnonce',
+          Host: 'localhost:5173',
+        },
+        redirect: 'manual',
+      },
+      { API_URL: 'http://localhost:8787' },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('http://localhost:5173/');
+    const cookies = res.headers.getSetCookie();
+    expect(cookies).toEqual(
+      expect.arrayContaining([expect.stringContaining('void_token=test-jwt;')]),
+    );
+    expect(cookies).toEqual(expect.arrayContaining([expect.stringContaining('void_auth_nonce=;')]));
+    // void_token must have the actual JWT value, not be cleared
+    expect(cookies.some((c) => c.startsWith('void_token=test-jwt;'))).toBe(true);
+  });
+
+  it('rejects token without nonce cookie on localhost', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const app = createApp(noApiFetch);
+
+    const res = await app.request(
+      'http://localhost:5173/auth/callback?token=test-jwt&login_nonce=devnonce',
+      {
+        headers: {
+          Host: 'localhost:5173',
+        },
+        redirect: 'manual',
+      },
+      { API_URL: 'http://localhost:8787' },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('http://localhost:5173/login');
+    expect(res.headers.getSetCookie()).not.toEqual(
+      expect.arrayContaining([expect.stringContaining('void_token=')]),
+    );
+    expect(warn).toHaveBeenCalledWith('[dashboard] auth callback nonce mismatch');
+  });
+
+  it('rejects token without nonce query param on localhost', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const app = createApp(noApiFetch);
+
+    const res = await app.request(
+      'http://localhost:5173/auth/callback?token=test-jwt',
+      {
+        headers: {
+          Cookie: 'void_auth_nonce=devnonce',
+          Host: 'localhost:5173',
+        },
+        redirect: 'manual',
+      },
+      { API_URL: 'http://localhost:8787' },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('http://localhost:5173/login');
+    expect(res.headers.getSetCookie()).not.toEqual(
+      expect.arrayContaining([expect.stringContaining('void_token=')]),
+    );
+    expect(warn).toHaveBeenCalledWith('[dashboard] auth callback nonce mismatch');
+  });
+
+  it('rejects token when nonce cookie does not match query param', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const app = createApp(noApiFetch);
+
+    const res = await app.request(
+      'http://localhost:5173/auth/callback?token=test-jwt&login_nonce=mismatch',
+      {
+        headers: {
+          Cookie: 'void_auth_nonce=devnonce',
+          Host: 'localhost:5173',
+        },
+        redirect: 'manual',
+      },
+      { API_URL: 'http://localhost:8787' },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('http://localhost:5173/login');
+    expect(res.headers.getSetCookie()).not.toEqual(
+      expect.arrayContaining([expect.stringContaining('void_token=')]),
+    );
+    expect(warn).toHaveBeenCalledWith('[dashboard] auth callback nonce mismatch');
+  });
+
+  it('rejects token on non-localhost host regardless of nonce', async () => {
+    const app = createApp(noApiFetch);
+
+    const res = await app.request(
+      'https://dash.void.cloud/auth/callback?token=test-jwt&login_nonce=devnonce',
+      {
+        headers: {
+          Cookie: 'void_auth_nonce=devnonce',
+          Host: 'dash.void.cloud',
+        },
+        redirect: 'manual',
+      },
+      { API_URL: 'https://api.void.cloud' },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('https://dash.void.cloud/login');
+    expect(res.headers.getSetCookie()).not.toEqual(
+      expect.arrayContaining([expect.stringContaining('void_token=')]),
+    );
+  });
+});

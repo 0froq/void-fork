@@ -29,6 +29,8 @@ import {
 } from '../db.ts';
 import { sendWelcomeEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
+import { isDevBypass } from '../env.ts';
+import { users } from '../schema.ts';
 import { isSignupAllowed, getAllowlist } from '../signup-allowlist.ts';
 
 const DEFAULT_REDIRECT_URI = 'https://api.void.cloud/auth/callback';
@@ -162,6 +164,64 @@ app.get('/login', async (context) => {
 
   const url = getGitHubAuthorizeUrl(context.env.GITHUB_CLIENT_ID, redirectUri, state);
   return context.redirect(url);
+});
+
+// GET /auth/dev-login?redirect=http://localhost:PORT/auth/callback — localhost-only, DEV_AUTH_BYPASS only
+app.get('/dev-login', async (context) => {
+  if (!isDevBypass(context.env)) {
+    return context.json({ error: 'not found' }, 404);
+  }
+
+  const redirect = context.req.query('redirect');
+  if (!redirect) {
+    return context.json({ error: 'redirect parameter is required' }, 400);
+  }
+
+  let redirectUrl: URL;
+  try {
+    redirectUrl = new URL(redirect);
+  } catch {
+    return context.json({ error: 'redirect must be a localhost URL' }, 400);
+  }
+  if (!isLocalhostRedirect(redirectUrl)) {
+    return context.json({ error: 'redirect must be a localhost URL' }, 400);
+  }
+
+  const user = await context
+    .get('db')
+    .select()
+    .from(users)
+    .limit(1)
+    .then((rows) => rows[0]);
+  if (!user) {
+    return context.json({ error: 'no seeded user — run pnpm -C packages/api setup' }, 404);
+  }
+
+  const jwt = await signJwt(
+    { sub: user.id, login: user.login, aud: 'api' },
+    context.env.JWT_SECRET,
+  );
+
+  const url = redirectUrl;
+  url.searchParams.set('token', jwt);
+  // 200 + JS redirect, not 302. `wrangler dev` rewrites `Location: http://localhost:*`
+  // headers (prepending the dev origin port), so a real 302 here arrives at the browser
+  // as `localhost:8787:8787:5173/...` and ERR_INVALID_REDIRECTs. Tests that run via
+  // `app.fetch` directly do not hit wrangler, so this code path returns the same HTML
+  // shape in both contexts and the test verifies the embedded target URL.
+  const target = url.toString();
+  // Encode for safe embedding inside a JS string literal. JWT content is ASCII-safe but
+  // be defensive — encodeURI is too coarse (it preserves quotes), JSON.stringify gives
+  // us a properly-escaped string literal.
+  const targetLiteral = JSON.stringify(target);
+  const body =
+    `<!doctype html><meta charset="utf-8"><title>Dev login</title>` +
+    `<script>location.replace(${targetLiteral})</script>` +
+    `<noscript><meta http-equiv="refresh" content="0;url=${target.replaceAll('"', '&quot;')}"></noscript>`;
+  return new Response(body, {
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  });
 });
 
 // GET /auth/callback?code=...&state=...

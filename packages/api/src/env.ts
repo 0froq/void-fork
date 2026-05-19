@@ -3,12 +3,17 @@ import type { Db } from './db.ts';
 import type { User } from './types.ts';
 
 /**
- * Returns true when DEV_AUTH_BYPASS is set and we are NOT in production.
- * Defaults to production for unknown PLATFORM_ENV values — only unset
- * (local dev) and "staging" are treated as non-production.
+ * Returns true when DEV_AUTH_BYPASS is exactly the string `'true'` and we are
+ * NOT in production.  Any other value — including `'false'`, `'0'`, `'no'`,
+ * `'TRUE'`, or an accidental typo — returns false (fail-closed).  Cloudflare
+ * env vars are always strings, so the strict equality guards against
+ * `DEV_AUTH_BYPASS='false'` accidentally enabling the bypass.
+ *
+ * PLATFORM_ENV defaults to production for unknown values — only unset
+ * (local dev) and `'staging'` are treated as non-production.
  */
 export function isDevBypass(env: { DEV_AUTH_BYPASS?: string; PLATFORM_ENV?: string }): boolean {
-  if (!env.DEV_AUTH_BYPASS) {
+  if (env.DEV_AUTH_BYPASS !== 'true') {
     return false;
   }
   const platformEnv = env.PLATFORM_ENV;
