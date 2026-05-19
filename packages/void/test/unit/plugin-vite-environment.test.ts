@@ -79,4 +79,70 @@ describe('voidPlugin Vite environments', () => {
       },
     });
   });
+
+  it('clears resolve.external from the worker environment configured by test runners', async () => {
+    const root = createProjectRoot();
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+
+    const config = await resolveConfig(
+      {
+        root,
+        plugins: [voidPlugin()],
+        environments: {
+          void_worker: {
+            resolve: {
+              external: ['node:fs'],
+              conditions: ['workerd'],
+            },
+            build: {
+              emptyOutDir: false,
+            },
+          },
+        },
+      },
+      'serve',
+      'test',
+    );
+
+    expect(config.environments.void_worker.resolve.external).toEqual([]);
+    expect(config.environments.void_worker.resolve.conditions).toContain('workerd');
+    expect(config.environments.void_worker.build).toMatchObject({
+      emptyOutDir: false,
+      outDir: 'dist/ssr',
+    });
+  });
+
+  it('clears resolve.external from class A framework worker environments', async () => {
+    const root = createProjectRoot();
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({
+        type: 'module',
+        dependencies: {
+          '@tanstack/react-start': '^1.0.0',
+        },
+      }),
+    );
+
+    const config = await resolveConfig(
+      {
+        root,
+        plugins: [voidPlugin()],
+        environments: {
+          ssr: {
+            resolve: {
+              external: ['node:fs'],
+              conditions: ['workerd'],
+            },
+          },
+        },
+      },
+      'serve',
+      'test',
+    );
+
+    expect(config.environments.ssr.resolve.external).toEqual([]);
+    expect(config.environments.ssr.resolve.conditions).toContain('workerd');
+  });
 });
