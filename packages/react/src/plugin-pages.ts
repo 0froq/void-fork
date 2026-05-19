@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, relative } from 'pathe';
-import type { Plugin, ResolvedConfig, ViteDevServer } from 'vite';
+import { normalizePath, type Plugin, type ResolvedConfig, type ViteDevServer } from 'vite';
 import { resolveStaticPageDataBuildOptions, scanPages } from 'void/pages';
 import type { PageScanResult, StaticPageDataBuildOptions } from 'void/pages';
 import { generateComponentManifest } from './pages-manifest.ts';
@@ -55,6 +55,7 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
   let isDev = false;
   let viteConfig: ResolvedConfig | undefined;
   const root = dirname(pagesDir);
+  const normalizedPagesDir = normalizePath(pagesDir);
   const pagesOptimizeEntries = `${relative(root, pagesDir)}/**/*.{js,jsx,ts,tsx}`;
   let pendingRescan: Promise<void> | null = null;
   const rescanPages = async () => {
@@ -125,10 +126,14 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
 
     configureServer(server) {
       const handlePagesChange = async (path: string, event: 'add' | 'change' | 'unlink') => {
-        if (!path.startsWith(pagesDir)) {
+        const normalizedPath = normalizePath(path);
+        if (
+          normalizedPath !== normalizedPagesDir &&
+          !normalizedPath.startsWith(normalizedPagesDir + '/')
+        ) {
           return;
         }
-        if (event === 'change' && !path.endsWith('.md')) {
+        if (event === 'change' && !normalizedPath.endsWith('.md')) {
           return;
         }
         await runRescan();

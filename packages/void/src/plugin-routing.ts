@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'pathe';
-import { loadEnv, type Plugin } from 'vite';
+import { loadEnv, normalizePath, type Plugin } from 'vite';
 import {
   hasDocumentRoutes,
   resolveAssetRoutingPolicy,
@@ -96,11 +96,22 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   const pagesDir = join(root, 'pages');
   const srcDir = join(root, 'src');
   const authConfigDir = root;
+  const normalizedRoutesDir = normalizePath(routesDir);
+  const normalizedMiddlewareDir = normalizePath(middlewareDir);
+  const normalizedJobsDir = normalizePath(jobsDir);
+  const normalizedQueuesDir = normalizePath(queuesDir);
+  const normalizedPagesDir = normalizePath(pagesDir);
+  const normalizedSrcDir = normalizePath(srcDir);
+  const normalizedAuthConfigDir = normalizePath(authConfigDir);
   const ssrEntryAbsPaths = new Set(
     [...SSR_SERVER_ENTRY_RELATIVE_PATHS, ...SSR_CLIENT_ENTRY_RELATIVE_PATHS].map((path) =>
-      join(root, path),
+      normalizePath(join(root, path)),
     ),
   );
+
+  function isInDirectory(path: string, directory: string): boolean {
+    return path === directory || path.startsWith(directory + '/');
+  }
 
   function writeRouteTypes() {
     if (!scan) {
@@ -280,10 +291,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   }
 
   function isPotentialAuthConfigPath(path: string): boolean {
-    if (!path.startsWith(authConfigDir + '/')) {
+    if (!isInDirectory(path, normalizedAuthConfigDir)) {
       return false;
     }
-    const rel = path.slice(authConfigDir.length + 1);
+    const rel = path.slice(normalizedAuthConfigDir.length + 1);
     return /^auth\.(c|m)?[jt]s$/.test(rel);
   }
 
@@ -559,19 +570,23 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       const watcher = devServer.watcher;
 
       const handleFileChange = async (path: string, event: 'add' | 'change' | 'unlink') => {
+        const normalizedPath = normalizePath(path);
         if (
-          !path.startsWith(routesDir) &&
-          !path.startsWith(middlewareDir) &&
-          !path.startsWith(jobsDir) &&
-          !path.startsWith(queuesDir) &&
-          !path.startsWith(pagesDir) &&
-          !path.startsWith(srcDir) &&
-          !isPotentialAuthConfigPath(path)
+          !isInDirectory(normalizedPath, normalizedRoutesDir) &&
+          !isInDirectory(normalizedPath, normalizedMiddlewareDir) &&
+          !isInDirectory(normalizedPath, normalizedJobsDir) &&
+          !isInDirectory(normalizedPath, normalizedQueuesDir) &&
+          !isInDirectory(normalizedPath, normalizedPagesDir) &&
+          !isInDirectory(normalizedPath, normalizedSrcDir) &&
+          !isPotentialAuthConfigPath(normalizedPath)
         ) {
           return;
         }
 
-        if (path.startsWith(srcDir) && !ssrEntryAbsPaths.has(path)) {
+        if (
+          isInDirectory(normalizedPath, normalizedSrcDir) &&
+          !ssrEntryAbsPaths.has(normalizedPath)
+        ) {
           return;
         }
 
@@ -628,7 +643,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         const structural = event !== 'change';
 
         const pageManifestChanged =
-          path.startsWith(pagesDir) && (structural || path.endsWith('.md'));
+          isInDirectory(normalizedPath, normalizedPagesDir) &&
+          (structural || normalizedPath.endsWith('.md'));
         for (const env of Object.values(devServer.environments)) {
           if (pageManifestChanged) {
             for (const id of PAGE_VIRTUAL_MODULE_IDS) {
@@ -650,7 +666,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         // Reload the browser for island page changes — islands are
         // server-rendered only, so there's no client HMR to handle updates.
         // .md pages are implicit islands (no client JS), so reload those too.
-        if (/\.island\./.test(path) || path.endsWith('.md')) {
+        if (/\.island\./.test(normalizedPath) || normalizedPath.endsWith('.md')) {
           devServer.environments.client?.hot.send({ type: 'full-reload' });
         }
       };

@@ -191,9 +191,14 @@ export function watchPagesForRescan(
 ): { flush: () => Promise<void> } {
   let pending: Promise<void> | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const normalizedPagesDir = normalizePath(pagesDir);
 
   const scheduleRescan = (path: string) => {
-    if (!path.startsWith(pagesDir)) {
+    const normalizedPath = normalizePath(path);
+    if (
+      normalizedPath !== normalizedPagesDir &&
+      !normalizedPath.startsWith(normalizedPagesDir + '/')
+    ) {
       return;
     }
     if (debounceTimer) {
@@ -217,7 +222,7 @@ export function watchPagesForRescan(
   server.watcher.on('add', scheduleRescan);
   server.watcher.on('unlink', scheduleRescan);
   server.watcher.on('change', (path) => {
-    if (path.endsWith('.md')) {
+    if (normalizePath(path).endsWith('.md')) {
       scheduleRescan(path);
     }
   });
