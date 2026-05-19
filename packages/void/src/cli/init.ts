@@ -118,7 +118,7 @@ const EMPTY_PROJECT_ALLOWED_ENTRIES = new Set([
   '.zencoder',
 ]);
 
-const PNPM_ALLOWED_BUILDS = ['better-sqlite3', 'esbuild', 'workerd'] as const;
+const PNPM_ALLOWED_BUILDS = ['better-sqlite3', 'esbuild', 'sharp', 'workerd'] as const;
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
 
 const EMPTY_PROJECT_ALLOWED_PACKAGES = new Set([
@@ -2243,7 +2243,7 @@ function scaffoldPagesApp(
   // but `isPnpmProject(root, pkg)` walks ancestors and (after round 43)
   // verifies membership. Gate the allowlist on the ancestor-aware check
   // so the workspace gets `allowBuilds` and its
-  // better-sqlite3 / esbuild / workerd postinstalls run on the next
+  // better-sqlite3 / esbuild / sharp / workerd postinstalls run on the next
   // workspace-root `pnpm install`.
   if (isPnpmProject(root, pkg)) {
     ensurePnpmAllowBuilds(root, pkg);
@@ -3025,7 +3025,7 @@ export function ensureVoidDependency(root: string): boolean {
   // Mirror `scaffoldPagesApp`'s pnpm build approval config. pnpm requires
   // build scripts to be approved through `allowBuilds`; without this, the freshly scaffolded
   // demo breaks on first local DB / dev commands because
-  // `better-sqlite3`/`esbuild`/`workerd` never run their postinstall
+  // `better-sqlite3`/`esbuild`/`sharp`/`workerd` never run their postinstall
   // build steps. Honor both pnpm signals via `isPnpmProject` — a committed
   // `pnpm-lock.yaml` OR a `package.json#packageManager: pnpm` Corepack pin.
   // The lockfile-only check used to miss the no-lockfile pin case, which

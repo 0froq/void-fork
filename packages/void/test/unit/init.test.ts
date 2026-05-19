@@ -40,6 +40,7 @@ function expectPnpmAllowBuilds(root: string): void {
   expect(yaml).toContain('allowBuilds:\n');
   expect(yaml).toContain('  better-sqlite3: true');
   expect(yaml).toContain('  esbuild: true');
+  expect(yaml).toContain('  sharp: true');
   expect(yaml).toContain('  workerd: true');
   expect(yaml).not.toContain('onlyBuiltDependencies:');
 }
@@ -4007,7 +4008,7 @@ export default config;
   // for a workspace subpackage with no local lockfile / Corepack pin,
   // `detectProjectState` returns `'npm'` — the pnpm branch never fires
   // and the subpackage's built-deps allowlist is silently dropped,
-  // which suppresses better-sqlite3 / esbuild / workerd postinstalls on
+  // which suppresses better-sqlite3 / esbuild / sharp / workerd postinstalls on
   // the next workspace-root `pnpm install`. Gate the allowlist on the
   // ancestor-aware `isPnpmProject` check instead.
   it('writes pnpm allowBuilds for a pnpm workspace subpackage (Round 44)', async () => {
