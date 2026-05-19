@@ -206,7 +206,7 @@ export function watchPagesForRescan(
     }
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      pending = scanPages(root).then((pageScan) => {
+      pending = scanPages(root, { pagesDir }).then((pageScan) => {
         onRescan(pageScan);
         for (const env of Object.values(server.environments)) {
           const mod = env.moduleGraph.getModuleById('\0' + ISLANDS_RENDERER_ID);

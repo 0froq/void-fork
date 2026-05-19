@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'pathe';
 import { glob, globSync } from 'tinyglobby';
 import { parseSync } from 'vite';
+import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import {
   isCallExpression,
   isIdentifier,
@@ -144,9 +145,13 @@ export function detectWebSocketDefinition(absPath: string): WebSocketSourceInfo 
   return null;
 }
 
-function buildWebSocketRoute(root: string, filePath: string): WebSocketRouteDefinition {
+function buildWebSocketRoute(
+  root: string,
+  filePath: string,
+  paths = readProjectPaths(root),
+): WebSocketRouteDefinition {
   const parsed = parseWebSocketFilename(filePath);
-  const info = detectWebSocketDefinition(join(root, 'routes', filePath));
+  const info = detectWebSocketDefinition(join(paths.routesDir, filePath));
   const className = deriveWebSocketClassName(filePath);
 
   return {
@@ -158,11 +163,15 @@ function buildWebSocketRoute(root: string, filePath: string): WebSocketRouteDefi
   };
 }
 
-function parseWebSocketFiles(root: string, files: Array<string>): Array<WebSocketRouteDefinition> {
+function parseWebSocketFiles(
+  root: string,
+  files: Array<string>,
+  paths = readProjectPaths(root),
+): Array<WebSocketRouteDefinition> {
   return files
     .filter((f) => isWebSocketRouteFile(f))
     .filter((f) => !f.split('/').some((segment) => segment.startsWith('_')))
-    .map((filePath) => buildWebSocketRoute(root, filePath))
+    .map((filePath) => buildWebSocketRoute(root, filePath, paths))
     .sort((a, b) => {
       if (a.catchAll !== b.catchAll) {
         return a.catchAll ? 1 : -1;
@@ -171,23 +180,29 @@ function parseWebSocketFiles(root: string, files: Array<string>): Array<WebSocke
     });
 }
 
-export async function scanWebSocketRoutes(root: string): Promise<Array<WebSocketRouteDefinition>> {
+export async function scanWebSocketRoutes(
+  root: string,
+  paths: ProjectPaths = readProjectPaths(root),
+): Promise<Array<WebSocketRouteDefinition>> {
   const pattern = `**/*.{${HANDLER_EXTENSIONS.join(',')}}`;
-  const files = await glob(pattern, { cwd: `${root}/routes`, absolute: false }).catch(
+  const files = await glob(pattern, { cwd: paths.routesDir, absolute: false }).catch(
     () => [] as Array<string>,
   );
-  return parseWebSocketFiles(root, files);
+  return parseWebSocketFiles(root, files, paths);
 }
 
-export function scanWebSocketRoutesSync(root: string): Array<WebSocketRouteDefinition> {
+export function scanWebSocketRoutesSync(
+  root: string,
+  paths: ProjectPaths = readProjectPaths(root),
+): Array<WebSocketRouteDefinition> {
   const pattern = `**/*.{${HANDLER_EXTENSIONS.join(',')}}`;
   let files: Array<string>;
   try {
-    files = globSync(pattern, { cwd: `${root}/routes`, absolute: false });
+    files = globSync(pattern, { cwd: paths.routesDir, absolute: false });
   } catch {
     files = [];
   }
-  return parseWebSocketFiles(root, files);
+  return parseWebSocketFiles(root, files, paths);
 }
 
 export function isWebSocketPatternFile(filePath: string): boolean {

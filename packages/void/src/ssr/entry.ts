@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'pathe';
+import { join, relative } from 'pathe';
 import { parseSync } from 'vite';
+import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import {
   isIdentifier,
   type AstCallExpression,
@@ -34,11 +35,12 @@ function resolveSingleEntry(
   root: string,
   entries: ReadonlyArray<string>,
   label: string,
+  paths: ProjectPaths = readProjectPaths(root),
 ): ResolvedEntry | null {
   const matches = entries
-    .map((relativePath) => ({
-      relativePath,
-      absolutePath: join(root, relativePath),
+    .map((entryName) => ({
+      relativePath: relative(root, join(paths.ssrDir, entryName)).replace(/\\/g, '/'),
+      absolutePath: join(paths.ssrDir, entryName),
     }))
     .filter((entry) => existsSync(entry.absolutePath));
 
@@ -52,13 +54,19 @@ function resolveSingleEntry(
   return matches[0];
 }
 
-export function getSsrServerEntryPath(root: string): string | null {
-  const entry = resolveSingleEntry(root, SSR_SERVER_ENTRY_RELATIVE_PATHS, 'SSR');
+const SSR_SERVER_ENTRY_NAMES = ['main.ssr.ts', 'main.ssr.tsx'] as const;
+const SSR_CLIENT_ENTRY_NAMES = ['main.client.ts', 'main.client.tsx'] as const;
+
+export function getSsrServerEntryPath(
+  root: string,
+  paths: ProjectPaths = readProjectPaths(root),
+): string | null {
+  const entry = resolveSingleEntry(root, SSR_SERVER_ENTRY_NAMES, 'SSR', paths);
   return entry?.absolutePath ?? null;
 }
 
-export function hasSsrEntry(root: string): boolean {
-  return getSsrServerEntryPath(root) !== null;
+export function hasSsrEntry(root: string, paths: ProjectPaths = readProjectPaths(root)): boolean {
+  return getSsrServerEntryPath(root, paths) !== null;
 }
 
 function validateServerRenderExport(entry: ResolvedEntry): void {
@@ -134,9 +142,12 @@ function validateServerRenderExport(entry: ResolvedEntry): void {
  * Validate SSR mode entry conventions.
  * Returns null when SSR mode is not used.
  */
-export function validateSsrEntries(root: string): SsrEntries | null {
-  const server = resolveSingleEntry(root, SSR_SERVER_ENTRY_RELATIVE_PATHS, 'SSR');
-  const client = resolveSingleEntry(root, SSR_CLIENT_ENTRY_RELATIVE_PATHS, 'SSR client');
+export function validateSsrEntries(
+  root: string,
+  paths: ProjectPaths = readProjectPaths(root),
+): SsrEntries | null {
+  const server = resolveSingleEntry(root, SSR_SERVER_ENTRY_NAMES, 'SSR', paths);
+  const client = resolveSingleEntry(root, SSR_CLIENT_ENTRY_NAMES, 'SSR client', paths);
 
   if (!server && !client) {
     return null;
@@ -159,8 +170,11 @@ export function validateSsrEntries(root: string): SsrEntries | null {
   };
 }
 
-export function validateSsrEntry(root: string): string | null {
-  return validateSsrEntries(root)?.server.absolutePath ?? null;
+export function validateSsrEntry(
+  root: string,
+  paths: ProjectPaths = readProjectPaths(root),
+): string | null {
+  return validateSsrEntries(root, paths)?.server.absolutePath ?? null;
 }
 
 const PRERENDER_RE = /export\s+const\s+prerender\s*=\s*true\s*;/;
@@ -172,8 +186,9 @@ const GET_PRERENDER_PATHS_RE = /export\s+(?:async\s+)?function\s+getPrerenderPat
  */
 export function detectSsrPrerender(
   root: string,
+  paths: ProjectPaths = readProjectPaths(root),
 ): { prerender: boolean; hasGetPrerenderPaths: boolean } | null {
-  const entryPath = getSsrServerEntryPath(root);
+  const entryPath = getSsrServerEntryPath(root, paths);
   if (!entryPath) {
     return null;
   }

@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { join } from 'pathe';
 import type { Plugin } from 'vite';
+import { readProjectPaths } from './project-paths.ts';
 
 /** Imports that require CF bindings and are not available in Node.js mode. */
 export const CF_ONLY_IMPORTS: Array<string> = [
@@ -144,7 +145,7 @@ export function nodeTargetPlugin(target: NodeTarget): Array<Plugin> {
 
       // Pages apps need dual builds: client (React hydration) + SSR (server entry).
       // API-only apps need a single SSR build.
-      if (existsSync(join(root, 'pages'))) {
+      if (existsSync(readProjectPaths(root).pagesDir)) {
         return {
           build: { outDir: 'dist/client' },
           environments: {

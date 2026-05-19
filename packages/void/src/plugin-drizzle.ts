@@ -6,6 +6,7 @@ import { DRIZZLE_OPERATORS, generateDbDts } from './codegen/db-types.ts';
 import { ensureProjectTsconfig } from './codegen/project-tsconfig.ts';
 import { discoverSchema } from './drizzle/discover.ts';
 import { voidWarn } from './log.ts';
+import { readProjectPaths } from './project-paths.ts';
 
 // Resolve drizzle-orm paths from void's own deps so they work in any project
 // (including metaframeworks where drizzle-orm isn't a direct dependency).
@@ -41,12 +42,14 @@ export function drizzlePlugin(
   options: DrizzlePluginOptions = {},
 ): Plugin {
   const outDir = join(root, '.void');
-  const schema = discoverSchema(root);
+  const paths = readProjectPaths(root);
+  const schema = discoverSchema(root, paths);
   const hasDbRuntime = schema != null || options.forceVirtualDb === true;
 
   // Always write tsconfig (for routes.d.ts, queues.d.ts, etc.)
   ensureProjectTsconfig(root, hasRouteTypes, hasDbRuntime, schema != null, {
     redirectDbModule: options.redirectDbTypePaths,
+    paths,
   });
 
   // Generate db.d.ts when void/db is available, even without a user schema.
@@ -213,7 +216,7 @@ export function createDb(d1) {
       }
 
       // Check for schema drift on startup
-      const migrationsDir = join(root, 'db', 'migrations');
+      const migrationsDir = paths.migrationsDir;
       const hasMigrations =
         existsSync(migrationsDir) && readdirSync(migrationsDir).some((f) => f.endsWith('.sql'));
 
@@ -232,7 +235,7 @@ export function createDb(d1) {
         }
 
         voidWarn(
-          'Schema found but no migrations in db/migrations/.\n' +
+          `Schema found but no migrations in ${paths.sourceRelative('db/migrations')}/.\n` +
             '         `void db push` syncs the schema to your local DB without creating migration files.\n' +
             '         Run `void db generate` to create migration files for dev startup and deploy.',
         );

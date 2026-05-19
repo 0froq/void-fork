@@ -15,6 +15,7 @@ import { readConfig, getDatabaseDialect } from '../config.ts';
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { collectMigrations, readJournal } from '../migrations/collect.ts';
 import { assertJournalCoherence, listDrizzleArtifacts } from '../migrations/validate.ts';
+import { readProjectPaths } from '../project-paths.ts';
 import type { GenArgs } from './gen-args.ts';
 import { cliTitle } from './output.ts';
 import { buildDrizzleKitSpawnEnv } from './yarn-pnp.ts';
@@ -479,9 +480,10 @@ async function runModel(root: string, name: string, columns: Array<ColumnSpec>):
   const validator = await resolveValidator(root);
 
   const dialect = getDatabaseDialect(readConfig(root));
+  const paths = readProjectPaths(root);
 
-  const schemaDir = join(root, 'db', 'schema');
-  const barrelPath = join(root, 'db', 'schema.ts');
+  const schemaDir = paths.schemaDir;
+  const barrelPath = paths.schemaFile;
   const modelPath = join(schemaDir, `${name}.ts`);
 
   // 1. Generate Drizzle table definition
@@ -541,24 +543,24 @@ async function runModel(root: string, name: string, columns: Array<ColumnSpec>):
   }
 
   // 3. Regenerate .void/tsconfig.json and db.d.ts
-  ensureProjectTsconfig(root, undefined, true, true);
+  ensureProjectTsconfig(root, undefined, true, true, { paths });
 
   log.success(`Created ${relative(root, modelPath)}`);
   log.success(`Updated ${relative(root, barrelPath)}`);
 
   // 4. Routes: routes/api/<name>/index.ts
-  const routeIndexPath = join(root, 'routes', 'api', name, 'index.ts');
+  const routeIndexPath = join(paths.routesDir, 'api', name, 'index.ts');
   writeIfNotExists(routeIndexPath, generateIndexRoute(name, columns, validator));
 
   // 5. Route: routes/api/<name>/[id].ts
-  const routeIdPath = join(root, 'routes', 'api', name, '[id].ts');
+  const routeIdPath = join(paths.routesDir, 'api', name, '[id].ts');
   writeIfNotExists(routeIdPath, generateIdRoute(name, validator));
 
   outro('Model scaffolding complete. Run `void db push` to apply.');
 }
 
 function runMigration(root: string, name: string): void {
-  const migrationsDir = join(root, 'db', 'migrations');
+  const migrationsDir = readProjectPaths(root).migrationsDir;
   mkdirSync(migrationsDir, { recursive: true });
 
   // Drift / partial-state gate. Run the same check the rest of the db
@@ -873,7 +875,7 @@ function runMigration(root: string, name: string): void {
 }
 
 function runRoute(root: string, routePath: string, methods: Array<string>): void {
-  const filePath = join(root, 'routes', routePath + '.ts');
+  const filePath = join(readProjectPaths(root).routesDir, routePath + '.ts');
   const exports = methods
     .map((m) => {
       const upper = m.toUpperCase();
@@ -893,7 +895,7 @@ ${exports}
 }
 
 function runMiddleware(root: string, name: string): void {
-  const middlewareDir = join(root, 'middleware');
+  const middlewareDir = readProjectPaths(root).middlewareDir;
   mkdirSync(middlewareDir, { recursive: true });
 
   const num = getNextMiddlewareNumber(middlewareDir);
@@ -911,7 +913,7 @@ export default defineMiddleware(async (c, next) => {
 }
 
 function runCron(root: string, name: string): void {
-  const filePath = join(root, 'crons', name + '.ts');
+  const filePath = join(readProjectPaths(root).cronsDir, name + '.ts');
   const content = `import { defineScheduled } from "void";
 
 export const cron = "* * * * *";
@@ -926,7 +928,7 @@ export default defineScheduled(async (controller, env) => {
 }
 
 function runQueue(root: string, name: string): void {
-  const filePath = join(root, 'queues', name + '.ts');
+  const filePath = join(readProjectPaths(root).queuesDir, name + '.ts');
   const content = `import { defineQueue } from "void";
 
 type Message = {};
@@ -999,8 +1001,9 @@ function detectFramework(root: string): 'react' | 'vue' | 'svelte' | 'solid' {
 // ---------------------------------------------------------------------------
 
 function writeReactSsr(root: string): void {
+  const ssrDir = readProjectPaths(root).ssrDir;
   writeIfNotExists(
-    join(root, 'src/main.ssr.tsx'),
+    join(ssrDir, 'main.ssr.tsx'),
     `import { renderToString } from "react-dom/server";
 import { defineRender } from "void";
 import App from "./App";
@@ -1029,7 +1032,7 @@ export default defineRender(async (c, assetTags) => {
   );
 
   writeIfNotExists(
-    join(root, 'src/main.client.tsx'),
+    join(ssrDir, 'main.client.tsx'),
     `import { hydrateRoot } from "react-dom/client";
 import App from "./App";
 
@@ -1038,7 +1041,7 @@ hydrateRoot(document.getElementById("root")!, <App />);
   );
 
   writeIfNotExists(
-    join(root, 'src/App.tsx'),
+    join(ssrDir, 'App.tsx'),
     `import { useState } from "react";
 
 export default function App() {
@@ -1058,8 +1061,9 @@ export default function App() {
 }
 
 function writeVueSsr(root: string): void {
+  const ssrDir = readProjectPaths(root).ssrDir;
   writeIfNotExists(
-    join(root, 'src/main.ssr.ts'),
+    join(ssrDir, 'main.ssr.ts'),
     `import { createSSRApp } from "vue";
 import { renderToString } from "vue/server-renderer";
 import { defineRender } from "void";
@@ -1090,7 +1094,7 @@ export default defineRender(async (c, assetTags) => {
   );
 
   writeIfNotExists(
-    join(root, 'src/main.client.ts'),
+    join(ssrDir, 'main.client.ts'),
     `import { createSSRApp } from "vue";
 import App from "./App.vue";
 
@@ -1100,7 +1104,7 @@ app.mount("#app");
   );
 
   writeIfNotExists(
-    join(root, 'src/App.vue'),
+    join(ssrDir, 'App.vue'),
     `<script setup lang="ts">
 import { ref } from "vue";
 
@@ -1118,8 +1122,9 @@ const count = ref(0);
 }
 
 function writeSvelteSsr(root: string): void {
+  const ssrDir = readProjectPaths(root).ssrDir;
   writeIfNotExists(
-    join(root, 'src/main.ssr.ts'),
+    join(ssrDir, 'main.ssr.ts'),
     `import { render } from "svelte/server";
 import { defineRender } from "void";
 import App from "./App.svelte";
@@ -1148,7 +1153,7 @@ export default defineRender(async (c, assetTags) => {
   );
 
   writeIfNotExists(
-    join(root, 'src/main.client.ts'),
+    join(ssrDir, 'main.client.ts'),
     `import { hydrate } from "svelte";
 import App from "./App.svelte";
 
@@ -1157,7 +1162,7 @@ hydrate(App, { target: document.getElementById("app")! });
   );
 
   writeIfNotExists(
-    join(root, 'src/App.svelte'),
+    join(ssrDir, 'App.svelte'),
     `<script>
   let count = $state(0);
 </script>
@@ -1171,8 +1176,9 @@ hydrate(App, { target: document.getElementById("app")! });
 }
 
 function writeSolidSsr(root: string): void {
+  const ssrDir = readProjectPaths(root).ssrDir;
   writeIfNotExists(
-    join(root, 'src/main.ssr.tsx'),
+    join(ssrDir, 'main.ssr.tsx'),
     `import { renderToString } from "solid-js/web";
 import { defineRender } from "void";
 import App from "./App";
@@ -1201,7 +1207,7 @@ export default defineRender(async (c, assetTags) => {
   );
 
   writeIfNotExists(
-    join(root, 'src/main.client.tsx'),
+    join(ssrDir, 'main.client.tsx'),
     `import { hydrate } from "solid-js/web";
 import App from "./App";
 
@@ -1210,7 +1216,7 @@ hydrate(() => <App />, document.getElementById("app")!);
   );
 
   writeIfNotExists(
-    join(root, 'src/App.tsx'),
+    join(ssrDir, 'App.tsx'),
     `import { createSignal } from "solid-js";
 
 export default function App() {

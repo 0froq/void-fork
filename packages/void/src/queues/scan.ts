@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'pathe';
+import { isAbsolute, join } from 'pathe';
 import { glob, globSync } from 'tinyglobby';
 
 const QUEUE_EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
@@ -40,11 +40,12 @@ function parseQueueFiles(
   queuesDir: string,
   files: Array<string>,
 ): Array<QueueDefinition> {
+  const queuesDirPath = isAbsolute(queuesDir) ? queuesDir : join(root, queuesDir);
   return files
     .filter((filePath) => !filePath.split('/').some((segment) => segment.startsWith('_')))
     .sort((leftFilePath, rightFilePath) => leftFilePath.localeCompare(rightFilePath))
     .map((filePath) => {
-      const absPath = join(root, queuesDir, filePath);
+      const absPath = join(queuesDirPath, filePath);
       const source = readFileSync(absPath, 'utf-8');
       const name = extractName(filePath);
       return {
@@ -64,7 +65,8 @@ export async function scanQueues(
   queuesDir = 'queues',
 ): Promise<Array<QueueDefinition>> {
   const pattern = `**/*.{${QUEUE_EXTENSIONS.join(',')}}`;
-  const files = await glob(pattern, { cwd: `${root}/${queuesDir}`, absolute: false }).catch(
+  const queuesDirPath = isAbsolute(queuesDir) ? queuesDir : join(root, queuesDir);
+  const files = await glob(pattern, { cwd: queuesDirPath, absolute: false }).catch(
     () => [] as Array<string>,
   );
   return parseQueueFiles(root, queuesDir, files);
@@ -74,7 +76,8 @@ export function scanQueuesSync(root: string, queuesDir = 'queues'): Array<QueueD
   const pattern = `**/*.{${QUEUE_EXTENSIONS.join(',')}}`;
   let files: Array<string>;
   try {
-    files = globSync(pattern, { cwd: `${root}/${queuesDir}`, absolute: false });
+    const queuesDirPath = isAbsolute(queuesDir) ? queuesDir : join(root, queuesDir);
+    files = globSync(pattern, { cwd: queuesDirPath, absolute: false });
   } catch {
     files = [];
   }

@@ -11,25 +11,30 @@ const ENV_PUBLIC_DIST = join(PACKAGE_ROOT, 'dist', 'runtime', 'env-public.mjs');
 
 const roots: Array<string> = [];
 
-function createProject(options: { withSources?: boolean } = {}): string {
+function createProject(options: { withSources?: boolean; sourceDir?: string } = {}): string {
   const root = mkdtempSync(join(tmpdir(), 'void-prepare-cli-'));
   roots.push(root);
 
+  if (options.sourceDir) {
+    writeFileSync(join(root, 'void.json'), JSON.stringify({ sourceDir: options.sourceDir }));
+  }
+
   if (options.withSources) {
     const envPublicUrl = pathToFileURL(ENV_PUBLIC_DIST).href;
-    mkdirSync(join(root, 'routes', 'api'), { recursive: true });
-    mkdirSync(join(root, 'db'), { recursive: true });
+    const sourceRoot = options.sourceDir ? join(root, options.sourceDir) : root;
+    mkdirSync(join(sourceRoot, 'routes', 'api'), { recursive: true });
+    mkdirSync(join(sourceRoot, 'db'), { recursive: true });
     writeFileSync(
-      join(root, 'env.ts'),
+      join(sourceRoot, 'env.ts'),
       `import { defineEnv, string } from "${envPublicUrl}";\n` +
         'export default defineEnv({ API_KEY: string() });\n',
     );
     writeFileSync(
-      join(root, 'routes', 'api', 'hello.ts'),
+      join(sourceRoot, 'routes', 'api', 'hello.ts'),
       'export const GET = { __validators: {}, __output: {} };\n',
       { encoding: 'utf8' },
     );
-    writeFileSync(join(root, 'db', 'schema.ts'), 'export const users = {};\n', {
+    writeFileSync(join(sourceRoot, 'db', 'schema.ts'), 'export const users = {};\n', {
       encoding: 'utf8',
     });
   }
@@ -108,5 +113,29 @@ describe('void prepare (subprocess)', () => {
     expect(existsSync(join(root, '.void', 'routes.d.ts'))).toBe(false);
     expect(existsSync(join(root, '.void', 'db.d.ts'))).toBe(false);
     expect(existsSync(join(root, '.void', 'env.d.ts'))).toBe(false);
+  });
+
+  it('generates project-local files from sourceDir conventions', () => {
+    const root = createProject({ withSources: true, sourceDir: 'src' });
+    mkdirSync(join(root, 'routes', 'api'), { recursive: true });
+    writeFileSync(join(root, 'routes', 'api', 'ignored.ts'), 'export const GET = {};\n');
+
+    const { stdout, status } = runVoid(root, ['prepare']);
+
+    expect(status).toBe(0);
+    expect(stdout).toContain('Project codegen is ready');
+
+    const outDir = join(root, '.void');
+    const routesDts = readFileSync(join(outDir, 'routes.d.ts'), 'utf8');
+    const envDts = readFileSync(join(outDir, 'env.d.ts'), 'utf8');
+    const tsconfig = JSON.parse(readFileSync(join(outDir, 'tsconfig.json'), 'utf8')) as {
+      compilerOptions?: { paths?: Record<string, Array<string>> };
+    };
+
+    expect(routesDts).toContain('typeof import("../src/routes/api/hello.ts")');
+    expect(routesDts).not.toContain('ignored.ts');
+    expect(envDts).toContain('typeof import("../src/env.ts")');
+    expect(tsconfig.compilerOptions?.paths?.['@schema']).toEqual(['../src/db/schema.ts']);
+    expect(tsconfig.compilerOptions?.paths?.['@schema/*']).toEqual(['../src/db/schema/*']);
   });
 });

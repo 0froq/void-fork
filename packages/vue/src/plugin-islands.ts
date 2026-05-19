@@ -77,9 +77,12 @@ function extractCss(filePath: string): string {
   return parts.join('\n');
 }
 
-export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
+export function islandsPlugin(
+  pagesDir: string,
+  options?: { root?: string },
+): ReadonlyArray<Plugin> {
   let pageScan: PageScanResult | null = null;
-  const root = dirname(pagesDir);
+  const root = options?.root ?? dirname(pagesDir);
   const islandManifest = new Map<string, IslandEntry>();
   const islandCssFiles = new Set<string>();
   let isDev = false;
@@ -112,7 +115,7 @@ export function islandsPlugin(pagesDir: string): ReadonlyArray<Plugin> {
 
       async buildStart() {
         if (existsSync(pagesDir)) {
-          pageScan = await scanPages(root);
+          pageScan = await scanPages(root, { pagesDir });
           // Pre-scan island pages to populate the manifest eagerly.
           // This is needed because the client build may load the virtual
           // islands-client entry before island page transforms run.

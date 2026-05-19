@@ -3,6 +3,7 @@ import { join } from 'pathe';
 import type { Plugin } from 'vite';
 import type { DatabaseDialect } from './config.ts';
 import { voidLog, voidWarn, voidError } from './log.ts';
+import { readProjectPaths } from './project-paths.ts';
 
 function readDatabaseUrl(root: string): string | undefined {
   const envPath = join(root, '.env.local');
@@ -52,7 +53,8 @@ export function migrationPlugin(
     apply: 'serve',
 
     async configureServer(server) {
-      const migrationsDir = join(root, 'db', 'migrations');
+      const paths = readProjectPaths(root);
+      const migrationsDir = paths.migrationsDir;
       const hasSqlMigrations = existsSync(migrationsDir);
       if (!hasSqlMigrations && !auth?.enabled) {
         return;

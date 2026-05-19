@@ -43,6 +43,7 @@ import {
   type DetectedFramework,
 } from '../plugin-inference.ts';
 import { collectPrerenderPaths, collectPrerenderPathsNode } from '../prerender.ts';
+import { readProjectPaths, resolveProjectPaths } from '../project-paths.ts';
 import { scanQueuesSync } from '../queues/scan.ts';
 import { scanRoutes } from '../router/scan.ts';
 import { scanWebSocketRoutesSync } from '../router/websocket.ts';
@@ -1055,10 +1056,11 @@ async function runFrameworkDeploy(
   const inferenceOptions = voidConfig.inference?.bindings
     ? { bindings: voidConfig.inference.bindings }
     : undefined;
+  const paths = resolveProjectPaths(root, voidConfig);
   const scanDirs = voidConfig.inference?.scanDirs ?? FRAMEWORK_SCAN_DIRS;
-  const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
+  const bindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
   const authEnabled =
-    bindings.needsAuth || findVoidAuthConfig(root) !== null || voidConfig.auth !== undefined;
+    bindings.needsAuth || findVoidAuthConfig(root, paths) !== null || voidConfig.auth !== undefined;
 
   if (authEnabled) {
     log.error(
@@ -1071,7 +1073,7 @@ async function runFrameworkDeploy(
     process.exit(1);
   }
 
-  const migrationsDir = join(root, 'db', 'migrations');
+  const migrationsDir = paths.migrationsDir;
 
   assertDeploySchemaDriftFree(root, dialect);
 
@@ -1125,8 +1127,8 @@ async function runFrameworkDeploy(
   }
 
   // 5. Generate wrapper if needed (crons or queues present)
-  const rawJobs = scanJobsSync(root);
-  const rawQueues = scanQueuesSync(root);
+  const rawJobs = scanJobsSync(root, paths.cronsDir);
+  const rawQueues = scanQueuesSync(root, paths.queuesDir);
   const originalEntry = join(workerDir, fwPreset.workerMain);
 
   const wrapperFeatures: WrapperFeatures = {
@@ -1372,15 +1374,18 @@ async function runFullDeploy(
 
   // 6. Infer bindings (expanded scan dirs in framework mode, or custom from config)
   const deployConfig = readConfig(root);
+  const paths = resolveProjectPaths(root, deployConfig);
   const dialect = getDatabaseDialect(deployConfig);
   const deployScanDirs =
     deployConfig.inference?.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
-  const bindings = inferProjectBindings(root, undefined, deployScanDirs);
+  const bindings = inferProjectBindings(root, { paths }, deployScanDirs);
   if (isSandboxEnabled(deployConfig)) {
     bindings.needsSandbox = true;
   }
   const authEnabled =
-    bindings.needsAuth || findVoidAuthConfig(root) !== null || deployConfig.auth !== undefined;
+    bindings.needsAuth ||
+    findVoidAuthConfig(root, paths) !== null ||
+    deployConfig.auth !== undefined;
   const effectiveBindings = authEnabled
     ? { ...bindings, needsAuth: true, needsD1: true }
     : bindings;
@@ -1429,7 +1434,7 @@ async function runFullDeploy(
   lintDestinationSplats(redirectRules, 'redirects/rewrites (pre-asset)');
   lintDestinationSplats(fallbackRules, 'fallbacks (post-asset)');
 
-  const migrationsDir = join(root, 'db', 'migrations');
+  const migrationsDir = paths.migrationsDir;
 
   assertDeploySchemaDriftFree(root, dialect);
 
@@ -1485,14 +1490,14 @@ async function runFullDeploy(
   }
   const workerDirName = resolveWorkerDirName(distDir, fwPreset, frameworkBuildCmd);
 
-  const schedules = scanJobsSync(root).flatMap((job) =>
+  const schedules = scanJobsSync(root, paths.cronsDir).flatMap((job) =>
     job.crons.map((cron) => ({
       name: job.name,
       cron,
     })),
   );
-  const routeScan = await scanRoutes(root, { output: deployConfig.output });
-  const webSockets = routeScan.websockets ?? scanWebSocketRoutesSync(root);
+  const routeScan = await scanRoutes(root, { output: deployConfig.output, paths });
+  const webSockets = routeScan.websockets ?? scanWebSocketRoutesSync(root, paths);
   const liveConfig = await resolveDeployLiveBindingConfig(root, client, config.projectId, {
     isFrameworkMode,
     needsLive: effectiveBindings.needsLive,
@@ -1500,20 +1505,20 @@ async function runFullDeploy(
     sandboxClassName: sandboxConfig?.className,
     cliLog,
   });
-  const queues = scanQueuesSync(root).map((q) => ({
+  const queues = scanQueuesSync(root, paths.queuesDir).map((q) => ({
     name: q.name,
     bindingName: q.bindingName,
     ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
     ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
   }));
-  const hasPages = existsSync(join(root, 'pages'));
+  const hasPages = existsSync(paths.pagesDir);
   const hasRoutes = routeScan.routes.length > 0;
   const hasDocumentRoutes = routeScanHasDocumentRoutes(routeScan.routes);
   const hasMiddleware = routeScan.middleware.length > 0;
   const hasWebSockets = webSockets.length > 0;
   const isSsr = isFrameworkMode
     ? true
-    : Boolean(validateSsrEntry(root)) || (hasPages && deployConfig.output !== 'static');
+    : Boolean(validateSsrEntry(root, paths)) || (hasPages && deployConfig.output !== 'static');
 
   // Resolve revalidate config from void.json + per-page .server.ts exports
   const vcRevalidate = readConfig(root).routing?.revalidate;
@@ -1522,10 +1527,10 @@ async function runFullDeploy(
     revalidate = vcRevalidate;
   }
   // Merge per-page revalidate exports (pages mode)
-  const pageScan = existsSync(join(root, 'pages'))
+  const pageScan = existsSync(paths.pagesDir)
     ? routeScan.pages.pages.length > 0
       ? routeScan.pages
-      : await scanPages(root, { output: deployConfig.output })
+      : await scanPages(root, { output: deployConfig.output, paths })
     : null;
   if (pageScan) {
     const perPageRules: Record<string, number> = {};
@@ -1816,7 +1821,7 @@ function assertDeploySchemaDriftFree(root: string, dialect: DatabaseDialect): vo
 }
 
 export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): boolean {
-  if (!discoverSchema(root)) {
+  if (!discoverSchema(root, readProjectPaths(root))) {
     return false;
   }
 
@@ -1826,7 +1831,7 @@ export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): bo
   createDeployDriftProject(root, driftProjectRoot);
 
   try {
-    const migrationsDir = join(driftProjectRoot, 'db', 'migrations');
+    const migrationsDir = readProjectPaths(driftProjectRoot).migrationsDir;
     const before = snapshotDir(migrationsDir);
     const driftConfigPath = writeDrizzleConfig(
       driftProjectRoot,

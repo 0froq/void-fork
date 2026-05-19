@@ -14,6 +14,12 @@ function createTempRoot(): string {
   return root;
 }
 
+function createBareTempRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), 'void-routing-'));
+  tempDirs.push(root);
+  return root;
+}
+
 function getHookHandler<T>(hook: T | { handler: T } | undefined): T {
   if (typeof hook === 'function') {
     return hook;
@@ -232,5 +238,107 @@ describe('routingPlugin', () => {
     }
 
     expect(invalidated).toEqual(['virtual:void-routes']);
+  });
+
+  it('rescans sourceDir route changes during dev', async () => {
+    const root = createBareTempRoot();
+    writeFileSync(join(root, 'void.json'), JSON.stringify({ sourceDir: 'src' }));
+    mkdirSync(join(root, 'src', 'routes'), { recursive: true });
+
+    const onPolicyChange = vi.fn(() => false);
+    const plugin = routingPlugin(root, {
+      isAuthEnabled: () => false,
+      onDevAssetRoutingPolicyChange: onPolicyChange,
+    });
+    const configureServer = getHookHandler(plugin.configureServer) as (server: unknown) => void;
+    const handlers = new Map<string, Array<(path: string) => Promise<void> | void>>();
+    const invalidated: Array<string> = [];
+    const modules = new Map([['virtual:void-routes', { id: 'virtual:void-routes' }]]);
+
+    configureServer({
+      watcher: {
+        on(event: string, handler: (path: string) => Promise<void> | void) {
+          const eventHandlers = handlers.get(event) ?? [];
+          eventHandlers.push(handler);
+          handlers.set(event, eventHandlers);
+        },
+      },
+      environments: {
+        void_worker: {
+          moduleGraph: {
+            getModuleById(id: string) {
+              return modules.get(id);
+            },
+            invalidateModule(mod: { id: string }) {
+              invalidated.push(mod.id);
+            },
+          },
+          hot: { send() {} },
+        },
+      },
+    });
+
+    const routePath = join(root, 'src', 'routes', 'api.ts');
+    writeFileSync(routePath, 'export const GET = () => new Response("ok");\n');
+    for (const handler of handlers.get('add') ?? []) {
+      await handler(routePath);
+    }
+
+    expect(onPolicyChange).toHaveBeenCalled();
+    expect(invalidated).toEqual(['virtual:void-routes']);
+    expect(readFileSync(join(root, '.void', 'routes.d.ts'), 'utf-8')).toContain(
+      '../src/routes/api.ts',
+    );
+  });
+
+  it('invalidates sourceDir page manifest changes during dev', async () => {
+    const root = createBareTempRoot();
+    writeFileSync(join(root, 'void.json'), JSON.stringify({ sourceDir: 'src' }));
+    mkdirSync(join(root, 'src', 'pages'), { recursive: true });
+
+    const plugin = routingPlugin(root, { isAuthEnabled: () => false });
+    const configureServer = getHookHandler(plugin.configureServer) as (server: unknown) => void;
+    const handlers = new Map<string, Array<(path: string) => Promise<void> | void>>();
+    const invalidated: Array<string> = [];
+    const modules = new Map(
+      ['\0virtual:void-pages-renderer', '\0virtual:void-pages-client', 'virtual:void-routes'].map(
+        (id) => [id, { id }],
+      ),
+    );
+
+    configureServer({
+      watcher: {
+        on(event: string, handler: (path: string) => Promise<void> | void) {
+          const eventHandlers = handlers.get(event) ?? [];
+          eventHandlers.push(handler);
+          handlers.set(event, eventHandlers);
+        },
+      },
+      environments: {
+        void_worker: {
+          moduleGraph: {
+            getModuleById(id: string) {
+              return modules.get(id);
+            },
+            invalidateModule(mod: { id: string }) {
+              invalidated.push(mod.id);
+            },
+          },
+          hot: { send() {} },
+        },
+      },
+    });
+
+    const pagePath = join(root, 'src', 'pages', 'test.tsx');
+    writeFileSync(pagePath, 'export default function Test() { return null; }');
+    for (const handler of handlers.get('add') ?? []) {
+      await handler(pagePath);
+    }
+
+    expect(invalidated).toEqual([
+      '\0virtual:void-pages-renderer',
+      '\0virtual:void-pages-client',
+      'virtual:void-routes',
+    ]);
   });
 });

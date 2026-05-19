@@ -7,6 +7,7 @@ import { generateVoidAuthDatabaseModule, generateVoidAuthDrizzleSchema } from '.
 import { getDatabaseDialect, readConfig } from '../config.ts';
 import { discoverSchema } from '../drizzle/discover.ts';
 import { FRAMEWORK_SCAN_DIRS, detectFramework, inferProjectBindings } from '../plugin-inference.ts';
+import { resolveProjectPaths } from '../project-paths.ts';
 import { scanRoutes } from '../router/scan.ts';
 import { generateDbDts } from './db-types.ts';
 import { findEnvFile, generateEnvTypes } from './env-types.ts';
@@ -41,6 +42,7 @@ function removeGeneratedFile(outDir: string, fileName: string, removed: Array<st
 
 export async function prepareProject(root: string): Promise<PrepareProjectResult> {
   const config = readConfig(root);
+  const paths = resolveProjectPaths(root, config);
   const outDir = join(root, '.void');
   const written: Array<string> = [];
   const removed: Array<string> = [];
@@ -53,8 +55,8 @@ export async function prepareProject(root: string): Promise<PrepareProjectResult
     : undefined;
   const scanDirs =
     config.inference?.scanDirs ?? (detectedFramework ? FRAMEWORK_SCAN_DIRS : undefined);
-  const bindings = inferProjectBindings(root, inferenceOptions, scanDirs);
-  const authConfigPath = findVoidAuthConfig(root);
+  const bindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
+  const authConfigPath = findVoidAuthConfig(root, paths);
   const authEnabled = bindings.needsAuth || authConfigPath !== null || config.auth !== undefined;
   const dialect = getDatabaseDialect(config);
 
@@ -66,24 +68,24 @@ export async function prepareProject(root: string): Promise<PrepareProjectResult
     removeGeneratedFile(outDir, 'env.d.ts', removed);
   }
 
-  const scan = await scanRoutes(root, { output: config.output });
+  const scan = await scanRoutes(root, { output: config.output, paths });
   const hasRouteTypes =
     scan.routes.length > 0 || (scan.websockets?.length ?? 0) > 0 || scan.pages.pages.length > 0;
   if (hasRouteTypes) {
-    const { dts } = generateRouteTypes(scan, join(root, 'routes'), outDir, join(root, 'pages'));
+    const { dts } = generateRouteTypes(scan, paths.routesDir, outDir, paths.pagesDir);
     writeGeneratedFile(outDir, 'routes.d.ts', dts, written);
   } else {
     removeGeneratedFile(outDir, 'routes.d.ts', removed);
   }
 
   if (scan.queues.length > 0) {
-    const dts = generateQueueTypes(scan.queues, join(root, 'queues'), outDir);
+    const dts = generateQueueTypes(scan.queues, paths.queuesDir, outDir);
     writeGeneratedFile(outDir, 'queues.d.ts', dts, written);
   } else {
     removeGeneratedFile(outDir, 'queues.d.ts', removed);
   }
 
-  const schema = discoverSchema(root);
+  const schema = discoverSchema(root, paths);
   const hasDbRuntime = schema != null || authEnabled;
   if (hasDbRuntime) {
     generateDbDts(outDir, schema, dialect);
@@ -119,7 +121,7 @@ export async function prepareProject(root: string): Promise<PrepareProjectResult
     removeGeneratedFile(outDir, 'better-auth-db.ts', removed);
   }
 
-  ensureProjectTsconfig(root, hasRouteTypes, hasDbRuntime, schema != null);
+  ensureProjectTsconfig(root, hasRouteTypes, hasDbRuntime, schema != null, { paths });
   written.push(join('.void', 'tsconfig.json'));
 
   return { written, removed };

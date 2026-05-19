@@ -3,6 +3,7 @@ import { glob, globSync } from 'tinyglobby';
 import { scanJobs, type JobDefinition } from '../crons/scan.ts';
 import { scanPages } from '../pages/scan.ts';
 import type { PageScanResult } from '../pages/types.ts';
+import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import { scanQueues, type QueueDefinition } from '../queues/scan.ts';
 import { detectHttpExports } from './detect-exports.ts';
 import { parseRouteFilename, type RouteDefinition } from './parse-filename.ts';
@@ -51,20 +52,21 @@ function parseMiddlewareDefinitions(files: Array<string>): Array<MiddlewareDefin
  */
 export async function scanRoutes(
   root: string,
-  options?: { output?: 'server' | 'static' },
+  options?: { output?: 'server' | 'static'; paths?: ProjectPaths },
 ): Promise<ScanResult> {
+  const paths = options?.paths ?? readProjectPaths(root);
   const [routeFiles, websockets, middlewareFiles, jobs, queues, pages] = await Promise.all([
-    glob(ROUTE_PATTERN, { cwd: `${root}/routes`, absolute: false }),
-    scanWebSocketRoutes(root),
-    glob(ROUTE_PATTERN, { cwd: `${root}/middleware`, absolute: false }).catch(
+    glob(ROUTE_PATTERN, { cwd: paths.routesDir, absolute: false }),
+    scanWebSocketRoutes(root, paths),
+    glob(ROUTE_PATTERN, { cwd: paths.middlewareDir, absolute: false }).catch(
       () => [] as Array<string>,
     ),
-    scanJobs(root),
-    scanQueues(root),
-    scanPages(root, { output: options?.output }),
+    scanJobs(root, paths.cronsDir),
+    scanQueues(root, paths.queuesDir),
+    scanPages(root, { output: options?.output, paths }),
   ]);
 
-  const routesDir = `${root}/routes`;
+  const routesDir = paths.routesDir;
 
   // Parse routes, filtering out files starting with _
   const routes = routeFiles
@@ -89,10 +91,13 @@ export async function scanRoutes(
   return { routes, websockets, middleware, jobs, queues, pages };
 }
 
-export function scanMiddlewareSync(root: string): Array<MiddlewareDefinition> {
+export function scanMiddlewareSync(
+  root: string,
+  paths: ProjectPaths = readProjectPaths(root),
+): Array<MiddlewareDefinition> {
   let middlewareFiles: Array<string>;
   try {
-    middlewareFiles = globSync(ROUTE_PATTERN, { cwd: `${root}/middleware`, absolute: false });
+    middlewareFiles = globSync(ROUTE_PATTERN, { cwd: paths.middlewareDir, absolute: false });
   } catch {
     middlewareFiles = [];
   }
@@ -100,10 +105,13 @@ export function scanMiddlewareSync(root: string): Array<MiddlewareDefinition> {
   return parseMiddlewareDefinitions(middlewareFiles);
 }
 
-export function scanRoutePatternsSync(root: string): Array<RouteDefinition> {
+export function scanRoutePatternsSync(
+  root: string,
+  paths: ProjectPaths = readProjectPaths(root),
+): Array<RouteDefinition> {
   let routeFiles: Array<string>;
   try {
-    routeFiles = globSync(ROUTE_PATTERN, { cwd: `${root}/routes`, absolute: false });
+    routeFiles = globSync(ROUTE_PATTERN, { cwd: paths.routesDir, absolute: false });
   } catch {
     routeFiles = [];
   }

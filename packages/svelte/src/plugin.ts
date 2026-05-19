@@ -1,6 +1,6 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { join } from 'pathe';
 import type { Plugin } from 'vite';
+import { resolvePagesDir } from 'void/pages';
 import { islandsPlugin } from './plugin-islands.ts';
 import { pagesPlugin } from './plugin-pages.ts';
 
@@ -16,13 +16,15 @@ export type VoidSvelteOptions = Readonly<{
 }>;
 
 export function voidSvelte(options?: VoidSvelteOptions): Array<Plugin> {
-  const pagesDir = join(process.cwd(), 'pages');
+  const root = process.cwd();
+  const pagesDir = resolvePagesDir(root);
   return [
     ...(svelte(options?.svelte) as ReadonlyArray<Plugin>),
     pagesPlugin(pagesDir, {
+      root,
       viewTransitions: options?.viewTransitions,
       prefetch: options?.prefetch,
     }),
-    ...islandsPlugin(pagesDir),
+    ...islandsPlugin(pagesDir, { root }),
   ];
 }

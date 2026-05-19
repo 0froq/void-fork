@@ -11,10 +11,11 @@ import {
 import { findVoidAuthConfig, loadVoidAuthConfig } from './auth/config.ts';
 import { generateVoidAuthDatabaseModule, generateVoidAuthDrizzleSchema } from './auth/drizzle.ts';
 import { lintDestinationSplats, lintDuplicateSources, mergeRoutingRules } from './cli/headers.ts';
-import { findEnvFile } from './codegen/env-types.ts';
+import { findEnvFileForPaths } from './codegen/env-types.ts';
 import { generateQueueTypes } from './codegen/queue-types.ts';
 import { generateRouteTypes } from './codegen/route-types.ts';
 import { readConfig, getDatabaseDialect } from './config.ts';
+import { readProjectPaths } from './project-paths.ts';
 import {
   compileRouteTable,
   compileBrowserClient,
@@ -89,23 +90,24 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   let scan: ScanResult | null = null;
   let ssr: SsrCompileOptions | null = null;
   let authConfigPath: string | null = null;
-  const routesDir = join(root, 'routes');
-  const middlewareDir = join(root, 'middleware');
-  const jobsDir = join(root, 'crons');
-  const queuesDir = join(root, 'queues');
-  const pagesDir = join(root, 'pages');
-  const srcDir = join(root, 'src');
-  const authConfigDir = root;
+  const paths = readProjectPaths(root);
+  const routesDir = paths.routesDir;
+  const middlewareDir = paths.middlewareDir;
+  const jobsDir = paths.cronsDir;
+  const queuesDir = paths.queuesDir;
+  const pagesDir = paths.pagesDir;
+  const ssrDir = paths.ssrDir;
+  const authConfigPaths = new Set(paths.authConfigCandidates.map((path) => normalizePath(path)));
+  const envFilePaths = new Set(paths.envFileCandidates.map((path) => normalizePath(path)));
   const normalizedRoutesDir = normalizePath(routesDir);
   const normalizedMiddlewareDir = normalizePath(middlewareDir);
   const normalizedJobsDir = normalizePath(jobsDir);
   const normalizedQueuesDir = normalizePath(queuesDir);
   const normalizedPagesDir = normalizePath(pagesDir);
-  const normalizedSrcDir = normalizePath(srcDir);
-  const normalizedAuthConfigDir = normalizePath(authConfigDir);
+  const normalizedSsrDir = normalizePath(ssrDir);
   const ssrEntryAbsPaths = new Set(
     [...SSR_SERVER_ENTRY_RELATIVE_PATHS, ...SSR_CLIENT_ENTRY_RELATIVE_PATHS].map((path) =>
-      normalizePath(join(root, path)),
+      normalizePath(join(ssrDir, path.split('/').pop()!)),
     ),
   );
 
@@ -130,9 +132,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   }
 
   async function rescan() {
-    scan = await scanRoutes(root, { output: options.output });
-    authConfigPath = findVoidAuthConfig(root);
-    const entries = validateSsrEntries(root);
+    scan = await scanRoutes(root, { output: options.output, paths });
+    authConfigPath = findVoidAuthConfig(root, paths);
+    const entries = validateSsrEntries(root, paths);
     ssr = entries
       ? {
           serverEntryPath: entries.server.absolutePath,
@@ -165,7 +167,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   // entry. The user file path is absolute so generated entry's import resolves
   // regardless of bundler cwd; the validator helper resolves to void/env.
   function getEnvSchemaModule(): { importPath: string; helperPath: string } | undefined {
-    const envFile = findEnvFile(root);
+    const envFile = findEnvFileForPaths(root, paths);
     if (!envFile) {
       return undefined;
     }
@@ -291,11 +293,11 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   }
 
   function isPotentialAuthConfigPath(path: string): boolean {
-    if (!isInDirectory(path, normalizedAuthConfigDir)) {
-      return false;
-    }
-    const rel = path.slice(normalizedAuthConfigDir.length + 1);
-    return /^auth\.(c|m)?[jt]s$/.test(rel);
+    return authConfigPaths.has(normalizePath(path));
+  }
+
+  function isPotentialEnvFilePath(path: string): boolean {
+    return envFilePaths.has(normalizePath(path));
   }
 
   function getPagesCompileOptions(): PagesCompileOptions | null {
@@ -430,7 +432,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         return { resolve: { alias: resolvedAliases } };
       }
 
-      const entries = validateSsrEntries(root);
+      const entries = validateSsrEntries(root, paths);
       if (!entries || env.command !== 'build') {
         return;
       }
@@ -457,7 +459,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
       // Bundle migrations into the worker for CF targets (in-worker migration runner)
       if (!options.target) {
-        const migrationsDir = join(root, 'db', 'migrations');
+        const migrationsDir = paths.migrationsDir;
         if (existsSync(migrationsDir) || compileOptions.auth) {
           const { collectMigrations } = await import('./migrations/collect.ts');
           const { buildMigrationPlanBundle } = await import('./migrations/plan.ts');
@@ -571,20 +573,25 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
       const handleFileChange = async (path: string, event: 'add' | 'change' | 'unlink') => {
         const normalizedPath = normalizePath(path);
+        const sourceConventionChanged =
+          isInDirectory(normalizedPath, normalizedRoutesDir) ||
+          isInDirectory(normalizedPath, normalizedMiddlewareDir) ||
+          isInDirectory(normalizedPath, normalizedJobsDir) ||
+          isInDirectory(normalizedPath, normalizedQueuesDir) ||
+          isInDirectory(normalizedPath, normalizedPagesDir) ||
+          isPotentialAuthConfigPath(normalizedPath) ||
+          isPotentialEnvFilePath(normalizedPath);
         if (
-          !isInDirectory(normalizedPath, normalizedRoutesDir) &&
-          !isInDirectory(normalizedPath, normalizedMiddlewareDir) &&
-          !isInDirectory(normalizedPath, normalizedJobsDir) &&
-          !isInDirectory(normalizedPath, normalizedQueuesDir) &&
-          !isInDirectory(normalizedPath, normalizedPagesDir) &&
-          !isInDirectory(normalizedPath, normalizedSrcDir) &&
-          !isPotentialAuthConfigPath(normalizedPath)
+          !sourceConventionChanged &&
+          !isInDirectory(normalizedPath, normalizedSsrDir) &&
+          !isPotentialEnvFilePath(normalizedPath)
         ) {
           return;
         }
 
         if (
-          isInDirectory(normalizedPath, normalizedSrcDir) &&
+          !sourceConventionChanged &&
+          isInDirectory(normalizedPath, normalizedSsrDir) &&
           !ssrEntryAbsPaths.has(normalizedPath)
         ) {
           return;

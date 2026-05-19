@@ -3,6 +3,7 @@ import { dirname, join } from 'pathe';
 import { normalizePath, type Plugin } from 'vite';
 import { scanJobsSync, type JobDefinition } from './crons/scan.ts';
 import { voidWarn } from './log.ts';
+import { readProjectPaths } from './project-paths.ts';
 import { scanQueuesSync, type QueueDefinition } from './queues/scan.ts';
 
 type FrameworkTriggersOptions = {
@@ -21,11 +22,15 @@ export function frameworkTriggersDispatchPath(root: string): string {
  * without depending on `configResolved` ordering.
  */
 export function writeFrameworkTriggersDispatch(root: string, devTriggerToken: string): void {
-  const jobs = scanJobsSync(root);
-  const queues = scanQueuesSync(root);
+  const paths = readProjectPaths(root);
+  const jobs = scanJobsSync(root, paths.cronsDir);
+  const queues = scanQueuesSync(root, paths.queuesDir);
   const target = frameworkTriggersDispatchPath(root);
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, generateModule(root, jobs, queues, devTriggerToken));
+  writeFileSync(
+    target,
+    generateModule(paths.cronsDir, paths.queuesDir, jobs, queues, devTriggerToken),
+  );
 }
 
 /**
@@ -55,8 +60,9 @@ export function frameworkTriggersPlugin(root: string, options: FrameworkTriggers
       // chokidar emits POSIX-style paths on every platform, so normalize the
       // root prefixes to match — otherwise this comparison silently no-ops
       // on Windows where `join(root, 'crons')` uses backslashes.
-      const cronsPrefix = normalizePath(join(root, 'crons'));
-      const queuesPrefix = normalizePath(join(root, 'queues'));
+      const paths = readProjectPaths(root);
+      const cronsPrefix = normalizePath(paths.cronsDir);
+      const queuesPrefix = normalizePath(paths.queuesDir);
       const isInteresting = (file: string) => {
         const normalized = normalizePath(file);
         return normalized.startsWith(cronsPrefix) || normalized.startsWith(queuesPrefix);
@@ -88,7 +94,8 @@ export function frameworkTriggersPlugin(root: string, options: FrameworkTriggers
 }
 
 function generateModule(
-  root: string,
+  cronsDir: string,
+  queuesDir: string,
   jobs: Array<JobDefinition>,
   queues: Array<QueueDefinition>,
   devTriggerToken: string,
@@ -96,13 +103,13 @@ function generateModule(
   const jobImports = jobs
     .map(
       (job, jobIndex) =>
-        `import __job${jobIndex} from ${JSON.stringify(join(root, 'crons', job.filePath))};`,
+        `import __job${jobIndex} from ${JSON.stringify(join(cronsDir, job.filePath))};`,
     )
     .join('\n');
   const queueImports = queues
     .map(
       (queue, queueIndex) =>
-        `import __queue${queueIndex} from ${JSON.stringify(join(root, 'queues', queue.filePath))};`,
+        `import __queue${queueIndex} from ${JSON.stringify(join(queuesDir, queue.filePath))};`,
     )
     .join('\n');
 

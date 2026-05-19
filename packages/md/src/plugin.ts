@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join, relative, resolve } from 'pathe';
 import { glob } from 'tinyglobby';
 import { normalizePath, type Plugin, type ResolvedConfig, type ViteDevServer } from 'vite';
+import { resolvePagesDir } from 'void/pages';
 import { generateMdTypes } from './codegen/md-types.ts';
 import type { CompileOptions } from './compile.ts';
 import { emitReactComponent, emitReactComponentWithIslands } from './emit-react.ts';
@@ -71,6 +72,7 @@ export function voidMarkdown(options?: MarkdownOptions): Array<Plugin> {
   let adapter: FrameworkAdapter | null = null;
   let mdPages: ReadonlyArray<MdPage> = [];
   let root = '';
+  let pagesDir = '';
   const svelteModules = new Map<string, string>();
   const solidModules = new Map<string, string>();
   const clientScripts = new Map<string, string>();
@@ -87,7 +89,6 @@ export function voidMarkdown(options?: MarkdownOptions): Array<Plugin> {
   }
 
   async function scanMdPages(): Promise<ReadonlyArray<MdPage>> {
-    const pagesDir = join(root, 'pages');
     if (!existsSync(pagesDir)) {
       return [];
     }
@@ -152,7 +153,7 @@ export function voidMarkdown(options?: MarkdownOptions): Array<Plugin> {
           return;
         }
         const configRoot = config.root || process.cwd();
-        const pagesDir = join(configRoot, 'pages');
+        const pagesDir = resolvePagesDir(configRoot);
         if (!existsSync(pagesDir)) {
           return;
         }
@@ -173,6 +174,7 @@ export function voidMarkdown(options?: MarkdownOptions): Array<Plugin> {
 
       configResolved(config: ResolvedConfig) {
         root = config.root;
+        pagesDir = resolvePagesDir(root);
         for (const plugin of config.plugins) {
           const match = ADAPTER_PLUGIN_NAMES[plugin.name];
           if (match) {
@@ -196,8 +198,11 @@ export function voidMarkdown(options?: MarkdownOptions): Array<Plugin> {
       },
 
       configureServer(server: ViteDevServer) {
+        const normalizedPagesDir = normalizePath(pagesDir);
+        const isInPagesDir = (file: string) =>
+          file === normalizedPagesDir || file.startsWith(normalizedPagesDir + '/');
         const handleMdChange = async (file: string) => {
-          if (!file.endsWith('.md') || !file.includes('/pages/')) {
+          if (!file.endsWith('.md') || !isInPagesDir(normalizePath(file))) {
             return;
           }
           mdPages = await scanMdPages();
@@ -321,7 +326,7 @@ export function useFrontmatter() { return useContext(FrontmatterContext) ?? {}; 
         async handler(code: string, _id: string) {
           const { body, islandImports, clientCode } = extractScript(code);
 
-          const pagesPrefix = join(root, 'pages') + '/';
+          const pagesPrefix = pagesDir + '/';
           if (_id.startsWith(pagesPrefix) && clientCode) {
             const rel = _id.slice(pagesPrefix.length).replace(/\.md$/, '');
             const componentId = rel.replace(/\/index$/, '').replace(/^index$/, '') || 'index';

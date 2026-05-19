@@ -11,6 +11,7 @@ import {
 import { join, extname } from 'pathe';
 import { build } from 'vite';
 import type { MigrationPlanBundle } from '../migrations/plan.ts';
+import { readProjectPaths } from '../project-paths.ts';
 
 export type WrapperFeatures = {
   /** Auth providers (kept for type compatibility, no longer used by wrapper). */
@@ -114,7 +115,7 @@ export async function generateWrapper(
   if (features.hasMigrations) {
     const { collectMigrations } = await import('../migrations/collect.ts');
     const { buildMigrationPlanBundle } = await import('../migrations/plan.ts');
-    const migrationsDir = join(root, 'db', 'migrations');
+    const migrationsDir = readProjectPaths(root).migrationsDir;
     migrations = collectMigrations(migrationsDir);
     migrationPlanBundle =
       features.migrationDialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
@@ -359,11 +360,12 @@ function generateWrapperSource(
 
 function generateHandlersSource(root: string, features: WrapperFeatures): string {
   const lines: Array<string> = [];
+  const paths = readProjectPaths(root);
 
   // Scheduled handlers
   if (features.crons.length > 0) {
     for (let i = 0; i < features.crons.length; i++) {
-      const absPath = join(root, 'crons', features.crons[i].filePath);
+      const absPath = join(paths.cronsDir, features.crons[i].filePath);
       lines.push(`import cronHandler${i} from "${absPath}";`);
     }
 
@@ -393,7 +395,7 @@ function generateHandlersSource(root: string, features: WrapperFeatures): string
   if (features.queues.length > 0) {
     lines.push('');
     for (let i = 0; i < features.queues.length; i++) {
-      const absPath = join(root, 'queues', features.queues[i].filePath);
+      const absPath = join(paths.queuesDir, features.queues[i].filePath);
       lines.push(`import queueHandler${i} from "${absPath}";`);
     }
 

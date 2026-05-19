@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'pathe';
+import { isAbsolute, join } from 'pathe';
 import { glob, globSync } from 'tinyglobby';
 
 const JOB_EXTENSIONS = ['ts', 'mts', 'js', 'mjs'];
@@ -46,12 +46,17 @@ function extractCronExpressions(source: string, filePath: string): Array<string>
   );
 }
 
+function resolveDir(root: string, dir: string): string {
+  return isAbsolute(dir) ? dir : join(root, dir);
+}
+
 function parseJobFiles(root: string, jobsDir: string, files: Array<string>): Array<JobDefinition> {
+  const jobsDirPath = resolveDir(root, jobsDir);
   return files
     .filter((filePath) => !filePath.split('/').some((segment) => segment.startsWith('_')))
     .sort((leftFilePath, rightFilePath) => leftFilePath.localeCompare(rightFilePath))
     .map((filePath) => {
-      const absPath = join(root, jobsDir, filePath);
+      const absPath = join(jobsDirPath, filePath);
       const source = readFileSync(absPath, 'utf-8');
       return {
         filePath,
@@ -63,7 +68,7 @@ function parseJobFiles(root: string, jobsDir: string, files: Array<string>): Arr
 
 export async function scanJobs(root: string, jobsDir = 'crons'): Promise<Array<JobDefinition>> {
   const pattern = `**/*.{${JOB_EXTENSIONS.join(',')}}`;
-  const files = await glob(pattern, { cwd: `${root}/${jobsDir}`, absolute: false }).catch(
+  const files = await glob(pattern, { cwd: resolveDir(root, jobsDir), absolute: false }).catch(
     () => [] as Array<string>,
   );
   return parseJobFiles(root, jobsDir, files);
@@ -73,7 +78,7 @@ export function scanJobsSync(root: string, jobsDir = 'crons'): Array<JobDefiniti
   const pattern = `**/*.{${JOB_EXTENSIONS.join(',')}}`;
   let files: Array<string>;
   try {
-    files = globSync(pattern, { cwd: `${root}/${jobsDir}`, absolute: false });
+    files = globSync(pattern, { cwd: resolveDir(root, jobsDir), absolute: false });
   } catch {
     files = [];
   }

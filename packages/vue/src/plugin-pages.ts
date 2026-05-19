@@ -14,6 +14,7 @@ type PrefetchConfig = {
 };
 
 type PagesPluginOptions = {
+  root?: string;
   viewTransitions?: boolean;
   prefetch?: PrefetchConfig;
 };
@@ -88,11 +89,11 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Rea
   let pageScan: PageScanResult | null = null;
   let isDev = false;
   let viteConfig: ResolvedConfig | undefined;
-  const root = dirname(pagesDir);
+  const root = options?.root ?? dirname(pagesDir);
   const normalizedPagesDir = normalizePath(pagesDir);
   let pendingRescan: Promise<void> | null = null;
   const rescanPages = async () => {
-    pageScan = existsSync(pagesDir) ? await scanPages(root) : null;
+    pageScan = existsSync(pagesDir) ? await scanPages(root, { pagesDir }) : null;
   };
   const runRescan = () => {
     pendingRescan ??= rescanPages().finally(() => {

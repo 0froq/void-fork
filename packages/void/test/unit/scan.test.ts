@@ -38,6 +38,24 @@ describe('scanRoutes', () => {
     expect(result.jobs).toEqual([]);
   });
 
+  it('discovers conventions under explicit sourceDir only', async () => {
+    createFile('void.json', JSON.stringify({ sourceDir: 'src' }));
+    createFile('routes/api/root.ts', 'export const GET = () => {}');
+    createFile('src/routes/api/hello.ts', 'export const GET = () => {}');
+    createFile('src/middleware/01.logger.ts');
+    createFile('src/crons/sync.ts', 'export const cron = "0 * * * *"\nexport default () => {}');
+    createFile('src/queues/emails.ts', 'export default async () => {}');
+    createFile('src/pages/index.tsx', 'export default function Index() { return null; }');
+
+    const result = await scanRoutes(TMP);
+
+    expect(result.routes.map((route) => route.pattern)).toEqual(['/api/hello']);
+    expect(result.middleware).toEqual([{ order: 1, filePath: '01.logger.ts' }]);
+    expect(result.jobs.map((job) => job.name)).toEqual(['sync']);
+    expect(result.queues.map((queue) => queue.name)).toEqual(['emails']);
+    expect(result.pages.pages.map((page) => page.pattern)).toEqual(['/']);
+  });
+
   it('ignores files starting with _', async () => {
     createFile('routes/api/hello.ts');
     createFile('routes/api/_utils.ts');

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
-import { join, relative } from 'pathe';
+import { relative } from 'pathe';
 import { voidWarn } from '../log.ts';
+import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 
 /** Possible source locations for the user env schema, in priority order.
  *  Root-level files win over `src/`-nested ones. */
@@ -20,11 +21,14 @@ const warnedRoots = new Set<string>();
 
 /** Find the user's env schema file, if any. Warns once per root when multiple candidates exist. */
 export function findEnvFile(root: string): string | null {
+  return findEnvFileForPaths(root, readProjectPaths(root));
+}
+
+export function findEnvFileForPaths(root: string, paths: ProjectPaths): string | null {
   const matches: Array<string> = [];
-  for (const candidate of ENV_FILE_CANDIDATES) {
-    const abs = join(root, candidate);
-    if (existsSync(abs)) {
-      matches.push(abs);
+  for (const absPath of paths.envFileCandidates) {
+    if (existsSync(absPath)) {
+      matches.push(absPath);
     }
   }
   if (matches.length > 1 && !warnedRoots.has(root)) {

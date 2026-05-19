@@ -2,6 +2,7 @@ import { join } from 'pathe';
 import type { Plugin } from 'vite';
 import { scanJobsSync } from './crons/scan.ts';
 import { voidLog } from './log.ts';
+import { readProjectPaths } from './project-paths.ts';
 import { scanQueuesSync } from './queues/scan.ts';
 import { parseDotenvFile } from './shared/dotenv.ts';
 
@@ -20,8 +21,9 @@ export function devTriggersHintPlugin(
     name: 'void:dev-triggers-hint',
     apply: 'serve',
     configureServer(server) {
-      const jobs = scanJobsSync(root);
-      const queues = scanQueuesSync(root);
+      const paths = readProjectPaths(root);
+      const jobs = scanJobsSync(root, paths.cronsDir);
+      const queues = scanQueuesSync(root, paths.queuesDir);
       if (jobs.length === 0 && queues.length === 0) {
         return;
       }

@@ -1,24 +1,17 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { join } from 'pathe';
+import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import type { VoidAuthConfig } from '../runtime/auth.ts';
-
-const AUTH_CONFIG_CANDIDATES = [
-  'auth.ts',
-  'auth.mts',
-  'auth.js',
-  'auth.mjs',
-  'auth.cts',
-  'auth.cjs',
-];
 
 function isVoidAuthConfigSource(code: string): boolean {
   return /\bfrom\s+["']void\/auth["']/.test(code);
 }
 
-export function findVoidAuthConfig(root: string): string | null {
-  for (const file of AUTH_CONFIG_CANDIDATES) {
-    const absPath = join(root, file);
+export function findVoidAuthConfig(
+  root: string,
+  paths: ProjectPaths = readProjectPaths(root),
+): string | null {
+  for (const absPath of paths.authConfigCandidates) {
     if (!existsSync(absPath)) {
       continue;
     }

@@ -16,6 +16,7 @@ import {
   validateMigrations,
 } from '../migrations/validate.ts';
 import { detectFramework } from '../plugin-inference.ts';
+import { readProjectPaths } from '../project-paths.ts';
 import type { SeedFn } from '../runtime/seed.ts';
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
@@ -203,7 +204,8 @@ async function runGenerate(root: string, dialect: DatabaseDialect): Promise<void
 }
 
 async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> {
-  const migrationsDir = join(root, 'db', 'migrations');
+  const paths = readProjectPaths(root);
+  const migrationsDir = paths.migrationsDir;
   const allMigrations = collectMigrations(migrationsDir);
 
   try {
@@ -214,7 +216,7 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
   }
 
   if (allMigrations.length === 0) {
-    log.info('No migration files found in db/migrations/');
+    log.info(`No migration files found in ${paths.sourceRelative('db/migrations')}/`);
     outro('Done.');
     return;
   }
@@ -297,7 +299,8 @@ async function resetDatabase(root: string, dialect: DatabaseDialect): Promise<nu
   // malformed `_journal.json` bubble as a raw stack trace — this matches
   // `runStatus`, `runMigrate`, and the deploy path, and this is the exact
   // drift case the preflight is here to surface.
-  const migrationsDir = join(root, 'db', 'migrations');
+  const paths = readProjectPaths(root);
+  const migrationsDir = paths.migrationsDir;
   const migrations = collectMigrations(migrationsDir);
   try {
     assertJournalCoherence(migrationsDir, migrations);
@@ -480,7 +483,8 @@ function printTable(rows: Array<Record<string, unknown>>): void {
 }
 
 async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boolean): Promise<void> {
-  const migrationsDir = join(root, 'db', 'migrations');
+  const paths = readProjectPaths(root);
+  const migrationsDir = paths.migrationsDir;
   const rawMigrations = collectMigrations(migrationsDir);
 
   try {
@@ -504,7 +508,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
     }
 
     if (rawMigrations.length === 0) {
-      log.info('No migration files found in db/migrations/');
+      log.info(`No migration files found in ${paths.sourceRelative('db/migrations')}/`);
       outro('Done.');
       return;
     }
@@ -661,7 +665,7 @@ async function runStudio(root: string, dialect: DatabaseDialect): Promise<void> 
 }
 
 async function runRenameMigrations(root: string, dialect: DatabaseDialect): Promise<void> {
-  const migrationsDir = join(root, 'db', 'migrations');
+  const migrationsDir = readProjectPaths(root).migrationsDir;
   if (!existsSync(migrationsDir)) {
     log.info('No migrations directory found.');
     outro('Done.');
@@ -1318,10 +1322,13 @@ function resolveSeedTarget(root: string, file: string | undefined): SeedTarget {
     return toSeedTarget(root, resolve(root, file), file);
   }
 
-  const defaults = DEFAULT_SEED_FILES.filter((candidate) => existsSync(join(root, candidate)));
+  const paths = readProjectPaths(root);
+  const defaults = DEFAULT_SEED_FILES.map((candidate) => paths.sourceRelative(candidate)).filter(
+    (candidate) => existsSync(join(root, candidate)),
+  );
   if (defaults.length === 0) {
     log.error(
-      `db: No seed file found. Create one of: ${DEFAULT_SEED_FILES.join(', ')} or pass --file <path>.`,
+      `db: No seed file found. Create one of: ${DEFAULT_SEED_FILES.map((candidate) => paths.sourceRelative(candidate)).join(', ')} or pass --file <path>.`,
     );
     process.exit(1);
   }
@@ -1407,7 +1414,8 @@ async function loadSeedFunction(seedPath: string): Promise<SeedFn<Record<string,
 
 async function loadSeedSchema(root: string): Promise<Record<string, unknown>> {
   const { discoverSchema } = await import('../drizzle/discover.ts');
-  const location = discoverSchema(root);
+  const paths = readProjectPaths(root);
+  const location = discoverSchema(root, paths);
   if (!location) {
     return {};
   }

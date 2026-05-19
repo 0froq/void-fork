@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname, basename, extname } from 'pathe';
 import { glob } from 'tinyglobby';
+import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import { parseRouteFilename } from '../router/parse-filename.ts';
 import { resolveNamedLayout } from './layout-resolution.ts';
 import type {
@@ -23,9 +24,9 @@ export const MAX_REVALIDATE = 31536000; // 1 year in seconds
 
 export async function scanPages(
   root: string,
-  options?: { output?: 'server' | 'static' },
+  options?: { output?: 'server' | 'static'; paths?: ProjectPaths; pagesDir?: string },
 ): Promise<PageScanResult> {
-  const pagesDir = join(root, 'pages');
+  const pagesDir = options?.pagesDir ?? options?.paths?.pagesDir ?? readProjectPaths(root).pagesDir;
   if (!existsSync(pagesDir)) {
     return { pages: [], layouts: [], namedLayouts: [] };
   }

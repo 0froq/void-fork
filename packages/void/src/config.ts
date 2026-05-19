@@ -9,6 +9,7 @@ import {
   type VoidAuthProvider,
 } from './auth/providers.ts';
 import type { HeadConfig } from './pages/head.ts';
+import { validateSourceDir } from './project-paths.ts';
 import type { SandboxConfig, SandboxInstanceType } from './sandbox/config.ts';
 
 /** Redirect destination — string (302) or object with explicit status. */
@@ -56,6 +57,7 @@ export type AuthConfig = {
 /** Shape of the `void.json` config file. All fields optional. */
 export type VoidConfig = {
   $schema?: string;
+  sourceDir?: string;
   target?: 'cloudflare' | 'node' | 'bun' | 'deno';
   output?: 'server' | 'static';
   auth?: AuthConfig;
@@ -332,6 +334,14 @@ export function readConfig(root: string): VoidConfig {
     if (obj[key] !== undefined) {
       throw new Error(`config: ${message} in ${CONFIG_FILE}.`);
     }
+  }
+
+  // Validate sourceDir
+  if (obj.sourceDir !== undefined) {
+    if (typeof obj.sourceDir !== 'string') {
+      throw new Error(`config: "sourceDir" in ${CONFIG_FILE} must be a string.`);
+    }
+    validateSourceDir(obj.sourceDir);
   }
 
   // Validate target

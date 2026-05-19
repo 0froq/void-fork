@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'pathe';
 import { globSync } from 'tinyglobby';
 import { inferBindingsFromSource, mergeBindings, type InferredBindings } from './inference/walk.ts';
+import { readProjectPaths, type ProjectPaths } from './project-paths.ts';
 import { getSsrServerEntryPath } from './ssr/entry.ts';
 
 const SOURCE_GLOB = '**/*.{ts,tsx,mts,js,jsx,mjs,astro}';
@@ -89,6 +90,7 @@ export type InferenceOptions = {
     storage?: boolean | string;
     ai?: boolean;
   };
+  paths?: ProjectPaths;
 };
 
 function extractAstroFrontmatter(code: string): string {
@@ -135,7 +137,8 @@ export function inferProjectBindings(
     };
   }
 
-  const dirs = scanDirs ?? DEFAULT_SCAN_DIRS;
+  const paths = options?.paths ?? readProjectPaths(root);
+  const dirs = scanDirs ?? (paths.sourceDir ? [paths.sourceDir] : DEFAULT_SCAN_DIRS);
   const allBindings: Array<InferredBindings> = [];
 
   for (const dir of dirs) {
@@ -153,7 +156,7 @@ export function inferProjectBindings(
     }
   }
 
-  const ssrEntry = getSsrServerEntryPath(root);
+  const ssrEntry = getSsrServerEntryPath(root, paths);
   if (ssrEntry) {
     const code = readFileSync(ssrEntry, 'utf-8');
     const filename = ssrEntry.split('/').pop() ?? 'main.ssr.ts';
@@ -163,8 +166,9 @@ export function inferProjectBindings(
   // Custom scan directories should still see client/auth helpers and colocated
   // server-only modules under src/.
   const dirsSet = new Set(dirs);
-  if (!dirsSet.has('src')) {
-    const srcPath = join(root, 'src');
+  const srcRel = paths.sourceDir ? paths.sourceDir : 'src';
+  if (!dirsSet.has(srcRel)) {
+    const srcPath = paths.sourceDir ? paths.sourceRoot : join(root, 'src');
     let srcFiles: Array<string>;
     try {
       srcFiles = globSync(SOURCE_GLOB, { cwd: srcPath, absolute: true });

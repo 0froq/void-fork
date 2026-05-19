@@ -1,6 +1,6 @@
-import { join } from 'pathe';
 import type { Plugin } from 'vite';
 import solid from 'vite-plugin-solid';
+import { resolvePagesDir } from 'void/pages';
 import { islandsPlugin } from './plugin-islands.ts';
 import { pagesPlugin } from './plugin-pages.ts';
 
@@ -45,14 +45,16 @@ function configPlugin(): Plugin {
 }
 
 export function voidSolid(options?: VoidSolidOptions): Array<Plugin> {
-  const pagesDir = join(process.cwd(), 'pages');
+  const root = process.cwd();
+  const pagesDir = resolvePagesDir(root);
   return [
     configPlugin(),
     solid({ ssr: true, ...options?.solid }),
     pagesPlugin(pagesDir, {
+      root,
       viewTransitions: options?.viewTransitions,
       prefetch: options?.prefetch,
     }),
-    ...islandsPlugin(pagesDir),
+    ...islandsPlugin(pagesDir, { root }),
   ];
 }

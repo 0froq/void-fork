@@ -620,6 +620,30 @@ describe('readConfig redirects', () => {
         .properties.status.enum;
     expect(new Set(schemaEnum)).toEqual(VALID_REDIRECT_STATUSES);
   });
+
+  it('schema.json sourceDir pattern matches runtime validation', () => {
+    const schema = JSON.parse(readFileSync(join(import.meta.dirname, '../../schema.json'), 'utf8'));
+    const sourceDirPattern = new RegExp(schema.properties.sourceDir.pattern);
+
+    for (const value of ['src', 'app/server', './src', 's']) {
+      expect(sourceDirPattern.test(value)).toBe(true);
+    }
+
+    for (const value of [
+      '',
+      ' src',
+      'src ',
+      '/',
+      '.',
+      './',
+      '..',
+      '../src',
+      'src/../app',
+      'src/..',
+    ]) {
+      expect(sourceDirPattern.test(value)).toBe(false);
+    }
+  });
 });
 
 describe('routing.rewrites validation', () => {

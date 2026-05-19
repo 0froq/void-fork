@@ -13,6 +13,7 @@ Project-level configuration lives in a `void.json` file at the project root. Mos
 ```json
 {
   "$schema": "./node_modules/void/schema.json",
+  "sourceDir": "src",
   "target": "cloudflare",
   "auth": {
     "providers": ["email", "github", "google"]
@@ -39,6 +40,20 @@ Project-level configuration lives in a `void.json` file at the project root. Mos
 Add the `$schema` field for autocomplete and validation in your editor.
 
 ## Fields
+
+### `sourceDir`
+
+Directory containing Void source conventions, relative to the project root.
+
+When omitted, Void uses the existing project-root conventions: `pages/`, `routes/`, `middleware/`, `crons/`, `queues/`, `db/`, `auth.ts`, and `env.ts`.
+
+When set, those conventions move under the configured directory:
+
+```json
+{ "sourceDir": "src" }
+```
+
+With that config, Void reads `src/pages`, `src/routes`, `src/db/schema.ts`, `src/db/migrations`, `src/auth.ts`, and `src/env.ts`. Project files such as `void.json`, `vite.config.ts`, `package.json`, `tsconfig.json`, `wrangler.json`, `public/`, and `.env*` stay at the project root. Void does not scan both locations; if source conventions exist in both places during dev/build, remove one copy so the active source tree is unambiguous.
 
 ### `auth`
 

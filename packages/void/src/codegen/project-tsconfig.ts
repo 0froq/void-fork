@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'pathe';
+import { join, relative } from 'pathe';
+import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 
 export type ProjectTsconfigOptions = {
   redirectDbModule?: boolean;
+  paths?: ProjectPaths;
 };
 
 export type ProjectTsconfig = {
@@ -29,9 +31,10 @@ export function createProjectTsconfig(
   hasSchema?: boolean,
   options: ProjectTsconfigOptions = {},
 ): ProjectTsconfig {
+  const pathsConfig = options.paths ?? readProjectPaths(root);
   const outDir = join(root, '.void');
-  const includeRoutes = hasRouteTypes ?? existsSync(join(root, 'routes'));
-  const includeQueues = existsSync(join(root, 'queues'));
+  const includeRoutes = hasRouteTypes ?? existsSync(pathsConfig.routesDir);
+  const includeQueues = existsSync(pathsConfig.queuesDir);
   const includeMd = existsSync(join(outDir, 'md.d.ts'));
   const includeEnv = existsSync(join(outDir, 'env.d.ts'));
   const files = [
@@ -57,12 +60,13 @@ export function createProjectTsconfig(
 
     if (hasSchema) {
       // Determine whether schema is a file or directory
-      const isDir =
-        existsSync(join(root, 'db', 'schema')) && !existsSync(join(root, 'db', 'schema.ts'));
+      const isDir = existsSync(pathsConfig.schemaDir) && !existsSync(pathsConfig.schemaFile);
 
       // Paths are relative to .void/ (where this tsconfig lives), so use ../
-      paths['@schema'] = [isDir ? '../db/schema/index.ts' : '../db/schema.ts'];
-      paths['@schema/*'] = ['../db/schema/*'];
+      const schemaRel = relative(outDir, pathsConfig.schemaDir).replace(/\\/g, '/');
+      const schemaFileRel = relative(outDir, pathsConfig.schemaFile).replace(/\\/g, '/');
+      paths['@schema'] = [isDir ? `${schemaRel}/index.ts` : schemaFileRel];
+      paths['@schema/*'] = [`${schemaRel}/*`];
     }
 
     tsconfig.compilerOptions = { paths };

@@ -63,6 +63,7 @@ import { nodeTargetPlugin } from './plugin-node-target.ts';
 import { prerenderPlugin } from './plugin-prerender.ts';
 import { restartPlugin } from './plugin-restart.ts';
 import { routingPlugin } from './plugin-routing.ts';
+import { assertNoRootSourceConventionConflicts, resolveProjectPaths } from './project-paths.ts';
 import { scanQueuesSync } from './queues/scan.ts';
 import { scanMiddlewareSync, scanRoutePatternsSync } from './router/scan.ts';
 import { scanWebSocketRoutesSync } from './router/websocket.ts';
@@ -622,6 +623,8 @@ export function voidPlugin(options?: {
     ? crypto.randomUUID()
     : getOrCreateDevTriggerToken(root);
   const config = readConfig(root);
+  const paths = resolveProjectPaths(root, config);
+  assertNoRootSourceConventionConflicts(paths);
   const dialect = getDatabaseDialect(config);
   const detected = detectFramework(root);
   const framework = detected?.class === 'a' ? (detected.name as Framework) : undefined;
@@ -631,11 +634,11 @@ export function voidPlugin(options?: {
   const inferenceOptions = config.inference?.bindings
     ? { bindings: config.inference.bindings }
     : undefined;
-  const inferredBindings = inferProjectBindings(root, inferenceOptions, scanDirs);
+  const inferredBindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
   const sandboxEnabled = isSandboxEnabled(config);
   const bindings = sandboxEnabled ? { ...inferredBindings, needsSandbox: true } : inferredBindings;
   const sandboxConfig = bindings.needsSandbox ? resolveSandboxConfig(config, root) : undefined;
-  const authConfigPath = findVoidAuthConfig(root);
+  const authConfigPath = findVoidAuthConfig(root, paths);
   const authEnabled = bindings.needsAuth || authConfigPath !== null || config.auth !== undefined;
 
   if (detected && authEnabled) {
@@ -696,8 +699,8 @@ export function voidPlugin(options?: {
 
   // Scan queues/websocket routes early so both framework-mode and default-mode
   // branches can safely close over these bindings.
-  const queues = framework ? [] : scanQueuesSync(root);
-  const websocketRoutes = framework ? [] : scanWebSocketRoutesSync(root);
+  const queues = framework ? [] : scanQueuesSync(root, paths.queuesDir);
+  const websocketRoutes = framework ? [] : scanWebSocketRoutesSync(root, paths);
   const liveConfig = !isNodeTarget(config.target)
     ? bindings.needsLive
       ? resolveLiveBindingConfig(root, {
@@ -1507,11 +1510,11 @@ export function voidPlugin(options?: {
     workerConfig.compatibility_flags = normalizedFlags;
   }
 
-  const jobs = scanJobsSync(root);
-  const ssrEntry = validateSsrEntry(root);
-  const hasPages = existsSync(join(root, 'pages'));
-  const hasMiddleware = scanMiddlewareSync(root).length > 0;
-  const routePatterns = scanRoutePatternsSync(root);
+  const jobs = scanJobsSync(root, paths.cronsDir);
+  const ssrEntry = validateSsrEntry(root, paths);
+  const hasPages = existsSync(paths.pagesDir);
+  const hasMiddleware = scanMiddlewareSync(root, paths).length > 0;
+  const routePatterns = scanRoutePatternsSync(root, paths);
   const hasDocumentRoutes = routeScanHasDocumentRoutes(routePatterns);
   let assetRouting = resolveAssetRoutingPolicy({
     isSsr: Boolean(ssrEntry),

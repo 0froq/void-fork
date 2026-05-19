@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'pathe';
+import { readProjectPaths } from '../project-paths.ts';
 import { hasSsrEntry } from '../ssr/entry.ts';
 
 /** Build output conventions for a known SSG (static site generator). */
@@ -310,22 +311,23 @@ function detectViteBinary(root: string): 'vite' | 'vp' {
  * Check whether the project has backend files that require a full worker deploy.
  */
 export function hasBackendFiles(root: string): boolean {
-  if (existsSync(join(root, 'routes'))) {
+  const paths = readProjectPaths(root);
+  if (existsSync(paths.routesDir)) {
     return true;
   }
-  if (existsSync(join(root, 'pages'))) {
+  if (existsSync(paths.pagesDir)) {
     return true;
   }
-  if (existsSync(join(root, 'middleware'))) {
+  if (existsSync(paths.middlewareDir)) {
     return true;
   }
-  if (existsSync(join(root, 'crons'))) {
+  if (existsSync(paths.cronsDir)) {
     return true;
   }
-  if (existsSync(join(root, 'queues'))) {
+  if (existsSync(paths.queuesDir)) {
     return true;
   }
-  if (hasSsrEntry(root)) {
+  if (hasSsrEntry(root, paths)) {
     return true;
   }
   return false;

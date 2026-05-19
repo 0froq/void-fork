@@ -1,6 +1,6 @@
 import vue from '@vitejs/plugin-vue';
-import { join } from 'pathe';
 import type { Plugin } from 'vite';
+import { resolvePagesDir } from 'void/pages';
 import { islandsPlugin } from './plugin-islands.ts';
 import { pagesPlugin } from './plugin-pages.ts';
 
@@ -10,10 +10,11 @@ export type VoidVueOptions = Readonly<{
 }>;
 
 export function voidVue(options?: VoidVueOptions): Array<Plugin> {
-  const pagesDir = join(process.cwd(), 'pages');
+  const root = process.cwd();
+  const pagesDir = resolvePagesDir(root);
   return [
     vue(options?.vue) as Plugin,
-    ...pagesPlugin(pagesDir, { viewTransitions: options?.viewTransitions }),
-    ...islandsPlugin(pagesDir),
+    ...pagesPlugin(pagesDir, { root, viewTransitions: options?.viewTransitions }),
+    ...islandsPlugin(pagesDir, { root }),
   ];
 }

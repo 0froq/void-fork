@@ -36,6 +36,23 @@ describe('ensureProjectTsconfig', () => {
     expect(tsconfig.compilerOptions.paths['void/routes']).toEqual(['./routes.d.ts']);
   });
 
+  it('uses sourceDir conventions for route, queue, and schema paths', () => {
+    writeFileSync(join(root, 'void.json'), JSON.stringify({ sourceDir: 'src' }));
+    mkdirSync(join(root, 'src', 'routes'), { recursive: true });
+    mkdirSync(join(root, 'src', 'queues'), { recursive: true });
+    mkdirSync(join(root, 'src', 'db'), { recursive: true });
+    writeFileSync(join(root, 'src', 'db', 'schema.ts'), 'export const users = {};');
+
+    ensureProjectTsconfig(root, undefined, true, true);
+    const tsconfig = readTsconfig();
+
+    expect(tsconfig.files).toEqual(
+      expect.arrayContaining(['routes.d.ts', 'queues.d.ts', 'db.d.ts']),
+    );
+    expect(tsconfig.compilerOptions.paths['@schema']).toEqual(['../src/db/schema.ts']);
+    expect(tsconfig.compilerOptions.paths['@schema/*']).toEqual(['../src/db/schema/*']);
+  });
+
   it('excludes routes.d.ts when no routes/ directory', () => {
     ensureProjectTsconfig(root);
     const tsconfig = readTsconfig();

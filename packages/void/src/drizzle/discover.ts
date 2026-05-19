@@ -1,5 +1,6 @@
 import { existsSync, statSync } from 'node:fs';
-import { join } from 'pathe';
+import { relative } from 'pathe';
+import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 
 export type SchemaLocation = { type: 'file'; path: string } | { type: 'directory'; path: string };
 
@@ -12,13 +13,16 @@ export type SchemaLocation = { type: 'file'; path: string } | { type: 'directory
  *
  * Returns null if no schema is found.
  */
-export function discoverSchema(root: string): SchemaLocation | null {
-  const filePath = join(root, 'db', 'schema.ts');
+export function discoverSchema(
+  root: string,
+  paths: ProjectPaths = readProjectPaths(root),
+): SchemaLocation | null {
+  const filePath = paths.schemaFile;
   if (existsSync(filePath) && statSync(filePath).isFile()) {
     return { type: 'file', path: filePath };
   }
 
-  const dirPath = join(root, 'db', 'schema');
+  const dirPath = paths.schemaDir;
   if (existsSync(dirPath) && statSync(dirPath).isDirectory()) {
     return { type: 'directory', path: dirPath };
   }
@@ -31,6 +35,10 @@ export function discoverSchema(root: string): SchemaLocation | null {
  * - File: `"./db/schema.ts"`
  * - Directory: `"./db/schema/*.ts"`
  */
-export function schemaSpecifier(location: SchemaLocation): string {
-  return location.type === 'file' ? './db/schema.ts' : './db/schema/*.ts';
+export function schemaSpecifier(location: SchemaLocation, root?: string): string {
+  if (!root) {
+    return location.type === 'file' ? './db/schema.ts' : './db/schema/*.ts';
+  }
+  const rel = relative(root, location.path).replace(/\\/g, '/');
+  return location.type === 'file' ? `./${rel}` : `./${rel}/*.ts`;
 }

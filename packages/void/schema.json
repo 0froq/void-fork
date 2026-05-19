@@ -8,6 +8,11 @@
       "type": "string",
       "description": "JSON Schema URL for IDE support"
     },
+    "sourceDir": {
+      "type": "string",
+      "pattern": "^(?!/)(?!\\.\\.?$)(?!\\./$)(?!\\.\\./)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\s$)(?!\\s).+$",
+      "description": "Directory containing Void source conventions such as pages, routes, middleware, crons, queues, db, auth.ts, and env.ts. Omit to use the project root."
+    },
     "target": {
       "type": "string",
       "enum": ["cloudflare", "node", "bun", "deno"],

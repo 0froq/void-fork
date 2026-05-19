@@ -19,6 +19,7 @@ import { createProjectTsconfig, ensureProjectTsconfig } from '../codegen/project
 import { getDatabaseDialect, readConfig, type DatabaseDialect } from '../config.ts';
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { detectFramework, type DetectedFramework } from '../plugin-inference.ts';
+import { readProjectPaths } from '../project-paths.ts';
 import {
   detectAgents,
   getAgentById,
@@ -1223,10 +1224,10 @@ export function detectProjectState(root: string): ProjectState {
     hasTypescript,
     hasTsconfig: existsSync(join(root, 'tsconfig.json')),
     hasGithubWorkflows: existsSync(join(root, '.github', 'workflows')),
-    hasRoutes: existsSync(join(root, 'routes')),
+    hasRoutes: existsSync(readProjectPaths(root).routesDir),
     hasMigrations:
-      existsSync(join(root, 'db', 'migrations')) || existsSync(join(root, 'migrations')),
-    hasPages: existsSync(join(root, 'pages')),
+      existsSync(readProjectPaths(root).migrationsDir) || existsSync(join(root, 'migrations')),
+    hasPages: existsSync(readProjectPaths(root).pagesDir),
     packageManager,
     typescriptWanted: hasTypescript,
   };
@@ -1237,7 +1238,8 @@ function findViteConfig(root: string): string | undefined {
 }
 
 function hasDrizzleSchema(root: string): boolean {
-  return existsSync(join(root, 'db', 'schema.ts')) || existsSync(join(root, 'db', 'schema'));
+  const paths = readProjectPaths(root);
+  return existsSync(paths.schemaFile) || existsSync(paths.schemaDir);
 }
 
 function detectPagesFramework(root: string): ScaffoldFramework | undefined {
@@ -1622,7 +1624,7 @@ function detectDatabaseSetup(root: string): DatabaseSetupChoice {
   }
   if (
     hasDrizzleSchema(root) ||
-    existsSync(join(root, 'db', 'migrations')) ||
+    existsSync(readProjectPaths(root).migrationsDir) ||
     existsSync(join(root, 'migrations'))
   ) {
     return 'sqlite';
@@ -2030,7 +2032,7 @@ export function generateStarterMigration(
   // Mirrors the rollback pattern in `gen.ts`'s
   // `generateCustomMigration`, but extended for the "migrations dir
   // doesn't exist yet" case that only the starter path hits.
-  const migrationsDir = join(root, 'db', 'migrations');
+  const migrationsDir = readProjectPaths(root).migrationsDir;
   const metaDir = join(migrationsDir, 'meta');
   const journalPath = join(metaDir, '_journal.json');
   const migrationsDirExistedBefore = existsSync(migrationsDir);
@@ -2874,12 +2876,13 @@ function setupExistingProject(
  */
 function scaffoldDemo(root: string): { packageJsonMutated: boolean } {
   const devCommand = getDevCommand(root);
+  const paths = readProjectPaths(root);
 
   const packageJsonMutated = ensureVoidDependency(root);
 
-  mkdirSync(join(root, 'db'), { recursive: true });
+  mkdirSync(paths.dbDir, { recursive: true });
   writeFileSync(
-    join(root, 'db', 'schema.ts'),
+    paths.schemaFile,
     `import { sql } from "void/db";
 import { integer, sqliteTable, text } from "void/schema-d1";
 
@@ -2894,9 +2897,9 @@ export const posts = sqliteTable("posts", {
   log.success('Created db/schema.ts');
 
   // API route
-  mkdirSync(join(root, 'routes', 'api'), { recursive: true });
+  mkdirSync(join(paths.routesDir, 'api'), { recursive: true });
   writeFileSync(
-    join(root, 'routes', 'api', 'posts.ts'),
+    join(paths.routesDir, 'api', 'posts.ts'),
     `import { defineHandler } from "void";
 import { db } from "void/db";
 import { posts } from "@schema";
@@ -2908,12 +2911,12 @@ export const GET = defineHandler(async () => {
 `,
   );
   log.success('Created routes/api/posts.ts');
-  ensureProjectTsconfig(root, undefined, true, true);
+  ensureProjectTsconfig(root, undefined, true, true, { paths });
 
   // Frontend demo
-  mkdirSync(join(root, 'src'), { recursive: true });
+  mkdirSync(paths.ssrDir, { recursive: true });
   writeFileSync(
-    join(root, 'src', 'demo.ts'),
+    join(paths.ssrDir, 'demo.ts'),
     `import { fetch } from "void/client";
 
 // Fully typed: response type is inferred from the GET handler's return type,
