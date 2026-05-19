@@ -281,6 +281,134 @@ describe('POST /admin/users/:id/plan', () => {
     expect(res.status).toBe(302);
     expect(res.headers.get('Location')).toBe(`/admin/users/${user.id}`);
   });
+
+  test('refreshes project:{projectId} KV entries so the proxy sandbox gate sees the new plan without a redeploy', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-plan-kv',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const user = await createTestUser(env.db, 'planuser-kv', 'github', undefined, 'free');
+    const p1 = await createTestProject(env.db, user.id, 'plan-kv-a');
+    const p2 = await createTestProject(env.db, user.id, 'plan-kv-b');
+
+    // Seed stale entries that reflect the pre-change plan.
+    await env.ROUTING.put(`project:${p1.id}`, JSON.stringify({ userId: user.id, plan: 'free' }));
+    await env.ROUTING.put(`project:${p2.id}`, JSON.stringify({ userId: user.id, plan: 'free' }));
+
+    const body = new URLSearchParams({ plan: 'pro' });
+    const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
+      method: 'POST',
+      body: body.toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+
+    const v1 = JSON.parse((await env.ROUTING.get(`project:${p1.id}`))!);
+    expect(v1).toEqual({ userId: user.id, plan: 'pro' });
+    const v2 = JSON.parse((await env.ROUTING.get(`project:${p2.id}`))!);
+    expect(v2).toEqual({ userId: user.id, plan: 'pro' });
+  });
+
+  test('clears sandbox-block KV and sandbox_runtime_exceeded DB suspension on plan change', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-plan-sb',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const user = await createTestUser(env.db, 'planuser-sb', 'github', undefined, 'solo');
+
+    // Pre-seed the suspension state as the UsageCounter DO would have left it.
+    await env.ROUTING.put(`sandbox-block:${user.id}`, '1');
+    await env.db
+      .update(users)
+      .set({ suspended_reason: 'sandbox_runtime_exceeded' })
+      .where(eq(users.id, user.id));
+
+    const body = new URLSearchParams({ plan: 'pro' });
+    const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
+      method: 'POST',
+      body: body.toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+
+    // KV block key should be deleted.
+    expect(await env.ROUTING.get(`sandbox-block:${user.id}`)).toBeNull();
+
+    // DB suspension reason should be cleared.
+    const [row] = await env.db
+      .select({ suspended_reason: users.suspended_reason })
+      .from(users)
+      .where(eq(users.id, user.id));
+    expect(row.suspended_reason).toBeNull();
+  });
+
+  test('does NOT clear non-sandbox suspensions (e.g. requests_exceeded) on plan change', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-plan-req',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const user = await createTestUser(env.db, 'planuser-req', 'github', undefined, 'solo');
+
+    await env.db
+      .update(users)
+      .set({ suspended_reason: 'requests_exceeded' })
+      .where(eq(users.id, user.id));
+
+    const body = new URLSearchParams({ plan: 'pro' });
+    const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
+      method: 'POST',
+      body: body.toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+
+    const [row] = await env.db
+      .select({ suspended_reason: users.suspended_reason })
+      .from(users)
+      .where(eq(users.id, user.id));
+    // unsuspendUserIfReason matches by reason — requests_exceeded must remain.
+    expect(row.suspended_reason).toBe('requests_exceeded');
+  });
+
+  test('succeeds when no sandbox block exists and no suspension is set', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-plan-noop',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const user = await createTestUser(env.db, 'planuser-noop', 'github', undefined, 'free');
+
+    const body = new URLSearchParams({ plan: 'pro' });
+    const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
+      method: 'POST',
+      body: body.toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe(`/admin/users/${user.id}`);
+
+    const [row] = await env.db
+      .select({ suspended_reason: users.suspended_reason, plan: users.plan })
+      .from(users)
+      .where(eq(users.id, user.id));
+    expect(row.suspended_reason).toBeNull();
+    expect(row.plan).toBe('pro');
+  });
 });
 
 describe('POST /admin/users/:id/suspend + unsuspend', () => {

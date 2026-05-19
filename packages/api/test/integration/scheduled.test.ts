@@ -41,6 +41,7 @@ function makeBindings(e: TestEnv) {
     USAGE_COUNTER: e.USAGE_COUNTER,
     CRON_SCHEDULER: e.CRON_SCHEDULER,
     ERROR_ALERT_MONITOR: e.ERROR_ALERT_MONITOR,
+    SANDBOX_CONCURRENCY_COUNTER: e.SANDBOX_CONCURRENCY_COUNTER,
     CRON_FIRES_QUEUE: { send: async () => {}, sendBatch: async () => {} } as unknown as Queue<
       import('../../src/cron-fires-queue.ts').CronFireMessage
     >,

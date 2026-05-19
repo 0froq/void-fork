@@ -271,6 +271,11 @@ async function cleanupBestEffortResources(
     context.env.ROUTING.delete(project.slug).catch(warn('Failed to delete routing entry')),
   );
 
+  // NOTE: `projectAccountKey(projectId)` (`project:{projectId}`) is intentionally
+  // NOT deleted here — the sandbox gate's release path in `packages/proxy/src/sandbox.ts`
+  // needs `{userId, plan}` to address the per-account SandboxConcurrencyCounter DO.
+  // Leaving it durable across project deletion prevents lease leaks until the 1h stale-slot sweep.
+
   // Queue routing KV entries
   for (const q of resources.filter((r) => r.type === 'queue')) {
     cleanup.push(

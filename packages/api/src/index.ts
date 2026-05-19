@@ -37,6 +37,7 @@ import projects from './routes/projects.ts';
 import revalidate from './routes/revalidate.ts';
 import secrets from './routes/secrets.ts';
 import { projectUsage, accountUsage } from './routes/usage.ts';
+import { SandboxConcurrencyCounter } from './sandbox-concurrency-counter.ts';
 import { REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
 import { UsageCounter } from './usage-counter.ts';
@@ -231,12 +232,15 @@ async function processUserRollover(
   const doId = env.USAGE_COUNTER.idFromName(user.id);
   const stub = env.USAGE_COUNTER.get(doId);
 
-  // Send rollover check (DO only resets if period actually changed)
+  // Send rollover check (DO only resets if period actually changed).
+  // The DO does the sandbox-block KV delete + sandbox_runtime DB unsuspend
+  // inline because it owns that state; request-suspension cleanup stays here
+  // because the DO doesn't know which project slugs were marked suspended.
   const rolloverRes = await stub.fetch(
     new Request('https://do/rollover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ billingPeriodStart, plan: user.plan }),
+      body: JSON.stringify({ billingPeriodStart, plan: user.plan, userId: user.id }),
     }),
   );
 
@@ -247,7 +251,6 @@ async function processUserRollover(
       unsuspendAi?: boolean;
     }>();
 
-    // If period rolled and user was request-suspended, unsuspend in DB
     if (result.rolled && result.unsuspendRequests) {
       await unsuspendUserIfReason(db, user.id, REASON_REQUESTS_EXCEEDED);
     }
@@ -263,7 +266,7 @@ async function processUserRollover(
   );
 }
 
-export { UsageCounter, CronScheduler, ErrorAlertMonitor };
+export { UsageCounter, CronScheduler, ErrorAlertMonitor, SandboxConcurrencyCounter };
 export type AppType = typeof app;
 export { app, scheduled };
 

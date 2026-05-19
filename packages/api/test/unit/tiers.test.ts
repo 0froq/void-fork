@@ -49,6 +49,36 @@ describe('PLAN_LIMITS', () => {
     expect(PLAN_LIMITS.solo.cpuMsPerRequest).toBeGreaterThan(PLAN_LIMITS.free.cpuMsPerRequest);
     expect(PLAN_LIMITS.pro.deploysPerDay).toBeGreaterThan(PLAN_LIMITS.solo.deploysPerDay);
   });
+
+  it('solo tier sandbox runtime is 30 hours', () => {
+    expect(PLAN_LIMITS.solo.sandboxRuntimeSecondsPerMonth).toBe(30 * 3600);
+  });
+
+  it('solo tier sandbox concurrency is 2', () => {
+    expect(PLAN_LIMITS.solo.sandboxMaxConcurrentInstances).toBe(2);
+  });
+
+  it('pro tier sandbox runtime is 200 hours', () => {
+    expect(PLAN_LIMITS.pro.sandboxRuntimeSecondsPerMonth).toBe(200 * 3600);
+  });
+
+  it('pro tier sandbox concurrency is 10', () => {
+    expect(PLAN_LIMITS.pro.sandboxMaxConcurrentInstances).toBe(10);
+  });
+
+  it('sponsored tier sandbox limits are unlimited (0)', () => {
+    expect(PLAN_LIMITS.sponsored.sandboxRuntimeSecondsPerMonth).toBe(0);
+    expect(PLAN_LIMITS.sponsored.sandboxMaxConcurrentInstances).toBe(0);
+  });
+
+  it('free tier sandbox is effectively disabled (non-zero finite limit)', () => {
+    // 0 would mean "unlimited" by the shared isWithinLimit convention, so
+    // we use a tiny finite limit to ensure any real sandbox use is rejected.
+    expect(PLAN_LIMITS.free.sandboxRuntimeSecondsPerMonth).toBeGreaterThan(0);
+    expect(PLAN_LIMITS.free.sandboxRuntimeSecondsPerMonth).toBeLessThan(
+      PLAN_LIMITS.solo.sandboxRuntimeSecondsPerMonth,
+    );
+  });
 });
 
 describe('getPlanLimits', () => {

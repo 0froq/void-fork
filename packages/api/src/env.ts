@@ -1,5 +1,6 @@
 import type { Env } from 'hono';
 import type { Db } from './db.ts';
+import type { SandboxConcurrencyCounter } from './sandbox-concurrency-counter.ts';
 import type { User } from './types.ts';
 
 /**
@@ -51,11 +52,21 @@ export type ApiEnv = Env & {
     TAIL_SERVICE_NAME?: string;
     VOID_PROXY_SERVICE?: string;
     VOID_PROXY_TOKEN?: string;
+    /**
+     * Name of the Cloudflare Queue (e.g. `void-usage-events` /
+     * `void-usage-events-staging`) injected as a producer binding on user
+     * worker uploads that declare a sandbox (`manifest.sandbox`). The
+     * framework runtime publishes container-runtime metering messages to
+     * the `USAGE_EVENTS_QUEUE` binding; the API itself consumes the same
+     * queue. Falls back to `void-usage-events` when unset.
+     */
+    USAGE_EVENTS_QUEUE_NAME?: string;
     SITE_DOMAIN?: string;
     DASHBOARD_URL?: string;
     USAGE_COUNTER: DurableObjectNamespace;
     CRON_SCHEDULER: DurableObjectNamespace;
     ERROR_ALERT_MONITOR: DurableObjectNamespace;
+    SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounter>;
     /**
      * Producer for the cron-firing queue. Used by `CronScheduler.alarm()` to
      * enqueue user-worker invocations from inside its Durable Object context.

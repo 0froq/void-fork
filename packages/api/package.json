@@ -14,7 +14,8 @@
     "./usage": "./src/routes/usage.ts",
     "./api": "./src/api.ts",
     "./env": "./src/env.ts",
-    "./suspension": "./src/suspension.ts"
+    "./suspension": "./src/suspension.ts",
+    "./routing": "./src/routing.ts"
   },
   "scripts": {
     "db:generate": "drizzle-kit generate",

@@ -23,6 +23,7 @@ export async function processUsageEventBatch(
   env: ApiEnv['Bindings'],
 ): Promise<void> {
   const events = batch.messages.map((message) => message.body as UsageEvent);
+
   const grouped = groupEventsByUser(events);
   const db = createDb(env.HYPERDRIVE.connectionString);
 

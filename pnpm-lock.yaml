@@ -196,6 +196,9 @@ importers:
 
   packages/proxy:
     dependencies:
+      '@voidcloud/api':
+        specifier: workspace:*
+        version: link:../api
       hono:
         specifier: 'catalog:'
         version: 4.12.18

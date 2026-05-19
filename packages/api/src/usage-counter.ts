@@ -1,8 +1,9 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createDb, suspendUser } from './db.ts';
+import { createDb, suspendUser, unsuspendUserIfReason } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { queryProjectAiUsage } from './routes/usage.ts';
-import { REASON_REQUESTS_EXCEEDED } from './suspension.ts';
+import { sandboxBlockKey } from './routing.ts';
+import { REASON_REQUESTS_EXCEEDED, REASON_SANDBOX_RUNTIME_EXCEEDED } from './suspension.ts';
 import { getPlanLimits, isWithinLimit } from './tiers.ts';
 
 // --- Exported types ---
@@ -10,10 +11,12 @@ import { getPlanLimits, isWithinLimit } from './tiers.ts';
 export type CounterState = {
   totalRequests: number;
   totalNeurons: number;
+  totalSandboxSeconds: number;
   plan: string;
   billingPeriodStart: string; // ISO date
   requestsSuspended: boolean;
   aiSuspended: boolean;
+  sandboxRuntimeSuspended: boolean;
   projectSlugs: Record<string, string>; // projectId → slug
 };
 
@@ -24,6 +27,8 @@ export type UsageEvent = Readonly<{
   requests: number;
   responseBytes: number;
   status?: number;
+  sandboxRuntimeSeconds?: number;
+  sandboxInstanceId?: string;
 }>;
 
 // --- Pure functions (exported for unit testing) ---
@@ -40,16 +45,27 @@ export function evaluateAiLimit(state: CounterState): boolean {
   return !isWithinLimit(limits.aiNeuronsPerMonth, state.totalNeurons);
 }
 
+/** Returns true if adding incomingSeconds would exceed the plan's sandboxRuntimeSecondsPerMonth limit. */
+export function evaluateSandboxRuntimeLimit(state: CounterState, incomingSeconds: number): boolean {
+  const limits = getPlanLimits(state.plan);
+  return !isWithinLimit(
+    limits.sandboxRuntimeSecondsPerMonth,
+    state.totalSandboxSeconds + incomingSeconds,
+  );
+}
+
 // --- Default state ---
 
 function defaultState(): CounterState {
   return {
     totalRequests: 0,
     totalNeurons: 0,
+    totalSandboxSeconds: 0,
     plan: 'free',
     billingPeriodStart: new Date().toISOString(),
     requestsSuspended: false,
     aiSuspended: false,
+    sandboxRuntimeSuspended: false,
     projectSlugs: {},
   };
 }
@@ -64,7 +80,8 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       return this.state;
     }
     const stored = await this.ctx.storage.get<CounterState>('state');
-    this.state = stored ?? defaultState();
+    // Backfill defaults so DOs with pre-sandbox state load cleanly.
+    this.state = stored ? { ...defaultState(), ...stored } : defaultState();
     return this.state;
   }
 
@@ -86,6 +103,9 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     if (request.method === 'POST' && path === '/init') {
       return this.handleInit(request);
     }
+    if (request.method === 'POST' && path === '/reevaluate-sandbox') {
+      return this.handleReevaluateSandbox(request);
+    }
     if (request.method === 'GET' && path === '/state') {
       return this.handleGetState();
     }
@@ -105,6 +125,16 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     const incomingRequests = body.events.reduce((sum, e) => sum + e.requests, 0);
     state.totalRequests += incomingRequests;
 
+    // Sum incoming sandbox runtime seconds. Treat missing as 0 so request-only
+    // events from non-sandbox workers don't perturb the counter.
+    // At-least-once delivery can re-add up to one heartbeat window (~5 min) on
+    // retry; acceptable for a soft cap.
+    const incomingSandboxSeconds = body.events.reduce(
+      (sum, e) => sum + (e.sandboxRuntimeSeconds ?? 0),
+      0,
+    );
+    state.totalSandboxSeconds += incomingSandboxSeconds;
+
     // Update projectSlugs map
     for (const event of body.events) {
       state.projectSlugs[event.projectId] = event.slug;
@@ -115,13 +145,31 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       state.plan = body.plan;
     }
 
+    // Lazily create one db handle shared by any suspension paths below.
+    let db: ReturnType<typeof createDb> | undefined;
+    const getDb = (): ReturnType<typeof createDb> => {
+      db ??= createDb(this.env.HYPERDRIVE.connectionString);
+      return db;
+    };
+
     // Evaluate request limit
     const exceedsLimit = evaluateRequestLimit(state, 0); // already added above
     if (exceedsLimit && !state.requestsSuspended) {
       state.requestsSuspended = true;
-      await this.suspendProjects(state.projectSlugs, REASON_REQUESTS_EXCEEDED);
-      const db = createDb(this.env.HYPERDRIVE.connectionString);
-      await suspendUser(db, body.userId, REASON_REQUESTS_EXCEEDED);
+      await Promise.all([
+        this.suspendProjects(state.projectSlugs, REASON_REQUESTS_EXCEEDED),
+        suspendUser(getDb(), body.userId, REASON_REQUESTS_EXCEEDED),
+      ]);
+    }
+
+    // Evaluate sandbox runtime limit
+    const exceedsSandbox = evaluateSandboxRuntimeLimit(state, 0); // already added above
+    if (exceedsSandbox && !state.sandboxRuntimeSuspended) {
+      state.sandboxRuntimeSuspended = true;
+      await Promise.all([
+        this.env.ROUTING.put(sandboxBlockKey(body.userId), '1'),
+        suspendUser(getDb(), body.userId, REASON_SANDBOX_RUNTIME_EXCEEDED),
+      ]);
     }
 
     // Schedule AI alarm if not already set
@@ -135,6 +183,8 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     return Response.json({
       totalRequests: state.totalRequests,
       suspended: state.requestsSuspended,
+      totalSandboxSeconds: state.totalSandboxSeconds,
+      sandboxRuntimeSuspended: state.sandboxRuntimeSuspended,
     });
   }
 
@@ -142,6 +192,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     const body = (await request.json()) as {
       billingPeriodStart: string;
       plan: string;
+      userId: string;
     };
     const state = await this.getState();
 
@@ -157,9 +208,11 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
 
     const wasRequestsSuspended = state.requestsSuspended;
     const wasAiSuspended = state.aiSuspended;
+    const wasSandboxRuntimeSuspended = state.sandboxRuntimeSuspended;
 
     state.totalRequests = 0;
     state.totalNeurons = 0;
+    state.totalSandboxSeconds = 0;
     state.plan = body.plan;
     state.billingPeriodStart = body.billingPeriodStart;
 
@@ -168,6 +221,14 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     }
     if (wasAiSuspended) {
       state.aiSuspended = false;
+    }
+    if (wasSandboxRuntimeSuspended) {
+      state.sandboxRuntimeSuspended = false;
+      const db = createDb(this.env.HYPERDRIVE.connectionString);
+      await Promise.all([
+        this.env.ROUTING.delete(sandboxBlockKey(body.userId)),
+        unsuspendUserIfReason(db, body.userId, REASON_SANDBOX_RUNTIME_EXCEEDED),
+      ]);
     }
 
     await this.saveState(state);
@@ -203,6 +264,16 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       }
     }
 
+    await this.saveState(state);
+    return Response.json({ ok: true });
+  }
+
+  /** Admin plan changes: clear in-memory suspension so the next handleRecord re-evaluates against the new plan. */
+  private async handleReevaluateSandbox(request: Request): Promise<Response> {
+    const body = (await request.json()) as { plan: string };
+    const state = await this.getState();
+    state.plan = body.plan;
+    state.sandboxRuntimeSuspended = false;
     await this.saveState(state);
     return Response.json({ ok: true });
   }

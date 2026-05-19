@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vite-plus/test';
 import {
   buildDurableObjectUploadMigrations,
   buildLiveUploadBindings,
+  buildSandboxIdentityBindings,
+  buildSandboxPlatformBindings,
   buildSandboxUploadBindings,
   buildSandboxUploadContainers,
   buildWebSocketUploadBindings,
@@ -9,6 +11,7 @@ import {
   enrichLiveManifest,
   enrichSandboxManifest,
   enrichWebSocketManifest,
+  validateManifestShape,
 } from '../../src/routes/deploy.ts';
 import type { DeployManifest } from '../../src/types.ts';
 
@@ -627,5 +630,130 @@ describe('buildSandboxUploadMetadata', () => {
         { new_classes: ['PresenceRoom'] },
       ],
     });
+  });
+});
+
+describe('buildSandboxPlatformBindings', () => {
+  const sandbox: NonNullable<DeployManifest['sandbox']> = {
+    bindingName: 'SANDBOX',
+    className: 'Sandbox',
+    containerName: 'void-sandbox',
+    image: 'docker.io/cloudflare/sandbox:0.8.11',
+  };
+
+  it('returns the queue producer binding when sandbox is present', () => {
+    expect(
+      buildSandboxPlatformBindings({ USAGE_EVENTS_QUEUE_NAME: 'void-usage-events' }, sandbox),
+    ).toEqual([{ type: 'queue', name: 'USAGE_EVENTS_QUEUE', queue_name: 'void-usage-events' }]);
+  });
+
+  it('returns an empty list when sandbox is absent (no sandbox = no platform bindings)', () => {
+    expect(
+      buildSandboxPlatformBindings({ USAGE_EVENTS_QUEUE_NAME: 'void-usage-events' }, undefined),
+    ).toEqual([]);
+  });
+
+  it('falls back to production defaults when env vars are unset', () => {
+    expect(buildSandboxPlatformBindings({}, sandbox)).toEqual([
+      { type: 'queue', name: 'USAGE_EVENTS_QUEUE', queue_name: 'void-usage-events' },
+    ]);
+  });
+
+  it('honors staging overrides when env vars carry the staging names', () => {
+    expect(
+      buildSandboxPlatformBindings(
+        { USAGE_EVENTS_QUEUE_NAME: 'void-usage-events-staging' },
+        sandbox,
+      ),
+    ).toEqual([
+      { type: 'queue', name: 'USAGE_EVENTS_QUEUE', queue_name: 'void-usage-events-staging' },
+    ]);
+  });
+});
+
+describe('buildSandboxIdentityBindings', () => {
+  const sandbox: NonNullable<DeployManifest['sandbox']> = {
+    bindingName: 'SANDBOX',
+    className: 'Sandbox',
+    containerName: 'void-sandbox',
+    image: 'docker.io/cloudflare/sandbox:0.8.11',
+  };
+
+  it('returns the __VOID_USER_ID + __VOID_PROJECT_SLUG plain-text bindings the framework runtime reads', () => {
+    expect(
+      buildSandboxIdentityBindings(sandbox, { userId: 'user_1', projectSlug: 'my-app' }),
+    ).toEqual([
+      { type: 'plain_text', name: '__VOID_USER_ID', text: 'user_1' },
+      { type: 'plain_text', name: '__VOID_PROJECT_SLUG', text: 'my-app' },
+    ]);
+  });
+
+  it('returns an empty list when sandbox is absent', () => {
+    expect(
+      buildSandboxIdentityBindings(undefined, { userId: 'user_1', projectSlug: 'my-app' }),
+    ).toEqual([]);
+  });
+});
+
+describe('validateManifestShape sandbox + static/spa rejection', () => {
+  const sandbox = {
+    bindingName: 'SANDBOX',
+    className: 'Sandbox',
+    containerName: 'void-sandbox',
+    image: 'docker.io/cloudflare/sandbox:0.8.11',
+  };
+
+  it('rejects manifest.sandbox when type is "static"', () => {
+    expect(
+      validateManifestShape({
+        version: 3,
+        bindings: {},
+        type: 'static',
+        sandbox,
+      }),
+    ).toBe('sandbox is not supported for static/spa deployments');
+  });
+
+  it('rejects manifest.sandbox when type is "spa"', () => {
+    expect(
+      validateManifestShape({
+        version: 3,
+        bindings: {},
+        type: 'spa',
+        sandbox,
+      }),
+    ).toBe('sandbox is not supported for static/spa deployments');
+  });
+
+  it('accepts manifest.sandbox when type is "void"', () => {
+    expect(
+      validateManifestShape({
+        version: 3,
+        bindings: {},
+        type: 'void',
+        sandbox,
+      }),
+    ).toBeNull();
+  });
+
+  it('accepts manifest.sandbox when type is omitted (defaults to void/framework)', () => {
+    expect(
+      validateManifestShape({
+        version: 3,
+        bindings: {},
+        sandbox,
+      }),
+    ).toBeNull();
+  });
+
+  it('accepts manifest.sandbox when type is "framework"', () => {
+    expect(
+      validateManifestShape({
+        version: 3,
+        bindings: {},
+        type: 'framework',
+        sandbox,
+      }),
+    ).toBeNull();
   });
 });

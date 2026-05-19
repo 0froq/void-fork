@@ -8,6 +8,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@voidcloud/api": "workspace:*",
     "hono": "catalog:"
   },
   "devDependencies": {

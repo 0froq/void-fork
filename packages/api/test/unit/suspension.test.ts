@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vite-plus/test';
-import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from '../../src/suspension.ts';
+import {
+  isAdminSuspended,
+  REASON_REQUESTS_EXCEEDED,
+  REASON_SANDBOX_RUNTIME_EXCEEDED,
+} from '../../src/suspension.ts';
 import {
   evaluateRequestLimit,
   evaluateAiLimit,
@@ -13,6 +17,14 @@ describe('isAdminSuspended', () => {
 
   it('returns false for usage-limit reason', () => {
     expect(isAdminSuspended(REASON_REQUESTS_EXCEEDED)).toBe(false);
+  });
+
+  it('returns false for sandbox runtime usage-limit reason', () => {
+    expect(isAdminSuspended(REASON_SANDBOX_RUNTIME_EXCEEDED)).toBe(false);
+  });
+
+  it('does not treat sandbox_runtime_exceeded as admin suspension', () => {
+    expect(isAdminSuspended('sandbox_runtime_exceeded')).toBe(false);
   });
 
   it('returns true for admin_suspended', () => {
@@ -38,10 +50,12 @@ describe('evaluateRequestLimit (real implementation)', () => {
     return {
       totalRequests: 0,
       totalNeurons: 0,
+      totalSandboxSeconds: 0,
       plan: 'free',
       billingPeriodStart: new Date().toISOString(),
       requestsSuspended: false,
       aiSuspended: false,
+      sandboxRuntimeSuspended: false,
       projectSlugs: {},
       ...overrides,
     };
@@ -71,10 +85,12 @@ describe('evaluateAiLimit (real implementation)', () => {
     return {
       totalRequests: 0,
       totalNeurons: 0,
+      totalSandboxSeconds: 0,
       plan: 'free',
       billingPeriodStart: new Date().toISOString(),
       requestsSuspended: false,
       aiSuspended: false,
+      sandboxRuntimeSuspended: false,
       projectSlugs: {},
       ...overrides,
     };

@@ -751,4 +751,154 @@ describe('per-deploy sandbox integration', () => {
     const [proj] = await env.db.select().from(projects).where(eq(projects.id, project.id));
     expect(proj).toBeUndefined();
   });
+
+  // ----------------------------------------------------------------------
+  // P6: deploy-pipeline integration — sandbox-using user worker uploads
+  // include the platform queue + identity bindings, and the routing-switch
+  // step writes the per-project `{userId, plan}` entry the proxy's sandbox
+  // gate reads (packages/proxy/src/sandbox.ts).
+  // ----------------------------------------------------------------------
+  it('sandbox deploy injects USAGE_EVENTS_QUEUE + __VOID_USER_ID/__VOID_PROJECT_SLUG and a single __VOID_PROXY', async () => {
+    const user = await createTestUser(env.db, 'sb-p6-user', 'github', undefined, 'pro');
+    const project = await createTestProject(env.db, user.id, 'sb-p6');
+    const cf = mockCfApi();
+
+    const res = await deploy(project.id, user.jwt);
+    expect(res.status).toBe(200);
+    const done = getDoneEvent(await readAllEvents(res));
+    expect(done).toBeDefined();
+    const deployId = done!.deployment;
+
+    const userWorker = cf.state.hostScripts.get(`user-${project.slug}-${deployId}`);
+    expect(userWorker).toBeDefined();
+    const bindings = userWorker!.bindings;
+
+    // Queue producer for the framework's container-runtime metering path.
+    const queueBindings = bindings.filter(
+      (b) => b.type === 'queue' && b.name === 'USAGE_EVENTS_QUEUE',
+    );
+    expect(queueBindings).toHaveLength(1);
+    expect(queueBindings[0].queue_name).toBe('void-usage-events');
+
+    // `__VOID_PROXY` is injected once by `provisionBindings` (AI / revalidation
+    // / sandbox gate all share the same service binding).
+    const proxyBindings = bindings.filter((b) => b.type === 'service' && b.name === '__VOID_PROXY');
+    expect(proxyBindings).toHaveLength(1);
+
+    // Identity plain-text bindings the framework's sandbox runtime reads
+    // before publishing to USAGE_EVENTS_QUEUE. Project id is sourced from
+    // the shared `__PROJECT_ID` slot injected by `provisionBindings`.
+    const userIdBinding = bindings.find((b) => b.name === '__VOID_USER_ID');
+    expect(userIdBinding).toBeDefined();
+    expect(userIdBinding!.type).toBe('plain_text');
+    expect((userIdBinding as { text?: string }).text).toBe(user.id);
+
+    const projectIdBinding = bindings.find((b) => b.name === '__PROJECT_ID');
+    expect(projectIdBinding).toBeDefined();
+    expect(projectIdBinding!.type).toBe('plain_text');
+    expect((projectIdBinding as { text?: string }).text).toBe(project.id);
+
+    const slugBinding = bindings.find((b) => b.name === '__VOID_PROJECT_SLUG');
+    expect(slugBinding).toBeDefined();
+    expect(slugBinding!.type).toBe('plain_text');
+    expect((slugBinding as { text?: string }).text).toBe(project.slug);
+  });
+
+  it('sandbox deploy writes `project:{projectId}` routing entry with { userId, plan } shape', async () => {
+    const user = await createTestUser(env.db, 'sb-p6-kv-user', 'github', undefined, 'pro');
+    const project = await createTestProject(env.db, user.id, 'sb-p6-kv');
+    mockCfApi();
+
+    const res = await deploy(project.id, user.jwt);
+    expect(res.status).toBe(200);
+    const done = getDoneEvent(await readAllEvents(res));
+    expect(done).toBeDefined();
+
+    const raw = await env.ROUTING.get(`project:${project.id}`);
+    expect(raw).not.toBeNull();
+    expect(JSON.parse(raw!)).toEqual({ userId: user.id, plan: 'pro' });
+  });
+
+  it('non-sandbox WfP deploy still writes `project:{projectId}` (entry tracks user plan, not sandbox usage)', async () => {
+    const user = await createTestUser(env.db, 'sb-p6-nosb-user', 'github', undefined, 'solo');
+    const project = await createTestProject(env.db, user.id, 'sb-p6-nosb');
+    mockCfApi();
+
+    const workerSource = "export default { fetch() { return new Response('ok'); } }";
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          manifest: { version: 3, assetManifestVersion: 2, bindings: {} },
+          assetManifest: {},
+          source: null,
+          commit: null,
+          repositoryUrl: null,
+          commitUrl: null,
+          gitRef: null,
+          preflight: null,
+          workerFiles: {
+            'index.js': bytesToBase64(new TextEncoder().encode(workerSource)),
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    // Drain the NDJSON stream so the deploy pipeline runs to completion
+    // (routing-switch + DB finalize). Without this the assertion below races
+    // the pipeline and reads KV before `ROUTING.put` ever fires.
+    const done = getDoneEvent(await readAllEvents(res));
+    expect(done).toBeDefined();
+
+    const raw = await env.ROUTING.get(`project:${project.id}`);
+    expect(raw).not.toBeNull();
+    expect(JSON.parse(raw!)).toEqual({ userId: user.id, plan: 'solo' });
+  });
+
+  it('rejects manifest.sandbox for static/spa deployments at validation time', async () => {
+    const user = await createTestUser(env.db, 'sb-p6-static-user', 'github', undefined, 'pro');
+    const project = await createTestProject(env.db, user.id, 'sb-p6-static');
+    mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          manifest: {
+            version: 3,
+            assetManifestVersion: 2,
+            bindings: {},
+            type: 'static',
+            sandbox: {
+              bindingName: 'SANDBOX',
+              className: 'Sandbox',
+              containerName: 'void-sandbox',
+              image: SANDBOX_IMAGE_V1,
+            },
+          },
+          assetManifest: {},
+          source: null,
+          commit: null,
+          repositoryUrl: null,
+          commitUrl: null,
+          gitRef: null,
+          preflight: null,
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { event: string; message: string };
+    expect(body.event).toBe('error');
+    expect(body.message).toContain('sandbox is not supported for static/spa deployments');
+  });
 });

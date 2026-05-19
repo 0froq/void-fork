@@ -19,6 +19,10 @@ export type PlanLimits = Readonly<{
   aiNeuronsPerMonth: number;
   /** Max retained deployment scripts (0 = unlimited) */
   retainedDeployments: number;
+  /** Max container-runtime seconds per billing month (0 = unlimited) */
+  sandboxRuntimeSecondsPerMonth: number;
+  /** Max simultaneous live sandbox containers (0 = unlimited) */
+  sandboxMaxConcurrentInstances: number;
 }>;
 
 const GB = 1024 * 1024 * 1024;
@@ -34,6 +38,9 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     kvStorageBytes: 1 * GB,
     aiNeuronsPerMonth: 100_000,
     retainedDeployments: 1,
+    // 0 = unlimited in PlanLimits convention, so 1 effectively disables sandbox for free users.
+    sandboxRuntimeSecondsPerMonth: 1,
+    sandboxMaxConcurrentInstances: 1,
   },
   solo: {
     requestsPerMonth: 10_000_000,
@@ -45,6 +52,8 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     kvStorageBytes: 5 * GB,
     aiNeuronsPerMonth: 300_000,
     retainedDeployments: 5,
+    sandboxRuntimeSecondsPerMonth: 30 * 3600,
+    sandboxMaxConcurrentInstances: 2,
   },
   pro: {
     requestsPerMonth: 100_000_000,
@@ -56,6 +65,8 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     kvStorageBytes: 25 * GB,
     aiNeuronsPerMonth: 500_000,
     retainedDeployments: 25,
+    sandboxRuntimeSecondsPerMonth: 200 * 3600,
+    sandboxMaxConcurrentInstances: 10,
   },
   sponsored: {
     requestsPerMonth: 0,
@@ -67,6 +78,8 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     kvStorageBytes: 0,
     aiNeuronsPerMonth: 0,
     retainedDeployments: 0,
+    sandboxRuntimeSecondsPerMonth: 0,
+    sandboxMaxConcurrentInstances: 0,
   },
   custom: {
     requestsPerMonth: 0,
@@ -78,6 +91,8 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     kvStorageBytes: 0,
     aiNeuronsPerMonth: 0,
     retainedDeployments: 0,
+    sandboxRuntimeSecondsPerMonth: 0,
+    sandboxMaxConcurrentInstances: 0,
   },
 };
 

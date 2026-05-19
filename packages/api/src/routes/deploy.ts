@@ -67,7 +67,12 @@ import {
 } from '../provisioning/containers.ts';
 import { provisionBindings } from '../provisioning/provision.ts';
 import { presignAssetPut } from '../r2-presign.ts';
-import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
+import {
+  buildRoutingJson,
+  buildStaticRoutingJson,
+  projectAccountKey,
+  writeProjectAccountEntry,
+} from '../routing.ts';
 import { deployments } from '../schema.ts';
 import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers.ts';
 import {
@@ -823,11 +828,16 @@ export function validateManifestShape(parsed: unknown): string | null {
     }
   }
 
-  // TODO(0067): reject manifest.sandbox when the deploy type is static/spa
-  // and there are no worker files. This is currently tolerated as a no-op
-  // (the deploy provisions nothing) but a clearer signal at validation time
-  // would prevent stale-manifest leakage.
   if (manifest.sandbox !== undefined) {
+    // sandbox is meaningless without a user worker. Static/SPA deploys are
+    // served straight from KV/R2 by dispatch — no script is created, so a
+    // `sandbox` block can't be wired to anything. Reject up-front rather
+    // than silently dropping the block; a stale manifest carrying `sandbox`
+    // after the project type flips would otherwise surface as a confusing
+    // runtime no-op rather than a clear deploy-time error.
+    if (manifest.type === 'static' || manifest.type === 'spa') {
+      return 'sandbox is not supported for static/spa deployments';
+    }
     if (
       manifest.sandbox == null ||
       typeof manifest.sandbox !== 'object' ||
@@ -1293,6 +1303,52 @@ export function buildSandboxUploadContainers(
   sandbox: DeployManifest['sandbox'] | undefined,
 ): ReadonlyArray<{ class_name: string }> | undefined {
   return sandbox ? [{ class_name: sandbox.className }] : undefined;
+}
+
+/**
+ * Builds the `USAGE_EVENTS_QUEUE` producer binding sandbox-using user
+ * workers need for container-runtime metering. The API itself consumes this
+ * queue (see `processUsageEventBatch`). The `__VOID_PROXY` service binding
+ * needed for the sandbox gate is injected unconditionally by
+ * `provisionBindings`, so it isn't duplicated here.
+ *
+ * Queue name comes from the API worker env so staging (`*-staging`) and
+ * production stay in sync with what the API itself binds.
+ */
+export function buildSandboxPlatformBindings(
+  env: Pick<ApiEnv['Bindings'], 'USAGE_EVENTS_QUEUE_NAME'>,
+  sandbox: DeployManifest['sandbox'] | undefined,
+): ReadonlyArray<{ type: 'queue'; name: string; queue_name: string }> {
+  if (!sandbox) {
+    return [];
+  }
+  return [
+    {
+      type: 'queue',
+      name: 'USAGE_EVENTS_QUEUE',
+      queue_name: env.USAGE_EVENTS_QUEUE_NAME ?? 'void-usage-events',
+    },
+  ];
+}
+
+/**
+ * Builds the sandbox-only plain-text identity bindings the framework's
+ * sandbox runtime reads when emitting metering messages to
+ * `USAGE_EVENTS_QUEUE` (see `framework/packages/void/src/runtime/sandbox.ts`).
+ * Project id is read from the shared `__PROJECT_ID` slot injected by
+ * `provisionBindings` for AI/ISR.
+ */
+export function buildSandboxIdentityBindings(
+  sandbox: DeployManifest['sandbox'] | undefined,
+  identity: { userId: string; projectSlug: string },
+): ReadonlyArray<{ type: 'plain_text'; name: string; text: string }> {
+  if (!sandbox) {
+    return [];
+  }
+  return [
+    { type: 'plain_text', name: '__VOID_USER_ID', text: identity.userId },
+    { type: 'plain_text', name: '__VOID_PROJECT_SLUG', text: identity.projectSlug },
+  ];
 }
 
 export function enrichWebSocketManifest(
@@ -2665,6 +2721,13 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           markPhase('routing_switch');
           await context.env.ROUTING.put(project.slug, routingJson);
           writtenRoutingKeys.push(project.slug);
+          await writeProjectAccountEntry(
+            context.env.ROUTING,
+            projectId,
+            project.user_id,
+            user.plan,
+          );
+          writtenRoutingKeys.push(projectAccountKey(projectId));
           routingSwitched = true;
           logger = logger.with({ routingSwitched: true });
           logger.info('routing_switch', 'slug_routed', { slug: project.slug });
@@ -3032,6 +3095,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           '__VOID_PROXY',
           '__PROJECT_ID',
           '__VOID_PROXY_TOKEN',
+          '__VOID_USER_ID',
+          '__VOID_PROJECT_SLUG',
+          'USAGE_EVENTS_QUEUE',
           'ASSETS',
         ]);
         const userVarNames = Object.keys(manifest.vars ?? {});
@@ -3052,7 +3118,14 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
         const sandboxBindings = buildSandboxUploadBindings(manifest.sandbox);
         const liveBindings = buildLiveUploadBindings(manifest.live);
+        const sandboxPlatformBindings = buildSandboxPlatformBindings(context.env, manifest.sandbox);
+        const sandboxIdentityBindings = buildSandboxIdentityBindings(manifest.sandbox, {
+          userId: user.id,
+          projectSlug: project.slug,
+        });
         const allBindings = [
+          ...sandboxIdentityBindings,
+          ...sandboxPlatformBindings,
           ...plainTextBindings,
           ...secretBindings,
           ...workerBindings,
@@ -3570,6 +3643,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         markPhase('routing_switch');
         await context.env.ROUTING.put(project.slug, routingJson);
         writtenRoutingKeys.push(project.slug);
+        await writeProjectAccountEntry(context.env.ROUTING, projectId, project.user_id, user.plan);
+        writtenRoutingKeys.push(projectAccountKey(projectId));
         routingSwitched = true;
         logger = logger.with({ routingSwitched: true });
         logger.info('routing_switch', 'slug_routed', { slug: project.slug });

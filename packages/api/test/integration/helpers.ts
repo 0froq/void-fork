@@ -8,6 +8,7 @@ import { signJwt } from '../../src/auth/jwt.ts';
 import type { Db } from '../../src/db.ts';
 import { generateId } from '../../src/id.ts';
 import { encryptProjectSecret } from '../../src/project-secrets.ts';
+import type { SandboxConcurrencyCounter } from '../../src/sandbox-concurrency-counter.ts';
 import * as schema from '../../src/schema.ts';
 import {
   users,
@@ -67,6 +68,7 @@ export type TestEnv = {
   USAGE_COUNTER: DurableObjectNamespace;
   CRON_SCHEDULER: DurableObjectNamespace;
   ERROR_ALERT_MONITOR: DurableObjectNamespace;
+  SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounter>;
   /** Test-only override for the deploy handler's heartbeat interval. */
   DEPLOY_HEARTBEAT_INTERVAL_MS?: number;
   /** Test-only overrides for the `domainAdd` SSL-record short poll. */
@@ -420,6 +422,8 @@ export async function setupEnv(): Promise<TestEnv> {
     USAGE_COUNTER: createMockDoNamespace(),
     CRON_SCHEDULER: createMockDoNamespace(),
     ERROR_ALERT_MONITOR: createMockDoNamespace(),
+    SANDBOX_CONCURRENCY_COUNTER:
+      createMockDoNamespace() as unknown as DurableObjectNamespace<SandboxConcurrencyCounter>,
   };
 }
 

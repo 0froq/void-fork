@@ -23,6 +23,24 @@ export type AiBinding = Readonly<{
 
 export type ProxyBody = Record<string, unknown>;
 
+/**
+ * RPC surface exposed by the api worker's `SandboxConcurrencyCounter`
+ * Durable Object. Re-declared here instead of imported because the proxy
+ * worker must not pull api-package source into its bundle — keep the
+ * coupling at the wire-shape level only. The brand is required by the
+ * `DurableObjectNamespace<T>` constraint and isn't carried over the wire.
+ */
+declare const SANDBOX_DO_BRAND: unique symbol;
+export interface SandboxConcurrencyCounterRpc extends Rpc.DurableObjectBranded {
+  [SANDBOX_DO_BRAND]: never;
+  acquire(
+    sandboxInstanceId: string,
+    planLimit: number,
+  ): Promise<{ ok: true } | { ok: false; reason: 'concurrency' }>;
+  refresh(sandboxInstanceId: string): Promise<{ ok: true } | { ok: false; reason: 'not_held' }>;
+  release(sandboxInstanceId: string): Promise<void>;
+}
+
 export type Env = Readonly<{
   AI: AiBinding;
   JWT_SECRET: string;
@@ -32,6 +50,7 @@ export type Env = Readonly<{
   CF_API_TOKEN: string;
   API: Fetcher;
   DISPATCH: DispatchNamespace;
+  SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounterRpc>;
 }>;
 
 export type JwtPayload = Readonly<{

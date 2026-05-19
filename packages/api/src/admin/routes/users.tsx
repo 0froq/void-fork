@@ -8,12 +8,15 @@ import {
   updateUserPlan,
   suspendUser,
   unsuspendUser,
+  unsuspendUserIfReason,
   countUserDeploymentsToday,
   deleteUser,
 } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import { teardownProject } from '../../provisioning/cleanup.ts';
 import { getRequestsDataset, queryBatchProjectUsage, ZERO_USAGE } from '../../routes/usage.ts';
+import { refreshProjectKvForUser, sandboxBlockKey } from '../../routing.ts';
+import { REASON_SANDBOX_RUNTIME_EXCEEDED } from '../../suspension.ts';
 import { PLAN_LIMITS, getCurrentBillingPeriodStart, type PlanId } from '../../tiers.ts';
 import { UserDetailPage } from '../views/user-detail.tsx';
 import { UsersListPage } from '../views/users-list.tsx';
@@ -103,7 +106,28 @@ app.post('/:id/plan', async (context) => {
   if (!plan || !(plan in PLAN_LIMITS)) {
     return context.html('<h1>Invalid plan</h1>', 400);
   }
-  await updateUserPlan(context.get('db'), user.id, plan as PlanId);
+  const newPlan = plan as PlanId;
+  await updateUserPlan(context.get('db'), user.id, newPlan);
+  // Optimistic clear: a plan change can lift the runtime-budget cap, so
+  // drop the suspension now; the next handleRecord re-suspends if usage
+  // is still over the new limit.
+  try {
+    const stub = context.env.USAGE_COUNTER.get(context.env.USAGE_COUNTER.idFromName(user.id));
+    await Promise.all([
+      refreshProjectKvForUser(context.get('db'), context.env.ROUTING, user.id),
+      context.env.ROUTING.delete(sandboxBlockKey(user.id)),
+      unsuspendUserIfReason(context.get('db'), user.id, REASON_SANDBOX_RUNTIME_EXCEEDED),
+      stub.fetch(
+        new Request('https://do/reevaluate-sandbox', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan: newPlan }),
+        }),
+      ),
+    ]);
+  } catch (error) {
+    console.error('[admin] post-plan-change cleanup failed', { userId: user.id, error });
+  }
   return context.redirect(`/admin/users/${user.id}`);
 });
 

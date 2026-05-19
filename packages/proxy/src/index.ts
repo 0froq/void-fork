@@ -7,6 +7,7 @@ import { kv } from './kv.ts';
 import { r2 } from './r2.ts';
 import { verifyProjectOwner } from './resolve.ts';
 import { revalidate } from './revalidate.ts';
+import { sandbox } from './sandbox.ts';
 import type { JwtPayload, ProxyBody, ProxyEnv } from './types.ts';
 
 const app = new Hono<ProxyEnv>();
@@ -109,6 +110,7 @@ app.route('/d1', d1);
 app.route('/kv', kv);
 app.route('/r2', r2);
 app.route('/revalidate', revalidate);
+app.route('/sandbox', sandbox);
 
 export default app;
 
