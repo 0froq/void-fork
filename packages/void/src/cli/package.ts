@@ -4,6 +4,7 @@ import { hash as blake3hash } from 'blake3-jit';
 import ignore from 'ignore';
 import { extname, join, relative } from 'pathe';
 import type { InferredBindings } from '../inference/walk.ts';
+import { buildMigrationPlanBundle } from '../migrations/plan.ts';
 import type { MigrationFile } from '../migrations/validate.ts';
 import type { WebSocketRouteDefinition } from '../router/websocket.ts';
 import type { ResolvedSandboxConfig } from '../sandbox/config.ts';
@@ -553,8 +554,19 @@ export function buildVoidManifest(opts: {
   }
 
   if (migrations && migrations.length > 0) {
+    const planBundle = dialect === 'postgresql' ? undefined : buildMigrationPlanBundle(migrations);
     manifest.migrations = {
       dialect: dialect ?? 'sqlite',
+      ...(planBundle
+        ? {
+            classifierVersion: planBundle.classifierVersion,
+            migrationListHash: planBundle.migrationListHash,
+            protocolVersion: planBundle.protocolVersion,
+            stability: planBundle.plans.some((plan) => plan.stability === 'legacy')
+              ? 'legacy'
+              : 'stable',
+          }
+        : {}),
       pending: migrations.length,
     };
   }
@@ -770,8 +782,20 @@ export function buildFrameworkManifest(opts: {
   }
 
   if (opts.migrations && opts.migrations.length > 0) {
+    const planBundle =
+      opts.dialect === 'postgresql' ? undefined : buildMigrationPlanBundle(opts.migrations);
     manifest.migrations = {
       dialect: opts.dialect ?? 'sqlite',
+      ...(planBundle
+        ? {
+            classifierVersion: planBundle.classifierVersion,
+            migrationListHash: planBundle.migrationListHash,
+            protocolVersion: planBundle.protocolVersion,
+            stability: planBundle.plans.some((plan) => plan.stability === 'legacy')
+              ? 'legacy'
+              : 'stable',
+          }
+        : {}),
       pending: opts.migrations.length,
     };
   }

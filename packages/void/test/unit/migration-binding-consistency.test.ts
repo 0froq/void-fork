@@ -5,6 +5,7 @@ import { buildVoidManifest, buildFrameworkManifest } from '../../src/cli/package
 import { inferBindingsFromSource, mergeBindings } from '../../src/inference/walk.ts';
 import type { InferredBindings } from '../../src/inference/walk.ts';
 import { collectMigrations } from '../../src/migrations/collect.ts';
+import { buildMigrationPlanBundle } from '../../src/migrations/plan.ts';
 import { validateMigrations } from '../../src/migrations/validate.ts';
 import type { MigrationFile } from '../../src/migrations/validate.ts';
 import {
@@ -52,7 +53,7 @@ describe('buildVoidManifest migration-binding consistency', () => {
     });
 
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 1 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 1 }));
   });
 
   it('forces d1 binding when migrations exist even if needsD1 is false', () => {
@@ -63,7 +64,7 @@ describe('buildVoidManifest migration-binding consistency', () => {
 
     // Migrations imply a database is needed — d1 binding must be present
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 1 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 1 }));
   });
 
   it('has no migrations and no d1 binding when both are absent', () => {
@@ -128,7 +129,7 @@ describe('buildVoidManifest migration-binding consistency', () => {
     });
 
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 1 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 1 }));
   });
 
   it('forces d1 binding when multiple migrations exist without D1 usage', () => {
@@ -153,7 +154,7 @@ describe('buildVoidManifest migration-binding consistency', () => {
     const manifest = buildVoidManifest({ bindings: noBindings, migrations });
 
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 3 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 3 }));
   });
 
   it('uses custom d1 binding name when provided', () => {
@@ -212,7 +213,7 @@ describe('buildFrameworkManifest migration-binding consistency', () => {
     });
 
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 1 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 1 }));
   });
 
   it('includes both d1 binding and migrations when needsD1 is true', () => {
@@ -224,7 +225,7 @@ describe('buildFrameworkManifest migration-binding consistency', () => {
     });
 
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 1 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 1 }));
   });
 
   it('includes d1 binding via auth even without explicit D1 usage', () => {
@@ -236,7 +237,7 @@ describe('buildFrameworkManifest migration-binding consistency', () => {
     });
 
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 1 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 1 }));
   });
 
   it('forces hyperdrive binding when postgresql migrations exist with needsD1 false', () => {
@@ -346,17 +347,30 @@ describe('createMigrationHandler with missing D1 binding', () => {
 describe('createMigrationHandler D1 execution', () => {
   const proxyToken = 'test-token-123';
 
-  function createMockD1(options?: { failExec?: (sql: string) => Error | undefined }) {
+  function createMockD1(options?: {
+    attempts?: Map<string, Record<string, unknown>>;
+    failExec?: (sql: string) => Error | undefined;
+    lockAttemptId?: string;
+  }) {
     const calls = {
       batch: 0,
+      batchSql: [] as Array<Array<string>>,
       exec: [] as Array<string>,
       run: [] as Array<string>,
     };
     const applied = new Set<string>();
+    const attempts = new Map(options?.attempts ?? []);
+    let lockAttemptId = options?.lockAttemptId;
 
     const db = {
-      async batch() {
+      async batch(statements: Array<{ __sql?: string; __bound?: Array<unknown> }>) {
         calls.batch++;
+        calls.batchSql.push(statements.map((statement) => statement.__sql ?? ''));
+        for (const statement of statements) {
+          if (statement.__sql?.startsWith('INSERT INTO _void_migrations')) {
+            applied.add(statement.__bound?.[0] as string);
+          }
+        }
         return [];
       },
       async exec(sql: string) {
@@ -371,6 +385,7 @@ describe('createMigrationHandler D1 execution', () => {
         const statement = {
           bind(...params: Array<unknown>) {
             bound = params;
+            (statement as { __bound?: Array<unknown> }).__bound = params;
             return statement;
           },
           async all() {
@@ -384,19 +399,70 @@ describe('createMigrationHandler D1 execution', () => {
             }
             return { results: [] };
           },
+          async first() {
+            if (sql === 'SELECT attempt_id FROM _void_migration_lock WHERE name = ?') {
+              return lockAttemptId ? { attempt_id: lockAttemptId } : null;
+            }
+            if (sql === 'SELECT * FROM _void_migration_attempts WHERE attempt_id = ?') {
+              return attempts.get(bound[0] as string) ?? null;
+            }
+            return null;
+          },
           async run() {
             calls.run.push(sql);
+            if (sql.startsWith('INSERT INTO _void_migration_lock')) {
+              if (lockAttemptId) {
+                throw new Error('UNIQUE constraint failed: _void_migration_lock.name');
+              }
+              lockAttemptId = bound[1] as string;
+            }
+            if (sql.startsWith('DELETE FROM _void_migration_lock')) {
+              if (lockAttemptId === bound[1]) {
+                lockAttemptId = undefined;
+              }
+            }
+            if (sql.includes('INSERT INTO _void_migration_attempts')) {
+              const attemptId = bound[0] as string;
+              if (attempts.has(attemptId)) {
+                throw new Error('UNIQUE constraint failed: _void_migration_attempts.attempt_id');
+              }
+              attempts.set(attemptId, {
+                attempt_id: attemptId,
+                completed_at: null,
+                deployment_id: bound[1] as string | null,
+                error: null,
+                migration_list_hash: bound[2] as string,
+                plan_hashes_json: bound[4] as string,
+                planned_names_json: bound[3] as string,
+                started_at: bound[5] as string,
+                status: 'running',
+              });
+            }
+            if (sql.includes('UPDATE _void_migration_attempts')) {
+              const attempt = attempts.get(bound[3] as string);
+              if (attempt) {
+                attempt.status = bound[0] as string;
+                attempt.completed_at = bound[1] as string;
+                attempt.error = bound[2] as string | null;
+              }
+            }
             if (sql.startsWith('INSERT OR IGNORE INTO _void_migrations')) {
               applied.add(bound[0] as string);
             }
             return {};
           },
+          __sql: sql,
         };
         return statement;
       },
     };
 
-    return { calls, db: db as unknown as D1Database };
+    return {
+      attempts,
+      calls,
+      db: db as unknown as D1Database,
+      getLockAttemptId: () => lockAttemptId,
+    };
   }
 
   it('passes the full migration SQL to D1 instead of splitting on semicolons', async () => {
@@ -555,6 +621,127 @@ describe('createMigrationHandler D1 execution', () => {
       'INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)',
     ]);
   });
+
+  it('executes protocol v2 breakpoint migrations and tracking insert in one D1 batch', async () => {
+    const sql = [
+      'CREATE TABLE users (id TEXT PRIMARY KEY);',
+      '--> statement-breakpoint',
+      'CREATE INDEX users_id_idx ON users (id);',
+    ].join('\n');
+    const migrations = [{ name: '0001_users.sql', sql }];
+    const { calls, db } = createMockD1();
+    const handler = createMigrationHandler(
+      { __VOID_PROXY_TOKEN: proxyToken, DB: db },
+      migrations,
+      'sqlite',
+      undefined,
+      buildMigrationPlanBundle(migrations),
+    );
+
+    const response = await handler(
+      new Request('https://example.com/__void/migrate/app', {
+        body: JSON.stringify({ attemptId: 'attempt_1', deploymentId: 'dpl_1' }),
+        headers: { 'content-type': 'application/json', 'x-void-internal': proxyToken },
+        method: 'POST',
+      }),
+    );
+    const body = (await response.json()) as MigrationResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.protocolVersion).toBe(2);
+    expect(body.confirmedApplied).toEqual(['0001_users.sql']);
+    expect(calls.exec).toEqual([]);
+    expect(calls.batchSql).toContainEqual([
+      'CREATE TABLE users (id TEXT PRIMARY KEY);',
+      'CREATE INDEX users_id_idx ON users (id);',
+      'INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)',
+    ]);
+  });
+
+  it('releases an incomplete attempt lock during reconciliation', async () => {
+    const attempts = new Map<string, Record<string, unknown>>([
+      [
+        'attempt_old',
+        {
+          attempt_id: 'attempt_old',
+          completed_at: null,
+          deployment_id: 'dpl_old',
+          error: null,
+          migration_list_hash: 'sha256:old',
+          plan_hashes_json: '[]',
+          planned_names_json: JSON.stringify(['0001_users.sql']),
+          started_at: new Date().toISOString(),
+          status: 'running',
+        },
+      ],
+    ]);
+    const {
+      attempts: storedAttempts,
+      db,
+      getLockAttemptId,
+    } = createMockD1({
+      attempts,
+      lockAttemptId: 'attempt_old',
+    });
+    const migrations: Array<MigrationFile> = [];
+    const handler = createMigrationHandler(
+      { __VOID_PROXY_TOKEN: proxyToken, DB: db },
+      migrations,
+      'sqlite',
+      undefined,
+      buildMigrationPlanBundle(migrations),
+    );
+
+    const reconcile = await handler(
+      new Request('https://example.com/__void/migrate/app/attempt/attempt_old', {
+        headers: { 'x-void-internal': proxyToken },
+      }),
+    );
+    const reconcileBody = (await reconcile.json()) as MigrationResponse;
+
+    expect(reconcile.status).toBe(409);
+    expect(reconcileBody.ok).toBe(false);
+    expect(reconcileBody.error).toBe('migration outcome unknown');
+    expect(storedAttempts.get('attempt_old')?.status).toBe('unknown');
+    expect(getLockAttemptId()).toBeUndefined();
+
+    const retry = await handler(
+      new Request('https://example.com/__void/migrate/app', {
+        body: JSON.stringify({ attemptId: 'attempt_new', deploymentId: 'dpl_new' }),
+        headers: { 'content-type': 'application/json', 'x-void-internal': proxyToken },
+        method: 'POST',
+      }),
+    );
+    const retryBody = (await retry.json()) as MigrationResponse;
+    expect(retry.status).toBe(200);
+    expect(retryBody.ok).toBe(true);
+  });
+
+  it('recovers an orphan lock whose attempt row was never written', async () => {
+    const migrations: Array<MigrationFile> = [];
+    const { db, getLockAttemptId } = createMockD1({ lockAttemptId: 'attempt_orphan' });
+    const handler = createMigrationHandler(
+      { __VOID_PROXY_TOKEN: proxyToken, DB: db },
+      migrations,
+      'sqlite',
+      undefined,
+      buildMigrationPlanBundle(migrations),
+    );
+
+    const response = await handler(
+      new Request('https://example.com/__void/migrate/app', {
+        body: JSON.stringify({ attemptId: 'attempt_new', deploymentId: 'dpl_new' }),
+        headers: { 'content-type': 'application/json', 'x-void-internal': proxyToken },
+        method: 'POST',
+      }),
+    );
+    const body = (await response.json()) as MigrationResponse;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(getLockAttemptId()).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -582,7 +769,7 @@ describe('end-to-end: D1 removed but migrations remain on disk', () => {
     const manifest = buildVoidManifest({ bindings, migrations: validatedMigrations });
 
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 1 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 1 }));
   });
 
   it('works correctly when D1 usage is still present', () => {
@@ -606,7 +793,7 @@ describe('end-to-end: D1 removed but migrations remain on disk', () => {
     const manifest = buildVoidManifest({ bindings, migrations: validatedMigrations });
 
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 1 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 1 }));
   });
 
   it('produces clean manifest when both D1 and migrations are removed', () => {
@@ -648,7 +835,7 @@ describe('end-to-end: D1 removed but migrations remain on disk', () => {
     const manifest = buildVoidManifest({ bindings, migrations: validatedMigrations });
 
     expect(manifest.bindings.d1).toEqual(['DB']);
-    expect(manifest.migrations).toEqual({ dialect: 'sqlite', pending: 2 });
+    expect(manifest.migrations).toEqual(expect.objectContaining({ dialect: 'sqlite', pending: 2 }));
   });
 
   it('auth-enabled project with leftover migrations stays consistent', () => {

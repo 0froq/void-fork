@@ -1,3 +1,5 @@
+import { canonicalJson } from '../migrations/canonical-json.ts';
+
 export type MigrationEntry = {
   name: string;
   sql: string;
@@ -8,31 +10,75 @@ export type MigrationResult = {
   applied: boolean;
   durationMs: number;
   error?: string;
+  status?: 'applied' | 'skipped' | 'failed';
+  stability?: 'stable' | 'legacy';
 };
 
 export type MigrationResponse = {
   ok: boolean;
   migrations: Array<MigrationResult>;
   error?: string;
+  protocolVersion?: 2;
+  attemptId?: string;
+  confirmedApplied?: Array<string>;
+  confirmedSkipped?: Array<string>;
+  stability?: 'stable' | 'legacy';
+  warnings?: Array<string>;
 };
+
+type MigrationExecutionPlan = {
+  name: string;
+  dialect: 'sqlite';
+  classifierVersion: number;
+  sqlHash: string;
+  planHash: string;
+  stability: 'stable' | 'legacy';
+  warnings?: Array<string>;
+} & (
+  | { kind: 'single-statement' }
+  | { kind: 'breakpoint-framed'; statements: Array<string> }
+  | { kind: 'legacy-unsplit-multi-statement'; allowLegacy: boolean }
+);
+
+type MigrationPlanBundle = {
+  protocolVersion: 2;
+  classifierVersion: number;
+  migrationListHash: string;
+  destructiveValidation: 'passed';
+  plans: Array<MigrationExecutionPlan>;
+};
+
+type AttemptRow = {
+  attempt_id: string;
+  deployment_id: string | null;
+  migration_list_hash: string;
+  planned_names_json: string;
+  plan_hashes_json: string;
+  status: 'running' | 'completed' | 'failed' | 'unknown';
+  started_at: string;
+  completed_at: string | null;
+  error: string | null;
+};
+
+const SUPPORTED_CLASSIFIER_VERSION = 1;
 
 export function createMigrationHandler(
   env: Record<string, unknown>,
   migrations: Array<MigrationEntry> | undefined,
   _dialect: 'sqlite' | 'postgresql',
   runAuthMigrations?: () => Promise<void>,
+  planBundle?: MigrationPlanBundle,
 ) {
   return async (request: Request): Promise<Response> => {
     const token = request.headers.get('x-void-internal');
     if (!token || token !== (env as Record<string, string>).__VOID_PROXY_TOKEN) {
       return Response.json(
         { ok: false, error: 'unauthorized', migrations: [] } satisfies MigrationResponse,
-        {
-          status: 401,
-        },
+        { status: 401 },
       );
     }
 
+    const url = new URL(request.url);
     try {
       const db = (env as Record<string, D1Database>).DB;
       if (!db) {
@@ -41,9 +87,73 @@ export function createMigrationHandler(
           { status: 500 },
         );
       }
-      const result = await runD1Migrations(db, migrations ?? []);
+
+      if (request.method === 'GET' && url.pathname === '/__void/migrate/capabilities') {
+        const verified = await verifyPlanBundle(migrations ?? [], planBundle);
+        return Response.json({
+          classifierVersion: verified.classifierVersion,
+          destructiveValidation: verified.destructiveValidation,
+          dialect: 'sqlite',
+          endpoints: {
+            app: '/__void/migrate/app',
+            auth: runAuthMigrations ? '/__void/migrate/auth' : undefined,
+            reconcile: '/__void/migrate/app/attempt/:attemptId',
+          },
+          migrationListHash: verified.migrationListHash,
+          protocolVersion: 2,
+        });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/__void/migrate/app') {
+        const body = (await request.json().catch(() => ({}))) as {
+          attemptId?: string;
+          deploymentId?: string;
+        };
+        if (!body.attemptId) {
+          return Response.json(
+            { ok: false, protocolVersion: 2, error: 'attemptId required', migrations: [] },
+            { status: 400 },
+          );
+        }
+        const result = await runD1AppMigrations(db, migrations ?? [], planBundle, {
+          attemptId: body.attemptId,
+          deploymentId: body.deploymentId,
+        });
+        const status = result.ok
+          ? 200
+          : result.error?.startsWith('migration already in progress')
+            ? 409
+            : 500;
+        return Response.json(result, { status });
+      }
+
+      if (request.method === 'GET' && url.pathname.startsWith('/__void/migrate/app/attempt/')) {
+        const attemptId = decodeURIComponent(url.pathname.split('/').pop() ?? '');
+        const result = await reconcileAttempt(db, attemptId);
+        return Response.json(result, { status: result.ok ? 200 : 409 });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/__void/migrate/auth') {
+        if (runAuthMigrations) {
+          await runAuthMigrations();
+        }
+        return Response.json({ ok: true, protocolVersion: 2 });
+      }
+
+      const result = await runD1LegacyMigrations(db, migrations ?? []);
       if (result.ok && runAuthMigrations) {
-        await runAuthMigrations();
+        try {
+          await runAuthMigrations();
+        } catch (err) {
+          return Response.json(
+            {
+              ...result,
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            } satisfies MigrationResponse,
+            { status: 500 },
+          );
+        }
       }
       return Response.json(result);
     } catch (err) {
@@ -59,10 +169,42 @@ export function createMigrationHandler(
   };
 }
 
-/**
- * One-time migration: rename legacy `_migrations` table to `_void_migrations`.
- * Copies all rows from the old table to the new one, then drops the old table.
- */
+async function createTrackingTable(db: D1Database): Promise<void> {
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS _void_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    )`,
+    )
+    .run();
+}
+
+async function createAttemptTables(db: D1Database): Promise<void> {
+  await db.batch([
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS _void_migration_attempts (
+        attempt_id TEXT PRIMARY KEY,
+        deployment_id TEXT,
+        migration_list_hash TEXT NOT NULL,
+        planned_names_json TEXT NOT NULL,
+        plan_hashes_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'unknown')),
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        error TEXT
+      )`,
+    ),
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS _void_migration_lock (
+        name TEXT PRIMARY KEY,
+        attempt_id TEXT NOT NULL,
+        acquired_at TEXT NOT NULL
+      )`,
+    ),
+  ]);
+}
+
 async function upgradeTrackingTable(db: D1Database): Promise<void> {
   const { results } = await db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'")
@@ -84,41 +226,399 @@ async function upgradeTrackingTable(db: D1Database): Promise<void> {
   ]);
 }
 
-async function runD1Migrations(
+async function readAppliedSet(db: D1Database): Promise<Set<string>> {
+  const { results } = await db.prepare('SELECT name FROM _void_migrations').all();
+  return new Set((results ?? []).map((row) => row.name as string));
+}
+
+async function runD1AppMigrations(
+  db: D1Database,
+  migrations: Array<MigrationEntry>,
+  planBundle: MigrationPlanBundle | undefined,
+  attempt: { attemptId: string; deploymentId?: string },
+): Promise<MigrationResponse> {
+  const verified = await verifyPlanBundle(migrations, planBundle);
+  await createAttemptTables(db);
+
+  const now = new Date().toISOString();
+  const lock = await acquireAttemptLock(db, attempt.attemptId, now);
+  if (lock !== 'acquired') {
+    return lock;
+  }
+
+  const plannedNames = migrations.map((migration) => migration.name);
+  const planHashes = verified.plans.map((plan) => plan.planHash);
+  try {
+    await db
+      .prepare(
+        `INSERT INTO _void_migration_attempts
+          (attempt_id, deployment_id, migration_list_hash, planned_names_json, plan_hashes_json, status, started_at)
+         VALUES (?, ?, ?, ?, ?, 'running', ?)`,
+      )
+      .bind(
+        attempt.attemptId,
+        attempt.deploymentId ?? null,
+        verified.migrationListHash,
+        JSON.stringify(plannedNames),
+        JSON.stringify(planHashes),
+        now,
+      )
+      .run();
+  } catch {
+    await releaseAttemptLock(db, attempt.attemptId);
+    return reconcileAttempt(db, attempt.attemptId);
+  }
+
+  const migrationResults: Array<MigrationResult> = [];
+  const confirmedApplied: Array<string> = [];
+  const confirmedSkipped: Array<string> = [];
+  const warnings = verified.plans.flatMap((plan) => plan.warnings ?? []);
+  let stability: 'stable' | 'legacy' = 'stable';
+
+  try {
+    await createTrackingTable(db);
+    await upgradeTrackingTable(db);
+    const applied = await readAppliedSet(db);
+
+    for (let index = 0; index < migrations.length; index++) {
+      const migration = migrations[index]!;
+      const plan = verified.plans[index]!;
+      if (plan.stability === 'legacy') {
+        stability = 'legacy';
+      }
+
+      if (applied.has(migration.name)) {
+        confirmedSkipped.push(migration.name);
+        migrationResults.push({
+          applied: false,
+          durationMs: 0,
+          name: migration.name,
+          stability: plan.stability,
+          status: 'skipped',
+        });
+        continue;
+      }
+
+      const start = Date.now();
+      try {
+        await executeMigrationPlan(db, migration, plan);
+        applied.add(migration.name);
+        confirmedApplied.push(migration.name);
+        migrationResults.push({
+          applied: true,
+          durationMs: Date.now() - start,
+          name: migration.name,
+          stability: plan.stability,
+          status: 'applied',
+        });
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        migrationResults.push({
+          applied: false,
+          durationMs: Date.now() - start,
+          error,
+          name: migration.name,
+          stability: plan.stability,
+          status: 'failed',
+        });
+        await markAttempt(db, attempt.attemptId, 'failed', error);
+        await releaseAttemptLock(db, attempt.attemptId);
+        return {
+          ok: false,
+          protocolVersion: 2,
+          attemptId: attempt.attemptId,
+          confirmedApplied,
+          confirmedSkipped,
+          error: `migration ${migration.name} failed`,
+          migrations: migrationResults,
+          stability,
+          warnings,
+        };
+      }
+    }
+
+    await markAttempt(db, attempt.attemptId, 'completed');
+    await releaseAttemptLock(db, attempt.attemptId);
+    return {
+      ok: true,
+      protocolVersion: 2,
+      attemptId: attempt.attemptId,
+      confirmedApplied,
+      confirmedSkipped,
+      migrations: migrationResults,
+      stability,
+      warnings,
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    await markAttempt(db, attempt.attemptId, 'failed', error).catch(() => {});
+    await releaseAttemptLock(db, attempt.attemptId).catch(() => {});
+    return {
+      ok: false,
+      protocolVersion: 2,
+      attemptId: attempt.attemptId,
+      confirmedApplied,
+      confirmedSkipped,
+      error,
+      migrations: migrationResults,
+      stability,
+      warnings,
+    };
+  }
+}
+
+async function acquireAttemptLock(
+  db: D1Database,
+  attemptId: string,
+  acquiredAt: string,
+): Promise<'acquired' | MigrationResponse> {
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      await db
+        .prepare(
+          'INSERT INTO _void_migration_lock (name, attempt_id, acquired_at) VALUES (?, ?, ?)',
+        )
+        .bind('app', attemptId, acquiredAt)
+        .run();
+      return 'acquired';
+    } catch {
+      const existing = await db
+        .prepare('SELECT attempt_id FROM _void_migration_lock WHERE name = ?')
+        .bind('app')
+        .first<{ attempt_id: string }>();
+      if (existing?.attempt_id === attemptId) {
+        return reconcileAttempt(db, attemptId);
+      }
+      if (existing?.attempt_id) {
+        const row = await readAttempt(db, existing.attempt_id);
+        if (
+          !row ||
+          row.status === 'completed' ||
+          row.status === 'failed' ||
+          row.status === 'unknown'
+        ) {
+          await releaseAttemptLock(db, existing.attempt_id).catch(() => {});
+          continue;
+        }
+      }
+      return {
+        ok: false,
+        protocolVersion: 2,
+        attemptId,
+        migrations: [],
+        error: `migration already in progress for attempt ${existing?.attempt_id ?? 'unknown'}`,
+      };
+    }
+  }
+  return {
+    ok: false,
+    protocolVersion: 2,
+    attemptId,
+    migrations: [],
+    error: 'migration lock could not be acquired',
+  };
+}
+
+async function executeMigrationPlan(
+  db: D1Database,
+  migration: MigrationEntry,
+  plan: MigrationExecutionPlan,
+): Promise<void> {
+  const appliedAt = new Date().toISOString();
+  if (plan.kind === 'single-statement') {
+    await db.batch([
+      db.prepare(migration.sql),
+      db
+        .prepare('INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)')
+        .bind(migration.name, appliedAt),
+    ]);
+    return;
+  }
+  if (plan.kind === 'breakpoint-framed') {
+    await db.batch([
+      ...plan.statements.map((statement) => db.prepare(statement)),
+      db
+        .prepare('INSERT INTO _void_migrations (name, applied_at) VALUES (?, ?)')
+        .bind(migration.name, appliedAt),
+    ]);
+    return;
+  }
+
+  await db.exec(migration.sql);
+  await db
+    .prepare('INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)')
+    .bind(migration.name, appliedAt)
+    .run();
+}
+
+async function markAttempt(
+  db: D1Database,
+  attemptId: string,
+  status: 'completed' | 'failed' | 'unknown',
+  error?: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE _void_migration_attempts
+       SET status = ?, completed_at = ?, error = ?
+       WHERE attempt_id = ?`,
+    )
+    .bind(status, new Date().toISOString(), error ?? null, attemptId)
+    .run();
+}
+
+async function releaseAttemptLock(db: D1Database, attemptId: string): Promise<void> {
+  await db
+    .prepare('DELETE FROM _void_migration_lock WHERE name = ? AND attempt_id = ?')
+    .bind('app', attemptId)
+    .run();
+}
+
+async function readAttempt(db: D1Database, attemptId: string): Promise<AttemptRow | null> {
+  return db
+    .prepare('SELECT * FROM _void_migration_attempts WHERE attempt_id = ?')
+    .bind(attemptId)
+    .first<AttemptRow>();
+}
+
+async function reconcileAttempt(db: D1Database, attemptId: string): Promise<MigrationResponse> {
+  await createAttemptTables(db);
+  await createTrackingTable(db);
+  const row = await readAttempt(db, attemptId);
+  if (!row) {
+    await releaseAttemptLock(db, attemptId).catch(() => {});
+    return {
+      ok: false,
+      protocolVersion: 2,
+      attemptId,
+      migrations: [],
+      error: 'migration attempt not found',
+    };
+  }
+  const plannedNames = JSON.parse(row.planned_names_json) as Array<string>;
+  const applied = await readAppliedSet(db);
+  const confirmed = plannedNames.filter((name) => applied.has(name));
+  const complete = confirmed.length === plannedNames.length;
+  if (complete && row.status !== 'completed') {
+    await markAttempt(db, attemptId, 'completed').catch(() => {});
+  }
+  if (!complete && row.status === 'running') {
+    await markAttempt(db, attemptId, 'unknown', row.error ?? 'migration outcome unknown').catch(
+      () => {},
+    );
+  }
+  await releaseAttemptLock(db, attemptId).catch(() => {});
+  return {
+    ok: complete,
+    protocolVersion: 2,
+    attemptId,
+    confirmedApplied: [],
+    confirmedSkipped: confirmed,
+    migrations: plannedNames.map((name) => ({
+      applied: false,
+      durationMs: 0,
+      name,
+      status: applied.has(name) ? 'skipped' : 'failed',
+    })),
+    error: complete ? undefined : (row.error ?? 'migration outcome unknown'),
+    stability: 'stable',
+  };
+}
+
+async function verifyPlanBundle(
+  migrations: Array<MigrationEntry>,
+  planBundle: MigrationPlanBundle | undefined,
+): Promise<MigrationPlanBundle> {
+  if (!planBundle || planBundle.protocolVersion !== 2) {
+    throw new Error('migration protocol v2 execution plans are missing');
+  }
+  if (
+    planBundle.classifierVersion !== SUPPORTED_CLASSIFIER_VERSION ||
+    planBundle.destructiveValidation !== 'passed'
+  ) {
+    throw new Error('unsupported migration execution plan metadata');
+  }
+  if (planBundle.plans.length !== migrations.length) {
+    throw new Error('migration execution plan count does not match bundled migrations');
+  }
+  for (let index = 0; index < migrations.length; index++) {
+    const migration = migrations[index]!;
+    const plan = planBundle.plans[index]!;
+    if (
+      plan.name !== migration.name ||
+      plan.dialect !== 'sqlite' ||
+      plan.classifierVersion !== SUPPORTED_CLASSIFIER_VERSION
+    ) {
+      throw new Error(`invalid migration execution plan for ${migration.name}`);
+    }
+    const sqlHash = await sha256Hex(canonicalSql(migration.sql));
+    if (plan.sqlHash !== sqlHash) {
+      throw new Error(`migration SQL hash mismatch for ${migration.name}`);
+    }
+    const planHash = await hashPlan(plan);
+    if (plan.planHash !== planHash) {
+      throw new Error(`migration plan hash mismatch for ${migration.name}`);
+    }
+  }
+  const migrationListHash = await sha256Hex(
+    canonicalJson(planBundle.plans.map((plan) => [plan.name, plan.sqlHash, plan.planHash])),
+  );
+  if (planBundle.migrationListHash !== migrationListHash) {
+    throw new Error('migration list hash mismatch');
+  }
+  return planBundle;
+}
+
+function canonicalSql(sql: string): string {
+  const withoutBom = sql.charCodeAt(0) === 0xfeff ? sql.slice(1) : sql;
+  return withoutBom.replace(/\r\n?/g, '\n');
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return `sha256:${[...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+async function hashPlan(plan: MigrationExecutionPlan): Promise<string> {
+  const hashInput: Record<string, unknown> = {
+    classifierVersion: plan.classifierVersion,
+    dialect: plan.dialect,
+    kind: plan.kind,
+    name: plan.name,
+    sqlHash: plan.sqlHash,
+    stability: plan.stability,
+  };
+  if (plan.kind === 'breakpoint-framed') {
+    hashInput.statements = plan.statements;
+  }
+  return sha256Hex(canonicalJson(hashInput));
+}
+
+async function runD1LegacyMigrations(
   db: D1Database,
   migrations: Array<MigrationEntry>,
 ): Promise<MigrationResponse> {
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS _void_migrations (
-      name TEXT PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    )`,
-    )
-    .run();
-
-  // Upgrade legacy `_migrations` table if it exists
+  await createTrackingTable(db);
   await upgradeTrackingTable(db);
 
-  const { results } = await db.prepare('SELECT name FROM _void_migrations').all();
-  const applied = new Set((results ?? []).map((r) => r.name as string));
-
+  const applied = await readAppliedSet(db);
   const migrationResults: Array<MigrationResult> = [];
 
-  for (const m of migrations) {
-    if (applied.has(m.name)) {
-      migrationResults.push({ name: m.name, applied: false, durationMs: 0 });
+  for (const migration of migrations) {
+    if (applied.has(migration.name)) {
+      migrationResults.push({ name: migration.name, applied: false, durationMs: 0 });
       continue;
     }
 
     const start = Date.now();
     try {
-      const statements = splitMigrationSql(m.sql);
+      const statements = splitMigrationSql(migration.sql);
       if (statements.length === 1) {
         if (isSingleSqlStatement(statements[0])) {
           await db.prepare(statements[0]).run();
         } else {
-          await db.exec(m.sql);
+          await db.exec(migration.sql);
         }
       } else {
         for (const statement of statements) {
@@ -127,17 +627,25 @@ async function runD1Migrations(
       }
       await db
         .prepare('INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)')
-        .bind(m.name, new Date().toISOString())
+        .bind(migration.name, new Date().toISOString())
         .run();
-      migrationResults.push({ name: m.name, applied: true, durationMs: Date.now() - start });
+      migrationResults.push({
+        name: migration.name,
+        applied: true,
+        durationMs: Date.now() - start,
+      });
     } catch (err) {
       migrationResults.push({
-        name: m.name,
+        name: migration.name,
         applied: false,
         durationMs: Date.now() - start,
         error: err instanceof Error ? err.message : String(err),
       });
-      return { ok: false, migrations: migrationResults, error: `migration ${m.name} failed` };
+      return {
+        ok: false,
+        migrations: migrationResults,
+        error: `migration ${migration.name} failed`,
+      };
     }
   }
 
@@ -258,9 +766,6 @@ function isSingleSqlStatement(sql: string): boolean {
     if (character === ';') {
       if (inStatement) {
         statements++;
-        if (statements > 1) {
-          return false;
-        }
         inStatement = false;
       }
       index++;

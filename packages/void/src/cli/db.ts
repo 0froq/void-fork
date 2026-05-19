@@ -558,6 +558,9 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
       }
       log.success(`Applied ${result.applied.length} migration(s) to remote database.`);
     }
+    for (const warning of result.warnings ?? []) {
+      log.warn(warning);
+    }
     outro('Done.');
     return;
   }

@@ -170,6 +170,10 @@ export type DeployManifest = {
   migrations?: {
     dialect: 'sqlite' | 'postgresql';
     pending: number;
+    protocolVersion?: 2;
+    classifierVersion?: number;
+    migrationListHash?: string;
+    stability?: 'stable' | 'legacy';
   };
   schedules?: Array<ScheduleMeta>;
   queues?: Array<QueueMeta>;

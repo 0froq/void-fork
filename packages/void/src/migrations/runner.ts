@@ -2,6 +2,7 @@ import { createHash, createHmac } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'pathe';
 import { collectMigrations } from './collect.ts';
+import { classifyMigration } from './plan.ts';
 
 type SqliteStatement<T = unknown> = {
   get(...params: Array<unknown>): T | undefined;
@@ -260,6 +261,9 @@ export async function runMigrations(migrationsDir: string, dbPath: string): Prom
     const pending = allMigrations.filter((m) => !appliedSet.has(m.name));
     if (pending.length === 0) {
       return [];
+    }
+    for (const migration of pending) {
+      classifyMigration(migration);
     }
 
     const insertStmt = db.prepare('INSERT INTO _void_migrations (name) VALUES (?)');

@@ -618,6 +618,9 @@ export class PlatformClient {
     applied: Array<string>;
     skipped: Array<string>;
     error?: string;
+    migration_protocol?: 'stable' | 'legacy';
+    migration_stability?: 'stable' | 'legacy';
+    warnings?: Array<string>;
   }> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/migrations/apply`, {
       method: 'POST',

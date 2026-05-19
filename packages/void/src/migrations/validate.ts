@@ -6,6 +6,8 @@ import {
   type DrizzleJournal,
   type DrizzleJournalEntry,
 } from './collect.ts';
+import { DESTRUCTIVE_PRAGMA } from './plan.ts';
+import { tokenizeSql } from './tokenize.ts';
 
 export type MigrationFile = {
   name: string;
@@ -19,18 +21,86 @@ export type MigrationFile = {
  */
 const DESTRUCTIVE_PATTERNS = [
   /\bDROP\s+TABLE\b/i,
-  /\bDROP\s+COLUMN\b/i,
-  /\bALTER\s+TABLE\s+\S+\s+RENAME\b/i,
+  /\bDROP\s+VIEW\b/i,
+  /\bDROP\s+INDEX\b/i,
+  /\bDROP\s+TRIGGER\b/i,
+  /\bALTER\s+TABLE\b[\s\S]*\bDROP\s+COLUMN\b/i,
+  /\bALTER\s+TABLE\b[\s\S]*\bRENAME\s+TO\b/i,
+  /\bALTER\s+TABLE\b[\s\S]*\bRENAME\s+COLUMN\b/i,
+  /\bALTER\s+TABLE\b[\s\S]*\bRENAME\b[\s\S]*\bTO\b/i,
   /\bTRUNCATE\b/i,
+  /\bINSERT\s+OR\s+REPLACE\b/i,
 ];
 
-const PRAGMA_COMMENT = '-- void:allow-destructive';
+function splitExecutableStatements(sql: string): Array<string> {
+  return sql
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+}
+
+function hasTopLevelKeyword(statement: string, keyword: string): boolean {
+  let depth = 0;
+  for (let index = 0; index < statement.length; index++) {
+    const character = statement[index];
+    if (character === '(') {
+      depth++;
+      continue;
+    }
+    if (character === ')') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth !== 0) {
+      continue;
+    }
+    if (
+      statement.slice(index, index + keyword.length).toUpperCase() === keyword &&
+      !/[A-Z0-9_]/i.test(statement[index - 1] ?? '') &&
+      !/[A-Z0-9_]/i.test(statement[index + keyword.length] ?? '')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasUnboundedWrite(statement: string): boolean {
+  if (/\bDELETE\s+FROM\b/i.test(statement)) {
+    return !hasTopLevelKeyword(statement, 'WHERE');
+  }
+  if (/\bUPDATE\b[\s\S]*\bSET\b/i.test(statement)) {
+    return !hasTopLevelKeyword(statement, 'WHERE');
+  }
+  return false;
+}
 
 /**
  * Check if a SQL migration contains destructive operations.
  */
 export function isDestructive(sql: string): boolean {
-  return DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(sql));
+  const normalized = sql.replace(/\r\n?/g, '\n');
+  let executable = '';
+  for (const segment of tokenizeSql(normalized)) {
+    if (segment.kind === 'sql') {
+      executable += normalized.slice(segment.start, segment.end);
+    } else {
+      executable += ' '.repeat(segment.end - segment.start);
+    }
+  }
+  return splitExecutableStatements(executable).some((statement) => {
+    return (
+      DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(statement)) ||
+      hasUnboundedWrite(statement)
+    );
+  });
+}
+
+function hasDestructivePragma(sql: string): boolean {
+  return sql
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .some((line) => line.trim() === DESTRUCTIVE_PRAGMA);
 }
 
 /**
@@ -45,7 +115,7 @@ export function validateMigrations(
 
   for (const file of files) {
     const destructive = isDestructive(file.sql);
-    if (destructive && !file.sql.includes(PRAGMA_COMMENT)) {
+    if (destructive && !hasDestructivePragma(file.sql)) {
       errors.push(file.name);
     }
     results.push({ name: file.name, sql: file.sql, destructive });
@@ -55,7 +125,7 @@ export function validateMigrations(
     throw new Error(
       `Destructive migrations detected without pragma:\n` +
         errors.map((f) => `  - ${f}`).join('\n') +
-        `\n\nAdd "${PRAGMA_COMMENT}" to each file to allow the migration locally and on deploy.`,
+        `\n\nAdd "${DESTRUCTIVE_PRAGMA}" to each file to allow the migration locally and on deploy.`,
     );
   }
 

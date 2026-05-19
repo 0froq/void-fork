@@ -1,5 +1,6 @@
 import type { VoidAuthProvider } from '../auth/providers.ts';
 import type { DevRedirectRule, HeaderRule } from '../cli/types.ts';
+import type { MigrationPlanBundle } from '../migrations/plan.ts';
 import { resolveLayoutIds } from '../pages/layout-resolution.ts';
 import { INTERNAL_BINDING_PREFIXES } from '../runtime/env-raw.ts';
 import type { ScanResult } from './scan.ts';
@@ -671,6 +672,8 @@ export type CompileOptions = {
   migrationHandlerPath?: string;
   /** Bundled migration SQL entries */
   migrations?: Array<{ name: string; sql: string }>;
+  /** Build-time migration execution plans for protocol v2 workers */
+  migrationPlanBundle?: MigrationPlanBundle;
   /** Migration dialect (sqlite or postgresql) */
   migrationDialect?: 'sqlite' | 'postgresql';
   /** Header rules from routing.headers config (node/bun/deno targets only) */
@@ -1531,6 +1534,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
       `import { createMigrationHandler as __createMigrationHandler } from ${JSON.stringify(options.migrationHandlerPath)};`,
     );
     lines.push(`const __migrations = ${JSON.stringify(options.migrations)};`);
+    lines.push(`const __migrationPlanBundle = ${JSON.stringify(options.migrationPlanBundle)};`);
     lines.push(
       `const __migrationDialect = ${JSON.stringify(options.migrationDialect ?? 'sqlite')};`,
     );
@@ -1551,6 +1555,60 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push('  );');
     lines.push('  return __voidMigrationHandler(c.req.raw);');
     lines.push('});');
+    lines.push('app.get("/__void/migrate/capabilities", async (c) => {');
+    lines.push('  const __voidMigrationHandler = __createMigrationHandler(');
+    lines.push('    __getRawEnv(),');
+    lines.push('    __migrations,');
+    lines.push('    __migrationDialect,');
+    if (auth) {
+      lines.push(
+        `    () => runVoidAuthMigrations(new Request(c.req.url), __getRawEnv(), __voidAuthOptions${
+          auth.authSchemaPath ? ', __voidAuthMigrationSchema' : ''
+        }),`,
+      );
+    } else {
+      lines.push('    undefined,');
+    }
+    lines.push('    __migrationPlanBundle,');
+    lines.push('  );');
+    lines.push('  return __voidMigrationHandler(c.req.raw);');
+    lines.push('});');
+    lines.push('app.post("/__void/migrate/app", async (c) => {');
+    lines.push('  const __voidMigrationHandler = __createMigrationHandler(');
+    lines.push('    __getRawEnv(),');
+    lines.push('    __migrations,');
+    lines.push('    __migrationDialect,');
+    lines.push('    undefined,');
+    lines.push('    __migrationPlanBundle,');
+    lines.push('  );');
+    lines.push('  return __voidMigrationHandler(c.req.raw);');
+    lines.push('});');
+    lines.push('app.get("/__void/migrate/app/attempt/:attemptId", async (c) => {');
+    lines.push('  const __voidMigrationHandler = __createMigrationHandler(');
+    lines.push('    __getRawEnv(),');
+    lines.push('    __migrations,');
+    lines.push('    __migrationDialect,');
+    lines.push('    undefined,');
+    lines.push('    __migrationPlanBundle,');
+    lines.push('  );');
+    lines.push('  return __voidMigrationHandler(c.req.raw);');
+    lines.push('});');
+    if (auth) {
+      lines.push('app.post("/__void/migrate/auth", async (c) => {');
+      lines.push('  const __voidMigrationHandler = __createMigrationHandler(');
+      lines.push('    __getRawEnv(),');
+      lines.push('    __migrations,');
+      lines.push('    __migrationDialect,');
+      lines.push(
+        `    () => runVoidAuthMigrations(new Request(c.req.url), __getRawEnv(), __voidAuthOptions${
+          auth.authSchemaPath ? ', __voidAuthMigrationSchema' : ''
+        }),`,
+      );
+      lines.push('    __migrationPlanBundle,');
+      lines.push('  );');
+      lines.push('  return __voidMigrationHandler(c.req.raw);');
+      lines.push('});');
+    }
     lines.push('');
   }
 

@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { afterEach, beforeEach, describe, it, expect } from 'vite-plus/test';
+import { classifyMigration } from '../../src/migrations/plan.ts';
 import {
   assertJournalCoherence,
   isDestructive,
@@ -30,10 +31,33 @@ describe('isDestructive', () => {
     expect(isDestructive('CREATE TABLE users (id TEXT PRIMARY KEY);')).toBe(false);
   });
 
-  it('returns false for INSERT/UPDATE/DELETE', () => {
+  it('returns false for bounded INSERT/UPDATE/DELETE', () => {
     expect(isDestructive("INSERT INTO users VALUES ('1', 'test');")).toBe(false);
-    expect(isDestructive("UPDATE users SET name = 'test';")).toBe(false);
+    expect(isDestructive("UPDATE users SET name = 'test' WHERE id = '1';")).toBe(false);
     expect(isDestructive("DELETE FROM users WHERE id = '1';")).toBe(false);
+  });
+
+  it('detects unbounded UPDATE and DELETE', () => {
+    expect(isDestructive("UPDATE users SET name = 'test';")).toBe(true);
+    expect(isDestructive('DELETE FROM users;')).toBe(true);
+  });
+
+  it('detects unbounded writes per statement', () => {
+    expect(isDestructive("DELETE FROM users; UPDATE posts SET name = 'test' WHERE id = '1';")).toBe(
+      true,
+    );
+    expect(isDestructive("UPDATE users SET name = (SELECT name FROM posts WHERE id = '1');")).toBe(
+      true,
+    );
+  });
+
+  it('does not treat nested WHERE clauses as the UPDATE or DELETE bound', () => {
+    expect(
+      isDestructive('DELETE FROM users WHERE id IN (SELECT id FROM posts WHERE ok = 1);'),
+    ).toBe(false);
+    expect(isDestructive('UPDATE users SET name = name WHERE id IN (SELECT id FROM posts);')).toBe(
+      false,
+    );
   });
 
   it('returns false for ADD COLUMN', () => {
@@ -90,6 +114,59 @@ describe('validateMigrations', () => {
   it('handles empty list', () => {
     const result = validateMigrations([]);
     expect(result).toEqual([]);
+  });
+});
+
+describe('classifyMigration', () => {
+  it('does not reject CREATE TRIGGER bodies as transaction control', () => {
+    const plan = classifyMigration({
+      name: '001_trigger.sql',
+      sql: [
+        'CREATE TRIGGER users_updated',
+        'AFTER UPDATE ON users',
+        'BEGIN',
+        "  INSERT INTO audit_log(message) VALUES('updated');",
+        'END;',
+      ].join('\n'),
+    });
+
+    expect(plan).toEqual(
+      expect.objectContaining({
+        kind: 'legacy-unsplit-multi-statement',
+        stability: 'legacy',
+      }),
+    );
+  });
+
+  it('still rejects explicit transaction-control statements', () => {
+    expect(() =>
+      classifyMigration({
+        name: '001_tx.sql',
+        sql: 'BEGIN;\nCREATE TABLE users (id TEXT);\nCOMMIT;',
+      }),
+    ).toThrow('contains BEGIN');
+  });
+
+  it('only splits on executable statement breakpoint comments', () => {
+    const plan = classifyMigration({
+      name: '001_breakpoints.sql',
+      sql:
+        "INSERT INTO logs(message) VALUES('--> statement-breakpoint');\n" +
+        'CREATE TABLE users (id TEXT);\n' +
+        '--> statement-breakpoint\n' +
+        'CREATE TABLE posts (id TEXT);',
+    });
+
+    expect(plan).toEqual(
+      expect.objectContaining({
+        kind: 'breakpoint-framed',
+        statements: [
+          "INSERT INTO logs(message) VALUES('--> statement-breakpoint');\nCREATE TABLE users (id TEXT);",
+          'CREATE TABLE posts (id TEXT);',
+        ],
+        stability: 'stable',
+      }),
+    );
   });
 });
 

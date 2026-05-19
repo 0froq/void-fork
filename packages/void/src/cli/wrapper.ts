@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { join, extname } from 'pathe';
 import { build } from 'vite';
+import type { MigrationPlanBundle } from '../migrations/plan.ts';
 
 export type WrapperFeatures = {
   /** Auth providers (kept for type compatibility, no longer used by wrapper). */
@@ -109,10 +110,14 @@ export async function generateWrapper(
 
   // Collect migrations and copy handler if needed
   let migrations: Array<{ name: string; sql: string }> | undefined;
+  let migrationPlanBundle: MigrationPlanBundle | undefined;
   if (features.hasMigrations) {
     const { collectMigrations } = await import('../migrations/collect.ts');
+    const { buildMigrationPlanBundle } = await import('../migrations/plan.ts');
     const migrationsDir = join(root, 'db', 'migrations');
     migrations = collectMigrations(migrationsDir);
+    migrationPlanBundle =
+      features.migrationDialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
     // Copy the migration handler runtime into the worker directory.
     // Pick the PG handler when the dialect is PostgreSQL, otherwise use the D1 handler.
     // Bundled CLI chunks are emitted directly in dist/, while an unbundled CLI
@@ -138,7 +143,13 @@ export async function generateWrapper(
   }
 
   // Write wrapper in place of original entry
-  const wrapperSource = generateWrapperSource(renamedName, handlerFilename, features, migrations);
+  const wrapperSource = generateWrapperSource(
+    renamedName,
+    handlerFilename,
+    features,
+    migrations,
+    migrationPlanBundle,
+  );
   writeFileSync(join(workerDir, workerMain), wrapperSource);
 }
 
@@ -222,6 +233,7 @@ function generateWrapperSource(
   handlersModule: string,
   features: WrapperFeatures,
   migrations?: Array<{ name: string; sql: string }>,
+  migrationPlanBundle?: MigrationPlanBundle,
 ): string {
   const lines: Array<string> = [];
 
@@ -236,6 +248,7 @@ function generateWrapperSource(
   if (migrations && migrations.length > 0) {
     lines.push(`import { createMigrationHandler } from "./__void_migration_handler.mjs";`);
     lines.push(`const __migrations = ${JSON.stringify(migrations)};`);
+    lines.push(`const __migrationPlanBundle = ${JSON.stringify(migrationPlanBundle)};`);
     lines.push(
       `const __migrationDialect = ${JSON.stringify(features.migrationDialect ?? 'sqlite')};`,
     );
@@ -264,6 +277,28 @@ function generateWrapperSource(
       lines.push('  if (request.method === "POST" && url.pathname === "/__void/migrate") {');
       lines.push(
         '    const handler = createMigrationHandler(env, __migrations, __migrationDialect);',
+      );
+      lines.push('    return handler(request);');
+      lines.push('  }');
+      lines.push(
+        '  if (request.method === "GET" && url.pathname === "/__void/migrate/capabilities") {',
+      );
+      lines.push(
+        '    const handler = createMigrationHandler(env, __migrations, __migrationDialect, undefined, __migrationPlanBundle);',
+      );
+      lines.push('    return handler(request);');
+      lines.push('  }');
+      lines.push('  if (request.method === "POST" && url.pathname === "/__void/migrate/app") {');
+      lines.push(
+        '    const handler = createMigrationHandler(env, __migrations, __migrationDialect, undefined, __migrationPlanBundle);',
+      );
+      lines.push('    return handler(request);');
+      lines.push('  }');
+      lines.push(
+        '  if (request.method === "GET" && url.pathname.startsWith("/__void/migrate/app/attempt/")) {',
+      );
+      lines.push(
+        '    const handler = createMigrationHandler(env, __migrations, __migrationDialect, undefined, __migrationPlanBundle);',
       );
       lines.push('    return handler(request);');
       lines.push('  }');

@@ -449,6 +449,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         const migrationsDir = join(root, 'db', 'migrations');
         if (existsSync(migrationsDir) || compileOptions.auth) {
           const { collectMigrations } = await import('./migrations/collect.ts');
+          const { buildMigrationPlanBundle } = await import('./migrations/plan.ts');
           const migrations = existsSync(migrationsDir) ? collectMigrations(migrationsDir) : [];
           const dialect = getDatabaseDialect(readConfig(root));
           compileOptions.migrationHandlerPath = resolveFile(
@@ -457,6 +458,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
               : '#self/runtime/migration-handler',
           );
           compileOptions.migrations = migrations;
+          compileOptions.migrationPlanBundle =
+            dialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
           compileOptions.migrationDialect = dialect;
         }
       }
