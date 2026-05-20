@@ -193,7 +193,8 @@ function defineRender(
 
 ```ts
 interface RenderAssetTags {
-  head: string; // Script and style tags for <head>
+  css: string; // Stylesheet links for <head>
+  preloads: string; // Modulepreload and dev client tags for <head>
   body: string; // Script tags for before </body>
 }
 ```

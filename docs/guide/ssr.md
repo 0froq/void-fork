@@ -10,6 +10,28 @@ Void supports framework-agnostic SSR via explicit server and client entries. Thi
 For most apps, [Pages Routing](./pages-routing/overview) handles SSR automatically. You do not need entry files or hydration code.
 :::
 
+## Relationship to Pages Routing
+
+Custom SSR is separate from Pages Routing. Use Custom SSR when you want to bring
+your own root component, router, data loading, HTML shell, and hydration logic.
+
+The `App` component in the examples below is not a Void convention and it is not
+the same thing as `pages/layout.tsx`. It is just the root component for your
+custom-rendered application:
+
+```tsx
+// src/App.tsx
+export default function App({ url }: { url: string }) {
+  return url === '/about' ? <main>About</main> : <main>Home</main>;
+}
+```
+
+If you are using `pages/` with `@void/react`, `@void/vue`, `@void/svelte`, or
+`@void/solid`, do not create `src/main.ssr.*`, `src/main.client.*`, or
+`src/App.*` for Pages mode. The adapter generates the SSR and hydration entries
+and automatically composes your `pages/layout.*`, route components, loaders, and
+actions.
+
 ## Required entries
 
 SSR mode is enabled when both of these exist:
@@ -40,8 +62,9 @@ The recommended form is `defineRender(...)` for inferred types.
 
 ```ts
 {
-  head: string; // styles/modulepreload/Vite client+preamble (dev)
-  body: string; // main client entry script tag
+  css: string; // stylesheet links for <head>
+  preloads: string; // modulepreload/Vite client+preamble tags for <head>
+  body: string; // main client entry script tag before </body>
 }
 ```
 
