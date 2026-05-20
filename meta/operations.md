@@ -319,23 +319,23 @@ Broken down:
 
 ```
 deploy
-├── deploy:proxy        → vp run --filter @voidcloud/proxy deploy --env production
-├── deploy:tail         → vp run --filter @voidcloud/tail deploy --env production
 ├── deploy:api          → vp run --filter @voidcloud/api migrate         (drizzle-kit migrate — requires DATABASE_URL)
 │                       → vp run --filter @voidcloud/api deploy --env production
+├── deploy:proxy        → vp run --filter @voidcloud/proxy deploy --env production
+├── deploy:tail         → vp run --filter @voidcloud/tail deploy --env production
 ├── deploy:dispatch     → vp run --filter @voidcloud/dispatch deploy --env production
 └── deploy:dashboard    → vp run --filter @voidcloud/dashboard deploy --env production
 
 deploy:staging
-├── deploy:staging:proxy     → vp run --filter @voidcloud/proxy deploy --env staging
-├── deploy:staging:tail      → vp run --filter @voidcloud/tail deploy --env staging
 ├── deploy:staging:api       → vp run --filter @voidcloud/api migrate:staging  (DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate)
 │                            → vp run --filter @voidcloud/api deploy --env staging
+├── deploy:staging:proxy     → vp run --filter @voidcloud/proxy deploy --env staging
+├── deploy:staging:tail      → vp run --filter @voidcloud/tail deploy --env staging
 ├── deploy:staging:dispatch  → vp run --filter @voidcloud/dispatch deploy --env staging
 └── deploy:staging:dashboard → vp run --filter @voidcloud/dashboard deploy --env staging
 ```
 
-Deploy order matters: proxy deploys first (user workers depend on it via service binding), then api runs PostgreSQL migrations via drizzle-kit before deploying (ensures schema is ready for new code), then dispatch deploys, and dashboard deploys only after the platform worker deploys succeed. Package-level deploy scripts reject missing env flags; production must be invoked with `--env production` and staging with `--env staging`.
+Deploy order matters: api runs PostgreSQL migrations via drizzle-kit before deploying (ensures schema is ready for new code), then proxy deploys after the api worker has published any Durable Object classes that proxy binds to, then tail and dispatch deploy, and dashboard deploys only after the platform worker deploys succeed. Package-level deploy scripts reject missing env flags; production must be invoked with `--env production` and staging with `--env staging`.
 
 ### API rollout notes for DB-backed project secrets
 
@@ -366,13 +366,13 @@ Three workflows in `.github/workflows/`:
 
 1. Runs CI workflow first
 2. Builds the framework packages used by the dashboard
-3. `vp run deploy` (proxy, tail, api with drizzle-kit migrations, dispatch, dashboard)
+3. `vp run deploy` (api with drizzle-kit migrations, proxy, tail, dispatch, dashboard)
 
 **`deploy-staging.yml`** — runs on push to `main` (staging, environment: `Staging`):
 
 1. Runs CI workflow first
 2. Builds the framework packages used by the dashboard
-3. `vp run deploy:staging` (proxy, tail, api with drizzle-kit migrations, dispatch, dashboard — all to staging)
+3. `vp run deploy:staging` (api with drizzle-kit migrations, proxy, tail, dispatch, dashboard — all to staging)
 
 ### Health Checks
 

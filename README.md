@@ -105,9 +105,9 @@ git submodule status
 | `vp fmt`                          | Run oxfmt through Vite+                                                                             |
 | `vp run check`                    | Run package `typecheck` scripts (`tsgo --noEmit` in most packages, `vue-tsc --noEmit` in dashboard) |
 | `vp run test:all`                 | Run format check, lint, build, typecheck, and tests                                                 |
-| `vp run deploy`                   | Deploy `proxy` → `tail` → `api` → `dispatch` → `dashboard`                                          |
+| `vp run deploy`                   | Deploy `api` → `proxy` → `tail` → `dispatch` → `dashboard`                                          |
 | `vp run deploy:dashboard`         | Deploy the dashboard only                                                                           |
-| `vp run deploy:staging`           | Deploy staging `proxy` → `tail` → `api` → `dispatch` → `dashboard`                                  |
+| `vp run deploy:staging`           | Deploy staging `api` → `proxy` → `tail` → `dispatch` → `dashboard`                                  |
 | `vp run deploy:staging:dashboard` | Deploy the staging dashboard only                                                                   |
 
 Root `dev` and `build` are intentionally dashboard-only. Dashboard deploys run after the platform workers in the main deploy pipeline.
@@ -300,9 +300,9 @@ There are five deployable platform packages/surfaces:
 | `packages/dispatch`  | `*.void.app` / `*.staging.void.app`             | User traffic router                            |
 
 ```
-vp run deploy                     # proxy -> tail -> api -> dispatch -> dashboard
+vp run deploy                     # api -> proxy -> tail -> dispatch -> dashboard
 vp run deploy:dashboard           # dashboard only
-vp run deploy:staging             # staging proxy -> tail -> api -> dispatch -> dashboard
+vp run deploy:staging             # staging api -> proxy -> tail -> dispatch -> dashboard
 vp run deploy:staging:dashboard   # staging dashboard only
 ```
 
