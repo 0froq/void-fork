@@ -208,7 +208,7 @@ All [AI Gateway providers](https://developers.cloudflare.com/ai-gateway/usage/pr
 For production, add your API key as a project secret:
 
 ```bash
-void secrets set OPENAI_API_KEY sk-...
+void secret put OPENAI_API_KEY=sk-...
 ```
 
 For local development, add it to `.env.local` in your project root:

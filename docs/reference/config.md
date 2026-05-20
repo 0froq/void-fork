@@ -237,7 +237,9 @@ Deploy target runtime. Defaults to `"cloudflare"`.
 | `"bun"`        | Bun, using `Bun.serve()`                                  |
 | `"deno"`       | Deno, using `Deno.serve()`                                |
 
-Non-CF targets disable CF bindings (`void/db`, `void/kv`, `void/auth`, `void/storage`, `void/ai`, `void/sandbox`, `void/env`, `void/ws`). Importing any of these with a non-CF target produces a compile-time error. File-based routing, middleware, and `void/client` all work normally.
+Non-CF targets disable CF binding imports (`void/db`, `void/kv`, `void/auth`, `void/storage`, `void/ai`, `void/sandbox`, `void/env`). Importing any of these with a non-CF target produces a compile-time error. File-based routing, middleware, and `void/client` all work normally.
+
+Void-managed WebSocket route files (`*.ws.ts`) are Cloudflare-only because they compile to Durable Objects. The `void/ws` subpath itself is not blocked on non-CF targets so client-side `connect()` code can still be bundled where a browser-like `WebSocket` runtime is available.
 
 ```json
 { "target": "node" }
@@ -251,15 +253,21 @@ Curated Cloudflare Workers configuration. Cloudflare-targeted apps require an ex
 | --------------------- | ---------- | -------------------------------------- |
 | `compatibility_date`  | `string`   | Cloudflare Workers compatibility date  |
 | `compatibility_flags` | `string[]` | Cloudflare Workers compatibility flags |
+| `vars`                | `object`   | Plain-text worker variables            |
 
 ```json
 {
   "worker": {
     "compatibility_date": "2025-12-01",
-    "compatibility_flags": ["nodejs_compat"]
+    "compatibility_flags": ["nodejs_compat"],
+    "vars": {
+      "PUBLIC_API_BASE": "https://api.example.com"
+    }
   }
 }
 ```
+
+`worker.vars` values must be strings. They are merged into Worker bindings before `.env` files are loaded, so project `.env` values override `worker.vars` for local dev/build. Do not put secrets here; use `env.ts` plus `void secret put` for production secrets.
 
 ### `routing`
 
@@ -267,7 +275,7 @@ Routing and edge configuration for headers, redirects, rewrites, and caching.
 
 #### `routing.headers`
 
-Custom response headers for static assets. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](../guide/edge/headers) for details.
+Custom response headers for dispatch-worker responses. Keys are URL patterns, values are arrays of `"Name: value"` strings. See [Custom Headers](../guide/edge/headers) for details.
 
 ```json
 {

@@ -50,7 +50,7 @@ Void supports deploying Vite-based meta-framework apps with `void deploy`. The f
 | [Analog](https://analogjs.org/)                     | `@analogjs/platform`    | [Guide](../integrations/frameworks/analog.md)         |
 | [Astro](https://astro.build/)                       | `astro`                 | [Guide](../integrations/frameworks/astro.md)          |
 
-Add `voidPlugin()` to the framework's Vite config to get binding inference, typed DB generation, migration management, auth, cron jobs, queues, and caching. See the [Meta Frameworks Integration](../integrations/frameworks/overview.md) for the full feature matrix, deploy pipeline, and per-framework setup guides.
+Add `voidPlugin()` to the framework's Vite config to get binding inference, typed DB generation, migration management, cron jobs, queues, and caching. Void-managed auth is not supported in framework mode; use Better Auth's official integration for your framework. See the [Meta Frameworks Integration](../integrations/frameworks/overview.md) for the full feature matrix, deploy pipeline, and per-framework setup guides.
 
 **Deploy:** `void deploy` runs the framework build, packages the output, and deploys to Void. The framework still owns routing and SSR, while Void handles resource provisioning, migrations, and edge hosting.
 

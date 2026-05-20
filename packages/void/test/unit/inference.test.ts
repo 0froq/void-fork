@@ -203,11 +203,10 @@ describe('inferBindingsFromSource', () => {
     expect(result.needsD1).toBe(true);
   });
 
-  it('detects needsQueues from void/queue import', () => {
+  it('detects needsQueues from void/queues import', () => {
     const code = `
-      import { defineQueue } from "void/queue";
-      export const queue = "emails";
-      export default defineQueue(async (batch) => {});
+      import { queues } from "void/queues";
+      await queues.emails.send({});
     `;
     const result = inferBindingsFromSource(code, 'test.ts');
     expect(result.needsQueues).toBe(true);

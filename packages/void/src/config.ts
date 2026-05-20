@@ -22,6 +22,7 @@ export type DatabaseDialect = 'sqlite' | 'postgresql';
 export type WranglerConfig = {
   compatibility_date?: string;
   compatibility_flags?: Array<string>;
+  vars?: Record<string, string>;
 };
 
 /** Routing configuration — headers, redirects, rewrites, fallbacks, revalidation, prerendering. */
@@ -859,6 +860,16 @@ export function readConfig(root: string): VoidConfig {
         throw new Error(
           `config: "worker.compatibility_flags" in ${CONFIG_FILE} must be an array of strings.`,
         );
+      }
+    }
+    if (w.vars !== undefined) {
+      if (typeof w.vars !== 'object' || w.vars === null || Array.isArray(w.vars)) {
+        throw new Error(`config: "worker.vars" in ${CONFIG_FILE} must be an object.`);
+      }
+      for (const [key, value] of Object.entries(w.vars)) {
+        if (typeof value !== 'string') {
+          throw new Error(`config: "worker.vars.${key}" in ${CONFIG_FILE} must be a string.`);
+        }
       }
     }
   }

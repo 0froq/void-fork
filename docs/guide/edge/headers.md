@@ -74,6 +74,6 @@ No configuration is needed. If the framework generates a `_headers` file, it is 
 
 1. `void deploy` reads header rules from the framework `_headers` file (if present) and `routing.headers` in `void.json`, then includes them in the deploy manifest.
 2. The platform stores the rules in the KV routing entry for your project.
-3. The dispatch worker applies matching rules to static responses before edge caching.
+3. The dispatch worker applies matching rules to matching responses before returning them. Cacheable responses are cached with the final headers.
 
 Because rules are evaluated at the edge, there is no extra latency cost. Headers are applied inline before the response is returned and cached.

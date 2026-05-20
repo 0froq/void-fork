@@ -23,6 +23,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void db seed`                    | Reset + seed local database                      |
 | `void db studio`                  | Open Drizzle Studio for local database           |
 | `void secret put <name=value>`    | Set a production secret                          |
+| `void secret list`                | List production secrets                          |
 | `void secret sync .env.local`     | Bulk upload secrets from dotenv file             |
 | `void env check [--remote]`       | Validate env.ts schema                           |
 | `void env types`                  | Regenerate .void/env.d.ts from env.ts            |
@@ -31,7 +32,9 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void project link`               | Link directory to a project                      |
 | `void project logs`               | Show runtime logs from deployed project          |
 | `void project rollback`           | Roll back to a previous deployment               |
+| `void project cancel`             | Cancel an active deployment                      |
 | `void project purge-cache`        | Purge all cached pages                           |
+| `void mcp`                        | Start the Void MCP server                        |
 | `void init`                       | Setup wizard for new or existing projects        |
 
 ## Binary Invocation
@@ -185,6 +188,17 @@ Roll back to a previous deployment. Traffic instantly switches to the target dep
 - If the target deployment has fewer applied migrations than the current one, a warning is shown listing the migration diff before confirmation
 
 Only **retained** deployments can be rolled back to. The number of retained deployments depends on your plan (free: 1, solo: 5, pro: 25, unlimited for sponsored/custom).
+
+### `void project cancel [deployId]`
+
+```
+void project cancel [deployId]
+```
+
+Cancel an active deployment.
+
+- If `[deployId]` is omitted, shows an interactive select menu of active deployments for the linked project
+- If `[deployId]` is provided, cancels that deployment directly
 
 ### `void project delete [name]`
 
@@ -432,6 +446,14 @@ void gen queue emails
 
 ## Secrets
 
+### `void secret list`
+
+```
+void secret list [--project <name>]
+```
+
+List the production secrets configured for the project. Secret values are never printed.
+
 ### `void secret put`
 
 ```
@@ -574,9 +596,17 @@ Runs all agent setup steps:
 
 If no agent is detected, `void init --agents` asks you to choose from Claude Code, Cursor, Codex, Gemini CLI, or Generic.
 
+### `void mcp`
+
+```
+void mcp
+```
+
+Start the Void MCP server over stdio for supported coding agents.
+
 ## Environment variables
 
-| Variable       | Purpose                                                      | Default |
-| -------------- | ------------------------------------------------------------ | ------- |
-| `VOID_TOKEN`   | Auth token override instead of saved config                  | none    |
-| `VOID_PROJECT` | Default project slug for deploy, secret, and delete commands | none    |
+| Variable       | Purpose                                                                   | Default |
+| -------------- | ------------------------------------------------------------------------- | ------- |
+| `VOID_TOKEN`   | Auth token override instead of saved config                               | none    |
+| `VOID_PROJECT` | Default project slug for deploy, secret, domain, and cache purge commands | none    |

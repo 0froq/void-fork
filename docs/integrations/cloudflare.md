@@ -38,7 +38,7 @@ export const GET = defineHandler(async (c) => {
 
 ### Via `cloudflare:workers` import
 
-When using framework mode (TanStack Start, React Router, SolidStart), the framework owns routing and you access bindings through the `cloudflare:workers` module instead:
+When using framework mode (TanStack Start or React Router), the framework owns routing and you access bindings through the `cloudflare:workers` module instead:
 
 ::: warning ⚠️ Cloudflare env access in meta frameworks
 Some frameworks, like Nuxt and SvelteKit, do not run in workerd during dev and therefore do not support directly importing from `cloudflare:workers`.
@@ -91,7 +91,7 @@ This augments the `Cloudflare.Env` interface with `DB`, `KV`, `STORAGE`, `AI`, a
 | `KV`      | `KVNamespace` | `env.KV` / `c.env.KV` or `import from "void/kv"`                |
 | `STORAGE` | `R2Bucket`    | `env.STORAGE` / `c.env.STORAGE` or `import from "void/storage"` |
 | `AI`      | `Ai`          | `env.AI` / `c.env.AI` or `import from "void/ai"`                |
-| `QUEUE_*` | `Queue<T>`    | `defineQueue()` or `import from "void/queue"`                   |
+| `QUEUE_*` | `Queue<T>`    | `defineQueue()` or `import { queues } from "void/queues"`       |
 
 Bindings are [inferred automatically](../reference/resource-inference.md) by scanning your source files for import and access patterns. You can also set them explicitly in `void.json`:
 
@@ -120,7 +120,7 @@ You can set non-binding wrangler fields like `compatibility_date` and `compatibi
 }
 ```
 
-For environment variables, use `.env` files instead of `worker.vars`. Void automatically loads `.env` files through Vite's `loadEnv` and merges them into the worker's `vars` bindings:
+For environment variables, use `.env` files for local values and secrets. Void automatically loads `.env` files through Vite's `loadEnv` and merges them into the worker's `vars` bindings:
 
 ```bash
 # .env
@@ -128,6 +128,8 @@ API_URL=https://api.example.com
 ```
 
 Binding arrays such as `d1_databases`, `kv_namespaces`, and `r2_buckets` are not allowed in the `worker` field because Void manages bindings for you. If you need custom bindings with real resource IDs, add a `wrangler.jsonc` to the project root instead. See [Wrangler config merging](#wrangler-config-merging) for details.
+
+For non-secret plain-text defaults, you can also set `worker.vars` in `void.json`. Values from `.env` files override `worker.vars`.
 
 ## Wrangler config merging
 

@@ -32,7 +32,7 @@ For local development, add `DATABASE_URL` to `.env.local`:
 DATABASE_URL=postgres://user:password@host:5432/mydb
 ```
 
-This connects directly to your Postgres database during `void dev`.
+This connects directly to your Postgres database during local Vite development.
 
 ### 3. Deploy
 

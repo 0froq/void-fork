@@ -371,9 +371,14 @@ async function runDeployInner(
         output: voidConfig.output,
       });
 
-      // Check for known framework first
+      let preset = resolveStaticDeployPreset(root, voidConfig, {
+        dir: options?.dir,
+        spa: options?.spa,
+      });
+
+      // Check for known framework after static overrides.
       const detected = detectFramework(root);
-      if (detected) {
+      if (!preset && detected) {
         cliLog.info('framework_detected', {
           name: detected.name,
           class: detected.class,
@@ -414,31 +419,11 @@ async function runDeployInner(
         }
         return;
       }
-
-      let preset: StaticPreset | null = null;
-
-      const appType = voidConfig.inference?.appType;
-      if (appType && appType !== 'void' && appType !== 'framework') {
-        // void.json has an explicit static app type
-        const outputDir = voidConfig.inference?.outputDir;
-        preset = {
-          buildCommand: null,
-          outputDir: outputDir ? resolve(root, outputDir) : join(root, 'dist'),
-          appType,
-        };
-        // Re-detect build command (config stores app type, not command)
-        const detectedPreset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
-        if (detectedPreset) {
-          preset.buildCommand = detectedPreset.buildCommand;
-          if (!outputDir) {
-            preset.outputDir = detectedPreset.outputDir;
-          }
-        }
-      } else if (!appType) {
-        // No configured app type — detect from CLI flags + project structure
-        preset = detectPreset(root, { dir: options?.dir, spa: options?.spa });
+      if (!preset && !voidConfig.inference?.appType) {
+        // No configured app type and no detected framework — detect from project structure.
+        preset = detectPreset(root, { spa: options?.spa });
       }
-      // appType === "void" or "framework" → preset stays null → full deploy
+      // appType === "void" or "framework" without a detected framework → full deploy.
 
       // Detect git commit before build (only when not skipping build)
       const gitMetadata = collectGitDeployMetadata(
@@ -541,6 +526,38 @@ export function resolveStaticBuildCommand(
     return null;
   }
   return buildOverride ?? preset.buildCommand;
+}
+
+export function resolveStaticDeployPreset(
+  root: string,
+  voidConfig: VoidConfig,
+  options?: Pick<RunDeployOptions, 'dir' | 'spa'>,
+): StaticPreset | null {
+  if (options?.dir) {
+    return detectPreset(root, { dir: options.dir, spa: options.spa });
+  }
+
+  const appType = voidConfig.inference?.appType;
+  if (appType === 'static' || appType === 'spa') {
+    const outputDir = voidConfig.inference?.outputDir;
+    const preset: StaticPreset = {
+      buildCommand: null,
+      outputDir: outputDir ? resolve(root, outputDir) : join(root, 'dist'),
+      appType,
+    };
+
+    // Re-detect build command (config stores app type, not command).
+    const detectedPreset = detectPreset(root, { spa: options?.spa });
+    if (detectedPreset) {
+      preset.buildCommand = detectedPreset.buildCommand;
+      if (!outputDir) {
+        preset.outputDir = detectedPreset.outputDir;
+      }
+    }
+    return preset;
+  }
+
+  return null;
 }
 
 export type ApplyDeployEventResult =

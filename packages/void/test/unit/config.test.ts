@@ -64,6 +64,7 @@ describe('readConfig', () => {
         worker: {
           compatibility_date: '2025-12-01',
           compatibility_flags: ['nodejs_compat'],
+          vars: { PUBLIC_VALUE: 'hello' },
         },
         sandbox: {
           binding: 'CODE',
@@ -84,6 +85,7 @@ describe('readConfig', () => {
     expect(config.worker).toEqual({
       compatibility_date: '2025-12-01',
       compatibility_flags: ['nodejs_compat'],
+      vars: { PUBLIC_VALUE: 'hello' },
     });
     expect(config.sandbox).toEqual({
       binding: 'CODE',
@@ -91,6 +93,12 @@ describe('readConfig', () => {
       instanceType: 'lite',
       maxInstances: 2,
     });
+    cleanup();
+  });
+
+  it('throws on non-string worker vars', () => {
+    setup(JSON.stringify({ worker: { vars: { PORT: 3000 } } }));
+    expect(() => readConfig(tmpDir)).toThrow('"worker.vars.PORT"');
     cleanup();
   });
 

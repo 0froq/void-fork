@@ -4,7 +4,7 @@ outline: deep
 
 # API Reference
 
-This page is the source of truth for public `void` exports. Use it when you already know what feature you want and need the exact import, signature, or return type.
+This page is the source of truth for user-facing `void` exports. Use it when you already know what feature you want and need the exact import, signature, or return type. Some exported subpaths are implementation support for adapters, generated workers, or internal runtime wiring and are intentionally not listed as app APIs.
 
 ## Plugin
 
@@ -534,11 +534,11 @@ The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typ
 
 ## Database
 
-Imported from `"void/db"`. The `db` export is a [Drizzle ORM](https://orm.drizzle.team) instance for [Cloudflare D1](https://developers.cloudflare.com/d1/). See the [Database guide](../guide/database.md) for usage and the [Drizzle docs](https://orm.drizzle.team/docs/select) for the full query API.
+Imported from `"void/db"`. The `db` export is a [Drizzle ORM](https://orm.drizzle.team) instance for the configured database dialect: [Cloudflare D1](https://developers.cloudflare.com/d1/) by default, or PostgreSQL when `void.json` sets `"database": "pg"` / `"postgresql"`. See the [Database guide](../guide/database.md) for usage and the [Drizzle docs](https://orm.drizzle.team/docs/select) for the full query API.
 
 ### `db`
 
-Default Drizzle D1 instance, pre-wired with the `env.DB` binding and your schema from `db/schema.ts`.
+Default Drizzle instance, pre-wired with your schema from `db/schema.ts`.
 
 ```ts
 import { db } from 'void/db';
@@ -547,11 +547,18 @@ import { users } from '@schema';
 const allUsers = await db.select().from(users).all();
 ```
 
-When the Void plugin is active, `void/db` is served as a virtual module that auto-wires the D1 binding with your schema. The published npm fallback uses a lazy proxy that resolves the `DB` binding at first access.
+When the Void plugin is active, `void/db` is served as a virtual module that auto-wires the active database with your schema.
+
+- D1 projects resolve the `DB` binding and expose `DrizzleD1Database<Schema>`.
+- PostgreSQL projects use `DATABASE_URL` during local development and Hyperdrive's `connectionString` in production, exposing `NodePgDatabase<Schema>`.
+
+The published npm fallback uses a lazy D1 proxy that resolves the `DB` binding at first access.
 
 ### `createDb(database)`
 
-Creates a Drizzle D1 instance from a specific D1 binding. Use this when you have multiple D1 databases or need a non-default binding.
+Creates a Drizzle instance for the active dialect.
+
+For D1 projects, pass a specific D1 binding. Use this when you have multiple D1 databases or need a non-default binding.
 
 ```ts
 import { createDb } from 'void/db';
@@ -560,10 +567,22 @@ import { env } from 'cloudflare:workers';
 const db = createDb(env.MY_OTHER_DB);
 ```
 
+For PostgreSQL projects, pass a connection string.
+
+```ts
+import { createDb } from 'void/db';
+
+const db = createDb('postgres://user:password@host:5432/app');
+```
+
 **Signature:**
 
 ```ts
-function createDb(d1: D1Database): DrizzleD1Database;
+// D1
+function createDb(d1: D1Database): DrizzleD1Database<Schema>;
+
+// PostgreSQL
+function createDb(connectionString: string): NodePgDatabase<Schema>;
 ```
 
 ### Query Operators
@@ -602,6 +621,98 @@ The callback receives:
 - `schema`: the exports from `db/schema.ts` or `db/schema/`
 
 Seed modules can export either `default` or a named `seed` function.
+
+## KV
+
+Imported from `"void/kv"`.
+
+### `kv`
+
+Typed JSON-aware client for the inferred `KV` binding.
+
+```ts
+import { kv } from 'void/kv';
+
+await kv.put('settings', { theme: 'dark' });
+const settings = await kv.get<{ theme: string }>('settings');
+```
+
+**Key exports:** `kv`, `createKV(namespace)`, `KVClient`, `KVMap`, `PutOptions`, `ListOptions`.
+
+`kv.map(prefix)` creates a typed namespaced view where every key is stored under `prefix:`.
+
+## Storage
+
+Imported from `"void/storage"`.
+
+### `storage`
+
+Default [R2 bucket](https://developers.cloudflare.com/r2/) proxy for the inferred `STORAGE` binding.
+
+```ts
+import { storage } from 'void/storage';
+
+await storage.put('avatars/alice.png', file);
+const object = await storage.get('avatars/alice.png');
+```
+
+**Key exports:** `storage`, `createStorage(bucket)`.
+
+## AI
+
+Imported from `"void/ai"`.
+
+### `ai`
+
+Typed AI client for Workers AI models and AI Gateway-backed third-party providers.
+
+```ts
+import { ai } from 'void/ai';
+
+const result = await ai.run('@cf/meta/llama-3.1-8b-instruct', {
+  messages: [{ role: 'user', content: 'Summarize this release note.' }],
+});
+```
+
+**Key exports:** `ai`, `VoidAi`, model input/response types. See [AI](../guide/ai.md) for provider setup and streaming examples.
+
+## ISR
+
+Imported from `"void/isr"`.
+
+### `revalidate(options)`
+
+Revalidate ISR-cached pages on demand. In local development this is a no-op because there is no edge ISR cache.
+
+```ts
+import { revalidate } from 'void/isr';
+
+await revalidate({ paths: ['/', '/blog/hello'] });
+await revalidate({ all: true });
+```
+
+**Signature:**
+
+```ts
+function revalidate(options: { paths?: string[]; all?: boolean }): Promise<void>;
+```
+
+## Logging
+
+Imported from `"void/log"`.
+
+### `logger`
+
+Structured logger that emits one JSON line per call so deployed logs can be filtered by message and fields.
+
+```ts
+import { logger } from 'void/log';
+
+logger.info('checkout completed', { orderId, userId });
+logger.error('webhook failed', { provider: 'stripe', attempt: 3 });
+```
+
+**Methods:** `logger.error(message, fields?)`, `logger.warn(message, fields?)`, `logger.info(message, fields?)`.
 
 ## Types
 
@@ -692,9 +803,42 @@ Empty stub interface augmented at build time by the generated `.void/routes.d.ts
 import type { RouteMap } from 'void/routes';
 ```
 
-## Environment Types
+## Environment
 
-Importing `"void/env"` provides global Cloudflare environment types:
+Imported from `"void/env"`.
+
+### `defineEnv(schema)`
+
+Register an env schema and return the typed [`env`](#env) proxy. Void auto-discovers `env.ts`, imports it during dev/build/deploy, generates `.void/env.d.ts`, validates production secrets before deploy, and validates values at worker boot.
+
+```ts
+import { defineEnv, string, number, oneOf, url } from 'void/env';
+
+export default defineEnv({
+  STRIPE_KEY: string().secret(),
+  PORT: number().default(3000),
+  NODE_ENV: oneOf(['development', 'production']),
+  VITE_PUBLIC_URL: url().public(),
+});
+```
+
+### `env`
+
+Typed runtime proxy for declared env keys. Unknown keys and bindings pass through as `unknown`.
+
+```ts
+import { env } from 'void/env';
+
+const port = env.PORT;
+```
+
+### Schema helpers
+
+`void/env` includes Standard Schema-compatible helpers: `string()`, `number()`, `boolean()`, `url()`, `email()`, `oneOf([...])`, and `json<T>()`. Each helper supports `.optional()`, `.default(value)`, `.secret()`, and `.public()`.
+
+### Types
+
+`void/env` also provides global Cloudflare environment types:
 
 ```ts
 /// <reference types="void/env" />
@@ -733,6 +877,7 @@ function voidVue(options?: VoidVueOptions): Plugin[];
 ```ts
 interface VoidVueOptions {
   vue?: VuePluginOptions; // passed through to @vitejs/plugin-vue
+  viewTransitions?: boolean; // enable View Transitions API for navigations
 }
 ```
 
@@ -747,6 +892,8 @@ Imported from `"@void/vue"`.
 | `useParams()`                      | Returns dynamic route params for the page currently being rendered.                                                                                                                                                                               |
 | `useNavigation()`                  | Returns pending navigation state: `{ state, location, method }`, where `state` is `"idle"`, `"loading"`, or `"submitting"` and `location` is the pending destination.                                                                             |
 | `useForm(url, defaults, options?)` | Typed reactive form helper bound to a page action URL. Returns `{ data, post, put, patch, delete, pending, errors, error, hasChanges, wasSuccessful, recentlySuccessful, reset, clearErrors, clearError }`.                                       |
+| `useIslandForm(defaults)`          | Form helper for island components where the action URL is inferred from the current island request. Returns the same form state and submit helpers as `useForm()`.                                                                                |
+| `action(url, options?)`            | Awaitable one-shot page action helper. Uses `POST` by default and accepts `{ data, method, params }`, where `method` can be `"PUT"`, `"PATCH"`, or `"DELETE"`. Returns an `ActionResult`.                                                         |
 | `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                                                                                                                          |
 
 Vue `Link` GET `data` is merged into the rendered `href` query string. Primitive values are serialized with `String(value)`, arrays become repeated keys, `null` and `undefined` are omitted, and nested objects throw. `prefetch` and `reloadDocument` are GET-only and throw for mutation links.
@@ -795,6 +942,7 @@ Imported from `"@void/react"`.
 | `useParams()`                      | Returns dynamic route params for the page currently being rendered.                                                                                                                                                                                 |
 | `useNavigation()`                  | Returns pending navigation state: `{ state, location, method }`, where `state` is `"idle"`, `"loading"`, or `"submitting"` and `location` is the pending destination.                                                                               |
 | `useForm(url, defaults, options?)` | Form helper hook. Returns `{ data, setData, post, put, patch, delete, pending, errors, error, hasChanges, wasSuccessful, recentlySuccessful, reset, clearErrors, clearError }`.                                                                     |
+| `useIslandForm(defaults)`          | Form helper hook for island components where the action URL is inferred from the current island request. Returns the same form state and submit helpers as `useForm()`.                                                                             |
 | `action(url, options?)`            | Awaitable one-shot page action helper. Uses `POST` by default and accepts `{ data, method, params }`, where `method` can be `"PUT"`, `"PATCH"`, or `"DELETE"`. Returns an `ActionResult`.                                                           |
 | `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                                                                                                                            |
 | `Deferred<T>`                      | React-only prop type for `defer()` results. It is `Promise<T>` and is consumed with React `use()`.                                                                                                                                                  |
@@ -836,6 +984,10 @@ function voidSvelte(options?: VoidSvelteOptions): Plugin[];
 interface VoidSvelteOptions {
   svelte?: SveltePluginOptions; // passed through to @sveltejs/vite-plugin-svelte
   viewTransitions?: boolean; // enable View Transitions API
+  prefetch?: {
+    hoverDelay?: number;
+    cacheFor?: number | string | [string, string];
+  };
 }
 ```
 
@@ -847,6 +999,8 @@ Imported from `"@void/svelte"`.
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Link`                             | Svelte component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `prefetch`, `cacheFor`, `preserveScroll`, `preserveState`, `replace`, `reloadDocument`, `viewTransition`, `onNavigate`. |
 | `useForm(url, defaults, options?)` | Form helper using Svelte 5 runes. Returns `{ data, post, put, patch, delete, pending, errors, error, hasChanges, wasSuccessful, recentlySuccessful, reset, clearErrors, clearError }`.                                                               |
+| `useIslandForm(defaults)`          | Form helper for island components where the action URL is inferred from the current island request. Returns the same form state and submit helpers as `useForm()`.                                                                                   |
+| `action(url, options?)`            | Awaitable one-shot page action helper. Uses `POST` by default and accepts `{ data, method, params }`, where `method` can be `"PUT"`, `"PATCH"`, or `"DELETE"`. Returns an `ActionResult`.                                                            |
 | `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                                                                                                                             |
 | `useRouter()`                      | Returns the Void Router with current route state (`url`, `path`, `query`, `params`) and navigation methods: `visit`, `refresh`, awaitable `prefetch`, `flush`, `flushAll`.                                                                           |
 | `useParams()`                      | Returns dynamic route params for the page currently being rendered.                                                                                                                                                                                  |
@@ -880,6 +1034,10 @@ function voidSolid(options?: VoidSolidOptions): Plugin[];
 interface VoidSolidOptions {
   solid?: SolidPluginOptions; // passed through to vite-plugin-solid
   viewTransitions?: boolean; // enable View Transitions API
+  prefetch?: {
+    hoverDelay?: number;
+    cacheFor?: number | string | [string, string];
+  };
 }
 ```
 
@@ -891,6 +1049,8 @@ Imported from `"@void/solid"`.
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Link`                             | Solid component for SPA navigation. Renders `<a>` for GET, `<button>` for non-GET methods. Props: `href`, `method`, `data`, `prefetch`, `cacheFor`, `preserveScroll`, `preserveState`, `replace`, `reloadDocument`, `viewTransition`, `onNavigate`. |
 | `useForm(url, defaults, options?)` | Form helper using Solid stores. Returns `{ data, setData, post, put, patch, delete, pending, errors, error, hasChanges, wasSuccessful, recentlySuccessful, reset, clearErrors, clearError }`.                                                       |
+| `useIslandForm(defaults)`          | Form helper for island components where the action URL is inferred from the current island request. Returns the same form state and submit helpers as `useForm()`.                                                                                  |
+| `action(url, options?)`            | Awaitable one-shot page action helper. Uses `POST` by default and accepts `{ data, method, params }`, where `method` can be `"PUT"`, `"PATCH"`, or `"DELETE"`. Returns an `ActionResult`.                                                           |
 | `useShared()`                      | Returns shared data injected by middleware via `c.set("shared", {...})`.                                                                                                                                                                            |
 | `useRouter()`                      | Returns the Void Router with current route state (`url`, `path`, `query`, `params`) and navigation methods: `visit`, `refresh`, awaitable `prefetch`, `flush`, `flushAll`.                                                                          |
 | `useParams()`                      | Returns dynamic route params for the page currently being rendered.                                                                                                                                                                                 |
@@ -898,11 +1058,35 @@ Imported from `"@void/solid"`.
 
 Solid `Link` GET `data` is merged into the rendered `href` query string. Primitive values are serialized with `String(value)`, arrays become repeated keys, `null` and `undefined` are omitted, and nested objects throw. `prefetch` and `reloadDocument` are GET-only and throw for mutation links.
 
-## Subpath Exports
+## Markdown Package
+
+The optional `@void/md` package adds Markdown pages to Pages Routing. Install it alongside a Pages adapter and add `voidMarkdown()` to your Vite plugins.
+
+```ts
+import { voidMarkdown } from '@void/md/plugin';
+
+export default defineConfig({
+  plugins: [voidPlugin(), voidReact(), voidMarkdown()],
+});
+```
+
+| Import path                  | Contents                                                                                 |
+| ---------------------------- | ---------------------------------------------------------------------------------------- |
+| `@void/md/plugin`            | `voidMarkdown(options?)`, `MarkdownOptions`, `MdPage`                                    |
+| `@void/md`                   | `useFrontmatter()`, `FrontmatterContext`, `setFrontmatter()`, `MdPage`                   |
+| `@void/md/pages`             | Generated metadata for Markdown pages, used for navigation, sidebars, and search indexes |
+| `@void/md/theme.css`         | Full Markdown theme styles                                                               |
+| `@void/md/theme-content.css` | Content-only Markdown styles for apps that provide their own shell/layout                |
+
+See [Markdown Pages](../guide/pages-routing/markdown.md) for setup and framework-specific examples.
+
+## User-Facing Imports
+
+This table lists app-facing imports. Exported implementation subpaths such as `void/pages*`, `void/runtime/*`, and `void/remote*` are used by adapters, generated entries, or internal runtime wiring and are not documented as application APIs.
 
 | Import path            | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `void`                 | `voidPlugin` named export + all handler/type re-exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `void`                 | `voidPlugin`, handler/type re-exports, `defer`, `Deferred`, `DeferredState`, `InferProps`, `HeadDescriptor`                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `void/handler`         | `defineHandler`, `defineMiddleware`, `defineScheduled`, `defineQueue`, `defineRender`, `defineHead`, types                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `void/auth`            | `defineAuth`, `getUser`, `getSession`, `requireAuth`, `AuthUser`, `AuthSession`, `AuthState`                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `void/client`          | `fetch`, `fetchStream`, `FetchError`, `auth`, `createAuthClient`, `AuthUser`, `AuthSession`, `AuthState`                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -918,9 +1102,15 @@ Solid `Link` GET `data` is merged into the rendered `href` query string. Primiti
 | `void/drizzle-arktype` | Re-exports [`drizzle-arktype`](https://orm.drizzle.team/docs/arktype) for schema-derived ArkType validators for Drizzle tables                                                                                                                                                                                                                                                                                                                                                                                           |
 | `void/schema-d1`       | Re-exports [`drizzle-orm/sqlite-core`](https://orm.drizzle.team/docs/column-types/sqlite) for D1 table and column builders                                                                                                                                                                                                                                                                                                                                                                                               |
 | `void/schema-pg`       | Re-exports [`drizzle-orm/pg-core`](https://orm.drizzle.team/docs/column-types/pg) for PostgreSQL table and column builders                                                                                                                                                                                                                                                                                                                                                                                               |
-| `void/db`              | `db` ([Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new) instance), `createDb`, query operators (`eq`, `and`, `or`, `desc`, `like`, `inArray`, etc.)                                                                                                                                                                                                                                                                                                                                                         |
+| `void/db`              | `db` (Drizzle D1 or PostgreSQL instance for the active dialect), `createDb`, query operators (`eq`, `and`, `or`, `desc`, `like`, `inArray`, etc.)                                                                                                                                                                                                                                                                                                                                                                        |
 | `void/seed`            | `defineSeed`, `SeedContext`, `SeedFn` for programmatic `void db seed` modules                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `void/kv`              | `kv`, `createKV`, typed KV client/map types                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `void/storage`         | `storage`, `createStorage` for the inferred R2 binding or a specific `R2Bucket`                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `void/ai`              | `ai`, `VoidAi`, model input and response types                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `void/isr`             | `revalidate(options)` for on-demand ISR cache invalidation                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `void/log`             | `logger` structured logging helper                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `void/routes`          | `RouteMap` and `WebSocketRouteMap` stubs (types only)                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `void/queues`          | `queues` proxy for sending messages to typed queues                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `void/sandbox`         | `getSandbox`, `sandbox`, `Sandbox`, and sandbox option types from the Cloudflare Sandbox SDK. `getSandbox(id)` resolves to the same Durable Object instance for a given `id` across all deploys and rollbacks. DO-level storage (`ctx.storage`) is durable; the container filesystem, processes, and exposed ports are tied to a single container lifetime and are lost on idle (`sleepAfter`, default `10m`), crash, or platform restart. See [Sandboxes › State persistence](../guide/sandboxes.md#state-persistence). |
-| `void/env`             | Global Cloudflare env types (types only)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `void/env`             | `defineEnv`, `env`, schema helpers (`string`, `number`, `boolean`, `url`, `email`, `oneOf`, `json`), and global Cloudflare env types                                                                                                                                                                                                                                                                                                                                                                                     |
+| `void/sveltekit`       | SvelteKit integration helpers: `withVoidTSConfig()` and `mergeVoidSvelteKitTsconfig()`                                                                                                                                                                                                                                                                                                                                                                                                                                   |

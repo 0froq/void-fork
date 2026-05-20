@@ -106,17 +106,18 @@ These Void features work identically across all targets:
 
 The following imports are **not available** with a non-CF target and produce a compile-time error:
 
-| Import         | CF Feature                   |
-| -------------- | ---------------------------- |
-| `void/db`      | D1 (SQL database)            |
-| `void/kv`      | KV (key-value storage)       |
-| `void/storage` | R2 (blob storage)            |
-| `void/auth`    | Void-managed Better Auth     |
-| `void/ai`      | Workers AI                   |
-| `void/env`     | CF env type augmentation     |
-| `void/ws`      | Durable Objects + WebSockets |
+| Import         | CF Feature               |
+| -------------- | ------------------------ |
+| `void/db`      | D1 (SQL database)        |
+| `void/kv`      | KV (key-value storage)   |
+| `void/storage` | R2 (blob storage)        |
+| `void/auth`    | Void-managed Better Auth |
+| `void/ai`      | Workers AI               |
+| `void/env`     | CF env type augmentation |
 
 If you need a database or storage, use an external provider and connect via standard Node.js libraries.
+
+Void-managed WebSocket route files (`*.ws.ts`) are still Cloudflare-only because they compile to Durable Objects. The `void/ws` subpath is not compile-time blocked on non-CF targets, so browser-side `connect()` code can still be bundled when a WebSocket runtime is available.
 
 ### No cron job runtime
 

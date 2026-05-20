@@ -8,6 +8,7 @@ import {
   resolveDeployLiveBindingConfig,
   resolveDistDir,
   resolveDeployWranglerCompat,
+  resolveStaticDeployPreset,
   resolveStaticBuildCommand,
   resolveWorkerDirName,
 } from '../../src/cli/deploy.ts';
@@ -371,6 +372,56 @@ describe('resolveStaticBuildCommand', () => {
         true,
       ),
     ).toBeNull();
+  });
+});
+
+describe('resolveStaticDeployPreset', () => {
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop()!;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('treats --dir as a static deploy override even in framework-shaped projects', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-test-'));
+    tempDirs.push(root);
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ dependencies: { '@sveltejs/kit': 'latest' } }),
+    );
+
+    expect(resolveStaticDeployPreset(root, {}, { dir: 'public' })).toEqual({
+      buildCommand: null,
+      outputDir: join(root, 'public'),
+      appType: 'static',
+    });
+  });
+
+  it('treats explicit static app type as an override before framework detection', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-test-'));
+    tempDirs.push(root);
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ dependencies: { '@sveltejs/kit': 'latest' } }),
+    );
+
+    expect(resolveStaticDeployPreset(root, { inference: { appType: 'static' } })).toEqual({
+      buildCommand: null,
+      outputDir: join(root, 'dist'),
+      appType: 'static',
+    });
+  });
+
+  it('does not classify ordinary framework auto-detection as a static override', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-test-'));
+    tempDirs.push(root);
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ dependencies: { '@sveltejs/kit': 'latest', vite: 'latest' } }),
+    );
+
+    expect(resolveStaticDeployPreset(root, {})).toBeNull();
   });
 });
 

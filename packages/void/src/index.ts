@@ -865,6 +865,9 @@ export function voidPlugin(options?: {
   // Core worker config — always set by voidPlugin (main, triggers, assets).
   // Bindings are handled separately in the config function below.
   const workerConfig: Record<string, unknown> = {};
+  if (config.worker?.vars) {
+    workerConfig.vars = { ...config.worker.vars };
+  }
 
   // Tracks whether vite is running in dev or build mode. Set early in
   // envPlugin.config so mergeBindings can gate credential injection on 'serve'.

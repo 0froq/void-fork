@@ -26,7 +26,7 @@ This runs once before plugins initialize, so the results are available to config
 | `AI`      | `Ai`                              | `import { ai } from "void/ai"`                                            | `env.AI` or `c.env.AI`           |
 | `SANDBOX` | `DurableObjectNamespace<Sandbox>` | `import { getSandbox } from "void/sandbox"`                               | `env.SANDBOX` or `c.env.SANDBOX` |
 | Auth      | none                              | `import { ... } from "void/auth"` or `import { auth } from "void/client"` | none                             |
-| `QUEUE_*` | `Queue`                           | `import { ... } from "void/queue"`                                        | `env.QUEUE_*`                    |
+| `QUEUE_*` | `Queue`                           | `import { queues } from "void/queues"`                                    | `env.QUEUE_*`                    |
 
 Auth detection also triggers when importing the `auth` specifier from `void/client` (but not when importing only `fetch`).
 

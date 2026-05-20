@@ -58,7 +58,7 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
         case 'void/auth':
           result.needsAuth = true;
           break;
-        case 'void/queue':
+        case 'void/queues':
           result.needsQueues = true;
           break;
         case 'void/ai':
