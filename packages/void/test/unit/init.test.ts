@@ -1004,6 +1004,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(() => readFileSync(join(root, 'index.html'), 'utf-8')).toThrow(/ENOENT/);
       expect(() => readFileSync(join(root, 'src', 'main.ts'), 'utf-8')).toThrow(/ENOENT/);
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        $schema: './node_modules/void/schema.json',
         worker: {
           compatibility_date: getTodayCompatDate(),
         },
@@ -1039,6 +1040,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies.void).toBeDefined();
 
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        $schema: './node_modules/void/schema.json',
         database: 'pg',
         worker: {
           compatibility_date: getTodayCompatDate(),
@@ -1157,6 +1159,7 @@ describe('isScaffoldableEmptyProject', () => {
         readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf-8'),
       ).toThrow();
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        $schema: './node_modules/void/schema.json',
         worker: {
           compatibility_date: getTodayCompatDate(),
         },
@@ -1992,6 +1995,7 @@ export default config;
       await runInitCommand(root);
 
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        $schema: './node_modules/void/schema.json',
         worker: {
           compatibility_date: getTodayCompatDate(),
         },
@@ -2026,6 +2030,7 @@ export default config;
       await runInitCommand(root);
 
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        $schema: './node_modules/void/schema.json',
         routing: {
           prerender: ['/'],
         },
@@ -2047,6 +2052,7 @@ export default config;
       await runInitCommand(root);
 
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
+        $schema: './node_modules/void/schema.json',
         worker: {
           compatibility_date: getTodayCompatDate(),
         },

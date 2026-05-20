@@ -57,7 +57,7 @@ Most configuration is inferred automatically. Use `void.json` to override defaul
 
 ```json
 {
-  "$schema": "https://unpkg.com/void/schema.json",
+  "$schema": "./node_modules/void/schema.json",
   "inference": {
     "build": "nuxt build",
     "scanDirs": ["src", "server", "lib"],

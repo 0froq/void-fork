@@ -652,6 +652,15 @@ describe('readConfig redirects', () => {
       expect(sourceDirPattern.test(value)).toBe(false);
     }
   });
+
+  it('publishes schema.json as a package file and subpath export', () => {
+    const packageJson = JSON.parse(
+      readFileSync(join(import.meta.dirname, '../../package.json'), 'utf8'),
+    );
+
+    expect(packageJson.files).toContain('schema.json');
+    expect(packageJson.exports['./schema.json']).toBe('./schema.json');
+  });
 });
 
 describe('routing.rewrites validation', () => {

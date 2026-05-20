@@ -37,7 +37,7 @@ Project-level configuration lives in a `void.json` file at the project root. Mos
 }
 ```
 
-Add the `$schema` field for autocomplete and validation in your editor.
+Add the `$schema` field for autocomplete and validation in your editor. The schema ships with the `void` package at `node_modules/void/schema.json` and is also exposed as the `void/schema.json` package subpath.
 
 ## Fields
 

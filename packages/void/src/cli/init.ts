@@ -138,6 +138,7 @@ const VITE_CONFIG_FILES = [
   'vite.config.cjs',
 ];
 const VOID_CONFIG_FILE = 'void.json';
+const VOID_SCHEMA_PATH = './node_modules/void/schema.json';
 type DatabaseSetupChoice = DatabaseDialect | 'none';
 type InitLocationChoice = 'subfolder' | 'current';
 type JsonObject = Record<string, unknown>;
@@ -1548,8 +1549,18 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
   }
 }
 
+function withDefaultVoidSchema(config: Record<string, unknown>): Record<string, unknown> {
+  if (typeof config.$schema === 'string' && config.$schema.length > 0) {
+    return config;
+  }
+  return { $schema: VOID_SCHEMA_PATH, ...config };
+}
+
 function writeVoidConfig(root: string, config: Record<string, unknown>): void {
-  writeFileSync(join(root, VOID_CONFIG_FILE), JSON.stringify(config, null, 2) + '\n');
+  writeFileSync(
+    join(root, VOID_CONFIG_FILE),
+    JSON.stringify(withDefaultVoidSchema(config), null, 2) + '\n',
+  );
 }
 
 function ensureVoidWorkerCompatibilityDate(root: string): void {

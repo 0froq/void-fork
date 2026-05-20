@@ -48,6 +48,7 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.mjs"
     },
+    "./schema.json": "./schema.json",
     "./handler": {
       "types": "./dist/runtime/handler.d.mts",
       "import": "./dist/runtime/handler.mjs",
