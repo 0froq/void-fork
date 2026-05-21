@@ -7,6 +7,13 @@ import { generateComponentManifest } from './pages-manifest.ts';
 
 const RENDERER_ID = 'virtual:void-pages-renderer';
 const CLIENT_ENTRY_ID = 'virtual:void-pages-client';
+const SVELTE_OPTIMIZE_DEPS = {
+  // Exclude @void/svelte so the virtual module and user components share
+  // the same Svelte context (identity).
+  exclude: ['@void/svelte'],
+  // Pre-include Svelte so it's not discovered late via dynamic imports.
+  include: ['svelte', 'svelte/store', 'svelte/internal', 'svelte/internal/client'],
+};
 
 type PrefetchConfig = {
   hoverDelay?: number;
@@ -146,12 +153,13 @@ export function pagesPlugin(pagesDir: string, options?: PagesPluginOptions): Plu
       if (env.command === 'serve') {
         isDev = true;
         return {
-          optimizeDeps: {
-            // Exclude @void/svelte so the virtual module and user
-            // components share the same Svelte context (identity).
-            exclude: ['@void/svelte'],
-            // Pre-include Svelte so it's not discovered late via dynamic imports.
-            include: ['svelte', 'svelte/store', 'svelte/internal', 'svelte/internal/client'],
+          optimizeDeps: SVELTE_OPTIMIZE_DEPS,
+          environments: {
+            void_worker: {
+              optimizeDeps: {
+                exclude: ['@void/svelte'],
+              },
+            },
           },
         };
       }

@@ -92,6 +92,8 @@ const EMPTY_PROJECT_ALLOWED_ENTRIES = new Set([
   '.vscode',
   '.idea',
   '.DS_Store',
+  '.void',
+  '.wrangler',
   'node_modules',
   'package.json',
   'package-lock.json',
@@ -99,6 +101,7 @@ const EMPTY_PROJECT_ALLOWED_ENTRIES = new Set([
   'yarn.lock',
   'bun.lock',
   'bun.lockb',
+  'tsconfig.json',
   '.agents',
   '.claude',
   '.cline',
@@ -121,13 +124,77 @@ const EMPTY_PROJECT_ALLOWED_ENTRIES = new Set([
 const PNPM_ALLOWED_BUILDS = ['better-sqlite3', 'esbuild', 'sharp', 'workerd'] as const;
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
 
+// Dependencies/scripts that can be left behind by a Void Pages starter after
+// the user deletes app files and runs `void init` again. These keep that retry
+// in the greenfield starter path instead of the existing-project patch path.
 const EMPTY_PROJECT_ALLOWED_PACKAGES = new Set([
+  'void',
+  'hono',
+  'vite',
+  'vite-plus',
+  'typescript',
+  '@typescript/native-preview',
+  '@rolldown/plugin-babel',
+  '@vitejs/plugin-react',
+  'babel-plugin-react-compiler',
+  '@types/react',
+  '@types/react-dom',
+  'react',
+  'react-dom',
+  'vue',
+  'svelte',
+  'solid-js',
+  '@void/react',
+  '@void/vue',
+  '@void/svelte',
+  '@void/solid',
+]);
+
+// A package with only `void` and/or an adapter can still be a preinstall shape
+// (`pnpm add -D void @void/svelte` before init). Once starter runtime/tooling
+// packages like `svelte` or `vite-plus` are present, require an adapter too so
+// we only accept manifests that look like a previous Void Pages starter.
+const EMPTY_PROJECT_ALLOWED_ADAPTER_PACKAGES = new Set([
+  '@void/react',
+  '@void/vue',
+  '@void/svelte',
+  '@void/solid',
+]);
+const EMPTY_PROJECT_BASE_PACKAGES = new Set([
   'void',
   '@void/react',
   '@void/vue',
   '@void/svelte',
   '@void/solid',
 ]);
+
+// Known starter scripts are allowed for scaffold detection and are replaced
+// with the newly selected toolchain's commands during scaffoldPagesApp().
+// Custom scripts make the package an existing project instead.
+const EMPTY_PROJECT_ALLOWED_SCRIPTS: Record<string, Set<string> | undefined> = {
+  test: undefined,
+  dev: new Set(['vite', 'vp dev']),
+  build: new Set(['vite build', 'vp build']),
+  preview: new Set(['vite preview', 'vp preview']),
+};
+const EMPTY_PROJECT_STARTER_SCRIPT_COMMANDS = new Set(
+  Object.values(EMPTY_PROJECT_ALLOWED_SCRIPTS).flatMap((commands) =>
+    commands ? Array.from(commands) : [],
+  ),
+);
+
+function isStarterScriptCommand(value: unknown): boolean {
+  return typeof value === 'string' && EMPTY_PROJECT_STARTER_SCRIPT_COMMANDS.has(value);
+}
+
+function hasOnlyVoidStarterDependencies(depNames: Array<string>): boolean {
+  if (depNames.some((dep) => !EMPTY_PROJECT_ALLOWED_PACKAGES.has(dep))) {
+    return false;
+  }
+  const hasStarterDependency = depNames.some((dep) => !EMPTY_PROJECT_BASE_PACKAGES.has(dep));
+  const hasPagesAdapter = depNames.some((dep) => EMPTY_PROJECT_ALLOWED_ADAPTER_PACKAGES.has(dep));
+  return !hasStarterDependency || hasPagesAdapter;
+}
 
 const VITE_CONFIG_FILES = [
   'vite.config.ts',
@@ -425,13 +492,22 @@ export function isScaffoldableEmptyProject(root: string): boolean {
     ...(asRecord(pkg.dependencies) ?? {}),
     ...(asRecord(pkg.devDependencies) ?? {}),
   };
-  if (Object.keys(deps).some((dep) => !EMPTY_PROJECT_ALLOWED_PACKAGES.has(dep))) {
+  if (!hasOnlyVoidStarterDependencies(Object.keys(deps))) {
     return false;
   }
 
   const scripts = asRecord(pkg.scripts) ?? {};
-  if (Object.keys(scripts).some((name) => name !== 'test')) {
-    return false;
+  for (const [name, command] of Object.entries(scripts)) {
+    if (!(name in EMPTY_PROJECT_ALLOWED_SCRIPTS)) {
+      return false;
+    }
+    const allowed = EMPTY_PROJECT_ALLOWED_SCRIPTS[name];
+    if (allowed === undefined) {
+      continue;
+    }
+    if (typeof command !== 'string' || !allowed.has(command)) {
+      return false;
+    }
   }
 
   return true;
@@ -2211,7 +2287,8 @@ function scaffoldPagesApp(
   const scripts = asRecord(pkg.scripts) ?? {};
   pkg.scripts = scripts;
   for (const [name, command] of Object.entries(template.scripts)) {
-    if (!scripts[name]) {
+    const existing = scripts[name];
+    if (typeof existing !== 'string' || isStarterScriptCommand(existing)) {
       scripts[name] = command;
     }
   }
@@ -2787,6 +2864,11 @@ export default defineConfig({
 `;
 }
 
+function getGeneratedViteConfigPath(root: string): 'vite.config.ts' | 'vite.config.mts' {
+  const pkg = readPackageJson(root);
+  return pkg?.type === 'module' ? 'vite.config.ts' : 'vite.config.mts';
+}
+
 function noteManualViteConfigSetup(configPath?: string): void {
   const target = configPath ?? 'your framework Vite config';
   note(
@@ -2838,7 +2920,7 @@ function ensureExistingProjectViteConfig(root: string, framework?: DetectedFrame
 
   const configPath = findViteConfig(root);
   if (!configPath) {
-    writeFileIfMissing(root, 'vite.config.ts', getBasicVoidViteConfig());
+    writeFileIfMissing(root, getGeneratedViteConfigPath(root), getBasicVoidViteConfig());
     return;
   }
 

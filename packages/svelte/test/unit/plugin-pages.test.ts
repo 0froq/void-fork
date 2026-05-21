@@ -74,4 +74,25 @@ describe('pagesPlugin dev HMR', () => {
 
     expect(renderer).toContain('"test": () => import');
   });
+
+  it('excludes @void/svelte from the void worker optimizer in dev', () => {
+    writePage('index.svelte', '<h1>Home</h1>\n');
+
+    const plugin = pagesPlugin(PAGES_DIR) as PagesPluginHooks;
+    const config = getHookHandler(plugin.config)({}, { command: 'serve' });
+
+    expect(config).toMatchObject({
+      optimizeDeps: {
+        exclude: ['@void/svelte'],
+        include: ['svelte', 'svelte/store', 'svelte/internal', 'svelte/internal/client'],
+      },
+      environments: {
+        void_worker: {
+          optimizeDeps: {
+            exclude: ['@void/svelte'],
+          },
+        },
+      },
+    });
+  });
 });

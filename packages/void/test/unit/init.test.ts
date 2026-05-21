@@ -915,6 +915,84 @@ describe('isScaffoldableEmptyProject', () => {
     });
   });
 
+  it('returns true for a deleted starter that only has manifest and generated state left', () => {
+    withTempDir((root) => {
+      mkdirSync(join(root, '.void'), { recursive: true });
+      mkdirSync(join(root, '.wrangler'), { recursive: true });
+      writeFileSync(join(root, 'tsconfig.json'), JSON.stringify({}) + '\n');
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify(
+          {
+            name: 'deleted-starter',
+            private: true,
+            type: 'module',
+            scripts: {
+              dev: 'vp dev',
+              build: 'vp build',
+              preview: 'vp preview',
+            },
+            dependencies: {
+              hono: '^4.11.9',
+              svelte: '^5.53.9',
+            },
+            devDependencies: {
+              void: '^0.2.3',
+              '@void/svelte': '^0.2.3',
+              vite: '^8.0.10',
+              'vite-plus': '^0.1.21',
+              typescript: '^5.9.3',
+            },
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+
+      expect(isScaffoldableEmptyProject(root)).toBe(true);
+    });
+  });
+
+  it('replaces stale vp starter scripts when plain Vite is selected', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify(
+          {
+            name: 'stale-vp-starter',
+            scripts: {
+              dev: 'vp dev',
+              build: 'vp build',
+              preview: 'vp preview',
+            },
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      mockSelect
+        .mockResolvedValueOnce('vite')
+        .mockResolvedValueOnce('svelte')
+        .mockResolvedValueOnce('static')
+        .mockResolvedValueOnce('generic');
+      mockConfirm.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+
+      await runInitCommand(root);
+
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      expect(pkg.scripts).toMatchObject({
+        dev: 'vite',
+        build: 'vite build',
+        preview: 'vite preview',
+      });
+      expect(pkg.devDependencies.vite).toBe('^8.0.10');
+      expect(pkg.devDependencies['vite-plus']).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('returns false when app files already exist', () => {
     withTempDir((root) => {
       mkdirSync(join(root, 'src'), { recursive: true });
@@ -923,7 +1001,7 @@ describe('isScaffoldableEmptyProject', () => {
     });
   });
 
-  it('returns false when package has non-void dependencies', () => {
+  it('returns false when package has non-starter dependencies', () => {
     withTempDir((root) => {
       writeFileSync(
         join(root, 'package.json'),
@@ -932,7 +1010,7 @@ describe('isScaffoldableEmptyProject', () => {
             name: 'my-app',
             devDependencies: {
               void: '^0.0.1',
-              vite: '^8.0.0',
+              express: '^4.18.0',
             },
           },
           null,
@@ -1256,6 +1334,7 @@ describe('isScaffoldableEmptyProject', () => {
       await runInitCommand(root);
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      expect(pkg.type).toBe('module');
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.scripts.dev).toBe('vite');
       expect(existsSync(join(root, 'vite.config.ts'))).toBe(true);
@@ -1265,7 +1344,7 @@ describe('isScaffoldableEmptyProject', () => {
     }
   });
 
-  it('configures an existing project with Void deps, Vite scripts, and vite.config.ts', async () => {
+  it('configures an existing package without forcing it to ESM', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       mkdirSync(join(root, 'src'));
@@ -1279,12 +1358,14 @@ describe('isScaffoldableEmptyProject', () => {
       await runInitCommand(root);
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      expect(pkg.type).toBeUndefined();
       expect(pkg.scripts.dev).toBe('vite');
       expect(pkg.scripts.build).toBe('vite build');
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies.vite).toBe('^8.0.10');
 
-      const viteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
+      expect(existsSync(join(root, 'vite.config.ts'))).toBe(false);
+      const viteConfig = readFileSync(join(root, 'vite.config.mts'), 'utf-8');
       expect(viteConfig).toContain('import { voidPlugin } from "void";');
       expect(viteConfig).toContain('plugins: [voidPlugin()]');
       expect(mockConfirm).toHaveBeenCalledWith({
@@ -1442,6 +1523,7 @@ export default defineConfig({
       await runInitCommand(root);
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      expect(pkg.type).toBeUndefined();
       expect(pkg.scripts.dev).toBe('custom-dev');
       expect(pkg.scripts.build).toBe('vite build');
       expect(pkg.scripts.test).toBe('vitest');
