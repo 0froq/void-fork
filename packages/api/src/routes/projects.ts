@@ -32,7 +32,11 @@ import { type ApiEnv, isDevBypass } from '../env.ts';
 import { validateSubmittedExecutionPlans } from '../migrations/execution-plan.ts';
 import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner.ts';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
-import { getDispatchWorkerProxyToken } from '../provisioning/cloudflare-api.ts';
+import {
+  CloudflareApiError,
+  InvalidHyperdriveConnectionStringError,
+  getDispatchWorkerProxyToken,
+} from '../provisioning/cloudflare-api.ts';
 import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
 import { tokenizeSql } from '../sql/tokenize.ts';
 import { getPlanLimits } from '../tiers.ts';
@@ -1756,13 +1760,25 @@ const app = new Hono<ApiEnv>()
       hyperdriveId = hd.id;
     } catch (err: unknown) {
       if (isAlreadyExistsError(err)) {
-        const hd = await getHyperdriveByName(
-          context.env.CF_ACCOUNT_ID,
-          context.env.CF_API_TOKEN,
-          resourceName,
-        );
-        hyperdriveId = hd.id;
+        try {
+          const hd = await getHyperdriveByName(
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
+            resourceName,
+          );
+          hyperdriveId = hd.id;
+        } catch (lookupErr: unknown) {
+          const response = toDatabaseProvisioningError(lookupErr);
+          if (response) {
+            return context.json(response.body, response.status);
+          }
+          throw lookupErr;
+        }
       } else {
+        const response = toDatabaseProvisioningError(err);
+        if (response) {
+          return context.json(response.body, response.status);
+        }
         throw err;
       }
     }
@@ -1793,12 +1809,22 @@ const app = new Hono<ApiEnv>()
 
     if (found) {
       // Update existing Hyperdrive config
-      await updateHyperdrive(
-        context.env.CF_ACCOUNT_ID,
-        context.env.CF_API_TOKEN,
-        found.cf_id,
-        connectionString,
-      );
+      try {
+        const resourceName = `${projectId}-hyperdrive`.toLowerCase();
+        await updateHyperdrive(
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
+          found.cf_id,
+          connectionString,
+          resourceName,
+        );
+      } catch (err: unknown) {
+        const response = toDatabaseProvisioningError(err);
+        if (response) {
+          return context.json(response.body, response.status);
+        }
+        throw err;
+      }
     } else {
       // Create new Hyperdrive config
       const resourceName = `${projectId}-hyperdrive`.toLowerCase();
@@ -1813,13 +1839,25 @@ const app = new Hono<ApiEnv>()
         hyperdriveId = hd.id;
       } catch (err: unknown) {
         if (isAlreadyExistsError(err)) {
-          const hd = await getHyperdriveByName(
-            context.env.CF_ACCOUNT_ID,
-            context.env.CF_API_TOKEN,
-            resourceName,
-          );
-          hyperdriveId = hd.id;
+          try {
+            const hd = await getHyperdriveByName(
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
+              resourceName,
+            );
+            hyperdriveId = hd.id;
+          } catch (lookupErr: unknown) {
+            const response = toDatabaseProvisioningError(lookupErr);
+            if (response) {
+              return context.json(response.body, response.status);
+            }
+            throw lookupErr;
+          }
         } else {
+          const response = toDatabaseProvisioningError(err);
+          if (response) {
+            return context.json(response.body, response.status);
+          }
           throw err;
         }
       }
@@ -1846,6 +1884,29 @@ function parseDuration(input: string): number | null {
 
 function isAlreadyExistsError(error: unknown): boolean {
   return error instanceof Error && error.message.toLowerCase().includes('already exists');
+}
+
+function toDatabaseProvisioningError(
+  error: unknown,
+): { body: { detail?: string; error: string }; status: 400 | 502 } | null {
+  if (error instanceof CloudflareApiError) {
+    return {
+      body: {
+        error: 'Failed to provision Hyperdrive',
+        detail: error.message.replace(/^Cloudflare API error:\s*/, ''),
+      },
+      status: 502,
+    };
+  }
+
+  if (error instanceof InvalidHyperdriveConnectionStringError) {
+    return {
+      body: { error: error.message },
+      status: 400,
+    };
+  }
+
+  return null;
 }
 
 function tryParse(json: string): ReadonlyArray<unknown> {

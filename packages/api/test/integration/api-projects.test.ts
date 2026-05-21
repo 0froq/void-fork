@@ -19,6 +19,7 @@ import {
   createTestDeployment,
   mockCfApi,
   cfSuccess,
+  cfError,
   type TestEnv,
 } from './helpers.ts';
 
@@ -241,6 +242,128 @@ describe('GET /projects/:id', () => {
       env,
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe('PUT /projects/:id/database-url', () => {
+  it('creates Hyperdrive from a provider Postgres URL when no resource exists', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app');
+
+    mockCfApi({
+      createHyperdrive: (_url, init) => {
+        expect(JSON.parse(init?.body as string)).toEqual({
+          name: `${project.id}-hyperdrive`.toLowerCase(),
+          origin: {
+            database: 'appdb',
+            host: 'db.example.com',
+            password: 'p@ss',
+            port: 25060,
+            scheme: 'postgresql',
+            user: 'void_user',
+          },
+          mtls: { sslmode: 'require' },
+        });
+        return cfSuccess({ id: 'hd-created', name: `${project.id}-hyperdrive`.toLowerCase() });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString:
+            'postgresql://void_user:p%40ss@db.example.com:25060/appdb?sslmode=require',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const rows = await env.db.select().from(resources).where(eq(resources.project_id, project.id));
+    expect(rows).toMatchObject([
+      { type: 'hyperdrive', cf_id: 'hd-created', binding_name: 'HYPERDRIVE' },
+    ]);
+  });
+
+  it('updates the existing Hyperdrive config when the resource exists', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app-update');
+    await env.db.insert(resources).values({
+      id: 'res_hd_existing',
+      project_id: project.id,
+      type: 'hyperdrive',
+      cf_id: 'hd-existing',
+      binding_name: 'HYPERDRIVE',
+    });
+
+    mockCfApi({
+      updateHyperdrive: (url, init) => {
+        expect(url).toContain('/hyperdrive/configs/hd-existing');
+        expect(JSON.parse(init?.body as string)).toEqual({
+          name: `${project.id}-hyperdrive`.toLowerCase(),
+          origin: {
+            database: 'appdb',
+            host: 'db.example.com',
+            password: 'pass',
+            scheme: 'postgres',
+            user: 'void_user',
+          },
+        });
+        return cfSuccess({ id: 'hd-existing', name: `${project.id}-hyperdrive`.toLowerCase() });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'postgres://void_user:pass@db.example.com/appdb',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('surfaces Cloudflare Hyperdrive errors as JSON instead of a generic 500', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app-error');
+
+    mockCfApi({
+      createHyperdrive: () => cfError('origin database is unreachable', 400),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'postgresql://void_user:pass@db.example.com/appdb',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({
+      error: 'Failed to provision Hyperdrive',
+      detail: 'origin database is unreachable',
+    });
   });
 });
 

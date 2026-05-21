@@ -24,6 +24,13 @@ export class CloudflareApiError extends Error {
   }
 }
 
+export class InvalidHyperdriveConnectionStringError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidHyperdriveConnectionStringError';
+  }
+}
+
 export async function cfFetch<T>(url: string, apiToken: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -454,15 +461,112 @@ export type HyperdriveInfo = Readonly<{
   name: string;
 }>;
 
+type HyperdriveOrigin = Readonly<{
+  database: string;
+  host: string;
+  password: string;
+  port?: number;
+  scheme: 'postgres' | 'postgresql';
+  user: string;
+}>;
+
+type HyperdriveConfigPayload = Readonly<{
+  name?: string;
+  origin: HyperdriveOrigin;
+  mtls?: Readonly<{ sslmode: 'require' | 'verify-ca' | 'verify-full' }>;
+}>;
+
+function decodeUrlPart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new InvalidHyperdriveConnectionStringError(
+      'Invalid PostgreSQL connection string encoding.',
+    );
+  }
+}
+
+export function parseHyperdriveConnectionString(connectionString: string): HyperdriveConfigPayload {
+  let url: URL;
+  try {
+    url = new URL(connectionString);
+  } catch {
+    throw new InvalidHyperdriveConnectionStringError('Invalid PostgreSQL connection string.');
+  }
+
+  const scheme = url.protocol.slice(0, -1);
+  if (scheme !== 'postgres' && scheme !== 'postgresql') {
+    throw new InvalidHyperdriveConnectionStringError(
+      'Connection string must start with "postgres://" or "postgresql://".',
+    );
+  }
+  if (!url.hostname) {
+    throw new InvalidHyperdriveConnectionStringError(
+      'PostgreSQL connection string must include a host.',
+    );
+  }
+  if (!url.username) {
+    throw new InvalidHyperdriveConnectionStringError(
+      'PostgreSQL connection string must include a user.',
+    );
+  }
+  if (!url.password) {
+    throw new InvalidHyperdriveConnectionStringError(
+      'PostgreSQL connection string must include a password.',
+    );
+  }
+
+  const database = decodeUrlPart(url.pathname.replace(/^\/+/, ''));
+  if (!database) {
+    throw new InvalidHyperdriveConnectionStringError(
+      'PostgreSQL connection string must include a database name.',
+    );
+  }
+
+  let port: number | undefined;
+  if (url.port) {
+    port = Number(url.port);
+    if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+      throw new InvalidHyperdriveConnectionStringError(
+        'PostgreSQL connection string port is invalid.',
+      );
+    }
+  }
+
+  const sslmode = url.searchParams.get('sslmode');
+  let mtls: HyperdriveConfigPayload['mtls'];
+  if (sslmode) {
+    if (sslmode !== 'require' && sslmode !== 'verify-ca' && sslmode !== 'verify-full') {
+      throw new InvalidHyperdriveConnectionStringError(
+        'Unsupported sslmode. Cloudflare Hyperdrive supports "require", "verify-ca", or "verify-full".',
+      );
+    }
+    mtls = { sslmode };
+  }
+
+  return {
+    origin: {
+      database,
+      host: url.hostname,
+      password: decodeUrlPart(url.password),
+      ...(port === undefined ? {} : { port }),
+      scheme,
+      user: decodeUrlPart(url.username),
+    },
+    ...(mtls === undefined ? {} : { mtls }),
+  };
+}
+
 export async function createHyperdrive(
   accountId: string,
   apiToken: string,
   name: string,
   connectionString: string,
 ): Promise<HyperdriveInfo> {
+  const payload = { name, ...parseHyperdriveConnectionString(connectionString) };
   return cfFetch<HyperdriveInfo>(`${CF_API_BASE}/${accountId}/hyperdrive/configs`, apiToken, {
     method: 'POST',
-    body: JSON.stringify({ name, origin: { connection_string: connectionString } }),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -471,13 +575,18 @@ export async function updateHyperdrive(
   apiToken: string,
   hyperdriveId: string,
   connectionString: string,
+  name?: string,
 ): Promise<HyperdriveInfo> {
+  const payload = {
+    ...(name === undefined ? {} : { name }),
+    ...parseHyperdriveConnectionString(connectionString),
+  };
   return cfFetch<HyperdriveInfo>(
     `${CF_API_BASE}/${accountId}/hyperdrive/configs/${hyperdriveId}`,
     apiToken,
     {
       method: 'PUT',
-      body: JSON.stringify({ origin: { connection_string: connectionString } }),
+      body: JSON.stringify(payload),
     },
   );
 }

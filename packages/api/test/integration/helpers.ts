@@ -822,6 +822,9 @@ export type CfApiMocks = {
   createD1: (url: string, init?: RequestInit) => Response;
   createKV: (url: string, init?: RequestInit) => Response;
   createR2: (url: string, init?: RequestInit) => Response;
+  createHyperdrive: (url: string, init?: RequestInit) => Response;
+  updateHyperdrive: (url: string, init?: RequestInit) => Response;
+  listHyperdrive: (url: string, init?: RequestInit) => Response;
   createQueue: (url: string, init?: RequestInit) => Response;
   addQueueConsumer: (url: string, init?: RequestInit) => Response;
   listQueueConsumers: (url: string, init?: RequestInit) => Response;
@@ -830,6 +833,7 @@ export type CfApiMocks = {
   deleteD1: (url: string, init?: RequestInit) => Response;
   deleteKV: (url: string, init?: RequestInit) => Response;
   deleteR2: (url: string, init?: RequestInit) => Response;
+  deleteHyperdrive: (url: string, init?: RequestInit) => Response;
   deleteQueue: (url: string, init?: RequestInit) => Response;
   deleteWorker: (url: string, init?: RequestInit) => Response | Promise<Response>;
   queryD1: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -859,6 +863,9 @@ const baseDefaultMocks: Omit<CfApiMocks, 'uploadWorker' | 'listWorkerBindings' |
   createD1: () => cfSuccess({ uuid: 'd1-test-uuid', name: 'test-db' }),
   createKV: () => cfSuccess({ id: 'kv-test-id', title: 'test-kv' }),
   createR2: () => cfSuccess({ name: 'test-bucket' }),
+  createHyperdrive: () => cfSuccess({ id: 'hd-test-id', name: 'test-hyperdrive' }),
+  updateHyperdrive: () => cfSuccess({ id: 'hd-test-id', name: 'test-hyperdrive' }),
+  listHyperdrive: () => cfSuccess([]),
   createQueue: () =>
     cfSuccess({ queue_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', queue_name: 'test-queue' }),
   addQueueConsumer: () => cfSuccess({}),
@@ -867,6 +874,7 @@ const baseDefaultMocks: Omit<CfApiMocks, 'uploadWorker' | 'listWorkerBindings' |
   deleteD1: () => cfSuccess(null),
   deleteKV: () => cfSuccess(null),
   deleteR2: () => cfSuccess(null),
+  deleteHyperdrive: () => cfSuccess(null),
   deleteQueue: () => cfSuccess(null),
   queryD1: () => cfSuccess([{ results: [] }]),
   assetUploadSession: async (_url: string, init?: RequestInit) => {
@@ -1348,6 +1356,18 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
     }
     if (method === 'POST' && url.includes('/workers/assets/upload')) {
       return mocks.assetUpload(url, init);
+    }
+    if (method === 'GET' && url.includes('/hyperdrive/configs')) {
+      return mocks.listHyperdrive(url, init);
+    }
+    if (method === 'POST' && url.includes('/hyperdrive/configs')) {
+      return mocks.createHyperdrive(url, init);
+    }
+    if (method === 'PUT' && url.includes('/hyperdrive/configs/')) {
+      return mocks.updateHyperdrive(url, init);
+    }
+    if (method === 'DELETE' && url.includes('/hyperdrive/configs/')) {
+      return mocks.deleteHyperdrive(url, init);
     }
 
     // Container application endpoints (must come before the generic dispatch

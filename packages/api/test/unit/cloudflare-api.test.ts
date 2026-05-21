@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vite-plus/test';
 import {
   addQueueConsumer,
+  createHyperdrive,
   getDispatchWorkerProxyToken,
+  parseHyperdriveConnectionString,
+  updateHyperdrive,
 } from '../../src/provisioning/cloudflare-api.ts';
 
 const ACCOUNT = 'acc_test';
@@ -75,6 +78,93 @@ describe('addQueueConsumer', () => {
       /insufficient permissions/i,
     );
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Hyperdrive connection strings', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('parses postgres connection strings into Cloudflare origin fields', () => {
+    expect(
+      parseHyperdriveConnectionString(
+        'postgresql://user:p%40ss@example.com:6543/app_db?sslmode=require',
+      ),
+    ).toEqual({
+      origin: {
+        database: 'app_db',
+        host: 'example.com',
+        password: 'p@ss',
+        port: 6543,
+        scheme: 'postgresql',
+        user: 'user',
+      },
+      mtls: { sslmode: 'require' },
+    });
+  });
+
+  it('sends parsed origin fields when creating Hyperdrive configs', async () => {
+    fetchMock.mockResolvedValueOnce(cfSuccess({ id: 'hd_1', name: 'proj-hyperdrive' }));
+
+    await createHyperdrive(
+      ACCOUNT,
+      TOKEN,
+      'proj-hyperdrive',
+      'postgres://user:pass@db.example.com:5432/app?sslmode=verify-full',
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      name: 'proj-hyperdrive',
+      origin: {
+        database: 'app',
+        host: 'db.example.com',
+        password: 'pass',
+        port: 5432,
+        scheme: 'postgres',
+        user: 'user',
+      },
+      mtls: { sslmode: 'verify-full' },
+    });
+  });
+
+  it('sends parsed origin fields when updating Hyperdrive configs', async () => {
+    fetchMock.mockResolvedValueOnce(cfSuccess({ id: 'hd_1', name: 'proj-hyperdrive' }));
+
+    await updateHyperdrive(
+      ACCOUNT,
+      TOKEN,
+      'hd_1',
+      'postgresql://user:pass@db.example.com/app',
+      'proj-hyperdrive',
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      name: 'proj-hyperdrive',
+      origin: {
+        database: 'app',
+        host: 'db.example.com',
+        password: 'pass',
+        scheme: 'postgresql',
+        user: 'user',
+      },
+    });
+  });
+
+  it('rejects malformed PostgreSQL URLs before calling Cloudflare', async () => {
+    await expect(
+      createHyperdrive(ACCOUNT, TOKEN, 'proj-hyperdrive', 'postgresql://user@db.example.com/app'),
+    ).rejects.toThrow(/password/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
