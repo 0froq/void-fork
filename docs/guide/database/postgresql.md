@@ -29,7 +29,7 @@ Add to your `void.json`:
 For local development, add `DATABASE_URL` to `.env.local`:
 
 ```
-DATABASE_URL=postgres://user:password@host:5432/mydb
+DATABASE_URL=postgresql://user:password@host:5432/mydb?sslmode=require
 ```
 
 This connects directly to your Postgres database during local Vite development.
@@ -40,10 +40,11 @@ On your first deploy, the CLI will prompt for your connection string:
 
 ```
 Your project uses PostgreSQL. Enter your connection string:
-> postgres://user:password@host:5432/mydb
+> postgresql://user:password@host:5432/mydb?sslmode=require
 ```
 
 Void provisions a Hyperdrive configuration and stores only the config ID. Your connection string is sent directly to Cloudflare's API and is never stored by Void.
+Both `postgres://` and `postgresql://` URLs are supported, including provider-supplied query strings such as `?sslmode=require`.
 
 You can also set the connection string ahead of time with `void db set-url`.
 

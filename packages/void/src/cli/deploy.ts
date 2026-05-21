@@ -1115,8 +1115,13 @@ async function runFrameworkDeploy(
 
   // Pre-deploy: ensure Hyperdrive is provisioned for PostgreSQL projects
   if (dialect === 'postgresql' && (bindings.needsD1 || rawMigrations.length > 0)) {
+    let resources: Array<ResourceSummary> | null = null;
     try {
-      const resources = await client.getResources(config.projectId);
+      resources = await client.getResources(config.projectId);
+    } catch {
+      // Resources endpoint not available
+    }
+    if (resources) {
       const hasHyperdrive = resources.some(
         (resource: ResourceSummary) => resource.type === 'hyperdrive',
       );
@@ -1138,8 +1143,6 @@ async function runFrameworkDeploy(
         await client.provisionDatabase(config.projectId, connectionString as string);
         log.success('Hyperdrive provisioned.');
       }
-    } catch {
-      // Resources endpoint not available
     }
   }
 
@@ -1478,8 +1481,13 @@ async function runFullDeploy(
   // Migrations on disk also gate this — even if inference says needsD1: false,
   // buildVoidManifest will add the hyperdrive binding when migrations are present.
   if (dialect === 'postgresql' && (effectiveBindings.needsD1 || rawMigrations.length > 0)) {
+    let resources: Array<ResourceSummary> | null = null;
     try {
-      const resources = await client.getResources(config.projectId);
+      resources = await client.getResources(config.projectId);
+    } catch {
+      // Resources endpoint not available — Hyperdrive will be checked at deploy time
+    }
+    if (resources) {
       const hasHyperdrive = resources.some(
         (resource: ResourceSummary) => resource.type === 'hyperdrive',
       );
@@ -1501,8 +1509,6 @@ async function runFullDeploy(
         await client.provisionDatabase(config.projectId, connectionString as string);
         log.success('Hyperdrive provisioned.');
       }
-    } catch {
-      // Resources endpoint not available — Hyperdrive will be checked at deploy time
     }
   }
   const workerDirName = resolveWorkerDirName(distDir, fwPreset, frameworkBuildCmd);

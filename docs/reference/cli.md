@@ -313,7 +313,7 @@ Rename existing migrations from the old numeric prefix format (`0001_name.sql`) 
 
 ### `void db set-url`
 
-Update the PostgreSQL connection string for deployment. Only available for projects with `database.dialect: "postgresql"`.
+Update the PostgreSQL connection string for deployment. Only available for projects with `"database": "pg"` in `void.json`.
 
 Prompts for a connection string and sends it to the platform API to create or update the Hyperdrive configuration.
 
