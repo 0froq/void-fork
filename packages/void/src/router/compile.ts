@@ -1538,6 +1538,54 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(
       `const __migrationDialect = ${JSON.stringify(options.migrationDialect ?? 'sqlite')};`,
     );
+    lines.push(
+      'function __voidCreateMigrationRequestHandler(request, includeAuthMigrations, includePlanBundle) {',
+    );
+    lines.push('  return __createMigrationHandler(');
+    lines.push('    __getRawEnv(),');
+    lines.push('    __migrations,');
+    lines.push('    __migrationDialect,');
+    if (auth) {
+      lines.push(
+        `    includeAuthMigrations ? () => runVoidAuthMigrations(new Request(request.url), __getRawEnv(), __voidAuthOptions${
+          auth.authSchemaPath ? ', __voidAuthMigrationSchema' : ''
+        }) : undefined,`,
+      );
+    } else {
+      lines.push('    undefined,');
+    }
+    lines.push('    includePlanBundle ? __migrationPlanBundle : undefined,');
+    lines.push('  );');
+    lines.push('}');
+    lines.push('export async function __voidHandleInternalRoute(request) {');
+    lines.push('  const url = new URL(request.url);');
+    lines.push('  if (request.method === "POST" && url.pathname === "/__void/migrate") {');
+    lines.push(
+      `    return __voidCreateMigrationRequestHandler(request, ${auth ? 'true' : 'false'}, false)(request);`,
+    );
+    lines.push('  }');
+    lines.push(
+      '  if (request.method === "GET" && url.pathname === "/__void/migrate/capabilities") {',
+    );
+    lines.push(
+      `    return __voidCreateMigrationRequestHandler(request, ${auth ? 'true' : 'false'}, true)(request);`,
+    );
+    lines.push('  }');
+    lines.push('  if (request.method === "POST" && url.pathname === "/__void/migrate/app") {');
+    lines.push('    return __voidCreateMigrationRequestHandler(request, false, true)(request);');
+    lines.push('  }');
+    lines.push(
+      '  if (request.method === "GET" && url.pathname.startsWith("/__void/migrate/app/attempt/")) {',
+    );
+    lines.push('    return __voidCreateMigrationRequestHandler(request, false, true)(request);');
+    lines.push('  }');
+    if (auth) {
+      lines.push('  if (request.method === "POST" && url.pathname === "/__void/migrate/auth") {');
+      lines.push('    return __voidCreateMigrationRequestHandler(request, true, true)(request);');
+      lines.push('  }');
+    }
+    lines.push('  return null;');
+    lines.push('}');
     lines.push('app.post("/__void/migrate", async (c) => {');
     lines.push('  const __voidMigrationHandler = __createMigrationHandler(');
     lines.push('    __getRawEnv(),');
@@ -1609,6 +1657,9 @@ window.__vite_plugin_react_preamble_installed__ = true;
       lines.push('  return __voidMigrationHandler(c.req.raw);');
       lines.push('});');
     }
+    lines.push('');
+  } else {
+    lines.push('export async function __voidHandleInternalRoute() { return null; }');
     lines.push('');
   }
 
@@ -2449,6 +2500,8 @@ ${envValidateCall}  const ws = await __voidHandleWebSocket(request, env);
   if (request.method === "GET" && url.pathname === "/__void/ready") {
     return Response.json({ ready: true });
   }
+  const routeInternal = await __voidHandleInternalRoute(request, env, ctx);
+  if (routeInternal) return routeInternal;
   if (request.method !== "POST" || url.pathname !== "/__void/prerender-paths") return null;
   const __expected = env.__VOID_PROXY_TOKEN;
   if (__expected) {
@@ -2473,7 +2526,7 @@ ${envValidateCall}  const userEnv = __filterInternalBindings(env);
 }`;
 
   if (hasQueues) {
-    return `${sandboxImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket, __withRawEnv, __processQueue${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
+    return `${sandboxImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __voidHandleWebSocket, __withRawEnv, __processQueue${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
 ${runtimeEnvImport}${envSchemaImport}${remoteImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}
@@ -2503,7 +2556,7 @@ ${liveExport}
 ${sandboxExport}
 export default { fetch: ${fetchHandler}, scheduled: handleScheduled, queue };`;
   }
-  return `${sandboxImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleWebSocket, __withRawEnv${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
+  return `${sandboxImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __voidHandleWebSocket, __withRawEnv${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
 ${runtimeEnvImport}${envSchemaImport}${remoteImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}

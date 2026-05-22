@@ -139,6 +139,11 @@ describe('compileRouteTable auth integration', () => {
     expect(code).toContain(
       'runVoidAuthMigrations(new Request(c.req.url), __getRawEnv(), __voidAuthOptions, __voidAuthMigrationSchema)',
     );
+    expect(code).toContain(
+      'runVoidAuthMigrations(new Request(request.url), __getRawEnv(), __voidAuthOptions, __voidAuthMigrationSchema)',
+    );
+    expect(code).toContain('export async function __voidHandleInternalRoute(request)');
+    expect(code).toContain('if (request.method === "POST" && url.pathname === "/__void/migrate")');
     expect(code).toContain('app.post("/__void/migrate"');
   });
 });

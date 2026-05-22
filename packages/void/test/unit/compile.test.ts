@@ -483,6 +483,18 @@ describe('compileRouteTable', () => {
     expect(code).toContain('request.headers.get("x-void-internal")');
   });
 
+  it('checks route-owned internal handlers before app routing', () => {
+    const code = compileWorkerEntry();
+
+    expect(code).toContain('__voidHandleInternalRoute');
+    expect(code.indexOf('const routeInternal = await __voidHandleInternalRoute')).toBeLessThan(
+      code.indexOf('url.pathname !== "/__void/prerender-paths"'),
+    );
+    expect(code.indexOf('const internal = await __handleInternal')).toBeLessThan(
+      code.indexOf('await app.fetch(request, userEnv, ctx)'),
+    );
+  });
+
   it('generates websocket durable object exports and proxy routes', () => {
     const scan: ScanResult = {
       routes: [],
