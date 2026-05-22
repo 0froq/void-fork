@@ -96,6 +96,21 @@ describe('PlatformClient.requestUploadUrls', () => {
   });
 });
 
+describe('PlatformClient.getMigrationStatus', () => {
+  it('passes the dialect query parameter when provided', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ applied: [] }));
+
+    const client = makeClient();
+    await client.getMigrationStatus(projectId, 'postgresql');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(url.href).toBe(`${apiUrl}/projects/${projectId}/migrations?dialect=postgresql`);
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe(`Bearer ${token}`);
+  });
+});
+
 describe('PlatformClient.finalizeDeploy', () => {
   const baseManifest: DeployManifest = {
     version: 3,

@@ -596,8 +596,13 @@ export class PlatformClient {
 
   async getMigrationStatus(
     projectId: string,
+    dialect?: 'sqlite' | 'postgresql',
   ): Promise<{ applied: Array<{ name: string; applied_at: string }> }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/migrations`, {
+    const url = new URL(`${this.baseUrl}/projects/${projectId}/migrations`);
+    if (dialect) {
+      url.searchParams.set('dialect', dialect);
+    }
+    const res = await fetch(url, {
       headers: {
         ...this.authHeaders,
       },

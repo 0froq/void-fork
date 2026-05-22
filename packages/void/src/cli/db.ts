@@ -253,7 +253,7 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
   if (token && config) {
     try {
       const client = new PlatformClient(token, { root });
-      const result = await client.getMigrationStatus(config.projectId);
+      const result = await client.getMigrationStatus(config.projectId, dialect);
       remoteApplied = result.applied;
     } catch {
       // graceful degradation — remote unavailable
@@ -527,7 +527,7 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
     // abort rather than risk validating (and rejecting) already-applied migrations.
     let remoteApplied: Set<string>;
     try {
-      const status = await client.getMigrationStatus(config.projectId);
+      const status = await client.getMigrationStatus(config.projectId, dialect);
       remoteApplied = new Set(status.applied.map((m) => m.name));
     } catch (err) {
       log.error(
