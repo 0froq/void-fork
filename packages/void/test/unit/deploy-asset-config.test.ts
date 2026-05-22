@@ -71,7 +71,7 @@ describe('resolveAssetConfig', () => {
     ).toEqual(NONE);
   });
 
-  it('uses none when the project has websocket routes', () => {
+  it('uses none when the project has document websocket routes', () => {
     expect(
       resolveAssetConfig({
         isSsr: false,
@@ -81,6 +81,18 @@ describe('resolveAssetConfig', () => {
         hasWebSockets: true,
       }),
     ).toEqual(NONE);
+  });
+
+  it('keeps SPA handling when the project only has API websocket routes', () => {
+    expect(
+      resolveAssetConfig({
+        isSsr: false,
+        hasPages: false,
+        hasDocumentRoutes: false,
+        hasMiddleware: false,
+        hasWebSockets: hasDocumentRoutes([{ pattern: '/api/chat' }]),
+      }),
+    ).toEqual(SPA);
   });
 
   it('uses none when managed auth is enabled', () => {

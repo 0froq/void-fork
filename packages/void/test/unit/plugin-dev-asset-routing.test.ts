@@ -55,6 +55,16 @@ function createApiOnlyProjectRoot(): string {
   return root;
 }
 
+function createApiWebSocketOnlyProjectRoot(): string {
+  const root = createProjectRoot();
+  mkdirSync(join(root, 'routes/api'), { recursive: true });
+  writeFileSync(
+    join(root, 'routes/api/chat.ws.ts'),
+    'export default defineWebSocket({ onMessage() {} });',
+  );
+  return root;
+}
+
 function createDocumentRouteProjectRoot(): string {
   const root = createProjectRoot();
   mkdirSync(join(root, 'routes'), { recursive: true });
@@ -134,6 +144,14 @@ describe('voidPlugin dev asset routing', () => {
         run_worker_first: ['/', '/*.html'],
       },
     });
+
+    expect(assets?.not_found_handling).toBe('single-page-application');
+    expect(assets?.run_worker_first).toBeUndefined();
+  });
+
+  it('keeps projects with only API websocket routes static-first for document requests', async () => {
+    const root = createApiWebSocketOnlyProjectRoot();
+    const assets = await resolveVoidPluginAssets(root);
 
     expect(assets?.not_found_handling).toBe('single-page-application');
     expect(assets?.run_worker_first).toBeUndefined();

@@ -347,7 +347,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       hasPages: scan.pages.pages.length > 0,
       hasDocumentRoutes: hasDocumentRoutes(scan.routes),
       hasMiddleware: scan.middleware.length > 0,
-      hasWebSockets: (scan.websockets?.length ?? 0) > 0,
+      hasWebSockets: hasDocumentRoutes(scan.websockets ?? []),
       authEnabled: compileOptions.auth !== null,
       liveEnabled: options.live !== undefined,
     });

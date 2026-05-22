@@ -1670,7 +1670,7 @@ async function runFullDeploy(
     hasPages,
     hasDocumentRoutes,
     hasMiddleware,
-    hasWebSockets,
+    hasWebSockets: routeScanHasDocumentRoutes(webSockets),
     authEnabled,
     liveEnabled: liveConfig !== undefined,
   });

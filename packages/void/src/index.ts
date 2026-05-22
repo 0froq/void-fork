@@ -1541,7 +1541,7 @@ export function voidPlugin(options?: {
     hasPages,
     hasDocumentRoutes,
     hasMiddleware,
-    hasWebSockets: websocketRoutes.length > 0,
+    hasWebSockets: routeScanHasDocumentRoutes(websocketRoutes),
     authEnabled,
     liveEnabled: liveConfig !== undefined,
   });

@@ -6,6 +6,7 @@ export type AssetRoutingInputs = {
   hasPages: boolean;
   hasDocumentRoutes: boolean;
   hasMiddleware: boolean;
+  /** True only when a websocket route is outside /api and can own document paths. */
   hasWebSockets?: boolean;
   authEnabled?: boolean;
   liveEnabled?: boolean;
