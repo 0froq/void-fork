@@ -246,14 +246,51 @@ describe('GET /projects/:id', () => {
 });
 
 describe('PUT /projects/:id/database-url', () => {
+  it('provisions Hyperdrive with a Cloudflare-safe name', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app-post');
+    const hyperdriveName = `${project.id}-hyperdrive`.replaceAll('_', '-').toLowerCase();
+
+    mockCfApi({
+      createHyperdrive: (_url, init) => {
+        const body = JSON.parse(init?.body as string) as { name: string };
+        expect(body.name).toBe(hyperdriveName);
+        expect(body.name).toMatch(/^[a-z0-9-]+$/);
+        return cfSuccess({ id: 'hd-post-created', name: hyperdriveName });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'postgresql://void_user:pass@db.example.com/appdb',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const rows = await env.db.select().from(resources).where(eq(resources.project_id, project.id));
+    expect(rows).toMatchObject([
+      { type: 'hyperdrive', cf_id: 'hd-post-created', binding_name: 'HYPERDRIVE' },
+    ]);
+  });
+
   it('creates Hyperdrive from a provider Postgres URL when no resource exists', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'pg-app');
+    const hyperdriveName = `${project.id}-hyperdrive`.replaceAll('_', '-').toLowerCase();
 
     mockCfApi({
       createHyperdrive: (_url, init) => {
         expect(JSON.parse(init?.body as string)).toEqual({
-          name: `${project.id}-hyperdrive`.toLowerCase(),
+          name: hyperdriveName,
           origin: {
             database: 'appdb',
             host: 'db.example.com',
@@ -264,7 +301,7 @@ describe('PUT /projects/:id/database-url', () => {
           },
           mtls: { sslmode: 'require' },
         });
-        return cfSuccess({ id: 'hd-created', name: `${project.id}-hyperdrive`.toLowerCase() });
+        return cfSuccess({ id: 'hd-created', name: hyperdriveName });
       },
     });
 
@@ -294,6 +331,7 @@ describe('PUT /projects/:id/database-url', () => {
   it('updates the existing Hyperdrive config when the resource exists', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'pg-app-update');
+    const hyperdriveName = `${project.id}-hyperdrive`.replaceAll('_', '-').toLowerCase();
     await env.db.insert(resources).values({
       id: 'res_hd_existing',
       project_id: project.id,
@@ -306,7 +344,7 @@ describe('PUT /projects/:id/database-url', () => {
       updateHyperdrive: (url, init) => {
         expect(url).toContain('/hyperdrive/configs/hd-existing');
         expect(JSON.parse(init?.body as string)).toEqual({
-          name: `${project.id}-hyperdrive`.toLowerCase(),
+          name: hyperdriveName,
           origin: {
             database: 'appdb',
             host: 'db.example.com',
@@ -315,7 +353,7 @@ describe('PUT /projects/:id/database-url', () => {
             user: 'void_user',
           },
         });
-        return cfSuccess({ id: 'hd-existing', name: `${project.id}-hyperdrive`.toLowerCase() });
+        return cfSuccess({ id: 'hd-existing', name: hyperdriveName });
       },
     });
 

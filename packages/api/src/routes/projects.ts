@@ -1748,7 +1748,7 @@ const app = new Hono<ApiEnv>()
       );
     }
 
-    const resourceName = `${projectId}-hyperdrive`.toLowerCase();
+    const resourceName = getHyperdriveResourceName(projectId);
     let hyperdriveId: string;
     try {
       const hd = await createHyperdrive(
@@ -1810,7 +1810,7 @@ const app = new Hono<ApiEnv>()
     if (found) {
       // Update existing Hyperdrive config
       try {
-        const resourceName = `${projectId}-hyperdrive`.toLowerCase();
+        const resourceName = getHyperdriveResourceName(projectId);
         await updateHyperdrive(
           context.env.CF_ACCOUNT_ID,
           context.env.CF_API_TOKEN,
@@ -1827,7 +1827,7 @@ const app = new Hono<ApiEnv>()
       }
     } else {
       // Create new Hyperdrive config
-      const resourceName = `${projectId}-hyperdrive`.toLowerCase();
+      const resourceName = getHyperdriveResourceName(projectId);
       let hyperdriveId: string;
       try {
         const hd = await createHyperdrive(
@@ -1884,6 +1884,10 @@ function parseDuration(input: string): number | null {
 
 function isAlreadyExistsError(error: unknown): boolean {
   return error instanceof Error && error.message.toLowerCase().includes('already exists');
+}
+
+function getHyperdriveResourceName(projectId: string): string {
+  return `${projectId}-hyperdrive`.toLowerCase().replaceAll('_', '-');
 }
 
 function toDatabaseProvisioningError(
