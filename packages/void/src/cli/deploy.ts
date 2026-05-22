@@ -137,6 +137,19 @@ type ResourceSummary = {
   type?: string;
 };
 
+export async function generateDeployWrapperIfNeeded(
+  root: string,
+  workerDir: string,
+  workerMain: string,
+  features: WrapperFeatures,
+): Promise<boolean> {
+  if (!needsWrapper(features)) {
+    return false;
+  }
+  await generateWrapper(workerDir, workerMain, root, features);
+  return true;
+}
+
 const EMPTY_BINDINGS = {
   needsD1: false,
   needsKV: false,
@@ -1175,10 +1188,10 @@ async function runFrameworkDeploy(
     log.info('Worker bundled');
   }
 
-  // Step 2: Wrap if crons/queues are present (in-place, no re-bundling)
+  // Step 2: Wrap if internal deploy endpoints are needed (in-place, no re-bundling)
   if (needsWrapper(wrapperFeatures)) {
     log.step('Generating wrapper...');
-    await generateWrapper(actualWorkerDir, actualWorkerMain, root, wrapperFeatures);
+    await generateDeployWrapperIfNeeded(root, actualWorkerDir, actualWorkerMain, wrapperFeatures);
     log.info('Wrapper generated');
   }
 
@@ -1517,7 +1530,9 @@ async function runFullDeploy(
   }
   const workerDirName = resolveWorkerDirName(distDir, fwPreset, frameworkBuildCmd);
 
-  const schedules = scanJobsSync(root, paths.cronsDir).flatMap((job) =>
+  const rawJobs = scanJobsSync(root, paths.cronsDir);
+  const rawQueues = scanQueuesSync(root, paths.queuesDir);
+  const schedules = rawJobs.flatMap((job) =>
     job.crons.map((cron) => ({
       name: job.name,
       cron,
@@ -1532,7 +1547,7 @@ async function runFullDeploy(
     sandboxClassName: sandboxConfig?.className,
     cliLog,
   });
-  const queues = scanQueuesSync(root, paths.queuesDir).map((q) => ({
+  const queues = rawQueues.map((q) => ({
     name: q.name,
     bindingName: q.bindingName,
     ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
@@ -1747,7 +1762,27 @@ async function runFullDeploy(
     dialect,
     webSockets,
   });
-  const workerFiles = collectWorkerFiles(join(distDir, workerDirName));
+  const workerDir = join(distDir, workerDirName);
+  if (isFrameworkMode) {
+    const wrapperFeatures: WrapperFeatures = {
+      auth: null,
+      crons: rawJobs,
+      queues: rawQueues,
+      hasMigrations: validatedMigrations != null && validatedMigrations.length > 0,
+      migrationDialect: dialect,
+    };
+    if (needsWrapper(wrapperFeatures)) {
+      log.step('Generating wrapper...');
+      await generateDeployWrapperIfNeeded(
+        root,
+        workerDir,
+        fwPreset?.workerMain ?? 'index.js',
+        wrapperFeatures,
+      );
+      log.info('Wrapper generated');
+    }
+  }
+  const workerFiles = collectWorkerFiles(workerDir);
   cliLog?.info('package_end', {
     mode: 'full',
     durationMs: Date.now() - packageStartedAt,

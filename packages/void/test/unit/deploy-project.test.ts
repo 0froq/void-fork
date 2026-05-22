@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vite-plus/test';
 import type { PlatformClient, ProjectResponse } from '../../src/cli/client.ts';
 import {
   ensurePreviouslyDeployedLiveBindingConfig,
+  generateDeployWrapperIfNeeded,
   resolveDeployLiveBindingConfig,
   resolveDistDir,
   resolveDeployWranglerCompat,
@@ -489,5 +490,44 @@ describe('resolveWorkerDirName', () => {
     mkdirSync(dist, { recursive: true });
 
     expect(() => resolveWorkerDirName(dist)).toThrow('Worker output not found');
+  });
+});
+
+describe('generateDeployWrapperIfNeeded', () => {
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop()!;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('wraps class-a framework worker output when migrations are present', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-test-'));
+    tempDirs.push(root);
+    const workerDir = join(root, 'dist', 'server');
+    mkdirSync(workerDir, { recursive: true });
+    writeFileSync(
+      join(workerDir, 'index.js'),
+      'export default { fetch() { return Response.json({ status: 500, unhandled: true, message: "HTTPError" }, { status: 500 }); } };',
+    );
+    mkdirSync(join(root, 'db', 'migrations'), { recursive: true });
+    writeFileSync(join(root, 'db', 'migrations', '001_init.sql'), 'CREATE TABLE users (id INT);');
+
+    const wrapped = await generateDeployWrapperIfNeeded(root, workerDir, 'index.js', {
+      auth: null,
+      crons: [],
+      queues: [],
+      hasMigrations: true,
+      migrationDialect: 'postgresql',
+    });
+
+    expect(wrapped).toBe(true);
+    expect(existsSync(join(workerDir, '__original.js'))).toBe(true);
+    expect(existsSync(join(workerDir, '__void_migration_handler.mjs'))).toBe(true);
+    const wrapper = readFileSync(join(workerDir, 'index.js'), 'utf-8');
+    expect(wrapper).toContain('import original from "./__original.js"');
+    expect(wrapper).toContain('createMigrationHandler');
+    expect(wrapper).toContain('/__void/migrate');
+    expect(wrapper).toContain('"postgresql"');
   });
 });
