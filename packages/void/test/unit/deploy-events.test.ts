@@ -84,6 +84,13 @@ describe('applyDeployEvent', () => {
     expect(result).toEqual({ kind: 'start', deploymentId: 'dpl_abc' });
   });
 
+  it('shows worker readiness before migration execution starts', () => {
+    const { spinner, calls } = createMockSpinner();
+    const result = applyDeployEvent({ event: 'worker_readiness' } satisfies DeployEvent, spinner);
+    expect(result).toEqual({ kind: 'continue' });
+    expect(calls.message[0]).toBe('Waiting for worker to become reachable...');
+  });
+
   it('returns {kind:"done"} for done event and stops the spinner', () => {
     const { spinner, calls } = createMockSpinner();
     const done: Extract<DeployEvent, { event: 'done' }> = {

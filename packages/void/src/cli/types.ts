@@ -204,6 +204,7 @@ export type DeployEvent =
   | { event: 'asset_upload_done' }
   | { event: 'provisioning'; bindings: Array<string> }
   | { event: 'provisioning_done' }
+  | { event: 'worker_readiness' }
   | { event: 'migration_start'; pending: number }
   | { event: 'migration'; name: string; durationMs: number }
   | { event: 'worker_upload'; modules: number }

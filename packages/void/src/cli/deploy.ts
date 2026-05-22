@@ -589,6 +589,9 @@ export function applyDeployEvent(event: DeployEvent, s: SpinnerResult): ApplyDep
     case 'provisioning':
       s.message(`Provisioning ${event.bindings.join(', ')}`);
       return { kind: 'continue' };
+    case 'worker_readiness':
+      s.message('Waiting for worker to become reachable...');
+      return { kind: 'continue' };
     case 'migration_start':
       s.message(`Running ${event.pending} migration${event.pending > 1 ? 's' : ''}...`);
       return { kind: 'continue' };
