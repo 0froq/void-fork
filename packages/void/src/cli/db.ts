@@ -495,6 +495,13 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
   }
 
   if (remote) {
+    if (dialect === 'postgresql') {
+      log.error(
+        'db: `void db migrate --remote` is only supported for D1 projects. PostgreSQL remote migrations run during `void deploy` through the project Hyperdrive binding.',
+      );
+      process.exit(1);
+    }
+
     const token = getToken(root);
     if (!token) {
       log.error('Not logged in. Run `void auth login` first.');

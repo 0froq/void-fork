@@ -66,6 +66,26 @@ function createProjectRoot(migrations: Record<string, string>): string {
   return root;
 }
 
+function createPgProjectRoot(migrations: Record<string, string>): string {
+  const root = createProjectRoot(migrations);
+  writeFileSync(join(root, 'void.json'), JSON.stringify({ database: 'pg' }, null, 2) + '\n');
+  writeFileSync(
+    join(root, 'db', 'migrations', 'meta', '_journal.json'),
+    JSON.stringify({
+      version: '7',
+      dialect: 'postgresql',
+      entries: Object.keys(migrations).map((name, idx) => ({
+        idx,
+        version: '7',
+        when: Date.now(),
+        tag: name.replace(/\.sql$/, ''),
+        breakpoints: true,
+      })),
+    }),
+  );
+  return root;
+}
+
 describe('void db migrate', () => {
   let runDbCommand: typeof import('../../src/cli/db.ts').runDbCommand;
 
@@ -130,5 +150,21 @@ describe('void db migrate', () => {
     expect(mockRunMigrations).toHaveBeenCalled();
     expect(mockLog.info).toHaveBeenCalledWith('All migrations are up to date.');
     expect(mockLog.error).not.toHaveBeenCalled();
+  });
+
+  it('rejects remote migrate for PostgreSQL before falling through to the D1 endpoint', async () => {
+    const root = createPgProjectRoot({
+      '001_create_users.sql': 'CREATE TABLE users (id text primary key);',
+    });
+
+    await expect(runDbCommand(root, { action: 'migrate', remote: true })).rejects.toThrow(
+      'process.exit:1',
+    );
+
+    expect(mockLog.error).toHaveBeenCalledWith(
+      'db: `void db migrate --remote` is only supported for D1 projects. PostgreSQL remote migrations run during `void deploy` through the project Hyperdrive binding.',
+    );
+    expect(mockGetAppliedMigrations).not.toHaveBeenCalled();
+    expect(mockRunMigrations).not.toHaveBeenCalled();
   });
 });
