@@ -783,6 +783,8 @@ describe('POST /projects/:id/deploy', () => {
       expect(res.status).toBe(200);
       const events = await readAllEvents(res);
 
+      expect(requireEvent<DeployEvent>(events, 'worker_readiness')).toBeDefined();
+
       const migrationStart = requireEvent<MigrationStartEvent>(events, 'migration_start');
       expect(migrationStart.pending).toBe(1);
 
@@ -1747,10 +1749,17 @@ describe('POST /projects/:id/deploy', () => {
           const raw = await res.text();
           expect(raw).not.toContain('Assets have already been uploaded');
           const events = parseDeployStream(raw);
+          expect(
+            events.some((event) => isDeployEvent(event) && event.event === 'worker_readiness'),
+          ).toBe(true);
+          expect(
+            events.some((event) => isDeployEvent(event) && event.event === 'migration_start'),
+          ).toBe(false);
           expect(events.at(-1)).toMatchObject({
             event: 'error',
             step: 'migration',
-            message: 'worker readiness probe failed: new worker not reachable after retries',
+            message:
+              'worker readiness probe failed: new worker not reachable after retries (last readiness response was a Cloudflare asset propagation stub)',
           });
           // Migration dispatch should never be attempted
           expect(migrateCalls).toBe(0);

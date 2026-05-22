@@ -214,6 +214,7 @@ export type DeployEvent =
   | { event: 'asset_upload_done' }
   | { event: 'provisioning'; bindings: ReadonlyArray<string> }
   | { event: 'provisioning_done' }
+  | { event: 'worker_readiness' }
   | { event: 'migration_start'; pending: number }
   | { event: 'migration'; name: string; durationMs: number; stability?: 'stable' | 'legacy' }
   | { event: 'migration_warning'; message: string }

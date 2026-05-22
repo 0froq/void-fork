@@ -3276,76 +3276,90 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           currentStatus = 'migrating';
           await assertDeploymentNotCanceled(context.get('db'), deployment.id);
           await assertProjectNotDeleting(context.get('db'), projectId);
-          emit({ event: 'migration_start', pending: manifest.migrations.pending });
+          emit({ event: 'worker_readiness' });
 
           const proxyTokenBinding = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN');
-          const probeResult = await retryWithBackoff<'ready' | 'compat'>(
-            async (attempt) => {
-              const attemptStart = Date.now();
-              const maxAttempts = CF_READINESS_RETRY.maxRetries + 1;
-              try {
-                const userWorker = context.env.DISPATCH.get(workerName);
-                const readyResponse = await userWorker.fetch(
-                  new Request('https://internal/__void/ready', {
-                    signal: AbortSignal.timeout(10_000),
-                  }),
-                );
-                const text = await readyResponse.text();
-                if (isCfAssetPlainText(text)) {
-                  logger.warn('migrate', 'readiness_probe_attempt_failed', {
-                    attempt,
-                    maxAttempts,
-                    latencyMs: Date.now() - attemptStart,
-                    code: 'cf_plain_text',
-                    bodyPreview: text.slice(0, 200),
-                  });
-                  return undefined;
-                }
+          const readinessError =
+            'worker readiness probe failed: new worker not reachable after retries';
+          let readinessFailure = 'no readiness attempts completed';
+          let probeResult: 'ready' | 'compat';
+          try {
+            probeResult = await retryWithBackoff<'ready' | 'compat'>(
+              async (attempt) => {
+                const attemptStart = Date.now();
+                const maxAttempts = CF_READINESS_RETRY.maxRetries + 1;
                 try {
-                  const data = JSON.parse(text);
-                  if (data.ready === true) {
-                    return 'ready';
+                  const userWorker = context.env.DISPATCH.get(workerName);
+                  const readyResponse = await userWorker.fetch(
+                    new Request('https://internal/__void/ready', {
+                      signal: AbortSignal.timeout(10_000),
+                    }),
+                  );
+                  const text = await readyResponse.text();
+                  if (isCfAssetPlainText(text)) {
+                    readinessFailure =
+                      'last readiness response was a Cloudflare asset propagation stub';
+                    logger.warn('migrate', 'readiness_probe_attempt_failed', {
+                      attempt,
+                      maxAttempts,
+                      latencyMs: Date.now() - attemptStart,
+                      code: 'cf_plain_text',
+                      bodyPreview: text.slice(0, 200),
+                    });
+                    return undefined;
                   }
-                } catch {
-                  // fall through
-                }
-                if (readyResponse.status === 404) {
-                  return 'compat';
-                }
-                if (readyResponse.ok) {
+                  try {
+                    const data = JSON.parse(text);
+                    if (data.ready === true) {
+                      return 'ready';
+                    }
+                  } catch {
+                    // fall through
+                  }
+                  if (readyResponse.status === 404) {
+                    return 'compat';
+                  }
+                  if (readyResponse.ok) {
+                    readinessFailure = `last readiness response was ${readyResponse.status} with unexpected body: ${text.slice(0, 200)}`;
+                    logger.warn('migrate', 'readiness_probe_attempt_failed', {
+                      attempt,
+                      maxAttempts,
+                      latencyMs: Date.now() - attemptStart,
+                      code: 'unexpected_2xx',
+                      status: readyResponse.status,
+                      bodyPreview: text.slice(0, 200),
+                    });
+                    return undefined;
+                  }
+                  readinessFailure = `last readiness response was HTTP ${readyResponse.status}: ${text.slice(0, 200)}`;
                   logger.warn('migrate', 'readiness_probe_attempt_failed', {
                     attempt,
                     maxAttempts,
                     latencyMs: Date.now() - attemptStart,
-                    code: 'non_json_2xx',
                     status: readyResponse.status,
                     bodyPreview: text.slice(0, 200),
                   });
                   return undefined;
+                } catch (err) {
+                  readinessFailure = `last readiness request threw: ${err instanceof Error ? err.message : String(err)}`;
+                  logger.warn('migrate', 'readiness_probe_attempt_failed', {
+                    attempt,
+                    maxAttempts,
+                    latencyMs: Date.now() - attemptStart,
+                    code: 'threw',
+                    err: err instanceof Error ? err.message : String(err),
+                  });
+                  return undefined;
                 }
-                logger.warn('migrate', 'readiness_probe_attempt_failed', {
-                  attempt,
-                  maxAttempts,
-                  latencyMs: Date.now() - attemptStart,
-                  status: readyResponse.status,
-                });
-                return undefined;
-              } catch (err) {
-                logger.warn('migrate', 'readiness_probe_attempt_failed', {
-                  attempt,
-                  maxAttempts,
-                  latencyMs: Date.now() - attemptStart,
-                  code: 'threw',
-                  err: err instanceof Error ? err.message : String(err),
-                });
-                return undefined;
-              }
-            },
-            {
-              ...CF_READINESS_RETRY,
-              errorMessage: 'worker readiness probe failed: new worker not reachable after retries',
-            },
-          );
+              },
+              {
+                ...CF_READINESS_RETRY,
+                errorMessage: readinessError,
+              },
+            );
+          } catch {
+            throw new Error(`${readinessError} (${readinessFailure})`);
+          }
 
           const manifestProtocol = manifest.migrations.protocolVersion;
           const stableCapabilities =
@@ -3367,6 +3381,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           if (manifestProtocol === 2 && !canUseStable) {
             throw new Error('migration protocol v2 capability negotiation failed');
           }
+
+          emit({ event: 'migration_start', pending: manifest.migrations.pending });
 
           if (canUseStable) {
             const attemptId = generateId('migatt');
