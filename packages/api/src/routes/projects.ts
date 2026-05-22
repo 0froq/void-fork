@@ -21,6 +21,7 @@ import {
   appendAppliedMigrations,
   appendProjectMigrations,
   activeDeploymentContainsMigration,
+  getProjectMigrationRows,
   getProjectMigrationNames,
   renameAppliedMigrationsForProject,
   renameProjectMigrations,
@@ -973,6 +974,25 @@ const app = new Hono<ApiEnv>()
     }
 
     const resources = await getProjectResources(context.get('db'), project.id);
+    const requestedDialect = context.req.query('dialect');
+    if (
+      requestedDialect !== undefined &&
+      requestedDialect !== 'sqlite' &&
+      requestedDialect !== 'postgresql'
+    ) {
+      return context.json({ error: 'invalid dialect, must be sqlite or postgresql' }, 400);
+    }
+
+    if (
+      requestedDialect === 'postgresql' ||
+      (requestedDialect === undefined &&
+        resources.some((r) => r.type === 'hyperdrive') &&
+        !resources.some((r) => r.type === 'd1'))
+    ) {
+      const applied = await getProjectMigrationRows(context.get('db'), project.id);
+      return context.json({ applied });
+    }
+
     const d1Resource = resources.find((r) => r.type === 'd1');
     if (!d1Resource) {
       return context.json({ applied: [] });

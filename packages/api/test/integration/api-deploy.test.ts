@@ -1569,6 +1569,57 @@ describe('POST /projects/:id/deploy', () => {
       }
     });
 
+    it('treats non-stub 2xx readiness HTML as compatible with older workers', async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'migrate-compat-html-test');
+      mockCfApi({
+        createD1: () => cfSuccess({ uuid: 'd1-compat-html-uuid', name: 'test-db' }),
+      });
+
+      let readyCalls = 0;
+      let migrateCalls = 0;
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            if (url.pathname === '/__void/ready') {
+              readyCalls++;
+              return new Response(
+                '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"></head><body>app</body></html>',
+                { headers: { 'content-type': 'text/html' } },
+              );
+            }
+            migrateCalls++;
+            return Response.json({
+              ok: true,
+              migrations: [{ name: '001_create_table.sql', applied: true, durationMs: 2 }],
+            });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+
+      try {
+        const res = await app.fetch(
+          await buildDeployRequest(env, project.id, user.jwt, {
+            manifest: {
+              version: 3,
+              bindings: { d1: ['DB'] },
+              migrations: { dialect: 'sqlite', pending: 1 },
+            },
+          }),
+          env,
+        );
+        expect(res.status).toBe(200);
+        const events = parseDeployStream(await res.text());
+        expect(events.at(-1)).toMatchObject({ event: 'done' });
+        expect(readyCalls).toBe(1);
+        expect(migrateCalls).toBe(1);
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    });
+
     it('uses protocol v2 app and auth migration endpoints after capability negotiation', async () => {
       const user = await createTestUser(env.db);
       const project = await createTestProject(env.db, user.id, 'migrate-v2-test');

@@ -555,6 +555,17 @@ export async function getProjectMigrationNames(
   return rows.map((row) => row.name);
 }
 
+export async function getProjectMigrationRows(
+  db: Db,
+  projectId: string,
+): Promise<ReadonlyArray<{ name: string; applied_at: string }>> {
+  return db
+    .select({ name: projectMigrations.name, applied_at: projectMigrations.applied_at })
+    .from(projectMigrations)
+    .where(eq(projectMigrations.project_id, projectId))
+    .orderBy(asc(projectMigrations.applied_at), asc(projectMigrations.name));
+}
+
 export async function appendProjectMigrations(
   db: Db,
   projectId: string,

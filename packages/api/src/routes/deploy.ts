@@ -3320,16 +3320,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                     return 'compat';
                   }
                   if (readyResponse.ok) {
-                    readinessFailure = `last readiness response was ${readyResponse.status} with unexpected body: ${text.slice(0, 200)}`;
-                    logger.warn('migrate', 'readiness_probe_attempt_failed', {
-                      attempt,
-                      maxAttempts,
-                      latencyMs: Date.now() - attemptStart,
-                      code: 'unexpected_2xx',
+                    logger.info('migrate', 'readiness_probe_compat', {
                       status: readyResponse.status,
                       bodyPreview: text.slice(0, 200),
                     });
-                    return undefined;
+                    return 'compat';
                   }
                   readinessFailure = `last readiness response was HTTP ${readyResponse.status}: ${text.slice(0, 200)}`;
                   logger.warn('migrate', 'readiness_probe_attempt_failed', {

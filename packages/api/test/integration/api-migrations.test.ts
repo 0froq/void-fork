@@ -13,7 +13,7 @@ import {
 import type { Db } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { canonicalJson } from '../../src/migrations/canonical-json.ts';
-import { deployments, projects, resources } from '../../src/schema.ts';
+import { deployments, projectMigrations, projects, resources } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -303,6 +303,16 @@ async function insertD1Resource(
   });
 }
 
+async function insertHyperdriveResource(db: TestEnv['db'], projectId: string): Promise<void> {
+  await db.insert(resources).values({
+    id: `res_${projectId}_hyperdrive`,
+    project_id: projectId,
+    type: 'hyperdrive',
+    cf_id: `${projectId}-hyperdrive`,
+    binding_name: 'HYPERDRIVE',
+  });
+}
+
 function authedReq(path: string, jwt: string, init?: RequestInit): Request {
   return new Request(`http://localhost${path}`, {
     ...init,
@@ -369,6 +379,45 @@ describe('GET /projects/:id/migrations', () => {
     const res = await app.fetch(authedReq(`/projects/${project.id}/migrations`, user.jwt), env);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ applied: [] });
+  });
+
+  it('returns applied migrations from platform metadata for PostgreSQL projects', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-mig-status');
+    await insertHyperdriveResource(env.db, project.id);
+    await env.db.insert(projectMigrations).values([
+      {
+        project_id: project.id,
+        name: '002_alter.sql',
+        applied_at: '2025-01-02T00:00:00Z',
+      },
+      {
+        project_id: project.id,
+        name: '001_create.sql',
+        applied_at: '2025-01-01T00:00:00Z',
+      },
+    ]);
+
+    const expected = {
+      applied: [
+        { name: '001_create.sql', applied_at: '2025-01-01 00:00:00' },
+        { name: '002_alter.sql', applied_at: '2025-01-02 00:00:00' },
+      ],
+    };
+
+    const explicitDialect = await app.fetch(
+      authedReq(`/projects/${project.id}/migrations?dialect=postgresql`, user.jwt),
+      env,
+    );
+    expect(explicitDialect.status).toBe(200);
+    expect(await explicitDialect.json()).toEqual(expected);
+
+    const inferredDialect = await app.fetch(
+      authedReq(`/projects/${project.id}/migrations`, user.jwt),
+      env,
+    );
+    expect(inferredDialect.status).toBe(200);
+    expect(await inferredDialect.json()).toEqual(expected);
   });
 
   it('returns applied migrations from _void_migrations', async () => {
