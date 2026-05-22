@@ -1953,6 +1953,28 @@ describe('default-target dev parity', () => {
     expect(code).toContain('const __fallbackRules =');
   });
 
+  it('applies header rules to immutable responses in local dev', async () => {
+    const code = compile({ nodeTarget: false, dev: true });
+    const app = evalCompiledApp(code);
+
+    app.get('/redirect', () => Response.redirect('https://example.com/next', 302));
+
+    const stubCtx = {
+      waitUntil: () => undefined,
+      passThroughOnException: () => undefined,
+      props: {},
+    };
+    const res = await app.fetch(
+      new Request('http://localhost/redirect'),
+      {},
+      stubCtx as unknown as ExecutionContext,
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('https://example.com/next');
+    expect(res.headers.get('x-test')).toBe('1');
+  });
+
   it('omits redirect + header + fallback middleware on the default target in prod', () => {
     const code = compile({ nodeTarget: false, dev: false });
     // Production bundles let the platform dispatch worker own the pipeline

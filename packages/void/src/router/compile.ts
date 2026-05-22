@@ -3010,9 +3010,16 @@ function compileHeaderMiddleware(lines: Array<string>, rules: Array<HeaderRule>)
   lines.push('  for (const rule of __headerRules) {');
   lines.push('    if (__matchPattern(rule.pattern, pathname)) matched.push(...rule.headers);');
   lines.push('  }');
+  lines.push('  if (matched.length === 0) return;');
+  lines.push('  const headers = new Headers(c.res.headers);');
   lines.push('  for (const [name, value] of matched) {');
-  lines.push('    c.res.headers.set(name, value);');
+  lines.push('    headers.set(name, value);');
   lines.push('  }');
+  lines.push('  c.res = new Response(c.res.body, {');
+  lines.push('    headers,');
+  lines.push('    status: c.res.status,');
+  lines.push('    statusText: c.res.statusText,');
+  lines.push('  });');
   lines.push('});');
   lines.push('');
 }
