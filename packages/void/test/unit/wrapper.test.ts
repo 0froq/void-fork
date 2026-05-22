@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'pathe';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
@@ -98,7 +98,6 @@ describe('generateWrapper with migrations', () => {
     expect(wrapper).toContain('__migrations');
     expect(wrapper).toContain('import original from "./__original.mjs"');
 
-    // Migration handler should be copied
     expect(existsSync(join(workerDir, '__void_migration_handler.mjs'))).toBe(true);
   });
 
@@ -149,8 +148,12 @@ describe('generateWrapper with migrations', () => {
     expect(wrapper).toContain('createMigrationHandler');
     expect(wrapper).toContain('"postgresql"');
 
-    // Migration handler should be copied
     expect(existsSync(join(workerDir, '__void_migration_handler.mjs'))).toBe(true);
+    const handler = readFileSync(join(workerDir, '__void_migration_handler.mjs'), 'utf-8');
+    expect(handler).not.toContain('import("pg")');
+    expect(
+      readdirSync(workerDir).some((file) => file.startsWith('__void_migration_handler-')),
+    ).toBe(true);
   });
 
   it('intercepts GET /__void/ready with {ready:true} when wrapper is generated', async () => {

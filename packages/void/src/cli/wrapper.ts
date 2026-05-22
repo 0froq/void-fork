@@ -119,10 +119,6 @@ export async function generateWrapper(
     migrations = collectMigrations(migrationsDir);
     migrationPlanBundle =
       features.migrationDialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
-    // Copy the migration handler runtime into the worker directory.
-    // Pick the PG handler when the dialect is PostgreSQL, otherwise use the D1 handler.
-    // Bundled CLI chunks are emitted directly in dist/, while an unbundled CLI
-    // entry would live in dist/cli/. Support both layouts plus source tests.
     const handlerFilename_ =
       features.migrationDialect === 'postgresql'
         ? 'migration-handler-pg.mjs'
@@ -140,7 +136,11 @@ export async function generateWrapper(
         `Migration handler not found: ${handlerFilename_}. Run "pnpm -C packages/void build" first.`,
       );
     }
-    copyFileSync(handlerPath, join(workerDir, '__void_migration_handler.mjs'));
+    if (features.migrationDialect === 'postgresql') {
+      await bundlePgMigrationHandler(root, workerDir, handlerPath);
+    } else {
+      copyFileSync(handlerPath, join(workerDir, '__void_migration_handler.mjs'));
+    }
   }
 
   // Write wrapper in place of original entry
@@ -152,6 +152,40 @@ export async function generateWrapper(
     migrationPlanBundle,
   );
   writeFileSync(join(workerDir, workerMain), wrapperSource);
+}
+
+async function bundlePgMigrationHandler(
+  root: string,
+  workerDir: string,
+  handlerPath: string,
+): Promise<void> {
+  const tmpDir = join(root, '.void', 'migration-handler');
+  mkdirSync(tmpDir, { recursive: true });
+  const outDir = join(tmpDir, 'out');
+  await build({
+    root: tmpDir,
+    logLevel: 'silent',
+    ssr: { noExternal: ['pg', 'pg-cloudflare'] },
+    build: {
+      outDir,
+      emptyOutDir: true,
+      minify: false,
+      ssr: handlerPath,
+      target: 'esnext',
+      rollupOptions: {
+        input: handlerPath,
+        external: [/^cloudflare:/, /^node:/],
+        output: {
+          entryFileNames: '__void_migration_handler.mjs',
+          chunkFileNames: '__void_migration_handler-[hash].mjs',
+        },
+      },
+    },
+  });
+
+  for (const file of readdirSync(outDir)) {
+    copyFileSync(join(outDir, file), join(workerDir, file));
+  }
 }
 
 /**
