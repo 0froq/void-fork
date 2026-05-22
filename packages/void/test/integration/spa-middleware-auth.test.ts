@@ -158,7 +158,7 @@ afterEach(async () => {
 });
 
 describe('SPA asset routing policy', () => {
-  it('keeps API-only projects on static SPA fallback even with stale wrangler asset rules', () => {
+  it('keeps API-only projects on static SPA fallback while routing API requests to the worker', () => {
     saveWranglerConfig();
     disableMiddlewareDir();
     writeFileSync(WRANGLER_CONFIG, staleWranglerSource);
@@ -168,7 +168,7 @@ describe('SPA asset routing policy', () => {
 
     const assetConfig = readBuiltAssetConfig();
     expect(assetConfig.not_found_handling).toBe('single-page-application');
-    expect(assetConfig.run_worker_first).toBeUndefined();
+    expect(assetConfig.run_worker_first).toEqual(['/api', '/api/*']);
   });
 
   it('routes document routes through the worker before SPA fallback HTML', async () => {

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'pathe';
 import { loadEnv, normalizePath, type Plugin } from 'vite';
 import {
+  hasApiRoutes,
   hasDocumentRoutes,
   resolveAssetRoutingPolicy,
   type AssetRoutingPolicy,
@@ -335,6 +336,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       return resolveAssetRoutingPolicy({
         isSsr: Boolean(ssr),
         hasPages: false,
+        hasApiRoutes: compileOptions.auth !== null,
         hasDocumentRoutes: false,
         hasMiddleware: false,
         hasWebSockets: false,
@@ -345,6 +347,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     return resolveAssetRoutingPolicy({
       isSsr: Boolean(ssr),
       hasPages: scan.pages.pages.length > 0,
+      hasApiRoutes:
+        hasApiRoutes(scan.routes) ||
+        hasApiRoutes(scan.websockets ?? []) ||
+        compileOptions.auth !== null,
       hasDocumentRoutes: hasDocumentRoutes(scan.routes),
       hasMiddleware: scan.middleware.length > 0,
       hasWebSockets: hasDocumentRoutes(scan.websockets ?? []),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
+  hasApiRoutes,
   hasDocumentRoutes,
   resolveAssetConfig,
   resolveAssetRoutingPolicy,
@@ -15,6 +16,10 @@ import {
 describe('resolveAssetConfig', () => {
   const NONE = { not_found_handling: 'none' as const, run_worker_first: ['/**'] };
   const SPA = { not_found_handling: 'single-page-application' as const };
+  const SPA_API = {
+    not_found_handling: 'single-page-application' as const,
+    run_worker_first: ['/api', '/api/*'],
+  };
 
   it('uses none when SSR is enabled', () => {
     expect(
@@ -43,10 +48,11 @@ describe('resolveAssetConfig', () => {
       resolveAssetConfig({
         isSsr: false,
         hasPages: false,
+        hasApiRoutes: true,
         hasDocumentRoutes: false,
         hasMiddleware: false,
       }),
-    ).toEqual(SPA);
+    ).toEqual(SPA_API);
   });
 
   it('uses none when the project has document routes', () => {
@@ -84,18 +90,20 @@ describe('resolveAssetConfig', () => {
   });
 
   it('keeps SPA handling when the project only has API websocket routes', () => {
+    const routes = [{ pattern: '/api/chat' }];
     expect(
       resolveAssetConfig({
         isSsr: false,
         hasPages: false,
+        hasApiRoutes: hasApiRoutes(routes),
         hasDocumentRoutes: false,
         hasMiddleware: false,
-        hasWebSockets: hasDocumentRoutes([{ pattern: '/api/chat' }]),
+        hasWebSockets: hasDocumentRoutes(routes),
       }),
-    ).toEqual(SPA);
+    ).toEqual(SPA_API);
   });
 
-  it('uses none when managed auth is enabled', () => {
+  it('routes managed auth endpoints through the worker without owning all HTML', () => {
     expect(
       resolveAssetConfig({
         isSsr: false,
@@ -104,7 +112,7 @@ describe('resolveAssetConfig', () => {
         hasMiddleware: false,
         authEnabled: true,
       }),
-    ).toEqual(NONE);
+    ).toEqual(SPA_API);
   });
 
   it('uses none for the common SPA + auth-middleware shape', () => {
@@ -146,16 +154,17 @@ describe('resolveAssetConfig', () => {
   });
 
   it('classifies /api routes separately from document routes', () => {
-    expect(
-      hasDocumentRoutes([
-        { pattern: '/api' },
-        { pattern: '/api/hello' },
-        { pattern: '/api/users/:id' },
-      ]),
-    ).toBe(false);
+    const apiRoutes = [
+      { pattern: '/api' },
+      { pattern: '/api/hello' },
+      { pattern: '/api/users/:id' },
+    ];
+    expect(hasDocumentRoutes(apiRoutes)).toBe(false);
+    expect(hasApiRoutes(apiRoutes)).toBe(true);
 
     expect(hasDocumentRoutes([{ pattern: '/hello' }])).toBe(true);
     expect(hasDocumentRoutes([{ pattern: '/apiish' }])).toBe(true);
+    expect(hasApiRoutes([{ pattern: '/hello' }, { pattern: '/apiish' }])).toBe(false);
   });
 
   it('uses the same worker-owned HTML decision as the asset config', () => {
@@ -179,6 +188,7 @@ describe('resolveAssetConfig', () => {
       }),
     ).toEqual({
       assetConfig: SPA,
+      apiWorkerFirst: false,
       workerFirst: false,
       workerSpaFallback: false,
     });
@@ -192,8 +202,24 @@ describe('resolveAssetConfig', () => {
       }),
     ).toEqual({
       assetConfig: NONE,
+      apiWorkerFirst: false,
       workerFirst: true,
       workerSpaFallback: true,
+    });
+
+    expect(
+      resolveAssetRoutingPolicy({
+        isSsr: false,
+        hasPages: false,
+        hasApiRoutes: true,
+        hasDocumentRoutes: false,
+        hasMiddleware: false,
+      }),
+    ).toEqual({
+      assetConfig: SPA_API,
+      apiWorkerFirst: true,
+      workerFirst: false,
+      workerSpaFallback: false,
     });
 
     expect(
@@ -205,6 +231,7 @@ describe('resolveAssetConfig', () => {
       }),
     ).toEqual({
       assetConfig: NONE,
+      apiWorkerFirst: false,
       workerFirst: true,
       workerSpaFallback: false,
     });

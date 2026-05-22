@@ -73,13 +73,13 @@ Static assets can run in front of the worker, behind the worker, or without any 
 
 ### Deploy shapes
 
-| Shape                                                                                   | Worker deployed | First handler for assets | First handler for document navigations | Miss behavior                                                                                                          |
-| --------------------------------------------------------------------------------------- | --------------- | ------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `inference.appType: "static"`                                                           | No              | Asset platform           | Asset platform                         | Platform 404 page.                                                                                                     |
-| Static SPA deploy                                                                       | No              | Asset platform           | Asset platform                         | Platform serves `/index.html` for unmatched navigations. If user `routing.fallbacks` exist, Void ships fallback rules. |
-| Void app with only `/api` routes                                                        | Yes             | Asset platform           | Asset platform                         | Static navigations keep the platform SPA fallback; API asset misses fall through to the worker route table.            |
-| Void app with `middleware/`, managed auth, non-`/api` routes, WebSockets, live bindings | Yes             | Worker first             | Worker first                           | Asset misses stay 404, then the worker serves `/index.html` for HTML requests after routes and middleware run.         |
-| Pages, SSR, and framework apps                                                          | Yes             | Worker first             | Worker first                           | Asset misses stay 404. Pages, SSR, or framework rendering owns HTML responses, including intentional HTML 404s.        |
+| Shape                                                                              | Worker deployed | First handler for assets | First handler for document navigations | Miss behavior                                                                                                          |
+| ---------------------------------------------------------------------------------- | --------------- | ------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `inference.appType: "static"`                                                      | No              | Asset platform           | Asset platform                         | Platform 404 page.                                                                                                     |
+| Static SPA deploy                                                                  | No              | Asset platform           | Asset platform                         | Platform serves `/index.html` for unmatched navigations. If user `routing.fallbacks` exist, Void ships fallback rules. |
+| Void app with only `/api` routes or managed auth                                   | Yes             | Worker first for `/api`  | Asset platform                         | Static navigations keep the platform SPA fallback; API requests, including document navigations, reach the worker.     |
+| Void app with `middleware/`, non-`/api` routes, document WebSockets, live bindings | Yes             | Worker first             | Worker first                           | Asset misses stay 404, then the worker serves `/index.html` for HTML requests after routes and middleware run.         |
+| Pages, SSR, and framework apps                                                     | Yes             | Worker first             | Worker first                           | Asset misses stay 404. Pages, SSR, or framework rendering owns HTML responses, including intentional HTML 404s.        |
 
 ### Worker-first Void apps
 
@@ -95,7 +95,7 @@ This is the path needed for preview auth and other middleware. Cloudflare's plat
 
 ### Asset-first Void apps
 
-For Void apps with only `/api` routes, Void does not enable `run_worker_first`. Static assets and SPA navigations stay on the asset platform. Requests that do not resolve to an asset and are not handled by the platform SPA fallback, such as `/api/hello`, fall through to the worker.
+For Void apps with only `/api` routes, Void keeps the platform SPA fallback and scopes `run_worker_first` to `/api` and `/api/*`. Static assets and non-API SPA navigations stay on the asset platform. API requests, including browser document navigations such as OAuth callbacks, reach the worker instead of being rewritten to `index.html`.
 
 ### Generated config
 

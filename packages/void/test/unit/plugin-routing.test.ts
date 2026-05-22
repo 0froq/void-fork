@@ -65,7 +65,7 @@ describe('routingPlugin', () => {
     expect(entry).toContain('accept.includes("text/html")');
   });
 
-  it('enables the worker SPA fallback for auth-only apps', async () => {
+  it('does not enable the worker SPA fallback for auth-only apps', async () => {
     const root = createTempRoot();
     writeFileSync(join(root, 'void.json'), JSON.stringify({ auth: { providers: ['email'] } }));
 
@@ -85,8 +85,8 @@ describe('routingPlugin', () => {
     await buildStart.call({} as never);
 
     const entry = readFileSync(join(root, '.void', 'entry.ts'), 'utf-8');
-    expect(entry).toContain('"/index.html"');
-    expect(entry).toContain('accept.includes("text/html")');
+    expect(entry).not.toContain('"/index.html"');
+    expect(entry).not.toContain('accept.includes("text/html")');
   });
 
   it('restarts dev when a structural route change changes the asset routing policy', async () => {
@@ -132,6 +132,57 @@ describe('routingPlugin', () => {
       expect.objectContaining({
         assetConfig: expect.objectContaining({ not_found_handling: 'none' }),
         workerFirst: true,
+      }),
+    );
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+
+  it('restarts dev when adding the first API route changes the asset routing policy', async () => {
+    const root = createTempRoot();
+
+    const onPolicyChange = vi.fn(() => true);
+    const plugin = routingPlugin(root, {
+      isAuthEnabled: () => false,
+      onDevAssetRoutingPolicyChange: onPolicyChange,
+    });
+    const configResolved = getHookHandler(plugin.configResolved) as (
+      config: import('vite').ResolvedConfig,
+    ) => void;
+    const buildStart = getHookHandler(plugin.buildStart) as () => Promise<void>;
+    const configureServer = getHookHandler(plugin.configureServer) as (server: unknown) => void;
+
+    configResolved({
+      build: { assetsDir: 'assets' },
+      command: 'serve',
+      mode: 'development',
+      plugins: [],
+    } as unknown as import('vite').ResolvedConfig);
+    await buildStart.call({} as never);
+
+    const handlers: Record<string, (path: string) => Promise<void>> = {};
+    const restart = vi.fn(async () => {});
+    configureServer({
+      watcher: {
+        on: vi.fn((event: string, handler: (path: string) => Promise<void>) => {
+          handlers[event] = handler;
+        }),
+      },
+      environments: {},
+      restart,
+    });
+
+    const apiRoute = join(root, 'routes', 'api.ts');
+    writeFileSync(apiRoute, 'export const GET = () => new Response("api");\n');
+    await handlers.add(apiRoute);
+
+    expect(onPolicyChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiWorkerFirst: true,
+        assetConfig: expect.objectContaining({
+          not_found_handling: 'single-page-application',
+          run_worker_first: ['/api', '/api/*'],
+        }),
+        workerFirst: false,
       }),
     );
     expect(restart).toHaveBeenCalledTimes(1);

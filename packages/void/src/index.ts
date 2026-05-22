@@ -13,6 +13,7 @@ import { join } from 'pathe';
 import pc from 'picocolors';
 import { loadEnv, type Plugin } from 'vite';
 import {
+  hasApiRoutes as routeScanHasApiRoutes,
   hasDocumentRoutes as routeScanHasDocumentRoutes,
   resolveAssetRoutingPolicy,
   type AssetRoutingPolicy,
@@ -1214,7 +1215,7 @@ export function voidPlugin(options?: {
       // Vite's own module URLs still need to bypass the worker so HMR,
       // virtual modules, and dev CSS are served by Vite middleware directly.
       const assets = workerConfig.assets as { run_worker_first?: Array<string> } | undefined;
-      if (command === 'serve' && assets?.run_worker_first) {
+      if (command === 'serve' && assets?.run_worker_first?.includes('/**')) {
         assets.run_worker_first = [...DEV_ASSET_ROUTING_EXCLUSIONS, '/**'];
       }
 
@@ -1536,9 +1537,12 @@ export function voidPlugin(options?: {
   const hasMiddleware = scanMiddlewareSync(root, paths).length > 0;
   const routePatterns = scanRoutePatternsSync(root, paths);
   const hasDocumentRoutes = routeScanHasDocumentRoutes(routePatterns);
+  const hasApiRoutes =
+    routeScanHasApiRoutes(routePatterns) || routeScanHasApiRoutes(websocketRoutes) || authEnabled;
   let assetRouting = resolveAssetRoutingPolicy({
     isSsr: Boolean(ssrEntry),
     hasPages,
+    hasApiRoutes,
     hasDocumentRoutes,
     hasMiddleware,
     hasWebSockets: routeScanHasDocumentRoutes(websocketRoutes),
@@ -1565,7 +1569,10 @@ export function voidPlugin(options?: {
     const previous = assetRouting;
     const requiresRestart =
       previous.workerFirst !== next.workerFirst ||
-      previous.assetConfig.not_found_handling !== next.assetConfig.not_found_handling;
+      previous.apiWorkerFirst !== next.apiWorkerFirst ||
+      previous.assetConfig.not_found_handling !== next.assetConfig.not_found_handling ||
+      JSON.stringify(previous.assetConfig.run_worker_first) !==
+        JSON.stringify(next.assetConfig.run_worker_first);
     assetRouting = next;
     if (requiresRestart) {
       applyAssetRoutingPolicy(next);

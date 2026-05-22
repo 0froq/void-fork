@@ -4,6 +4,7 @@ import type { RouteDefinition } from './router/parse-filename.ts';
 export type AssetRoutingInputs = {
   isSsr: boolean;
   hasPages: boolean;
+  hasApiRoutes?: boolean;
   hasDocumentRoutes: boolean;
   hasMiddleware: boolean;
   /** True only when a websocket route is outside /api and can own document paths. */
@@ -14,6 +15,7 @@ export type AssetRoutingInputs = {
 
 export type AssetRoutingPolicy = {
   assetConfig: AssetConfig;
+  apiWorkerFirst: boolean;
   workerFirst: boolean;
   workerSpaFallback: boolean;
 };
@@ -24,6 +26,10 @@ export function isApiRoutePattern(pattern: string): boolean {
 
 export function hasDocumentRoutes(routes: Array<Pick<RouteDefinition, 'pattern'>>): boolean {
   return routes.some((route) => !isApiRoutePattern(route.pattern));
+}
+
+export function hasApiRoutes(routes: Array<Pick<RouteDefinition, 'pattern'>>): boolean {
+  return routes.some((route) => isApiRoutePattern(route.pattern));
 }
 
 /**
@@ -37,7 +43,6 @@ export function workerOwnsHtmlRouting(inputs: AssetRoutingInputs): boolean {
     inputs.hasDocumentRoutes ||
     inputs.hasMiddleware ||
     inputs.hasWebSockets === true ||
-    inputs.authEnabled === true ||
     inputs.liveEnabled === true
   );
 }
@@ -48,11 +53,16 @@ export function resolveAssetConfig(inputs: AssetRoutingInputs): AssetConfig {
 
 export function resolveAssetRoutingPolicy(inputs: AssetRoutingInputs): AssetRoutingPolicy {
   const workerFirst = workerOwnsHtmlRouting(inputs);
+  const apiWorkerFirst =
+    !workerFirst && (inputs.hasApiRoutes === true || inputs.authEnabled === true);
   const assetConfig: AssetConfig = workerFirst
     ? { not_found_handling: 'none', run_worker_first: ['/**'] }
-    : { not_found_handling: 'single-page-application' };
+    : apiWorkerFirst
+      ? { not_found_handling: 'single-page-application', run_worker_first: ['/api', '/api/*'] }
+      : { not_found_handling: 'single-page-application' };
   return {
     assetConfig,
+    apiWorkerFirst,
     workerFirst,
     workerSpaFallback: workerFirst && !inputs.isSsr && !inputs.hasPages,
   };

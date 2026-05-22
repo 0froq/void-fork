@@ -15,6 +15,7 @@ const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '.
 const deployDriftCheckDir = join('.void', 'deploy-drift-check');
 import { intro, outro, log, note, confirm, isCancel, type SpinnerResult } from '@clack/prompts';
 import {
+  hasApiRoutes as routeScanHasApiRoutes,
   hasDocumentRoutes as routeScanHasDocumentRoutes,
   resolveAssetConfig,
 } from '../asset-routing.ts';
@@ -1539,6 +1540,8 @@ async function runFullDeploy(
   }));
   const hasPages = existsSync(paths.pagesDir);
   const hasRoutes = routeScan.routes.length > 0;
+  const hasApiRoutes =
+    routeScanHasApiRoutes(routeScan.routes) || routeScanHasApiRoutes(webSockets) || authEnabled;
   const hasDocumentRoutes = routeScanHasDocumentRoutes(routeScan.routes);
   const hasMiddleware = routeScan.middleware.length > 0;
   const hasWebSockets = webSockets.length > 0;
@@ -1671,6 +1674,7 @@ async function runFullDeploy(
   const assetConfig: AssetConfig = resolveAssetConfig({
     isSsr,
     hasPages,
+    hasApiRoutes,
     hasDocumentRoutes,
     hasMiddleware,
     hasWebSockets: routeScanHasDocumentRoutes(webSockets),

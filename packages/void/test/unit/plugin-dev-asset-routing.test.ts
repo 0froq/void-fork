@@ -65,6 +65,18 @@ function createApiWebSocketOnlyProjectRoot(): string {
   return root;
 }
 
+function createAuthOnlyProjectRoot(): string {
+  const root = createProjectRoot();
+  writeFileSync(
+    join(root, 'void.json'),
+    JSON.stringify({
+      auth: { providers: ['email'] },
+      worker: { compatibility_date: '2026-02-24' },
+    }),
+  );
+  return root;
+}
+
 function createDocumentRouteProjectRoot(): string {
   const root = createProjectRoot();
   mkdirSync(join(root, 'routes'), { recursive: true });
@@ -135,7 +147,7 @@ describe('voidPlugin dev asset routing', () => {
     expect(assets?.not_found_handling).toBe('none');
   });
 
-  it('keeps API-only projects on the static SPA fallback and clears stale worker-first rules', async () => {
+  it('keeps API-only projects on the static SPA fallback while routing API requests to the worker', async () => {
     const root = createApiOnlyProjectRoot();
     const assets = await resolveVoidPluginAssets(root, {
       assets: {
@@ -146,7 +158,7 @@ describe('voidPlugin dev asset routing', () => {
     });
 
     expect(assets?.not_found_handling).toBe('single-page-application');
-    expect(assets?.run_worker_first).toBeUndefined();
+    expect(assets?.run_worker_first).toEqual(['/api', '/api/*']);
   });
 
   it('keeps projects with only API websocket routes static-first for document requests', async () => {
@@ -154,7 +166,15 @@ describe('voidPlugin dev asset routing', () => {
     const assets = await resolveVoidPluginAssets(root);
 
     expect(assets?.not_found_handling).toBe('single-page-application');
-    expect(assets?.run_worker_first).toBeUndefined();
+    expect(assets?.run_worker_first).toEqual(['/api', '/api/*']);
+  });
+
+  it('routes managed auth endpoints to the worker without making all documents worker-first', async () => {
+    const root = createAuthOnlyProjectRoot();
+    const assets = await resolveVoidPluginAssets(root);
+
+    expect(assets?.not_found_handling).toBe('single-page-application');
+    expect(assets?.run_worker_first).toEqual(['/api', '/api/*']);
   });
 
   it('keeps API-only projects static-first when middleware directory has no active files', async () => {
@@ -165,7 +185,7 @@ describe('voidPlugin dev asset routing', () => {
     const assets = await resolveVoidPluginAssets(root);
 
     expect(assets?.not_found_handling).toBe('single-page-application');
-    expect(assets?.run_worker_first).toBeUndefined();
+    expect(assets?.run_worker_first).toEqual(['/api', '/api/*']);
   });
 
   it('routes document routes through the worker before SPA fallback HTML', async () => {
