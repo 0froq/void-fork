@@ -122,6 +122,47 @@ type UserWorkerMigrationResult = Readonly<{
   error?: string;
 }>;
 
+function asStringArray(value: unknown): ReadonlyArray<string> {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : [];
+}
+
+function normalizeUserWorkerMigrationResult(
+  value: unknown,
+  bodyPreview: string,
+): UserWorkerMigrationResult {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {
+      ok: false,
+      migrations: [],
+      error: `migration endpoint returned invalid response: ${bodyPreview}`,
+    };
+  }
+
+  const data = value as Record<string, unknown>;
+  if (Array.isArray(data.migrations)) {
+    return data as UserWorkerMigrationResult;
+  }
+
+  const applied = [...asStringArray(data.applied), ...asStringArray(data.confirmedApplied)];
+  const skipped = [...asStringArray(data.skipped), ...asStringArray(data.confirmedSkipped)];
+  if (applied.length > 0 || skipped.length > 0) {
+    return {
+      ok: data.ok !== false,
+      migrations: [
+        ...applied.map((name) => ({ name, applied: true, durationMs: 0 })),
+        ...skipped.map((name) => ({ name, applied: false, durationMs: 0 })),
+      ],
+      ...(typeof data.error === 'string' ? { error: data.error } : {}),
+    };
+  }
+
+  return {
+    ok: false,
+    migrations: [],
+    error: `migration endpoint returned invalid response: missing migrations array (${bodyPreview})`,
+  };
+}
+
 type WorkerMigrationCapabilities = Readonly<{
   protocolVersion: 2;
   endpoints: {
@@ -202,7 +243,7 @@ async function dispatchStableAppMigration(
       return reconcileStableAppMigration(userWorker, token, attemptId);
     }
     try {
-      return JSON.parse(text) as UserWorkerMigrationResult;
+      return normalizeUserWorkerMigrationResult(JSON.parse(text), text.slice(0, 500));
     } catch {
       return reconcileStableAppMigration(userWorker, token, attemptId);
     }
@@ -228,7 +269,7 @@ async function reconcileStableAppMigration(
   );
   const text = await response.text();
   try {
-    return JSON.parse(text) as UserWorkerMigrationResult;
+    return normalizeUserWorkerMigrationResult(JSON.parse(text), text.slice(0, 500));
   } catch {
     return {
       ok: false,
@@ -3463,7 +3504,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                   }
 
                   try {
-                    return JSON.parse(text) as UserWorkerMigrationResult;
+                    return normalizeUserWorkerMigrationResult(JSON.parse(text), text.slice(0, 500));
                   } catch {
                     if (migrateResponse.ok) {
                       logger.warn('migrate', 'attempt_failed', {

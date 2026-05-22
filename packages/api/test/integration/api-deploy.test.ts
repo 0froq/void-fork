@@ -17,6 +17,7 @@ import {
   resources,
   domains,
   projects,
+  projectMigrations,
   projectSecrets,
   users,
 } from '../../src/schema.ts';
@@ -1615,6 +1616,99 @@ describe('POST /projects/:id/deploy', () => {
         expect(events.at(-1)).toMatchObject({ event: 'done' });
         expect(readyCalls).toBe(1);
         expect(migrateCalls).toBe(1);
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    });
+
+    it('normalizes legacy migration responses with applied and skipped arrays', async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'migrate-legacy-shape-test');
+      mockCfApi({
+        createD1: () => cfSuccess({ uuid: 'd1-legacy-shape-uuid', name: 'test-db' }),
+      });
+
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            if (url.pathname === '/__void/ready') {
+              return Response.json({ ready: true });
+            }
+            return Response.json({
+              ok: true,
+              applied: [],
+              skipped: ['001_create_table.sql'],
+            });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+
+      try {
+        const res = await app.fetch(
+          await buildDeployRequest(env, project.id, user.jwt, {
+            manifest: {
+              version: 3,
+              bindings: { d1: ['DB'] },
+              migrations: { dialect: 'sqlite', pending: 1 },
+            },
+          }),
+          env,
+        );
+        expect(res.status).toBe(200);
+        const events = parseDeployStream(await res.text());
+        expect(events.at(-1)).toMatchObject({ event: 'done' });
+
+        const rows = await env.db
+          .select({ name: projectMigrations.name })
+          .from(projectMigrations)
+          .where(eq(projectMigrations.project_id, project.id));
+        expect(rows).toEqual([{ name: '001_create_table.sql' }]);
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    });
+
+    it('returns a clear migration error when the worker response has no migration names', async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'migrate-invalid-shape-test');
+      mockCfApi({
+        createD1: () => cfSuccess({ uuid: 'd1-invalid-shape-uuid', name: 'test-db' }),
+      });
+
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            if (url.pathname === '/__void/ready') {
+              return Response.json({ ready: true });
+            }
+            return Response.json({ ok: true });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+
+      try {
+        const res = await app.fetch(
+          await buildDeployRequest(env, project.id, user.jwt, {
+            manifest: {
+              version: 3,
+              bindings: { d1: ['DB'] },
+              migrations: { dialect: 'sqlite', pending: 1 },
+            },
+          }),
+          env,
+        );
+        expect(res.status).toBe(200);
+        const events = parseDeployStream(await res.text());
+        expect(events.at(-1)).toMatchObject({
+          event: 'error',
+          step: 'migration',
+          message:
+            'migration failed: migration endpoint returned invalid response: missing migrations array ({"ok":true})',
+        });
       } finally {
         env.DISPATCH = originalDispatch;
       }
