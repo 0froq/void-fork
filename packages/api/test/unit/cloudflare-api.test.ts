@@ -111,6 +111,24 @@ describe('Hyperdrive connection strings', () => {
     });
   });
 
+  it('defaults PostgreSQL Hyperdrive origins to port 5432 when omitted', () => {
+    expect(
+      parseHyperdriveConnectionString(
+        'postgresql://user:pass@ep-aged-field-aql3zcv7.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require',
+      ),
+    ).toEqual({
+      origin: {
+        database: 'neondb',
+        host: 'ep-aged-field-aql3zcv7.c-8.us-east-1.aws.neon.tech',
+        password: 'pass',
+        port: 5432,
+        scheme: 'postgresql',
+        user: 'user',
+      },
+      mtls: { sslmode: 'require' },
+    });
+  });
+
   it('sends parsed origin fields when creating Hyperdrive configs', async () => {
     fetchMock.mockResolvedValueOnce(cfSuccess({ id: 'hd_1', name: 'proj-hyperdrive' }));
 
@@ -154,6 +172,7 @@ describe('Hyperdrive connection strings', () => {
         database: 'app',
         host: 'db.example.com',
         password: 'pass',
+        port: 5432,
         scheme: 'postgresql',
         user: 'user',
       },

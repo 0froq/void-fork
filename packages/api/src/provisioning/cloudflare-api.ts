@@ -523,14 +523,11 @@ export function parseHyperdriveConnectionString(connectionString: string): Hyper
     );
   }
 
-  let port: number | undefined;
-  if (url.port) {
-    port = Number(url.port);
-    if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
-      throw new InvalidHyperdriveConnectionStringError(
-        'PostgreSQL connection string port is invalid.',
-      );
-    }
+  const port = url.port ? Number(url.port) : 5432;
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+    throw new InvalidHyperdriveConnectionStringError(
+      'PostgreSQL connection string port is invalid.',
+    );
   }
 
   const sslmode = url.searchParams.get('sslmode');
@@ -549,7 +546,7 @@ export function parseHyperdriveConnectionString(connectionString: string): Hyper
       database,
       host: url.hostname,
       password: decodeUrlPart(url.password),
-      ...(port === undefined ? {} : { port }),
+      port,
       scheme,
       user: decodeUrlPart(url.username),
     },
