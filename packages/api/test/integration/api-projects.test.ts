@@ -349,6 +349,7 @@ describe('PUT /projects/:id/database-url', () => {
             database: 'appdb',
             host: 'db.example.com',
             password: 'pass',
+            port: 5432,
             scheme: 'postgres',
             user: 'void_user',
           },
