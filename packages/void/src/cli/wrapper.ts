@@ -8,7 +8,8 @@ import {
   copyFileSync,
   readdirSync,
 } from 'node:fs';
-import { join, extname } from 'pathe';
+import { createRequire } from 'node:module';
+import { dirname, join, extname } from 'pathe';
 import { build } from 'vite';
 import type { MigrationPlanBundle } from '../migrations/plan.ts';
 import { readProjectPaths } from '../project-paths.ts';
@@ -119,11 +120,13 @@ export async function generateWrapper(
     migrations = collectMigrations(migrationsDir);
     migrationPlanBundle =
       features.migrationDialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
-    const handlerFilename_ =
-      features.migrationDialect === 'postgresql'
-        ? 'migration-handler-pg.mjs'
-        : 'migration-handler.mjs';
-    let handlerPath = join(import.meta.dirname, 'runtime', handlerFilename_);
+    const handlerName =
+      features.migrationDialect === 'postgresql' ? 'migration-handler-pg' : 'migration-handler';
+    const handlerFilename_ = `${handlerName}.mjs`;
+    let handlerPath = join(import.meta.dirname, '..', 'runtime', `${handlerName}.ts`);
+    if (!existsSync(handlerPath)) {
+      handlerPath = join(import.meta.dirname, 'runtime', handlerFilename_);
+    }
     if (!existsSync(handlerPath)) {
       handlerPath = join(import.meta.dirname, '..', 'runtime', handlerFilename_);
     }
@@ -165,7 +168,19 @@ async function bundlePgMigrationHandler(
   await build({
     root: tmpDir,
     logLevel: 'silent',
-    ssr: { noExternal: ['pg', 'pg-cloudflare'] },
+    resolve: {
+      alias: {
+        'pg-cloudflare': resolvePgCloudflareWorkerdEntry(handlerPath),
+        'pg-pool': resolvePgCjsDependency(handlerPath, 'pg-pool'),
+      },
+      conditions: ['workerd', 'worker', 'browser', 'module', 'import', 'default'],
+    },
+    ssr: {
+      noExternal: ['pg', 'pg-cloudflare'],
+      resolve: {
+        conditions: ['workerd', 'worker', 'browser', 'module', 'import', 'default'],
+      },
+    },
     build: {
       outDir,
       emptyOutDir: true,
@@ -174,7 +189,7 @@ async function bundlePgMigrationHandler(
       target: 'esnext',
       rollupOptions: {
         input: handlerPath,
-        external: [/^cloudflare:/, /^node:/],
+        external: [/^cloudflare:/, /^node:/, /^pgpass$/],
         output: {
           entryFileNames: '__void_migration_handler.mjs',
           chunkFileNames: '__void_migration_handler-[hash].mjs',
@@ -183,9 +198,74 @@ async function bundlePgMigrationHandler(
     },
   });
 
+  patchPgWorkerBundle(outDir);
   for (const file of readdirSync(outDir)) {
     copyFileSync(join(outDir, file), join(workerDir, file));
   }
+}
+
+function patchPgWorkerBundle(outDir: string): void {
+  for (const file of readdirSync(outDir)) {
+    if (!file.endsWith('.mjs') && !file.endsWith('.js')) {
+      continue;
+    }
+    const path = join(outDir, file);
+    let code = readFileSync(path, 'utf-8');
+    if (!code.includes('__require("pgpass")') && !code.includes('createRequire(import.meta.url)')) {
+      continue;
+    }
+    code = code
+      .replaceAll('__require("pgpass")', '__voidPgpassNoop')
+      .replace('import { createRequire } from "node:module";', '')
+      .replace(
+        'var __require = /* @__PURE__ */ createRequire(import.meta.url);',
+        pgWorkerRequireShim(),
+      );
+    code =
+      `const __voidPgpassNoop = Object.assign(function pgpass(_connectionInfo, callback) { callback(undefined); }, { warnTo() {} });\n` +
+      code;
+    writeFileSync(path, code);
+  }
+}
+
+function createPgPackageRequire(fromPath: string): NodeJS.Require {
+  const fromRequire = createRequire(fromPath);
+  return createRequire(fromRequire.resolve('pg/package.json'));
+}
+
+function resolvePgCjsDependency(fromPath: string, specifier: string): string {
+  return createPgPackageRequire(fromPath).resolve(specifier);
+}
+
+function resolvePgCloudflareWorkerdEntry(fromPath: string): string {
+  const packageJsonPath = createPgPackageRequire(fromPath).resolve('pg-cloudflare/package.json');
+  return join(dirname(packageJsonPath), 'dist', 'index.js');
+}
+
+function pgWorkerRequireShim(): string {
+  return [
+    'import * as __voidNodeCrypto from "node:crypto";',
+    'import * as __voidNodeDns from "node:dns";',
+    'import * as __voidNodeEvents from "node:events";',
+    'import * as __voidNodeFs from "node:fs";',
+    'import * as __voidNodeNet from "node:net";',
+    'import * as __voidNodeTls from "node:tls";',
+    'import * as __voidNodeUtil from "node:util";',
+    'var __voidNodeRequireModules = {',
+    '  crypto: __voidNodeCrypto,',
+    '  dns: __voidNodeDns,',
+    '  events: __voidNodeEvents,',
+    '  fs: __voidNodeFs,',
+    '  net: __voidNodeNet,',
+    '  tls: __voidNodeTls,',
+    '  util: __voidNodeUtil,',
+    '};',
+    'var __require = (id) => {',
+    '  const mod = __voidNodeRequireModules[id];',
+    '  if (mod) return mod;',
+    '  throw new Error(`Unsupported require("${id}") in Void PG migration bundle`);',
+    '};',
+  ].join('\n');
 }
 
 /**

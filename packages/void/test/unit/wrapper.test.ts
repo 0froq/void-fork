@@ -154,6 +154,21 @@ describe('generateWrapper with migrations', () => {
     expect(
       readdirSync(workerDir).some((file) => file.startsWith('__void_migration_handler-')),
     ).toBe(true);
+    const bundled = readdirSync(workerDir)
+      .map((file) => readFileSync(join(workerDir, file), 'utf-8'))
+      .join('\n');
+    expect(bundled).not.toContain('PGPASSFILE');
+    expect(bundled).not.toContain('createReadStream');
+    expect(bundled).not.toContain('__require("pgpass")');
+    expect(bundled).not.toContain('createRequire(import.meta.url)');
+    expect(bundled).not.toContain('createRequire("file:///__void_migration_handler.mjs")');
+    expect(bundled).not.toContain('node:module');
+    expect(bundled).not.toContain('empty module that is served up when outside of a workerd');
+    expect(bundled).toContain('CloudflareSocket');
+    expect(bundled).toContain('cloudflare:sockets');
+    expect(bundled).toContain('node:events');
+    expect(bundled).toContain('__voidNodeRequireModules');
+    expect(bundled).toContain('__voidPgpassNoop');
   });
 
   it('intercepts GET /__void/ready with {ready:true} when wrapper is generated', async () => {

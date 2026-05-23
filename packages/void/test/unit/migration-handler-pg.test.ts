@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { disablePgPassFallback } from '../../src/runtime/migration-handler-pg.ts';
+import { disablePgPassFallback } from '../../src/runtime/pg.ts';
 
 describe('PostgreSQL migration handler', () => {
   it('prevents pgpass fallback when Hyperdrive connection strings have no password', () => {

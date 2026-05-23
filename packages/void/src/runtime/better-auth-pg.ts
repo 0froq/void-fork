@@ -5,6 +5,7 @@ import {
   type VoidAuthEnv,
   type VoidAuthRuntimeApi,
 } from './better-auth-shared.ts';
+import { disablePgPassFallback } from './pg.ts';
 
 function resolveConnectionString(env: VoidAuthEnv): string {
   const connectionString =
@@ -56,6 +57,7 @@ async function runPostgresAuthMigrations(
 
   const { Client } = await import('pg');
   const client = new Client({ connectionString: resolveConnectionString(env) });
+  disablePgPassFallback(client);
   await client.connect();
   try {
     await applyPgAuthMigrations(
