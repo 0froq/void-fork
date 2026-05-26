@@ -45,6 +45,19 @@ import { processUsageEventBatch } from './usage-queue.ts';
 
 const app = new Hono<ApiEnv>()
 
+  // Catch-all error handler. Without this, Hono returns a plain-text
+  // `Internal Server Error` body which is opaque to the CLI and dashboard.
+  // Routes still handle known cases inline (returning 400/404/etc. with
+  // domain-specific messages); this is the safety net for unexpected
+  // throws. The body is intentionally a generic string — leaking raw
+  // `err.message` here would surface DB constraint names, library
+  // internals, connection-string fragments, etc. to API clients. The
+  // full error is logged for prod diagnosis.
+  .onError((err, context) => {
+    console.error('[api] unhandled error:', err);
+    return context.json({ error: 'Internal Server Error' }, 500);
+  })
+
   // Drizzle middleware — creates a Db instance per request
   .use('*', async (context, next) => {
     context.set('db', createDb(context.env.HYPERDRIVE.connectionString));

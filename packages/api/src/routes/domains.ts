@@ -12,6 +12,7 @@ import {
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import {
+  CloudflareApiError,
   createCustomHostname,
   getCustomHostname,
   deleteCustomHostname,
@@ -20,6 +21,11 @@ import {
 import type { DomainVerificationData } from '../schema.ts';
 
 const CNAME_TARGET = `cname.${SITE_DOMAIN}`;
+
+// Whitelist of CF status codes the create-hostname route surfaces to the
+// caller. See the catch block on `createCustomHostname` for the full
+// rationale on why 401/403/404 are NOT in this set.
+const CF_PASSTHROUGH_STATUSES = new Set<number>([400, 409, 422, 429]);
 
 const app = new Hono<ApiEnv>()
 
@@ -58,12 +64,43 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'hostname already in use' }, 409);
     }
 
-    // Create custom hostname via CF API
-    let cfHostname = await createCustomHostname(
-      context.env.CF_ZONE_ID,
-      context.env.CF_API_TOKEN,
-      hostname,
-    );
+    // Create custom hostname via CF API. CF's 4xx responses are not all
+    // semantically equivalent and only a subset can be safely surfaced to
+    // the caller:
+    //
+    //   400 — hostname validation (reserved TLDs, malformed names): caller-fixable
+    //   409 — hostname already registered to another account: caller-fixable
+    //   422 — other validation: caller-fixable
+    //   429 — CF rate limit: transient; caller should back off (retry-after)
+    //
+    // 401 and 403 BOTH commonly indicate our `CF_API_TOKEN` is broken or
+    // under-scoped — a server-config fault the caller can't act on, and
+    // whose CF message ("Authentication error", "permission denied", etc.)
+    // would leak internal state if surfaced. 403 is also returned for some
+    // caller-fixable cases (SaaS zone-apex collision), but the HTTP status
+    // alone can't disambiguate — discriminating would need CF's internal
+    // error code (`errors[].code`), which `CloudflareApiError` does not
+    // currently preserve. Until it does, the conservative choice is to
+    // treat 403 like 401 and re-throw → onError → generic 500.
+    //
+    // Same for 404 (could be zone-not-found = misconfig) and any other
+    // status not in the whitelist. CF 5xx (upstream degraded) also re-throws.
+    //
+    // The CF hostname has not been created when this catch fires, so there
+    // is no orphan to clean up.
+    let cfHostname;
+    try {
+      cfHostname = await createCustomHostname(
+        context.env.CF_ZONE_ID,
+        context.env.CF_API_TOKEN,
+        hostname,
+      );
+    } catch (err) {
+      if (err instanceof CloudflareApiError && CF_PASSTHROUGH_STATUSES.has(err.status)) {
+        return context.json({ error: err.message }, err.status as 400 | 409 | 422 | 429);
+      }
+      throw err;
+    }
 
     // CF populates `ssl.validation_records` asynchronously; poll briefly so the
     // create response includes them. See helper for the full rationale.

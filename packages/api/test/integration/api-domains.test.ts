@@ -19,6 +19,7 @@ import {
   createTestProject,
   mockCfApi,
   cfSuccess,
+  cfError,
   type TestEnv,
 } from './helpers.ts';
 
@@ -599,6 +600,201 @@ describe('POST /projects/:id/domains', () => {
     // returned cleanly, it just didn't observe records within the deadline.
     const warnMessages = warn.mock.calls.map((call) => String(call[0] ?? ''));
     expect(warnMessages.some((msg) => msg.includes('CF API error'))).toBe(false);
+  });
+
+  // Regression: CF rejects certain hostnames (e.g. reserved `.test` TLD per
+  // RFC 2606) with a non-success envelope. The route used to let the resulting
+  // `CloudflareApiError` propagate to Hono's default handler, which returned
+  // `500 Internal Server Error` as plain text — opaque to the user and
+  // mis-attributing a 4xx client-input problem as a 5xx server fault.
+  it('returns 400 with the CF error message when CF rejects the hostname', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cf-rejects');
+    mockCfApi({
+      createCustomHostname: () => cfError('hostname is not a valid domain', 400),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'foo.test' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('hostname is not a valid domain');
+
+    // No orphan DB row when CF rejects.
+    const [row] = await env.db.select().from(domains).where(eq(domains.hostname, 'foo.test'));
+    expect(row).toBeUndefined();
+  });
+
+  // Defense-in-depth: any unexpected throw inside an API route must surface as
+  // a structured JSON 500 with a stable, GENERIC body — not Hono's bare
+  // `Internal Server Error` text and not the raw `err.message` (which could
+  // leak DB constraint names, connection strings, library internals, etc.).
+  // The thrown error is logged server-side for prod diagnosis.
+  it('returns a generic JSON 500 (no err.message leak) for unexpected route errors', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'unexpected-throw');
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const secretMessage = 'boom: connection string postgres://user:hunter2@host/db failed';
+    mockCfApi({
+      createCustomHostname: () => {
+        throw new Error(secretMessage);
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'unexpected.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(500);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Internal Server Error');
+    // The raw exception message must NOT appear in the wire response.
+    expect(JSON.stringify(body)).not.toContain('hunter2');
+    expect(JSON.stringify(body)).not.toContain('postgres://');
+
+    // The thrown error must be logged so prod incidents are diagnosable.
+    const errMessages = errSpy.mock.calls.map((call) =>
+      call.map((arg) => (arg instanceof Error ? arg.message : String(arg))).join(' '),
+    );
+    expect(errMessages.some((msg) => msg.includes(secretMessage))).toBe(true);
+  });
+
+  // Regression: CF 401 means our `CF_API_TOKEN` is misconfigured — server
+  // fault, caller can't fix it. The caller MUST NOT see a 401 (they ARE
+  // authenticated to our API) and the CF message MUST NOT leak. The error
+  // re-throws to onError and becomes a generic 500.
+  it('returns 500 (not 401) when CF responds with 401 (our token broken)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cf-401');
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockCfApi({
+      createCustomHostname: () => cfError('Authentication error', 401),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'cf-auth-fail.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Internal Server Error');
+
+    // Still no orphan DB row.
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'cf-auth-fail.example.com'));
+    expect(row).toBeUndefined();
+
+    // The CF error is logged for ops.
+    const errMessages = errSpy.mock.calls.map((call) =>
+      call.map((arg) => (arg instanceof Error ? arg.message : String(arg))).join(' '),
+    );
+    expect(errMessages.some((msg) => msg.includes('Authentication error'))).toBe(true);
+  });
+
+  // Regression: CF 403 is ambiguous — it can mean a caller-fixable rule
+  // (e.g. custom hostname matching the SaaS zone apex) OR an auth-class
+  // failure (under-scoped `CF_API_TOKEN`, CF error code 10000). The HTTP
+  // status alone can't disambiguate. To avoid leaking auth-error text
+  // ("permission denied", token details, etc.) the route treats 403 the
+  // same as 401: re-throw to onError → generic 500 with the CF message
+  // preserved server-side in logs.
+  it('returns 500 (not 403) when CF responds with 403 — auth/rule ambiguity', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cf-403');
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cfAuthMessage = 'Authentication error (10000): API token under-scoped';
+    mockCfApi({
+      createCustomHostname: () => cfError(cfAuthMessage, 403),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'cf-403-case.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Internal Server Error');
+    // CF auth text MUST NOT leak in the wire body.
+    expect(JSON.stringify(body)).not.toContain('Authentication');
+    expect(JSON.stringify(body)).not.toContain('under-scoped');
+
+    // No orphan DB row when CF rejects pre-insert.
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'cf-403-case.example.com'));
+    expect(row).toBeUndefined();
+
+    // The CF error is still logged for ops to diagnose token issues.
+    const errMessages = errSpy.mock.calls.map((call) =>
+      call.map((arg) => (arg instanceof Error ? arg.message : String(arg))).join(' '),
+    );
+    expect(errMessages.some((msg) => msg.includes(cfAuthMessage))).toBe(true);
+  });
+
+  // CF returns 429 when we hit a rate limit. The caller should see 429 so its
+  // retry-after logic kicks in (rather than treating a transient throttle as
+  // a permanent client error).
+  it('passes through CF 429 (rate limit) so the caller can back off', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cf-429');
+    mockCfApi({
+      createCustomHostname: () => cfError('rate limit exceeded', 429),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'rate-limited.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('rate limit exceeded');
   });
 });
 
