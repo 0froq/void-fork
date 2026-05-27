@@ -9,11 +9,11 @@ allowBuilds:
 
 catalog:
   '@cloudflare/workers-types': ^4.20260508.1
-  '@typescript/native-preview': 7.0.0-dev.20260514.1
+  '@typescript/native-preview': 7.0.0-dev.20260523.1
   hono: 4.12.18
   wrangler: ^4.90.0
-  vite: npm:@voidzero-dev/vite-plus-core@0.1.21
-  vitest: npm:@voidzero-dev/vite-plus-test@0.1.21
+  vite: npm:@voidzero-dev/vite-plus-core@0.1.22
+  vitest: npm:@voidzero-dev/vite-plus-test@0.1.22
   vite-plus: ^0.1.20
 
 onlyBuiltDependencies:
@@ -24,6 +24,7 @@ onlyBuiltDependencies:
 overrides:
   vite: 'catalog:'
   vitest: 'catalog:'
+  hono: 'catalog:'
   void: link:framework/packages/void
   '@void/react': link:framework/packages/react
   '@void/vue': link:framework/packages/vue

@@ -28,7 +28,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@cloudflare/sandbox": "0.10.1",
+    "@cloudflare/sandbox": "0.10.2",
     "@voidcloud/isr-shared": "workspace:*",
     "aws4fetch": "^1.0.20",
     "blake3-jit": "^1.1.0",
@@ -36,7 +36,7 @@
     "drizzle-orm": "^0.45.2",
     "hono": "catalog:",
     "mime": "^4.1.0",
-    "pg": "8.20.0"
+    "pg": "8.21.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
