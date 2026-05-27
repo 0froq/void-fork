@@ -2337,12 +2337,19 @@ export default config;
         .mockResolvedValueOnce('sqlite')
         .mockResolvedValueOnce('generic')
         .mockResolvedValueOnce('proj_456');
-      mockConfirm.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      mockConfirm
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(true);
 
       await runInitCommand(root);
 
       expect(mockConfirm.mock.calls[1]?.[0]).toMatchObject({
         message: 'Link your Void project now?',
+      });
+      expect(mockConfirm.mock.calls[2]?.[0]).toMatchObject({
+        message:
+          'Linking to an existing project. Running `void deploy` will overwrite the current deployment of existing-app.void.app. Continue?',
       });
       expect(mockRunLogin).not.toHaveBeenCalled();
       expect(mockSaveToken).not.toHaveBeenCalled();
