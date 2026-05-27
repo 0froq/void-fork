@@ -1,5 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { stripVTControlCharacters } from 'node:util';
 import { join } from 'pathe';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
@@ -77,7 +78,9 @@ describe('runLink', () => {
       projectId: 'proj_1',
       slug: 'existing-app',
     });
-    expect(mockOutro).toHaveBeenCalledWith('Linked to existing-app.void.app');
+    expect(stripVTControlCharacters(String(mockOutro.mock.calls[0]?.[0]))).toBe(
+      'Linked to existing-app.void.app',
+    );
   });
 
   it('does not write project config when the existing-project guard is declined', async () => {
