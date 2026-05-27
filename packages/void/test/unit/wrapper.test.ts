@@ -101,6 +101,32 @@ describe('generateWrapper with migrations', () => {
     expect(existsSync(join(workerDir, '__void_migration_handler.mjs'))).toBe(true);
   });
 
+  it('bundles the SQLite migration handler into a self-contained worker module', async () => {
+    mkdirSync(workerDir, { recursive: true });
+    writeFileSync(
+      join(workerDir, 'index.mjs'),
+      'export default { fetch() { return new Response("ok"); } };',
+    );
+
+    mkdirSync(join(projectRoot, 'db', 'migrations'), { recursive: true });
+    writeFileSync(
+      join(projectRoot, 'db', 'migrations', '001_test.sql'),
+      'CREATE TABLE test (id INTEGER PRIMARY KEY);',
+    );
+
+    await generateWrapper(workerDir, 'index.mjs', projectRoot, {
+      ...base,
+      hasMigrations: true,
+      migrationDialect: 'sqlite',
+    });
+
+    const handler = readFileSync(join(workerDir, '__void_migration_handler.mjs'), 'utf-8');
+    expect(handler).not.toMatch(/from\s+["']\.\.\//);
+    expect(handler).not.toContain('../migrations/canonical-json');
+    expect(handler).not.toContain('../canonical-json-');
+    expect(handler).toContain('function canonicalJson');
+  });
+
   it('includes migrations JSON in wrapper source', async () => {
     mkdirSync(workerDir, { recursive: true });
     writeFileSync(

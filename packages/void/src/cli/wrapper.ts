@@ -139,11 +139,12 @@ export async function generateWrapper(
         `Migration handler not found: ${handlerFilename_}. Run "pnpm -C packages/void build" first.`,
       );
     }
-    if (features.migrationDialect === 'postgresql') {
-      await bundlePgMigrationHandler(root, workerDir, handlerPath);
-    } else {
-      copyFileSync(handlerPath, join(workerDir, '__void_migration_handler.mjs'));
-    }
+    await bundleMigrationHandler(
+      root,
+      workerDir,
+      handlerPath,
+      features.migrationDialect ?? 'sqlite',
+    );
   }
 
   // Write wrapper in place of original entry
@@ -157,30 +158,36 @@ export async function generateWrapper(
   writeFileSync(join(workerDir, workerMain), wrapperSource);
 }
 
-async function bundlePgMigrationHandler(
+async function bundleMigrationHandler(
   root: string,
   workerDir: string,
   handlerPath: string,
+  dialect: 'sqlite' | 'postgresql',
 ): Promise<void> {
   const tmpDir = join(root, '.void', 'migration-handler');
   mkdirSync(tmpDir, { recursive: true });
   const outDir = join(tmpDir, 'out');
+  const isPostgresql = dialect === 'postgresql';
   await build({
     root: tmpDir,
     logLevel: 'silent',
-    resolve: {
-      alias: {
-        'pg-cloudflare': resolvePgCloudflareWorkerdEntry(handlerPath),
-        'pg-pool': resolvePgCjsDependency(handlerPath, 'pg-pool'),
-      },
-      conditions: ['workerd', 'worker', 'browser', 'module', 'import', 'default'],
-    },
-    ssr: {
-      noExternal: ['pg', 'pg-cloudflare'],
-      resolve: {
-        conditions: ['workerd', 'worker', 'browser', 'module', 'import', 'default'],
-      },
-    },
+    resolve: isPostgresql
+      ? {
+          alias: {
+            'pg-cloudflare': resolvePgCloudflareWorkerdEntry(handlerPath),
+            'pg-pool': resolvePgCjsDependency(handlerPath, 'pg-pool'),
+          },
+          conditions: ['workerd', 'worker', 'browser', 'module', 'import', 'default'],
+        }
+      : undefined,
+    ssr: isPostgresql
+      ? {
+          noExternal: ['pg', 'pg-cloudflare'],
+          resolve: {
+            conditions: ['workerd', 'worker', 'browser', 'module', 'import', 'default'],
+          },
+        }
+      : undefined,
     build: {
       outDir,
       emptyOutDir: true,
@@ -198,7 +205,9 @@ async function bundlePgMigrationHandler(
     },
   });
 
-  patchPgWorkerBundle(outDir);
+  if (isPostgresql) {
+    patchPgWorkerBundle(outDir);
+  }
   for (const file of readdirSync(outDir)) {
     copyFileSync(join(outDir, file), join(workerDir, file));
   }
