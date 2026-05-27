@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import {
   appendInlineQuery,
   DEV_CSS_ASSET_ENDPOINT,
@@ -67,6 +67,20 @@ function createConfiguredPlugin(address = '::', resolvedLocalUrl?: string) {
 function loadDevAssetModule(plugin: ReturnType<typeof createConfiguredPlugin>): string {
   const load = plugin.load as (this: unknown, id: string) => string;
   return load.call({}, `\0${DEV_CSS_ASSET_MODULE_ID}`);
+}
+
+async function importDevAssetModule(plugin: ReturnType<typeof createConfiguredPlugin>): Promise<{
+  getVoidPagesDevCss(
+    request: Request,
+    env: { ASSETS?: { fetch(request: Request): Promise<Response> } },
+    payload: unknown,
+  ): Promise<Array<{ css: string; id: string; url: string }>>;
+}> {
+  const code = loadDevAssetModule(plugin);
+  const encoded = Buffer.from(`${code}\n//# sourceURL=void-pages-dev-assets-test.mjs`).toString(
+    'base64',
+  );
+  return import(`data:text/javascript;base64,${encoded}`);
 }
 
 function createResponse() {
@@ -225,6 +239,84 @@ describe('pages dev CSS assets', () => {
     expect(code).toContain('new URL(ENDPOINT, INTERNAL_ORIGIN)');
     expect(code).toContain('env?.ASSETS');
     expect(code).toContain('new URL(ENDPOINT, request.url)');
+  });
+
+  it('uses the internal Vite origin before the ASSETS binding in dev', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const originalFetch = globalThis.fetch;
+    const plugin = createConfiguredPlugin();
+    const mod = await importDevAssetModule(plugin);
+    const expectedAssets = [{ url: '/src/page.css', id: '/root/src/page.css', css: '.page{}' }];
+    const assetsFetch = vi.fn(async () => {
+      throw new Error('ASSETS should not handle the dev CSS endpoint when internal fetch works.');
+    });
+    const globalFetch = vi.fn(async (request: Request) => {
+      expect(request.url).toBe('http://127.0.0.1:6199/__void/dev/pages-css');
+      expect(request.signal.aborted).toBe(false);
+      return Response.json({ assets: expectedAssets });
+    });
+    globalThis.fetch = globalFetch as typeof fetch;
+
+    try {
+      const resultPromise = mod.getVoidPagesDevCss(
+        new Request('https://app.local/dashboard'),
+        {
+          ASSETS: { fetch: assetsFetch },
+        },
+        { kind: 'pages', componentId: '/dashboard', rootPhases: [['/src/page.ts']] },
+      );
+
+      await expect(resultPromise).resolves.toEqual(expectedAssets);
+      expect(globalFetch).toHaveBeenCalledTimes(1);
+      expect(assetsFetch).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+      warn.mockRestore();
+    }
+  });
+
+  it('uses a fresh abort signal for fallback attempts', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const originalFetch = globalThis.fetch;
+    const plugin = createConfiguredPlugin();
+    const mod = await importDevAssetModule(plugin);
+    const expectedAssets = [{ url: '/src/page.css', id: '/root/src/page.css', css: '.page{}' }];
+    const globalFetch = vi.fn(
+      (request: Request) =>
+        new Promise<Response>((_, reject) => {
+          request.signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('The operation was aborted', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+    const assetsFetch = vi.fn(async (request: Request) => {
+      expect(request.signal.aborted).toBe(false);
+      return Response.json({ assets: expectedAssets });
+    });
+    globalThis.fetch = globalFetch as typeof fetch;
+
+    try {
+      const resultPromise = mod.getVoidPagesDevCss(
+        new Request('https://app.local/dashboard'),
+        { ASSETS: { fetch: assetsFetch } },
+        { kind: 'pages', componentId: '/dashboard', rootPhases: [['/src/page.ts']] },
+      );
+
+      await vi.advanceTimersByTimeAsync(1500);
+
+      await expect(resultPromise).resolves.toEqual(expectedAssets);
+      expect(globalFetch).toHaveBeenCalledTimes(1);
+      expect(assetsFetch).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('brackets IPv6 internal Vite origins', () => {

@@ -429,26 +429,25 @@ async function readDevCssResponse(response) {
 }
 
 export async function getVoidPagesDevCss(request, env, payload) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1500);
   const attempts = [];
+  attempts.push({
+    fetcher: "global",
+    label: INTERNAL_ORIGIN,
+    url: new URL(ENDPOINT, INTERNAL_ORIGIN).toString(),
+  });
   if (env?.ASSETS && typeof env.ASSETS.fetch === "function") {
     attempts.push({
       fetcher: env.ASSETS,
       label: "ASSETS",
       url: new URL(ENDPOINT, request.url).toString(),
     });
-  } else {
-    attempts.push({
-      fetcher: "global",
-      label: INTERNAL_ORIGIN,
-      url: new URL(ENDPOINT, INTERNAL_ORIGIN).toString(),
-    });
   }
   try {
     let lastError;
     let lastLabel = "unknown";
     for (const attempt of attempts) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1500);
       try {
         const request = createDevCssRequest(attempt.url, payload, controller.signal);
         const response =
@@ -459,6 +458,8 @@ export async function getVoidPagesDevCss(request, env, payload) {
       } catch (error) {
         lastError = error;
         lastLabel = attempt.label;
+      } finally {
+        clearTimeout(timeout);
       }
     }
     throw new Error(
@@ -467,8 +468,6 @@ export async function getVoidPagesDevCss(request, env, payload) {
   } catch (error) {
     console.warn("[void] dev CSS collection failed:", error instanceof Error ? error.message : String(error));
     return [];
-  } finally {
-    clearTimeout(timeout);
   }
 }
 `;
