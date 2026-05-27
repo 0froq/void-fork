@@ -69,6 +69,7 @@ type RoutingPluginOptions = {
   output?: 'server' | 'static';
   prerenderPaths?: Array<string>;
   remoteMode?: boolean;
+  bindingNames?: { d1?: string; kv?: string; r2?: string };
   target?: 'node' | 'bun' | 'deno';
   /**
    * Full `routing` section from `void.json`. The plugin merges
@@ -171,6 +172,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
   };
   const remote = options.remoteMode
     ? {
+        bindingNames: options.bindingNames,
         remotePath: resolveFile('#self/remote'),
         envPath: resolveFile('#self/_env'),
       }
@@ -205,6 +207,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     nodeTarget: !!options.target,
     explicitPrerenderPaths: options.prerenderPaths,
     bindingHandlerPath: options.target ? undefined : resolveFile('#self/remote/binding-handler'),
+    bindingNames: options.bindingNames,
   };
 
   // Static `_redirects` / `_headers` are always merged on every target so
