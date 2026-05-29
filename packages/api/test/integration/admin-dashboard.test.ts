@@ -933,6 +933,28 @@ describe('GET /admin/deployments/:id (logs section)', () => {
     expect(html).toContain('log-entries');
   });
 
+  test('logs script empty-state branch references the in-scope filter variable (regression: "q is not defined")', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-logsui3',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const project = await createTestProject(env.db, admin.id, 'logsui3-proj');
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+
+    const res = await req(`/admin/deployments/${deployment.id}`, admin.adminJwt);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    // The "No logs found" branch runs on initial load when a deployment has no
+    // logs in range. It must read the declared `query` var, not a stray `q`,
+    // otherwise renderData throws ReferenceError -> "Failed to load logs: q is not defined".
+    expect(html).toContain('(query ?');
+    expect(html).not.toContain('(q ?');
+  });
+
   test('does not render logs section for failed deployment', async () => {
     const admin = await createTestUser(
       env.db,

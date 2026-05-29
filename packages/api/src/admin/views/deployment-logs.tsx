@@ -150,7 +150,7 @@ export function DeploymentLogs({ deploymentId }: { deploymentId: string }) {
     var filtered = query ? data.filter(function(entry) { return entryText(entry).indexOf(query) !== -1; }) : data;
     container.innerHTML = '';
     if (filtered.length === 0) {
-      container.innerHTML = '<p style="color:#999;font-size:0.8rem">No logs found' + (q ? ' matching filter' : ' for this time range') + '. New logs may take up to 2 minutes to appear.</p>';
+      container.innerHTML = '<p style="color:#999;font-size:0.8rem">No logs found' + (query ? ' matching filter' : ' for this time range') + '. New logs may take up to 2 minutes to appear.</p>';
       return;
     }
     filtered.forEach(function(entry) {
