@@ -316,6 +316,20 @@ export const projectMigrations = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// project_database_credentials
+// ---------------------------------------------------------------------------
+export const projectDatabaseCredentials = pgTable('project_database_credentials', {
+  project_id: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  ciphertext: text('ciphertext').notNull(),
+  iv: text('iv').notNull(),
+  key_version: text('key_version').notNull(),
+  created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+  updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
 // invitations
 // ---------------------------------------------------------------------------
 export const invitations = pgTable(

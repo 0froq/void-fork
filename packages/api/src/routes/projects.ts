@@ -28,11 +28,14 @@ import {
   recordMigrationRenames,
   migrationRenameExists,
   invalidateMigrationRenamesForOldName,
+  upsertProjectDatabaseUrl,
+  getProjectDatabaseUrl,
 } from '../db.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
 import { validateSubmittedExecutionPlans } from '../migrations/execution-plan.ts';
 import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner.ts';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
+import { encryptProjectSecret, decryptProjectSecret } from '../project-secrets.ts';
 import {
   CloudflareApiError,
   InvalidHyperdriveConnectionStringError,
@@ -1754,7 +1757,7 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'Invalid connection string' }, 400);
     }
 
-    const { createHyperdrive, getHyperdriveByName } =
+    const { createHyperdrive, updateHyperdrive, getHyperdriveByName } =
       await import('../provisioning/cloudflare-api.ts');
     const { createResource, getProjectResources } = await import('../db.ts');
 
@@ -1780,10 +1783,20 @@ const app = new Hono<ApiEnv>()
       hyperdriveId = hd.id;
     } catch (err: unknown) {
       if (isAlreadyExistsError(err)) {
+        // CF already has a Hyperdrive for this name (orphaned from a prior partial failure).
+        // Look up its ID and update it with the submitted connectionString so CF reflects
+        // what we're about to store — never persist a URL that CF hasn't accepted.
         try {
           const hd = await getHyperdriveByName(
             context.env.CF_ACCOUNT_ID,
             context.env.CF_API_TOKEN,
+            resourceName,
+          );
+          await updateHyperdrive(
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
+            hd.id,
+            connectionString,
             resourceName,
           );
           hyperdriveId = hd.id;
@@ -1801,6 +1814,34 @@ const app = new Hono<ApiEnv>()
         }
         throw err;
       }
+    }
+
+    // CF accepted the connection string — persist it as our cached copy.
+    // CF is the source of truth for production routing; this row is the URL
+    // that CF accepted and is now serving. If this upsert fails (rare),
+    // instruct the user to re-run `void db set-url` to re-sync.
+    try {
+      const encrypted = await encryptProjectSecret(
+        context.env,
+        projectId,
+        'database-url',
+        connectionString,
+      );
+      await upsertProjectDatabaseUrl(
+        context.get('db'),
+        projectId,
+        encrypted.ciphertext,
+        encrypted.iv,
+        encrypted.keyVersion,
+      );
+    } catch {
+      return context.json(
+        {
+          error:
+            'Failed to persist database URL after Cloudflare accepted it. Run `void db set-url` again to re-sync.',
+        },
+        500,
+      );
     }
 
     await createResource(context.get('db'), projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
@@ -1859,10 +1900,20 @@ const app = new Hono<ApiEnv>()
         hyperdriveId = hd.id;
       } catch (err: unknown) {
         if (isAlreadyExistsError(err)) {
+          // CF already has a Hyperdrive for this name (orphaned from a prior partial failure).
+          // Look up its ID and update it with the submitted connectionString so CF reflects
+          // what we're about to store — never persist a URL that CF hasn't accepted.
           try {
             const hd = await getHyperdriveByName(
               context.env.CF_ACCOUNT_ID,
               context.env.CF_API_TOKEN,
+              resourceName,
+            );
+            await updateHyperdrive(
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
+              hd.id,
+              connectionString,
               resourceName,
             );
             hyperdriveId = hd.id;
@@ -1884,7 +1935,67 @@ const app = new Hono<ApiEnv>()
       await createResource(context.get('db'), projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
     }
 
+    // CF accepted the connection string — persist it as our cached copy.
+    // CF is the source of truth for production routing; this row is the URL
+    // that CF accepted and is now serving. If this upsert fails (rare),
+    // instruct the user to re-run `void db set-url` to re-sync.
+    try {
+      const encrypted = await encryptProjectSecret(
+        context.env,
+        projectId,
+        'database-url',
+        connectionString,
+      );
+      await upsertProjectDatabaseUrl(
+        context.get('db'),
+        projectId,
+        encrypted.ciphertext,
+        encrypted.iv,
+        encrypted.keyVersion,
+      );
+    } catch {
+      return context.json(
+        {
+          error:
+            'Failed to persist database URL after Cloudflare accepted it. Run `void db set-url` again to re-sync.',
+        },
+        500,
+      );
+    }
+
     return context.json({ ok: true });
+  })
+
+  // Retrieve the stored (encrypted-at-rest) PostgreSQL connection string
+  .get('/:id/database-url', async (context) => {
+    const projectId = context.req.param('id');
+    const project = await getProject(context.get('db'), projectId);
+    if (!project) {
+      return context.json({ error: 'project not found' }, 404);
+    }
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
+    }
+
+    const row = await getProjectDatabaseUrl(context.get('db'), projectId);
+    if (!row) {
+      return context.json(
+        {
+          error: 'database_url_not_stored',
+          message:
+            "This project's database URL is not stored on the platform yet. Run `void db set-url` once to populate it.",
+        },
+        404,
+      );
+    }
+
+    const url = await decryptProjectSecret(context.env, projectId, {
+      name: 'database-url',
+      ciphertext: row.ciphertext,
+      iv: row.iv,
+      key_version: row.key_version,
+    });
+    return context.json({ url });
   });
 
 function parseDuration(input: string): number | null {

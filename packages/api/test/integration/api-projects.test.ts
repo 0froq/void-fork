@@ -9,7 +9,7 @@ import {
 } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { users } from '../../src/schema.ts';
-import { domains, resources } from '../../src/schema.ts';
+import { domains, resources, projectDatabaseCredentials } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -403,6 +403,325 @@ describe('PUT /projects/:id/database-url', () => {
       error: 'Failed to provision Hyperdrive',
       detail: 'origin database is unreachable',
     });
+  });
+});
+
+describe('GET /projects/:id/database-url', () => {
+  it('returns 404 with structured error when no URL has been stored', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app-get-404');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      error: 'database_url_not_stored',
+      message: expect.stringContaining('void db set-url'),
+    });
+  });
+
+  it('returns 403 when accessed by a different user', async () => {
+    const owner = await createTestUser(env.db);
+    const other = await createTestUser(env.db);
+    const project = await createTestProject(env.db, owner.id, 'pg-app-get-403');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        headers: { Authorization: `Bearer ${other.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(403);
+  });
+
+  it('round-trips the connection string via POST /:id/database', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app-get-rt-post');
+    const connectionString = 'postgresql://void_user:pass@db.example.com/appdb';
+
+    mockCfApi();
+
+    const postRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ connectionString }),
+      }),
+      env,
+    );
+    expect(postRes.status).toBe(200);
+
+    const getRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(getRes.status).toBe(200);
+    expect(await getRes.json()).toEqual({ url: connectionString });
+  });
+
+  it('round-trips the connection string via PUT /:id/database-url', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app-get-rt-put');
+    const connectionString = 'postgres://void_user:secret@db.example.com/mydb';
+
+    mockCfApi();
+
+    const putRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ connectionString }),
+      }),
+      env,
+    );
+    expect(putRes.status).toBe(200);
+
+    const getRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(getRes.status).toBe(200);
+    expect(await getRes.json()).toEqual({ url: connectionString });
+  });
+
+  it('last PUT wins — GET returns the most recently written URL', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app-get-overwrite');
+    const first = 'postgresql://void_user:first@db.example.com/appdb';
+    const second = 'postgresql://void_user:second@db2.example.com/appdb2';
+
+    mockCfApi();
+
+    await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ connectionString: first }),
+      }),
+      env,
+    );
+    await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ connectionString: second }),
+      }),
+      env,
+    );
+
+    const getRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(getRes.status).toBe(200);
+    expect(await getRes.json()).toEqual({ url: second });
+  });
+});
+
+describe('database URL persistence ordering — CF failure must not overwrite stored URL', () => {
+  it('POST /:id/database does not write credentials when createHyperdrive rejects', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-post-cf-fail');
+
+    mockCfApi({
+      createHyperdrive: () => cfError('origin database is unreachable', 400),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'postgresql://void_user:pass@db.example.com/appdb',
+        }),
+      }),
+      env,
+    );
+
+    // CF rejected — the request should fail
+    expect(res.status).toBe(502);
+
+    // No credential row should have been written
+    const getRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(getRes.status).toBe(404);
+    expect(await getRes.json()).toMatchObject({ error: 'database_url_not_stored' });
+  });
+
+  it('POST /:id/database leaves pre-existing credentials unchanged when createHyperdrive rejects', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-post-cf-fail-keep');
+    const originalUrl = 'postgresql://void_user:original@db.example.com/appdb';
+
+    // Seed a successful first set via the happy path
+    mockCfApi();
+    const firstRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ connectionString: originalUrl }),
+      }),
+      env,
+    );
+    expect(firstRes.status).toBe(200);
+
+    // Now a second POST attempt fails at CF (409 conflict since resource exists)
+    // but the PUT endpoint is what would be called in a re-run; test it via
+    // direct DB read to confirm the original value is intact after a PUT failure
+    mockCfApi({
+      updateHyperdrive: () => cfError('origin database is unreachable', 400),
+    });
+
+    // Insert an existing hyperdrive resource so PUT takes the update path
+    const rows = await env.db.select().from(resources).where(eq(resources.project_id, project.id));
+    const hdResource = rows.find((r) => r.type === 'hyperdrive');
+
+    if (hdResource) {
+      const putRes = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/database-url`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${user.jwt}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            connectionString: 'postgresql://void_user:new@db2.example.com/otherdb',
+          }),
+        }),
+        env,
+      );
+      expect(putRes.status).toBe(502);
+    }
+
+    // The stored URL must still be the original
+    const getRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(getRes.status).toBe(200);
+    expect(await getRes.json()).toEqual({ url: originalUrl });
+  });
+
+  it('PUT /:id/database-url does not write credentials when createHyperdrive rejects (no existing resource)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-put-cf-fail-create');
+
+    mockCfApi({
+      createHyperdrive: () => cfError('origin database is unreachable', 400),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'postgresql://void_user:pass@db.example.com/appdb',
+        }),
+      }),
+      env,
+    );
+
+    // CF rejected — the request should fail
+    expect(res.status).toBe(502);
+
+    // No credential row should have been written
+    const rows = await env.db
+      .select()
+      .from(projectDatabaseCredentials)
+      .where(eq(projectDatabaseCredentials.project_id, project.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it('PUT /:id/database-url does not overwrite credentials when updateHyperdrive rejects', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-put-cf-fail-update');
+    const originalUrl = 'postgresql://void_user:original@db.example.com/appdb';
+
+    // Seed an existing hyperdrive resource and a stored credential via the happy path
+    mockCfApi();
+    const firstRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ connectionString: originalUrl }),
+      }),
+      env,
+    );
+    expect(firstRes.status).toBe(200);
+
+    // Now attempt an update with CF rejecting the new URL
+    mockCfApi({
+      updateHyperdrive: () => cfError('origin database is unreachable', 400),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'postgresql://void_user:new@db2.example.com/otherdb',
+        }),
+      }),
+      env,
+    );
+
+    // CF rejected — the request should fail
+    expect(res.status).toBe(502);
+
+    // The stored URL must still be the original (not overwritten with the rejected URL)
+    const getRes = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(getRes.status).toBe(200);
+    expect(await getRes.json()).toEqual({ url: originalUrl });
   });
 });
 

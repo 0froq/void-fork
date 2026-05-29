@@ -134,6 +134,13 @@
       "when": 1779152519000,
       "tag": "0018_project_migrations",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1779874928068,
+      "tag": "0019_project_database_credentials",
+      "breakpoints": true
     }
   ]
 }

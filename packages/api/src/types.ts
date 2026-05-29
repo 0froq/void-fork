@@ -10,6 +10,7 @@ import type {
   platformEvents,
   invitations,
   projectMigrations,
+  projectDatabaseCredentials,
 } from './schema.ts';
 
 export type InvitationStatus = 'pending' | 'accepted' | 'revoked';
@@ -25,6 +26,7 @@ export type Domain = InferSelectModel<typeof domains>;
 export type PlatformEvent = InferSelectModel<typeof platformEvents>;
 export type Invitation = InferSelectModel<typeof invitations>;
 export type ProjectMigration = InferSelectModel<typeof projectMigrations>;
+export type ProjectDatabaseCredentials = InferSelectModel<typeof projectDatabaseCredentials>;
 
 export type MigrationMeta = Readonly<{
   name: string;
