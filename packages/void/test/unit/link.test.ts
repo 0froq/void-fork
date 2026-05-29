@@ -43,6 +43,25 @@ vi.mock('../../src/cli/client', () => ({
   },
 }));
 
+// Disable colors so assertions can match plain strings without ANSI escape codes.
+vi.mock('picocolors', () => {
+  const id = (s: string) => s;
+  return {
+    default: {
+      blue: id,
+      bold: id,
+      cyan: id,
+      dim: id,
+      gray: id,
+      green: id,
+      red: id,
+      reset: id,
+      white: id,
+      yellow: id,
+    },
+  };
+});
+
 describe('runLink', () => {
   let root: string;
 

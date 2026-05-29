@@ -33,6 +33,7 @@ describe('parseDbArgs', () => {
       action: 'execute',
       command: 'SELECT * FROM users',
       file: undefined,
+      remote: undefined,
     });
   });
 
@@ -41,6 +42,16 @@ describe('parseDbArgs', () => {
       action: 'execute',
       command: undefined,
       file: 'query.sql',
+      remote: undefined,
+    });
+  });
+
+  it('parses execute with --remote flag', () => {
+    expect(parseDbArgs(['execute', 'SELECT 1', '--remote'])).toEqual({
+      action: 'execute',
+      command: 'SELECT 1',
+      file: undefined,
+      remote: true,
     });
   });
 
@@ -146,8 +157,24 @@ describe('parseDbArgs', () => {
     expect(() => parseDbArgs(['export', 'extra'])).toThrow("db: Unexpected argument 'extra'.");
   });
 
+  it('errors on export with --remote (not yet supported — must not silently fall through to local export)', () => {
+    expect(() => parseDbArgs(['export', '--remote'])).toThrow(
+      '`void db export --remote` is not yet supported. Local export only for now.',
+    );
+  });
+
+  it('errors on export with --remote combined with other flags', () => {
+    expect(() => parseDbArgs(['export', '--remote', '--output', 'dump.sql'])).toThrow(
+      '`void db export --remote` is not yet supported. Local export only for now.',
+    );
+  });
+
   it('parses studio', () => {
-    expect(parseDbArgs(['studio'])).toEqual({ action: 'studio' });
+    expect(parseDbArgs(['studio'])).toEqual({ action: 'studio', remote: undefined });
+  });
+
+  it('parses studio with --remote flag', () => {
+    expect(parseDbArgs(['studio', '--remote'])).toEqual({ action: 'studio', remote: true });
   });
 
   it('errors on studio with extra positional', () => {

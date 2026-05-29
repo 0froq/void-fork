@@ -11,13 +11,23 @@ export const dbSubcommands: Array<SubcommandDef> = [
     description: 'Reset local DB, run migrations, and seed',
     flags: [{ name: '--file', arg: '<path>', description: 'Seed from a specific file' }],
   },
-  { name: 'execute', arg: '<sql>', description: 'Run SQL against the local database' },
+  {
+    name: 'execute',
+    arg: '<sql>',
+    description: 'Run SQL against the database (use --remote for the deployed database)',
+    flags: [{ name: '--remote', description: 'Run against the deployed database' }],
+  },
   {
     name: 'migrate',
     description: 'Apply pending migrations',
     flags: [{ name: '--remote', description: 'Apply to the remote database' }],
   },
-  { name: 'studio', description: 'Open Drizzle Studio for the local database' },
+  {
+    name: 'studio',
+    description:
+      'Open Drizzle Studio against the database (use --remote for the deployed PostgreSQL database)',
+    flags: [{ name: '--remote', description: 'Open Studio against the deployed database' }],
+  },
   { name: 'set-url', description: 'Update the PostgreSQL connection string for deployment' },
   { name: 'rename-migrations', description: 'Rename migrations to timestamp-based format' },
   {
@@ -38,9 +48,9 @@ export type DbArgs =
   | { action: 'status' }
   | { action: 'reset' }
   | { action: 'seed'; file?: string }
-  | { action: 'execute'; command?: string; file?: string }
+  | { action: 'execute'; command?: string; file?: string; remote?: boolean }
   | { action: 'migrate'; remote?: boolean }
-  | { action: 'studio' }
+  | { action: 'studio'; remote?: boolean }
   | {
       action: 'export';
       output?: string;
@@ -116,7 +126,8 @@ export function parseDbArgs(args: Array<string>): DbArgs {
     if (command && file) {
       throw new Error('db: Provide either SQL inline or --file, not both.');
     }
-    return { action, command, file };
+    const remote = parsed.values.remote === true ? true : undefined;
+    return { action, command, file, remote };
   }
 
   if (action === 'migrate') {
@@ -131,7 +142,8 @@ export function parseDbArgs(args: Array<string>): DbArgs {
     if (rest.length > 0) {
       throw new Error(`db: Unexpected argument '${rest[0]}'.`);
     }
-    return { action };
+    const remote = parsed.values.remote === true ? true : undefined;
+    return { action, remote };
   }
 
   if (action === 'set-url') {
@@ -149,6 +161,9 @@ export function parseDbArgs(args: Array<string>): DbArgs {
   }
 
   if (action === 'export') {
+    if (parsed.values.remote === true) {
+      throw new Error('`void db export --remote` is not yet supported. Local export only for now.');
+    }
     if (rest.length > 0) {
       throw new Error(`db: Unexpected argument '${rest[0]}'.`);
     }

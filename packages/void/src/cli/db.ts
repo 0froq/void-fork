@@ -1,9 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { intro, outro, log } from '@clack/prompts';
+import { confirm, intro, isCancel, outro, log } from '@clack/prompts';
 import { extname, join, relative, resolve } from 'pathe';
-import { readConfig, getDatabaseDialect, type DatabaseDialect } from '../config.ts';
+import {
+  readConfig,
+  getDatabaseDialect,
+  resolveBindingNames,
+  type DatabaseDialect,
+} from '../config.ts';
 import {
   collectMigrations,
   readJournal,
@@ -18,8 +23,10 @@ import {
 import { detectFramework } from '../plugin-inference.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import type { SeedFn } from '../runtime/seed.ts';
-import { getToken } from './auth.ts';
-import { PlatformClient } from './client.ts';
+import { cfAccessHeaders } from '../shared/cf-access.ts';
+import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from '../shared/proxy.ts';
+import { getToken, isStagingMode } from './auth.ts';
+import { PlatformApiError, PlatformClient } from './client.ts';
 import type { DbArgs } from './db-args.ts';
 import { formatTimestamp } from './gen.ts';
 import { cliTitle, dim, pc } from './output.ts';
@@ -148,11 +155,11 @@ export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
   } else if (args.action === 'seed') {
     await runSeed(root, args.file, dialect);
   } else if (args.action === 'execute') {
-    await runExecute(root, args.command, args.file, dialect);
+    await runExecute(root, args.command, args.file, dialect, args.remote);
   } else if (args.action === 'migrate') {
     await runMigrate(root, dialect, args.remote);
   } else if (args.action === 'studio') {
-    await runStudio(root, dialect);
+    await runStudio(root, dialect, args.remote);
   } else if (args.action === 'set-url') {
     await runSetUrl(root);
   } else if (args.action === 'rename-migrations') {
@@ -405,12 +412,216 @@ async function runSeed(
   outro('Done.');
 }
 
+/**
+ * Returns true when the SQL is read-only (SELECT / EXPLAIN only).
+ * Used to skip the destructive-statement safety prompt for safe queries.
+ *
+ * This is a fail-closed heuristic, not a real SQL parser:
+ * - SQL comments (slash-star block and double-dash line) are stripped first,
+ *   so commented variants like `EXPLAIN <block-comment> ANALYZE DELETE FROM
+ *   users` or `EXPLAIN -- c\n ANALYZE ...` can't bypass the EXPLAIN ANALYZE
+ *   check by hiding the `ANALYZE` keyword behind a comment that PostgreSQL
+ *   treats as whitespace. This also handles leading comments, so
+ *   `-- header\nSELECT 1` is now correctly classified as safe.
+ * - The comment-stripping regex is naive and doesn't understand string
+ *   literals: a string literal containing a block-comment marker will have its
+ *   contents stripped. That's harmless here (still classified as SELECT, still
+ *   safe), but worth knowing if this helper is ever reused.
+ * - `WITH` (CTEs) is intentionally excluded: writable CTEs such as
+ *   `WITH deleted AS (DELETE FROM users RETURNING *) SELECT * FROM deleted`
+ *   are destructive but match a naive `WITH` prefix check. Users with
+ *   read-only CTEs will see the safety prompt — minor friction, safe by default.
+ * - Multi-statement SQL (`SELECT 1; DELETE FROM users`) is rejected: any `;`
+ *   followed by non-whitespace content after stripping a trailing semicolon is
+ *   treated as unsafe.
+ * - `EXPLAIN ANALYZE` is explicitly excluded: in PostgreSQL, `EXPLAIN ANALYZE`
+ *   actually executes the underlying statement (including DML) to collect runtime
+ *   statistics. A naive `EXPLAIN` prefix check would treat it as safe when it is
+ *   in fact destructive. Only plain `EXPLAIN` (without `ANALYZE`) is allowed.
+ * - `EXPLAIN (...)` parenthesized option lists (PostgreSQL) are scanned for
+ *   `ANALYZE`. The bare-keyword form `EXPLAIN ANALYZE ...` and the option-list
+ *   form `EXPLAIN (ANALYZE) ...` / `EXPLAIN (ANALYZE TRUE) ...` both execute
+ *   the underlying statement, so either shape is rejected. Even
+ *   `EXPLAIN (ANALYZE FALSE)` is rejected (over-strict, but safer than
+ *   guessing the boolean value of an arbitrary option expression).
+ */
+function isSafeStatement(sql: string): boolean {
+  const decommented = sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+  const stripped = decommented.replace(/;\s*$/, '');
+  if (stripped.includes(';')) {
+    return false;
+  }
+  if (/^\s*SELECT\b/i.test(stripped)) {
+    return true;
+  }
+  if (/^\s*EXPLAIN\b/i.test(stripped)) {
+    if (/^\s*EXPLAIN\s+ANALYZE\b/i.test(stripped)) {
+      return false;
+    }
+    const parenMatch = stripped.match(/^\s*EXPLAIN\s*\(([^)]*)\)/i);
+    if (parenMatch && /\bANALYZE\b/i.test(parenMatch[1])) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Fetch a project's remote PostgreSQL connection string from the platform.
+ * Exits with a friendly message when the URL has never been stored (404);
+ * other errors propagate so the caller's top-level handler can report them.
+ */
+async function fetchRemoteDatabaseUrl(client: PlatformClient, projectId: string): Promise<string> {
+  try {
+    const result = await client.getDatabaseUrl(projectId);
+    return result.url;
+  } catch (err) {
+    if (err instanceof PlatformApiError && err.status === 404) {
+      log.error(
+        "This project's database URL isn't stored on the platform yet. Run `void db set-url` once to populate it, then retry.",
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Prompt the user to confirm a destructive remote query when running in a TTY.
+ * Returns true if execution should proceed, false if it was cancelled.
+ */
+async function confirmDestructiveRemote(sql: string): Promise<boolean> {
+  if (isSafeStatement(sql)) {
+    return true;
+  }
+  if (!process.stdin.isTTY) {
+    // --yes flag (skip prompt under a TTY) is intentionally not wired here — non-TTY already bypasses; --yes can be added in a follow-up if scripted-TTY callers need it.
+    return true;
+  }
+  const ok = await confirm({
+    message: 'This will run against your deployed database. Continue?',
+  });
+  if (isCancel(ok) || !ok) {
+    return false;
+  }
+  return true;
+}
+
 async function runExecute(
   root: string,
   command: string | undefined,
   file: string | undefined,
   dialect: DatabaseDialect,
+  remote?: boolean,
 ): Promise<void> {
+  if (remote) {
+    // Reject --file with --remote D1 before reading the file or prompting.
+    if (dialect !== 'postgresql' && file) {
+      log.error(
+        '--file is not yet supported with --remote D1; pipe statements through stdin or run them one at a time.',
+      );
+      process.exit(1);
+    }
+
+    const sql = file ? readFileSync(join(root, file), 'utf-8') : command!;
+
+    const token = getToken(root);
+    if (!token) {
+      log.error('Not logged in. Run `void auth login` first.');
+      process.exit(1);
+    }
+
+    const projectConfig = readProjectConfig(root);
+    if (!projectConfig) {
+      log.error('No project linked. Run `void deploy` first or link a project.');
+      process.exit(1);
+    }
+
+    const shouldProceed = await confirmDestructiveRemote(sql);
+    if (!shouldProceed) {
+      log.info('Cancelled.');
+      process.exit(0);
+    }
+
+    if (dialect === 'postgresql') {
+      // PG remote: fetch the connection string from the platform, then connect directly.
+      const client = new PlatformClient(token, { root });
+      const dbUrl = await fetchRemoteDatabaseUrl(client, projectConfig.projectId);
+
+      const { Client } = await import('pg');
+      const pgClient: PgClient = new Client({ connectionString: dbUrl });
+      await pgClient.connect();
+      try {
+        const result = await pgClient.query(sql);
+        if (result.rows && result.rows.length > 0) {
+          printTable(result.rows);
+        } else {
+          log.success('Executed successfully.');
+        }
+      } finally {
+        await pgClient.end();
+      }
+      outro('Done.');
+      return;
+    }
+
+    // D1 remote: route through the platform proxy.
+    const platformClient = new PlatformClient(token, { root });
+    // Resolve the locally-configured binding name (inference.bindings.db in void.json) so that
+    // the fallback honours custom names instead of always hardcoding 'DB'.
+    const voidConfig = readConfig(root);
+    const configuredBindingNames = resolveBindingNames(voidConfig.inference?.bindings);
+    const configuredD1Binding = configuredBindingNames?.d1 ?? 'DB';
+    let binding = configuredD1Binding;
+    try {
+      const resources = await platformClient.getResources(projectConfig.projectId);
+      // TODO: support --binding for projects with multiple D1 bindings (currently auto-selects the first).
+      const d1Resource = resources.find((r) => r.type === 'd1');
+      if (d1Resource) {
+        binding = d1Resource.binding_name;
+      }
+    } catch {
+      // Fall back to the locally-configured binding name (or 'DB' by default) if resource discovery fails.
+    }
+
+    const proxyUrl = isStagingMode(root) ? STAGING_PROXY_URL : DEFAULT_PROXY_URL;
+    const res = await fetch(`${proxyUrl}/d1/query`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...cfAccessHeaders(process.env),
+      },
+      body: JSON.stringify({
+        projectId: projectConfig.projectId,
+        binding,
+        sql,
+        params: [],
+        method: 'all',
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      log.error(`db: Proxy request failed with ${res.status}: '${text}'.`);
+      process.exit(1);
+    }
+
+    const data = (await res.json()) as {
+      results?: Array<Record<string, unknown>>;
+      success?: boolean;
+    };
+    const rows = data.results ?? [];
+    if (rows.length > 0) {
+      printTable(rows);
+    } else {
+      log.success('Executed successfully.');
+    }
+    outro('Done.');
+    return;
+  }
+
   if (dialect === 'postgresql') {
     const sql = file ? readFileSync(join(root, file), 'utf-8') : command!;
     await withPgClient(root, async (client) => {
@@ -635,7 +846,43 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
   outro('Done.');
 }
 
-async function runStudio(root: string, dialect: DatabaseDialect): Promise<void> {
+async function runStudio(root: string, dialect: DatabaseDialect, remote?: boolean): Promise<void> {
+  if (remote) {
+    if (dialect !== 'postgresql') {
+      log.error(
+        'Remote D1 studio is not yet supported. Use `void db execute --remote` for ad-hoc queries against your deployed D1 database.',
+      );
+      process.exit(1);
+    }
+
+    // PG remote: fetch the connection URL from the platform, then open Studio against it.
+    const token = getToken(root);
+    if (!token) {
+      log.error('Not logged in. Run `void auth login` first.');
+      process.exit(1);
+    }
+
+    const projectConfig = readProjectConfig(root);
+    if (!projectConfig) {
+      log.error('No project linked. Run `void deploy` first or link a project.');
+      process.exit(1);
+    }
+
+    const client = new PlatformClient(token, { root });
+    const dbUrl = await fetchRemoteDatabaseUrl(client, projectConfig.projectId);
+
+    const { writeDrizzleConfig } = await import('../drizzle/config.ts');
+    const configPath = writeDrizzleConfig(root, dbUrl, 'postgresql');
+
+    log.info('Opening Drizzle Studio (remote)...');
+    try {
+      runDrizzleKit(root, ['studio', '--config', configPath]);
+    } catch {
+      process.exit(1);
+    }
+    return;
+  }
+
   if (dialect === 'postgresql') {
     const { writeDrizzleConfig } = await import('../drizzle/config.ts');
     const url = getPgUrl(root);
