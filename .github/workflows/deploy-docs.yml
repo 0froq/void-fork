@@ -2,24 +2,20 @@ name: Deploy void.cloud
 
 on:
   workflow_dispatch:
-  push:
-    branches: [prod]
-    paths:
-      - .github/workflows/deploy-docs.yml
-      - .node-version
-      - docs/**
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions: {}
 
 concurrency:
-  group: deploy-void-cloud-production
-  cancel-in-progress: false
+  group: deploy-void-cloud
+  cancel-in-progress: true
 
 jobs:
   deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment:
       name: Docs
@@ -30,11 +26,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1.9.0
         with:
           node-version-file: .node-version
           cache: true
-      - run: vp run build:core
       - run: vp install
       - run: vp run deploy:docs
         env:
