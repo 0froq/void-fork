@@ -1,4 +1,4 @@
-name: Deploy Docs Staging
+name: Deploy void.cloud Staging
 
 on:
   workflow_dispatch:
@@ -9,10 +9,16 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: deploy-void-cloud-staging
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    environment: Docs
+    environment:
+      name: Docs
+      url: https://void-docs-staging.void.app
     permissions:
       contents: read
     steps:

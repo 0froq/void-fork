@@ -1,18 +1,29 @@
-name: Deploy Docs Production
+name: Deploy void.cloud
 
 on:
   workflow_dispatch:
   push:
     branches: [prod]
     paths:
+      - .github/workflows/deploy-docs.yml
+      - .node-version
       - docs/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
 
 permissions: {}
+
+concurrency:
+  group: deploy-void-cloud-production
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    environment: Docs
+    environment:
+      name: Docs
+      url: https://void.cloud
     permissions:
       contents: read
     steps:
