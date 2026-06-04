@@ -6,17 +6,14 @@ import {
   getDomainsByProjectId,
   getDomain,
   getDomainByHostname,
-  updateDomainStatus,
-  updateDomainVerificationData,
   deleteDomain,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
+import { tryActivateDomain } from '../provisioning/activate-domain.ts';
 import {
   CloudflareApiError,
   createCustomHostname,
-  getCustomHostname,
   deleteCustomHostname,
-  pollCustomHostnameUntilSslRecords,
 } from '../provisioning/cloudflare-api.ts';
 import type { DomainVerificationData } from '../schema.ts';
 
@@ -102,50 +99,13 @@ const app = new Hono<ApiEnv>()
       throw err;
     }
 
-    // CF populates `ssl.validation_records` asynchronously; poll briefly so the
-    // create response includes them. See helper for the full rationale.
-    if (
-      (cfHostname.ssl.validation_records ?? []).length === 0 &&
-      cfHostname.ssl.status !== 'active'
-    ) {
-      const deadlineOverride = context.env.CF_HOSTNAME_POLL_DEADLINE_MS;
-      const deadlineMs =
-        typeof deadlineOverride === 'number' &&
-        Number.isFinite(deadlineOverride) &&
-        deadlineOverride > 0
-          ? deadlineOverride
-          : 8_000;
-      const intervalOverride = context.env.CF_HOSTNAME_POLL_INITIAL_INTERVAL_MS;
-      const initialIntervalMs =
-        typeof intervalOverride === 'number' &&
-        Number.isFinite(intervalOverride) &&
-        intervalOverride > 0
-          ? intervalOverride
-          : 500;
-      try {
-        cfHostname = await pollCustomHostnameUntilSslRecords(
-          context.env.CF_ZONE_ID,
-          context.env.CF_API_TOKEN,
-          cfHostname.id,
-          { deadlineMs, initialIntervalMs },
-        );
-      } catch (err) {
-        // Don't orphan the CF hostname on a transient 5xx mid-poll — the
-        // hostname is already created but the DB row hasn't been inserted
-        // yet. Fall through with the original create response; the user
-        // (or `void domain status`) will surface the SSL records on the
-        // next poll.
-        console.warn(
-          `CF API error while polling for SSL records for ${hostname}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-      if ((cfHostname.ssl.validation_records ?? []).length === 0) {
-        console.warn(`SSL validation records did not appear for ${hostname} within deadline`);
-      }
-    }
-
+    // Under HTTP-DCV the certificate is validated at CF's edge once the
+    // hostname proxies through it, so CF never emits `ssl.validation_records`
+    // (no `_acme-challenge` TXT). `ownership_verification` — the
+    // `_cf-custom-hostname` TXT that proves the user controls the hostname —
+    // IS returned synchronously in the create response, so persist it
+    // straight away and return. (`ssl_validation_records` will be
+    // empty/absent — expected.)
     const verificationData: DomainVerificationData = {
       ownership_verification: cfHostname.ownership_verification,
       ssl_validation_records: cfHostname.ssl.validation_records,
@@ -203,61 +163,23 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'domain not found' }, 404);
     }
 
-    // Poll CF API for live status
-    const cfHostname = await getCustomHostname(
-      context.env.CF_ZONE_ID,
-      context.env.CF_API_TOKEN,
-      domain.cf_hostname_id,
+    const { cf, activated, awaitingDeployment } = await tryActivateDomain(
+      context.env,
+      context.get('db'),
+      domain,
+      project,
     );
-
-    // CF only flips status to `active` after BOTH ownership verification and
-    // SSL DV complete, so `status === 'active'` is itself the verified signal.
-    // Also require `ssl.status === 'active'` per CF for SaaS docs, which call
-    // this out as the production-traffic precondition. Require `ssl.method`
-    // to be `txt` so legacy HTTP-DCV hostnames — vulnerable to the wildcard
-    // CNAME hijack this change closes — cannot be activated by a poll.
-    const gateOk =
-      cfHostname.status === 'active' &&
-      cfHostname.ssl.status === 'active' &&
-      cfHostname.ssl.method === 'txt';
-
-    // Only activate after KV routing is in place. If the project has never
-    // been deployed, `project.slug` is absent from KV; leaving the DB row in
-    // 'pending' ensures the next poll retries (a future deploy populates the
-    // slug entry). Flipping DB→active before writing KV would leave traffic
-    // 404ing forever, since `domain.status === 'pending'` would no longer
-    // fire on subsequent polls.
-    let routingWritten = false;
-    // Read slug routing whenever the CF gate is satisfied so we can surface
-    // `awaiting_deployment` to the caller regardless of whether activation
-    // actually happened (activation also requires `domain.status === 'pending'`).
-    const slugRouting =
-      gateOk && domain.status === 'pending' ? await context.env.ROUTING.get(project.slug) : null;
-    if (gateOk && domain.status === 'pending' && slugRouting) {
-      await context.env.ROUTING.put(`domain:${domain.hostname}`, slugRouting);
-      await updateDomainStatus(context.get('db'), domain.id, 'active');
-      routingWritten = true;
-    }
-    const awaitingDeployment = gateOk && domain.status === 'pending' && !slugRouting;
-
-    if (cfHostname.ownership_verification || cfHostname.ssl.validation_records) {
-      const verificationData: DomainVerificationData = {
-        ownership_verification: cfHostname.ownership_verification,
-        ssl_validation_records: cfHostname.ssl.validation_records,
-      };
-      await updateDomainVerificationData(context.get('db'), domain.id, verificationData);
-      domain.verification_data = verificationData;
-    }
 
     return context.json({
       ...domain,
-      status: routingWritten || domain.status === 'active' ? 'active' : domain.status,
-      ssl_status: cfHostname.ssl.status,
-      cf_status: cfHostname.status,
+      status: activated || domain.status === 'active' ? 'active' : domain.status,
+      cname_target: CNAME_TARGET,
+      ssl_status: cf.ssl.status,
+      cf_status: cf.status,
       awaiting_deployment: awaitingDeployment,
-      verification_errors: cfHostname.verification_errors,
-      ownership_verification: cfHostname.ownership_verification,
-      ssl_validation_records: cfHostname.ssl.validation_records ?? [],
+      verification_errors: cf.verification_errors,
+      ownership_verification: cf.ownership_verification,
+      ssl_validation_records: cf.ssl.validation_records ?? [],
     });
   })
 

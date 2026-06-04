@@ -38,15 +38,16 @@ Two fully isolated environments. Each has its own CF resources (KV, R2, dispatch
 
 **API worker** (`void-api`):
 
-| Resource           | Binding         | Name / ID                                                     |
-| ------------------ | --------------- | ------------------------------------------------------------- |
-| Hyperdrive         | `HYPERDRIVE`    | `7bd6b2a606a347819ad3421867840736` (→ PlanetScale PostgreSQL) |
-| KV Namespace       | `ROUTING`       | `9250c33f3db6494ebe8ad6272812c8c0`                            |
-| KV Namespace       | `ISR_CACHE`     | `7a0284b2390b42218901919579aadf0e`                            |
-| Dispatch Namespace | `DISPATCH`      | `void-users`                                                  |
-| Durable Object     | `USAGE_COUNTER` | `UsageCounter` (per-user usage enforcement)                   |
-| Queue (consumer)   | —               | `void-usage-events` (batch 100, timeout 5s)                   |
-| Cron Trigger       | —               | `0 * * * *` (hourly — billing rollovers + backfill)           |
+| Resource           | Binding         | Name / ID                                                                                                                    |
+| ------------------ | --------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Hyperdrive         | `HYPERDRIVE`    | `7bd6b2a606a347819ad3421867840736` (→ PlanetScale PostgreSQL)                                                                |
+| KV Namespace       | `ROUTING`       | `9250c33f3db6494ebe8ad6272812c8c0`                                                                                           |
+| KV Namespace       | `ISR_CACHE`     | `7a0284b2390b42218901919579aadf0e`                                                                                           |
+| Dispatch Namespace | `DISPATCH`      | `void-users`                                                                                                                 |
+| Durable Object     | `USAGE_COUNTER` | `UsageCounter` (per-user usage enforcement)                                                                                  |
+| Queue (consumer)   | —               | `void-usage-events` (batch 100, timeout 5s)                                                                                  |
+| Cron Trigger       | —               | `0 * * * *` (hourly — full maintenance: reconcile all pending domains → stale-pending cleanup → billing rollover + backfill) |
+| Cron Trigger       | —               | `*/2 * * * *` (fast tier — reconcile pending domains created within the last 30 min only; no other maintenance)              |
 
 **Dispatch worker** (`void-dispatch`):
 

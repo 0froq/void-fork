@@ -106,7 +106,7 @@
     { "name": "EMAIL", "remote": true, "allowed_sender_addresses": ["noreply@void.cloud"] },
   ],
   "triggers": {
-    "crons": ["0 * * * *"],
+    "crons": ["0 * * * *", "*/2 * * * *"],
   },
   "routes": [{ "pattern": "api.void.cloud", "custom_domain": true }],
   "vars": {

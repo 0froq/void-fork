@@ -71,9 +71,6 @@ export type TestEnv = {
   SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounter>;
   /** Test-only override for the deploy handler's heartbeat interval. */
   DEPLOY_HEARTBEAT_INTERVAL_MS?: number;
-  /** Test-only overrides for the `domainAdd` SSL-record short poll. */
-  CF_HOSTNAME_POLL_DEADLINE_MS?: number;
-  CF_HOSTNAME_POLL_INITIAL_INTERVAL_MS?: number;
 };
 
 export function createMockExecutionContext(): ExecutionContext {
@@ -845,6 +842,7 @@ export type CfApiMocks = {
   deleteWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
   createCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   getCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  patchCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   purgeCache: (url: string, init?: RequestInit) => Response | Promise<Response>;
   analyticsQuery: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -913,15 +911,8 @@ const baseDefaultMocks: Omit<CfApiMocks, 'uploadWorker' | 'listWorkerBindings' |
       status: 'pending',
       ssl: {
         status: 'pending_validation',
-        method: 'txt',
+        method: 'http',
         type: 'dv',
-        validation_records: [
-          {
-            txt_name: '_acme-challenge.test.example.com',
-            txt_value: 'test-acme-token',
-            status: 'pending_validation',
-          },
-        ],
       },
       ownership_verification: {
         type: 'txt',
@@ -936,15 +927,24 @@ const baseDefaultMocks: Omit<CfApiMocks, 'uploadWorker' | 'listWorkerBindings' |
       status: 'pending',
       ssl: {
         status: 'pending_validation',
-        method: 'txt',
+        method: 'http',
         type: 'dv',
-        validation_records: [
-          {
-            txt_name: '_acme-challenge.test.example.com',
-            txt_value: 'test-acme-token',
-            status: 'pending_validation',
-          },
-        ],
+      },
+      ownership_verification: {
+        type: 'txt',
+        name: '_cf-custom-hostname.test.example.com',
+        value: 'test-ownership-token',
+      },
+    }),
+  patchCustomHostname: () =>
+    cfSuccess({
+      id: 'ch-test-id',
+      hostname: 'test.example.com',
+      status: 'pending',
+      ssl: {
+        status: 'pending_validation',
+        method: 'http',
+        type: 'dv',
       },
       ownership_verification: {
         type: 'txt',
@@ -1344,6 +1344,9 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
     }
     if (method === 'GET' && url.includes('/custom_hostnames/')) {
       return mocks.getCustomHostname(url, init);
+    }
+    if (method === 'PATCH' && url.includes('/custom_hostnames/')) {
+      return mocks.patchCustomHostname(url, init);
     }
     if (method === 'DELETE' && url.includes('/custom_hostnames/')) {
       return mocks.deleteCustomHostname(url, init);

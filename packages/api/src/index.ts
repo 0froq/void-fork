@@ -15,15 +15,28 @@ import {
   getUsersWithProjectsBatch,
   unsuspendUserIfReason,
   getDomainsByProjectIds,
+  getPendingDomainsOlderThan,
+  getPendingDomains,
+  getPendingDomainsNewerThan,
+  deleteDomainIfPending,
   purgeExpiredOAuthNonces,
   purgeExpiredAuthCodes,
   failStaleDeployments,
+  getProject,
+  getProjectsByIds,
+  getUsersByIds,
   type Db,
 } from './db.ts';
 import { escapeHtml } from './email.ts';
 import type { ApiEnv } from './env.ts';
 import { ErrorAlertMonitor } from './error-alert-monitor.ts';
 import { authMiddleware } from './middleware/auth.ts';
+import { tryActivateDomain } from './provisioning/activate-domain.ts';
+import {
+  CloudflareApiError,
+  deleteCustomHostname,
+  getCustomHostname,
+} from './provisioning/cloudflare-api.ts';
 import auth from './routes/auth.ts';
 import deleteRoute from './routes/delete.ts';
 import deploy from './routes/deploy.ts';
@@ -38,8 +51,9 @@ import revalidate from './routes/revalidate.ts';
 import secrets from './routes/secrets.ts';
 import { projectUsage, accountUsage } from './routes/usage.ts';
 import { SandboxConcurrencyCounter } from './sandbox-concurrency-counter.ts';
-import { REASON_REQUESTS_EXCEEDED } from './suspension.ts';
+import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
+import type { Domain, Project } from './types.ts';
 import { UsageCounter } from './usage-counter.ts';
 import { processUsageEventBatch } from './usage-queue.ts';
 
@@ -131,12 +145,46 @@ app.route('/admin', adminSystem);
 
 const BATCH_SIZE = 50;
 
+const PENDING_DOMAIN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Pending custom domains created within this window are reconciled on the
+// every-2-min fast tier; older ones fall back to the hourly tier. Tunable.
+const RECENT_PENDING_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+
+// Cron expression for the fast reconciliation tier (every 2 minutes). Exported
+// so the scheduled() branch condition and tests share the same literal.
+export const FAST_CRON = '*/2 * * * *';
+
+const MAX_PENDING_RECONCILE_PER_RUN = 200; // bound CF polling + protect later maintenance; tunable
+
 async function scheduled(
-  _controller: ScheduledController,
+  controller: ScheduledController,
   env: ApiEnv['Bindings'],
   _ctx: ExecutionContext,
 ): Promise<void> {
   const db = createDb(env.HYPERDRIVE.connectionString);
+
+  // Fast tier (every 2 min): only reconcile recently-created pending domains
+  // (within the last 30 min) so a freshly-configured custom domain comes online
+  // quickly without the user polling. The heavier hourly maintenance does NOT
+  // run on this tick.
+  if (controller.cron === FAST_CRON) {
+    const cutoff = new Date(controller.scheduledTime - RECENT_PENDING_WINDOW_MS).toISOString();
+    const young = await getPendingDomainsNewerThan(db, cutoff, MAX_PENDING_RECONCILE_PER_RUN);
+    if (young.length === MAX_PENDING_RECONCILE_PER_RUN) {
+      console.warn(
+        `[scheduled] fast pending-domain reconcile hit the per-run cap (${MAX_PENDING_RECONCILE_PER_RUN}); remaining pending domains will be processed on the next run`,
+      );
+    }
+    // Fast tier does NOT re-trigger HTTP DCV via PATCH — only the hourly tier
+    // does (see the hourly call below and tryActivateDomain's comment).
+    await reconcilePendingDomains(env, db, young, false).catch((err) =>
+      console.error('[scheduled] fast pending-domain reconcile failed:', err),
+    );
+    return;
+  }
+
+  // Hourly tier (every :00): full maintenance.
 
   // Auto-fail deployments stuck in active states for more than 30 minutes
   await failStaleDeployments(db)
@@ -153,6 +201,34 @@ async function scheduled(
   );
   await purgeExpiredAuthCodes(db).catch((err) =>
     console.error('[scheduled] failed to purge expired auth codes:', err),
+  );
+
+  // Reconcile ALL pending domains BEFORE the stale-cleanup janitor, so a domain
+  // that only just finished validating (even one near the 7-day cutoff) gets
+  // activated instead of garbage-collected.
+  const allPending = await getPendingDomains(db, MAX_PENDING_RECONCILE_PER_RUN);
+  if (allPending.length === MAX_PENDING_RECONCILE_PER_RUN) {
+    console.warn(
+      `[scheduled] hourly pending-domain reconcile hit the per-run cap (${MAX_PENDING_RECONCILE_PER_RUN}); remaining pending domains will be processed on the next run`,
+    );
+  }
+  // Only the hourly tier re-triggers HTTP DCV via PATCH: it bounds the
+  // per-account CF custom-hostname API load (the every-2-min fast tier would
+  // amplify PATCH volume under a burst of young pending domains and could 429
+  // other tenants' hostname operations), while still re-triggering the long
+  // tail and resetting CF's decaying 7-day validation backoff once per hour.
+  await reconcilePendingDomains(env, db, allPending, true).catch((err) =>
+    console.error('[scheduled] hourly pending-domain reconcile failed:', err),
+  );
+
+  // Cleanup janitor: custom hostnames that have sat in `pending` for more than
+  // 7 days never completed ownership/cert validation. Their CF cert order is
+  // still open (CT-log noise) and — under a wildcard-CNAME hijack attempt —
+  // CF's own "Moved → Deleted after 7 days" sweep may not fire. Delete the CF
+  // hostname (revokes the cert order) and drop the DB row. Run once globally;
+  // conservative — only `status === 'pending'` rows are eligible.
+  await cleanupStalePendingDomains(env, db, controller.scheduledTime).catch((err) =>
+    console.error('[scheduled] failed to clean up stale pending domains:', err),
   );
 
   let offset = 0;
@@ -173,6 +249,190 @@ async function scheduled(
     );
 
     offset += BATCH_SIZE;
+  }
+}
+
+// Reconcile a set of pending custom domains: for each, re-run the shared
+// activation gate (tryActivateDomain) and activate it if CF has finished
+// validating ownership + cert AND the project has live slug routing. This is
+// what lets a domain come online after the user configures DNS without them
+// re-running `void domain status`. Per-domain failures (e.g. a CF API error)
+// are isolated so one bad domain never aborts the batch. `retriggerDcv` is
+// forwarded to tryActivateDomain to gate the HTTP-DCV re-trigger PATCH — only
+// the hourly tier passes `true` (see the scheduled() call sites).
+async function reconcilePendingDomains(
+  env: ApiEnv['Bindings'],
+  db: Db,
+  pending: ReadonlyArray<Domain>,
+  retriggerDcv: boolean,
+): Promise<void> {
+  if (pending.length === 0) {
+    return;
+  }
+
+  // Batch-load projects for the deduped set of project_ids in a single query.
+  const projectIds = [...new Set(pending.map((d) => d.project_id))];
+  const projectRows = await getProjectsByIds(db, projectIds);
+  const projectMap = new Map<string, Project>();
+  for (const project of projectRows) {
+    projectMap.set(project.id, project);
+  }
+
+  // Batch-load the owners of the loaded projects so we can skip domains whose
+  // owner is ADMIN-suspended. The authenticated `void domain status` route is
+  // behind authMiddleware, which 403s admin-suspended owners; the cron must
+  // match that — it should never advance a domain the authed path would
+  // refuse. Usage-suspended owners (isAdminSuspended === false) are NOT skipped
+  // — they retain access and their domains must still reconcile.
+  const ownerIds = [...new Set(projectRows.map((p) => p.user_id))];
+  const owners = await getUsersByIds(db, ownerIds);
+  const suspendedOwnerIds = new Set(
+    owners.filter((u) => isAdminSuspended(u.suspended_reason)).map((u) => u.id),
+  );
+
+  let activated = 0;
+  for (const domain of pending) {
+    const project = projectMap.get(domain.project_id);
+    if (!project) {
+      // Defensive: orphaned domain row with no project.
+      console.error(
+        `[scheduled] reconcile: project ${domain.project_id} not found for domain ${domain.hostname} — skipping`,
+      );
+      continue;
+    }
+    if (suspendedOwnerIds.has(project.user_id)) {
+      // Expected, not an error: the owner is admin-suspended, so the cron must
+      // not activate their domain (parity with the 403 the authed status route
+      // returns). No error log.
+      continue;
+    }
+    try {
+      const result = await tryActivateDomain(env, db, domain, project, { retriggerDcv });
+      if (result.activated) {
+        activated += 1;
+      }
+    } catch (err) {
+      console.error('[scheduled] failed to reconcile pending domain ' + domain.hostname + ':', err);
+    }
+  }
+
+  if (activated > 0) {
+    console.log(
+      '[scheduled] auto-activated ' + activated + '/' + pending.length + ' pending domain(s)',
+    );
+  }
+}
+
+// Exported for direct integration testing of the janitor branch in isolation
+// from the reconcile pass (the hourly `scheduled()` runs reconcile first, which
+// would otherwise activate any gate-passing pending domain before the janitor
+// sees it — masking the >200-backlog starvation path the janitor now handles).
+export async function cleanupStalePendingDomains(
+  env: ApiEnv['Bindings'],
+  db: Db,
+  nowMs: number,
+): Promise<void> {
+  const cutoff = new Date(nowMs - PENDING_DOMAIN_MAX_AGE_MS).toISOString();
+  const stale = await getPendingDomainsOlderThan(db, cutoff, MAX_PENDING_RECONCILE_PER_RUN);
+  if (stale.length === MAX_PENDING_RECONCILE_PER_RUN) {
+    console.warn(
+      `[scheduled] stale pending-domain cleanup hit the per-run cap (${MAX_PENDING_RECONCILE_PER_RUN}); remaining stale domains will be processed on the next run`,
+    );
+  }
+  if (stale.length === 0) {
+    return;
+  }
+
+  let cleaned = 0;
+  for (const domain of stale) {
+    // The `stale` snapshot can be racy: a user may finish DNS on day 8, or a
+    // concurrent `void domain status` poll may activate the domain between the
+    // snapshot and now. Re-check CF live before tearing anything down so we
+    // never delete a hostname that has since verified.
+    let live;
+    try {
+      live = await getCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
+    } catch (err) {
+      // CF already removed the hostname (e.g. its own 7-day validation
+      // cleanup). Nothing to revoke — fall through to drop the orphaned DB row
+      // (and any stray KV) so the customer can re-add the hostname.
+      if (err instanceof CloudflareApiError && err.status === 404) {
+        await env.ROUTING.delete(`domain:${domain.hostname}`).catch(() => {});
+        if (await deleteDomainIfPending(db, domain.id)) {
+          cleaned += 1;
+        }
+        continue;
+      }
+      console.error(`[scheduled] failed to read stale CF hostname for ${domain.hostname}:`, err);
+      continue;
+    }
+
+    // Ownership completed since the snapshot — never delete a verified host.
+    // We don't merely skip here: under a sustained >MAX_PENDING_RECONCILE_PER_RUN
+    // backlog, the oldest-first reconcile cap can starve a verified-but-pending
+    // domain that has aged past 7 days into this janitor, leaving it unrouted
+    // indefinitely. Opportunistically run the shared activation gate so it comes
+    // online, while preserving reconcile's admin-suspended-owner skip parity (the
+    // authed status route 403s admin-suspended owners; the cron must match).
+    if (live.status === 'active') {
+      const project = await getProject(db, domain.project_id);
+      if (!project) {
+        // Defensive: orphaned domain row with no project. Never delete a
+        // verified host — leave the row for ops/manual cleanup.
+        continue;
+      }
+      const [owner] = await getUsersByIds(db, [project.user_id]);
+      if (owner && isAdminSuspended(owner.suspended_reason)) {
+        // Owner is admin-suspended — parity with reconcile and the authed
+        // status route's 403. Do not activate; never delete a verified host.
+        continue;
+      }
+      try {
+        await tryActivateDomain(env, db, domain, project);
+      } catch (err) {
+        console.error(
+          `[scheduled] failed to activate verified stale domain ${domain.hostname}:`,
+          err,
+        );
+      }
+      continue;
+    }
+
+    // Still genuinely pending. Claim the row FIRST via a conditional delete:
+    // if a concurrent poll has activated it, this no-ops and we skip teardown,
+    // so we never revoke the cert of a live domain.
+    if (!(await deleteDomainIfPending(db, domain.id))) {
+      continue;
+    }
+
+    // Row claimed — revoke the CF cert order (treat an already-gone 404 as
+    // success) and drop any routing entry a racing activation may have written.
+    // The DB row is already deleted, so a non-404 CF failure orphans the CF
+    // hostname (cert order stays open). Retry the DELETE ONCE to shrink that
+    // orphan window — no backoff/sleep (cron context). If the retry also fails
+    // non-404, log an error explicitly noting the orphan so ops can detect it.
+    try {
+      await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
+    } catch (err) {
+      if (!(err instanceof CloudflareApiError && err.status === 404)) {
+        try {
+          await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
+        } catch (retryErr) {
+          if (!(retryErr instanceof CloudflareApiError && retryErr.status === 404)) {
+            console.error(
+              `[scheduled] failed to delete stale CF hostname for ${domain.hostname} after retry — CF hostname ${domain.cf_hostname_id} is ORPHANED (DB row already removed):`,
+              retryErr,
+            );
+          }
+        }
+      }
+    }
+    await env.ROUTING.delete(`domain:${domain.hostname}`).catch(() => {});
+    cleaned += 1;
+  }
+
+  if (cleaned > 0) {
+    console.log(`[scheduled] cleaned up ${cleaned} stale pending domain(s)`);
   }
 }
 

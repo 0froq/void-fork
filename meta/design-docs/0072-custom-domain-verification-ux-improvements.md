@@ -1,6 +1,6 @@
 ---
 title: Custom Domain Verification UX Improvements (Single-Stage Display + Status Rollup)
-status: draft
+status: superseded by 0073
 created: 2026-05-18
 ---
 

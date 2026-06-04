@@ -5,6 +5,8 @@ import {
   asc,
   eq,
   ne,
+  lt,
+  gte,
   inArray,
   notInArray,
   ilike,
@@ -109,6 +111,17 @@ export async function getUserByEmail(db: Db, email: string): Promise<User | null
 export async function getUser(db: Db, id: string): Promise<User | null> {
   const [row] = await db.select().from(users).where(eq(users.id, id)).limit(1);
   return row ?? null;
+}
+
+export async function getUsersByIds(
+  db: Db,
+  ids: ReadonlyArray<string>,
+): Promise<ReadonlyArray<User>> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  return db.select().from(users).where(inArray(users.id, ids));
 }
 
 export async function updateUser(
@@ -239,6 +252,17 @@ export async function getLatestDeploymentsByProjectIds(
     }
   }
   return latest;
+}
+
+export async function getProjectsByIds(
+  db: Db,
+  ids: ReadonlyArray<string>,
+): Promise<ReadonlyArray<Project>> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  return db.select().from(projects).where(inArray(projects.id, ids));
 }
 
 export async function getProjectsWithOwnerByIds(
@@ -1199,6 +1223,53 @@ export async function getDomain(db: Db, id: string): Promise<Domain | null> {
   return row ?? null;
 }
 
+// Stale custom hostnames that never verified — for the cleanup janitor. Only
+// `pending` rows are eligible; `created_at` is a string-mode timestamp so the
+// cutoff is compared as an ISO string. Capped at `limit` and ordered
+// oldest-first (most overdue cleaned first) so a large stale backlog cannot
+// starve later hourly maintenance.
+export async function getPendingDomainsOlderThan(
+  db: Db,
+  isoCutoff: string,
+  limit: number,
+): Promise<ReadonlyArray<Domain>> {
+  return db
+    .select()
+    .from(domains)
+    .where(and(eq(domains.status, 'pending'), lt(domains.created_at, isoCutoff)))
+    .orderBy(asc(domains.created_at))
+    .limit(limit);
+}
+
+// All pending custom-hostname rows (cron hourly reconciliation tier). Capped
+// at `limit` and ordered oldest-first so domains nearest the 7-day cleanup are
+// reconciled before the per-run cap truncates the batch.
+export async function getPendingDomains(db: Db, limit: number): Promise<ReadonlyArray<Domain>> {
+  return db
+    .select()
+    .from(domains)
+    .where(eq(domains.status, 'pending'))
+    .orderBy(asc(domains.created_at))
+    .limit(limit);
+}
+
+// Recently-created pending rows (cron 30-min fast reconciliation tier).
+// `created_at` is a string-mode timestamp, compared as an ISO string. Capped at
+// `limit` and ordered oldest-first so the per-run cap truncates the newest
+// (least urgent) domains rather than starving older ones.
+export async function getPendingDomainsNewerThan(
+  db: Db,
+  isoCutoff: string,
+  limit: number,
+): Promise<ReadonlyArray<Domain>> {
+  return db
+    .select()
+    .from(domains)
+    .where(and(eq(domains.status, 'pending'), gte(domains.created_at, isoCutoff)))
+    .orderBy(asc(domains.created_at))
+    .limit(limit);
+}
+
 export async function updateDomainStatus(
   db: Db,
   id: string,
@@ -1217,6 +1288,19 @@ export async function updateDomainVerificationData(
 
 export async function deleteDomain(db: Db, id: string): Promise<void> {
   await db.delete(domains).where(eq(domains.id, id));
+}
+
+// Atomically delete a domain row ONLY if it is still `pending`. Used by the
+// cleanup janitor to "claim" a stale row: if a concurrent status poll has
+// since activated the domain (status → 'active'), the delete is a no-op and
+// returns false, so the janitor leaves the now-live domain (and its CF
+// hostname) untouched. Returns true iff a pending row was deleted.
+export async function deleteDomainIfPending(db: Db, id: string): Promise<boolean> {
+  const deleted = await db
+    .delete(domains)
+    .where(and(eq(domains.id, id), eq(domains.status, 'pending')))
+    .returning({ id: domains.id });
+  return deleted.length > 0;
 }
 
 export async function deleteProjectDomains(db: Db, projectId: string): Promise<void> {

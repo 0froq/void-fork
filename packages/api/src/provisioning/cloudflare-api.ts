@@ -365,6 +365,15 @@ export type CustomHostnameInfo = Readonly<{
     name: string;
     value: string;
   }>;
+  // CF's HTTP-based ownership challenge. Returned alongside (or instead of)
+  // the TXT `ownership_verification` depending on the hostname's state. The
+  // activation gate must treat the presence of EITHER as "ownership not yet
+  // settled" — keying on the TXT field alone would let an HTTP-satisfiable
+  // (wildcard-routable) ownership slip through.
+  ownership_verification_http?: Readonly<{
+    http_url: string;
+    http_body: string;
+  }>;
   custom_metadata?: Readonly<Record<string, string>>;
   verification_errors?: ReadonlyArray<string>;
 }>;
@@ -384,7 +393,7 @@ export async function createCustomHostname(
     method: 'POST',
     body: JSON.stringify({
       hostname,
-      ssl: { method: 'txt', type: 'dv' },
+      ssl: { method: 'http', type: 'dv' },
     }),
   });
 }
@@ -400,48 +409,29 @@ export async function getCustomHostname(
   );
 }
 
-// CF's POST /custom_hostnames returns `ownership_verification` synchronously
-// but populates `ssl.validation_records` asynchronously as its cert-provisioning
-// workflow generates the ACME challenge tokens — typically within a few
-// seconds. Short-poll the hostname until the records appear so `domain add`
-// can show the user the complete record set in a single screen.
-//
-// Errors from `getCustomHostname` propagate to the caller — the route is the
-// right place to decide how to recover (e.g. fall back to the original create
-// response so the CF hostname isn't orphaned on a transient 5xx mid-poll).
-//
-// The fetch always runs at least once before the deadline is consulted, so
-// `last` is provably assigned on every return path regardless of how small
-// `deadlineMs` is.
-export async function pollCustomHostnameUntilSslRecords(
+// Re-send the SSL block via PATCH to re-trigger HTTP DCV. Void's flow is
+// add-domain-first: `void domain add` creates the custom hostname with
+// `ssl.method:'http'` BEFORE the user points the CNAME at `cname.void.app`.
+// Per CF's Create Custom Hostname API docs, "If `http` is used and the domain
+// is not already pointing to the Managed CNAME host, the PATCH method must be
+// used once it is" to complete validation. Our cron/status path otherwise only
+// GETs the hostname, so an add-first domain that the user later fixes can stay
+// pending forever (or get CF-deleted after 7 days). A no-change PATCH re-sends
+// the same `ssl` block, which both re-triggers HTTP DCV and resets CF's decaying
+// validation-retry backoff (per CF's realtime-validation behavior).
+export async function patchCustomHostname(
   zoneId: string,
   apiToken: string,
-  customHostnameId: string,
-  options?: { deadlineMs?: number; initialIntervalMs?: number },
+  hostnameId: string,
 ): Promise<CustomHostnameInfo> {
-  const deadlineMs = options?.deadlineMs ?? 8_000;
-  const initialIntervalMs = options?.initialIntervalMs ?? 500;
-  const subsequentIntervalMs = Math.max(1, Math.round(initialIntervalMs * 1.5));
-  const start = Date.now();
-  let interval = initialIntervalMs;
-  let last: CustomHostnameInfo;
-  while (true) {
-    last = await getCustomHostname(zoneId, apiToken, customHostnameId);
-    if ((last.ssl.validation_records ?? []).length > 0 || last.ssl.status === 'active') {
-      return last;
-    }
-    const elapsed = Date.now() - start;
-    if (elapsed >= deadlineMs) {
-      break;
-    }
-    const remaining = deadlineMs - elapsed;
-    const sleep = Math.min(interval, remaining);
-    if (sleep > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, sleep));
-    }
-    interval = subsequentIntervalMs;
-  }
-  return last;
+  return cfFetch<CustomHostnameInfo>(
+    `${CF_ZONE_API_BASE}/${zoneId}/custom_hostnames/${hostnameId}`,
+    apiToken,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ ssl: { method: 'http', type: 'dv' } }),
+    },
+  );
 }
 
 export async function deleteCustomHostname(
