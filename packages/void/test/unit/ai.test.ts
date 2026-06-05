@@ -28,7 +28,7 @@ describe('runtime ai', () => {
       },
       async () => {
         const result = await ai.run('google/gemini-2.5-flash', {
-          messages: [{ role: 'user', content: 'Hello' }],
+          contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
         });
 
         expect(result).toEqual({ choices: [{ message: { content: 'Hi' } }] });
@@ -42,7 +42,7 @@ describe('runtime ai', () => {
     expect(JSON.parse(init.body as string)).toEqual({
       action: 'run',
       model: 'google/gemini-2.5-flash',
-      inputs: { messages: [{ role: 'user', content: 'Hello' }] },
+      inputs: { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] },
       projectId: 'proj_1',
     });
   });

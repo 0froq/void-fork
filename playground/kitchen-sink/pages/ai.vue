@@ -10,6 +10,37 @@ const response = ref('');
 const loading = ref(false);
 const error = ref('');
 
+function textFromAiResult(value: unknown): string {
+  if (typeof value !== 'object' || value === null) {
+    return '';
+  }
+
+  const result = value as {
+    response?: unknown;
+    choices?: Array<{ message?: { content?: unknown }; delta?: { content?: unknown } }>;
+    candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
+  };
+
+  if (typeof result.response === 'string') {
+    return result.response;
+  }
+
+  const choice = result.choices?.[0];
+  if (typeof choice?.delta?.content === 'string') {
+    return choice.delta.content;
+  }
+  if (typeof choice?.message?.content === 'string') {
+    return choice.message.content;
+  }
+
+  const parts = result.candidates?.[0]?.content?.parts;
+  if (parts) {
+    return parts.map((part) => (typeof part.text === 'string' ? part.text : '')).join('');
+  }
+
+  return '';
+}
+
 async function submit() {
   if (!prompt.value.trim()) {
     return;
@@ -28,6 +59,12 @@ async function submit() {
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { error?: string } | null;
       error.value = body?.error ?? `${res.status} ${res.statusText}`;
+      return;
+    }
+
+    if (res.headers.get('content-type')?.includes('application/json')) {
+      const parsed = await res.json();
+      response.value = textFromAiResult(parsed) || JSON.stringify(parsed, null, 2);
       return;
     }
 
@@ -52,10 +89,7 @@ async function submit() {
           }
           try {
             const parsed = JSON.parse(data);
-            // Workers AI format: { response: "..." }
-            // OpenAI-compatible format: { choices: [{ delta: { content: "..." } }] }
-            const token = parsed.response ?? parsed.choices?.[0]?.delta?.content ?? '';
-            response.value += token;
+            response.value += textFromAiResult(parsed);
           } catch {
             // skip unparseable chunks
           }

@@ -29,7 +29,7 @@ export const POST = defineHandler(async (c) => {
 });
 ```
 
-You can use any model available through Cloudflare's AI binding, including Workers AI models such as `@cf/meta/llama-3.1-8b-instruct` and Cloudflare Gateway models such as `google/gemini-2.5-flash` or `openai/gpt-4.1-mini`. Models that return binary data, such as generated images, are returned as a `Blob` from `ai.run()`.
+You can use any model available through Cloudflare's AI binding, including Workers AI models such as `@cf/meta/llama-3.1-8b-instruct` and Cloudflare Gateway models such as `google/gemini-2.5-flash` or `openai/gpt-4.1-mini`. The input object must match the selected Cloudflare model's schema. Models that return binary data, such as generated images, are returned as a `Blob` from `ai.run()`.
 
 ## Streaming
 
@@ -89,11 +89,24 @@ On the **free tier**, AI requests return a `429` error once the limit is reached
 
 ## Cloudflare Gateway Models
 
-`ai.run()` mirrors Cloudflare's `env.AI.run()` model naming. Third-party models use Cloudflare model IDs and Cloudflare-managed credentials.
+`ai.run()` mirrors Cloudflare's `env.AI.run()` model naming and input schemas. Third-party models use Cloudflare model IDs and Cloudflare-managed credentials.
 
 ```ts
 const result = await ai.run('google/gemini-2.5-flash', {
-  messages: [{ role: 'user', content: 'Explain Durable Objects in one paragraph.' }],
+  contents: [
+    {
+      role: 'user',
+      parts: [{ text: 'Explain Durable Objects in one paragraph.' }],
+    },
+  ],
+});
+```
+
+OpenAI-compatible models use OpenAI-style `messages`:
+
+```ts
+const result = await ai.run('openai/gpt-4.1-mini', {
+  messages: [{ role: 'user', content: 'Summarize this deploy.' }],
 });
 ```
 
