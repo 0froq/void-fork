@@ -675,7 +675,7 @@ Imported from `"void/ai"`.
 
 ### `ai`
 
-Typed AI client for Workers AI models and AI Gateway-backed third-party providers.
+Typed AI client for Cloudflare AI models and provider-native AI Gateway requests.
 
 ```ts
 import { ai } from 'void/ai';
@@ -683,9 +683,16 @@ import { ai } from 'void/ai';
 const result = await ai.run('@cf/meta/llama-3.1-8b-instruct', {
   messages: [{ role: 'user', content: 'Summarize this release note.' }],
 });
+
+const response = await ai.provider('openai').fetch('/chat/completions', {
+  body: {
+    model: 'gpt-4o',
+    messages: [{ role: 'user', content: 'Summarize this release note.' }],
+  },
+});
 ```
 
-**Key exports:** `ai`, `VoidAi`, model input/response types. See [AI](../guide/ai.md) for provider setup and streaming examples.
+**Key exports:** `ai`, `VoidAi`, provider request types. See [AI](../guide/ai.md) for provider setup and streaming examples.
 
 ## ISR
 

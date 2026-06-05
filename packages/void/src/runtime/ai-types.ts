@@ -1,6 +1,6 @@
-// Types for third-party AI providers via CF AI Gateway's OpenAI-compatible endpoint
+// Provider-native AI Gateway helpers.
 
-export type ThirdPartyProvider =
+export type AiProviderName =
   | 'openai'
   | 'anthropic'
   | 'google-ai-studio'
@@ -22,65 +22,7 @@ export type ThirdPartyProvider =
   | 'ideogram'
   | 'parallel';
 
-export type ThirdPartyModel = `${ThirdPartyProvider}/${string}`;
-
-export type ChatContent =
-  | string
-  | Array<
-      | { type: 'text'; text: string }
-      | {
-          type: 'image_url';
-          image_url: { url: string; detail?: 'auto' | 'low' | 'high' };
-        }
-    >;
-
-export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: ChatContent;
-};
-
-export type ChatCompletionInputs = {
-  messages: Array<ChatMessage>;
-  temperature?: number;
-  max_tokens?: number;
-  top_p?: number;
-  frequency_penalty?: number;
-  presence_penalty?: number;
-  stop?: string | Array<string>;
-  stream?: boolean;
-};
-
-export type ChatCompletionResponse = {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: Array<ChatCompletionChoice>;
-  usage: ChatCompletionUsage;
-};
-
-export type ChatCompletionChoice = {
-  index: number;
-  message: ChatMessage;
-  finish_reason: string;
-};
-
-export type ChatCompletionUsage = {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-};
-
-export type ChatCompletionChunk = {
-  id: string;
-  choices: Array<{
-    index: number;
-    delta: { role?: string; content?: string };
-    finish_reason: string | null;
-  }>;
-};
-
-export type ImageGatewayEndpoint = 'images/generations' | 'images/edits';
+export type AiProvider = AiProviderName | (string & {});
 
 export type ImageFileInput =
   | Blob
@@ -92,48 +34,16 @@ export type ImageFileInput =
       type?: string;
     };
 
-export type ImageGenerationInputs = {
-  prompt: string;
-  n?: number;
-  size?: string;
-  quality?: string;
-  response_format?: 'url' | 'b64_json';
-  user?: string;
-  [key: string]: unknown;
+export type AiProviderOptions = {
+  apiKeyEnv?: string;
+  apiKeyHeader?: string;
+  apiKeyPrefix?: string;
 };
 
-export type ImageGenerationData = {
-  url?: string;
-  b64_json?: string;
-  revised_prompt?: string;
-};
-
-export type ImageGenerationResponse = {
-  created?: number;
-  data: Array<ImageGenerationData>;
-  usage?: unknown;
-  [key: string]: unknown;
-};
-
-export type ImageGenerationOptions = {
-  endpoint?: 'images/generations';
-  [key: string]: unknown;
-};
-
-export type ImageEditOptions = {
-  endpoint: 'images/edits';
-  [key: string]: unknown;
-};
-
-export type ImageEditInputs = {
-  prompt: string;
-  image: ImageFileInput | Array<ImageFileInput>;
-  mask?: ImageFileInput;
-  n?: number;
-  size?: string;
-  response_format?: 'url' | 'b64_json';
-  user?: string;
-  [key: string]: unknown;
+export type AiProviderFetchInit = {
+  method?: string;
+  headers?: HeadersInit;
+  body?: unknown;
 };
 
 /** Maps provider prefix to expected env var name for the API key */

@@ -1,13 +1,9 @@
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import {
   PROVIDER_KEY_MAP,
-  type ThirdPartyModel,
-  type ChatCompletionInputs,
-  type ChatCompletionResponse,
-  type ImageEditInputs,
-  type ImageEditOptions,
-  type ImageGenerationInputs,
-  type ImageGenerationOptions,
+  type AiProvider,
+  type AiProviderFetchInit,
+  type AiProviderOptions,
 } from './ai-types.ts';
 import { getRawRuntimeEnv, type RuntimeEnv } from './env-raw.ts';
 
@@ -22,20 +18,28 @@ type SerializedFileInput = {
   type?: string;
 };
 
+type SerializedProviderBody =
+  | { type: 'none' }
+  | { type: 'json'; value: unknown }
+  | { type: 'text'; data: string; contentType?: string }
+  | { type: 'base64'; data: string; contentType?: string }
+  | { type: 'form'; entries: Array<{ name: string; value: string | SerializedFileInput }> };
+
 type AiBackend = {
   run(model: string, inputs: unknown, options?: unknown): Promise<unknown>;
   image(model: string, inputs: unknown, options?: unknown): Promise<Response>;
+  providerFetch(
+    provider: string,
+    path: string,
+    init: AiProviderFetchInit | undefined,
+    options: AiProviderOptions | undefined,
+  ): Promise<Response>;
   models(params?: unknown): Promise<unknown>;
   toMarkdown(items: unknown, options?: unknown): Promise<unknown>;
 };
 
 function hasStreamFlag(value: unknown): value is { stream?: boolean } {
   return typeof value === 'object' && value !== null && 'stream' in value;
-}
-
-function isThirdPartyModel(model: string): boolean {
-  const provider = model.split('/')[0];
-  return provider in PROVIDER_KEY_MAP;
 }
 
 function mediaTypeFromContentType(contentType: string | null): string | null {
@@ -166,8 +170,82 @@ async function serializeProxyValue(
   return value;
 }
 
-async function serializeImageInputs(inputs: unknown, endpoint: string): Promise<unknown> {
-  return endpoint === 'images/edits' ? serializeProxyValue(inputs) : inputs;
+function formFileName(value: File | Blob, fallback: string): string {
+  const name = fileNameFromBlob(value);
+  return name ?? fallback;
+}
+
+async function serializeFormData(form: FormData): Promise<SerializedProviderBody> {
+  const entries: Array<{ name: string; value: string | SerializedFileInput }> = [];
+  for (const [name, value] of form.entries()) {
+    if (typeof value === 'string') {
+      entries.push({ name, value });
+      continue;
+    }
+    entries.push({
+      name,
+      value: {
+        [VOID_FILE_MARKER]: true,
+        data: arrayBufferToBase64(await value.arrayBuffer()),
+        name: formFileName(value, name),
+        type: value.type || undefined,
+      },
+    });
+  }
+  return { type: 'form', entries };
+}
+
+async function serializeProviderBody(body: unknown): Promise<SerializedProviderBody> {
+  if (body === undefined || body === null) {
+    return { type: 'none' };
+  }
+
+  if (typeof body === 'string') {
+    return { type: 'text', data: body };
+  }
+
+  if (body instanceof URLSearchParams) {
+    return {
+      type: 'text',
+      data: body.toString(),
+      contentType: 'application/x-www-form-urlencoded;charset=UTF-8',
+    };
+  }
+
+  if (body instanceof FormData) {
+    return serializeFormData(body);
+  }
+
+  if (body instanceof Blob) {
+    return {
+      type: 'base64',
+      data: arrayBufferToBase64(await body.arrayBuffer()),
+      contentType: body.type || undefined,
+    };
+  }
+
+  if (body instanceof ArrayBuffer) {
+    return { type: 'base64', data: arrayBufferToBase64(body) };
+  }
+
+  if (isBinaryView(body)) {
+    return { type: 'base64', data: arrayBufferToBase64(copyBinaryView(body)) };
+  }
+
+  return { type: 'json', value: await serializeProxyValue(body) };
+}
+
+function headersToRecord(headers: HeadersInit | undefined): Record<string, string> | undefined {
+  if (!headers) {
+    return undefined;
+  }
+
+  const result: Record<string, string> = {};
+  const normalized = new Headers(headers);
+  for (const [key, value] of normalized.entries()) {
+    result[key] = value;
+  }
+  return result;
 }
 
 async function responseFromResult(result: unknown): Promise<Response> {
@@ -211,9 +289,12 @@ function splitImageOptions(options: unknown): {
   };
 }
 
-function resolveProviderKey(model: string, runtimeEnv: RuntimeEnv): string {
-  const provider = model.split('/')[0];
-  const envVar = PROVIDER_KEY_MAP[provider];
+function resolveProviderKey(
+  provider: string,
+  runtimeEnv: RuntimeEnv,
+  options?: AiProviderOptions,
+): string {
+  const envVar = options?.apiKeyEnv ?? PROVIDER_KEY_MAP[provider];
   if (!envVar) {
     throw new Error(
       `ai: Unknown provider '${provider}'. Use one of: ${Object.keys(PROVIDER_KEY_MAP).join(', ')}.`,
@@ -263,6 +344,7 @@ function resolveBackend(): AiBackend {
           await directAi.run(model as keyof AiModels, inputs as never, runOptions as AiOptions),
         );
       },
+      providerFetch: unsupportedProviderFetch,
       models: directAi.models.bind(directAi),
       toMarkdown: directAi.toMarkdown?.bind(directAi) ?? unsupported('toMarkdown'),
     };
@@ -277,14 +359,41 @@ function unsupported(method: string): () => never {
   };
 }
 
+function unsupportedProviderFetch(): Promise<Response> {
+  throw new Error('ai: ai.provider().fetch() is not supported in this environment.');
+}
+
+async function providerRequestBody(
+  provider: string,
+  path: string,
+  init: AiProviderFetchInit | undefined,
+  options: AiProviderOptions | undefined,
+  runtimeEnv: RuntimeEnv,
+): Promise<Record<string, unknown>> {
+  return {
+    provider,
+    path,
+    method: init?.method,
+    headers: headersToRecord(init?.headers),
+    body: await serializeProviderBody(init?.body),
+    providerKey: resolveProviderKey(provider, runtimeEnv, options),
+    apiKeyHeader: options?.apiKeyHeader,
+    apiKeyPrefix: options?.apiKeyPrefix,
+  };
+}
+
 function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBackend {
-  async function proxyFetch(action: string, body: Record<string, unknown>): Promise<Response> {
+  async function proxyFetch(
+    action: string,
+    body: Record<string, unknown>,
+    options: { throwOnError?: boolean } = {},
+  ): Promise<Response> {
     const res = await proxy.fetch(`https://ai-proxy/ai/${action}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action, ...body }),
     });
-    if (!res.ok) {
+    if (options.throwOnError !== false && !res.ok) {
       const text = await res.text();
       throw new Error(`ai: Proxy request failed with ${res.status}: '${text}'.`);
     }
@@ -296,15 +405,6 @@ function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBa
       const projectId = runtimeEnv.__PROJECT_ID;
       const aiToken = runtimeEnv.__VOID_PROXY_TOKEN;
 
-      if (isThirdPartyModel(model as string)) {
-        const providerKey = resolveProviderKey(model as string, runtimeEnv);
-        const res = await proxyFetch('gateway', { model, inputs, providerKey, projectId, aiToken });
-        if (hasStreamFlag(inputs) && inputs.stream) {
-          return res.body;
-        }
-        return readProxyResult(res);
-      }
-
       const res = await proxyFetch('run', { model, inputs, options, projectId, aiToken });
       if (hasStreamFlag(inputs) && inputs.stream) {
         return res.body;
@@ -314,22 +414,22 @@ function makeServiceBindingBackend(proxy: Fetcher, runtimeEnv: RuntimeEnv): AiBa
     async image(model, inputs, options) {
       const projectId = runtimeEnv.__PROJECT_ID;
       const aiToken = runtimeEnv.__VOID_PROXY_TOKEN;
-      const { endpoint, runOptions } = splitImageOptions(options);
-
-      if (isThirdPartyModel(model as string)) {
-        const providerKey = resolveProviderKey(model as string, runtimeEnv);
-        const proxyInputs = await serializeImageInputs(inputs, endpoint);
-        return proxyFetch('gateway', {
-          model,
-          endpoint,
-          inputs: proxyInputs,
-          providerKey,
-          projectId,
-          aiToken,
-        });
-      }
+      const { runOptions } = splitImageOptions(options);
 
       return proxyFetch('run', { model, inputs, options: runOptions, projectId, aiToken });
+    },
+    async providerFetch(provider, path, init, options) {
+      const projectId = runtimeEnv.__PROJECT_ID;
+      const aiToken = runtimeEnv.__VOID_PROXY_TOKEN;
+      return proxyFetch(
+        'provider',
+        {
+          ...(await providerRequestBody(provider, path, init, options, runtimeEnv)),
+          projectId,
+          aiToken,
+        },
+        { throwOnError: false },
+      );
     },
     async models(params) {
       const projectId = runtimeEnv.__PROJECT_ID;
@@ -354,13 +454,17 @@ function makeHttpBackend(token: string, projectId: string, runtimeEnv: RuntimeEn
     ...cfAccessHeaders(runtimeEnv),
   };
 
-  async function proxyFetch(action: string, body: Record<string, unknown>): Promise<Response> {
+  async function proxyFetch(
+    action: string,
+    body: Record<string, unknown>,
+    options: { throwOnError?: boolean } = {},
+  ): Promise<Response> {
     const res = await fetch(`${base}/${action}`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ action, ...body, projectId }),
     });
-    if (!res.ok) {
+    if (options.throwOnError !== false && !res.ok) {
       const text = await res.text();
       throw new Error(`ai: Proxy request failed with ${res.status}: '${text}'.`);
     }
@@ -369,15 +473,6 @@ function makeHttpBackend(token: string, projectId: string, runtimeEnv: RuntimeEn
 
   return {
     async run(model, inputs, options) {
-      if (isThirdPartyModel(model as string)) {
-        const providerKey = resolveProviderKey(model as string, runtimeEnv);
-        const res = await proxyFetch('gateway', { model, inputs, providerKey });
-        if (hasStreamFlag(inputs) && inputs.stream) {
-          return res.body;
-        }
-        return readProxyResult(res);
-      }
-
       const res = await proxyFetch('run', { model, inputs, options });
       if (hasStreamFlag(inputs) && inputs.stream) {
         return res.body;
@@ -385,15 +480,16 @@ function makeHttpBackend(token: string, projectId: string, runtimeEnv: RuntimeEn
       return readProxyResult(res);
     },
     async image(model, inputs, options) {
-      const { endpoint, runOptions } = splitImageOptions(options);
-
-      if (isThirdPartyModel(model as string)) {
-        const providerKey = resolveProviderKey(model as string, runtimeEnv);
-        const proxyInputs = await serializeImageInputs(inputs, endpoint);
-        return proxyFetch('gateway', { model, endpoint, inputs: proxyInputs, providerKey });
-      }
+      const { runOptions } = splitImageOptions(options);
 
       return proxyFetch('run', { model, inputs, options: runOptions });
+    },
+    async providerFetch(provider, path, init, options) {
+      return proxyFetch(
+        'provider',
+        await providerRequestBody(provider, path, init, options, runtimeEnv),
+        { throwOnError: false },
+      );
     },
     async models(params) {
       const res = await proxyFetch('models', { inputs: params });
@@ -426,33 +522,26 @@ export type VoidAi = Omit<Ai, 'run'> & {
     options?: AiOptions,
   ): Promise<AiModels[Name]['postProcessedOutputs']>;
 
-  /** Third-party chat completions (OpenAI, Anthropic, etc.) */
-  run(
-    model: ThirdPartyModel,
-    inputs: ChatCompletionInputs,
-    options?: AiOptions,
-  ): Promise<ChatCompletionResponse>;
+  /** Cloudflare AI Gateway model inference. Accepts Cloudflare model IDs unchanged. */
+  run(model: string, inputs: unknown, options?: AiOptions): Promise<unknown>;
 
   /** Image generation. Returns the proxy response so callers can return or parse it. */
   image<Name extends keyof AiModels>(
     model: Name,
     inputs: AiModels[Name]['inputs'],
-    options?: ImageGenerationOptions,
+    options?: AiOptions,
   ): Promise<Response>;
 
-  /** Third-party image generation or editing through AI Gateway. */
-  image(
-    model: ThirdPartyModel,
-    inputs: ImageEditInputs,
-    options: ImageEditOptions,
-  ): Promise<Response>;
+  /** Cloudflare AI Gateway model inference returned as a Response. */
+  image(model: string, inputs: unknown, options?: AiOptions): Promise<Response>;
 
-  /** Third-party image generation through AI Gateway. */
-  image(
-    model: ThirdPartyModel,
-    inputs: ImageGenerationInputs,
-    options?: ImageGenerationOptions,
-  ): Promise<Response>;
+  /** Provider-native AI Gateway requests using a project secret for the provider API key. */
+  provider(
+    provider: AiProvider,
+    options?: AiProviderOptions,
+  ): {
+    fetch(path: string, init?: AiProviderFetchInit): Promise<Response>;
+  };
 
   /** Stream Workers AI response as SSE */
   stream<Name extends keyof AiModels>(
@@ -461,12 +550,8 @@ export type VoidAi = Omit<Ai, 'run'> & {
     options?: AiOptions,
   ): Promise<Response>;
 
-  /** Stream third-party chat completions as SSE */
-  stream(
-    model: ThirdPartyModel,
-    inputs: Omit<ChatCompletionInputs, 'stream'>,
-    options?: AiOptions,
-  ): Promise<Response>;
+  /** Stream any Cloudflare AI Gateway model response as SSE */
+  stream(model: string, inputs: Record<string, unknown>, options?: AiOptions): Promise<Response>;
 };
 
 export const ai: VoidAi = new Proxy({} as VoidAi, {
@@ -485,6 +570,12 @@ export const ai: VoidAi = new Proxy({} as VoidAi, {
     if (prop === 'image') {
       return backend().image;
     }
+    if (prop === 'provider') {
+      return (provider: string, options?: AiProviderOptions) => ({
+        fetch: (path: string, init?: AiProviderFetchInit) =>
+          backend().providerFetch(provider, path, init, options),
+      });
+    }
     if (prop === 'models') {
       return backend().models;
     }
@@ -496,21 +587,9 @@ export const ai: VoidAi = new Proxy({} as VoidAi, {
 });
 
 export type {
-  ThirdPartyModel,
-  ThirdPartyProvider,
-  ChatCompletionInputs,
-  ChatCompletionResponse,
-  ChatCompletionChoice,
-  ChatCompletionUsage,
-  ChatCompletionChunk,
-  ChatMessage,
-  ChatContent,
-  ImageGatewayEndpoint,
-  ImageEditInputs,
-  ImageEditOptions,
+  AiProvider,
+  AiProviderFetchInit,
+  AiProviderName,
+  AiProviderOptions,
   ImageFileInput,
-  ImageGenerationInputs,
-  ImageGenerationResponse,
-  ImageGenerationData,
-  ImageGenerationOptions,
 } from './ai-types.ts';

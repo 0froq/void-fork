@@ -9,7 +9,8 @@ export const loader = defineHandler(() => {
         value: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
         label: 'Llama 3.3 70B (Workers AI)',
       },
-      { value: 'openai/gpt-4o', label: 'GPT-4o (OpenAI)' },
+      { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash (Google)' },
+      { value: 'openai/gpt-4.1-mini', label: 'GPT-4.1 Mini (OpenAI)' },
       {
         value: 'anthropic/claude-sonnet-4-20250514',
         label: 'Claude Sonnet 4 (Anthropic)',

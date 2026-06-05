@@ -4,7 +4,7 @@ outline: deep
 
 # AI
 
-Void provides a typed AI client powered by Cloudflare's [AI Gateway](https://developers.cloudflare.com/ai-gateway/). It supports both [Workers AI](https://developers.cloudflare.com/workers-ai/) models and third-party providers such as OpenAI, Anthropic, and Google through bring-your-own-key credentials. Import `ai` from `void/ai` and run inference directly from your route handlers. Usage is metered through Void.
+Void provides a typed AI client powered by Cloudflare's [AI Gateway](https://developers.cloudflare.com/ai-gateway/). Import `ai` from `void/ai` and run inference directly from your route handlers. Usage is metered through Void.
 
 ```ts
 import { ai } from 'void/ai';
@@ -29,7 +29,7 @@ export const POST = defineHandler(async (c) => {
 });
 ```
 
-You can use any model available on [Workers AI](https://developers.cloudflare.com/workers-ai/models/), including text generation, image classification, image-to-text, text-to-image, embeddings, translation, and more. Models that return binary data, such as generated images, are returned as a `Blob` from `ai.run()`.
+You can use any model available through Cloudflare's AI binding, including Workers AI models such as `@cf/meta/llama-3.1-8b-instruct` and Cloudflare Gateway models such as `google/gemini-2.5-flash` or `openai/gpt-4.1-mini`. Models that return binary data, such as generated images, are returned as a `Blob` from `ai.run()`.
 
 ## Streaming
 
@@ -87,11 +87,39 @@ Workers AI usage is metered in [**neurons**](https://developers.cloudflare.com/w
 
 On the **free tier**, AI requests return a `429` error once the limit is reached. On **paid tiers**, usage beyond the included allowance is tracked as overage on your monthly bill.
 
-## Third-Party Providers (BYOK)
+## Cloudflare Gateway Models
 
-You can use models from OpenAI, Anthropic, Google, and other providers by passing a `provider/model` identifier. Bring your own API key, add it as a project secret, and Void handles the rest. Third-party inference is billed directly by the provider, and Void does not mark up API calls. Requests still route through AI Gateway so usage shows up on the dashboard.
+`ai.run()` mirrors Cloudflare's `env.AI.run()` model naming. Third-party models use Cloudflare model IDs and Cloudflare-managed credentials.
 
-### Usage
+```ts
+const result = await ai.run('google/gemini-2.5-flash', {
+  messages: [{ role: 'user', content: 'Explain Durable Objects in one paragraph.' }],
+});
+```
+
+Pass Cloudflare AI Gateway options as the third argument:
+
+```ts
+const result = await ai.run(
+  'openai/gpt-4.1-mini',
+  {
+    messages: [{ role: 'user', content: 'Summarize this deploy.' }],
+  },
+  {
+    gateway: {
+      skipCache: true,
+    },
+  },
+);
+```
+
+Void always injects the `void` gateway ID and project metadata for metering.
+
+## Provider-Native Requests
+
+Use `ai.provider(provider).fetch(path, init)` when you want to call a provider-native API with your own provider key. The request still routes through Cloudflare AI Gateway and Void metering, but the request shape is the provider's native HTTP API.
+
+### OpenAI
 
 ```ts
 import { defineHandler } from 'void';
@@ -100,57 +128,57 @@ import { ai } from 'void/ai';
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
 
-  const result = await ai.run('openai/gpt-4o', {
-    messages: [{ role: 'user', content: prompt }],
-    max_tokens: 512,
+  const response = await ai.provider('openai').fetch('/chat/completions', {
+    body: {
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 512,
+    },
   });
 
+  const result = await response.json();
   return c.json(result);
 });
 ```
 
-The same `ai.run()` and `ai.stream()` methods work for both Workers AI and third-party models. The framework detects the provider from the model string and routes the request through [AI Gateway](https://developers.cloudflare.com/ai-gateway/) automatically.
-
-The options follow each provider's conventions. All third-party providers use the OpenAI-compatible chat completions format, including `messages`, `max_tokens`, and `temperature`. TypeScript narrows the input and return types based on the model string: Workers AI models get per-model typed inputs from `@cloudflare/workers-types`, while third-party models such as `"provider/model"` get `ChatCompletionInputs` and `ChatCompletionResponse`.
-
-### Vision
-
-Third-party chat models that accept image inputs can receive OpenAI-compatible multimodal message content:
+### Google AI Studio
 
 ```ts
-const result = await ai.run('openai/gpt-4o', {
-  messages: [
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: 'What is in this image?' },
+const response = await ai
+  .provider('google-ai-studio')
+  .fetch('/v1/models/gemini-2.5-flash:generateContent', {
+    body: {
+      contents: [
         {
-          type: 'image_url',
-          image_url: { url: 'data:image/png;base64,...', detail: 'high' },
+          role: 'user',
+          parts: [{ text: 'What is Cloudflare?' }],
         },
       ],
     },
-  ],
-});
+  });
+
+const result = await response.json();
+```
+
+### Custom Providers
+
+For providers that are not in Void's default key map, pass the secret name and API-key header:
+
+```ts
+const response = await ai
+  .provider('custom-provider', {
+    apiKeyEnv: 'CUSTOM_PROVIDER_API_KEY',
+    apiKeyHeader: 'x-api-key',
+    apiKeyPrefix: '',
+  })
+  .fetch('/v1/respond', {
+    body: { prompt: 'Hello' },
+  });
 ```
 
 ### Image Generation
 
-Use `ai.image()` for image-generation providers or Workers AI image models. It returns a `Response`, so route handlers can return it directly or parse it as JSON depending on the provider:
-
-```ts
-export const POST = defineHandler(async (c) => {
-  const { prompt } = await c.req.json();
-
-  return ai.image('openai/gpt-image-1.5', {
-    prompt,
-    size: '1024x1024',
-    response_format: 'b64_json',
-  });
-});
-```
-
-For Workers AI text-to-image models, pass the model name and input shape from Cloudflare's model docs:
+Use `ai.run()` or `ai.image()` for Cloudflare-native image models:
 
 ```ts
 export const POST = defineHandler(async (c) => {
@@ -159,26 +187,40 @@ export const POST = defineHandler(async (c) => {
 });
 ```
 
-For image edits, pass the file-like input and select the edit endpoint. Void serializes the file through the proxy and forwards it to AI Gateway as multipart form data:
+Use `ai.provider().fetch()` for provider-native image APIs:
+
+```ts
+export const POST = defineHandler(async (c) => {
+  const { prompt } = await c.req.json();
+
+  return ai.provider('openai').fetch('/images/generations', {
+    body: {
+      model: 'gpt-image-1.5',
+      prompt,
+      size: '1024x1024',
+      response_format: 'b64_json',
+    },
+  });
+});
+```
+
+For multipart provider APIs, pass a `FormData` body. Void serializes the body through the proxy and reconstructs it before forwarding to AI Gateway:
 
 ```ts
 export const POST = defineHandler(async (c) => {
   const body = await c.req.parseBody();
+  const form = new FormData();
+  form.set('model', 'gpt-image-1.5');
+  form.set('prompt', String(body.prompt));
+  form.set('image', body.image as Blob, 'source.png');
 
-  return ai.image(
-    'openai/gpt-image-1.5',
-    {
-      prompt: String(body.prompt),
-      image: body.image as Blob,
-    },
-    { endpoint: 'images/edits' },
-  );
+  return ai.provider('openai').fetch('/images/edits', { body: form });
 });
 ```
 
 ### Provider Key Convention
 
-Each provider requires an API key set as a project secret. The env var name is automatically derived from the provider prefix:
+Provider-native requests require an API key set as a project secret. The env var name is automatically derived from the provider name:
 
 | Provider prefix    | Env var               |
 | ------------------ | --------------------- |
@@ -203,7 +245,7 @@ Each provider requires an API key set as a project secret. The env var name is a
 | `ideogram`         | `IDEOGRAM_API_KEY`    |
 | `parallel`         | `PARALLEL_API_KEY`    |
 
-All [AI Gateway providers](https://developers.cloudflare.com/ai-gateway/usage/providers/) that accept a Bearer API key are supported. Providers with non-standard auth (Amazon Bedrock, Azure OpenAI, Google Vertex) are not yet supported.
+OpenAI-style providers use `Authorization: Bearer <key>`. Google AI Studio uses `x-goog-api-key`. Use `apiKeyHeader` and `apiKeyPrefix` for custom providers.
 
 For production, add your API key as a project secret:
 
@@ -217,19 +259,22 @@ For local development, add it to `.env.local` in your project root:
 OPENAI_API_KEY=sk-...
 ```
 
-If the key is missing at runtime, `ai.run()` throws a descriptive error telling you which env var to set.
+If the key is missing at runtime, `ai.provider().fetch()` throws a descriptive error telling you which env var to set.
 
-### Streaming with Third-Party Models
+### Streaming with Provider-Native APIs
 
-`ai.stream()` works the same way. The response is always SSE regardless of provider:
+Provider-native streaming APIs return the provider response directly:
 
 ```ts
 export const POST = defineHandler(async (c) => {
   const { prompt } = await c.req.json();
 
-  return ai.stream('anthropic/claude-sonnet-4-20250514', {
-    messages: [{ role: 'user', content: prompt }],
-    max_tokens: 512,
+  return ai.provider('openai').fetch('/chat/completions', {
+    body: {
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      stream: true,
+    },
   });
 });
 ```
