@@ -225,6 +225,47 @@ function filteredResponseHeaders(response: Response): Headers {
   return headers;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function responseFromThrown(value: unknown): Response | null {
+  if (value instanceof Response) {
+    return value;
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (value.response instanceof Response) {
+    return value.response;
+  }
+
+  return responseFromThrown(value.cause);
+}
+
+function statusFromThrown(value: unknown): number | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const status = value.status ?? value.statusCode;
+  if (typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599) {
+    return status;
+  }
+
+  return statusFromThrown(value.cause);
+}
+
+function messageFromThrown(value: unknown): string {
+  if (value instanceof Error) {
+    return value.message;
+  }
+
+  return String(value);
+}
+
 function hasResponseMethod(value: unknown): value is { response(): Response | Promise<Response> } {
   return (
     typeof value === 'object' &&
@@ -265,6 +306,16 @@ async function responseFromAiResult(result: unknown, streamAsSse: boolean): Prom
   return Response.json(result);
 }
 
+async function responseFromAiError(err: unknown): Promise<Response> {
+  const response = responseFromThrown(err);
+  if (response) {
+    return responseFromGateway(response, false);
+  }
+
+  const status = statusFromThrown(err) ?? 502;
+  return Response.json({ error: messageFromThrown(err) }, { status });
+}
+
 async function responseFromGateway(response: Response, streamAsSse: boolean): Promise<Response> {
   if (streamAsSse && response.body) {
     return new Response(response.body, {
@@ -297,9 +348,9 @@ ai.post('/run', async (context) => {
     const result = await context.env.AI.run(model, body.inputs, options);
     return responseFromAiResult(result, hasStreamFlag(body.inputs) && body.inputs.stream === true);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = messageFromThrown(err);
     console.error('AI inference error:', message);
-    return context.json({ error: 'inference error' }, 502);
+    return responseFromAiError(err);
   }
 });
 

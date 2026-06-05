@@ -1028,7 +1028,7 @@ describe('proxy worker', () => {
   });
 
   describe('error handling', () => {
-    it('returns 502 when AI binding throws', async () => {
+    it('returns the AI binding error message when the binding throws', async () => {
       const env = createEnv({
         run: vi.fn(async () => {
           throw new Error('inference failed');
@@ -1046,10 +1046,10 @@ describe('proxy worker', () => {
       );
 
       expect(res.status).toBe(502);
-      expect(await res.json()).toEqual({ error: 'inference error' });
+      expect(await res.json()).toEqual({ error: 'inference failed' });
     });
 
-    it('returns 502 with generic error when non-Error is thrown', async () => {
+    it('returns 502 with stringified error when non-Error is thrown', async () => {
       const env = createEnv({
         run: vi.fn(async () => {
           throw 'string error';
@@ -1067,7 +1067,60 @@ describe('proxy worker', () => {
       );
 
       expect(res.status).toBe(502);
-      expect(await res.json()).toEqual({ error: 'inference error' });
+      expect(await res.json()).toEqual({ error: 'string error' });
+    });
+
+    it('forwards response-shaped AI binding errors', async () => {
+      const env = createEnv({
+        run: vi.fn(async () => {
+          throw {
+            response: new Response(
+              JSON.stringify({ errors: [{ message: 'Unified Billing off' }] }),
+              {
+                status: 402,
+                headers: { 'content-type': 'application/json' },
+              },
+            ),
+          };
+        }),
+      });
+
+      const res = await worker.fetch(
+        post('/ai/run', {
+          model: 'google/gemini-2.5-flash',
+          inputs: { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] },
+          projectId: 'p',
+          aiToken: aiTokens['p'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(402);
+      expect(res.headers.get('content-type')).toBe('application/json');
+      expect(await res.json()).toEqual({ errors: [{ message: 'Unified Billing off' }] });
+    });
+
+    it('uses status from AI binding errors when available', async () => {
+      const env = createEnv({
+        run: vi.fn(async () => {
+          const error = new Error('Invalid model input') as Error & { status: number };
+          error.status = 400;
+          throw error;
+        }),
+      });
+
+      const res = await worker.fetch(
+        post('/ai/run', {
+          model: 'google/gemini-2.5-flash',
+          inputs: { messages: [{ role: 'user', content: 'Hello' }] },
+          projectId: 'p',
+          aiToken: aiTokens['p'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Invalid model input' });
     });
 
     it('includes CORS headers on error responses', async () => {
