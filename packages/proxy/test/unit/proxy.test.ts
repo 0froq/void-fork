@@ -488,6 +488,40 @@ describe('proxy worker', () => {
       );
     });
 
+    it('preserves user gateway options while forcing Void gateway id and project metadata', async () => {
+      const env = createEnv();
+      await worker.fetch(
+        post('/ai/run', {
+          model: 'm',
+          inputs: { prompt: 'hi' },
+          options: {
+            gateway: {
+              id: 'custom',
+              skipCache: true,
+              cacheTtl: 60,
+              metadata: { user: 'alice', projectId: 'wrong' },
+            },
+          },
+          projectId: 'proj_42',
+          aiToken: aiTokens['proj_42'],
+        }),
+        env,
+      );
+
+      expect(env.AI.run).toHaveBeenCalledWith(
+        'm',
+        { prompt: 'hi' },
+        {
+          gateway: {
+            id: 'void',
+            skipCache: true,
+            cacheTtl: 60,
+            metadata: { user: 'alice', projectId: 'proj_42' },
+          },
+        },
+      );
+    });
+
     it('returns 400 when model is missing', async () => {
       const res = await worker.fetch(
         post('/ai/run', { inputs: {}, projectId: 'p', aiToken: aiTokens['p'] }),
@@ -647,105 +681,43 @@ describe('proxy worker', () => {
     });
   });
 
-  describe('AI: /ai/gateway', () => {
-    function mockGatewayResponse(response: unknown, status = 200) {
-      const runMock = vi.fn(
-        async () =>
-          new Response(JSON.stringify(response), {
-            status,
-            headers: { 'content-type': 'application/json' },
-          }),
-      );
-      return { runMock, gateway: vi.fn(() => ({ run: runMock })) };
+  describe('AI: /ai/provider', () => {
+    function mockProviderFetch(response: BodyInit, init?: ResponseInit) {
+      const fetchMock = vi.fn(async () => new Response(response, init));
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
     }
 
-    function mockGatewayStream(chunks: Array<string>) {
-      const body = new ReadableStream({
-        start(controller) {
-          const encoder = new TextEncoder();
-          for (const chunk of chunks) {
-            controller.enqueue(encoder.encode(chunk));
-          }
-          controller.close();
-        },
+    function mockProviderGateway(provider = 'openai') {
+      const getUrlMock = vi.fn(
+        async (requestedProvider?: string) =>
+          `https://gateway.test/v1/account/void/${requestedProvider ?? provider}/`,
+      );
+      const runMock = vi.fn();
+      const gateway = vi.fn(() => ({ getUrl: getUrlMock, run: runMock }));
+      return { gateway, getUrlMock, runMock };
+    }
+
+    it('forwards OpenAI provider-native JSON requests', async () => {
+      const fetchMock = mockProviderFetch(JSON.stringify({ id: 'resp_1' }), {
+        headers: { 'content-type': 'application/json' },
       });
-      const runMock = vi.fn(
-        async () =>
-          new Response(body, {
-            status: 200,
-            headers: { 'content-type': 'text/event-stream' },
-          }),
-      );
-      return { runMock, gateway: vi.fn(() => ({ run: runMock })) };
-    }
-
-    it('forwards chat request to AI Gateway via binding', async () => {
-      const gatewayResponse = {
-        id: 'chatcmpl-123',
-        choices: [
-          { index: 0, message: { role: 'assistant', content: 'Hi!' }, finish_reason: 'stop' },
-        ],
-        usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
-      };
-      const { runMock, gateway } = mockGatewayResponse(gatewayResponse);
+      const { gateway, getUrlMock, runMock } = mockProviderGateway();
 
       const env = createEnv({ gateway });
       const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-4o',
-          inputs: { messages: [{ role: 'user', content: 'Hello' }] },
-          providerKey: 'sk-test-key',
-          projectId: 'proj_1',
-          aiToken: aiTokens['proj_1'],
-        }),
-        env,
-      );
-
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual(gatewayResponse);
-
-      // Verify gateway was initialized with correct ID
-      expect(gateway).toHaveBeenCalledWith('void');
-
-      // Verify the run call
-      expect(runMock).toHaveBeenCalledOnce();
-      const arg = runMock.mock.calls[0][0];
-      expect(arg.provider).toBe('openai');
-      expect(arg.endpoint).toBe('chat/completions');
-      expect(arg.headers.authorization).toBe('Bearer sk-test-key');
-      expect(arg.headers['cf-aig-metadata-projectId']).toBe('proj_1');
-      expect(arg.query.model).toBe('gpt-4o');
-      expect(arg.query.messages).toEqual([{ role: 'user', content: 'Hello' }]);
-    });
-
-    it('forwards multimodal chat content unchanged', async () => {
-      const { runMock, gateway } = mockGatewayResponse({
-        id: 'chatcmpl-vision',
-        choices: [],
-        usage: {},
-      });
-
-      const messages = [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'What is in this image?' },
-            {
-              type: 'image_url',
-              image_url: {
-                url: 'data:image/png;base64,iVBORw0KGgo=',
-                detail: 'high',
-              },
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/chat/completions',
+          method: 'POST',
+          headers: { 'openai-beta': 'assistants=v2' },
+          body: {
+            type: 'json',
+            value: {
+              model: 'gpt-4o',
+              messages: [{ role: 'user', content: 'Hello' }],
             },
-          ],
-        },
-      ];
-
-      const env = createEnv({ gateway });
-      const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-4o',
-          inputs: { messages },
+          },
           providerKey: 'sk-test-key',
           projectId: 'proj_1',
           aiToken: aiTokens['proj_1'],
@@ -754,30 +726,88 @@ describe('proxy worker', () => {
       );
 
       expect(res.status).toBe(200);
-      expect(runMock.mock.calls[0][0].query.messages).toEqual(messages);
+      expect(await res.json()).toEqual({ id: 'resp_1' });
+      expect(gateway).toHaveBeenCalledWith('void');
+      expect(getUrlMock).toHaveBeenCalledWith('openai');
+      expect(runMock).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        'https://gateway.test/v1/account/void/openai/chat/completions',
+      );
+
+      const init = fetchMock.mock.calls[0][1]!;
+      expect(init.method).toBe('POST');
+      const headers = new Headers(init.headers);
+      expect(headers.get('authorization')).toBe('Bearer sk-test-key');
+      expect(headers.get('cf-aig-metadata-projectId')).toBe('proj_1');
+      expect(headers.get('content-type')).toBe('application/json');
+      expect(headers.get('openai-beta')).toBe('assistants=v2');
+      expect(JSON.parse(init.body as string)).toEqual({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: 'Hello' }],
+      });
     });
 
-    it('requires providerKey', async () => {
-      const env = createEnv();
+    it('uses Google AI Studio API-key header for provider-native requests', async () => {
+      const fetchMock = mockProviderFetch(JSON.stringify({ candidates: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+      const { gateway, getUrlMock } = mockProviderGateway('google-ai-studio');
+
+      const env = createEnv({ gateway });
       const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-4o',
-          inputs: { messages: [{ role: 'user', content: 'Hello' }] },
+        post('/ai/provider', {
+          provider: 'google-ai-studio',
+          path: '/v1/models/gemini-2.5-flash:generateContent',
+          body: {
+            type: 'json',
+            value: { contents: [{ parts: [{ text: 'Hello' }] }] },
+          },
+          providerKey: 'google-key',
           projectId: 'proj_1',
           aiToken: aiTokens['proj_1'],
         }),
         env,
       );
 
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: 'providerKey required' });
+      expect(res.status).toBe(200);
+      expect(getUrlMock).toHaveBeenCalledWith('google-ai-studio');
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        'https://gateway.test/v1/account/void/google-ai-studio/v1/models/gemini-2.5-flash:generateContent',
+      );
+      const headers = new Headers(fetchMock.mock.calls[0][1]!.headers);
+      expect(headers.get('x-goog-api-key')).toBe('google-key');
+      expect(headers.get('authorization')).toBeNull();
+      expect(headers.get('cf-aig-metadata-projectId')).toBe('proj_1');
     });
 
-    it('requires model', async () => {
-      const env = createEnv();
+    it('reconstructs multipart form data bodies', async () => {
+      const fetchMock = mockProviderFetch(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+      });
+      const { gateway } = mockProviderGateway();
+
+      const env = createEnv({ gateway });
       const res = await worker.fetch(
-        post('/ai/gateway', {
-          inputs: { messages: [{ role: 'user', content: 'Hello' }] },
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/images/edits',
+          body: {
+            type: 'form',
+            entries: [
+              { name: 'model', value: 'gpt-image-1.5' },
+              { name: 'prompt', value: 'change the background' },
+              {
+                name: 'image',
+                value: {
+                  __voidFile: true,
+                  data: btoa('png-bytes'),
+                  name: 'source.png',
+                  type: 'image/png',
+                },
+              },
+            ],
+          },
           providerKey: 'sk-test',
           projectId: 'proj_1',
           aiToken: aiTokens['proj_1'],
@@ -785,91 +815,33 @@ describe('proxy worker', () => {
         env,
       );
 
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: 'model required' });
-    });
-
-    it('returns streaming response when inputs.stream is true', async () => {
-      const { runMock, gateway } = mockGatewayStream([
-        'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n',
-        'data: {"choices":[{"delta":{"content":"!"}}]}\n\n',
-        'data: [DONE]\n\n',
-      ]);
-
-      const env = createEnv({ gateway });
-      const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-4o',
-          inputs: {
-            messages: [{ role: 'user', content: 'Hello' }],
-            stream: true,
-          },
-          providerKey: 'sk-test-key',
-          projectId: 'proj_1',
-          aiToken: aiTokens['proj_1'],
-        }),
-        env,
-      );
-
       expect(res.status).toBe(200);
-      expect(res.headers.get('content-type')).toBe('text/event-stream');
-      expect(res.headers.get('cache-control')).toBe('no-cache');
+      const init = fetchMock.mock.calls[0][1]!;
+      const headers = new Headers(init.headers);
+      expect(headers.get('content-type')).toBeNull();
 
-      const text = await res.text();
-      expect(text).toContain('Hi');
-      expect(text).toContain('[DONE]');
-
-      // Verify stream: true was forwarded in the query
-      expect(runMock.mock.calls[0][0].query.stream).toBe(true);
+      const form = init.body as FormData;
+      expect(form).toBeInstanceOf(FormData);
+      expect(form.get('model')).toBe('gpt-image-1.5');
+      expect(form.get('prompt')).toBe('change the background');
+      const image = form.get('image') as Blob;
+      expect(image).toBeInstanceOf(Blob);
+      expect(image.type).toBe('image/png');
+      expect(await image.text()).toBe('png-bytes');
     });
 
-    it('routes image generation requests to the requested gateway endpoint', async () => {
-      const { runMock, gateway } = mockGatewayResponse({
-        created: 1,
-        data: [{ b64_json: 'abc123' }],
+    it('preserves non-JSON provider responses', async () => {
+      const fetchMock = mockProviderFetch('image-bytes', {
+        headers: { 'content-type': 'image/png' },
       });
+      const { gateway } = mockProviderGateway('fal');
 
       const env = createEnv({ gateway });
       const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-image-1.5',
-          endpoint: 'images/generations',
-          inputs: {
-            model: 'attacker-model',
-            prompt: 'a small robot',
-            size: '1024x1024',
-          },
-          providerKey: 'sk-test-key',
-          projectId: 'proj_1',
-          aiToken: aiTokens['proj_1'],
-        }),
-        env,
-      );
-
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ created: 1, data: [{ b64_json: 'abc123' }] });
-
-      const arg = runMock.mock.calls[0][0];
-      expect(arg.provider).toBe('openai');
-      expect(arg.endpoint).toBe('images/generations');
-      expect(arg.query.model).toBe('gpt-image-1.5');
-      expect(arg.query.prompt).toBe('a small robot');
-      expect(arg.query.size).toBe('1024x1024');
-      expect(arg.query.stream).toBeUndefined();
-    });
-
-    it('preserves non-JSON gateway responses', async () => {
-      const runMock = vi.fn(
-        async () => new Response('image-bytes', { headers: { 'content-type': 'image/png' } }),
-      );
-      const gateway = vi.fn(() => ({ run: runMock }));
-
-      const env = createEnv({ gateway });
-      const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'fal/image-model',
-          endpoint: 'images/generations',
-          inputs: { prompt: 'a small robot' },
+        post('/ai/provider', {
+          provider: 'fal',
+          path: '/v1/images',
+          body: { type: 'json', value: { prompt: 'a small robot' } },
           providerKey: 'fal-key',
           projectId: 'proj_1',
           aiToken: aiTokens['proj_1'],
@@ -880,170 +852,88 @@ describe('proxy worker', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toBe('image/png');
       expect(await res.text()).toBe('image-bytes');
-    });
-
-    it('rejects unsupported gateway endpoints', async () => {
-      const env = createEnv();
-      const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-4o',
-          endpoint: 'responses',
-          inputs: { input: 'Hello' },
-          providerKey: 'sk-test',
-          projectId: 'proj_1',
-          aiToken: aiTokens['proj_1'],
-        }),
-        env,
-      );
-
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: 'unsupported endpoint' });
-    });
-
-    it('forwards image edit requests through provider-specific multipart fetch', async () => {
-      const runMock = vi.fn();
-      const getUrlMock = vi.fn(async () => 'https://gateway.test/v1/account/void/openai/');
-      const gateway = vi.fn(() => ({ getUrl: getUrlMock, run: runMock }));
-      const fetchMock = vi.fn(
-        async () =>
-          new Response(JSON.stringify({ created: 1, data: [{ b64_json: 'edited' }] }), {
-            headers: { 'content-type': 'application/json' },
-          }),
-      );
-      vi.stubGlobal('fetch', fetchMock);
-
-      const env = createEnv({ gateway });
-      const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-image-1.5',
-          endpoint: 'images/edits',
-          inputs: {
-            model: 'attacker-model',
-            prompt: 'change the background',
-            image: [
-              {
-                __voidFile: true,
-                data: btoa('png-bytes'),
-                name: 'source.png',
-                type: 'image/png',
-              },
-              {
-                __voidFile: true,
-                data: btoa('second-png'),
-                name: 'source-2.png',
-                type: 'image/png',
-              },
-            ],
-            mask: {
-              __voidFile: true,
-              data: btoa('mask-bytes'),
-              name: 'mask.png',
-              type: 'image/png',
-            },
-            size: '1024x1024',
-          },
-          providerKey: 'sk-test',
-          projectId: 'proj_1',
-          aiToken: aiTokens['proj_1'],
-        }),
-        env,
-      );
-
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ created: 1, data: [{ b64_json: 'edited' }] });
-
-      expect(gateway).toHaveBeenCalledWith('void');
-      expect(getUrlMock).toHaveBeenCalledWith('openai');
-      expect(runMock).not.toHaveBeenCalled();
       expect(fetchMock).toHaveBeenCalledOnce();
-      expect(fetchMock.mock.calls[0][0]).toBe(
-        'https://gateway.test/v1/account/void/openai/images/edits',
-      );
-
-      const init = fetchMock.mock.calls[0][1]!;
-      expect(init.method).toBe('POST');
-      const headers = new Headers(init.headers);
-      expect(headers.get('authorization')).toBe('Bearer sk-test');
-      expect(headers.get('cf-aig-metadata-projectId')).toBe('proj_1');
-      expect(headers.get('content-type')).toBeNull();
-
-      const form = init.body as FormData;
-      expect(form).toBeInstanceOf(FormData);
-      expect(form.get('model')).toBe('gpt-image-1.5');
-      expect(form.getAll('model')).toEqual(['gpt-image-1.5']);
-      expect(form.get('prompt')).toBe('change the background');
-      expect(form.get('size')).toBe('1024x1024');
-
-      const images = form.getAll('image') as Array<Blob>;
-      expect(images).toHaveLength(2);
-      expect(images[0]).toBeInstanceOf(Blob);
-      expect(images[0].type).toBe('image/png');
-      expect(await images[0].text()).toBe('png-bytes');
-      expect(images[1]).toBeInstanceOf(Blob);
-      expect(images[1].type).toBe('image/png');
-      expect(await images[1].text()).toBe('second-png');
-
-      const mask = form.get('mask') as Blob;
-      expect(mask).toBeInstanceOf(Blob);
-      expect(mask.type).toBe('image/png');
-      expect(await mask.text()).toBe('mask-bytes');
     });
 
-    it('rejects image edit string inputs before forwarding', async () => {
+    it('requires provider, path, and providerKey', async () => {
       const env = createEnv();
-      const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-image-1.5',
-          endpoint: 'images/edits',
-          inputs: { prompt: 'change the background', image: 'not-a-real-file' },
+
+      const noProvider = await worker.fetch(
+        post('/ai/provider', {
+          path: '/chat/completions',
           providerKey: 'sk-test',
           projectId: 'proj_1',
           aiToken: aiTokens['proj_1'],
         }),
         env,
       );
+      expect(noProvider.status).toBe(400);
+      expect(await noProvider.json()).toEqual({ error: 'provider required' });
 
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: 'image must be a file' });
-    });
-
-    it('rejects malformed image edit file envelopes before forwarding', async () => {
-      const env = createEnv();
-      const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-image-1.5',
-          endpoint: 'images/edits',
-          inputs: {
-            prompt: 'change the background',
-            image: {
-              __voidFile: true,
-              data: '%%%',
-              name: 'source.png',
-              type: 'image/png',
-            },
-          },
+      const noPath = await worker.fetch(
+        post('/ai/provider', {
+          provider: 'openai',
           providerKey: 'sk-test',
           projectId: 'proj_1',
           aiToken: aiTokens['proj_1'],
         }),
         env,
       );
+      expect(noPath.status).toBe(400);
+      expect(await noPath.json()).toEqual({ error: 'path required' });
 
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: 'invalid file data' });
+      const noKey = await worker.fetch(
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/chat/completions',
+          projectId: 'proj_1',
+          aiToken: aiTokens['proj_1'],
+        }),
+        env,
+      );
+      expect(noKey.status).toBe(400);
+      expect(await noKey.json()).toEqual({ error: 'providerKey required' });
+    });
+
+    it('rejects unsafe provider paths', async () => {
+      const env = createEnv();
+      for (const path of [
+        'https://api.openai.com/v1/chat/completions',
+        '//api.openai.com/v1/chat/completions',
+        '/../chat/completions',
+        '/%2e%2e/chat/completions',
+        '/v1\\chat\\completions',
+        '/%E0%A4%A',
+      ]) {
+        const res = await worker.fetch(
+          post('/ai/provider', {
+            provider: 'openai',
+            path,
+            providerKey: 'sk-test',
+            projectId: 'proj_1',
+            aiToken: aiTokens['proj_1'],
+          }),
+          env,
+        );
+
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: 'path must be relative' });
+      }
     });
 
     it('forwards provider error status and message', async () => {
-      const { gateway } = mockGatewayResponse(
-        { error: { message: 'Invalid API key', type: 'invalid_request_error' } },
-        401,
+      mockProviderFetch(
+        JSON.stringify({ error: { message: 'Invalid API key', type: 'invalid_request_error' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
       );
+      const { gateway } = mockProviderGateway();
 
       const env = createEnv({ gateway });
       const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-4o',
-          inputs: { messages: [{ role: 'user', content: 'Hello' }] },
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/chat/completions',
+          body: { type: 'json', value: { model: 'gpt-4o' } },
           providerKey: 'sk-bad-key',
           projectId: 'proj_1',
           aiToken: aiTokens['proj_1'],
@@ -1056,42 +946,12 @@ describe('proxy worker', () => {
       expect(json.error).toContain('Invalid API key');
     });
 
-    it('forwards extra parameters (temperature, max_tokens)', async () => {
-      const { runMock, gateway } = mockGatewayResponse({
-        id: 'chatcmpl-1',
-        choices: [],
-        usage: {},
-      });
-
-      const env = createEnv({ gateway });
-      await worker.fetch(
-        post('/ai/gateway', {
-          model: 'anthropic/claude-sonnet-4-20250514',
-          inputs: {
-            messages: [{ role: 'user', content: 'Hello' }],
-            temperature: 0.5,
-            max_tokens: 100,
-          },
-          providerKey: 'sk-ant-key',
-          projectId: 'proj_1',
-          aiToken: aiTokens['proj_1'],
-        }),
-        env,
-      );
-
-      const arg = runMock.mock.calls[0][0];
-      expect(arg.provider).toBe('anthropic');
-      expect(arg.query.model).toBe('claude-sonnet-4-20250514');
-      expect(arg.query.temperature).toBe(0.5);
-      expect(arg.query.max_tokens).toBe(100);
-    });
-
-    it('respects usage limit (429) for chat endpoint', async () => {
+    it('respects usage limits for provider-native requests', async () => {
       const env = createEnv({}, { 'ai-block:proj_1': '1' });
       const res = await worker.fetch(
-        post('/ai/gateway', {
-          model: 'openai/gpt-4o',
-          inputs: { messages: [{ role: 'user', content: 'Hello' }] },
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/chat/completions',
           providerKey: 'sk-test',
           projectId: 'proj_1',
           aiToken: aiTokens['proj_1'],

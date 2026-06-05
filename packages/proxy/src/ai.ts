@@ -3,11 +3,9 @@ import { asRecord, asString } from './body.ts';
 import type { AiGateway, ProxyEnv } from './types.ts';
 
 const GATEWAY_ID = 'void';
-const ALLOWED_GATEWAY_ENDPOINTS = new Set([
-  'chat/completions',
-  'images/generations',
-  'images/edits',
-]);
+const PROVIDER_AUTH_DEFAULTS: Record<string, { header: string; prefix: string }> = {
+  'google-ai-studio': { header: 'x-goog-api-key', prefix: '' },
+};
 const VOID_FILE_MARKER = '__voidFile';
 
 type SerializedFileInput = Readonly<{
@@ -16,6 +14,14 @@ type SerializedFileInput = Readonly<{
   name?: string;
   type?: string;
 }>;
+
+type SerializedProviderBody = Readonly<
+  | { type: 'none' }
+  | { type: 'json'; value: unknown }
+  | { type: 'text'; data: string; contentType?: string }
+  | { type: 'base64'; data: string; contentType?: string }
+  | { type: 'form'; entries: Array<{ name: string; value: string | SerializedFileInput }> }
+>;
 
 class BadRequestError extends Error {}
 
@@ -56,107 +62,150 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-function appendFormValue(form: FormData, key: string, value: unknown, requireFile = false): void {
-  if (value === undefined) {
-    return;
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      appendFormValue(form, key, item, requireFile);
-    }
-    return;
-  }
-
-  if (isSerializedFileInput(value)) {
-    const blob = new Blob([base64ToBytes(value.data)], {
-      type: value.type ?? 'application/octet-stream',
-    });
-    form.append(key, blob, value.name ?? key);
-    return;
-  }
-
-  if (value instanceof Blob) {
-    form.append(key, value, key);
-    return;
-  }
-
-  if (requireFile) {
-    throw new BadRequestError(`${key} must be a file`);
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    form.append(key, JSON.stringify(value));
-    return;
-  }
-
-  form.append(key, String(value));
-}
-
-function imageEditForm(model: string, inputs: unknown): FormData {
-  const form = new FormData();
-  const rest = { ...asRecord(inputs) };
-  delete rest.model;
-  delete rest.stream;
-  form.append('model', model);
-  for (const [key, value] of Object.entries(rest)) {
-    appendFormValue(form, key, value, key === 'image' || key === 'mask');
-  }
-  return form;
-}
-
-function gatewayQueryForEndpoint(endpoint: string, model: string, inputs: unknown): unknown {
-  const { model: _model, stream, ...rest } = asRecord(inputs);
-
-  const streamAsSse = endpoint === 'chat/completions' && stream === true;
-  return {
-    model,
-    ...rest,
-    ...(streamAsSse ? { stream: true } : {}),
-  };
-}
-
 function gatewayEndpointUrl(baseUrl: string, endpoint: string): string {
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
   const normalizedEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
   return `${normalizedBase}/${normalizedEndpoint}`;
 }
 
-async function runGatewayRequest({
-  gateway,
-  provider,
-  endpoint,
-  providerKey,
-  projectId,
-  query,
-}: {
-  gateway: AiGateway;
-  provider: string;
-  endpoint: string;
-  providerKey: string;
-  projectId: string;
-  query: unknown;
-}): Promise<Response> {
-  const headers = {
-    authorization: `Bearer ${providerKey}`,
-    'cf-aig-metadata-projectId': projectId,
-  };
-
-  if (endpoint === 'images/edits') {
-    const baseUrl = await gateway.getUrl(provider);
-    return fetch(gatewayEndpointUrl(baseUrl, endpoint), {
-      method: 'POST',
-      headers,
-      body: query as FormData,
-    });
+function isUnsafeProviderPath(path: string): boolean {
+  if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(path) || path.includes('\\')) {
+    return true;
   }
 
-  return gateway.run({
-    provider,
-    endpoint,
-    headers,
-    query,
-  });
+  const pathname = path.split(/[?#]/, 1)[0] ?? '';
+  for (const segment of pathname.split('/')) {
+    try {
+      if (decodeURIComponent(segment) === '..') {
+        return true;
+      }
+    } catch {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function providerBody(value: unknown): SerializedProviderBody {
+  const record = asRecord(value);
+  const type = asString(record.type);
+  if (
+    type === 'none' ||
+    type === 'json' ||
+    type === 'text' ||
+    type === 'base64' ||
+    type === 'form'
+  ) {
+    return record as SerializedProviderBody;
+  }
+  return { type: 'none' };
+}
+
+function appendSerializedFormValue(
+  form: FormData,
+  name: string,
+  value: string | SerializedFileInput,
+): void {
+  if (isSerializedFileInput(value)) {
+    const blob = new Blob([base64ToBytes(value.data)], {
+      type: value.type ?? 'application/octet-stream',
+    });
+    form.append(name, blob, value.name ?? name);
+    return;
+  }
+  form.append(name, value);
+}
+
+function providerRequestBody(body: SerializedProviderBody): {
+  body?: BodyInit;
+  contentType?: string;
+} {
+  if (body.type === 'none') {
+    return {};
+  }
+
+  if (body.type === 'json') {
+    return { body: JSON.stringify(body.value), contentType: 'application/json' };
+  }
+
+  if (body.type === 'text') {
+    return { body: body.data, contentType: body.contentType };
+  }
+
+  if (body.type === 'base64') {
+    return {
+      body: base64ToBytes(body.data).buffer as ArrayBuffer,
+      contentType: body.contentType,
+    };
+  }
+
+  const form = new FormData();
+  for (const entry of body.entries) {
+    appendSerializedFormValue(form, entry.name, entry.value);
+  }
+  return { body: form };
+}
+
+function headersFromRecord(value: unknown): Headers {
+  const headers = new Headers();
+  for (const [key, headerValue] of Object.entries(asRecord(value))) {
+    if (typeof headerValue === 'string') {
+      headers.set(key, headerValue);
+    }
+  }
+  return headers;
+}
+
+function providerAuthDefaults(provider: string): { header: string; prefix: string } {
+  return PROVIDER_AUTH_DEFAULTS[provider] ?? { header: 'authorization', prefix: 'Bearer ' };
+}
+
+function gatewayOptions(value: unknown, projectId: string): Record<string, unknown> {
+  const options = asRecord(value);
+  const gateway = asRecord(options.gateway);
+  const metadata = asRecord(gateway.metadata);
+
+  return {
+    ...options,
+    gateway: {
+      ...gateway,
+      id: GATEWAY_ID,
+      metadata: {
+        ...metadata,
+        projectId,
+      },
+    },
+  };
+}
+
+function applyProviderHeaders({
+  headers,
+  provider,
+  providerKey,
+  projectId,
+  apiKeyHeader,
+  apiKeyPrefix,
+  contentType,
+}: {
+  headers: Headers;
+  provider: string;
+  providerKey: string;
+  projectId: string;
+  apiKeyHeader?: string | null;
+  apiKeyPrefix?: string | null;
+  contentType?: string;
+}): Headers {
+  const defaults = providerAuthDefaults(provider);
+  const keyHeader = apiKeyHeader ?? defaults.header;
+  const keyPrefix = apiKeyPrefix ?? defaults.prefix;
+
+  headers.set(keyHeader, `${keyPrefix}${providerKey}`);
+  headers.set('cf-aig-metadata-projectId', projectId);
+  if (contentType && !headers.has('content-type')) {
+    headers.set('content-type', contentType);
+  }
+  return headers;
 }
 
 function headersForContentType(contentType: string | null | undefined): HeadersInit | undefined {
@@ -242,10 +291,7 @@ ai.post('/run', async (context) => {
     return context.json({ error: 'model required' }, 400);
   }
 
-  const options = {
-    ...asRecord(body.options),
-    gateway: { id: GATEWAY_ID, metadata: { projectId } },
-  };
+  const options = gatewayOptions(body.options, projectId);
 
   try {
     const result = await context.env.AI.run(model, body.inputs, options);
@@ -257,46 +303,46 @@ ai.post('/run', async (context) => {
   }
 });
 
-ai.post('/gateway', async (context) => {
+ai.post('/provider', async (context) => {
   const body = context.get('body');
   const projectId = context.get('projectId');
-  const modelPath = asString(body.model);
+  const provider = asString(body.provider);
+  const path = asString(body.path);
+  const method = asString(body.method) ?? 'POST';
   const providerKey = asString(body.providerKey);
-  const endpoint = asString(body.endpoint) ?? 'chat/completions';
+  const apiKeyHeader = asString(body.apiKeyHeader);
+  const apiKeyPrefix = asString(body.apiKeyPrefix);
 
-  if (!modelPath) {
-    return context.json({ error: 'model required' }, 400);
+  if (!provider) {
+    return context.json({ error: 'provider required' }, 400);
+  }
+  if (!path) {
+    return context.json({ error: 'path required' }, 400);
   }
   if (!providerKey) {
     return context.json({ error: 'providerKey required' }, 400);
   }
-  if (!ALLOWED_GATEWAY_ENDPOINTS.has(endpoint)) {
-    return context.json({ error: 'unsupported endpoint' }, 400);
+  if (isUnsafeProviderPath(path)) {
+    return context.json({ error: 'path must be relative' }, 400);
   }
 
-  // Parse "provider/model" format (e.g. "openai/gpt-4o")
-  const slashIdx = modelPath.indexOf('/');
-  if (slashIdx <= 0 || slashIdx === modelPath.length - 1) {
-    return context.json({ error: 'model must use provider/model format' }, 400);
-  }
-  const provider = modelPath.slice(0, slashIdx);
-  const model = modelPath.slice(slashIdx + 1);
-
-  const { stream } = asRecord(body.inputs);
-  const streamAsSse = endpoint === 'chat/completions' && stream === true;
   try {
     const gateway = context.env.AI.gateway(GATEWAY_ID);
-    const query =
-      endpoint === 'images/edits'
-        ? imageEditForm(model, body.inputs)
-        : gatewayQueryForEndpoint(endpoint, model, body.inputs);
-    const response: Response = await runGatewayRequest({
-      gateway,
+    const baseUrl = await gateway.getUrl(provider);
+    const requestBody = providerRequestBody(providerBody(body.body));
+    const headers = applyProviderHeaders({
+      headers: headersFromRecord(body.headers),
       provider,
-      endpoint,
       providerKey,
       projectId,
-      query,
+      apiKeyHeader,
+      apiKeyPrefix,
+      contentType: requestBody.contentType,
+    });
+    const response = await fetch(gatewayEndpointUrl(baseUrl, path), {
+      method,
+      headers,
+      body: requestBody.body,
     });
 
     if (!response.ok) {
@@ -311,7 +357,7 @@ ai.post('/gateway', async (context) => {
       return context.json({ error }, response.status as 400);
     }
 
-    return responseFromGateway(response, streamAsSse);
+    return responseFromGateway(response, false);
   } catch (err) {
     if (err instanceof BadRequestError) {
       return context.json({ error: err.message }, 400);
