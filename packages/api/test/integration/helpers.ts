@@ -841,6 +841,7 @@ export type CfApiMocks = {
   setWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteWorkerSecret: (url: string, init?: RequestInit) => Response | Promise<Response>;
   createCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
+  listCustomHostnames: (url: string, init?: RequestInit) => Response | Promise<Response>;
   getCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   patchCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
   deleteCustomHostname: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -920,6 +921,7 @@ const baseDefaultMocks: Omit<CfApiMocks, 'uploadWorker' | 'listWorkerBindings' |
         value: 'test-ownership-token',
       },
     }),
+  listCustomHostnames: () => cfSuccess([]),
   getCustomHostname: () =>
     cfSuccess({
       id: 'ch-test-id',
@@ -1341,6 +1343,9 @@ export function mockCfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle 
     }
     if (method === 'POST' && url.includes('/custom_hostnames')) {
       return mocks.createCustomHostname(url, init);
+    }
+    if (method === 'GET' && url.includes('/custom_hostnames?')) {
+      return mocks.listCustomHostnames(url, init);
     }
     if (method === 'GET' && url.includes('/custom_hostnames/')) {
       return mocks.getCustomHostname(url, init);

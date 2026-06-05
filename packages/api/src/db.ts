@@ -1218,6 +1218,19 @@ export async function getDomainByHostname(db: Db, hostname: string): Promise<Dom
   return row ?? null;
 }
 
+export async function getDomainByHostnameOrCfHostnameId(
+  db: Db,
+  hostname: string,
+  cfHostnameId: string,
+): Promise<Domain | null> {
+  const [row] = await db
+    .select()
+    .from(domains)
+    .where(or(eq(domains.hostname, hostname), eq(domains.cf_hostname_id, cfHostnameId)))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function getDomain(db: Db, id: string): Promise<Domain | null> {
   const [row] = await db.select().from(domains).where(eq(domains.id, id)).limit(1);
   return row ?? null;

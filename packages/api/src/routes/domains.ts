@@ -6,6 +6,7 @@ import {
   getDomainsByProjectId,
   getDomain,
   getDomainByHostname,
+  getDomainByHostnameOrCfHostnameId,
   deleteDomain,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
@@ -14,15 +15,35 @@ import {
   CloudflareApiError,
   createCustomHostname,
   deleteCustomHostname,
+  getCustomHostnameByHostname,
+  type CustomHostnameInfo,
 } from '../provisioning/cloudflare-api.ts';
 import type { DomainVerificationData } from '../schema.ts';
 
 const CNAME_TARGET = `cname.${SITE_DOMAIN}`;
+const ORPHAN_ADOPTION_MIN_AGE_MS = 60_000;
 
 // Whitelist of CF status codes the create-hostname route surfaces to the
 // caller. See the catch block on `createCustomHostname` for the full
 // rationale on why 401/403/404 are NOT in this set.
 const CF_PASSTHROUGH_STATUSES = new Set<number>([400, 409, 422, 429]);
+
+function isAdoptablePostCreateOrphan(cfHostname: CustomHostnameInfo): boolean {
+  if (cfHostname.status !== 'pending') {
+    return false;
+  }
+
+  if (!cfHostname.ownership_verification && !cfHostname.ownership_verification_http) {
+    return false;
+  }
+
+  if (!cfHostname.created_at) {
+    return false;
+  }
+
+  const createdAtMs = Date.parse(cfHostname.created_at);
+  return Number.isFinite(createdAtMs) && Date.now() - createdAtMs >= ORPHAN_ADOPTION_MIN_AGE_MS;
+}
 
 const app = new Hono<ApiEnv>()
 
@@ -83,20 +104,50 @@ const app = new Hono<ApiEnv>()
     // Same for 404 (could be zone-not-found = misconfig) and any other
     // status not in the whitelist. CF 5xx (upstream degraded) also re-throws.
     //
-    // The CF hostname has not been created when this catch fires, so there
-    // is no orphan to clean up.
-    let cfHostname;
+    // The duplicate-hostname case can be a CF object left behind after an
+    // earlier post-create DB failure. Only adopt still-pending CF objects with
+    // an outstanding ownership challenge; a previously verified/active hostname
+    // must not become claimable by another project without fresh ownership.
+    let cfHostname: CustomHostnameInfo;
+    let createdCustomHostname = false;
     try {
       cfHostname = await createCustomHostname(
         context.env.CF_ZONE_ID,
         context.env.CF_API_TOKEN,
         hostname,
       );
+      createdCustomHostname = true;
     } catch (err) {
-      if (err instanceof CloudflareApiError && CF_PASSTHROUGH_STATUSES.has(err.status)) {
+      if (err instanceof CloudflareApiError && err.status === 409) {
+        const existingAfterConflict = await getDomainByHostname(context.get('db'), hostname);
+        if (existingAfterConflict) {
+          return context.json({ error: 'hostname already in use' }, 409);
+        }
+
+        let orphanedHostname: CustomHostnameInfo | null;
+        try {
+          orphanedHostname = await getCustomHostnameByHostname(
+            context.env.CF_ZONE_ID,
+            context.env.CF_API_TOKEN,
+            hostname,
+          );
+        } catch (lookupErr) {
+          if (lookupErr instanceof CloudflareApiError && lookupErr.status === 429) {
+            return context.json({ error: lookupErr.message }, 429);
+          }
+          return context.json({ error: err.message }, 409);
+        }
+
+        if (orphanedHostname && isAdoptablePostCreateOrphan(orphanedHostname)) {
+          cfHostname = orphanedHostname;
+        } else {
+          return context.json({ error: err.message }, 409);
+        }
+      } else if (err instanceof CloudflareApiError && CF_PASSTHROUGH_STATUSES.has(err.status)) {
         return context.json({ error: err.message }, err.status as 400 | 409 | 422 | 429);
+      } else {
+        throw err;
       }
-      throw err;
     }
 
     // Under HTTP-DCV the certificate is validated at CF's edge once the
@@ -111,14 +162,40 @@ const app = new Hono<ApiEnv>()
       ssl_validation_records: cfHostname.ssl.validation_records,
     };
 
-    // Insert domain record
-    const domain = await createDomain(
-      context.get('db'),
-      projectId,
-      hostname,
-      cfHostname.id,
-      verificationData,
-    );
+    // Insert domain record. If we just created the CF hostname and then fail
+    // to persist it, revoke that CF object so future adds do not hit a
+    // duplicate custom-hostname orphan that no Void project can delete.
+    let domain;
+    try {
+      domain = await createDomain(
+        context.get('db'),
+        projectId,
+        hostname,
+        cfHostname.id,
+        verificationData,
+      );
+    } catch (err) {
+      if (createdCustomHostname) {
+        const persistedDomain = await getDomainByHostnameOrCfHostnameId(
+          context.get('db'),
+          hostname,
+          cfHostname.id,
+        );
+        if (!persistedDomain) {
+          await deleteCustomHostname(
+            context.env.CF_ZONE_ID,
+            context.env.CF_API_TOKEN,
+            cfHostname.id,
+          ).catch((deleteErr) => {
+            console.error(
+              `Failed to delete orphaned custom hostname ${cfHostname.id} after DB insert failure:`,
+              deleteErr,
+            );
+          });
+        }
+      }
+      throw err;
+    }
 
     return context.json({
       ...domain,

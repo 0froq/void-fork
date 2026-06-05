@@ -234,6 +234,270 @@ describe('POST /projects/:id/domains', () => {
     expect(await res.json()).toEqual({ error: 'hostname already in use' });
   });
 
+  it('adopts an orphaned CF custom hostname when create reports a duplicate', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'adopt-orphan-domain');
+    const fetchMock = mockCfApi({
+      createCustomHostname: () => cfError('Duplicate custom hostname found.', 409),
+      listCustomHostnames: () =>
+        cfSuccess([
+          {
+            id: 'ch-orphan',
+            hostname: 'orphan.example.com',
+            status: 'pending',
+            created_at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+            ssl: {
+              status: 'pending_validation',
+              method: 'http',
+              type: 'dv',
+            },
+            ownership_verification: {
+              type: 'txt',
+              name: '_cf-custom-hostname.orphan.example.com',
+              value: 'orphan-ownership-token',
+            },
+          },
+        ]),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'orphan.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      hostname: string;
+      ownership_verification?: { name: string; value: string };
+    };
+    expect(body.hostname).toBe('orphan.example.com');
+    expect(body.ownership_verification?.value).toBe('orphan-ownership-token');
+
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'orphan.example.com'));
+    expect(row?.cf_hostname_id).toBe('ch-orphan');
+
+    const listCall = fetchMock.mock.calls.find((call: Array<unknown>) => {
+      const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
+      const init = call[1] as RequestInit | undefined;
+      return url.includes('/custom_hostnames?') && (init?.method ?? 'GET') === 'GET';
+    });
+    expect(listCall).toBeDefined();
+    const listUrl = new URL(String(listCall![0]));
+    expect(listUrl.searchParams.get('hostname')).toBe('orphan.example.com');
+    expect(listUrl.searchParams.has('hostname[contains]')).toBe(false);
+  });
+
+  it('passes through CF 429 when orphan lookup is rate-limited after duplicate create', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'adopt-orphan-rate-limit');
+    mockCfApi({
+      createCustomHostname: () => cfError('Duplicate custom hostname found.', 409),
+      listCustomHostnames: () => cfError('rate limit exceeded', 429),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'orphan-rate-limited.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('rate limit exceeded');
+
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'orphan-rate-limited.example.com'));
+    expect(row).toBeUndefined();
+  });
+
+  it('falls back to the original duplicate response when orphan lookup fails', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'adopt-orphan-lookup-fails');
+    mockCfApi({
+      createCustomHostname: () => cfError('Duplicate custom hostname found.', 409),
+      listCustomHostnames: () => cfError('Cloudflare unavailable', 500),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'orphan-lookup-fails.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('Duplicate custom hostname found.');
+
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'orphan-lookup-fails.example.com'));
+    expect(row).toBeUndefined();
+  });
+
+  it('does not adopt a newly-created CF custom hostname from an in-flight request', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'reject-inflight-domain');
+    mockCfApi({
+      createCustomHostname: () => cfError('Duplicate custom hostname found.', 409),
+      listCustomHostnames: () =>
+        cfSuccess([
+          {
+            id: 'ch-inflight',
+            hostname: 'inflight.example.com',
+            status: 'pending',
+            created_at: new Date().toISOString(),
+            ssl: {
+              status: 'pending_validation',
+              method: 'http',
+              type: 'dv',
+            },
+          },
+        ]),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'inflight.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('Duplicate custom hostname found.');
+
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'inflight.example.com'));
+    expect(row).toBeUndefined();
+  });
+
+  it('does not adopt an old active CF custom hostname without fresh ownership', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'reject-active-orphan-domain');
+    mockCfApi({
+      createCustomHostname: () => cfError('Duplicate custom hostname found.', 409),
+      listCustomHostnames: () =>
+        cfSuccess([
+          {
+            id: 'ch-active-orphan',
+            hostname: 'active-orphan.example.com',
+            status: 'active',
+            created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+            ssl: { status: 'active', method: 'http', type: 'dv' },
+          },
+        ]),
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'active-orphan.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('Duplicate custom hostname found.');
+
+    const [row] = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'active-orphan.example.com'));
+    expect(row).toBeUndefined();
+  });
+
+  it('does not delete a newly-created CF hostname another request persisted', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'domain-db-insert-fail');
+    const fetchMock = mockCfApi({
+      createCustomHostname: async () => {
+        await env.db.insert(domains).values({
+          id: 'dom_race',
+          project_id: project.id,
+          hostname: 'race.example.com',
+          cf_hostname_id: 'ch-race-created',
+        });
+        return cfSuccess({
+          id: 'ch-race-created',
+          hostname: 'race.example.com',
+          status: 'pending',
+          ssl: {
+            status: 'pending_validation',
+            method: 'http',
+            type: 'dv',
+          },
+        });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/domains`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user.jwt}`,
+        },
+        body: JSON.stringify({ hostname: 'race.example.com' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Internal Server Error');
+
+    const deletes = fetchMock.mock.calls.filter((call: Array<unknown>) => {
+      const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
+      const init = call[1] as RequestInit | undefined;
+      return url.includes('/custom_hostnames/ch-race-created') && init?.method === 'DELETE';
+    });
+    expect(deletes).toHaveLength(0);
+
+    const rows = await env.db
+      .select()
+      .from(domains)
+      .where(eq(domains.hostname, 'race.example.com'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cf_hostname_id).toBe('ch-race-created');
+  });
+
   it('rejects void.app subdomains', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'reject-vc');

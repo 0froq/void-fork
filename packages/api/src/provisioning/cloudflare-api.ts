@@ -346,6 +346,7 @@ export type CustomHostnameInfo = Readonly<{
   id: string;
   hostname: string;
   status: string;
+  created_at?: string;
   ssl: Readonly<{
     status: string;
     method?: 'http' | 'txt' | 'email';
@@ -396,6 +397,22 @@ export async function createCustomHostname(
       ssl: { method: 'http', type: 'dv' },
     }),
   });
+}
+
+export async function getCustomHostnameByHostname(
+  zoneId: string,
+  apiToken: string,
+  hostname: string,
+): Promise<CustomHostnameInfo | null> {
+  const params = new URLSearchParams({
+    hostname,
+    per_page: '50',
+  });
+  const matches = await cfFetch<ReadonlyArray<CustomHostnameInfo>>(
+    `${CF_ZONE_API_BASE}/${zoneId}/custom_hostnames?${params}`,
+    apiToken,
+  );
+  return matches.find((match) => match.hostname === hostname) ?? null;
 }
 
 export async function getCustomHostname(
