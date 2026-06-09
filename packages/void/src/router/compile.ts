@@ -1016,7 +1016,7 @@ export function compileRouteTable(
   }
   lines.push('    if (!__VOID_DEV_ROUTING) return __rewritePromise;');
   lines.push(
-    '    return __rewritePromise.then((res) => __voidAnnotateRouting(res, "c.rewrite \\u2192 " + path + " (middleware)"));',
+    '    return __rewritePromise.then((res) => __voidAnnotateRouting(res, "c.rewrite -> " + path + " (middleware)"));',
   );
   lines.push('  };');
   lines.push('  const __origRedirect = c.redirect.bind(c);');
@@ -2956,7 +2956,7 @@ function emitApplyRoutingRules(
   lines.push(`${indent}    if (!__VOID_DEV_ROUTING) return __r;`);
   lines.push(`${indent}    const __kind = matched.rule.force === true ? "rewrite" : "fallback";`);
   lines.push(
-    `${indent}    const __trace = __kind + "[" + matched.rule.source + "] \\u2192 " + dest + " (" + (matched.rule.origin || "unknown") + ")";`,
+    `${indent}    const __trace = __kind + "[" + matched.rule.source + "] -> " + dest + " (" + (matched.rule.origin || "unknown") + ")";`,
   );
   lines.push(`${indent}    return __voidAnnotateRouting(__r, __trace);`);
   lines.push(`${indent}  }`);
@@ -2966,7 +2966,7 @@ function emitApplyRoutingRules(
   lines.push(`${indent}  const __redir = c.redirect(location, matched.rule.status);`);
   lines.push(`${indent}  if (!__VOID_DEV_ROUTING) return __redir;`);
   lines.push(
-    `${indent}  const __rtrace = "redirect[" + matched.rule.source + "] \\u2192 " + dest + " " + matched.rule.status + " (" + (matched.rule.origin || "unknown") + ")";`,
+    `${indent}  const __rtrace = "redirect[" + matched.rule.source + "] -> " + dest + " " + matched.rule.status + " (" + (matched.rule.origin || "unknown") + ")";`,
   );
   lines.push(`${indent}  return __voidAnnotateRouting(__redir, __rtrace);`);
   lines.push(`${indent}}`);
