@@ -503,6 +503,20 @@ describe('scanPages', () => {
       expect(result.namedLayouts[0].directory).toBe('guide');
     });
 
+    it('resolves nested named layouts for directory index pages', async () => {
+      writeFile('guide/_layouts/api.vue', '<template><slot /></template>');
+      writeFile(
+        'guide/index.vue',
+        '<script>export const layout = "api";</script>\n<template><div /></template>',
+      );
+      const result = await scanPages(TMP);
+      const page = result.pages.find((p) => p.componentId === 'guide');
+      expect(page).toBeDefined();
+      expect(resolveLayoutIds(page!, result.layouts, result.namedLayouts)).toEqual([
+        'guide/_layouts/api',
+      ]);
+    });
+
     it('detects island named layouts', async () => {
       writeFile('_layouts/post.island.vue', '<template><slot /></template>');
       writeFile(
@@ -645,6 +659,18 @@ describe('resolveLayoutChain', () => {
     expect(chain[0].directory).toBe('');
     expect(chain[1].directory).toBe('users/settings');
   });
+
+  it('includes directory layouts for index page file paths', () => {
+    const layouts = [
+      { directory: '', filePath: 'layout.vue' },
+      { directory: 'users', filePath: 'users/layout.vue' },
+    ];
+
+    const chain = resolveLayoutChain('users', layouts, 'users/index.vue');
+    expect(chain).toHaveLength(2);
+    expect(chain[0].directory).toBe('');
+    expect(chain[1].directory).toBe('users');
+  });
 });
 
 describe('resolveNamedLayout', () => {
@@ -786,9 +812,29 @@ describe('resolveLayoutIds', () => {
     ]);
   });
 
+  it('returns directory layout ids for index page file paths', () => {
+    expect(
+      resolveLayoutIds(
+        { componentId: 'guide', componentPath: 'guide/index.vue' },
+        layouts,
+        namedLayouts,
+      ),
+    ).toEqual(['layout', 'guide/layout']);
+  });
+
   it('replaces the innermost layout id for named layouts', () => {
     expect(
       resolveLayoutIds({ componentId: 'guide/intro', layout: 'api' }, layouts, namedLayouts),
+    ).toEqual(['layout', 'guide/_layouts/api']);
+  });
+
+  it('replaces the innermost layout id for index page named layouts', () => {
+    expect(
+      resolveLayoutIds(
+        { componentId: 'guide', componentPath: 'guide/index.vue', layout: 'api' },
+        layouts,
+        namedLayouts,
+      ),
     ).toEqual(['layout', 'guide/_layouts/api']);
   });
 

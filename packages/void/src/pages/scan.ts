@@ -295,7 +295,7 @@ export async function scanPages(root: string, options?: PageScanOptions): Promis
     if (name.startsWith('.') || name.startsWith('/')) {
       continue;
     }
-    if (!resolveNamedLayout(name, page.componentId, namedLayouts)) {
+    if (!resolveNamedLayout(name, page.componentId, namedLayouts, page.componentPath)) {
       throw new Error(
         `pages: Page '${page.componentPath}' specifies layout '${page.layout}', but _layouts/${name}.vue was not found in any ancestor directory.`,
       );
