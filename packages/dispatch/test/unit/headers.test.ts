@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vite-plus/test';
-import { applyHeaderRules, type HeaderRule } from '../../src/headers.ts';
+import {
+  applyHeaderRules,
+  parseClearSiteData,
+  sanitizeClearSiteData,
+  type HeaderRule,
+} from '../../src/headers.ts';
 
 describe('applyHeaderRules', () => {
   it('returns original response when no rules', () => {
@@ -90,6 +95,76 @@ describe('applyHeaderRules', () => {
     expect(result.headers.get('set-cookie')).toBeNull();
   });
 
+  it('strips the cookies directive from Clear-Site-Data (cross-tenant)', () => {
+    // On the shared *.void.app domain, Clear-Site-Data: "cookies" clears cookies
+    // for the registrable domain and all subdomains — a cross-tenant attack.
+    const rules: Array<HeaderRule> = [
+      { pattern: '/*', headers: [['Clear-Site-Data', '"cookies"']] },
+    ];
+    const result = applyHeaderRules(new Response('body'), '/index.html', rules);
+    expect(result.headers.get('Clear-Site-Data')).toBeNull();
+  });
+
+  it('keeps safe Clear-Site-Data directives while stripping cookies (origin-scoped)', () => {
+    const rules: Array<HeaderRule> = [
+      { pattern: '/*', headers: [['Clear-Site-Data', '"cache", "cookies", "storage"']] },
+    ];
+    const result = applyHeaderRules(new Response('body'), '/index.html', rules);
+    expect(result.headers.get('Clear-Site-Data')).toBe('"cache", "storage"');
+  });
+
+  it('a later fully-stripped Clear-Site-Data rule discards an earlier rule (last match wins)', () => {
+    // Both rules match /assets/app.js; the more specific rule sanitizes to
+    // nothing, so it must clear the earlier rule's value rather than leave it.
+    const rules: Array<HeaderRule> = [
+      { pattern: '/*', headers: [['Clear-Site-Data', '"cache"']] },
+      { pattern: '/assets/*', headers: [['Clear-Site-Data', '"cookies"']] },
+    ];
+    const result = applyHeaderRules(new Response('body'), '/assets/app.js', rules);
+    expect(result.headers.get('Clear-Site-Data')).toBeNull();
+  });
+
+  it('falls back to the origin Clear-Site-Data when the last matching rule is fully stripped', () => {
+    // A stripped rule resets the header to the origin's own value, not to an
+    // earlier rule's value (last match wins).
+    const rules: Array<HeaderRule> = [
+      { pattern: '/*', headers: [['Clear-Site-Data', '"cache"']] },
+      { pattern: '/assets/*', headers: [['Clear-Site-Data', '"cookies"']] },
+    ];
+    const origin = new Response('body', {
+      headers: { 'Clear-Site-Data': '"storage"' },
+    });
+    const result = applyHeaderRules(origin, '/assets/app.js', rules);
+    expect(result.headers.get('Clear-Site-Data')).toBe('"storage"');
+  });
+
+  it('does not resurface an origin cookies directive when the last rule is stripped', () => {
+    // The origin worker response itself carries "cookies"; the stripped-rule
+    // fallback sanitizes the origin value too, so rule processing never re-emits
+    // the cross-tenant cookie directive.
+    const rules: Array<HeaderRule> = [
+      { pattern: '/*', headers: [['Clear-Site-Data', '"cache"']] },
+      { pattern: '/assets/*', headers: [['Clear-Site-Data', '"cookies"']] },
+    ];
+    const origin = new Response('body', {
+      headers: { 'Clear-Site-Data': '"cookies"' },
+    });
+    const result = applyHeaderRules(origin, '/assets/app.js', rules);
+    expect(result.headers.get('Clear-Site-Data')).toBeNull();
+  });
+
+  it('keeps only the safe part of the origin Clear-Site-Data on stripped-rule fallback', () => {
+    const rules: Array<HeaderRule> = [
+      { pattern: '/*', headers: [['Clear-Site-Data', '"cache"']] },
+      { pattern: '/assets/*', headers: [['Clear-Site-Data', '"cookies"']] },
+    ];
+    const origin = new Response('body', {
+      headers: { 'Clear-Site-Data': '"storage", "cookies"' },
+    });
+    const result = applyHeaderRules(origin, '/assets/app.js', rules);
+    expect(result.headers.get('Clear-Site-Data')).toBe('"storage"');
+  });
+
   it('allows Strict-Transport-Security header (per-domain, safe)', () => {
     const rules: Array<HeaderRule> = [
       { pattern: '/*', headers: [['Strict-Transport-Security', 'max-age=31536000']] },
@@ -134,5 +209,84 @@ describe('applyHeaderRules', () => {
     expect(result.headers.get('X-Frame-Options')).toBe('DENY');
     expect(result.headers.get('Set-Cookie')).toBeNull();
     expect(result.headers.get('Cache-Control')).toBe('no-cache');
+  });
+});
+
+describe('parseClearSiteData', () => {
+  const directives = (value: string) => parseClearSiteData(value).map((m) => m.directive);
+
+  it('parses a single quoted directive', () => {
+    expect(parseClearSiteData('"cookies"')).toEqual([{ raw: '"cookies"', directive: 'cookies' }]);
+  });
+
+  it('parses a comma-separated list and trims surrounding whitespace', () => {
+    expect(directives('"cache",  "storage" , "cookies"')).toEqual(['cache', 'storage', 'cookies']);
+  });
+
+  it('preserves the original case of the directive content', () => {
+    expect(directives('"Cache"')).toEqual(['Cache']);
+  });
+
+  it('does not split on a comma inside a quoted-string', () => {
+    const members = parseClearSiteData('"a,b", "cookies"');
+    expect(members.map((m) => m.raw)).toEqual(['"a,b"', '"cookies"']);
+    expect(members.map((m) => m.directive)).toEqual(['a,b', 'cookies']);
+  });
+
+  it('resolves quoted-pair escapes so an escaped form cannot hide a directive', () => {
+    // RFC 7230 quoted-pair: \e is the literal "e", so this content IS "cookies".
+    expect(directives('"cooki\\es"')).toEqual(['cookies']);
+  });
+
+  it('marks members that are not well-formed quoted-strings as malformed', () => {
+    expect(directives('cookies')).toEqual([null]); // unquoted
+    expect(directives('"cookies')).toEqual([null]); // no closing quote
+    expect(directives('"a"b"')).toEqual([null]); // unescaped inner quote
+    expect(directives('"bad\\')).toEqual([null]); // dangling escape, no close
+  });
+
+  it('drops empty members', () => {
+    expect(parseClearSiteData('')).toEqual([]);
+    expect(directives('"cache", , "storage"')).toEqual(['cache', 'storage']);
+  });
+});
+
+describe('sanitizeClearSiteData', () => {
+  it('drops the cross-tenant cookies directive', () => {
+    expect(sanitizeClearSiteData('"cookies"')).toBeNull();
+  });
+
+  it('drops the whole value for the "*" wildcard (it includes cookies)', () => {
+    expect(sanitizeClearSiteData('"*"')).toBeNull();
+    expect(sanitizeClearSiteData('"cache", "*"')).toBeNull();
+  });
+
+  it('keeps origin-scoped directives verbatim', () => {
+    expect(sanitizeClearSiteData('"cache", "storage"')).toBe('"cache", "storage"');
+    expect(sanitizeClearSiteData('"executionContexts"')).toBe('"executionContexts"');
+  });
+
+  it('keeps unknown but well-formed directives (forward-compatible)', () => {
+    expect(sanitizeClearSiteData('"clientHints"')).toBe('"clientHints"');
+  });
+
+  it('strips only the cookies directive from a mixed value', () => {
+    expect(sanitizeClearSiteData('"cache", "cookies", "storage"')).toBe('"cache", "storage"');
+  });
+
+  it('strips case-variant and escape-obfuscated cookies directives', () => {
+    expect(sanitizeClearSiteData('"COOKIES"')).toBeNull();
+    expect(sanitizeClearSiteData('"cooki\\es"')).toBeNull(); // \e resolves to "cookies"
+    expect(sanitizeClearSiteData('"cache", "Cookies"')).toBe('"cache"');
+  });
+
+  it('drops malformed members (a browser ignores them anyway)', () => {
+    expect(sanitizeClearSiteData('cookies')).toBeNull(); // unquoted → malformed → dropped
+    expect(sanitizeClearSiteData('"cache", garbage')).toBe('"cache"');
+  });
+
+  it('returns null for an empty or whitespace-only value', () => {
+    expect(sanitizeClearSiteData('')).toBeNull();
+    expect(sanitizeClearSiteData('   ')).toBeNull();
   });
 });

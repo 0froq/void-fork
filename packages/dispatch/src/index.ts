@@ -473,10 +473,65 @@ export default {
         cacheUrl.search = '';
         const cacheKey = new Request(cacheUrl.toString());
 
+        // Hashed assets are served straight from the immutable edge cache. Apply
+        // routing.headerRules on the way OUT — on both cache HIT and MISS — instead
+        // of baking them into the cached body. This is what lets a cross-origin
+        // isolated app put COOP/COEP/CORP on its hashed worker/wasm assets: browsers
+        // fetch those over GET, and without per-serve header application the GET
+        // response (unlike a HEAD, which falls through to the worker and is handled
+        // by the dispatch path's applyHeaderRules) would ship with no COEP, so a
+        // module worker spawned from a require-corp document would be blocked.
+        // Applying per-serve rather than at cache-write also means a header-rule
+        // change in a later deploy takes effect even when the content hash — and
+        // thus the unversioned, immutable cache key — is unchanged.
+        //
+        // Tenant rules apply ADDITIVELY only. The platform/origin owns how a
+        // content-addressed asset is cached, represented, and framed on the wire;
+        // tenants may ADD headers (COOP/COEP/CORP, security) but must not rewrite
+        // the headers below, so each is restored from the pre-rule response after
+        // the rules run. The set is exactly the headers whose forgery would corrupt
+        // the asset or break the immutable-cache / usage-metering contract:
+        //   cache-control     immutable contract; the cache-HIT check above keys on it
+        //   content-type      wrong MIME breaks ES-module / WebAssembly loading
+        //   content-encoding  a false `gzip` makes the browser mis-decode the bytes
+        //   content-length    meter() bills from it; clients frame the body by it
+        //   content-range     } forging range/framing semantics truncates or
+        //   accept-ranges     } mis-reads a body the platform did not range-encode
+        //   transfer-encoding hop-by-hop framing; must never come from a tenant rule
+        // Cosmetic metadata (Vary, ETag, ...) is left overridable — on an immutable
+        // URL-keyed asset it is neither a corruption nor a security risk. This
+        // mirrors how the static-asset paths force their own Cache-Control after
+        // applyHeaderRules via clientRevalidateResponse.
+        const MANAGED_ASSET_HEADERS = [
+          'cache-control',
+          'content-type',
+          'content-encoding',
+          'content-length',
+          'content-range',
+          'accept-ranges',
+          'transfer-encoding',
+        ] as const;
+        const finalizeAsset = (assetResponse: Response): Response => {
+          const ruled = applyHeaderRules(assetResponse, pathname, routing.headerRules);
+          // applyHeaderRules returns the same object when nothing matched — then
+          // there is no override to undo and we can skip the header restore.
+          if (ruled !== assetResponse) {
+            for (const name of MANAGED_ASSET_HEADERS) {
+              const managed = assetResponse.headers.get(name);
+              if (managed === null) {
+                ruled.headers.delete(name);
+              } else {
+                ruled.headers.set(name, managed);
+              }
+            }
+          }
+          return meter(ruled);
+        };
+
         const cache = caches.default;
         const cached = await cache.match(cacheKey);
         if (cached?.headers.get('Cache-Control')?.includes('immutable')) {
-          return meter(cached);
+          return finalizeAsset(cached);
         }
         // Cache miss — fetch from KV/R2 for static deployments, or invoke worker
         if (routing.staticDeploymentId) {
@@ -493,9 +548,9 @@ export default {
             const res = new Response(response.body, response);
             res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
             ctx.waitUntil(cache.put(cacheKey, res.clone()));
-            return meter(res);
+            return finalizeAsset(res);
           }
-          return meter(response);
+          return finalizeAsset(response);
         }
         try {
           const worker = getWorker(env, routing);
@@ -514,9 +569,9 @@ export default {
             const res = new Response(response.body, response);
             res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
             ctx.waitUntil(cache.put(cacheKey, res.clone()));
-            return meter(res);
+            return finalizeAsset(res);
           }
-          return meter(response);
+          return finalizeAsset(response);
         } catch (err) {
           if (err instanceof Error && err.message.includes('Worker exceeded')) {
             return meter(Response.json({ error: 'CPU limit exceeded' }, { status: 429 }));

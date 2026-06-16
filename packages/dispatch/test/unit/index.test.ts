@@ -1490,7 +1490,7 @@ describe('header rules', () => {
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 
-  it('does not apply header rules to hashed asset cache hits', async () => {
+  it('applies header rules to hashed assets on cache miss and cache hit', async () => {
     const routing: RoutingEntry = {
       workerName: 'test-worker',
       projectId: 'proj-1',
@@ -1500,15 +1500,17 @@ describe('header rules', () => {
     const { env } = createEnv({ routing, workerResponse: new Response('asset-body') });
     const ctx = createCtx();
 
-    // First request — cache miss, goes through hashed asset path
+    // First request — cache miss, goes through the hashed asset path
     const res1 = await app.fetch(new Request('https://test.void.app/assets/main-abc.js'), env, ctx);
     expect(res1.status).toBe(200);
-    // Hashed asset path sets its own Cache-Control, header rules don't apply
-    expect(res1.headers.get('X-Custom')).toBeNull();
+    expect(res1.headers.get('X-Custom')).toBe('from-rules');
+    // Rules are applied per-serve, not baked into the immutable cache entry, so
+    // the immutable Cache-Control survives alongside the custom header.
+    expect(res1.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
 
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
 
-    // Second request — cache hit, also bypasses header rules
+    // Second request — cache hit, header rules still apply on the way out
     const ctx2 = createCtx();
     const res2 = await app.fetch(
       new Request('https://test.void.app/assets/main-abc.js'),
@@ -1516,7 +1518,199 @@ describe('header rules', () => {
       ctx2,
     );
     expect(res2.status).toBe(200);
-    expect(res2.headers.get('X-Custom')).toBeNull();
+    expect(res2.headers.get('X-Custom')).toBe('from-rules');
+    expect(res2.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+  });
+
+  it('applies COOP/COEP/CORP to a hashed worker asset across a cache hit (cross-origin isolation)', async () => {
+    // A cross-origin-isolated app (SharedArrayBuffer / wasm threads) must serve its
+    // hashed worker + wasm assets with COEP, or a module worker spawned from the
+    // require-corp document is blocked. Browsers fetch those assets over GET, served
+    // from the immutable hashed-asset cache — so the rules must reach that path.
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      hashedAssetsPrefix: 'assets',
+      headerRules: [
+        {
+          pattern: '/assets/*',
+          headers: [
+            ['Cross-Origin-Embedder-Policy', 'require-corp'],
+            ['Cross-Origin-Resource-Policy', 'same-origin'],
+          ],
+        },
+      ],
+    };
+    const { env, workerFetch } = createEnv({
+      routing,
+      workerResponse: new Response('worker-bytes'),
+    });
+    const ctx = createCtx();
+    const url = 'https://test.void.app/assets/worker-D2vJiay4.js';
+
+    const miss = await app.fetch(new Request(url), env, ctx);
+    expect(miss.status).toBe(200);
+    expect(miss.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
+    expect(miss.headers.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const ctx2 = createCtx();
+    const hit = await app.fetch(new Request(url), env, ctx2);
+    expect(hit.status).toBe(200);
+    expect(workerFetch).toHaveBeenCalledTimes(1); // served from edge cache, not re-fetched
+    expect(hit.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
+    expect(hit.headers.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
+  });
+
+  it('keeps platform immutable Cache-Control on hashed assets when a rule overrides it', async () => {
+    // A broad `/* -> Cache-Control: no-store` rule must NOT disable immutable
+    // caching for content-addressed URLs. On the hashed-asset path tenant rules
+    // are additive only — the platform-managed Cache-Control is restored after
+    // the rules run, while other (non-managed) headers still apply.
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      hashedAssetsPrefix: 'assets',
+      headerRules: [
+        {
+          pattern: '/*',
+          headers: [
+            ['Cache-Control', 'no-store'],
+            ['X-Custom', 'from-rules'],
+          ],
+        },
+      ],
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response('asset-body') });
+    const ctx = createCtx();
+    const url = 'https://test.void.app/assets/main-abc.js';
+
+    // Cache miss — rule tries to clobber Cache-Control, platform value wins.
+    const miss = await app.fetch(new Request(url), env, ctx);
+    expect(miss.status).toBe(200);
+    expect(miss.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+    expect(miss.headers.get('X-Custom')).toBe('from-rules'); // additive header survives
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Cache hit — same protection on the way out of the edge cache.
+    const ctx2 = createCtx();
+    const hit = await app.fetch(new Request(url), env, ctx2);
+    expect(hit.status).toBe(200);
+    expect(hit.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+    expect(hit.headers.get('X-Custom')).toBe('from-rules');
+  });
+
+  it('does not let a rule forge Content-Length on hashed assets (metering integrity)', async () => {
+    // meter() bills from Content-Length and clients frame the body by it; a rule
+    // must not be able to set it to 0 on a hashed asset and skew usage accounting
+    // or truncate the response. The real asset length is restored after rules.
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      hashedAssetsPrefix: 'assets',
+      headerRules: [{ pattern: '/*', headers: [['Content-Length', '0']] }],
+    };
+    const { env } = createEnv({
+      routing,
+      workerResponse: new Response('asset-body', { headers: { 'Content-Length': '10' } }),
+    });
+    const ctx = createCtx();
+    const url = 'https://test.void.app/assets/main-abc.js';
+
+    const res = await app.fetch(new Request(url), env, ctx);
+    expect(res.status).toBe(200);
+    // The forged 0 is discarded; the real asset length is preserved and the body
+    // is served intact.
+    expect(res.headers.get('Content-Length')).not.toBe('0');
+    expect(await res.text()).toBe('asset-body');
+  });
+
+  it('keeps platform representation headers on hashed assets when a rule overrides them', async () => {
+    // A tenant rule must not rewrite how a content-addressed asset is represented:
+    // a forged Content-Encoding makes the browser mis-decode the bytes and a wrong
+    // Content-Type breaks ES-module / WebAssembly loading. These are restored after
+    // rules run, while additive headers (COEP) still apply.
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      hashedAssetsPrefix: 'assets',
+      headerRules: [
+        {
+          pattern: '/*',
+          headers: [
+            ['Content-Type', 'text/plain'],
+            ['Content-Encoding', 'gzip'],
+            ['Cross-Origin-Embedder-Policy', 'require-corp'],
+          ],
+        },
+      ],
+    };
+    const { env } = createEnv({
+      routing,
+      // Origin serves real, uncompressed JS — no Content-Encoding.
+      workerResponse: new Response('asset-body', {
+        headers: { 'Content-Type': 'text/javascript; charset=utf-8' },
+      }),
+    });
+    const ctx = createCtx();
+    const url = 'https://test.void.app/assets/main-abc.js';
+
+    const miss = await app.fetch(new Request(url), env, ctx);
+    expect(miss.status).toBe(200);
+    // Platform/origin representation preserved...
+    expect(miss.headers.get('Content-Type')).toBe('text/javascript; charset=utf-8');
+    expect(miss.headers.get('Content-Encoding')).toBeNull(); // no false `gzip` claim
+    // ...while the additive isolation header still applies.
+    expect(miss.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Cache hit — same protection on the way out of the edge cache.
+    const ctx2 = createCtx();
+    const hit = await app.fetch(new Request(url), env, ctx2);
+    expect(hit.status).toBe(200);
+    expect(hit.headers.get('Content-Type')).toBe('text/javascript; charset=utf-8');
+    expect(hit.headers.get('Content-Encoding')).toBeNull();
+    expect(hit.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
+  });
+
+  it('strips the Clear-Site-Data cookies directive on hashed assets (cross-tenant cookie boundary)', async () => {
+    // On the shared *.void.app domain a Clear-Site-Data: "cookies" response would
+    // wipe cookies for the whole registrable domain, across tenants. The cookies
+    // directive is stripped at the header-rule layer, so it must never reach a
+    // served hashed asset — on miss or hit — while additive headers (COEP) still apply.
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      hashedAssetsPrefix: 'assets',
+      headerRules: [
+        {
+          pattern: '/assets/*',
+          headers: [
+            ['Clear-Site-Data', '"cookies"'],
+            ['Cross-Origin-Embedder-Policy', 'require-corp'],
+          ],
+        },
+      ],
+    };
+    const { env } = createEnv({ routing, workerResponse: new Response('asset-body') });
+    const ctx = createCtx();
+    const url = 'https://test.void.app/assets/main-abc.js';
+
+    const miss = await app.fetch(new Request(url), env, ctx);
+    expect(miss.status).toBe(200);
+    expect(miss.headers.get('Clear-Site-Data')).toBeNull();
+    expect(miss.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const ctx2 = createCtx();
+    const hit = await app.fetch(new Request(url), env, ctx2);
+    expect(hit.status).toBe(200);
+    expect(hit.headers.get('Clear-Site-Data')).toBeNull();
+    expect(hit.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
   });
 
   it('last-match-wins for overlapping patterns', async () => {
