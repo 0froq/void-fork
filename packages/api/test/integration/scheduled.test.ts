@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vite-plus/test';
 import { scheduled } from '../../src/index.ts';
+import { domains } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -164,5 +165,133 @@ describe('scheduled()', () => {
     // Second user should still have userId backfilled
     const routing2 = JSON.parse((await env.ROUTING.get(proj2.slug))!);
     expect(routing2.userId).toBe(id2);
+  });
+
+  // A DO mock that always reports `requestsSuspended: <latch>` on /rollover,
+  // optionally also reporting a one-time rollover. Mirrors the real DO, which
+  // now returns the request latch on every response so the scheduler can
+  // reconcile KV against it each pass.
+  function makeRequestLatchMock(opts: {
+    requestsSuspended: boolean;
+    rolled?: boolean;
+  }): DurableObjectNamespace {
+    return {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({
+        fetch: async (req: Request) => {
+          const url = new URL(req.url);
+          if (url.pathname === '/rollover') {
+            return Response.json({
+              rolled: opts.rolled ?? false,
+              unsuspendRequests: opts.rolled ?? false,
+              unsuspendAi: false,
+              requestsSuspended: opts.requestsSuspended,
+            });
+          }
+          return Response.json({ ok: true });
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+  }
+
+  it('clears suspended on slug AND active domain routes when the DO reports a request rollover', async () => {
+    const { id } = await createTestUser(env.db, 'rolluser', 'github', undefined, 'free');
+    const proj = await createTestProject(env.db, id);
+    await env.db.insert(domains).values({
+      id: 'dom_roll_active',
+      project_id: proj.id,
+      hostname: 'roll-custom.example.com',
+      cf_hostname_id: 'cf_roll',
+      status: 'active',
+    });
+
+    // Routes left `suspended` by the previous period's request cap.
+    const suspendedJson = JSON.stringify({
+      projectId: proj.id,
+      userId: id,
+      suspended: 'requests_exceeded',
+    });
+    await env.ROUTING.put(proj.slug, suspendedJson);
+    await env.ROUTING.put('domain:roll-custom.example.com', suspendedJson);
+
+    // DO reports the billing period rolled and the request latch is now clear.
+    await scheduled(
+      mockController,
+      {
+        ...makeBindings(env),
+        USAGE_COUNTER: makeRequestLatchMock({ rolled: true, requestsSuspended: false }),
+      },
+      mockCtx,
+    );
+
+    expect(JSON.parse((await env.ROUTING.get(proj.slug))!).suspended).toBeUndefined();
+    expect(
+      JSON.parse((await env.ROUTING.get('domain:roll-custom.example.com'))!).suspended,
+    ).toBeUndefined();
+  });
+
+  it('self-heals a stale requests_exceeded marker even on a pass that did NOT roll over', async () => {
+    // Models a prior rollover whose KV clear partially failed: the DO latch is
+    // already false (period rolled last run) but a route still carries the
+    // stale marker. A later, non-rolling pass must reconcile it — proving the
+    // cleanup is retryable, not one-shot.
+    const { id } = await createTestUser(env.db, 'staleuser', 'github', undefined, 'free');
+    const proj = await createTestProject(env.db, id);
+    await env.ROUTING.put(
+      proj.slug,
+      JSON.stringify({ projectId: proj.id, userId: id, suspended: 'requests_exceeded' }),
+    );
+
+    await scheduled(
+      mockController,
+      {
+        ...makeBindings(env),
+        USAGE_COUNTER: makeRequestLatchMock({ rolled: false, requestsSuspended: false }),
+      },
+      mockCtx,
+    );
+
+    expect(JSON.parse((await env.ROUTING.get(proj.slug))!).suspended).toBeUndefined();
+  });
+
+  it('preserves an admin suspension when the request latch is clear (reason-scoped reconcile)', async () => {
+    const { id } = await createTestUser(env.db, 'adminuser', 'github', undefined, 'free');
+    const proj = await createTestProject(env.db, id);
+    // Admin-suspended route — the request-cap reconcile must never lift this.
+    await env.ROUTING.put(
+      proj.slug,
+      JSON.stringify({ projectId: proj.id, userId: id, suspended: 'admin_suspended' }),
+    );
+
+    await scheduled(
+      mockController,
+      {
+        ...makeBindings(env),
+        USAGE_COUNTER: makeRequestLatchMock({ rolled: false, requestsSuspended: false }),
+      },
+      mockCtx,
+    );
+
+    expect(JSON.parse((await env.ROUTING.get(proj.slug))!).suspended).toBe('admin_suspended');
+  });
+
+  it('does NOT clear a route while the request latch is still set (user genuinely over cap)', async () => {
+    const { id } = await createTestUser(env.db, 'overcap', 'github', undefined, 'free');
+    const proj = await createTestProject(env.db, id);
+    await env.ROUTING.put(
+      proj.slug,
+      JSON.stringify({ projectId: proj.id, userId: id, suspended: 'requests_exceeded' }),
+    );
+
+    await scheduled(
+      mockController,
+      {
+        ...makeBindings(env),
+        USAGE_COUNTER: makeRequestLatchMock({ rolled: false, requestsSuspended: true }),
+      },
+      mockCtx,
+    );
+
+    expect(JSON.parse((await env.ROUTING.get(proj.slug))!).suspended).toBe('requests_exceeded');
   });
 });

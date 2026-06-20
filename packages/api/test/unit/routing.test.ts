@@ -1,11 +1,33 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import {
+  applyRoutingSuspension,
   buildProjectAccountJson,
   buildRoutingJson,
   buildStaticRoutingJson,
   projectAccountKey,
   refreshProjectKvForUser,
+  setProjectsRoutingSuspension,
 } from '../../src/routing.ts';
+
+function createKvStore(initial: Record<string, string> = {}): {
+  store: Map<string, string>;
+  puts: Array<string>;
+  kv: KVNamespace;
+} {
+  const store = new Map(Object.entries(initial));
+  const puts: Array<string> = [];
+  const kv = {
+    get: async (key: string) => store.get(key) ?? null,
+    put: async (key: string, value: string) => {
+      store.set(key, value);
+      puts.push(key);
+    },
+    delete: async (key: string) => {
+      store.delete(key);
+    },
+  } as unknown as KVNamespace;
+  return { store, puts, kv };
+}
 
 describe('buildRoutingJson', () => {
   const base = {
@@ -134,6 +156,185 @@ describe('refreshProjectKvForUser', () => {
     } as Awaited<ReturnType<typeof import('../../src/db.ts').getUser>>);
     vi.spyOn(await import('../../src/db.ts'), 'getProjectsByUserId').mockResolvedValue([]);
     await refreshProjectKvForUser(db, kv, 'user_1');
+    expect(puts).toEqual([]);
+    vi.restoreAllMocks();
+  });
+});
+
+describe('applyRoutingSuspension', () => {
+  it('stamps suspended on each existing key and skips keys with no entry', async () => {
+    const { store, kv } = createKvStore({
+      'slug-a': JSON.stringify({ workerName: 'w', projectId: 'p' }),
+      'domain:a.com': JSON.stringify({ workerName: 'w', projectId: 'p' }),
+    });
+    await applyRoutingSuspension(kv, ['slug-a', 'domain:a.com', 'domain:missing.com'], {
+      op: 'suspend',
+      reason: 'requests_exceeded',
+      force: false,
+    });
+    expect(JSON.parse(store.get('slug-a')!).suspended).toBe('requests_exceeded');
+    expect(JSON.parse(store.get('domain:a.com')!).suspended).toBe('requests_exceeded');
+    expect(store.has('domain:missing.com')).toBe(false);
+  });
+
+  it('clears suspended (unsuspend, matchReason=null) while leaving other fields intact', async () => {
+    const { store, kv } = createKvStore({
+      'slug-a': JSON.stringify({ workerName: 'w', projectId: 'p', suspended: 'requests_exceeded' }),
+    });
+    await applyRoutingSuspension(kv, ['slug-a'], { op: 'unsuspend', matchReason: null });
+    const entry = JSON.parse(store.get('slug-a')!);
+    expect(entry.suspended).toBeUndefined();
+    expect(entry.workerName).toBe('w');
+  });
+
+  it('skips the KV write when the value already carries the same reason', async () => {
+    const { kv, puts } = createKvStore({
+      'slug-a': JSON.stringify({ projectId: 'p', suspended: 'requests_exceeded' }),
+    });
+    await applyRoutingSuspension(kv, ['slug-a'], {
+      op: 'suspend',
+      reason: 'requests_exceeded',
+      force: false,
+    });
+    expect(puts).toEqual([]);
+  });
+
+  it('skips the KV write when clearing an entry that has no suspended flag', async () => {
+    const { kv, puts } = createKvStore({ 'slug-a': JSON.stringify({ projectId: 'p' }) });
+    await applyRoutingSuspension(kv, ['slug-a'], { op: 'unsuspend', matchReason: null });
+    expect(puts).toEqual([]);
+  });
+
+  // --- reason precedence: usage paths must never clobber an admin suspension ---
+
+  it('non-force suspend does NOT overwrite a different (admin) reason already present', async () => {
+    const { store, kv, puts } = createKvStore({
+      'slug-a': JSON.stringify({ projectId: 'p', suspended: 'admin_suspended' }),
+    });
+    await applyRoutingSuspension(kv, ['slug-a'], {
+      op: 'suspend',
+      reason: 'requests_exceeded',
+      force: false,
+    });
+    expect(JSON.parse(store.get('slug-a')!).suspended).toBe('admin_suspended');
+    expect(puts).toEqual([]);
+  });
+
+  it('force suspend DOES overwrite a different reason (admin action is authoritative)', async () => {
+    const { store, kv } = createKvStore({
+      'slug-a': JSON.stringify({ projectId: 'p', suspended: 'requests_exceeded' }),
+    });
+    await applyRoutingSuspension(kv, ['slug-a'], {
+      op: 'suspend',
+      reason: 'admin_suspended',
+      force: true,
+    });
+    expect(JSON.parse(store.get('slug-a')!).suspended).toBe('admin_suspended');
+  });
+
+  it('unsuspend with matchReason only clears the matching reason, preserving others', async () => {
+    const { store, kv, puts } = createKvStore({
+      'admin-route': JSON.stringify({ projectId: 'p', suspended: 'admin_suspended' }),
+      'usage-route': JSON.stringify({ projectId: 'p', suspended: 'requests_exceeded' }),
+    });
+    await applyRoutingSuspension(kv, ['admin-route', 'usage-route'], {
+      op: 'unsuspend',
+      matchReason: 'requests_exceeded',
+    });
+    expect(JSON.parse(store.get('admin-route')!).suspended).toBe('admin_suspended');
+    expect(JSON.parse(store.get('usage-route')!).suspended).toBeUndefined();
+    expect(puts).toEqual(['usage-route']);
+  });
+});
+
+describe('setProjectsRoutingSuspension', () => {
+  it('stamps the slug AND every domain route with a live KV entry — including a crash-window pending domain', async () => {
+    // `tryActivateDomain` writes `domain:<host>` to KV BEFORE flipping the DB row
+    // to `active`; a crash between leaves a `pending` row whose KV route is still
+    // served by dispatch. Suspension must stamp it too, or the project keeps
+    // serving past the cap on that hostname. A pending domain with NO KV route
+    // (the normal case) is a harmless no-op — applyRoutingSuspension skips it.
+    const { store, kv } = createKvStore({
+      'slug-a': JSON.stringify({ projectId: 'proj_a' }),
+      'domain:active.com': JSON.stringify({ projectId: 'proj_a' }),
+      'domain:crash-pending.com': JSON.stringify({ projectId: 'proj_a' }),
+    });
+    vi.spyOn(await import('../../src/db.ts'), 'getDomainsByProjectIds').mockResolvedValue(
+      new Map([
+        [
+          'proj_a',
+          [
+            { project_id: 'proj_a', hostname: 'active.com', status: 'active' },
+            { project_id: 'proj_a', hostname: 'crash-pending.com', status: 'pending' },
+            // Pending domain with no published KV route — must not error.
+            { project_id: 'proj_a', hostname: 'no-route-pending.com', status: 'pending' },
+          ],
+        ],
+      ]) as unknown as Awaited<ReturnType<typeof import('../../src/db.ts').getDomainsByProjectIds>>,
+    );
+    const db = {} as Parameters<typeof setProjectsRoutingSuspension>[1];
+    await setProjectsRoutingSuspension(kv, db, [{ id: 'proj_a', slug: 'slug-a' }], {
+      op: 'suspend',
+      reason: 'requests_exceeded',
+      force: false,
+    });
+    expect(JSON.parse(store.get('slug-a')!).suspended).toBe('requests_exceeded');
+    expect(JSON.parse(store.get('domain:active.com')!).suspended).toBe('requests_exceeded');
+    expect(JSON.parse(store.get('domain:crash-pending.com')!).suspended).toBe('requests_exceeded');
+    expect(store.has('domain:no-route-pending.com')).toBe(false);
+    vi.restoreAllMocks();
+  });
+
+  it('clears the slug and active domain entries (unsuspend, matchReason=null)', async () => {
+    const { store, kv } = createKvStore({
+      'slug-a': JSON.stringify({ projectId: 'proj_a', suspended: 'requests_exceeded' }),
+      'domain:active.com': JSON.stringify({ projectId: 'proj_a', suspended: 'requests_exceeded' }),
+    });
+    vi.spyOn(await import('../../src/db.ts'), 'getDomainsByProjectIds').mockResolvedValue(
+      new Map([
+        ['proj_a', [{ project_id: 'proj_a', hostname: 'active.com', status: 'active' }]],
+      ]) as unknown as Awaited<ReturnType<typeof import('../../src/db.ts').getDomainsByProjectIds>>,
+    );
+    const db = {} as Parameters<typeof setProjectsRoutingSuspension>[1];
+    await setProjectsRoutingSuspension(kv, db, [{ id: 'proj_a', slug: 'slug-a' }], {
+      op: 'unsuspend',
+      matchReason: null,
+    });
+    expect(JSON.parse(store.get('slug-a')!).suspended).toBeUndefined();
+    expect(JSON.parse(store.get('domain:active.com')!).suspended).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  it('reason-scoped clear preserves an admin suspension on the slug AND domain routes', async () => {
+    const { store, kv } = createKvStore({
+      'slug-a': JSON.stringify({ projectId: 'proj_a', suspended: 'admin_suspended' }),
+      'domain:active.com': JSON.stringify({ projectId: 'proj_a', suspended: 'admin_suspended' }),
+    });
+    vi.spyOn(await import('../../src/db.ts'), 'getDomainsByProjectIds').mockResolvedValue(
+      new Map([
+        ['proj_a', [{ project_id: 'proj_a', hostname: 'active.com', status: 'active' }]],
+      ]) as unknown as Awaited<ReturnType<typeof import('../../src/db.ts').getDomainsByProjectIds>>,
+    );
+    const db = {} as Parameters<typeof setProjectsRoutingSuspension>[1];
+    await setProjectsRoutingSuspension(kv, db, [{ id: 'proj_a', slug: 'slug-a' }], {
+      op: 'unsuspend',
+      matchReason: 'requests_exceeded',
+    });
+    expect(JSON.parse(store.get('slug-a')!).suspended).toBe('admin_suspended');
+    expect(JSON.parse(store.get('domain:active.com')!).suspended).toBe('admin_suspended');
+    vi.restoreAllMocks();
+  });
+
+  it('no-ops without a domains query when given zero projects', async () => {
+    const { kv, puts } = createKvStore({});
+    const spy = vi.spyOn(await import('../../src/db.ts'), 'getDomainsByProjectIds');
+    const db = {} as Parameters<typeof setProjectsRoutingSuspension>[1];
+    await setProjectsRoutingSuspension(kv, db, [], {
+      op: 'suspend',
+      reason: 'requests_exceeded',
+      force: false,
+    });
+    expect(spy).not.toHaveBeenCalled();
     expect(puts).toEqual([]);
     vi.restoreAllMocks();
   });

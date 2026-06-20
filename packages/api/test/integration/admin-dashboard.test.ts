@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vite-plus/test';
 import { app } from '../../src/index.ts';
-import { deployments, invitations, projects, users } from '../../src/schema.ts';
+import { deployments, domains, invitations, projects, users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -350,7 +350,7 @@ describe('POST /admin/users/:id/plan', () => {
     expect(row.suspended_reason).toBeNull();
   });
 
-  test('does NOT clear non-sandbox suspensions (e.g. requests_exceeded) on plan change', async () => {
+  test('optimistically clears request suspension (DB + route marker) on plan change', async () => {
     const admin = await createTestUser(
       env.db,
       'admin-plan-req',
@@ -360,11 +360,57 @@ describe('POST /admin/users/:id/plan', () => {
       'admin',
     );
     const user = await createTestUser(env.db, 'planuser-req', 'github', undefined, 'solo');
+    const project = await createTestProject(env.db, user.id, 'planuser-req-slug');
 
+    // Request-suspended on the old plan. A plan change must drop the request
+    // suspension too (symmetric with sandbox), or a capped→unlimited upgrade
+    // would strand the user at 429 — the scheduled reconcile skips unlimited
+    // plans, so nothing else clears it.
     await env.db
       .update(users)
       .set({ suspended_reason: 'requests_exceeded' })
       .where(eq(users.id, user.id));
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: 'w', projectId: project.id, suspended: 'requests_exceeded' }),
+    );
+
+    const body = new URLSearchParams({ plan: 'sponsored' });
+    const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
+      method: 'POST',
+      body: body.toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+
+    const [row] = await env.db
+      .select({ suspended_reason: users.suspended_reason })
+      .from(users)
+      .where(eq(users.id, user.id));
+    expect(row.suspended_reason).toBeNull();
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!).suspended).toBeUndefined();
+  });
+
+  test('plan change does NOT lift an admin suspension (reason-scoped)', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-plan-adm',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const user = await createTestUser(env.db, 'planuser-adm', 'github', undefined, 'solo');
+    const project = await createTestProject(env.db, user.id, 'planuser-adm-slug');
+
+    await env.db
+      .update(users)
+      .set({ suspended_reason: 'admin_suspended' })
+      .where(eq(users.id, user.id));
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: 'w', projectId: project.id, suspended: 'admin_suspended' }),
+    );
 
     const body = new URLSearchParams({ plan: 'pro' });
     const res = await req(`/admin/users/${user.id}/plan`, admin.adminJwt, {
@@ -378,8 +424,9 @@ describe('POST /admin/users/:id/plan', () => {
       .select({ suspended_reason: users.suspended_reason })
       .from(users)
       .where(eq(users.id, user.id));
-    // unsuspendUserIfReason matches by reason — requests_exceeded must remain.
-    expect(row.suspended_reason).toBe('requests_exceeded');
+    // A plan change is a usage-cap action; it must never lift an admin block.
+    expect(row.suspended_reason).toBe('admin_suspended');
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!).suspended).toBe('admin_suspended');
   });
 
   test('succeeds when no sandbox block exists and no suspension is set', async () => {
@@ -407,6 +454,46 @@ describe('POST /admin/users/:id/plan', () => {
       .from(users)
       .where(eq(users.id, user.id));
     expect(row.suspended_reason).toBeNull();
+    expect(row.plan).toBe('pro');
+  });
+
+  test('surfaces a failed /reevaluate-sandbox DO response (plan persisted, cleanup flagged for retry)', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-plan-faildo',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const user = await createTestUser(env.db, 'planuser-faildo', 'github', undefined, 'solo');
+    await createTestProject(env.db, user.id, 'planuser-faildo-slug');
+
+    const failingDo = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({ fetch: async () => new Response('boom', { status: 500 }) }),
+    } as unknown as typeof env.USAGE_COUNTER;
+
+    const res = await app.fetch(
+      new Request(`http://localhost/admin/users/${user.id}/plan`, {
+        method: 'POST',
+        headers: {
+          Cookie: `admin_token=${admin.adminJwt}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ plan: 'pro' }).toString(),
+        redirect: 'manual',
+      }),
+      { ...env, USAGE_COUNTER: failingDo } as typeof env,
+    );
+    expect(res.status).toBe(500);
+
+    // The plan change is the primary action and IS persisted; only the cleanup
+    // failed, and the plan form is always available for a retry.
+    const [row] = await env.db
+      .select({ plan: users.plan })
+      .from(users)
+      .where(eq(users.id, user.id));
     expect(row.plan).toBe('pro');
   });
 });
@@ -440,6 +527,240 @@ describe('POST /admin/users/:id/suspend + unsuspend', () => {
 
     const routingAfter2 = JSON.parse((await env.ROUTING.get(project.slug))!);
     expect(routingAfter2.suspended).toBeUndefined();
+  });
+
+  test('syncs the slug AND active custom-domain routes, and clears sandbox-block on unsuspend', async () => {
+    const admin = await createTestUser(env.db, 'admin6b', 'github', undefined, 'free', 'admin');
+    const user = await createTestUser(env.db, 'suspuser-dom');
+    const project = await createTestProject(env.db, user.id, 'susp-dom-slug');
+
+    // Active custom domain → has a `domain:<host>` routing entry dispatch serves.
+    await env.db.insert(domains).values({
+      id: 'dom_susp_active',
+      project_id: project.id,
+      hostname: 'susp-custom.example.com',
+      cf_hostname_id: 'cf_susp_active',
+      status: 'active',
+    });
+    // Pending domain → no routing entry yet; must be left untouched.
+    await env.db.insert(domains).values({
+      id: 'dom_susp_pending',
+      project_id: project.id,
+      hostname: 'susp-pending.example.com',
+      cf_hostname_id: 'cf_susp_pending',
+      status: 'pending',
+    });
+
+    const slugJson = JSON.stringify({ workerName: 'w', projectId: project.id });
+    await env.ROUTING.put(project.slug, slugJson);
+    await env.ROUTING.put('domain:susp-custom.example.com', slugJson);
+    // The UsageCounter DO would have left this on a sandbox-runtime suspension.
+    await env.ROUTING.put(`sandbox-block:${user.id}`, '1');
+
+    // Suspend stamps slug + active domain. The pending domain has no published
+    // KV route, so the fan-out is a harmless no-op there (no key is created).
+    const suspRes = await req(`/admin/users/${user.id}/suspend`, admin.adminJwt, {
+      method: 'POST',
+      body: new URLSearchParams({ reason: 'admin_suspended' }).toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(suspRes.status).toBe(302);
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!).suspended).toBe('admin_suspended');
+    expect(JSON.parse((await env.ROUTING.get('domain:susp-custom.example.com'))!).suspended).toBe(
+      'admin_suspended',
+    );
+    expect(await env.ROUTING.get('domain:susp-pending.example.com')).toBeNull();
+
+    // Unsuspend clears slug + domain markers and removes the sandbox block.
+    const unsuspRes = await req(`/admin/users/${user.id}/unsuspend`, admin.adminJwt, {
+      method: 'POST',
+      body: '',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(unsuspRes.status).toBe(302);
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!).suspended).toBeUndefined();
+    expect(
+      JSON.parse((await env.ROUTING.get('domain:susp-custom.example.com'))!).suspended,
+    ).toBeUndefined();
+    expect(await env.ROUTING.get(`sandbox-block:${user.id}`)).toBeNull();
+  });
+
+  test('admin suspend REJECTS a reserved usage reason (would be auto-cleared by the reconcile)', async () => {
+    const admin = await createTestUser(env.db, 'admin6f', 'github', undefined, 'free', 'admin');
+    const user = await createTestUser(env.db, 'suspuser-reserved');
+    const project = await createTestProject(env.db, user.id, 'susp-reserved-slug');
+    await env.ROUTING.put(project.slug, JSON.stringify({ workerName: 'w', projectId: project.id }));
+
+    // `requests_exceeded` classifies as a USAGE suspension (isAdminSuspended === false),
+    // and the scheduled reconcile would auto-clear it whenever the DO latch is false —
+    // silently un-blocking an admin-intended block. The route must reject it.
+    const res = await req(`/admin/users/${user.id}/suspend`, admin.adminJwt, {
+      method: 'POST',
+      body: new URLSearchParams({ reason: 'requests_exceeded' }).toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(res.status).toBe(400);
+    // Neither DB nor KV mutated.
+    const [row] = await env.db
+      .select({ suspended_reason: users.suspended_reason })
+      .from(users)
+      .where(eq(users.id, user.id));
+    expect(row.suspended_reason).toBeNull();
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!).suspended).toBeUndefined();
+  });
+
+  test('admin suspend is authoritative — overwrites an existing usage marker on the route', async () => {
+    const admin = await createTestUser(env.db, 'admin6c', 'github', undefined, 'free', 'admin');
+    const user = await createTestUser(env.db, 'suspuser-overwrite');
+    const project = await createTestProject(env.db, user.id, 'susp-overwrite-slug');
+    // The route already carries a usage-driven marker from the request cap.
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: 'w', projectId: project.id, suspended: 'requests_exceeded' }),
+    );
+
+    const suspRes = await req(`/admin/users/${user.id}/suspend`, admin.adminJwt, {
+      method: 'POST',
+      body: new URLSearchParams({ reason: 'admin_suspended' }).toString(),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(suspRes.status).toBe(302);
+    // Admin reason outranks the usage reason and replaces it.
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!).suspended).toBe('admin_suspended');
+  });
+
+  // POST the unsuspend form against a custom env (req() uses the fixed env, so
+  // we call app.fetch directly to inject a faulty binding).
+  function unsuspendWith(userId: string, adminJwt: string, overrides: Partial<TestEnv>) {
+    return app.fetch(
+      new Request(`http://localhost/admin/users/${userId}/unsuspend`, {
+        method: 'POST',
+        headers: {
+          Cookie: `admin_token=${adminJwt}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: '',
+        redirect: 'manual',
+      }),
+      { ...env, ...overrides } as typeof env,
+    );
+  }
+
+  // POST the suspend form against a custom env (req() uses the fixed env, so we
+  // call app.fetch directly to inject a faulty binding).
+  function suspendWith(
+    userId: string,
+    adminJwt: string,
+    reason: string,
+    overrides: Partial<TestEnv>,
+  ) {
+    return app.fetch(
+      new Request(`http://localhost/admin/users/${userId}/suspend`, {
+        method: 'POST',
+        headers: {
+          Cookie: `admin_token=${adminJwt}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ reason }).toString(),
+        redirect: 'manual',
+      }),
+      { ...env, ...overrides } as typeof env,
+    );
+  }
+
+  test('failed suspend leaves the user NOT suspended in the DB (fail-closed, retryable)', async () => {
+    const admin = await createTestUser(env.db, 'admin6h', 'github', undefined, 'free', 'admin');
+    const user = await createTestUser(env.db, 'susp-failopen');
+    await createTestProject(env.db, user.id, 'susp-failopen-slug');
+
+    // ROUTING whose reads throw — setProjectsRoutingSuspension rejects, so the
+    // edge stamp fails. The DB write must NOT have happened: a DB-first ordering
+    // would leave `suspended_reason` set while dispatch (which enforces only
+    // `routing.suspended`) keeps serving the unstamped route — a fail-OPEN strand
+    // whose detail view shows Unsuspend, not a retry of the failed suspend.
+    const failingRouting = {
+      get: async () => {
+        throw new Error('KV unavailable');
+      },
+      put: async () => {},
+      delete: async () => {},
+    } as unknown as typeof env.ROUTING;
+
+    const res = await suspendWith(user.id, admin.adminJwt, 'admin_suspended', {
+      ROUTING: failingRouting,
+    });
+    expect(res.status).toBe(500);
+
+    // DB must stay active so the user-detail view keeps the Suspend form — i.e. the
+    // operator retries the idempotent stamp rather than seeing a false "suspended".
+    const [row] = await env.db
+      .select({ suspended_reason: users.suspended_reason })
+      .from(users)
+      .where(eq(users.id, user.id));
+    expect(row.suspended_reason).toBeNull();
+  });
+
+  test('unsuspend surfaces a non-2xx /clear-suspension DO response instead of redirecting as success', async () => {
+    const admin = await createTestUser(env.db, 'admin6d', 'github', undefined, 'free', 'admin');
+    const user = await createTestUser(env.db, 'unsusp-do-fail');
+    await createTestProject(env.db, user.id, 'unsusp-do-fail-slug');
+
+    // DO whose /clear-suspension fails (e.g. storage error) — unchecked, this
+    // would 302 as success while the latch (and next /init re-stamp) persists.
+    const failingDo = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({
+        fetch: async () => new Response('boom', { status: 500 }),
+      }),
+    } as unknown as typeof env.USAGE_COUNTER;
+
+    const res = await unsuspendWith(user.id, admin.adminJwt, { USAGE_COUNTER: failingDo });
+    expect(res.status).toBe(500);
+  });
+
+  test('unsuspend surfaces a ROUTING cleanup failure instead of redirecting as success', async () => {
+    const admin = await createTestUser(env.db, 'admin6e', 'github', undefined, 'free', 'admin');
+    const user = await createTestUser(env.db, 'unsusp-kv-fail');
+    await createTestProject(env.db, user.id, 'unsusp-kv-fail-slug');
+
+    // ROUTING whose reads throw — setProjectsRoutingSuspension rejects, so the
+    // cleanup Promise.all rejects and must not redirect as success.
+    const failingRouting = {
+      get: async () => {
+        throw new Error('KV unavailable');
+      },
+      put: async () => {},
+      delete: async () => {},
+    } as unknown as typeof env.ROUTING;
+
+    const res = await unsuspendWith(user.id, admin.adminJwt, { ROUTING: failingRouting });
+    expect(res.status).toBe(500);
+  });
+
+  test('failed unsuspend cleanup leaves the user SUSPENDED in the DB (retryable, truthful UI)', async () => {
+    const admin = await createTestUser(env.db, 'admin6g', 'github', undefined, 'free', 'admin');
+    const user = await createTestUser(env.db, 'unsusp-retryable');
+    await createTestProject(env.db, user.id, 'unsusp-retryable-slug');
+    await env.db
+      .update(users)
+      .set({ suspended_reason: 'admin_suspended' })
+      .where(eq(users.id, user.id));
+
+    const failingDo = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({ fetch: async () => new Response('boom', { status: 500 }) }),
+    } as unknown as typeof env.USAGE_COUNTER;
+
+    const res = await unsuspendWith(user.id, admin.adminJwt, { USAGE_COUNTER: failingDo });
+    expect(res.status).toBe(500);
+
+    // DB must stay suspended so the user-detail view keeps the Unsuspend form
+    // (it gates on suspended_reason) — i.e. the operator can retry the cleanup.
+    const [row] = await env.db
+      .select({ suspended_reason: users.suspended_reason })
+      .from(users)
+      .where(eq(users.id, user.id));
+    expect(row.suspended_reason).toBe('admin_suspended');
   });
 });
 

@@ -1,4 +1,4 @@
-import { getProjectsByUserId, getUser, type Db } from './db.ts';
+import { getDomainsByProjectIds, getProjectsByUserId, getUser, type Db } from './db.ts';
 import type { AssetConfig, DeployManifest } from './types.ts';
 
 /**
@@ -64,6 +64,108 @@ export async function refreshProjectKvForUser(
   }
   const payload = buildProjectAccountJson({ userId, plan: user.plan });
   await Promise.all(projects.map((project) => routing.put(projectAccountKey(project.id), payload)));
+}
+
+/**
+ * A reason-aware mutation of the `suspended` marker on a routing KV entry.
+ *
+ * The `suspended` field is shared by two unrelated suspension sources with a
+ * precedence rule: an admin suspension (`admin_suspended` / a custom reason)
+ * outranks an automatic usage suspension (`requests_exceeded`). Usage paths
+ * must therefore NEVER clobber an admin marker, while admin actions are
+ * authoritative and overwrite/clear anything. The discriminant encodes that:
+ *
+ *  - `{ op: 'suspend', reason, force }` — set `suspended = reason`. `force`
+ *    (admin) overwrites a different existing reason; non-`force` (usage) only
+ *    stamps when no marker exists, so it can't downgrade an admin suspension.
+ *  - `{ op: 'unsuspend', matchReason }` — clear the marker. `matchReason: null`
+ *    (admin) clears any reason; a string (usage) clears ONLY when the existing
+ *    marker equals it, so a usage clear can't lift an admin suspension.
+ */
+export type RoutingSuspensionUpdate =
+  | { op: 'suspend'; reason: string; force: boolean }
+  | { op: 'unsuspend'; matchReason: string | null };
+
+/**
+ * Apply a {@link RoutingSuspensionUpdate} to each given routing KV entry. A
+ * project's suspension lives on EVERY routing entry dispatch serves it from —
+ * its slug route AND one `domain:<host>` route per active custom domain — so
+ * callers pass the full key set (see {@link setProjectsRoutingSuspension}).
+ *
+ * Skips keys with no entry (a pending domain has no KV route yet; a slug may be
+ * mid-deploy), and skips the write whenever the entry already satisfies the
+ * update (set → same reason / weaker reason preserved, clear → no matching
+ * marker) so repeated suspend/unsuspend is a cheap no-op.
+ */
+export async function applyRoutingSuspension(
+  routing: KVNamespace,
+  keys: ReadonlyArray<string>,
+  update: RoutingSuspensionUpdate,
+): Promise<void> {
+  for (const key of keys) {
+    const raw = await routing.get(key);
+    if (!raw) {
+      continue;
+    }
+    const entry = JSON.parse(raw) as Record<string, unknown>;
+    if (update.op === 'suspend') {
+      if (entry.suspended === update.reason) {
+        continue; // already carries this reason
+      }
+      if (!update.force && entry.suspended) {
+        continue; // usage suspend must not overwrite a stronger (admin) reason
+      }
+      entry.suspended = update.reason;
+    } else {
+      if (!('suspended' in entry)) {
+        continue; // nothing to clear
+      }
+      if (update.matchReason !== null && entry.suspended !== update.matchReason) {
+        continue; // usage clear must not lift a different (admin) reason
+      }
+      delete entry.suspended;
+    }
+    await routing.put(key, JSON.stringify(entry));
+  }
+}
+
+/**
+ * Apply a {@link RoutingSuspensionUpdate} across a set of projects' routing
+ * entries — each project's slug route plus EVERY `domain:<host>` route the
+ * project has. This is the single source of truth for which KV keys carry a
+ * project's suspension; dispatch enforces `routing.suspended` on all of them,
+ * so suspending only the slug (the historical behaviour) left custom domains
+ * serving past the cap, and unsuspending only the slug left them 429'd.
+ *
+ * We deliberately do NOT filter to `status === 'active'`. `tryActivateDomain`
+ * writes the `domain:<host>` KV route BEFORE flipping the DB row to `active`
+ * (self-healing ordering — see provisioning/activate-domain.ts), so a crash in
+ * that window leaves a `pending` row whose KV route is already live and served
+ * by dispatch. Filtering to active would skip that route and let a suspended
+ * project keep serving on the hostname. Fanning out to every domain is safe:
+ * {@link applyRoutingSuspension} skips any key with no KV entry, so a pending
+ * domain that was never published is just a cheap no-op read.
+ *
+ * Batches the domain lookup over all projects. No-ops (no DB query) for an
+ * empty project list.
+ */
+export async function setProjectsRoutingSuspension(
+  routing: KVNamespace,
+  db: Db,
+  projects: ReadonlyArray<{ id: string; slug: string }>,
+  update: RoutingSuspensionUpdate,
+): Promise<void> {
+  if (projects.length === 0) {
+    return;
+  }
+  const domainMap = await getDomainsByProjectIds(
+    db,
+    projects.map((p) => p.id),
+  );
+  for (const project of projects) {
+    const domainKeys = (domainMap.get(project.id) ?? []).map((d) => `domain:${d.hostname}`);
+    await applyRoutingSuspension(routing, [project.slug, ...domainKeys], update);
+  }
 }
 
 export function buildRoutingJson(opts: {

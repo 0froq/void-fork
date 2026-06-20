@@ -50,6 +50,7 @@ import projects from './routes/projects.ts';
 import revalidate from './routes/revalidate.ts';
 import secrets from './routes/secrets.ts';
 import { projectUsage, accountUsage } from './routes/usage.ts';
+import { setProjectsRoutingSuspension } from './routing.ts';
 import { SandboxConcurrencyCounter } from './sandbox-concurrency-counter.ts';
 import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
@@ -522,10 +523,32 @@ async function processUserRollover(
       rolled: boolean;
       unsuspendRequests?: boolean;
       unsuspendAi?: boolean;
+      requestsSuspended?: boolean;
     }>();
 
     if (result.rolled && result.unsuspendRequests) {
+      // DB side of the request-cap unsuspend. Match-guarded, so it's a no-op if
+      // a later sandbox suspension overwrote `suspended_reason` (the DO latch,
+      // not the DB reason, is the authority for the KV reconcile below).
       await unsuspendUserIfReason(db, user.id, REASON_REQUESTS_EXCEEDED);
+    }
+
+    // KV side, EVERY pass: reconcile the `suspended` marker on slug + active
+    // `domain:<host>` routes against the DO's authoritative request latch. When
+    // the user is not request-suspended, clear any lingering `requests_exceeded`
+    // marker (reason-scoped — never lifts an admin suspension). The DO resets
+    // its latch on rollover but cannot clear KV (it lacks the project + domain
+    // list). Running this every pass — not just on the rollover pass — makes the
+    // cleanup self-healing: a partial KV-write failure is retried next run
+    // instead of stranding routes at 429 until the next deploy. This mirrors the
+    // DO `/init` re-stamp, which already re-applies the marker every pass while
+    // the latch is true. (`undefined` from an old DO during a deploy: skipped,
+    // and reconciled on the next pass once the DO is updated.)
+    if (result.requestsSuspended === false) {
+      await setProjectsRoutingSuspension(env.ROUTING, db, userProjects, {
+        op: 'unsuspend',
+        matchReason: REASON_REQUESTS_EXCEEDED,
+      });
     }
   }
 

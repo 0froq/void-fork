@@ -1,8 +1,8 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createDb, suspendUser, unsuspendUserIfReason } from './db.ts';
+import { createDb, suspendUser, unsuspendUserIfReason, type Db } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { queryProjectAiUsage } from './routes/usage.ts';
-import { sandboxBlockKey } from './routing.ts';
+import { sandboxBlockKey, setProjectsRoutingSuspension } from './routing.ts';
 import { REASON_REQUESTS_EXCEEDED, REASON_SANDBOX_RUNTIME_EXCEEDED } from './suspension.ts';
 import { getPlanLimits, isWithinLimit } from './tiers.ts';
 
@@ -106,6 +106,9 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     if (request.method === 'POST' && path === '/reevaluate-sandbox') {
       return this.handleReevaluateSandbox(request);
     }
+    if (request.method === 'POST' && path === '/clear-suspension') {
+      return this.handleClearSuspension();
+    }
     if (request.method === 'GET' && path === '/state') {
       return this.handleGetState();
     }
@@ -152,24 +155,32 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       return db;
     };
 
-    // Evaluate request limit
+    // Evaluate request limit. Flip the latch only AFTER the KV/DB writes succeed:
+    // getState() caches and returns the same object on a queue retry, so flipping
+    // first then throwing on a write would make the retry skip this (now-true)
+    // branch and persist enforcement as done while the writes never ran. (Requests
+    // self-heal via the `/init` re-stamp, but ordering it the same as sandbox keeps
+    // the two paths consistent.)
     const exceedsLimit = evaluateRequestLimit(state, 0); // already added above
     if (exceedsLimit && !state.requestsSuspended) {
-      state.requestsSuspended = true;
       await Promise.all([
-        this.suspendProjects(state.projectSlugs, REASON_REQUESTS_EXCEEDED),
+        this.suspendProjects(getDb(), state.projectSlugs, REASON_REQUESTS_EXCEEDED),
         suspendUser(getDb(), body.userId, REASON_REQUESTS_EXCEEDED),
       ]);
+      state.requestsSuspended = true;
     }
 
-    // Evaluate sandbox runtime limit
+    // Evaluate sandbox runtime limit. Latch AFTER the writes for the same reason —
+    // and here it is load-bearing: there is NO `/init` re-stamp for sandbox-block,
+    // so a latch persisted true with a failed block write would leave an over-budget
+    // account serving sandbox traffic unblocked until the next limit re-evaluation.
     const exceedsSandbox = evaluateSandboxRuntimeLimit(state, 0); // already added above
     if (exceedsSandbox && !state.sandboxRuntimeSuspended) {
-      state.sandboxRuntimeSuspended = true;
       await Promise.all([
         this.env.ROUTING.put(sandboxBlockKey(body.userId), '1'),
         suspendUser(getDb(), body.userId, REASON_SANDBOX_RUNTIME_EXCEEDED),
       ]);
+      state.sandboxRuntimeSuspended = true;
     }
 
     // Schedule AI alarm if not already set
@@ -202,6 +213,10 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
         rolled: false,
         unsuspendRequests: false,
         unsuspendAi: false,
+        // The authoritative request-suspension latch, returned on EVERY response
+        // (not just rollovers) so the scheduler can reconcile the KV `suspended`
+        // marker against it each pass — see processUserRollover in index.ts.
+        requestsSuspended: state.requestsSuspended,
         projectSlugs: state.projectSlugs,
       });
     }
@@ -210,12 +225,35 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     const wasAiSuspended = state.aiSuspended;
     const wasSandboxRuntimeSuspended = state.sandboxRuntimeSuspended;
 
+    // Run all external (KV/DB) cleanup BEFORE mutating the cached state. getState()
+    // returns the same cached object on a retry, and the rollover guard above keys
+    // on billingPeriodStart, so mutating it (or any latch) before a throwing await
+    // would make the retried call short-circuit as `rolled: false` and strand the
+    // half-finished cleanup. Deferring every cached mutation until after the awaits
+    // succeed keeps the retry re-entering the rollover body until cleanup completes
+    // (the KV deletes / unsuspend are idempotent).
+    if (wasAiSuspended) {
+      // The alarm's delete branch requires aiSuspended to still be true AND returns
+      // early for unlimited-AI plans, so without this the proxy keeps 429ing AI
+      // routes after rollover.
+      for (const projectId of Object.keys(state.projectSlugs)) {
+        await this.env.ROUTING.delete(`ai-block:${projectId}`);
+      }
+    }
+    if (wasSandboxRuntimeSuspended) {
+      const db = createDb(this.env.HYPERDRIVE.connectionString);
+      await Promise.all([
+        this.env.ROUTING.delete(sandboxBlockKey(body.userId)),
+        unsuspendUserIfReason(db, body.userId, REASON_SANDBOX_RUNTIME_EXCEEDED),
+      ]);
+    }
+
+    // All external cleanup succeeded — now mutate the cached state and persist.
     state.totalRequests = 0;
     state.totalNeurons = 0;
     state.totalSandboxSeconds = 0;
     state.plan = body.plan;
     state.billingPeriodStart = body.billingPeriodStart;
-
     if (wasRequestsSuspended) {
       state.requestsSuspended = false;
     }
@@ -224,11 +262,6 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     }
     if (wasSandboxRuntimeSuspended) {
       state.sandboxRuntimeSuspended = false;
-      const db = createDb(this.env.HYPERDRIVE.connectionString);
-      await Promise.all([
-        this.env.ROUTING.delete(sandboxBlockKey(body.userId)),
-        unsuspendUserIfReason(db, body.userId, REASON_SANDBOX_RUNTIME_EXCEEDED),
-      ]);
     }
 
     await this.saveState(state);
@@ -237,6 +270,10 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
       rolled: true,
       unsuspendRequests: wasRequestsSuspended,
       unsuspendAi: wasAiSuspended,
+      // Post-rollover latch (false after a request rollover). Returned every
+      // response so the scheduler reconciles KV against it each pass — see
+      // processUserRollover in index.ts.
+      requestsSuspended: state.requestsSuspended,
       projectSlugs: state.projectSlugs,
     });
   }
@@ -256,7 +293,8 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
 
     // Re-suspend any newly added project slugs if user is currently suspended
     if (state.requestsSuspended) {
-      await this.suspendProjects(state.projectSlugs, REASON_REQUESTS_EXCEEDED);
+      const db = createDb(this.env.HYPERDRIVE.connectionString);
+      await this.suspendProjects(db, state.projectSlugs, REASON_REQUESTS_EXCEEDED);
     }
     if (state.aiSuspended) {
       for (const projectId of Object.keys(state.projectSlugs)) {
@@ -268,11 +306,52 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     return Response.json({ ok: true });
   }
 
-  /** Admin plan changes: clear in-memory suspension so the next handleRecord re-evaluates against the new plan. */
+  /**
+   * Admin plan changes: optimistically clear ALL in-memory usage latches so the
+   * next handleRecord (and the AI alarm) re-evaluates against the new plan.
+   * Drops request + sandbox + AI — a plan change can lift any cap, and leaving
+   * `requestsSuspended` set would make the next `/init` re-stamp the routes the
+   * plan-change route just cleared. AI normally self-heals via the alarm, but
+   * the alarm returns early for unlimited-AI plans, so a capped→unlimited-AI
+   * upgrade needs the ai-block keys cleared here (projectId-keyed, owned by the
+   * DO). The plan-change route deletes the userId-keyed sandbox-block.
+   */
   private async handleReevaluateSandbox(request: Request): Promise<Response> {
     const body = (await request.json()) as { plan: string };
     const state = await this.getState();
     state.plan = body.plan;
+    state.requestsSuspended = false;
+    state.sandboxRuntimeSuspended = false;
+    if (state.aiSuspended) {
+      // Delete BEFORE flipping the cached `aiSuspended` latch. getState() caches
+      // and returns the same object on a retry; if a delete throws after the flip,
+      // saveState is never reached but the in-memory latch is already false, so the
+      // retried call skips this branch and persists `aiSuspended: false` with the
+      // remaining ai-block keys stranded. Deleting first keeps the latch true until
+      // every key is gone, so a retry re-enters and finishes the (idempotent) cleanup.
+      for (const projectId of Object.keys(state.projectSlugs)) {
+        await this.env.ROUTING.delete(`ai-block:${projectId}`);
+      }
+      state.aiSuspended = false;
+    }
+    await this.saveState(state);
+    return Response.json({ ok: true });
+  }
+
+  /**
+   * Admin unsuspend: drop the request + sandbox suspension latches. The admin
+   * route clears the corresponding KV routes concurrently with this call and the
+   * DB reason only after this succeeds; resetting the latches here stops the next
+   * billing-reconcile `/init` from re-stamping the routes (the `requestsSuspended`
+   * branch) and lets the next `/record` re-evaluate against current usage. AI
+   * self-heals via the alarm, so `aiSuspended` is intentionally left untouched.
+   * This is a latch reset only — no counters change (unlike a billing rollover).
+   * Trivial set-and-save, so no `blockConcurrencyWhile` is needed (no non-storage
+   * await between read+save).
+   */
+  private async handleClearSuspension(): Promise<Response> {
+    const state = await this.getState();
+    state.requestsSuspended = false;
     state.sandboxRuntimeSuspended = false;
     await this.saveState(state);
     return Response.json({ ok: true });
@@ -340,38 +419,24 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
   // --- Private helpers ---
 
   private async suspendProjects(
+    db: Db,
     projectSlugs: Record<string, string>,
     reason: string,
   ): Promise<void> {
-    for (const slug of Object.values(projectSlugs)) {
-      const raw = await this.env.ROUTING.get(slug);
-      if (!raw) {
-        continue;
-      }
-      const entry = JSON.parse(raw) as Record<string, unknown>;
-      if (entry.suspended) {
-        continue;
-      } // already suspended
-      entry.suspended = reason;
-      await this.env.ROUTING.put(slug, JSON.stringify(entry));
-    }
-  }
-
-  private async unsuspendProjects(
-    projectSlugs: Record<string, string>,
-    reason: string,
-  ): Promise<void> {
-    for (const slug of Object.values(projectSlugs)) {
-      const raw = await this.env.ROUTING.get(slug);
-      if (!raw) {
-        continue;
-      }
-      const entry = JSON.parse(raw) as Record<string, unknown>;
-      if (entry.suspended !== reason) {
-        continue;
-      } // only remove matching reason
-      delete entry.suspended;
-      await this.env.ROUTING.put(slug, JSON.stringify(entry));
-    }
+    // Stamp `suspended` on each project's slug route AND its active custom-domain
+    // routes — dispatch enforces suspension from all of them, so a slug-only
+    // stamp left over-limit projects serving on their custom domains.
+    //
+    // `force: false`: a usage suspension must never overwrite an admin
+    // suspension already on the route. If an admin suspended the user first, the
+    // route carries `admin_suspended` and this leaves it intact (the admin
+    // reason already blocks dispatch; downgrading it to `requests_exceeded`
+    // would let the next admin unsuspend silently un-block an admin action).
+    const projects = Object.entries(projectSlugs).map(([id, slug]) => ({ id, slug }));
+    await setProjectsRoutingSuspension(this.env.ROUTING, db, projects, {
+      op: 'suspend',
+      reason,
+      force: false,
+    });
   }
 }

@@ -23,6 +23,10 @@ vi.mock('../../src/db.ts', () => ({
   // The DO module also re-exports nothing else from db.ts at module scope,
   // so a minimal mock is sufficient.
   getUser: vi.fn(),
+  // routing.ts (imported transitively via setProjectsRoutingSuspension) reads a
+  // project's active domains here. Default to none so request-suspension tests
+  // that don't seed domains keep their slug-only behaviour.
+  getDomainsByProjectIds: vi.fn(async () => new Map()),
 }));
 
 import {
@@ -436,6 +440,48 @@ describe('UsageCounter.handleRecord — sandbox', () => {
     expect(kv.calls.filter(([op, key]) => op === 'put' && key === 'sandbox-block:u1')).toEqual([]);
     expect(dbCalls.suspend).toEqual([]);
   });
+
+  it('is retry-safe when the sandbox-block KV write fails (latch not set until the block is written)', async () => {
+    // Regression: the sandbox latch is flipped only AFTER the block KV put + DB
+    // suspend succeed. getState() caches and returns the same object on a queue
+    // retry; flipping first then throwing on the put would make the retry skip the
+    // (now-true) branch and persist `sandboxRuntimeSuspended: true` with NO
+    // sandbox-block key written — and there is no `/init` restamp for sandbox, so
+    // the over-budget account would serve sandbox traffic unblocked (fail-open).
+    const { counter, kv, storage } = makeCounter({
+      plan: 'solo',
+      totalSandboxSeconds: 31 * 3600, // already over solo's 30h
+    });
+
+    let failNextPut = true;
+    const realPut = kv.put;
+    kv.put = async (key: string, value: string) => {
+      if (key.startsWith('sandbox-block:') && failNextPut) {
+        failNextPut = false;
+        throw new Error('transient KV put failure');
+      }
+      return realPut(key, value);
+    };
+
+    const event: UsageEvent = {
+      projectId: 'p1',
+      userId: 'u1',
+      slug: 's1',
+      requests: 0,
+      responseBytes: 0,
+    };
+    // First attempt fails mid-suspend; the latch must NOT persist as suspended.
+    await expect(counter.fetch(recordRequest([event], 'u1', 'solo'))).rejects.toThrow(
+      'transient KV put failure',
+    );
+
+    // Retry (put now works) re-enters the sandbox-suspend branch and writes the block.
+    const res = await counter.fetch(recordRequest([event], 'u1', 'solo'));
+    expect(res.status).toBe(200);
+
+    expect(kv.store.get('sandbox-block:u1')).toBe('1');
+    expect((storage.data.get('state') as CounterState).sandboxRuntimeSuspended).toBe(true);
+  });
 });
 
 describe('UsageCounter.handleRollover — sandbox', () => {
@@ -472,6 +518,69 @@ describe('UsageCounter.handleRollover — sandbox', () => {
     const persisted = storage.data.get('state') as CounterState;
     expect(persisted.totalSandboxSeconds).toBe(0);
     expect(persisted.sandboxRuntimeSuspended).toBe(false);
+  });
+
+  it('deletes the projectId-keyed ai-block KV keys on rollover when AI was suspended', async () => {
+    const { counter, kv } = makeCounter({
+      plan: 'free',
+      aiSuspended: true,
+      projectSlugs: { p1: 's1', p2: 's2' },
+      billingPeriodStart: '2026-01-01T00:00:00Z',
+    });
+    kv.store.set('ai-block:p1', '1');
+    kv.store.set('ai-block:p2', '1');
+
+    await counter.fetch(rolloverRequest('2026-02-01T00:00:00Z', 'free', 'u1'));
+
+    // Without this, the alarm never clears them (it needs aiSuspended still true,
+    // and returns early for unlimited-AI plans), so the proxy keeps 429ing AI.
+    expect(kv.store.has('ai-block:p1')).toBe(false);
+    expect(kv.store.has('ai-block:p2')).toBe(false);
+  });
+
+  it('is retry-safe when an ai-block delete fails mid-rollover (no short-circuit, no stranded keys)', async () => {
+    // Regression: the rollover runs all external cleanup BEFORE mutating the cached
+    // state. getState() caches and returns the same object on a retry, and the
+    // rollover guard keys on billingPeriodStart — so mutating it before a throwing
+    // delete would make the retry short-circuit as `rolled: false` and strand the
+    // remaining ai-block keys.
+    const { counter, kv, storage } = makeCounter({
+      plan: 'free',
+      aiSuspended: true,
+      projectSlugs: { p1: 's1', p2: 's2' },
+      billingPeriodStart: '2026-01-01T00:00:00Z',
+    });
+    kv.store.set('ai-block:p1', '1');
+    kv.store.set('ai-block:p2', '1');
+
+    let failNextDelete = true;
+    const realDelete = kv.delete;
+    kv.delete = async (key: string) => {
+      if (failNextDelete) {
+        failNextDelete = false;
+        throw new Error('transient KV delete failure');
+      }
+      return realDelete(key);
+    };
+
+    // First attempt fails mid-cleanup; billingPeriodStart must NOT be persisted.
+    await expect(
+      counter.fetch(rolloverRequest('2026-02-01T00:00:00Z', 'free', 'u1')),
+    ).rejects.toThrow('transient KV delete failure');
+    expect((storage.data.get('state') as CounterState).billingPeriodStart).toBe(
+      '2026-01-01T00:00:00Z',
+    );
+
+    // Retry re-enters the rollover (guard still sees the old period) and finishes.
+    const res = await counter.fetch(rolloverRequest('2026-02-01T00:00:00Z', 'free', 'u1'));
+    const body = await res.json<{ rolled: boolean }>();
+    expect(body.rolled).toBe(true);
+
+    const persisted = storage.data.get('state') as CounterState;
+    expect(persisted.billingPeriodStart).toBe('2026-02-01T00:00:00Z');
+    expect(persisted.aiSuspended).toBe(false);
+    expect(kv.store.has('ai-block:p1')).toBe(false);
+    expect(kv.store.has('ai-block:p2')).toBe(false);
   });
 
   it('skips sandbox cleanup when not previously suspended', async () => {
@@ -520,6 +629,76 @@ describe('UsageCounter.handleReevaluateSandbox', () => {
       body: JSON.stringify({ plan }),
     });
   }
+
+  it('clears aiSuspended and deletes ai-block keys (capped→unlimited-AI upgrade the alarm never reaches)', async () => {
+    const { counter, kv, storage } = makeCounter({
+      plan: 'free',
+      aiSuspended: true,
+      projectSlugs: { p1: 's1' },
+    });
+    kv.store.set('ai-block:p1', '1');
+
+    await counter.fetch(reevaluateRequest('sponsored'));
+
+    const persisted = storage.data.get('state') as CounterState;
+    expect(persisted.aiSuspended).toBe(false);
+    expect(kv.store.has('ai-block:p1')).toBe(false);
+  });
+
+  it('is retry-safe when an ai-block delete fails mid-cleanup (latch stays set until all keys gone)', async () => {
+    // Regression: the cleanup deletes the ai-block keys BEFORE flipping the cached
+    // `aiSuspended` latch. getState() caches and returns the same object on the
+    // retry, so flipping first then throwing mid-delete would make the retry skip
+    // the (now-false) branch and persist `aiSuspended: false` with keys stranded.
+    const { counter, kv, storage } = makeCounter({
+      plan: 'free',
+      aiSuspended: true,
+      projectSlugs: { p1: 's1', p2: 's2' },
+    });
+    kv.store.set('ai-block:p1', '1');
+    kv.store.set('ai-block:p2', '1');
+
+    // First delete throws (transient KV failure), then deletes work normally.
+    let failNextDelete = true;
+    const realDelete = kv.delete;
+    kv.delete = async (key: string) => {
+      if (failNextDelete) {
+        failNextDelete = false;
+        throw new Error('transient KV delete failure');
+      }
+      return realDelete(key);
+    };
+
+    // First attempt fails mid-cleanup; the latch must NOT be persisted false.
+    await expect(counter.fetch(reevaluateRequest('sponsored'))).rejects.toThrow(
+      'transient KV delete failure',
+    );
+
+    // Retry (deletes now succeed) re-enters the branch and finishes the cleanup.
+    const res = await counter.fetch(reevaluateRequest('sponsored'));
+    expect(res.status).toBe(200);
+
+    const persisted = storage.data.get('state') as CounterState;
+    expect(persisted.aiSuspended).toBe(false);
+    expect(kv.store.has('ai-block:p1')).toBe(false);
+    expect(kv.store.has('ai-block:p2')).toBe(false);
+  });
+
+  it('also clears the requestsSuspended latch (plan change optimistically lifts BOTH usage latches)', async () => {
+    // A capped user request-suspended last period, upgraded via the admin plan
+    // change. The latch must drop too, or the next `/init` re-stamps the routes.
+    const { counter, storage } = makeCounter({
+      plan: 'solo',
+      requestsSuspended: true,
+      sandboxRuntimeSuspended: true,
+    });
+
+    await counter.fetch(reevaluateRequest('pro'));
+
+    const persisted = storage.data.get('state') as CounterState;
+    expect(persisted.requestsSuspended).toBe(false);
+    expect(persisted.sandboxRuntimeSuspended).toBe(false);
+  });
 
   it('clears sandboxRuntimeSuspended and updates plan when upgrade lifts the limit', async () => {
     // Was suspended on solo (30h). Upgrade to pro (200h). totalSandboxSeconds is below pro's limit.
@@ -577,5 +756,104 @@ describe('UsageCounter.handleReevaluateSandbox', () => {
     expect(reSuspended.sandboxRuntimeSuspended).toBe(true);
     expect(kv.store.get('sandbox-block:u1')).toBe('1');
     expect(dbCalls.suspend).toContainEqual({ id: 'u1', reason: 'sandbox_runtime_exceeded' });
+  });
+});
+
+describe('UsageCounter.handleClearSuspension', () => {
+  it('clears the request + sandbox suspension latches, leaving AI and counters intact', async () => {
+    const { counter, storage } = makeCounter({
+      plan: 'pro',
+      totalRequests: 999,
+      requestsSuspended: true,
+      sandboxRuntimeSuspended: true,
+      aiSuspended: true,
+    });
+
+    const res = await counter.fetch(new Request('https://do/clear-suspension', { method: 'POST' }));
+    expect(res.status).toBe(200);
+
+    const persisted = storage.data.get('state') as CounterState;
+    expect(persisted.requestsSuspended).toBe(false);
+    expect(persisted.sandboxRuntimeSuspended).toBe(false);
+    // AI self-heals via the alarm when usage drops; the admin unsuspend does not touch it.
+    expect(persisted.aiSuspended).toBe(true);
+    // Counters are untouched — this is a latch reset, not a billing rollover.
+    expect(persisted.totalRequests).toBe(999);
+  });
+});
+
+describe('UsageCounter.handleRecord — request suspension fans out to custom domains', () => {
+  beforeEach(async () => {
+    const db = await import('../../src/db.ts');
+    vi.mocked(db.getDomainsByProjectIds).mockReset();
+    vi.mocked(db.getDomainsByProjectIds).mockResolvedValue(new Map());
+  });
+
+  it('stamps suspended on the slug AND active domain routes when crossing the request cap', async () => {
+    // free.requestsPerMonth = 3_000_000
+    const { counter, kv } = makeCounter({ plan: 'free', totalRequests: 3_000_000 });
+    // Seed the routes a deploy publisher would have written for this project.
+    kv.store.set('s1', JSON.stringify({ workerName: 'w', projectId: 'p1' }));
+    kv.store.set('domain:custom.com', JSON.stringify({ workerName: 'w', projectId: 'p1' }));
+
+    const db = await import('../../src/db.ts');
+    vi.mocked(db.getDomainsByProjectIds).mockResolvedValue(
+      new Map([['p1', [{ project_id: 'p1', hostname: 'custom.com', status: 'active' }]]]) as never,
+    );
+
+    const events: Array<UsageEvent> = [
+      { projectId: 'p1', userId: 'u1', slug: 's1', requests: 1, responseBytes: 0 },
+    ];
+    const res = await counter.fetch(recordRequest(events, 'u1', 'free'));
+    const body = await res.json<{ suspended: boolean }>();
+    expect(body.suspended).toBe(true);
+
+    expect(JSON.parse(kv.store.get('s1')!).suspended).toBe('requests_exceeded');
+    expect(JSON.parse(kv.store.get('domain:custom.com')!).suspended).toBe('requests_exceeded');
+  });
+
+  it('does NOT downgrade an existing admin suspension on the route when crossing the request cap', async () => {
+    const { counter, kv } = makeCounter({ plan: 'free', totalRequests: 3_000_000 });
+    // An admin already suspended this user — the route carries `admin_suspended`.
+    kv.store.set(
+      's1',
+      JSON.stringify({ workerName: 'w', projectId: 'p1', suspended: 'admin_suspended' }),
+    );
+
+    const events: Array<UsageEvent> = [
+      { projectId: 'p1', userId: 'u1', slug: 's1', requests: 1, responseBytes: 0 },
+    ];
+    await counter.fetch(recordRequest(events, 'u1', 'free'));
+
+    // The admin reason outranks the usage reason — the usage suspend must not
+    // overwrite it, or the next admin unsuspend would silently un-block.
+    expect(JSON.parse(kv.store.get('s1')!).suspended).toBe('admin_suspended');
+  });
+});
+
+describe('UsageCounter.handleRollover — request latch in response', () => {
+  it('returns the post-rollover request latch (false) so the scheduler can reconcile KV', async () => {
+    const { counter } = makeCounter({
+      plan: 'solo',
+      totalRequests: 999_999_999,
+      requestsSuspended: true,
+      billingPeriodStart: '2026-01-01T00:00:00Z',
+    });
+    const res = await counter.fetch(rolloverRequest('2026-02-01T00:00:00Z', 'solo', 'u1'));
+    const body = await res.json<{ rolled: boolean; requestsSuspended: boolean }>();
+    expect(body.rolled).toBe(true);
+    expect(body.requestsSuspended).toBe(false);
+  });
+
+  it('returns the current request latch on a no-op (unchanged period) so a stale marker still reconciles', async () => {
+    const { counter } = makeCounter({
+      plan: 'solo',
+      requestsSuspended: false,
+      billingPeriodStart: '2026-01-01T00:00:00Z',
+    });
+    const res = await counter.fetch(rolloverRequest('2026-01-01T00:00:00Z', 'solo', 'u1'));
+    const body = await res.json<{ rolled: boolean; requestsSuspended: boolean }>();
+    expect(body.rolled).toBe(false);
+    expect(body.requestsSuspended).toBe(false);
   });
 });
