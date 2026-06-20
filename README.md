@@ -274,7 +274,7 @@ The runtime log pipeline.
 | Tool     | Version   | Purpose                                                                                        |
 | -------- | --------- | ---------------------------------------------------------------------------------------------- |
 | Node.js  | 24.13.1   | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
-| Vite+    | 0.1.x     | Unified toolchain (`vp`, Vite, Vitest, Oxlint, Oxfmt)                                          |
+| Vite+    | 0.2.x     | Unified toolchain (`vp`, Vite, Vitest, Oxlint, Oxfmt)                                          |
 | pnpm     | 11.x      | Package manager with workspaces + catalog                                                      |
 | wrangler | 4.x       | CF Worker dev/deploy (api, dispatch)                                                           |
 | drizzle  | 0.45.x    | Type-safe ORM for API PostgreSQL (schema + queries + migrations)                               |
