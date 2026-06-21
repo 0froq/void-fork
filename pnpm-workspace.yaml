@@ -9,10 +9,10 @@ allowBuilds:
 
 catalog:
   '@cloudflare/workers-types': ^4.20260508.1
-  '@typescript/native-preview': 7.0.0-dev.20260523.1
-  hono: 4.12.18
+  '@typescript/native-preview': 7.0.0-dev.20260618.1
+  hono: 4.12.26
   wrangler: ^4.90.0
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.0
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.1
   vitest: 4.1.9
   vite-plus: ^0.2.0
 

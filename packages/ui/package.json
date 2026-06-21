@@ -15,7 +15,7 @@
     "./fonts/*": "./src/fonts/*"
   },
   "dependencies": {
-    "@base-ui/react": "1.5.0",
+    "@base-ui/react": "1.6.0",
     "@iconify/react": "^6.0.2",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.5.0"
