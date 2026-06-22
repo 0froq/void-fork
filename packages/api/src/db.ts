@@ -6,6 +6,7 @@ import {
   eq,
   ne,
   lt,
+  gt,
   gte,
   inArray,
   notInArray,
@@ -397,6 +398,92 @@ export async function updateDeploymentStatus(
             notInArray(deployments.status, CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES),
           ),
     );
+}
+
+/**
+ * Durable publish-complete marker. Set once ALL post-go-live routing KV keys
+ * (slug, account, active domains, queues, asset-fallback metadata) have been
+ * published. The hourly `reconcileLiveRouting` safety net selects only rows
+ * where this is NOT true and republishes them byte-identically, so the mark is
+ * idempotent and needs no CAS — a missed mark simply re-publishes next run.
+ */
+export async function markRoutingPublished(db: Db, deploymentId: string): Promise<void> {
+  await db
+    .update(deployments)
+    .set({ routing_published: true })
+    .where(eq(deployments.id, deploymentId));
+}
+
+/**
+ * Clear the durable publish-complete marker. Set inside the rollback go-live tx
+ * (alongside `setActiveDeployment`) so the target is committed-active but flagged
+ * routing-UNPUBLISHED until the post-commit routing publish succeeds and re-marks
+ * it. If the publish fails, the row stays `false` and the hourly
+ * `reconcileLiveRouting` safety net republishes it byte-identically. Unlike the
+ * legacy NULL marker, `false` rows are exempt from the reconciler's recency
+ * window (see `getRecentlyLiveActiveDeployments`) — a rollback target is usually
+ * older than the window and must stay eligible until healed.
+ */
+export async function markRoutingUnpublished(db: Db, deploymentId: string): Promise<void> {
+  await db
+    .update(deployments)
+    .set({ routing_published: false })
+    .where(eq(deployments.id, deploymentId));
+}
+
+/**
+ * Number of rows an UPDATE/DELETE touched, normalized across drivers: pg
+ * (Hyperdrive, production) reports `rowCount`; PGlite (integration tests)
+ * reports `affectedRows`. A guarded CAS must read whichever the active driver
+ * provides — without this, a successful CAS reads as `undefined`/0 under PGlite
+ * and the caller wrongly treats it as a no-op.
+ */
+function updatedRowCount(result: { rowCount?: number | null; affectedRows?: number }): number {
+  return result.rowCount ?? result.affectedRows ?? 0;
+}
+
+/**
+ * Atomically flip a deployment to `live` ONLY if it has not been canceled.
+ *
+ * Performs the same live transition as `updateDeploymentStatus(..., 'live')`
+ * without `force` — `status='live'` and `deployed_at = COALESCE(deployed_at,
+ * now())` — guarded by `status NOT IN ('canceling','canceled')`. Returns true
+ * iff the row matched (i.e. the deploy went live), false if a cancel had
+ * already committed.
+ *
+ * This is the atomic point-of-no-return in the deploy go-live tx. It replaces a
+ * racy read-then-`force:true`: `cancelDeployment` does a lock-free UPDATE that
+ * does NOT lock the project row, so a plain read could pass and then a cancel
+ * could commit before the forced write (cancel acked, deploy forced live
+ * anyway). With this CAS the two writes serialize on the deployment row:
+ *   - a cancel committed BEFORE → this matches 0 rows → caller throws → the
+ *     generic catch re-reads canceling/canceled and marks the deploy canceled,
+ *     NO routing written.
+ *   - a cancel committing AFTER → it blocks on the row lock until this tx
+ *     commits, then sees status='live' (terminal) → its own guarded UPDATE
+ *     matches 0 rows → 409 (correct: deploy won the race, user rolls back).
+ *
+ * Reads `updatedRowCount` so the match is detected under PGlite (affectedRows)
+ * as well as pg (rowCount).
+ */
+export async function markDeploymentLiveIfNotCanceled(
+  db: Db,
+  deploymentId: string,
+): Promise<boolean> {
+  const result = await db
+    .update(deployments)
+    .set({
+      status: 'live',
+      updated_at: sql`now()`,
+      deployed_at: sql`COALESCE(${deployments.deployed_at}, now())`,
+    })
+    .where(
+      and(
+        eq(deployments.id, deploymentId),
+        notInArray(deployments.status, CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES),
+      ),
+    );
+  return updatedRowCount(result) > 0;
 }
 
 export async function getDeployment(db: Db, id: string): Promise<Deployment | null> {
@@ -882,24 +969,6 @@ export async function getRetainedDeploymentsExcluding(
     .orderBy(desc(deployments.created_at));
 }
 
-export async function getInFlightDeploymentsExcluding(
-  db: Db,
-  projectId: string,
-  excludeId?: string | null,
-): Promise<ReadonlyArray<Deployment>> {
-  return db
-    .select()
-    .from(deployments)
-    .where(
-      and(
-        eq(deployments.project_id, projectId),
-        notInArray(deployments.status, TERMINAL_DEPLOYMENT_STATUSES),
-        excludeId ? ne(deployments.id, excludeId) : undefined,
-      ),
-    )
-    .orderBy(desc(deployments.created_at));
-}
-
 /**
  * Every deployment that has ever reached `live` (deployed_at IS NOT NULL),
  * regardless of current retention. Used by the rollback queue sweep to
@@ -1283,12 +1352,352 @@ export async function getPendingDomainsNewerThan(
     .limit(limit);
 }
 
+/**
+ * Active live deployments whose routing publish is incomplete — the input to
+ * the hourly live-routing reconciler (`reconcileLiveRouting` in `index.ts`).
+ *
+ * Joins each project to its CURRENT active deployment (the `active_deployment_id`
+ * pointer the deploy/rollback go-live tx flips) and keeps only `live` rows not
+ * yet marked `routing_published`: a deploy/rollback that committed live but
+ * failed to publish routing KV (e.g. a transient KV error after the go-live tx,
+ * with all in-request retries exhausted) leaves a missing/stale slug route, and
+ * on a FIRST deploy the project is then unreachable (dispatch routes purely from
+ * ROUTING KV). The reconciler republishes slug/account/domain routing from the
+ * manifest below.
+ *
+ * The two unpublished marker states have different eligibility:
+ * - NULL — pre-marker legacy rows. Window-bounded backfill: eligible only when
+ *   `deployed_at > sinceIso`, or the fleet-wide NULL backlog would dominate
+ *   every scan.
+ * - false — explicitly unpublished; the only writer is `markRoutingUnpublished`
+ *   inside the rollback go-live tx. ALWAYS eligible, no window: a rollback
+ *   target is usually older than any recency window, and the set is bounded —
+ *   the join keeps only active-pointer rows, and a healed row flips to true and
+ *   self-clears.
+ *
+ * `deployed_at` is a string-mode timestamp, so the cutoff is compared as an ISO
+ * string. Capped at `limit` (mirrors `getPendingDomains`) and ordered
+ * oldest-first so the per-run cap truncates the least-stale rows.
+ */
+export async function getRecentlyLiveActiveDeployments(
+  db: Db,
+  sinceIso: string,
+  limit: number,
+): Promise<
+  ReadonlyArray<{
+    projectId: string;
+    slug: string;
+    userId: string;
+    type: Project['type'];
+    deploymentId: string;
+    manifest: string | null;
+    assetHashes: string | null;
+  }>
+> {
+  return db
+    .select({
+      projectId: projects.id,
+      slug: projects.slug,
+      userId: projects.user_id,
+      type: projects.type,
+      deploymentId: deployments.id,
+      manifest: deployments.manifest,
+      assetHashes: deployments.asset_hashes,
+    })
+    .from(projects)
+    .innerJoin(deployments, eq(deployments.id, projects.active_deployment_id))
+    .where(
+      and(
+        eq(deployments.status, 'live'),
+        // Defense-in-depth: never reconcile a project being torn down.
+        // `teardownProject` flips `status='deleting'`, deletes the routing KV
+        // entries lock-free, then cascade-deletes the row last — re-publishing
+        // here would recreate orphan routes the reconciler can never heal once
+        // the row is gone. `publishRoutingIfStillActive` also re-checks this
+        // under the project lock; excluding deleting rows from the snapshot
+        // avoids the wasted lock + re-check entirely.
+        ne(projects.status, 'deleting'),
+        // Skip rows whose routing is already fully published — `ne(col, true)`
+        // would exclude NULLs in SQL three-valued logic, so spell out each
+        // unpublished state. The recency window applies ONLY to legacy NULL
+        // rows; explicitly-unpublished (false) rows must stay eligible at any
+        // age or a failed rollback publish to a >window-old target never heals.
+        or(
+          and(isNull(deployments.routing_published), gt(deployments.deployed_at, sinceIso)),
+          eq(deployments.routing_published, false),
+        ),
+      ),
+    )
+    .orderBy(asc(deployments.deployed_at))
+    .limit(limit);
+}
+
+/**
+ * Lock a project row `FOR UPDATE` and return its CURRENT
+ * `active_deployment_id`. The lock serializes against the deploy/rollback
+ * go-live tx (which also takes `SELECT id FROM projects WHERE id = ? FOR
+ * UPDATE` before flipping the pointer — see `deploy.ts`), so a caller holding
+ * this lock observes a stable active pointer for the lifetime of its tx.
+ *
+ * Used by the hourly live-routing reconciler: it SELECTs a snapshot of active
+ * deployments, then per-row re-reads the pointer under this lock to confirm the
+ * snapshot's deployment is STILL active before publishing its routing — so a
+ * concurrent deploy that flipped the pointer to a newer deployment cannot have
+ * its routing clobbered by the reconciler's stale snapshot.
+ *
+ * MUST be called inside a transaction (`db` is the tx-scoped `Db`); a `FOR
+ * UPDATE` outside a tx releases the lock immediately and is pointless.
+ */
+export async function lockProjectAndGetActiveDeploymentId(
+  db: Db,
+  projectId: string,
+): Promise<string | null> {
+  const result = (await db.execute(
+    sql`SELECT active_deployment_id FROM projects WHERE id = ${projectId} FOR UPDATE`,
+  )) as { rows: ReadonlyArray<{ active_deployment_id: string | null }> };
+  return result.rows[0]?.active_deployment_id ?? null;
+}
+
+/**
+ * Lock-and-read variant for the publish chokepoint: takes the SAME project-row
+ * `FOR UPDATE` lock as {@link lockProjectAndGetActiveDeploymentId}, but returns
+ * BOTH `active_deployment_id` AND `status`, or `null` when the row is gone.
+ *
+ * `publishRoutingIfStillActive` needs the status too: project teardown
+ * (`teardownProject`) flips `projects.status='deleting'` WITHOUT moving
+ * `active_deployment_id` away from the still-`live` deployment (`live` is
+ * terminal, so the deployment is not marked `canceling`), then deletes the
+ * routing KV entries lock-free and cascade-deletes the row LAST. In that gap a
+ * parked publisher (or the reconciler) would re-pass a pointer-only active check
+ * and RE-CREATE the routing it just tore down — and once the row is gone the
+ * reconciler can never heal it (its join returns nothing) → permanent orphan
+ * routes. Reading `status` under the lock lets the publisher treat a deleting /
+ * missing project as superseded and write nothing.
+ *
+ * A SEPARATE sibling (not an extension of
+ * `lockProjectAndGetActiveDeploymentId`) keeps the change scoped: that helper
+ * has callers (deploy / reconciler backfill / domain activate / queue-token
+ * backfill / guardedRoutingKvRmw) that only acquire the lock or compare the
+ * pointer to a specific id, and folding a status check into it would alter those
+ * unrelated paths.
+ *
+ * MUST be called inside a transaction (same `FOR UPDATE` constraint).
+ */
+export async function lockProjectForPublish(
+  db: Db,
+  projectId: string,
+): Promise<{ activeDeploymentId: string | null; status: Project['status'] } | null> {
+  const result = (await db.execute(
+    sql`SELECT active_deployment_id, status FROM projects WHERE id = ${projectId} FOR UPDATE`,
+  )) as {
+    rows: ReadonlyArray<{ active_deployment_id: string | null; status: Project['status'] }>;
+  };
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+  return { activeDeploymentId: row.active_deployment_id ?? null, status: row.status };
+}
+
+/**
+ * Lock-guarded read-modify-write of a SINGLE project-scoped routing KV entry.
+ *
+ * Under the routing-after-tx model a project's slug / `queue:*` / `domain:*`
+ * routing entry is written by a guarded publisher (deploy / rollback /
+ * reconciler) ONLY after that publisher takes the project `FOR UPDATE` lock and
+ * re-reads `active_deployment_id` under it. Any OTHER mutation of the same entry
+ * (admin suspend/unsuspend, usage-counter suspension, queue-token backfill) must
+ * take the SAME lock and RE-READ the entry under it before writing — otherwise a
+ * lock-free read-then-write clobbers a concurrent publisher's NEWER route, and
+ * because the newer active deployment is already `routing_published=true` the
+ * hourly `reconcileLiveRouting` safety net (which heals only unpublished rows)
+ * never repairs it: the clobber is permanent.
+ *
+ * This helper wraps that pattern. It opens a transaction, takes the project
+ * `FOR UPDATE` lock, RE-READS the entry under the lock, and runs `mutate` on the
+ * FRESH under-lock value. `mutate` returns the next entry to `put`, or `null` to
+ * skip the write entirely (e.g. the entry already has / no longer needs the
+ * mutation). A concurrent publish either committed BEFORE this lock (the re-read
+ * observes its fresh value, and `mutate` decides against the stale clobber) or
+ * serializes BEHIND this short RMW. No-op when the key is absent.
+ *
+ * The KV put nests no further pg write — same shape as the reconciler's lock +
+ * KV publish. PGlite (tests) is single-connection, so ALL reads/writes for the
+ * project happen inside this one lock-tx; callers must not interleave an outer
+ * `db` read while the lock-tx is open.
+ */
+export async function guardedRoutingKvRmw(
+  db: Db,
+  projectId: string,
+  kv: KVNamespace,
+  key: string,
+  mutate: (entry: Record<string, unknown>) => Record<string, unknown> | null,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await lockProjectAndGetActiveDeploymentId(tx as unknown as Db, projectId);
+    const raw = await kv.get(key);
+    if (raw === null) {
+      return;
+    }
+    const next = mutate(JSON.parse(raw) as Record<string, unknown>);
+    if (next !== null) {
+      await kv.put(key, JSON.stringify(next));
+    }
+  });
+}
+
+/**
+ * Outcome of {@link publishRoutingIfStillActive}.
+ *
+ *   - `published`  — `deploymentId` was still the active deployment; `publish()`
+ *                    ran (under the lock) and the row was marked published.
+ *   - `superseded` — a NEWER operation already flipped `active_deployment_id`
+ *                    away from `deploymentId`, OR the project is being deleted
+ *                    (`status='deleting'`) / already gone; NO KV write, NO mark.
+ *                    The newer active deployment owns routing and has/will
+ *                    publish it, or teardown owns the (impending) absence of
+ *                    routing and this publisher must not recreate it.
+ *   - `failed`     — `deploymentId` was active but `publish()` threw; the mark
+ *                    is NOT set, so the row stays routing-unpublished and the
+ *                    hourly `reconcileLiveRouting` safety net heals it.
+ */
+export type PublishRoutingOutcome = 'published' | 'superseded' | 'failed';
+
+/**
+ * Publish routing for `deploymentId` ONLY while it is still the project's active
+ * deployment, serializing concurrent same-project publishers on the project row
+ * lock so a stale (parked/slow) publisher can never clobber a newer operation's
+ * routing.
+ *
+ * The deploy/rollback go-live tx flips `active_deployment_id` then publishes
+ * routing KV POST-commit (DB-ahead-of-KV — see `deploy.ts`/`projects.ts`). A
+ * publisher that gets parked after its go-live commit can land AFTER a newer
+ * operation has committed, published, and marked its own deployment
+ * `routing_published=true`. Replaying the stale deployment's routing then both
+ * clobbers the newer live routes (dispatch routes purely from these KV values)
+ * AND stamps the stale row published — and because the newer active row is
+ * already `routing_published=true`, the reconciler's `active AND NOT published`
+ * query filters it out, so the stale routing persists permanently.
+ *
+ * This helper closes that race by mirroring the reconciler's lock + re-check: a
+ * SEPARATE post-commit tx takes the SAME `SELECT ... FOR UPDATE` lock the
+ * go-live tx and reconciler take, RE-READS `active_deployment_id` AND `status`,
+ * and:
+ *
+ *   - if the project row is GONE, or its `status='deleting'`, or
+ *     `active_deployment_id` no longer equals `deploymentId` → returns
+ *     `'superseded'` (no KV write, no mark): a newer operation owns routing, or
+ *     teardown is removing this project and the publisher must not recreate the
+ *     routing it just tore down. Project teardown (`teardownProject`) flips
+ *     `status='deleting'` but leaves the pointer on the still-`live` deployment,
+ *     deletes routing KV lock-free, then cascade-deletes the row last — so a
+ *     pointer-only check would re-pass and re-create orphan routes the
+ *     reconciler can never heal (the row is gone). Reading `status` under the
+ *     lock (the same `status==='deleting'` re-check the go-live tx already does)
+ *     closes both the parked-publisher and reconciler vectors here.
+ *   - else runs `publish(txDb)` (the KV puts) UNDER THE LOCK, then
+ *     `markRoutingPublished`, and returns `'published'`. Holding the lock across
+ *     `publish()` + the mark makes "marked published" truthful and serializes
+ *     concurrent same-project publishers, so a stale one blocks (then
+ *     short-circuits as superseded) rather than clobbering. The lock-tx db
+ *     handle is passed to `publish` so it can re-read project state (e.g. the
+ *     active domain set) under the lock instead of from a pre-publish snapshot
+ *     that a concurrent domain activate/delete could have invalidated.
+ *   - if `publish()` throws → returns `'failed'` (mark NOT set): the row stays
+ *     unmarked and any KV already written is healed byte-identically by the
+ *     reconciler.
+ *
+ * The publish stays POST-commit: this helper re-acquires the lock in its OWN tx
+ * AFTER the go-live commit. It does NOT move routing writes back into the
+ * go-live tx (which would reopen the original "failed publish rolls back the
+ * go-live" clobber class). `publish()` performs the external KV puts while the
+ * pg lock is held — the same shape the reconciler already runs successfully on
+ * PGlite (single-connection) and pg.
+ */
+export async function publishRoutingIfStillActive(
+  db: Db,
+  projectId: string,
+  deploymentId: string,
+  publish: (txDb: Db) => Promise<void>,
+): Promise<PublishRoutingOutcome> {
+  return db.transaction(async (tx) => {
+    const txDb = tx as unknown as Db;
+    const locked = await lockProjectForPublish(txDb, projectId);
+    // Row gone (cascade-deleted by teardown), project being deleted, or the
+    // pointer moved to a newer deployment → a newer operation owns routing, or
+    // teardown owns the (impending) absence of it. Write nothing.
+    if (
+      locked === null ||
+      locked.status === 'deleting' ||
+      locked.activeDeploymentId !== deploymentId
+    ) {
+      return 'superseded';
+    }
+    try {
+      // Pass the lock-tx db handle so the closure can re-read project state
+      // (e.g. active domains) UNDER THE LOCK rather than from a pre-publish
+      // snapshot. PGlite is single-connection, so the closure MUST use this
+      // handle for any pg read — a read via the OUTER `db` while this tx holds
+      // the lock would self-deadlock.
+      await publish(txDb);
+    } catch {
+      // The KV puts threw. Do NOT mark published — the row stays
+      // routing-unpublished and the reconciler heals it byte-identically. The
+      // surrounding tx still commits (it only took a shared-pointer read lock
+      // and wrote nothing), releasing the lock for the next publisher.
+      return 'failed';
+    }
+    // The KV puts SUCCEEDED — routing is now live. The mark is a best-effort,
+    // idempotent, CAS-free flag (see `markRoutingPublished`): a transient DB
+    // failure here must NOT reject the helper, because rejecting would make the
+    // caller treat an already-live publish as a hard error (rollback 500s after
+    // the target is committed live; deploy diverts to its outer recovery path
+    // and skips its normal 'published' epilogue). Swallow the mark failure and
+    // still report 'published' — the row is simply left unmarked, and the
+    // hourly `reconcileLiveRouting` safety net re-publishes byte-identically and
+    // re-marks it on its next run.
+    try {
+      await markRoutingPublished(txDb, deploymentId);
+    } catch (err) {
+      console.error('routing_publish_mark_failed', {
+        projectId,
+        deploymentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return 'published';
+  });
+}
+
 export async function updateDomainStatus(
   db: Db,
   id: string,
   status: Domain['status'],
 ): Promise<void> {
   await db.update(domains).set({ status }).where(eq(domains.id, id));
+}
+
+// Atomically flip a domain row to `active` ONLY if it is still `pending` (and
+// belongs to `projectId`). This is the activation-side counterpart to
+// `deleteDomainIfPending`: both statements are conditional on `status='pending'`,
+// so under READ COMMITTED they mutually exclude at the ROW level — whichever
+// commits first wins and the other matches 0 rows. A janitor delete can never
+// be silently overwritten, and an activation can never silently match 0 rows
+// after its KV write (the caller writes KV only AFTER this returns true).
+// Returns true iff a pending row was claimed (flipped to active).
+export async function activateDomainIfPending(
+  db: Db,
+  id: string,
+  projectId: string,
+): Promise<boolean> {
+  const claimed = await db
+    .update(domains)
+    .set({ status: 'active' })
+    .where(
+      and(eq(domains.id, id), eq(domains.project_id, projectId), eq(domains.status, 'pending')),
+    )
+    .returning({ id: domains.id });
+  return claimed.length > 0;
 }
 
 export async function updateDomainVerificationData(

@@ -10,6 +10,7 @@ import {
   vi,
 } from 'vite-plus/test';
 import { markDeploymentRetained } from '../../src/db.ts';
+import * as db from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { deployments, projects, resources } from '../../src/schema.ts';
 import {
@@ -411,33 +412,18 @@ describe('per-deploy sandbox integration', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'sb-prefail');
 
-    // Make CF reject the worker secret PUT to fail BETWEEN the user worker
-    // PUT (and container POST) AND routing flip. This forces the
-    // `routingSwitched=false` cleanup branch.
-    //
-    // Actually, an easier approach: stub `c.env.DISPATCH.get(...)` so the
-    // readiness probe times out / fails. But the readiness probe only runs
-    // when there are migrations (`manifest.migrations.pending > 0`). For a
-    // sandbox-only deploy, the failure point we need is between the
-    // container POST and the routing flip. Make `setWorkerSecret` fail —
-    // it runs as part of secret upload AFTER the user worker PUT and
-    // sandbox container POST. (No, that runs BEFORE worker PUT.)
-    //
-    // Simpler: make the slug ROUTING.put fail. We spy on env.ROUTING.put
-    // and reject when key === project.slug, which is exactly the routing
-    // flip step (`routingSwitched` is set true RIGHT AFTER that put, so a
-    // failing put aborts before `routingSwitched=true`).
-    const originalPut = env.ROUTING.put.bind(env.ROUTING);
-    const putSpy = vi.spyOn(env.ROUTING, 'put').mockImplementation((async (
-      key: string,
-      value: string | ArrayBuffer | ArrayBufferView | ReadableStream,
-      options?: KVNamespacePutOptions,
-    ) => {
-      if (key === project.slug) {
-        throw new Error('forced ROUTING.put failure for test');
-      }
-      return originalPut(key, value as never, options as never);
-    }) as typeof env.ROUTING.put);
+    // Routing-after-tx: routing is published only AFTER the go-live tx commits,
+    // so a failing slug ROUTING.put would now land POST-commit (the deploy is
+    // already live → re-affirm branch, no teardown). To exercise the genuine
+    // PRE-go-live failure path (worker + container created, but the deploy
+    // aborts before it goes live), we force the go-live tx itself to throw.
+    // `setActiveDeployment` is the last in-tx write; a throw there aborts the
+    // tx with `goLiveTxCommitted=false`, ZERO routing written, and the generic
+    // pre-publish catch branch marks the deployment failed and tears down the
+    // worker + container this attempt created.
+    const setActiveSpy = vi.spyOn(db, 'setActiveDeployment').mockImplementation(async () => {
+      throw new Error('forced go-live tx failure for test');
+    });
 
     const cf = mockCfApi();
 
@@ -453,7 +439,11 @@ describe('per-deploy sandbox integration', () => {
     );
     expect(errorEvent).toBeDefined();
 
-    putSpy.mockRestore();
+    // No routing was published (go-live tx aborted pre-commit): the slug key
+    // was never written.
+    expect(await env.ROUTING.get(project.slug)).toBeNull();
+
+    setActiveSpy.mockRestore();
 
     // The user worker PUT is recorded in cf.state.hostScripts (mock state),
     // and the catch path issues a DELETE — so the script should NOT be present
@@ -487,33 +477,30 @@ describe('per-deploy sandbox integration', () => {
   // ----------------------------------------------------------------------
   // 7. Post-routing teardown race: rollback branch deletes the container app
   // ----------------------------------------------------------------------
-  it('post-routing teardown race: when status flips to deleting after the slug routing PUT, the rollback branch deletes the user worker AND the per-deploy container app', async () => {
+  it('teardown race inside the go-live tx: a concurrent project teardown lands in the teardownRaceLost rollback branch (deletes the user worker AND the per-deploy container app)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'sb-teardown-race');
     const cf = mockCfApi();
 
-    // Hook: AFTER the slug ROUTING.put commits (routingSwitched=true), flip
-    // projects.status='deleting' so the very next FOR UPDATE check throws
-    // PROJECT_DELETING_ERROR_MESSAGE — which lands in the teardownRaceLost
-    // branch of the outer catch.
-    const originalPut = env.ROUTING.put.bind(env.ROUTING);
-    const putSpy = vi.spyOn(env.ROUTING, 'put').mockImplementation((async (
-      key: string,
-      value: string | ArrayBuffer | ArrayBufferView | ReadableStream,
-      options?: KVNamespacePutOptions,
-    ) => {
-      const result = await originalPut(key, value as never, options as never);
-      if (key === project.slug) {
-        // Flip status='deleting' AFTER the slug routing flips. The next
-        // FOR UPDATE re-check inside deploy.ts will throw and trigger the
-        // teardownRaceLost branch.
-        await env.db
-          .update(projects)
-          .set({ status: 'deleting' })
-          .where(eq(projects.id, project.id));
-      }
-      return result;
-    }) as typeof env.ROUTING.put);
+    // Routing-after-tx: routing is published only AFTER the go-live tx commits,
+    // and the project-deleting re-check now runs INSIDE that tx under the same
+    // project-row FOR UPDATE lock. A concurrent teardown that wins the race
+    // throws PROJECT_DELETING_ERROR_MESSAGE from inside the go-live tx (with
+    // `goLiveTxEntered && !goLiveTxCommitted`), which is exactly the
+    // `teardownRaceLost` branch. We model that by throwing the deletion
+    // sentinel from the last in-tx write (`setActiveDeployment`): the tx aborts
+    // pre-commit, ZERO routing is written, and the rollback branch tears down
+    // the worker + container this attempt created.
+    // NB: throw the sentinel directly — do NOT issue any statement on `env.db`
+    // from inside the spy. The go-live `db.transaction` holds an open BEGIN on
+    // PGlite's single connection, so a second statement on `env.db` would
+    // self-deadlock the test (see deploy-token-scope.test.ts for the same
+    // constraint). The `teardownRaceLost` branch only needs the sentinel
+    // message + `goLiveTxEntered && !goLiveTxCommitted`.
+    const PROJECT_DELETING_ERROR_MESSAGE = 'project deletion in progress';
+    const setActiveSpy = vi.spyOn(db, 'setActiveDeployment').mockImplementation(async () => {
+      throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
+    });
 
     const res = await deploy(project.id, user.jwt);
     expect(res.status).toBe(200);
@@ -528,7 +515,11 @@ describe('per-deploy sandbox integration', () => {
     );
     expect(errorEvent).toBeDefined();
 
-    putSpy.mockRestore();
+    setActiveSpy.mockRestore();
+
+    // No routing was published (go-live tx aborted pre-commit): the slug key
+    // was never written.
+    expect(await env.ROUTING.get(project.slug)).toBeNull();
 
     // Both the user worker and the container app are deleted by the
     // teardown-race rollback branch.

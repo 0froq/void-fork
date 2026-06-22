@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { SITE_DOMAIN } from '../constants.ts';
 import {
+  type Db,
   getProject,
   createDomain,
   getDomainsByProjectId,
@@ -8,6 +9,7 @@ import {
   getDomainByHostname,
   getDomainByHostnameOrCfHostnameId,
   deleteDomain,
+  lockProjectAndGetActiveDeploymentId,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { tryActivateDomain } from '../provisioning/activate-domain.ts';
@@ -281,26 +283,39 @@ const app = new Hono<ApiEnv>()
 
     const warnings: Array<string> = [];
 
-    // Best-effort CF + KV cleanup (always proceed to DB delete)
-    await Promise.all([
-      deleteCustomHostname(
-        context.env.CF_ZONE_ID,
-        context.env.CF_API_TOKEN,
-        domain.cf_hostname_id,
-      ).catch((err) => {
-        warnings.push(
-          `Failed to delete custom hostname: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }),
-      context.env.ROUTING.delete(`domain:${domain.hostname}`).catch((err) => {
+    // Best-effort CF hostname delete — external, no routing-consistency
+    // requirement, so it stays OUTSIDE the project lock (it is slow and
+    // independent of the KV/DB removal below).
+    await deleteCustomHostname(
+      context.env.CF_ZONE_ID,
+      context.env.CF_API_TOKEN,
+      domain.cf_hostname_id,
+    ).catch((err) => {
+      warnings.push(
+        `Failed to delete custom hostname: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+
+    // Serialize the `domain:<host>` KV delete + DB delete behind the project
+    // FOR UPDATE lock (the SAME lock the deploy/rollback go-live tx, the
+    // reconciler, and `activate-domain` take). A concurrent guarded publisher
+    // re-reads the active domain set UNDER this lock: it either runs BEFORE the
+    // delete commits (the domain is still active → it republishes `domain:<host>`,
+    // then this handler removes both the row and the KV key) or AFTER (the row
+    // is gone → it is not in the active set, so nothing is republished).
+    // Serialized either way, so a publisher can never recreate a deleted
+    // domain's routing behind `routing_published=true`.
+    await context.get('db').transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      await lockProjectAndGetActiveDeploymentId(txDb, projectId);
+      await context.env.ROUTING.delete(`domain:${domain.hostname}`).catch((err) => {
         warnings.push(
           `Failed to delete routing entry: ${err instanceof Error ? err.message : String(err)}`,
         );
-      }),
-    ]);
-
-    // DB record is source of truth — always delete last
-    await deleteDomain(context.get('db'), domain.id);
+      });
+      // DB record is source of truth — delete last, still under the lock.
+      await deleteDomain(txDb, domain.id);
+    });
 
     return context.json({ ok: true, ...(warnings.length > 0 && { warnings }) });
   });

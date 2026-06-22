@@ -1,4 +1,9 @@
-import { type Db, updateDomainStatus, updateDomainVerificationData } from '../db.ts';
+import {
+  activateDomainIfPending,
+  type Db,
+  lockProjectForPublish,
+  updateDomainVerificationData,
+} from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import type { DomainVerificationData } from '../schema.ts';
 import type { Domain, Project } from '../types.ts';
@@ -81,28 +86,141 @@ export async function tryActivateDomain(
   // been deployed, `project.slug` is absent from KV; leaving the DB row in
   // 'pending' ensures the next poll retries (a future deploy populates the
   // slug entry).
-  // Self-healing ordering: write KV BEFORE flipping the DB row to `active`.
-  // A crash between the KV write and the DB flip leaves the row `pending`, so
-  // the next poll/cron retries and re-writes the same KV entry — the system
-  // heals itself. The converse ordering (DB flip first) would strand an
-  // `active` row with no route, producing 404s until a manual deploy or fix.
-  // Accepted limitation: a concurrent `void domain delete` can interleave so
-  // that this call writes `domain:<host>` KV after the delete removed the DB
-  // row, leaving a rare orphan routing entry (the entry serves the domain's
-  // own project's content). This is a low-probability, bounded race accepted
-  // as a documented limitation — see design-doc 0073 — rather than something
-  // guarded here; a lock-free reconciler and creation-time quota are deferred.
-  // Read slug routing whenever the CF gate is satisfied so we can surface
+  // Self-healing ordering: the DB flip is a CONDITIONAL claim
+  // (`activateDomainIfPending`) issued inside the activation tx, with the KV
+  // write awaited BEFORE the tx commits. Durable effects therefore order as
+  // KV-put-then-DB-commit, so a crash between them rolls the (uncommitted) claim
+  // back, leaves the row `pending`, and the next poll/cron retries and re-writes
+  // the same KV entry — the system heals itself, exactly as the old KV-first
+  // ordering did. See the in-tx comment for the full failure-window analysis.
+  // Resurrection of a deleted row is now CLOSED (was design-doc 0073's accepted
+  // limitation, then narrowed by the under-lock re-read, now eliminated): a
+  // concurrent `void domain delete` / the stale-pending janitor and this
+  // activation BOTH gate on `status='pending'` at the ROW level (the delete is
+  // `deleteDomainIfPending`, the activation is the conditional claim below), so
+  // under READ COMMITTED whichever commits first wins and the other matches 0
+  // rows. The KV `domain:<host>` is written ONLY after a successful claim, so a
+  // deleted row can never have a route (re)created.
+  // Stale-snapshot race: the slug ROUTING entry is the CURRENT active
+  // deployment's route, but a lock-free read can be clobbered by a concurrent
+  // deploy/rollback. If we read deployment A's slug route, then deployment B
+  // goes live (flips `active_deployment_id`, publishes its routing, and marks
+  // `routing_published=true`), and only THEN we copy A's stale route into
+  // `domain:<host>` and flip the row active — the live-routing reconciler will
+  // never repair it (its query selects only active deployments NOT yet marked
+  // `routing_published`, and B is already marked), so the domain serves A's
+  // stale route until the next deploy/rollback.
+  //
+  // Close it by serializing the slug-read → domain-write on the SAME project
+  // `FOR UPDATE` lock the deploy/rollback go-live tx and the reconciler take
+  // (via `publishRoutingIfStillActive`). Holding the lock across the re-read +
+  // domain write guarantees one of two safe orderings against a racing
+  // publisher B:
+  //   - B published + marked BEFORE we took the lock → we re-read B's CURRENT
+  //     slug route and write THAT (not a pre-lock snapshot).
+  //   - B is blocked behind our lock → it has not marked yet; after we release,
+  //     B's publish runs and heals every active `domain:<host>` (it iterates
+  //     active domains — and we marked this one active under the lock) with B's
+  //     route.
+  // Either way the domain key ends up consistent with the active deployment.
+  // We need only the slug route to be FROZEN for the read+write, not a
+  // deployment-id match, so we take the lock directly (via
+  // `lockProjectForPublish`, reading `status` but not asserting a specific id)
+  // rather than through `publishRoutingIfStillActive`, which gates on a specific
+  // id.
+  //
+  // Read the slug entry whenever the CF gate is satisfied so we can surface
   // `awaitingDeployment` to the caller regardless of whether activation
   // actually happened (activation also requires `domain.status === 'pending'`).
+  // This lock-free read is for `awaitingDeployment` only; the authoritative
+  // value that gets copied into the domain key is RE-READ under the lock below.
   const slugRouting = gateOk && wasPending ? await env.ROUTING.get(project.slug) : null;
 
   let activated = false;
   if (gateOk && wasPending && slugRouting) {
-    await env.ROUTING.put(`domain:${domain.hostname}`, slugRouting);
-    await updateDomainStatus(db, domain.id, 'active');
-    activated = true;
-    domain.status = 'active';
+    // Re-read the active deployment's slug route under the project lock and
+    // write the domain key from THAT, so the route we copy belongs to whatever
+    // deployment is active RIGHT NOW. The deploy/rollback go-live tx and the
+    // reconciler take the SAME `SELECT ... FOR UPDATE` lock and publish slug KV
+    // only while holding it (see `publishRoutingIfStillActive`), so holding it
+    // here freezes both the active pointer AND the slug route across our
+    // re-read + domain write. If the active deployment's slug route is gone by
+    // the time we hold the lock (the active deployment was unpublished), we
+    // write NOTHING and leave the row `pending` so the next poll/cron retries —
+    // never a stale/empty domain route. KV-put-then-DB-commit self-healing
+    // ordering is preserved (the KV put is awaited before the tx commits).
+    await db.transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      // Acquire the project FOR UPDATE lock AND re-read `status` under it. Its
+      // purpose here is to FREEZE the slug route against concurrent publishers
+      // (which hold the same lock while writing slug KV), not to assert a
+      // specific pointer value — we ignore the returned id; the slug KV presence
+      // is itself the "a deployment is live" signal. It does NOT serialize
+      // against the stale-pending janitor — `cleanupStalePendingDomains` deletes
+      // pending rows WITHOUT taking this lock — so the row-level conditional
+      // claim below is what excludes it.
+      //
+      // The `project` arg is a STALE pre-lock snapshot from the caller, never
+      // re-read under the lock — so we re-read `status` here. `teardownProject`
+      // flips `status='deleting'` and COMMITS, THEN deletes `domain:<host>` +
+      // slug KV lock-free, THEN cascade-deletes the rows LAST. A pending-domain
+      // verification that interleaves during teardown would otherwise take the
+      // lock, find the row still `pending`, and re-PUT `domain:<host>` for a
+      // project about to vanish → an orphan route the reconciler can never heal
+      // (the project row is gone). Bail on a deleting/missing project, writing
+      // NOTHING — mirroring `publishRoutingIfStillActive`'s same-lock guard.
+      const locked = await lockProjectForPublish(txDb, project.id);
+      if (locked === null || locked.status === 'deleting') {
+        return;
+      }
+      // Read the active deployment's slug route under the lock. If it is gone
+      // (the active deployment was unpublished), write NOTHING and leave the row
+      // `pending` so the next poll/cron retries — never a stale/empty route.
+      const current = await env.ROUTING.get(project.slug);
+      if (!current) {
+        return;
+      }
+      // CLAIM-then-WRITE. Flip the row to `active` with a SINGLE atomic
+      // conditional UPDATE (`... WHERE id AND project_id AND status='pending'
+      // RETURNING`). This mutually excludes the janitor's conditional delete
+      // (`DELETE ... WHERE id AND status='pending'` in `cleanupStalePendingDomains`,
+      // which takes NO project lock) at the ROW level under READ COMMITTED:
+      // whichever statement commits first wins and the other matches 0 rows. So
+      //   - if the janitor's delete commits first, this claim matches 0 rows →
+      //     we write NO KV and resurrect nothing;
+      //   - if this claim commits first, the janitor's delete matches 0 rows →
+      //     it skips teardown and leaves the now-live domain alone.
+      // The claim also subsumes the old read-then-write pre-check (a `getDomain`
+      // re-read followed by an unconditional `updateDomainStatus`): a `false`
+      // result covers BOTH "row deleted by the janitor" AND "already activated by
+      // a racing poll", and — being a single atomic statement — it has NO
+      // read↔write window for a delete to slip through (the old pre-check did:
+      // the janitor's delete could commit AFTER the `getDomain` read but BEFORE
+      // the unconditional flip, leaving the flip matching 0 rows while the KV was
+      // already written → an orphan route — F30).
+      //
+      // Ordering of DURABLE effects is KV-put-then-DB-commit, preserving the
+      // original self-healing property:
+      //   - The conditional claim is issued INSIDE this tx (uncommitted until the
+      //     callback resolves). The KV `env.ROUTING.put` is the next awaited step,
+      //     and DB commit happens only AFTER it resolves.
+      //   - A crash/abort BETWEEN the put and the commit rolls the claim back
+      //     (uncommitted) → the row stays `pending`, so the next poll/cron
+      //     re-runs activation and re-writes the same KV. The transient KV entry
+      //     already points to THIS project's own slug route, so it is correct,
+      //     not an orphan.
+      //   - A `put` THROW rejects the callback → the whole tx rolls back, undoing
+      //     the claim → row back to `pending`, no half-applied state.
+      // The KV is written only AFTER a successful claim, so a row the janitor
+      // already deleted (claim `false`) can never have a route (re)created.
+      const claimed = await activateDomainIfPending(txDb, domain.id, project.id);
+      if (!claimed) {
+        return;
+      }
+      await env.ROUTING.put(`domain:${domain.hostname}`, current);
+      activated = true;
+      domain.status = 'active';
+    });
   }
 
   const awaitingDeployment = gateOk && wasPending && !slugRouting;

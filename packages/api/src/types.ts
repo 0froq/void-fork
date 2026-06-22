@@ -234,5 +234,9 @@ export type DeployEvent =
       assets: number;
       workers: number;
       migrations?: number;
+      // False when the deploy committed live in the DB but post-commit routing
+      // publish exhausted its retries (routing self-heals on the next
+      // deploy/rollback). Omitted/true on a fully published deploy.
+      published?: boolean;
     }
   | { event: 'error'; message: string; step: string };

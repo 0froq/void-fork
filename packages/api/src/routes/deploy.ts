@@ -28,14 +28,16 @@ import {
   createDeployment,
   updateDeploymentManifest,
   updateDeploymentStatus,
+  publishRoutingIfStillActive,
+  lockProjectAndGetActiveDeploymentId,
   updateProjectType,
   updateProjectWebSocketVersion,
   getDomainsByProjectId,
   countUserDeploymentsToday,
   getActiveDeployment,
-  getInFlightDeploymentsExcluding,
   getLastLiveAssetManifest,
   setActiveDeployment,
+  markDeploymentLiveIfNotCanceled,
   markDeploymentRetained,
   markDeploymentBundleStored,
   setAppliedMigrations,
@@ -68,9 +70,10 @@ import {
 import { provisionBindings } from '../provisioning/provision.ts';
 import { presignAssetPut } from '../r2-presign.ts';
 import {
+  applyCurrentSuspension,
   buildRoutingJson,
   buildStaticRoutingJson,
-  projectAccountKey,
+  sweepStaleQueueRoutes,
   writeProjectAccountEntry,
 } from '../routing.ts';
 import { deployments } from '../schema.ts';
@@ -1147,6 +1150,32 @@ async function assertProjectNotDeleting(db: Db, projectId: string): Promise<void
   if (!project || project.status === 'deleting') {
     throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
   }
+}
+
+/**
+ * Returns whether `deploymentId` is STILL the project's active deployment,
+ * re-read under a fresh short-lived `FOR UPDATE` lock. Used by the post-publish
+ * epilogue to guard the project-keyed side effects (cron clear/sync, legacy +
+ * retained-worker deletes) against a flip-AFTER-publish race: once
+ * `publishRoutingIfStillActive` returns the lock is released, so a concurrent
+ * rollback/deploy can flip + publish a newer active deployment before this
+ * request reaches its epilogue. Running those project-scoped steps from a stale
+ * manifest would clobber the now-active deployment's crons/workers
+ * (unrecoverable for worker scripts). Each delete that targets a slug-derived
+ * worker is re-checked per-candidate in its OWN short tx — the lock is NOT held
+ * across the slow CF `deleteDispatchScript` calls (PGlite is single-connection;
+ * a held lock + a nested tx would deadlock — mirrors the WfP eviction loop).
+ */
+async function isStillActiveDeployment(
+  db: Db,
+  projectId: string,
+  deploymentId: string,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const txDb = tx as unknown as Db;
+    const activeNow = await lockProjectAndGetActiveDeploymentId(txDb, projectId);
+    return activeNow === deploymentId;
+  });
 }
 
 export function buildWebSocketUploadMigrations(
@@ -2340,8 +2369,27 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     logger.info('json_validate', 'phase_start');
     phaseName = 'json_validate';
     phaseStartMs = Date.now();
-    let routingSwitched = false;
-    const writtenRoutingKeys: Array<string> = [];
+    // Did we ENTER a go-live tx (vs. fail before reaching one)? Set true
+    // immediately before each go-live `.transaction(`. Used in the catch to
+    // tell an IN-TX teardown race (PROJECT_DELETING thrown inside the tx) apart
+    // from the many PRE-tx `assertProjectNotDeleting` calls that throw the same
+    // message.
+    let goLiveTxEntered = false;
+    // Did the go-live tx COMMIT (deployment is live in the DB)? Set true right
+    // after the tx resolves. Once true the deploy is committed-live: routing is
+    // published AFTER this point (DB-ahead-of-KV), and any later failure is a
+    // forward condition — never a rollback. Dispatch routes purely from ROUTING
+    // KV, and `setActiveDeployment` is a control-plane pointer it does not read
+    // for traffic, so the brief window where the DB says "new is active" but KV
+    // still points at the old deploy is benign: the old deploy keeps serving
+    // until the routing write lands.
+    let goLiveTxCommitted = false;
+    // Did ALL post-tx routing-KV writes (slug, account, domains, WfP queues)
+    // succeed? Distinct from `goLiveTxCommitted`: the deploy can be committed-
+    // live with `published === false` if a routing write transiently failed.
+    // That is recoverable, not fatal — routing is reconstructable from the
+    // active deployment's manifest on the next deploy/rollback, so it self-heals.
+    let published = false;
     let workerUploaded = false;
     let workerUploadUrl: string | undefined;
     let sandboxContainerAppId: string | undefined;
@@ -2736,6 +2784,10 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             `manifest:${deployment.id}`,
             JSON.stringify(servingManifest),
           );
+          // Track the serving manifest so the catch's `!goLiveTxCommitted`
+          // branch evicts it on a pre-commit abort (otherwise `manifest:<id>`
+          // orphans). On success/post-commit the manifest is preserved.
+          wfpMirroredManifestDeploymentId = deployment.id;
 
           await context
             .get('db')
@@ -2759,27 +2811,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           });
           await assertDeploymentNotCanceled(context.get('db'), deployment.id);
           await assertProjectNotDeleting(context.get('db'), projectId);
-          markPhase('routing_switch');
-          await context.env.ROUTING.put(project.slug, routingJson);
-          writtenRoutingKeys.push(project.slug);
-          await writeProjectAccountEntry(
-            context.env.ROUTING,
-            projectId,
-            project.user_id,
-            user.plan,
-          );
-          writtenRoutingKeys.push(projectAccountKey(projectId));
-          routingSwitched = true;
-          logger = logger.with({ routingSwitched: true });
-          logger.info('routing_switch', 'slug_routed', { slug: project.slug });
-
-          for (const domain of projectDomains) {
-            if (domain.status === 'active') {
-              const domainKey = `domain:${domain.hostname}`;
-              await context.env.ROUTING.put(domainKey, routingJson);
-              writtenRoutingKeys.push(domainKey);
-            }
-          }
 
           markPhase('db_finalize');
           logger.info('status_transition', 'status_change', {
@@ -2787,6 +2818,15 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             to: 'live',
             reason: 'static_deploy',
           });
+          // Go-live tx FIRST, routing-KV writes AFTER it commits. A failed
+          // in-tx check (teardown re-check or cancel CAS) writes ZERO routing,
+          // so there is nothing to roll back — the prior-live deploy's routes
+          // are left byte-for-byte intact and keep serving. The consistency
+          // model is intentionally DB-ahead-of-KV: dispatch routes purely from
+          // ROUTING KV and never reads `setActiveDeployment` for traffic, so
+          // the brief window where the DB says "new is active" but KV still
+          // points at the old deploy is benign.
+          goLiveTxEntered = true;
           await context.get('db').transaction(async (tx) => {
             await tx.execute(
               drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
@@ -2796,107 +2836,374 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             if (!lockedProject || lockedProject.status === 'deleting') {
               throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
             }
-            await updateDeploymentStatus(txDb, deployment.id, 'live', undefined, {
-              force: true,
-            });
+            // Final cancellation deadline, INSIDE the go-live tx under the same
+            // project-row FOR UPDATE lock, immediately before the pointer flip.
+            // The CAS is the atomic point of no return: it flips status→'live'
+            // only if the row is NOT 'canceling'/'canceled', in one statement.
+            // `cancelDeployment` does a lock-free UPDATE that does not lock the
+            // project, so a plain read-then-force could let a cancel commit
+            // between the read and the write (cancel acked, deploy forced live
+            // anyway). The CAS closes that TOCTOU: a cancel committed before it
+            // makes the CAS match zero rows (→ throw → generic catch re-reads
+            // the canceling/canceled status and marks the deployment canceled,
+            // NO routing written); a cancel committing after the tx commit is
+            // too late (deploy is live, cancel lost the race → user rolls back).
+            const wentLive = await markDeploymentLiveIfNotCanceled(txDb, deployment.id);
+            if (!wentLive) {
+              throw new Error('deployment canceled');
+            }
             await updateProjectType(txDb, projectId, type);
+            // Flip the active-deployment pointer INSIDE this tx, under the same
+            // project-row FOR UPDATE lock as the checks above, so the checks
+            // and the flip commit atomically. No interleave between check-pass
+            // and flip.
+            await setActiveDeployment(txDb, projectId, deployment.id);
           });
+          goLiveTxCommitted = true;
           currentStatus = 'live';
-          await setActiveDeployment(context.get('db'), projectId, deployment.id);
-          await markDeploymentRetained(context.get('db'), deployment.id, true);
 
-          await clearCronScheduler(context.env, projectId);
+          // === Routing publish (post-tx) ===
+          // The deploy is committed-live; publish routing forward. This is
+          // best-effort: a transient KV failure here does NOT fail the deploy
+          // (we never roll back a committed deploy's routing). Routing is fully
+          // reconstructable from the active deployment's manifest on the next
+          // deploy/rollback, so a missed write self-heals. One retry on failure.
+          //
+          // `publishRoutingIfStillActive` re-acquires the project-row FOR UPDATE
+          // lock (the SAME lock the go-live tx and reconciler take) in a separate
+          // post-commit tx, RE-READS `active_deployment_id`, and only publishes +
+          // marks under the lock IF this deployment is still active — so a slow/
+          // parked publisher that lands after a newer deploy/rollback committed
+          // cannot clobber the newer routing or stamp a stale row published. The
+          // publish stays POST-commit (the helper's tx is post-go-live); a publish
+          // failure never rolls back the committed deploy.
+          markPhase('routing_switch');
+          const publishStaticRouting = async (txDb: Db): Promise<void> => {
+            // RE-READ the current slug entry's `suspended` marker UNDER THE LOCK
+            // and fold it into the prebuilt JSON. `routingJson` was built from a
+            // PRE-LOCK snapshot of `suspended`; a guarded suspension
+            // (`guardedRoutingKvRmw`) can serialize FIRST and stamp `suspended`
+            // onto the slug route, and writing the stale snapshot here would drop
+            // that marker — dispatch then keeps serving a suspended project until
+            // another mutation re-stamps (hidden behind `routing_published=true`,
+            // the reconciler never heals it). The corrected JSON flows into BOTH
+            // the slug write and the domain writes below.
+            const slugJson = await applyCurrentSuspension(
+              context.env.ROUTING,
+              project.slug,
+              routingJson,
+            );
+            await context.env.ROUTING.put(project.slug, slugJson);
+            await writeProjectAccountEntry(
+              context.env.ROUTING,
+              projectId,
+              project.user_id,
+              user.plan,
+            );
+            // Re-read the active domain set UNDER THE LOCK (via the lock-tx
+            // handle), not from the pre-publish `projectDomains` snapshot: a
+            // domain activated/deleted in the window between the snapshot and
+            // this publish would otherwise be missed (newly-active domain left
+            // stranded on the old deployment) or recreated (deleted domain
+            // re-published) and stamped `routing_published=true` permanently.
+            const activeDomains = (await getDomainsByProjectId(txDb, projectId)).filter(
+              (d) => d.status === 'active',
+            );
+            for (const domain of activeDomains) {
+              await context.env.ROUTING.put(`domain:${domain.hostname}`, slugJson);
+            }
+            // A static deploy binds no queues — sweep EVERY `queue:<projectId>-`
+            // route this project no longer needs (e.g. a WfP-with-queues deploy
+            // superseded by going static). The expected set is EMPTY: under the
+            // routing-after-tx model no in-flight deploy has written a queue
+            // route yet (routes are published only post-go-live), and any
+            // in-flight deploy republishes its own queue routes when it goes
+            // live — so dropping every queue route here is safe. A stale queue
+            // route would otherwise dispatch batches to a dead worker forever,
+            // hidden behind `routing_published=true`. Matches the reconciler.
+            await sweepStaleQueueRoutes(context.env.ROUTING, projectId, new Set<string>());
 
-          const legacyName = `user-${project.slug}`;
-          await deleteDispatchScript(
-            context.env.CF_ACCOUNT_ID,
-            context.env.CF_API_TOKEN,
-            dispatchNamespace,
-            legacyName,
-          );
-
-          const retained = await getRetainedDeploymentsExcluding(
+            // Cron DO clear — now PUBLISHED UNDER THE PROJECT LOCK, atomically
+            // with the routing KV above. A static deploy binds no schedules, so
+            // it always /clears (idempotent — see cron-scheduler.ts
+            // `handleClear`). Running it inside the closure means it fires ONLY
+            // on 'published': `publishRoutingIfStillActive` does NOT invoke the
+            // closure on 'superseded', so this stale static deploy never clears
+            // the schedules a newer active (e.g. a rollback to a WfP deployment
+            // with crons) just synced. The CronScheduler is a project-keyed DO
+            // touching only its own storage (no pg), so this nests no pg tx — the
+            // same shape as the KV puts already done under the lock.
+            await clearCronScheduler(context.env, projectId);
+          };
+          // Run the whole lock + re-check + publish under one retry. A transient
+          // KV failure ('failed') retries the entire guarded publish; a
+          // 'superseded' result short-circuits (a newer op owns routing — do NOT
+          // retry, do NOT report a clobbering success).
+          let staticPublishOutcome = await publishRoutingIfStillActive(
             context.get('db'),
             projectId,
             deployment.id,
+            publishStaticRouting,
           );
-          for (const old of retained) {
+          if (staticPublishOutcome === 'failed') {
+            logger.warn('routing_switch', 'routing_publish_failed', {
+              slug: project.slug,
+              attempt: 1,
+            });
+            staticPublishOutcome = await publishRoutingIfStillActive(
+              context.get('db'),
+              projectId,
+              deployment.id,
+              publishStaticRouting,
+            );
+            if (staticPublishOutcome === 'failed') {
+              logger.warn('routing_switch', 'routing_publish_failed', {
+                slug: project.slug,
+                attempt: 2,
+              });
+            }
+          }
+          // 'published' → this deploy owns + published routing (mark already set
+          // under the lock). 'superseded' → a newer op owns routing (NOT a
+          // clobbering success); leave `published` false so the `done` event and
+          // CLI report the deploy did not publish routing — honest, and aligned
+          // with the existing degraded-publish path. 'failed' → degraded, healed
+          // by the reconciler (existing behavior).
+          if (staticPublishOutcome === 'published') {
+            published = true;
+            logger = logger.with({ published: true });
+            logger.info('routing_switch', 'slug_routed', { slug: project.slug });
+          } else if (staticPublishOutcome === 'superseded') {
+            logger.info('routing_switch', 'routing_publish_superseded', { slug: project.slug });
+          }
+
+          // Best-effort own-row retain mark. A transient pg/Hyperdrive failure
+          // here must NOT throw into the catch's `goLiveTxCommitted` recovery
+          // branch, which would re-assert this (possibly superseded) deploy's
+          // active pointer. The go-live tx already set status+pointer atomically;
+          // the retain flag self-heals on the next deploy/retention pass.
+          await markDeploymentRetained(context.get('db'), deployment.id, true).catch((e) =>
+            logger.error('routing_switch', 'mark_retained_failed', e, {
+              deploymentId: deployment.id,
+            }),
+          );
+
+          // SKIP ALL project-keyed post-routing side effects unless this deploy
+          // ACTUALLY PUBLISHED its routing AND is STILL the active deployment.
+          // BOTH conditions are required:
+          //   - `staticPublishOutcome === 'published'`: the irreversible
+          //     old-resource cleanup (legacy worker delete + retained-worker
+          //     delete loop + retention/asset eviction) is only safe once the NEW
+          //     routing is actually live. On 'failed' (a ROUTING.put threw on
+          //     BOTH attempts) the go-live tx already committed — so this deploy
+          //     IS the DB-active deployment and `isStillActiveDeployment` would
+          //     return true — but dispatch's slug/domain/queue KV STILL points at
+          //     the PREVIOUS deployment's worker. Deleting that previous worker
+          //     here would route stale KV to a now-deleted script (the reconciler
+          //     can republish KV onto the new worker but CANNOT recreate a deleted
+          //     CF worker script) → outage until the reconciler heals (up to 1h).
+          //     On 'superseded' the closure never ran and a newer op owns routing.
+          //     Either way: skip the entire cleanup. The deploy stays
+          //     committed-live/degraded (`published` false); the reconciler heals
+          //     routing and the NEXT successful deploy's cleanup reclaims the
+          //     now-stale old resources.
+          //   - `isStillActiveDeployment`: still required INSIDE the published
+          //     branch to guard the flip-AFTER-publish race (publish returned
+          //     'published', then a concurrent rollback/deploy flipped + published
+          //     a newer active deployment in the window after the publish lock was
+          //     released and before this epilogue).
+          // Short-circuit on the outcome so the active re-check is skipped
+          // entirely on 'failed'/'superseded'.
+          // Every step below is project-scoped — the legacy worker delete, the
+          // retained-script cleanup loop (`getRetainedDeploymentsExcluding` lists
+          // the NEW active among `retained`, so its live
+          // `user-${slug}-${activeId}` worker would be deleted while ROUTING +
+          // routing_published point at it — an unrecoverable outage; the
+          // reconciler cannot recreate worker scripts), and the retention/asset
+          // GC. The `clearCronScheduler` is NO LONGER here — it now runs INSIDE
+          // `publishStaticRouting` under the project lock (atomically with
+          // routing), so a superseded/failed publish never clears the schedules a
+          // newer active (e.g. a rollback to a WfP deployment with crons) just
+          // synced. Mirrors rollback's 'superseded' handling (projects.ts): the
+          // newer op owns the project's routing/cron/workers. This stale deploy's
+          // own leftover resources are reclaimed by the normal retention/stale
+          // cleanup on the next deploy, NOT by this request's epilogue. The
+          // deploy stays committed-live (200, `published` false — see above).
+          const stillActive =
+            staticPublishOutcome === 'published' &&
+            (await isStillActiveDeployment(context.get('db'), projectId, deployment.id));
+          if (stillActive) {
+            // Legacy bare-slug worker (`user-${slug}`) — never a deployment-
+            // scoped active worker (rollback targets `user-${slug}-${id}`), and
+            // the epilogue-entry re-check above already confirmed THIS deploy is
+            // active, so deleting it is safe.
+            const legacyName = `user-${project.slug}`;
             await deleteDispatchScript(
               context.env.CF_ACCOUNT_ID,
               context.env.CF_API_TOKEN,
               dispatchNamespace,
-              `user-${project.slug}-${old.id}`,
+              legacyName,
             );
-          }
 
-          markPhase('retention_cleanup');
-          if (STATIC_RETENTION_LIMIT > 0) {
-            const toEvict = retained.slice(STATIC_RETENTION_LIMIT - 1);
-            // Build the post-eviction retained-hashes union once. Always
-            // built (independent of `toEvict.length`) because the R2
-            // keyspace sweep below uses it to opportunistically GC
-            // direct-to-R2 orphans (bytes uploaded via presigned PUTs that
-            // never finalized into a live deploy).
-            const retainedHashes = new Set<string>();
-            for (const [, entry] of Object.entries(assetManifest)) {
-              retainedHashes.add(entry.hash);
+            const retained = await getRetainedDeploymentsExcluding(
+              context.get('db'),
+              projectId,
+              deployment.id,
+            );
+            for (const old of retained) {
+              // Only WfP-served candidates (`void`/`framework`) have a worker
+              // script to delete + unretain here. A prior STATIC/SPA candidate
+              // serves from KV/R2 (no worker), so deleting its non-existent
+              // script is a 404 no-op — but unretaining it would wrongly reject
+              // it as a rollback target even though its static assets/manifest
+              // still live within `STATIC_RETENTION_LIMIT`. SKIP those: the
+              // separate static retention eviction pass below owns their
+              // lifecycle. (Regression guard: this must NOT spare a WfP
+              // candidate whose worker IS deleted — only worker-less static/spa
+              // rows are left retained.)
+              let oldType: string;
+              try {
+                const oldManifest = old.manifest
+                  ? (JSON.parse(old.manifest) as DeployManifest)
+                  : null;
+                oldType = oldManifest?.type ?? (oldManifest?.framework ? 'framework' : 'void');
+              } catch {
+                // A corrupt manifest blob: treat as WfP (the conservative
+                // default — a void/framework row with a worker to clean up).
+                oldType = 'void';
+              }
+              if (oldType === 'static' || oldType === 'spa') {
+                continue;
+              }
+              // Going static deletes EVERY retained WfP deployment's worker
+              // script (a static project serves no WfP workers). Per candidate,
+              // under the project FOR UPDATE lock (the SAME lock the go-live tx,
+              // rollback, and WfP eviction take): if `old.id` is now the active
+              // deployment a concurrent rollback flipped to it in the residual
+              // window — SKIP (deleting its live worker is an unrecoverable
+              // outage; CF cannot recreate the script). Otherwise mark `old`
+              // `retained=false` UNDER THE LOCK *before* deleting the script, so
+              // its row no longer advertises a rollback target whose worker we
+              // are about to delete. Without this CAS the row stays
+              // `retained=true` with the script gone, and a later rollback (which
+              // admits targets on `retained` and routes to `user-${slug}-${id}`)
+              // would route to a missing worker. Mirrors the WfP eviction loop's
+              // lock-CAS; the lock is NOT held across the CF delete.
+              const skipUnretain = await context.get('db').transaction(async (tx) => {
+                await tx.execute(
+                  drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
+                );
+                const txDb = tx as unknown as Db;
+                const lockedProject = await getProject(txDb, projectId);
+                if (lockedProject?.active_deployment_id === old.id) {
+                  return true;
+                }
+                await markDeploymentRetained(txDb, old.id, false);
+                return false;
+              });
+              if (skipUnretain) {
+                continue;
+              }
+              await deleteDispatchScript(
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
+                dispatchNamespace,
+                `user-${project.slug}-${old.id}`,
+              );
             }
-            const keptDeployments = retained.slice(0, STATIC_RETENTION_LIMIT - 1);
-            for (const kept of keptDeployments) {
-              if (kept.asset_hashes) {
-                try {
-                  const keptManifest = JSON.parse(kept.asset_hashes) as Record<
+
+            markPhase('retention_cleanup');
+            if (STATIC_RETENTION_LIMIT > 0) {
+              const toEvict = retained.slice(STATIC_RETENTION_LIMIT - 1);
+              // Build the post-eviction retained-hashes union once. Always
+              // built (independent of `toEvict.length`) because the R2
+              // keyspace sweep below uses it to opportunistically GC
+              // direct-to-R2 orphans (bytes uploaded via presigned PUTs that
+              // never finalized into a live deploy).
+              const retainedHashes = new Set<string>();
+              for (const [, entry] of Object.entries(assetManifest)) {
+                retainedHashes.add(entry.hash);
+              }
+              const keptDeployments = retained.slice(0, STATIC_RETENTION_LIMIT - 1);
+              for (const kept of keptDeployments) {
+                if (kept.asset_hashes) {
+                  try {
+                    const keptManifest = JSON.parse(kept.asset_hashes) as Record<
+                      string,
+                      { hash: string }
+                    >;
+                    for (const entry of Object.values(keptManifest)) {
+                      retainedHashes.add(entry.hash);
+                    }
+                  } catch (e) {
+                    logger.warn('retention_cleanup', 'retained_asset_hashes_parse_failed', {
+                      retainedDeploymentId: kept.id,
+                      err: e instanceof Error ? e.message : String(e),
+                    });
+                  }
+                }
+              }
+
+              for (const old of toEvict) {
+                // `toEvict` is computed from the pre-skip `retained` snapshot, so
+                // a candidate the worker-delete loop above skipped (because a
+                // concurrent rollback flipped the active pointer to it) can still
+                // appear here. Re-check per candidate under the project FOR
+                // UPDATE lock and mark `retained=false` UNDER THE LOCK, mirroring
+                // the worker-delete loop's CAS: if `old.id` is now the active
+                // deployment, SKIP its manifest/asset eviction — evicting the
+                // live deployment's static manifest would break its serving and
+                // any future rollback to it.
+                const evictionSkipped = await context.get('db').transaction(async (tx) => {
+                  await tx.execute(
+                    drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
+                  );
+                  const txDb = tx as unknown as Db;
+                  const lockedProject = await getProject(txDb, projectId);
+                  if (lockedProject?.active_deployment_id === old.id) {
+                    return true;
+                  }
+                  await markDeploymentRetained(txDb, old.id, false);
+                  return false;
+                });
+                if (evictionSkipped) {
+                  continue;
+                }
+                if (old.asset_hashes) {
+                  const evictedManifest = JSON.parse(old.asset_hashes) as Record<
                     string,
                     { hash: string }
                   >;
-                  for (const entry of Object.values(keptManifest)) {
-                    retainedHashes.add(entry.hash);
-                  }
-                } catch (e) {
-                  logger.warn('retention_cleanup', 'retained_asset_hashes_parse_failed', {
-                    retainedDeploymentId: kept.id,
-                    err: e instanceof Error ? e.message : String(e),
-                  });
+                  const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
+                  await deleteUnreferencedAssets(
+                    context.env.STATIC_ASSETS,
+                    context.env.STATIC_ASSETS_R2,
+                    evictedHashes,
+                    retainedHashes,
+                    projectId,
+                  );
                 }
+                await context.env.ROUTING.delete(`manifest:${old.id}`);
               }
-            }
 
-            for (const old of toEvict) {
-              if (old.asset_hashes) {
-                const evictedManifest = JSON.parse(old.asset_hashes) as Record<
-                  string,
-                  { hash: string }
-                >;
-                const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
-                await deleteUnreferencedAssets(
-                  context.env.STATIC_ASSETS,
+              // Direct-to-R2 orphan sweep. See WfP branch for rationale —
+              // orphans uploaded via presigned PUTs that never finalized are
+              // not named in any manifest, so the eviction loop misses them.
+              // Best-effort: a failed sweep should not fail the deploy.
+              try {
+                const orphans = await sweepProjectAssetOrphans(
                   context.env.STATIC_ASSETS_R2,
-                  evictedHashes,
-                  retainedHashes,
                   projectId,
+                  retainedHashes,
                 );
+                if (orphans > 0) {
+                  logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
+                }
+              } catch (e) {
+                logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
+                  err: e instanceof Error ? e.message : String(e),
+                });
               }
-              await context.env.ROUTING.delete(`manifest:${old.id}`);
-              await markDeploymentRetained(context.get('db'), old.id, false);
-            }
-
-            // Direct-to-R2 orphan sweep. See WfP branch for rationale —
-            // orphans uploaded via presigned PUTs that never finalized are
-            // not named in any manifest, so the eviction loop misses them.
-            // Best-effort: a failed sweep should not fail the deploy.
-            try {
-              const orphans = await sweepProjectAssetOrphans(
-                context.env.STATIC_ASSETS_R2,
-                projectId,
-                retainedHashes,
-              );
-              if (orphans > 0) {
-                logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
-              }
-            } catch (e) {
-              logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
-                err: e instanceof Error ? e.message : String(e),
-              });
             }
           }
 
@@ -2917,6 +3224,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             ],
             assets: assetCount,
             workers: 0,
+            published,
           });
           return;
         }
@@ -3600,22 +3908,10 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             .join('; ');
           throw new Error(`queue consumer conflict: ${details}`);
         }
-        for (const outcome of consumerOutcomes) {
-          if (!outcome) {
-            continue;
-          }
-          const queueKey = `queue:${outcome.queueBinding.queue_name}`;
-          await context.env.ROUTING.put(
-            queueKey,
-            JSON.stringify({
-              workerName,
-              projectId,
-              queueName: outcome.q.name,
-              proxyToken: queueProxyToken,
-            }),
-          );
-          writtenRoutingKeys.push(queueKey);
-        }
+        // Queue consumers are now added on the dispatch worker. Their ROUTING
+        // KV entries (`queue:<name>`) are published AFTER the go-live tx
+        // commits, alongside slug/account/domain routing — see the routing
+        // publish block below the tx.
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
 
@@ -3692,22 +3988,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         });
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
-        markPhase('routing_switch');
-        await context.env.ROUTING.put(project.slug, routingJson);
-        writtenRoutingKeys.push(project.slug);
-        await writeProjectAccountEntry(context.env.ROUTING, projectId, project.user_id, user.plan);
-        writtenRoutingKeys.push(projectAccountKey(projectId));
-        routingSwitched = true;
-        logger = logger.with({ routingSwitched: true });
-        logger.info('routing_switch', 'slug_routed', { slug: project.slug });
-
-        for (const domain of projectDomains) {
-          if (domain.status === 'active') {
-            const domainKey = `domain:${domain.hostname}`;
-            await context.env.ROUTING.put(domainKey, routingJson);
-            writtenRoutingKeys.push(domainKey);
-          }
-        }
 
         markPhase('db_finalize');
         logger.info('status_transition', 'status_change', {
@@ -3715,6 +3995,15 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           to: 'live',
           reason: 'wfp_deploy',
         });
+        // Go-live tx FIRST, routing-KV writes AFTER it commits. A failed
+        // in-tx check (teardown re-check or cancel CAS) writes ZERO routing, so
+        // there is nothing to roll back — the prior-live deploy's routes are
+        // left byte-for-byte intact and keep serving. The consistency model is
+        // intentionally DB-ahead-of-KV: dispatch routes purely from ROUTING KV
+        // and never reads `setActiveDeployment` for traffic, so the brief window
+        // where the DB says "new is active" but KV still points at the old
+        // deploy is benign.
+        goLiveTxEntered = true;
         await context.get('db').transaction(async (tx) => {
           await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
           const txDb = tx as unknown as Db;
@@ -3722,231 +4011,424 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           if (!lockedProject || lockedProject.status === 'deleting') {
             throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
           }
-          await updateDeploymentStatus(txDb, deployment.id, 'live', undefined, {
-            force: true,
-          });
+          // Final cancellation deadline, INSIDE the go-live tx under the same
+          // project-row FOR UPDATE lock, immediately before the pointer flip.
+          // The CAS is the atomic point of no return: it flips status→'live'
+          // only if the row is NOT 'canceling'/'canceled', in one statement.
+          // `cancelDeployment` does a lock-free UPDATE that does not lock the
+          // project, so a plain read-then-force could let a cancel commit
+          // between the read and the write (cancel acked, deploy forced live
+          // anyway). The CAS closes that TOCTOU: a cancel committed before it
+          // makes the CAS match zero rows (→ throw → generic catch re-reads
+          // the canceling/canceled status and marks the deployment canceled,
+          // NO routing written); a cancel committing after the tx commit is
+          // too late (deploy is live, cancel lost the race → user rolls back).
+          const wentLive = await markDeploymentLiveIfNotCanceled(txDb, deployment.id);
+          if (!wentLive) {
+            throw new Error('deployment canceled');
+          }
           await updateProjectType(
             txDb,
             projectId,
             manifest.type ?? (manifest.framework ? 'framework' : 'void'),
           );
+          // Flip the active-deployment pointer INSIDE this tx, under the same
+          // project-row FOR UPDATE lock as the checks above, so the checks and
+          // the flip commit atomically. No interleave between check-pass and
+          // flip.
+          await setActiveDeployment(txDb, projectId, deployment.id);
         });
+        goLiveTxCommitted = true;
         currentStatus = 'live';
-        await setActiveDeployment(context.get('db'), projectId, deployment.id);
-        await markDeploymentRetained(context.get('db'), deployment.id, true);
 
-        // Cron sync
-        currentStep = 'cron_setup';
-        markPhase('cron_sync');
-        const cronSyncPromise = (async () => {
-          try {
-            if (hasCrons) {
-              const cronProxyToken = workerBindings.find(
-                (b) => b.name === '__VOID_PROXY_TOKEN',
-              )?.text;
-              await syncCronScheduler(context.env, projectId, {
-                workerName,
-                schedules: manifest.schedules!,
-                proxyToken: cronProxyToken,
-              });
-            } else {
-              await clearCronScheduler(context.env, projectId);
-            }
-          } catch (err) {
-            logger.error('cron_sync', 'cron_sync_failed_post_routing', err);
+        // === Routing publish (post-tx) ===
+        // The deploy is committed-live; publish routing forward. This is
+        // best-effort: a transient KV failure here does NOT fail the deploy (we
+        // never roll back a committed deploy's routing). Routing — slug,
+        // account, active domains, and queue consumers — is fully
+        // reconstructable from the active deployment's manifest on the next
+        // deploy/rollback, so a missed write self-heals. One retry on failure.
+        //
+        // `publishRoutingIfStillActive` re-acquires the project-row FOR UPDATE
+        // lock (the SAME lock the go-live tx and reconciler take) in a separate
+        // post-commit tx, RE-READS `active_deployment_id`, and only publishes +
+        // marks under the lock IF this deployment is still active — so a slow/
+        // parked publisher that lands after a newer deploy/rollback committed
+        // cannot clobber the newer routing or stamp a stale row published. The
+        // publish stays POST-commit; a publish failure never rolls back the
+        // committed deploy.
+        markPhase('routing_switch');
+        const publishWfpRouting = async (txDb: Db): Promise<void> => {
+          // RE-READ the current slug entry's `suspended` marker UNDER THE LOCK
+          // and fold it into the prebuilt JSON (see `publishStaticRouting` for
+          // the full rationale): a guarded suspension that serialized first must
+          // not be dropped by this publisher's pre-lock snapshot. The corrected
+          // JSON flows into BOTH the slug write and the domain writes below.
+          const slugJson = await applyCurrentSuspension(
+            context.env.ROUTING,
+            project.slug,
+            routingJson,
+          );
+          await context.env.ROUTING.put(project.slug, slugJson);
+          await writeProjectAccountEntry(
+            context.env.ROUTING,
+            projectId,
+            project.user_id,
+            user.plan,
+          );
+          // Re-read the active domain set UNDER THE LOCK (via the lock-tx
+          // handle), not from the pre-publish `projectDomains` snapshot: a
+          // domain activated/deleted in the window between the snapshot and
+          // this publish would otherwise be missed (newly-active domain left
+          // stranded on the old deployment) or recreated (deleted domain
+          // re-published) and stamped `routing_published=true` permanently.
+          const activeDomains = (await getDomainsByProjectId(txDb, projectId)).filter(
+            (d) => d.status === 'active',
+          );
+          for (const domain of activeDomains) {
+            await context.env.ROUTING.put(`domain:${domain.hostname}`, slugJson);
           }
-        })();
-        try {
-          context.executionCtx.waitUntil(cronSyncPromise);
-        } catch {
-          await cronSyncPromise;
-        }
+          // Write this deploy's queue routes, then sweep any queue route this
+          // deploy DROPPED relative to the prior live deployment — without the
+          // sweep a `queue:<projectId>-<oldName>` key dispatches to a dead/old
+          // worker forever (the row is marked published, so the reconciler, which
+          // only heals unpublished rows, never reaches it). The expected set is
+          // ONLY this deploy's own queue routes: under the routing-after-tx model
+          // an in-flight deploy has written no queue route yet (routes publish
+          // post-go-live) and republishes its own routes when it goes live, so
+          // there is nothing of theirs to preserve. Matches the reconciler.
+          const expectedQueueKeys = new Set<string>();
+          for (const outcome of consumerOutcomes) {
+            if (!outcome) {
+              continue;
+            }
+            expectedQueueKeys.add(`queue:${outcome.queueBinding.queue_name}`);
+            await context.env.ROUTING.put(
+              `queue:${outcome.queueBinding.queue_name}`,
+              JSON.stringify({
+                workerName,
+                projectId,
+                queueName: outcome.q.name,
+                proxyToken: queueProxyToken,
+              }),
+            );
+          }
+          await sweepStaleQueueRoutes(context.env.ROUTING, projectId, expectedQueueKeys);
 
-        // Legacy + retention cleanup (mirror of multipart's WfP path)
-        const legacyWorkerName = `user-${project.slug}`;
-        await deleteDispatchScript(
-          context.env.CF_ACCOUNT_ID,
-          context.env.CF_API_TOKEN,
-          dispatchNamespace,
-          legacyWorkerName,
+          // Cron DO sync — now PUBLISHED UNDER THE PROJECT LOCK, atomically with
+          // the routing/queue KV above. The CronScheduler is a project-keyed DO
+          // touching only its own storage (no pg), so calling it here nests no pg
+          // tx — the same shape as the KV puts already done under the lock.
+          // Running it inside the closure means it fires ONLY on 'published':
+          // `publishRoutingIfStillActive` does NOT invoke the closure on
+          // 'superseded' (so a stale no-cron deploy never /clears the newer
+          // active's schedules and a stale cron deploy never /syncs the old
+          // worker/token), and a throw here yields 'failed' (row left unmarked,
+          // healed byte-identically by the reconciler; crons self-heal on the
+          // next deploy). This closes the released-lock flip-after-recheck window
+          // the old epilogue cron block had.
+          if (hasCrons) {
+            const cronProxyToken = workerBindings.find(
+              (b) => b.name === '__VOID_PROXY_TOKEN',
+            )?.text;
+            await syncCronScheduler(context.env, projectId, {
+              workerName,
+              schedules: manifest.schedules!,
+              proxyToken: cronProxyToken,
+            });
+          } else {
+            await clearCronScheduler(context.env, projectId);
+          }
+        };
+        // Run the whole lock + re-check + publish under one retry. A transient
+        // KV failure ('failed') retries the entire guarded publish; a
+        // 'superseded' result short-circuits (a newer op owns routing — do NOT
+        // retry, do NOT report a clobbering success).
+        let wfpPublishOutcome = await publishRoutingIfStillActive(
+          context.get('db'),
+          projectId,
+          deployment.id,
+          publishWfpRouting,
         );
-
-        markPhase('retention_cleanup');
-        const retentionLimit = planLimits.retainedDeployments;
-        if (retentionLimit > 0) {
-          const retained = await getRetainedDeploymentsExcluding(
+        if (wfpPublishOutcome === 'failed') {
+          logger.warn('routing_switch', 'routing_publish_failed', {
+            slug: project.slug,
+            attempt: 1,
+          });
+          wfpPublishOutcome = await publishRoutingIfStillActive(
             context.get('db'),
             projectId,
             deployment.id,
+            publishWfpRouting,
           );
-          const toEvict = retained.slice(retentionLimit - 1);
-
-          // Build the union of hashes that must remain in R2 after this deploy:
-          // this deploy's manifest plus every kept retained deployment's
-          // manifest. Always built (independent of `toEvict.length`) because
-          // the post-eviction R2 keyspace sweep below uses it to opportunistically
-          // GC direct-to-R2 orphans (bytes uploaded via presigned PUTs that
-          // never finalized into a live deploy).
-          const retainedHashes = new Set<string>();
-          for (const [, entry] of Object.entries(assetManifest)) {
-            retainedHashes.add(entry.hash);
-          }
-          const keptDeployments = retained.slice(0, retentionLimit - 1);
-          for (const kept of keptDeployments) {
-            if (kept.asset_hashes) {
-              try {
-                const keptManifest = JSON.parse(kept.asset_hashes) as Record<
-                  string,
-                  { hash: string }
-                >;
-                for (const entry of Object.values(keptManifest)) {
-                  retainedHashes.add(entry.hash);
-                }
-              } catch (e) {
-                // A single corrupt asset_hashes blob must not poison the
-                // sweep — skip the bad row and keep walking. The orphan sweep
-                // is best-effort either way.
-                logger.warn('retention_cleanup', 'retained_asset_hashes_parse_failed', {
-                  retainedDeploymentId: kept.id,
-                  err: e instanceof Error ? e.message : String(e),
-                });
-              }
-            }
-          }
-
-          for (const old of toEvict) {
-            const evictionSkipped = await context.get('db').transaction(async (tx) => {
-              await tx.execute(
-                drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
-              );
-              const txDb = tx as unknown as Db;
-              const lockedProject = await getProject(txDb, projectId);
-              if (lockedProject?.active_deployment_id === old.id) {
-                return true;
-              }
-              await markDeploymentRetained(txDb, old.id, false);
-              return false;
+          if (wfpPublishOutcome === 'failed') {
+            logger.warn('routing_switch', 'routing_publish_failed', {
+              slug: project.slug,
+              attempt: 2,
             });
-            if (evictionSkipped) {
-              continue;
-            }
+          }
+        }
+        // 'published' → this deploy owns + published routing (mark already set
+        // under the lock). 'superseded' → a newer op owns routing (NOT a
+        // clobbering success); leave `published` false so the `done` event and
+        // CLI report the deploy did not publish routing — honest, and aligned
+        // with the existing degraded-publish path. 'failed' → degraded, healed
+        // by the reconciler (existing behavior).
+        if (wfpPublishOutcome === 'published') {
+          published = true;
+          logger = logger.with({ published: true });
+          logger.info('routing_switch', 'slug_routed', { slug: project.slug });
+        } else if (wfpPublishOutcome === 'superseded') {
+          logger.info('routing_switch', 'routing_publish_superseded', { slug: project.slug });
+        }
 
-            try {
-              const oldWorkerName = `user-${project.slug}-${old.id}`;
-              await deleteDispatchScript(
-                context.env.CF_ACCOUNT_ID,
-                context.env.CF_API_TOKEN,
-                dispatchNamespace,
-                oldWorkerName,
-              ).catch((e) => {
-                logger.warn('retention_cleanup', 'evicted_dispatch_script_delete_failed', {
-                  evictedDeploymentId: old.id,
-                  err: e instanceof Error ? e.message : String(e),
-                });
-              });
-              if (old.asset_hashes) {
+        // Best-effort own-row retain mark. A transient pg/Hyperdrive failure
+        // here must NOT throw into the catch's `goLiveTxCommitted` recovery
+        // branch, which would re-assert this (possibly superseded) deploy's
+        // active pointer. The go-live tx already set status+pointer atomically;
+        // the retain flag self-heals on the next deploy/retention pass.
+        await markDeploymentRetained(context.get('db'), deployment.id, true).catch((e) =>
+          logger.error('routing_switch', 'mark_retained_failed', e, {
+            deploymentId: deployment.id,
+          }),
+        );
+
+        // SKIP ALL project-keyed post-routing side effects unless this deploy
+        // ACTUALLY PUBLISHED its routing AND is STILL the active deployment.
+        // BOTH conditions are required:
+        //   - `wfpPublishOutcome === 'published'`: the irreversible old-resource
+        //     cleanup (legacy worker delete + retained-worker delete loop +
+        //     retention/asset eviction) is only safe once the NEW routing is
+        //     actually live. On 'failed' (a ROUTING.put threw on BOTH attempts)
+        //     the go-live tx already committed — so this deploy IS the DB-active
+        //     deployment and `isStillActiveDeployment` would return true — but
+        //     dispatch's slug/domain/queue KV STILL points at the PREVIOUS
+        //     deployment's worker. Deleting that previous worker here would route
+        //     stale KV to a now-deleted script (the reconciler can republish KV
+        //     onto the new worker but CANNOT recreate a deleted CF worker script)
+        //     → outage until the reconciler heals (up to 1h). On 'superseded' the
+        //     closure never ran and a newer op owns routing. Either way: skip the
+        //     entire cleanup. The deploy stays committed-live/degraded
+        //     (`published` false); the reconciler heals routing and the NEXT
+        //     successful deploy's cleanup reclaims the now-stale old resources.
+        //   - `isStillActiveDeployment`: still required INSIDE the published
+        //     branch to guard the flip-AFTER-publish race (publish returned
+        //     'published', then a concurrent rollback/deploy flipped + published a
+        //     newer active deployment in the window after the publish lock
+        //     released and before this epilogue).
+        // Short-circuit on the outcome so the active re-check is skipped entirely
+        // on 'failed'/'superseded'.
+        // Every step below is project-scoped: the legacy worker delete and the
+        // retention/asset GC. The cron sync/clear is NO LONGER here — it now runs
+        // INSIDE `publishWfpRouting` under the project lock (atomically with
+        // routing), so a superseded/failed publish never touches the project-keyed
+        // CronScheduler DO (a stale no-cron deploy could otherwise /clear the
+        // newer active's schedules, a stale cron deploy /sync the old
+        // worker/token). The newer op owns the project's routing/cron/workers;
+        // this stale deploy's own leftover resources are reclaimed by the normal
+        // retention/stale cleanup on the next deploy, NOT by this request's
+        // epilogue. The deploy stays committed-live (200, `published` false). The
+        // retained-worker eviction loop below ALSO re-checks per-candidate under
+        // its own lock (residual window before each irreversible CF delete).
+        const wfpStillActive =
+          wfpPublishOutcome === 'published' &&
+          (await isStillActiveDeployment(context.get('db'), projectId, deployment.id));
+        if (wfpStillActive) {
+          // Legacy + retention cleanup (mirror of multipart's WfP path)
+          const legacyWorkerName = `user-${project.slug}`;
+          await deleteDispatchScript(
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
+            dispatchNamespace,
+            legacyWorkerName,
+          );
+
+          markPhase('retention_cleanup');
+          const retentionLimit = planLimits.retainedDeployments;
+          if (retentionLimit > 0) {
+            const retained = await getRetainedDeploymentsExcluding(
+              context.get('db'),
+              projectId,
+              deployment.id,
+            );
+            const toEvict = retained.slice(retentionLimit - 1);
+
+            // Build the union of hashes that must remain in R2 after this deploy:
+            // this deploy's manifest plus every kept retained deployment's
+            // manifest. Always built (independent of `toEvict.length`) because
+            // the post-eviction R2 keyspace sweep below uses it to opportunistically
+            // GC direct-to-R2 orphans (bytes uploaded via presigned PUTs that
+            // never finalized into a live deploy).
+            const retainedHashes = new Set<string>();
+            for (const [, entry] of Object.entries(assetManifest)) {
+              retainedHashes.add(entry.hash);
+            }
+            const keptDeployments = retained.slice(0, retentionLimit - 1);
+            for (const kept of keptDeployments) {
+              if (kept.asset_hashes) {
                 try {
-                  const evictedManifest = JSON.parse(old.asset_hashes) as Record<
+                  const keptManifest = JSON.parse(kept.asset_hashes) as Record<
                     string,
                     { hash: string }
                   >;
-                  const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
-                  await deleteUnreferencedAssets(
-                    context.env.STATIC_ASSETS,
-                    context.env.STATIC_ASSETS_R2,
-                    evictedHashes,
-                    retainedHashes,
-                    projectId,
-                  ).catch((e) => {
-                    logger.warn('retention_cleanup', 'evicted_unreferenced_assets_delete_failed', {
-                      evictedDeploymentId: old.id,
-                      err: e instanceof Error ? e.message : String(e),
-                    });
-                  });
-                  await context.env.ROUTING.delete(`manifest:${old.id}`).catch((e) => {
-                    logger.warn('retention_cleanup', 'evicted_routing_manifest_delete_failed', {
-                      evictedDeploymentId: old.id,
-                      err: e instanceof Error ? e.message : String(e),
-                    });
-                  });
+                  for (const entry of Object.values(keptManifest)) {
+                    retainedHashes.add(entry.hash);
+                  }
                 } catch (e) {
-                  logger.warn('retention_cleanup', 'evicted_asset_hashes_parse_failed', {
-                    evictedDeploymentId: old.id,
+                  // A single corrupt asset_hashes blob must not poison the
+                  // sweep — skip the bad row and keep walking. The orphan sweep
+                  // is best-effort either way.
+                  logger.warn('retention_cleanup', 'retained_asset_hashes_parse_failed', {
+                    retainedDeploymentId: kept.id,
                     err: e instanceof Error ? e.message : String(e),
                   });
                 }
               }
-              if (old.manifest) {
-                try {
-                  const oldManifest = JSON.parse(old.manifest) as DeployManifest;
-                  if (oldManifest.sandbox) {
-                    const oldContainerAppName = perDeployContainerApplicationName(
+            }
+
+            for (const old of toEvict) {
+              const evictionSkipped = await context.get('db').transaction(async (tx) => {
+                await tx.execute(
+                  drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`,
+                );
+                const txDb = tx as unknown as Db;
+                const lockedProject = await getProject(txDb, projectId);
+                if (lockedProject?.active_deployment_id === old.id) {
+                  return true;
+                }
+                await markDeploymentRetained(txDb, old.id, false);
+                return false;
+              });
+              if (evictionSkipped) {
+                continue;
+              }
+
+              try {
+                const oldWorkerName = `user-${project.slug}-${old.id}`;
+                await deleteDispatchScript(
+                  context.env.CF_ACCOUNT_ID,
+                  context.env.CF_API_TOKEN,
+                  dispatchNamespace,
+                  oldWorkerName,
+                ).catch((e) => {
+                  logger.warn('retention_cleanup', 'evicted_dispatch_script_delete_failed', {
+                    evictedDeploymentId: old.id,
+                    err: e instanceof Error ? e.message : String(e),
+                  });
+                });
+                if (old.asset_hashes) {
+                  try {
+                    const evictedManifest = JSON.parse(old.asset_hashes) as Record<
+                      string,
+                      { hash: string }
+                    >;
+                    const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
+                    await deleteUnreferencedAssets(
+                      context.env.STATIC_ASSETS,
+                      context.env.STATIC_ASSETS_R2,
+                      evictedHashes,
+                      retainedHashes,
                       projectId,
-                      old.id,
-                      oldManifest.sandbox.containerName ?? 'void-sandbox',
-                    );
-                    const existing = await findContainerApplication(
-                      context.env.CF_ACCOUNT_ID,
-                      context.env.CF_API_TOKEN,
-                      oldContainerAppName,
-                    );
-                    if (existing) {
-                      await deleteContainerApplicationIdempotent(
+                    ).catch((e) => {
+                      logger.warn(
+                        'retention_cleanup',
+                        'evicted_unreferenced_assets_delete_failed',
+                        {
+                          evictedDeploymentId: old.id,
+                          err: e instanceof Error ? e.message : String(e),
+                        },
+                      );
+                    });
+                    await context.env.ROUTING.delete(`manifest:${old.id}`).catch((e) => {
+                      logger.warn('retention_cleanup', 'evicted_routing_manifest_delete_failed', {
+                        evictedDeploymentId: old.id,
+                        err: e instanceof Error ? e.message : String(e),
+                      });
+                    });
+                  } catch (e) {
+                    logger.warn('retention_cleanup', 'evicted_asset_hashes_parse_failed', {
+                      evictedDeploymentId: old.id,
+                      err: e instanceof Error ? e.message : String(e),
+                    });
+                  }
+                }
+                if (old.manifest) {
+                  try {
+                    const oldManifest = JSON.parse(old.manifest) as DeployManifest;
+                    if (oldManifest.sandbox) {
+                      const oldContainerAppName = perDeployContainerApplicationName(
+                        projectId,
+                        old.id,
+                        oldManifest.sandbox.containerName ?? 'void-sandbox',
+                      );
+                      const existing = await findContainerApplication(
                         context.env.CF_ACCOUNT_ID,
                         context.env.CF_API_TOKEN,
-                        existing.id,
+                        oldContainerAppName,
                       );
+                      if (existing) {
+                        await deleteContainerApplicationIdempotent(
+                          context.env.CF_ACCOUNT_ID,
+                          context.env.CF_API_TOKEN,
+                          existing.id,
+                        );
+                      }
                     }
+                  } catch (e) {
+                    logger.error(
+                      'retention_cleanup',
+                      'evicted_sandbox_container_delete_failed',
+                      e,
+                      {
+                        evictedDeploymentId: old.id,
+                      },
+                    );
                   }
-                } catch (e) {
-                  logger.error('retention_cleanup', 'evicted_sandbox_container_delete_failed', e, {
-                    evictedDeploymentId: old.id,
-                  });
                 }
-              }
-              if (old.bundle_stored) {
-                try {
-                  await deleteWorkerBundle(context.env.STATIC_ASSETS_R2, projectId, old.id);
-                } catch (e) {
-                  logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', e, {
-                    evictedDeploymentId: old.id,
-                  });
+                if (old.bundle_stored) {
+                  try {
+                    await deleteWorkerBundle(context.env.STATIC_ASSETS_R2, projectId, old.id);
+                  } catch (e) {
+                    logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', e, {
+                      evictedDeploymentId: old.id,
+                    });
+                  }
                 }
-              }
-              await clearIsrCache(context.env.ISR_CACHE, projectId, old.id).catch((e) =>
-                logger.error('retention_cleanup', 'evicted_isr_cache_clear_failed', e, {
+                await clearIsrCache(context.env.ISR_CACHE, projectId, old.id).catch((e) =>
+                  logger.error('retention_cleanup', 'evicted_isr_cache_clear_failed', e, {
+                    evictedDeploymentId: old.id,
+                  }),
+                );
+              } catch (e) {
+                logger.warn('retention_cleanup', 'eviction_partial_failure', {
                   evictedDeploymentId: old.id,
-                }),
+                  err: e instanceof Error ? e.message : String(e),
+                });
+                continue;
+              }
+            }
+
+            // Direct-to-R2 orphan sweep. The eviction loop above only deletes
+            // hashes named in the EVICTED deployments' `asset_hashes` — bytes
+            // uploaded via direct-to-R2 presigned PUTs that never finalized
+            // into a live deploy were never named in any manifest, so they
+            // outlive the eviction loop. Walk the project's R2 keyspace and
+            // drop anything not in `retainedHashes`. Best-effort: a failed
+            // sweep should not fail the deploy.
+            try {
+              const orphans = await sweepProjectAssetOrphans(
+                context.env.STATIC_ASSETS_R2,
+                projectId,
+                retainedHashes,
               );
+              if (orphans > 0) {
+                logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
+              }
             } catch (e) {
-              logger.warn('retention_cleanup', 'eviction_partial_failure', {
-                evictedDeploymentId: old.id,
+              logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
                 err: e instanceof Error ? e.message : String(e),
               });
-              continue;
             }
-          }
-
-          // Direct-to-R2 orphan sweep. The eviction loop above only deletes
-          // hashes named in the EVICTED deployments' `asset_hashes` — bytes
-          // uploaded via direct-to-R2 presigned PUTs that never finalized
-          // into a live deploy were never named in any manifest, so they
-          // outlive the eviction loop. Walk the project's R2 keyspace and
-          // drop anything not in `retainedHashes`. Best-effort: a failed
-          // sweep should not fail the deploy.
-          try {
-            const orphans = await sweepProjectAssetOrphans(
-              context.env.STATIC_ASSETS_R2,
-              projectId,
-              retainedHashes,
-            );
-            if (orphans > 0) {
-              logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
-            }
-          } catch (e) {
-            logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
-              err: e instanceof Error ? e.message : String(e),
-            });
           }
         }
 
@@ -3967,6 +4449,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           ],
           assets: assetCount,
           workers: workerFiles.length,
+          published,
           ...(migrationsApplied > 0 && { migrations: migrationsApplied }),
         });
       } catch (err) {
@@ -3980,14 +4463,20 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         }
         logger.error('catch', 'pipeline_error', err, {
           currentPhase: currentStep,
-          routingSwitched,
+          goLiveTxEntered,
+          goLiveTxCommitted,
+          published,
           workerUploaded,
           bundleStored,
         });
 
-        // Wfp mirror manifest cleanup on pre-routing failure (mirror of
-        // multipart `cleanupStreamedAssetsOnAbort`'s mirror-only branch).
-        if (!routingSwitched && wfpMirroredManifestDeploymentId) {
+        // Mirror serving-manifest cleanup when the deploy never went live.
+        // `manifest:<deploymentId>` is the asset serving manifest written
+        // pre-tx (during asset upload), NOT a traffic route — dispatch reads it
+        // to serve a LIVE deploy's bytes. If the tx never committed, the deploy
+        // is not live and the manifest is an orphan, so evict it. Once the tx
+        // commits (`goLiveTxCommitted`) the manifest must persist for dispatch.
+        if (!goLiveTxCommitted && wfpMirroredManifestDeploymentId) {
           const id = wfpMirroredManifestDeploymentId;
           wfpMirroredManifestDeploymentId = null;
           await context.env.ROUTING.delete(`manifest:${id}`).catch((e) =>
@@ -4003,17 +4492,26 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         const failedWorkerName = workerName!;
         const failedDispatchNamespace = dispatchNamespace!;
 
-        const teardownRaceLost = routingSwitched && raw === PROJECT_DELETING_ERROR_MESSAGE;
+        // Go-live tx aborts (deploy did NOT go live), kept distinct from the
+        // generic pre-publish failure only for status-reason logging. Routing
+        // is now written ONLY after the tx commits, so a tx throw wrote ZERO
+        // routing — there is NOTHING to roll back, and the prior-live deploy's
+        // routes are untouched. We only mark the deployment terminal and tear
+        // down the external worker/bundle/container state this attempt created.
+        //
+        // `teardownRaceLost`: PROJECT_DELETING is also thrown by many PRE-tx
+        // guards; `goLiveTxEntered && !goLiveTxCommitted` narrows it to the
+        // IN-TX teardown re-check, leaving pre-tx teardowns to the generic
+        // branch below (which they have always used).
+        const teardownRaceLost =
+          goLiveTxEntered && !goLiveTxCommitted && raw === PROJECT_DELETING_ERROR_MESSAGE;
         if (teardownRaceLost) {
           logger.error('catch', 'teardown_race_lost', err, {
             workerName: failedWorkerName,
-            writtenRoutingKeyCount: writtenRoutingKeys.length,
           });
-          for (const key of writtenRoutingKeys) {
-            await context.env.ROUTING.delete(key).catch((e) =>
-              logger.error('catch', 'routing_rollback_failed', e, { key }),
-            );
-          }
+          // No routing rollback: with routing written post-tx, a go-live tx
+          // failure published none. The prior-live deploy's routes (slug,
+          // account, domains, queues) were never overwritten and keep serving.
           if (workerUploaded && workerUploadUrl) {
             await fetch(workerUploadUrl, {
               method: 'DELETE',
@@ -4072,10 +4570,17 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           );
           currentStatus = 'failed';
           emit({ event: 'error', message: msg, step: currentStep });
-        } else if (routingSwitched) {
+        } else if (goLiveTxCommitted) {
+          // The go-live tx committed (deploy IS live in the DB) but a LATER
+          // step threw — routing publish exhausted its retries, or a post-publish
+          // step (markRetained, cron sync, legacy/retention cleanup). NEVER fail
+          // a committed-live deploy: re-affirm live state and emit `done`. Any
+          // unpublished routing self-heals on the next deploy/rollback from the
+          // active deployment's manifest.
           logger.error('catch', 'post_routing_step_failed', err, {
             workerName: failedWorkerName,
             currentPhase: currentStep,
+            published,
           });
           logger.info('status_transition', 'status_change', {
             deploymentId: failedDeployment.id,
@@ -4087,14 +4592,32 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             force: true,
           }).catch(() => {});
           currentStatus = 'live';
-          await updateProjectType(
-            context.get('db'),
-            projectId,
-            failedManifest.type ?? (failedManifest.framework ? 'framework' : 'void'),
-          ).catch(() => {});
-          await setActiveDeployment(context.get('db'), projectId, failedDeployment.id).catch(
-            () => {},
-          );
+          // Re-assert `projects.type` + `active_deployment_id` ONLY while this
+          // deploy still owns the pointer (or the pointer is null), under a fresh
+          // lock. The go-live tx already set both atomically; this re-assertion
+          // is a defensive leftover from the old KV-ahead model. If a concurrent
+          // rollback/deploy flipped the pointer to a NEWER deployment while this
+          // request was parked (e.g. the own-row retain mark threw transiently
+          // and diverted here), blindly re-pointing at THIS deploy would clobber
+          // the newer winner AND — because this row is unpublished — let the
+          // reconciler republish its stale routing. So skip the re-flip when a
+          // newer deployment owns the pointer. The own-row status/retain marks
+          // below are harmless (they touch only this deployment's row).
+          await context
+            .get('db')
+            .transaction(async (tx) => {
+              const txDb = tx as unknown as Db;
+              const activeNow = await lockProjectAndGetActiveDeploymentId(txDb, projectId);
+              if (activeNow === failedDeployment.id || activeNow === null) {
+                await updateProjectType(
+                  txDb,
+                  projectId,
+                  failedManifest.type ?? (failedManifest.framework ? 'framework' : 'void'),
+                );
+                await setActiveDeployment(txDb, projectId, failedDeployment.id);
+              }
+            })
+            .catch(() => {});
           await markDeploymentRetained(context.get('db'), failedDeployment.id, true).catch(
             () => {},
           );
@@ -4107,16 +4630,17 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             urls: [slugUrl],
             assets: 0,
             workers: 0,
+            published,
           });
         } else {
+          // Pre-publish failure: the go-live tx never committed (or was never
+          // reached). No traffic routing was written (routing is post-tx), so
+          // there is nothing to delete — only tear down the external worker /
+          // bundle / container / ISR state this attempt created and mark the
+          // deployment terminal.
           const latest = await getDeployment(context.get('db'), failedDeployment.id);
           const wasCanceled =
             latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
-          for (const key of writtenRoutingKeys) {
-            await context.env.ROUTING.delete(key).catch((e) =>
-              logger.error('catch', 'routing_rollback_failed', e, { key }),
-            );
-          }
           await deleteDispatchScript(
             context.env.CF_ACCOUNT_ID,
             context.env.CF_API_TOKEN,
