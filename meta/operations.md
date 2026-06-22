@@ -235,14 +235,28 @@ Two GitHub environments (`Prod` and `Staging`) share the same repo-level secrets
 
 **GitHub Actions `CF_API_TOKEN` permissions** — narrower-scope token used only for wrangler deploys. Separate from the API worker runtime token.
 
+> ⚠️ **Must be a _User_ API Token, not an _Account_ API Token.** The `api` worker
+> declares a `BuildManager` **container**, so `wrangler deploy` now builds and
+> pushes a container image. Before pushing, wrangler calls
+> `GET /accounts/{id}/containers/me`, and Cloudflare's Containers/Cloudchamber
+> gateway **rejects account-owned tokens** there with `403 "Authentication error"`
+> — even when the token has Containers read/write. Create the token under
+> **My Profile → API Tokens** (user-owned), _not_ Account → API Tokens. Verify
+> with `wrangler whoami`: it must print "User API Token". (An account-owned token
+> deploys everything else fine and only fails once a container is in the config —
+> which is why this surfaced the moment Deploy-on-GitHub merged. See
+> [diagnosing the 403](#diagnosing-container-deploy-403).)
+
 Account-level:
 
-| Permission         | Access | Operations                                   |
-| ------------------ | ------ | -------------------------------------------- |
-| Workers Scripts    | Edit   | Deploy API and dispatch workers              |
-| D1                 | Edit   | Bind user project D1 databases during deploy |
-| Workers KV Storage | Edit   | Bind KV namespaces during deploy             |
-| Workers R2 Storage | Edit   | Bind R2 buckets during deploy                |
+| Permission         | Access | Operations                                                    |
+| ------------------ | ------ | ------------------------------------------------------------- |
+| Workers Scripts    | Edit   | Deploy API and dispatch workers                               |
+| Containers         | Edit   | Build + push the `BuildManager` container image during deploy |
+| Cloudchamber       | Edit   | Container registry / `/containers/me` preflight               |
+| D1                 | Edit   | Bind user project D1 databases during deploy                  |
+| Workers KV Storage | Edit   | Bind KV namespaces during deploy                              |
+| Workers R2 Storage | Edit   | Bind R2 buckets during deploy                                 |
 
 Zone-level (on `void.app`):
 
@@ -250,6 +264,34 @@ Zone-level (on `void.app`):
 | -------------- | ------ | --------------------------------------------------- |
 | Workers Routes | Edit   | Set dispatch worker route patterns (`*.void.app/*`) |
 | DNS            | Read   | Zone lookup for route binding                       |
+
+#### Diagnosing container-deploy 403
+
+If a deploy fails at `vp run deploy[:staging]` with:
+
+```
+✘ ApiError: Forbidden
+  url: '.../accounts/<id>/containers/me'  status: 403
+  body: { error: 'Authentication error' }
+👋 You are logged in with an Account API Token ...
+```
+
+wrangler's "ensure it has the correct permissions" hint is generic boilerplate
+(it keys on the 403 status only and never reads the body) — do not chase token
+scopes first. Disambiguate in ~30 seconds:
+
+```bash
+# 1. token type — must be User, not Account
+CLOUDFLARE_API_TOKEN=<deploy token> npx wrangler whoami      # "User"? or "Account"?
+
+# 2. is the ACCOUNT entitled for Containers at all?
+npx wrangler containers list                                 # via your own OAuth login
+#   lists containers → account is entitled → cause is the token type (#1 above)
+#   403               → account not onboarded → enable Containers / Workers Paid
+```
+
+The 2026-06-22 occurrence was an **account-owned** deploy token against an
+**entitled** account → fix was recreating the token as user-owned.
 
 ### GitHub App (Deploy on GitHub)
 
