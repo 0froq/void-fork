@@ -1,1 +1,0 @@
-ALTER TABLE "deployments" ADD COLUMN "routing_published" boolean;

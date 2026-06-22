@@ -2,7 +2,6 @@ import { sql as drizzleSql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { hmacSignState } from '../auth/hmac.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
-import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client.ts';
 import type { Db } from '../db.ts';
 import {
   createProject,
@@ -12,6 +11,8 @@ import {
   getLatestDeploymentsByProjectIds,
   getProjectDeployments,
   getProjectResources,
+  getActivatedDeployments,
+  getTerminalFailedDeployments,
   getDomainsByProjectId,
   getDomainsByProjectIds,
   getDeployment,
@@ -29,9 +30,6 @@ import {
   invalidateMigrationRenamesForOldName,
   upsertProjectDatabaseUrl,
   getProjectDatabaseUrl,
-  updateProjectType,
-  markRoutingUnpublished,
-  publishRoutingIfStillActive,
 } from '../db.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
 import { validateSubmittedExecutionPlans } from '../migrations/execution-plan.ts';
@@ -43,16 +41,10 @@ import {
   InvalidHyperdriveConnectionStringError,
   getDispatchWorkerProxyToken,
 } from '../provisioning/cloudflare-api.ts';
-import {
-  applyCurrentSuspension,
-  buildRoutingJson,
-  buildStaticRoutingJson,
-  sweepStaleQueueRoutes,
-  writeProjectAccountEntry,
-} from '../routing.ts';
+import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
 import { tokenizeSql } from '../sql/tokenize.ts';
 import { getPlanLimits } from '../tiers.ts';
-import type { DeployManifest, Project } from '../types.ts';
+import type { DeployManifest } from '../types.ts';
 import { getRequestsDataset, queryProjectRequestOverview } from './usage.ts';
 
 export const RESERVED_SLUGS = new Set([
@@ -671,51 +663,27 @@ const app = new Hono<ApiEnv>()
           }
         : null;
 
-    // Rollback go-live tx FIRST, routing-KV/DO writes AFTER it commits — a
-    // mirror of the deploy go-live path (deploy.ts static/WfP go-live). Ordering
-    // invariants:
+    // The entire rollback cutover runs inside a single row-locked tx so
+    // concurrent rollbacks / applies / renames serialize and no external
+    // state is written before the pg flip. Ordering invariants:
     //
-    //   - The locked tx does ONLY pg work: the row lock, all re-reads /
-    //     validation / destructive-migration checks (rejections still mutate
-    //     nothing), the routing-JSON computation, `setActiveDeployment`,
-    //     `updateProjectType`, and `markRoutingUnpublished(target)`. No external
-    //     (KV/DO) write happens inside the lock. If the tx throws, it rolls back
-    //     and NOTHING external was written → no orphan (failure mode (a)).
+    //   - pg flip runs FIRST inside the lock; external writes run AFTER.
+    //     If the pg flip throws, the tx rolls back and no external writes
+    //     have happened yet → caller sees 500, state is consistent.
     //
-    //   - After commit the target is committed-active but flagged
-    //     routing-UNPUBLISHED. The post-commit `publishRollbackRouting` writes
-    //     slug/account/domain/queue KV (one retry, then swallow) and on full
-    //     success re-marks `routing_published=true`. A publish failure leaves the
-    //     marker false; the target is still committed-live, so the hourly
-    //     `reconcileLiveRouting` safety net rebuilds its routing byte-identically
-    //     and marks it published (failure mode (b)). We never fail a
-    //     committed-live rollback on a routing-publish error → 200 either way,
-    //     exactly like deploy.
+    //   - If an external write throws after the pg flip, the tx rolls
+    //     back (reverting active_deployment_id), but some earlier
+    //     external writes may have already landed. The caller sees 500
+    //     and retries; KV PUTs and cron/queue routes are idempotent
+    //     under the same payload.
     //
     // target.applied_migrations (and retained, manifest) are re-read
     // inside the lock because a concurrent /rename can rewrite every
     // deployment's applied_migrations via
     // renameAppliedMigrationsForProject.
-    type RollbackPublishPlan = {
-      migrationDiff: ReadonlyArray<string>;
-      targetId: string;
-      targetType: Project['type'];
-      isStaticDeployment: boolean;
-      routingJson: string;
-      workerName: string;
-      slug: string;
-      userId: string;
-      ownerPlan: string;
-      manifest: DeployManifest | null;
-    };
-    // The owner's plan for the per-project account entry. The authenticated
-    // caller IS the project owner (verified `project.user_id === user.id`
-    // above), so `user.plan` is the owner's plan — no extra read needed (the
-    // reconciler reaches the same value via `getUsersByIds`).
-    const ownerPlan = context.get('user').plan;
-    let plan: RollbackPublishPlan;
+    let rollbackResult: { migrationDiff: ReadonlyArray<string> };
     try {
-      plan = await context.get('db').transaction(async (tx) => {
+      rollbackResult = await context.get('db').transaction(async (tx) => {
         // Lock the project row via `SELECT … FOR UPDATE` — per-project,
         // collision-free, released automatically at tx end. MUST be the
         // first statement in the locked section so serialization is
@@ -814,34 +782,13 @@ const app = new Hono<ApiEnv>()
         const workerName = getProjectDeploymentWorkerName(lockedProject.slug, target.id);
         const existingRouting = await context.env.ROUTING.get(lockedProject.slug);
         const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-
-        // The serving model is a property of the TARGET deployment, not of
-        // the project's CURRENT type. A normal deploy persists `projects.type`
-        // from `manifest.type` at go-live (deploy.ts: static path
-        // `manifest.type ?? (not_found_handling === 'single-page-application'
-        // ? 'spa' : 'static')`; WfP path `manifest.type ?? (framework
-        // ? 'framework' : 'void')`). If the project's type changed between the
-        // current active deploy and the target (e.g. a void/framework app was
-        // later converted to static/spa, or vice-versa), keying static-vs-WfP
-        // off `lockedProject.type` publishes a routing entry for the WRONG
-        // serving model — and the hourly reconciler (which also reads
-        // `projects.type`) would re-cement it. Derive the type from the
-        // target's manifest so it is identical to a fresh deploy of that
-        // manifest, then restore `projects.type` below.
-        //
-        // Deploy discriminates static-vs-WfP by worker-file presence, then derives type
-        // within the branch; manifest.type is the stored equivalent (every current CLI
-        // builder emits it). Only truly-legacy typeless manifests lack it, and those can
-        // only be legacy void/framework (buildStaticManifest always sets type), so default
-        // typeless -> WfP (framework?framework:void). assetConfig must NOT decide the type.
-        const targetType: Project['type'] =
-          manifest?.type ?? (manifest?.framework ? 'framework' : 'void');
-        const isStaticDeployment = targetType === 'static' || targetType === 'spa';
+        const isStaticDeployment = lockedProject.type === 'static' || lockedProject.type === 'spa';
 
         let routingJson: string;
         if (isStaticDeployment) {
           const assetConfig = manifest?.assetConfig ?? {
-            not_found_handling: targetType === 'spa' ? 'single-page-application' : '404-page',
+            not_found_handling:
+              lockedProject.type === 'spa' ? 'single-page-application' : '404-page',
           };
           routingJson = buildStaticRoutingJson({
             projectId,
@@ -861,64 +808,142 @@ const app = new Hono<ApiEnv>()
             dispatchLimits,
             suspended: existingEntry?.suspended,
             hasCrons: !!manifest?.schedules?.length,
-            // `asset_hashes != null` is the exact proxy for "this WfP
-            // deployment mirrored assets to KV/R2" (deploy.ts writes it
-            // only when assetCount > 0). Without these, dispatch's
-            // `maybeServeWfpAssetFallback` short-circuits on a missing
-            // `assetManifestId` and can serve CF's "Assets have not yet
-            // been deployed" stub as the asset after a rollback.
-            assetManifestId: target.asset_hashes ? target.id : undefined,
-            assetConfig: target.asset_hashes
-              ? (manifest?.assetConfig ?? { not_found_handling: 'none' })
-              : undefined,
           });
         }
 
-        // PG flip FIRST, inside the lock. If this (or anything below in the tx)
-        // throws, no external state was mutated yet — the tx rolls back cleanly
-        // and the caller can retry (failure mode (a): nothing committed, nothing
-        // published, no orphan).
+        // PG flip FIRST. If this throws, no external state is mutated
+        // yet — the tx rolls back cleanly and the caller can retry.
         await setActiveDeployment(txDb, projectId, target.id);
-        // Restore `projects.type` to the target's serving model within the
-        // same tx so it tracks the now-active deployment. Without this the
-        // type would still describe the OLD active deploy, and the hourly
-        // reconciler (which reads `projects.type`) would re-publish a routing
-        // entry for the wrong serving model after a cross-type rollback.
-        // Mirrors the deploy path, which calls `updateProjectType` in its
-        // own go-live tx.
-        await updateProjectType(txDb, projectId, targetType);
-        // Flag the now-active target routing-UNPUBLISHED within the same tx, so
-        // that if the post-commit publish below fails the row stays `false` and
-        // the hourly reconciler heals it. On full publish success it is re-marked
-        // `true`. Mirrors deploy's `markRoutingPublished`-only model inverted for
-        // the rollback flip (deploy starts a fresh deployment whose marker is
-        // already NULL; rollback re-activates an old deployment that may already
-        // carry `routing_published=true`, so it must be explicitly cleared).
-        await markRoutingUnpublished(txDb, target.id);
 
-        // The queue-route sweep runs post-commit inside the publish closure via
-        // the shared `sweepStaleQueueRoutes`, which LISTs the project's live
-        // `queue:<projectId>-` KV keys directly and drops any not in the expected
-        // set — no pre-computed name union over historic manifests (the old
-        // approach) is needed. The expected set is ONLY the rollback TARGET's own
-        // queues: under the routing-after-tx model a `queue:<name>` route is
-        // published only AFTER a deployment goes live, so a concurrent in-flight
-        // deploy has written no route yet and republishes its own when it goes
-        // live — there is nothing of theirs in KV to preserve. Matches the
-        // reconciler.
+        // External writes SECOND, inside the same lock. A throw here
+        // rolls back the pg flip; some external writes may have
+        // already landed but subsequent external retries are
+        // idempotent (KV PUT is an overwrite; queue/domain routes are
+        // keyed by slug/hostname; cron DO sync is a replace).
+        await context.env.ROUTING.put(lockedProject.slug, routingJson);
 
-        return {
-          migrationDiff: diff,
-          targetId: target.id,
-          targetType,
-          isStaticDeployment,
-          routingJson,
-          workerName,
-          slug: lockedProject.slug,
-          userId: lockedProject.user_id,
-          ownerPlan,
-          manifest,
-        };
+        // Resolve the target worker's baked __VOID_PROXY_TOKEN once if
+        // either cron or queues need it. Re-fetching on each path would
+        // double the CF API round-trips AND widen the failure window
+        // between cron DO sync and queue KV write: a transient CF 429
+        // on the second fetch would abort the transaction after cron
+        // state was already committed to the DO. The framework's
+        // /__void/scheduled and /__void/queue handlers both validate
+        // against the SAME __VOID_PROXY_TOKEN binding, so one lookup
+        // is authoritative for both.
+        const needsProxyToken = !!manifest?.schedules?.length || !!manifest?.queues?.length;
+        const targetProxyToken = needsProxyToken
+          ? await resolveRollbackProxyToken(context.env, workerName, projectId)
+          : null;
+
+        // Sync cron scheduler to point at the rollback target.
+        //
+        // When target has no schedules, `/clear` is called unconditionally
+        // (it's idempotent — see cron-scheduler.ts `handleClear`). A
+        // prior failed cutover could leave the DO holding schedules that
+        // no pg manifest still mentions, and a guarded clear would let
+        // that stale DO state persist across every future rollback.
+        //
+        // Not migrated to clearCronScheduler/syncCronScheduler helpers: those
+        // helpers swallow errors (catch+log) because deploy/cleanup paths can
+        // self-heal on the next deploy. Rollback runs inside a DB transaction
+        // and must throw on cron failure so the txn aborts and the rollback
+        // is retried atomically; swallowing here would silently desync DO
+        // state from the rolled-back manifest.
+        if (manifest?.schedules?.length) {
+          const cronId = context.env.CRON_SCHEDULER.idFromName(projectId);
+          await context.env.CRON_SCHEDULER.get(cronId).fetch(
+            new Request('https://do/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                workerName,
+                schedules: manifest.schedules,
+                proxyToken: targetProxyToken!,
+              }),
+            }),
+          );
+        } else {
+          const cronId = context.env.CRON_SCHEDULER.idFromName(projectId);
+          await context.env.CRON_SCHEDULER.get(cronId).fetch(
+            new Request('https://do/clear', { method: 'POST' }),
+          );
+        }
+
+        // Update custom domain routing
+        const projectDomains = await getDomainsByProjectId(txDb, projectId);
+        for (const domain of projectDomains) {
+          if (domain.status === 'active') {
+            await context.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
+          }
+        }
+
+        // Update queue routing. Rewrite every queue route that target
+        // binds AND delete any queue route left over from older
+        // deployments that target does not bind. Without the deletion
+        // pass, messages arriving on a queue A had bound but B does not
+        // would still hit `queue:<q>` in KV and dispatch would forward
+        // them to A's (now evicted) worker.
+        //
+        // Sweep source is the UNION of:
+        //   - Deployments that have ever been live (`deployed_at IS NOT NULL`).
+        //   - Terminal-failed/canceled deployments (`deployed_at = null`).
+        //
+        // The second set catches deploys that wrote `queue:<name>` KV
+        // routes at step 2b and then failed before the routing flip.
+        // In-flight deploys (status not in the terminal-failed set) are
+        // excluded, so rollback does not clobber KV routes an in-flight
+        // deploy is provisioning.
+        const [activatedDeployments, terminalFailedDeployments] = await Promise.all([
+          getActivatedDeployments(txDb, projectId),
+          getTerminalFailedDeployments(txDb, projectId),
+        ]);
+        const sweepQueueNames = new Set<string>();
+        const unionSource = [...activatedDeployments, ...terminalFailedDeployments];
+        for (const d of unionSource) {
+          if (!d.manifest) {
+            continue;
+          }
+          let depManifest: DeployManifest | null = null;
+          try {
+            depManifest = JSON.parse(d.manifest);
+          } catch {
+            // Skip deployments with unparseable manifests rather than
+            // blowing up the whole rollback.
+            continue;
+          }
+          for (const q of depManifest?.queues ?? []) {
+            sweepQueueNames.add(q.name);
+          }
+        }
+        // Include target's own queue names in the union so the delete
+        // pass's complement is always `union \ target`, i.e. we never
+        // accidentally delete a route we're about to rewrite below.
+        const targetQueueNames = new Set((manifest?.queues ?? []).map((q) => q.name));
+        for (const name of targetQueueNames) {
+          sweepQueueNames.add(name);
+        }
+        if (manifest?.queues?.length) {
+          for (const q of manifest.queues) {
+            await context.env.ROUTING.put(
+              `queue:${getProjectQueueName(projectId, q.name)}`,
+              JSON.stringify({
+                workerName,
+                projectId,
+                queueName: q.name,
+                proxyToken: targetProxyToken!,
+              }),
+            );
+          }
+        }
+        for (const name of sweepQueueNames) {
+          if (targetQueueNames.has(name)) {
+            continue;
+          }
+          await context.env.ROUTING.delete(`queue:${getProjectQueueName(projectId, name)}`);
+        }
+
+        return { migrationDiff: diff };
       });
     } catch (err) {
       if (err instanceof RollbackError) {
@@ -933,183 +958,10 @@ const app = new Hono<ApiEnv>()
       throw err;
     }
 
-    // === Routing publish (post-tx) ===
-    // The rollback is committed-live (target is the active deployment, flagged
-    // routing-UNPUBLISHED). Publish routing forward, mirroring deploy's
-    // publish*Routing structure: try → log attempt 1 → retry → log attempt 2 →
-    // swallow. A transient KV/CF failure here does NOT fail the rollback — the
-    // target is committed-live and the hourly reconciler rebuilds routing
-    // byte-identically from its manifest and marks it published (failure mode
-    // (b)). NOT deploy's closures — those close over deploy-local state.
-    //
-    // Resolve the target worker's baked __VOID_PROXY_TOKEN once for BOTH the
-    // queue routes and the cron sync below — the framework's /__void/queue and
-    // /__void/scheduled handlers validate against the SAME __VOID_PROXY_TOKEN
-    // binding, so one lookup is authoritative for both. A re-fetch per path would
-    // double the CF round-trips. Memoize the resolved token but re-attempt if a
-    // prior call threw, so a transient CF error on publish attempt 1 can still be
-    // retried by attempt 2 / the cron sync.
-    let cachedProxyToken: string | null = null;
-    const resolveProxyTokenOnce = async (): Promise<string> => {
-      if (cachedProxyToken !== null) {
-        return cachedProxyToken;
-      }
-      const token = await resolveRollbackProxyToken(context.env, plan.workerName, projectId);
-      cachedProxyToken = token;
-      return token;
-    };
-    const publishRollbackRouting = async (txDb: Db): Promise<void> => {
-      // RE-READ the current slug entry's `suspended` marker UNDER THE LOCK and
-      // fold it into the prebuilt JSON. `plan.routingJson` was built from a
-      // PRE-LOCK snapshot of `suspended` (read in the rollback prepare tx); a
-      // guarded suspension (`guardedRoutingKvRmw`) can serialize FIRST and stamp
-      // `suspended` onto the slug route, and writing the stale snapshot here would
-      // drop that marker — dispatch then keeps serving a suspended project until
-      // another mutation re-stamps (hidden behind `routing_published=true`, the
-      // reconciler never heals it). The corrected JSON flows into BOTH the slug
-      // write and the domain writes below.
-      const slugJson = await applyCurrentSuspension(
-        context.env.ROUTING,
-        plan.slug,
-        plan.routingJson,
-      );
-      await context.env.ROUTING.put(plan.slug, slugJson);
-      // Per-project account entry — the old in-tx rollback omitted this; written
-      // here for deploy/reconciler parity (both write `project:<id>`).
-      await writeProjectAccountEntry(context.env.ROUTING, projectId, plan.userId, plan.ownerPlan);
-      // Re-read the active domain set UNDER THE LOCK (via the lock-tx handle),
-      // not from a pre-publish snapshot: a domain activated/deleted between the
-      // go-live tx and this publish would otherwise be missed (newly-active
-      // domain stranded on the old deployment) or recreated (deleted domain
-      // re-published) and stamped `routing_published=true` permanently.
-      const activeDomainHostnames = (await getDomainsByProjectId(txDb, projectId))
-        .filter((domain) => domain.status === 'active')
-        .map((domain) => domain.hostname);
-      for (const hostname of activeDomainHostnames) {
-        await context.env.ROUTING.put(`domain:${hostname}`, slugJson);
-      }
-      // ONLY the rollback target's own queue routes — the sweep drops every
-      // other `queue:<projectId>-` route. Under the routing-after-tx model no
-      // in-flight deploy has written a queue route yet (routes publish only
-      // post-go-live), so there is nothing of theirs to preserve here. A rollback
-      // whose TARGET is static binds NO queues and has NO consumer worker, so its
-      // expected set stays EMPTY — the queue-route WRITES are WfP-only, but the
-      // sweep below STILL runs to drop any `queue:<projectId>-` route left over
-      // from the pre-rollback WfP deployment.
-      const expectedQueueKeys = new Set<string>();
-      if (!plan.isStaticDeployment) {
-        const queues = plan.manifest?.queues ?? [];
-        for (const q of queues) {
-          expectedQueueKeys.add(`queue:${getProjectQueueName(projectId, q.name)}`);
-          await context.env.ROUTING.put(
-            `queue:${getProjectQueueName(projectId, q.name)}`,
-            JSON.stringify({
-              workerName: plan.workerName,
-              projectId,
-              queueName: q.name,
-              proxyToken: await resolveProxyTokenOnce(),
-            }),
-          );
-        }
-      }
-      // Delete-sweep: drop queue routes from older deployments the target does
-      // not bind. Idempotent (KV delete on a missing key is a no-op), so it is
-      // retry-safe across both publish attempts. The shared
-      // `sweepStaleQueueRoutes` LISTs every `queue:<projectId>-` key and drops
-      // any not in `expectedQueueKeys` (the target's own queues, or EMPTY for a
-      // static target). Runs UNCONDITIONALLY so a rollback to a static target
-      // still sweeps the pre-rollback WfP deployment's queue routes.
-      await sweepStaleQueueRoutes(context.env.ROUTING, projectId, expectedQueueKeys);
-
-      // Cron DO sync — runs INSIDE this publish closure, so it is gated by the
-      // project lock + active-pointer re-check `publishRoutingIfStillActive`
-      // holds: the closure fires ONLY on a still-active target ('published'),
-      // and is NOT invoked on 'superseded', so an overtaken rollback can never
-      // clobber the newer active op's project-keyed schedules. That closes the
-      // released-lock window the old post-return cron block had (which gated on
-      // the stale `publishOutcome !== 'superseded'` and so also fired on
-      // 'failed'). The sync/clear themselves stay BEST-EFFORT via the shared
-      // client helpers (retry-then-swallow, same as the deploy path): a transient
-      // CronScheduler DO blip must NOT fail the routing publish — routing KV is
-      // already correct, and cron drift self-heals on the next deploy (the
-      // reconciler heals routing, not cron). When the target has no schedules,
-      // `/clear` runs unconditionally (idempotent) so a prior cutover's stale DO
-      // schedules do not persist. `resolveProxyTokenOnce` is reused (memoized) so
-      // cron + queues share a single CF round-trip.
-      if (plan.manifest?.schedules?.length) {
-        await syncCronScheduler(context.env, projectId, {
-          workerName: plan.workerName,
-          schedules: plan.manifest.schedules,
-          proxyToken: await resolveProxyTokenOnce(),
-        });
-      } else {
-        await clearCronScheduler(context.env, projectId);
-      }
-    };
-    // `publishRoutingIfStillActive` re-acquires the project-row FOR UPDATE lock
-    // (the SAME lock the rollback/deploy go-live tx and reconciler take) in a
-    // separate post-commit tx, RE-READS `active_deployment_id`, and only
-    // publishes + marks under the lock IF the rollback target is still active.
-    // If a newer deploy/rollback committed while this rollback's publish was
-    // parked, the re-check returns 'superseded': SKIP the KV writes (incl. the
-    // queue delete-sweep — a stale sweep would delete queue routes the newer
-    // active needs) AND the cron DO sync AND the mark. The pointer flip already
-    // committed (200 either way); the newer op owns routing. The publish stays
-    // POST-commit; a publish failure never rolls back the committed flip. The
-    // cron DO sync/clear now runs INSIDE `publishRollbackRouting` (after the
-    // routing/queue writes), so it is serialized under the same project lock as
-    // routing and runs ONLY on 'published' (not on 'superseded' — closure not
-    // invoked — and not on 'failed' — the closure threw, row left unmarked).
-    // `resolveProxyTokenOnce` stays memoized across attempts AND that cron sync.
-    let publishOutcome: Awaited<ReturnType<typeof publishRoutingIfStillActive>>;
-    try {
-      publishOutcome = await publishRoutingIfStillActive(
-        context.get('db'),
-        projectId,
-        plan.targetId,
-        publishRollbackRouting,
-      );
-      if (publishOutcome === 'failed') {
-        console.warn(`[rollback] routing publish failed (attempt 1) for slug ${plan.slug}`);
-        publishOutcome = await publishRoutingIfStillActive(
-          context.get('db'),
-          projectId,
-          plan.targetId,
-          publishRollbackRouting,
-        );
-        if (publishOutcome === 'failed') {
-          console.warn(`[rollback] routing publish failed (attempt 2) for slug ${plan.slug}`);
-        }
-      }
-    } catch (err) {
-      // The post-commit publish helper REJECTED — e.g. a transient pg/Hyperdrive
-      // error taking the FOR UPDATE lock or committing the short publish tx —
-      // which is DISTINCT from a 'failed' RETURN (the `publish()` KV writes threw,
-      // already handled above). The go-live tx already committed (the rollback
-      // target is active, routing_published=false), so NEVER fail a committed-live
-      // rollback: treat a rejection exactly like 'failed'. The hourly
-      // `reconcileLiveRouting` heals the route byte-identically, the same as a
-      // 'failed' attempt. Mirrors the deploy path's committed-live recovery.
-      console.warn(
-        `[rollback] routing publish threw post-commit for slug ${plan.slug}; rollback is committed-live, reconciler will heal`,
-        err,
-      );
-      publishOutcome = 'failed';
-    }
-    // 'published' → target owns + published routing (mark set under the lock).
-    // 'superseded' → a newer op overtook the target; KV untouched (no clobber,
-    // no stale queue-route deletion), no mark. 'failed' → row stays unmarked and
-    // the hourly `reconcileLiveRouting` safety net heals it byte-identically.
-    if (publishOutcome === 'superseded') {
-      console.log(
-        `[rollback] routing publish superseded for slug ${plan.slug}: target ${plan.targetId} is no longer active (a newer op owns routing)`,
-      );
-    }
-
     return context.json({
       ok: true,
       deploymentId,
-      migrationDiff: plan.migrationDiff,
+      migrationDiff: rollbackResult.migrationDiff,
     });
   })
 

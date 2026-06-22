@@ -1,59 +1,5 @@
-import {
-  getDomainsByProjectIds,
-  getProjectsByUserId,
-  getUser,
-  lockProjectAndGetActiveDeploymentId,
-  type Db,
-} from './db.ts';
-import { getProjectQueueName } from './naming.ts';
+import { getDomainsByProjectIds, getProjectsByUserId, getUser, type Db } from './db.ts';
 import type { AssetConfig, DeployManifest } from './types.ts';
-
-/**
- * Delete every `queue:<projectId>-<name>` routing entry that is NOT in
- * `expectedQueueKeys`, so a deploy/rollback that DROPS a queue binding (or a
- * project that goes static and binds no queues) leaves no stale queue route
- * dispatching batches to a dead/old worker.
- *
- * The prefix is derived through `getProjectQueueName(projectId, '')` (NOT a raw
- * `queue:${projectId}-`) so the projectId segment is lowercased / `_`→`-`
- * IDENTICALLY to the stored keys — a raw prefix would MISS keys when the
- * projectId contains uppercase or `_` characters. `list({ prefix })` is
- * paginated via the cursor; KV delete on a missing key is a no-op so this is
- * idempotent/retry-safe.
- *
- * This is the single reference implementation shared by the deploy publish
- * closures, the rollback publish closure, and the hourly reconciler. Callers
- * that want to drop ALL queue routes (e.g. a static deploy) pass an empty
- * `expectedQueueKeys`.
- *
- * Under the routing-after-tx model a `queue:<name>` route is written ONLY by a
- * publish closure AFTER its deployment goes live (deploy/rollback/reconciler),
- * never before. So an in-flight (non-terminal) deployment has NO route in KV at
- * sweep time — callers pass ONLY their own/target manifest's queue keys and do
- * NOT union any in-flight set. An in-flight deploy that the sweep "misses" (it
- * had no route to begin with) republishes its own queue routes when it goes
- * live, so a concurrent cutover dropping a not-yet-owned route causes no harm.
- */
-export async function sweepStaleQueueRoutes(
-  routing: KVNamespace,
-  projectId: string,
-  expectedQueueKeys: ReadonlySet<string>,
-): Promise<void> {
-  const queuePrefix = `queue:${getProjectQueueName(projectId, '')}`;
-  let cursor: string | undefined;
-  do {
-    const listed = await routing.list({
-      prefix: queuePrefix,
-      ...(cursor ? { cursor } : {}),
-    });
-    for (const { name } of listed.keys) {
-      if (!expectedQueueKeys.has(name)) {
-        await routing.delete(name);
-      }
-    }
-    cursor = listed.list_complete ? undefined : listed.cursor;
-  } while (cursor);
-}
 
 /**
  * KV key + payload shape for the per-project routing entry consumed by the
@@ -118,49 +64,6 @@ export async function refreshProjectKvForUser(
   }
   const payload = buildProjectAccountJson({ userId, plan: user.plan });
   await Promise.all(projects.map((project) => routing.put(projectAccountKey(project.id), payload)));
-}
-
-/**
- * Re-read the CURRENT slug routing entry's `suspended` marker and fold it into a
- * prebuilt routing JSON, so a publisher carries whatever suspension state exists
- * UNDER THE LOCK instead of its pre-lock snapshot.
- *
- * Publishers (deploy static/WfP, rollback, reconciler) build `prebuiltJson` with
- * `suspended` read BEFORE taking the publish lock. A guarded admin/UsageCounter
- * suspension (`guardedRoutingKvRmw`) can serialize FIRST and stamp `suspended`
- * onto the slug route — then the publisher would overwrite it with the stale
- * pre-lock JSON that lacks the marker, and dispatch (which enforces suspension
- * from `routing.suspended`) keeps serving a suspended/over-limit project until
- * some unrelated mutation re-stamps it. Hidden behind `routing_published=true`,
- * the reconciler never heals it.
- *
- * Call this INSIDE the publish closure (under the project lock) for the slug
- * route, and reuse the returned JSON for the `domain:<host>` writes too — the
- * domain payload must carry the same corrected `suspended`. Reads the FRESH slug
- * entry via `routing.get` (the publishers already nest KV reads under the lock),
- * parses the prebuilt JSON, and sets `suspended` to the slug entry's current
- * value (or removes it when the slug entry has none / is absent). Returns
- * `prebuiltJson` byte-identical when nothing changed.
- */
-export async function applyCurrentSuspension(
-  routing: KVNamespace,
-  slug: string,
-  prebuiltJson: string,
-): Promise<string> {
-  const currentRaw = await routing.get(slug);
-  const currentSuspended =
-    currentRaw !== null ? (JSON.parse(currentRaw) as { suspended?: unknown }).suspended : undefined;
-  const parsed = JSON.parse(prebuiltJson) as Record<string, unknown>;
-  const prebuiltSuspended = parsed.suspended;
-  if (currentSuspended === prebuiltSuspended) {
-    return prebuiltJson;
-  }
-  if (typeof currentSuspended === 'string' && currentSuspended.length > 0) {
-    parsed.suspended = currentSuspended;
-  } else {
-    delete parsed.suspended;
-  }
-  return JSON.stringify(parsed);
 }
 
 /**
@@ -261,19 +164,7 @@ export async function setProjectsRoutingSuspension(
   );
   for (const project of projects) {
     const domainKeys = (domainMap.get(project.id) ?? []).map((d) => `domain:${d.hostname}`);
-    // Serialize the fan-out with deploy/rollback publishers on the project
-    // `FOR UPDATE` lock (the contract documented on `guardedRoutingKvRmw`): a
-    // publisher holds the SAME lock while it writes the fresh route AND marks
-    // `routing_published=true`. Running `applyRoutingSuspension`'s get→put UNDER
-    // the lock means a publish that committed concurrently is RE-READ here, so
-    // `suspended` is folded onto the FRESH route instead of a lock-free pre-publish
-    // snapshot reverting the publish — a clobber the reconciler (which skips
-    // `routing_published=true`) would never heal. Domains are looked up before the
-    // lock; `applyRoutingSuspension` no-ops on any key without a live KV entry.
-    await db.transaction(async (tx) => {
-      await lockProjectAndGetActiveDeploymentId(tx as unknown as Db, project.id);
-      await applyRoutingSuspension(routing, [project.slug, ...domainKeys], update);
-    });
+    await applyRoutingSuspension(routing, [project.slug, ...domainKeys], update);
   }
 }
 

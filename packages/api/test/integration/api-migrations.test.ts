@@ -10,7 +10,6 @@ import {
   afterEach,
   vi,
 } from 'vite-plus/test';
-import * as db from '../../src/db.ts';
 import type { Db } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { canonicalJson } from '../../src/migrations/canonical-json.ts';
@@ -4475,66 +4474,30 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(rollbackBody.migrationDiff).toEqual(['m3.sql']);
   });
 
-  it('rollback-vs-rollback: a parked stale publisher resuming after a newer rollback committed must SKIP (superseded) — routing converges to the active deployment, no clobber', async () => {
-    // RACE REGRESSION (the bug this fix closes). Under routing-after-tx the row
-    // lock covers ONLY the pg work (the active-pointer flip + the snapshot-bound
-    // destructive diff); the ROUTING/queue publish runs AFTER the tx commits.
-    // The OLD code published lock-free and called `markRoutingPublished`
-    // UNCONDITIONALLY, so a parked/slow publisher (rollback A) that resumed AFTER
-    // a newer rollback (B) had committed + published + marked would clobber the
-    // newer routing with its stale deployment AND delete-sweep queue routes the
-    // newer active needs — and the reconciler's `active AND NOT published` query
-    // could never heal it (the newer active row is already published). The fix
-    // wraps the publish in `publishRoutingIfStillActive`, which re-acquires the
-    // project-row FOR UPDATE lock, re-reads `active_deployment_id`, and SKIPS
-    // (returns 'superseded': no KV write, no mark) when the target is no longer
-    // active. Final state: routing converges to the active deployment (C).
+  it('rollback-vs-rollback serializes on the row lock and keeps pg and ROUTING in sync', async () => {
+    // Concurrent rollbacks must fully serialize. The row lock covers the
+    // whole cutover (pg flip + ROUTING.put + cron + queue + ISR), so when
+    // both finish the final state is internally consistent: whatever pg
+    // says is active, ROUTING points at the matching worker, and the
+    // diffs returned by both rollbacks are computed against the correct
+    // pre-flip snapshots.
     //
-    // PGlite is single-connection, so the interleaving is seamed SEQUENTIALLY:
-    // rollback A's go-live tx commits (active=B) and releases the lock, then A
-    // PARKS on a barrier BEFORE `publishRoutingIfStillActive` acquires the lock
-    // (parking inside the helper's tx would self-deadlock B). While A is parked,
-    // rollback B runs to completion (commit active=C + publish C + mark C). Then
-    // A is released → its helper takes the lock, re-reads active=C != B → SKIP.
+    // This test pins that invariant by holding rollback A mid-cutover
+    // (inside its locked tx, AFTER the pg flip but during its
+    // `ROUTING.put(slug, …)` external write) and kicking rollback B while
+    // A is paused. B must block on the row lock until A commits.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'r13f1-rb-rb');
     await insertD1Resource(env.db, project.id);
 
-    // Queue resources so B's and C's queue routes actually publish. C binds qC
-    // (qA only A bound; qC only C binds) — qC's route is what A's stale superseded
-    // publish must NOT delete via its sweep.
-    await env.db.insert(resources).values([
-      {
-        id: `res_${project.id}_qA`,
-        project_id: project.id,
-        type: 'queue',
-        cf_id: 'cf-qa',
-        binding_name: 'qA',
-      },
-      {
-        id: `res_${project.id}_qC`,
-        project_id: project.id,
-        type: 'queue',
-        cf_id: 'cf-qc',
-        binding_name: 'qC',
-      },
-    ]);
-    const queueKey = (name: string): string =>
-      `queue:${`${project.id}-${name}`.toLowerCase().replaceAll('_', '-')}`;
-
-    // Active A ([m1, m2, m3], binds qA); retained B ([m1, m2], no queues);
-    // retained C ([m1], binds qC).
+    // Active A ([m1, m2, m3]); retained B ([m1, m2]); retained C ([m1]).
     const depA = await createTestDeployment(env.db, project.id, 'live');
     await env.db
       .update(deployments)
       .set({
         applied_migrations: JSON.stringify(['m1.sql', 'm2.sql', 'm3.sql']),
         retained: true,
-        manifest: JSON.stringify({
-          version: 4,
-          type: 'void',
-          queues: [{ name: 'qA', bindingName: 'QA' }],
-        }),
+        manifest: JSON.stringify({ version: 4, type: 'void' }),
       })
       .where(eq(deployments.id, depA.id));
     const depB = await createTestDeployment(env.db, project.id, 'failed');
@@ -4552,42 +4515,44 @@ describe('POST /projects/:id/migrations/rename', () => {
       .set({
         applied_migrations: JSON.stringify(['m1.sql']),
         retained: true,
-        manifest: JSON.stringify({
-          version: 4,
-          type: 'void',
-          queues: [{ name: 'qC', bindingName: 'QC' }],
-        }),
+        manifest: JSON.stringify({ version: 4, type: 'void' }),
       })
       .where(eq(deployments.id, depC.id));
 
-    // Park rollback A's publisher on a barrier BEFORE it acquires the helper's
-    // FOR UPDATE lock — i.e. between A's go-live commit (active=B, lock released)
-    // and `publishRoutingIfStillActive`. Spying on the helper itself parks A
-    // OUTSIDE any open pg tx, so B is free to take the lock and finish. The
-    // rollback-B call (target depC) passes straight through to the real helper.
+    // Deferred ROUTING.put spy — holds the FIRST put for project.slug
+    // (this is rollback A's in-lock external write, which now runs
+    // AFTER the pg flip). Subsequent calls pass through normally.
     let releaseA: () => void = () => {};
     const aHold = new Promise<void>((r) => {
       releaseA = r;
     });
-    let aReached: (() => void) | undefined;
-    const aReachedPublish = new Promise<void>((r) => {
-      aReached = r;
+    let holdFired: (() => void) | undefined;
+    const aReachedPut = new Promise<void>((r) => {
+      holdFired = r;
     });
-    let aParked = false;
-    const realPublish = db.publishRoutingIfStillActive;
-    const publishSpy = vi
-      .spyOn(db, 'publishRoutingIfStillActive')
-      .mockImplementation(async (database, projectId, deploymentId, publish) => {
-        if (!aParked && deploymentId === depB.id) {
-          aParked = true;
-          aReached?.();
-          await aHold; // park A until B has fully committed + published + marked
+    let aHoldFired = false;
+    const originalPut = env.ROUTING.put.bind(env.ROUTING);
+    vi.spyOn(env.ROUTING, 'put').mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (key: string, value: any, options?: any) => {
+        if (!aHoldFired && key === project.slug) {
+          aHoldFired = true;
+          holdFired?.();
+          await aHold;
         }
-        return realPublish(database, projectId, deploymentId, publish);
-      });
+        return originalPut(key, value, options);
+      },
+    );
 
-    // Both rollbacks carry non-empty destructive diffs (A→B drops m3; B→C drops
-    // m2), so echo each exact diff via `allowDestructive`.
+    // Kick rollback A to B. It takes the row lock, re-reads, commits the
+    // pg flip (active=B), then hits ROUTING.put(slug) and pauses inside
+    // the spy while still holding the lock.
+    //
+    // Both rollbacks in this scenario carry non-empty diffs (A→B drops m3;
+    // B→C drops m2) so the destructive guard would reject them without an
+    // opt-in. The invariant here (lock serialization between concurrent
+    // rollbacks) is orthogonal, so echo each rollback's exact diff via
+    // `allowDestructive`.
     const rollbackAPromise = app.fetch(
       authedReq(`/projects/${project.id}/rollback`, user.jwt, {
         method: 'POST',
@@ -4595,152 +4560,65 @@ describe('POST /projects/:id/migrations/rename', () => {
       }),
       env,
     );
-    // A committed (active=B) and is now parked at its publisher barrier.
-    await aReachedPublish;
+    await aReachedPut;
 
-    // Run rollback B→C to full completion while A is parked: take the lock,
-    // commit active=C, publish C's routing (real helper → 'published'), mark C.
-    const resB = await app.fetch(
+    // Kick rollback B to C. It enters the tx callback and blocks on the
+    // per-project row lock — A still holds it. (On PGlite this is also
+    // enforced by the underlying single-connection serialization, a safe
+    // upper bound for this test.)
+    const rollbackBPromise = app.fetch(
       authedReq(`/projects/${project.id}/rollback`, user.jwt, {
         method: 'POST',
         body: JSON.stringify({ deploymentId: depC.id, allowDestructive: ['m2.sql'] }),
       }),
       env,
     );
+
+    // Give B's request time to reach its tx/lock acquisition and
+    // actually be blocked. We cannot poll pg to confirm this — a
+    // `SELECT` through env.db would itself block on the single
+    // PGlite connection that A's tx still holds — so we use a small
+    // sleep. Release A afterward.
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Release A. It commits the tx (pg active=B, ROUTING=B, etc),
+    // then B acquires the lock and flips pg active=C, ROUTING=C.
+    releaseA();
+    const [resA, resB] = await Promise.all([rollbackAPromise, rollbackBPromise]);
+    expect(resA.status).toBe(200);
     expect(resB.status).toBe(200);
 
-    // Release A. Its parked publisher now runs the REAL helper, which takes the
-    // lock, re-reads active=C != depB → returns 'superseded': NO slug write, NO
-    // queue sweep, NO mark.
-    releaseA();
-    const resA = await rollbackAPromise;
-    expect(resA.status).toBe(200);
-    publishSpy.mockRestore();
-
-    const bodyA = (await resA.json()) as { deploymentId: string; migrationDiff: Array<string> };
-    const bodyB = (await resB.json()) as { deploymentId: string; migrationDiff: Array<string> };
-    // A: current A[m1,m2,m3] → target B[m1,m2] → diff=[m3].
+    const bodyA = (await resA.json()) as {
+      ok: boolean;
+      deploymentId: string;
+      migrationDiff: Array<string>;
+    };
+    const bodyB = (await resB.json()) as {
+      ok: boolean;
+      deploymentId: string;
+      migrationDiff: Array<string>;
+    };
+    // A: current was A[m1,m2,m3], target B[m1,m2] → diff=[m3]
     expect(bodyA.deploymentId).toBe(depB.id);
     expect(bodyA.migrationDiff).toEqual(['m3.sql']);
-    // B: current B[m1,m2] (post-A-commit) → target C[m1] → diff=[m2].
+    // B: current was B[m1,m2] (post-A's-commit), target C[m1] → diff=[m2]
     expect(bodyB.deploymentId).toBe(depC.id);
     expect(bodyB.migrationDiff).toEqual(['m2.sql']);
 
-    // pg converged on C (last committer) — the row lock serialized both flips.
+    // Final consistency: pg says active=C AND ROUTING.workerName matches C.
+    // The pg flip happens FIRST inside the lock and external writes follow,
+    // so the serialized order guarantees pg and ROUTING converge on the
+    // same terminal state.
     const finalPg = await env.db.select().from(projects).where(eq(projects.id, project.id));
     expect(finalPg[0]!.active_deployment_id).toBe(depC.id);
 
-    // CONVERGENCE: the published slug route points at the ACTIVE deployment C,
-    // NOT at A's stale target B. A's resumed publish was superseded → it did not
-    // clobber. (Under the OLD lock-free unconditional publish this asserted B.)
     const finalRouting = (await env.ROUTING.get(project.slug, 'json')) as {
       workerName: string;
       version: string;
     };
+    // `version` in the routing json holds the deployment id.
     expect(finalRouting.version).toBe(depC.id);
-    expect(finalRouting.version).not.toBe(depB.id);
     expect(finalRouting.workerName).toBe(`user-r13f1-rb-rb-${depC.id}`);
-
-    // C is the active deployment and is marked routing_published (B published +
-    // marked it under the lock); the active row is healable/converged.
-    const [cRow] = await env.db
-      .select({ routing_published: deployments.routing_published })
-      .from(deployments)
-      .where(eq(deployments.id, depC.id));
-    expect(cRow?.routing_published).toBe(true);
-    // A's stale target B is NOT marked published (its publish was superseded).
-    const [bRow] = await env.db
-      .select({ routing_published: deployments.routing_published })
-      .from(deployments)
-      .where(eq(deployments.id, depB.id));
-    expect(bRow?.routing_published ?? null).not.toBe(true);
-
-    // A's stale publish did NOT delete C's queue route: qC (only C binds) still
-    // points at C's worker. Under the OLD code A's resumed sweep would have
-    // deleted qC (B does not bind it), breaking C's queue delivery.
-    const qcEntry = (await env.ROUTING.get(queueKey('qC'), 'json')) as {
-      workerName: string;
-      queueName: string;
-    } | null;
-    expect(qcEntry).not.toBeNull();
-    expect(qcEntry!.workerName).toBe(`user-r13f1-rb-rb-${depC.id}`);
-    expect(qcEntry!.queueName).toBe('qC');
-  });
-
-  it('rollback to a STATIC target sweeps the pre-rollback WfP deployment queue route', async () => {
-    // F16 DISCRIMINATOR. The current active is a WfP deployment binding queue qX
-    // (its `queue:<pid>-qx` route is live in KV). The rollback TARGET is a STATIC
-    // deployment — it binds no queues and has no consumer worker, so EVERY
-    // `queue:<pid>-` route is dead after the flip. The OLD code wrapped the sweep
-    // inside `if (!isStaticDeployment)`, so a static target never swept and the
-    // stale qX route survived (dispatch kept relaying qX batches to the evicted
-    // WfP worker, and `routing_published=true` hid it from the reconciler). The
-    // fix runs the sweep UNCONDITIONALLY with an empty expected set for static.
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'r16f1-static-sweep');
-    const queueKey = (name: string): string =>
-      `queue:${`${project.id}-${name}`.toLowerCase().replaceAll('_', '-')}`;
-
-    // Current active WfP deployment binding qX (created `live` → becomes active).
-    const wfpActive = await createTestDeployment(env.db, project.id, 'live');
-    await env.db
-      .update(deployments)
-      .set({
-        applied_migrations: JSON.stringify([]),
-        retained: true,
-        manifest: JSON.stringify({
-          version: 4,
-          type: 'void',
-          queues: [{ name: 'qX', bindingName: 'QX' }],
-        }),
-      })
-      .where(eq(deployments.id, wfpActive.id));
-
-    // Retained STATIC target (no queues, no migrations → empty rollback diff).
-    const staticTarget = await createTestDeployment(env.db, project.id, 'failed');
-    await env.db
-      .update(deployments)
-      .set({
-        applied_migrations: JSON.stringify([]),
-        retained: true,
-        manifest: JSON.stringify({ version: 4, type: 'static' }),
-      })
-      .where(eq(deployments.id, staticTarget.id));
-
-    // The pre-rollback WfP deployment's qX route is live in KV (written when it
-    // went live). The static rollback must delete it.
-    await env.ROUTING.put(
-      queueKey('qX'),
-      JSON.stringify({
-        workerName: `user-r16f1-static-sweep-${wfpActive.id}`,
-        projectId: project.id,
-        queueName: 'qX',
-        proxyToken: 'mock-proxy-token',
-      }),
-    );
-    expect(await env.ROUTING.get(queueKey('qX'))).not.toBeNull();
-    mockCfApi();
-
-    const res = await app.fetch(
-      authedReq(`/projects/${project.id}/rollback`, user.jwt, {
-        method: 'POST',
-        body: JSON.stringify({ deploymentId: staticTarget.id }),
-      }),
-      env,
-    );
-    expect(res.status).toBe(200);
-
-    // pg flipped to the static target...
-    const finalPg = await env.db.select().from(projects).where(eq(projects.id, project.id));
-    expect(finalPg[0]!.active_deployment_id).toBe(staticTarget.id);
-    // ...the slug now serves static routing...
-    const finalRouting = (await env.ROUTING.get(project.slug, 'json')) as {
-      staticDeploymentId: string;
-    };
-    expect(finalRouting.staticDeploymentId).toBe(staticTarget.id);
-    // ...and the dead qX queue route is SWEPT (the discriminator: survives without
-    // the fix because the sweep was gated behind `if (!isStaticDeployment)`).
-    expect(await env.ROUTING.get(queueKey('qX'))).toBeNull();
   });
 
   it('rollback target.applied_migrations is re-read inside the row lock so /rename cannot stale the diff', async () => {
@@ -5088,26 +4966,27 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(doCalls[0]!.method).toBe('POST');
   });
 
-  it('rollback queue sweep deletes every KV route not in the target manifest, including historical orphans', async () => {
-    // Under the routing-after-tx model the sweep does NOT union any
-    // deployment manifests. It LISTs the project's live `queue:<projectId>-`
-    // KV keys and deletes every one NOT in the rollback target's own
-    // manifest. A `queue:` route only ever lands in KV after a deployment
-    // goes live (publish runs post-go-live), so any route the LIST finds
-    // belongs to a deployment that already cut over — deleting the ones the
-    // target does not bind is exactly the orphan reclaim we want. There is no
-    // need to enumerate historic manifests or the resources table.
+  it('rollback queue sweep unions manifests from activated deployments and deletes historical orphans', async () => {
+    // Rollback's queue sweep candidate set is the union of queue names
+    // across all deployments that have ever been live
+    // (`deployed_at IS NOT NULL`). Simple current-vs-target manifest diff
+    // would miss queue routes left behind by even older deployments whose
+    // manifests are no longer referenced by either side. Enumerating the
+    // pg `resources` table would race a mid-provisioning deploy (resources
+    // rows are written before the deployment reaches live). The
+    // deployed_at union catches historical orphans without falling for any
+    // in-flight deploy.
     //
-    // Scenario: previously-live C left q1 in KV, currentActive A left q2 in
-    // KV, rollback A→B with B binding q3. The sweep must delete BOTH q1 (a
-    // historical orphan) and q2 (the old active's queue) — neither is in B.
+    // Scenario: retained-but-previously-live C bound q1, currentActive A
+    // bound q2, rollback A→B with B binding q3. The sweep must delete q1's
+    // orphan route even though neither A nor B mentions it.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'r15f1-queue-orphan');
     await insertD1Resource(env.db, project.id);
 
-    // q1's KV route was written by deploy C when it went live; C is now a
-    // retained-but-superseded deployment. The sweep finds q1 by LISTing KV,
-    // not by reading C's manifest.
+    // Queue names come from deployment manifests, not the resources
+    // table. q1 must be attached to a deployment that was once `live`
+    // (deploy C) so the manifest-union sweep can discover it.
     const depC = await createTestDeployment(env.db, project.id, 'live');
     await env.db
       .update(deployments)
@@ -5122,9 +5001,9 @@ describe('POST /projects/:id/migrations/rename', () => {
       })
       .where(eq(deployments.id, depC.id));
 
-    // currentActive A's manifest only lists q2 — q1 is an orphan left in KV
-    // by older deploy C. The sweep catches q1 by LISTing KV (it points at no
-    // longer-served worker), independent of any manifest.
+    // currentActive A's manifest only lists q2 — q1 is an orphan from
+    // older deploy C (C was live at some point, so its manifest shows
+    // up in the union; that's what the sweep uses to catch q1).
     const depA = await createTestDeployment(env.db, project.id, 'live');
     await env.db
       .update(deployments)
@@ -5195,34 +5074,25 @@ describe('POST /projects/:id/migrations/rename', () => {
     const q2Entry = await env.ROUTING.get(queueKey('q2'));
     expect(q2Entry).toBeNull();
 
-    // q1 — orphan left in KV by a historical deploy (C). Neither A's nor B's
-    // manifest mentions it; the LIST-based sweep finds q1 in KV and, since it
-    // is not in target B's manifest, reclaims it. Load-bearing assertion for
-    // the manifest-free LIST sweep.
+    // q1 — orphan from a historical deploy (C). Neither A's nor B's
+    // manifest mentions it, but C's manifest joins the union via
+    // `deployed_at IS NOT NULL`, so q1's KV route is reclaimed.
+    // Load-bearing assertion for the manifest-union sweep.
     const q1Entry = await env.ROUTING.get(queueKey('q1'));
     expect(q1Entry).toBeNull();
   });
 
-  it('rollback queue sweep deletes KV routes not in the target manifest even for in-flight deploys', async () => {
-    // Under the routing-after-tx model an in-flight deploy NEVER writes its
-    // `queue:` route to KV before going live — publish closures run only
-    // post-go-live. So a `queue:` route in KV at sweep time can only belong
-    // to a deployment that already cut over, and the sweep deletes every
-    // route not in the rollback target's manifest.
+  it('rollback queue sweep preserves queues owned by in-flight deploys', async () => {
+    // The sweep's candidate set unions manifests from deployments with
+    // `deployed_at IS NOT NULL`. An in-flight deploy D has
+    // `deployed_at = null` until its `setActiveDeployment` commits, so
+    // its manifest is excluded and its pre-staged KV writes survive —
+    // otherwise a concurrent rollback would nuke q4's KV route mid-deploy
+    // and break D's cutover once it finishes.
     //
-    // The OLD union-based sweep tried to "preserve" an in-flight deploy's
-    // route. That defended a state the routing-after-tx model cannot produce
-    // (in-flight D's route is not in KV yet). This test pins the corrected
-    // behavior: even if a route attributable to in-flight D were somehow
-    // present in KV, the sweep DELETES it because B does not bind it. This is
-    // harmless — D republishes its own queue route when it goes live, so the
-    // delete only drops a route D does not yet own.
-    //
-    // Scenario: rollback A→B (B binds q5) with an in-flight D in status
-    // `uploading` whose manifest lists q4 and which has a q4 resources row +
-    // a fabricated q4 KV route. Assert q4's KV route is DELETED, and that the
-    // sweep did NOT consult the resources table (it deletes based on KV+target
-    // manifest alone).
+    // Scenario: rollback A→B with an in-flight D sitting in status
+    // `uploading` that has pre-staged q4 into resources + KV. Assert
+    // q4's KV route survives.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'r16f2-inflight');
     await insertD1Resource(env.db, project.id);
@@ -5255,11 +5125,11 @@ describe('POST /projects/:id/migrations/rename', () => {
       })
       .where(eq(deployments.id, depB.id));
 
-    // In-flight D: status uploading, never reached live. Under
-    // routing-after-tx D has NOT published its q4 route — it will write q4
-    // only when it goes live. We give D a q4 manifest and a resources row to
-    // prove the sweep ignores both (it deletes based on the KV LIST + target
-    // manifest, never the resources table or other deployments' manifests).
+    // In-flight D: status uploading/migrating, never reached live.
+    // `createTestDeployment` only stamps `deployed_at` for status
+    // 'live', so D has `deployed_at = null` — the sweep excludes it
+    // from the candidate set even though its manifest lists q4 and its
+    // resources row exists.
     const depD = await createTestDeployment(env.db, project.id, 'uploading');
     await env.db
       .update(deployments)
@@ -5271,10 +5141,9 @@ describe('POST /projects/:id/migrations/rename', () => {
         }),
       })
       .where(eq(deployments.id, depD.id));
-    // D's q4 resources row, written the way provisioning does before the
-    // cutover. The sweep must NOT consult the resources table — q4 is
-    // deleted because it is not in target B's manifest, not because of this
-    // row.
+    // D pre-staged q4 into the resources table the way provisioning
+    // does before the cutover. A resources-table sweep would see this
+    // row and incorrectly pull q4 into the delete set.
     await env.db.insert(resources).values({
       id: `res_${project.id}_q4`,
       project_id: project.id,
@@ -5288,9 +5157,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       return `queue:${normalized}`;
     };
 
-    // Pre-seed KV: q1 from live A, plus a fabricated q4 route attributed to
-    // in-flight D. (Routing-after-tx means D would not actually have written
-    // q4 yet; we seed it to prove the sweep deletes it regardless.)
+    // Pre-seed KV: q1 from A, q4 from in-flight D.
     const workerA = `user-r16f2-inflight-${depA.id}`;
     const workerD = `user-r16f2-inflight-${depD.id}`;
     await env.ROUTING.put(
@@ -5311,8 +5178,8 @@ describe('POST /projects/:id/migrations/rename', () => {
     );
     expect(rollbackRes.status).toBe(200);
 
-    // q1 — A's queue. In KV from A's go-live; not in target B, so the LIST
-    // sweep deletes it. Expected.
+    // q1 — A's queue. A was live, so the manifest-union sweep sees
+    // q1, it's not in target B, and the delete fires. Expected.
     const q1Entry = await env.ROUTING.get(queueKey('q1'));
     expect(q1Entry).toBeNull();
 
@@ -5320,26 +5187,24 @@ describe('POST /projects/:id/migrations/rename', () => {
     const q5Entry = await env.ROUTING.get(queueKey('q5'));
     expect(q5Entry).not.toBeNull();
 
-    // q4 — attributed to in-flight D. Not in target B's manifest, so the
-    // sweep DELETES it. Correct under routing-after-tx: D never owned q4 in
-    // KV (it had not gone live), and D will republish q4 when it does go
-    // live, so dropping this not-yet-owned route is harmless. The q4
-    // resources row is left untouched (the sweep never reads resources).
-    // Load-bearing assertion for the new model.
+    // q4 — owned by in-flight D. D has `deployed_at = null`, so the
+    // sweep excludes its manifest and the KV route SURVIVES.
+    // Load-bearing assertion for the in-flight exclusion.
     const q4Entry = await env.ROUTING.get(queueKey('q4'));
-    expect(q4Entry).toBeNull();
+    expect(q4Entry).not.toBeNull();
   });
 
-  it('rollback queue sweep reclaims any KV route a terminal-failed deployment left behind', async () => {
-    // Under routing-after-tx the sweep does NOT union deployment manifests by
-    // status. It LISTs the project's `queue:<projectId>-` KV keys and deletes
-    // every one not in the rollback target's manifest. So however a stale
-    // route lands in KV — including a route attributable to a terminal-failed
-    // deployment — it is reclaimed as long as the target does not bind it.
+  it('rollback queue sweep reclaims KV routes from terminal-failed deployments', async () => {
+    // The sweep's candidate set unions `getActivatedDeployments` with
+    // `getTerminalFailedDeployments` (status in failed/canceled with
+    // `deployed_at = null`) — defense in depth to reclaim queue KV routes
+    // left behind by a deploy that wrote routes at step 2b (queue_setup)
+    // and failed later without its eager cleanup firing. The deploy-side
+    // cleanup is still the primary reclaim path.
     //
-    // Scenario: currentActive A binds q1, target B binds q2, terminal-failed
-    // C has a `queue:<q3>` route in KV. Rollback A→B must reclaim q3's KV
-    // route purely via the LIST sweep (no manifest union, no status filter).
+    // Scenario: currentActive A binds q1, target B binds q2, terminal-
+    // failed C (never reached live) bound q3 and pre-seeded `queue:<q3>`
+    // in KV. Rollback A→B must reclaim q3's KV route via the union.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'r17f1-terminal-failed');
     await insertD1Resource(env.db, project.id);
@@ -5374,10 +5239,10 @@ describe('POST /projects/:id/migrations/rename', () => {
       })
       .where(eq(deployments.id, depB.id));
 
-    // Terminal-failed deploy C: status=failed, `deployed_at=null`, manifest
-    // lists q3. Its q3 KV route stands in for any stale route left in KV that
-    // the target no longer binds. The sweep reclaims it by LIST, regardless
-    // of C's status or manifest.
+    // Terminal-failed deploy C: status=failed, `deployed_at=null`,
+    // manifest lists q3. This simulates a deploy that wrote its queue
+    // KV routes at step 2b and then failed at a later step without its
+    // eager cleanup running.
     const depC = await createTestDeployment(env.db, project.id, 'failed');
     await env.db
       .update(deployments)
@@ -5417,29 +5282,28 @@ describe('POST /projects/:id/migrations/rename', () => {
     );
     expect(rollbackRes.status).toBe(200);
 
-    // q1 — A's queue, in KV but not in target B. Swept by the LIST sweep.
+    // q1 — A's queue. Expected to be swept (A was activated, not in target).
     expect(await env.ROUTING.get(queueKey('q1'))).toBeNull();
 
     // q2 — B's queue. Rollback's cutover rewrites this.
     expect(await env.ROUTING.get(queueKey('q2'))).not.toBeNull();
 
-    // q3 — stale route attributable to terminal-failed C. Not in target B's
-    // manifest, so the LIST sweep reclaims it. Load-bearing assertion.
+    // q3 — orphan from terminal-failed C. C joins the union via
+    // `getTerminalFailedDeployments` and q3's KV route is reclaimed.
+    // Load-bearing assertion.
     expect(await env.ROUTING.get(queueKey('q3'))).toBeNull();
   });
 
-  it('rollback queue sweep deletes an in-flight deploy KV route alongside a terminal-failed orphan', async () => {
-    // Companion to the terminal-failed reclaim test, pinning that the LIST
-    // sweep treats an in-flight deploy's route the same as any other: if it
-    // is in KV and not in the target manifest, it is deleted. There is no
-    // status-based union to "exclude" in-flight deploys anymore, because
-    // under routing-after-tx an in-flight deploy has not written its route
-    // yet — and when it goes live it republishes its own route, so deleting a
-    // route attributed to it here is harmless.
+  it('rollback queue sweep preserves in-flight deploys even when terminal-failed are unioned in', async () => {
+    // The terminal-failed union MUST NOT regress the in-flight exclusion.
+    // `getTerminalFailedDeployments` filters `status IN (failed, canceled)`,
+    // so an in-flight deploy D with status `uploading` (or pending/
+    // migrating/etc.) stays out of the candidate set and its KV writes
+    // survive.
     //
     // Scenario: currentActive A binds q1, target B binds q2, in-flight D
-    // (status=uploading) has a fabricated q4 KV route. Rollback A→B DELETES
-    // q4 (not in B's manifest).
+    // (status=uploading, `deployed_at=null`) binds q4 and has pre-seeded
+    // its KV route. Rollback A→B must NOT touch q4.
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'r17f1-inflight-negative');
     await insertD1Resource(env.db, project.id);
@@ -5472,9 +5336,9 @@ describe('POST /projects/:id/migrations/rename', () => {
       })
       .where(eq(deployments.id, depB.id));
 
-    // In-flight D: status=uploading, `deployed_at=null`. Manifest lists q4,
-    // but under routing-after-tx D has not published q4's route yet. We give
-    // it a fabricated q4 KV route below to prove the sweep deletes it.
+    // In-flight D: status=uploading, `deployed_at=null`. Not in the
+    // terminal-failed set (status filter), not in the activated set
+    // (deployed_at filter). Manifest lists q4.
     const depD = await createTestDeployment(env.db, project.id, 'uploading');
     await env.db
       .update(deployments)
@@ -5515,11 +5379,9 @@ describe('POST /projects/:id/migrations/rename', () => {
     // q1 — A's queue, swept as expected.
     expect(await env.ROUTING.get(queueKey('q1'))).toBeNull();
 
-    // q4 — route attributed to in-flight D. Not in target B's manifest, so
-    // the LIST sweep DELETES it. Correct under routing-after-tx: D never
-    // owned q4 in KV and republishes it on go-live, so the delete is
-    // harmless.
-    expect(await env.ROUTING.get(queueKey('q4'))).toBeNull();
+    // q4 — in-flight D's queue. Neither activated nor terminal-failed,
+    // so excluded from the sweep candidate set. MUST survive.
+    expect(await env.ROUTING.get(queueKey('q4'))).not.toBeNull();
   });
 
   it('rollback leaves deployment-scoped ISR caches untouched', async () => {

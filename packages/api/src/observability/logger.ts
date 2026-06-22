@@ -18,7 +18,7 @@ export type DeployLogContext = Readonly<{
   userId?: string;
   deploymentId?: string;
   branch?: 'wfp' | 'static' | null;
-  published?: boolean;
+  routingSwitched?: boolean;
 }>;
 
 export type DeployLogger = Readonly<{

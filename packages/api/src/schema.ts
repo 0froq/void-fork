@@ -122,13 +122,6 @@ export const deployments = pgTable(
     retained: boolean('retained').notNull().default(false),
     applied_migrations: text('applied_migrations'),
     bundle_stored: boolean('bundle_stored').notNull().default(false),
-    // Durable marker set once ALL post-go-live routing KV keys (slug, account,
-    // active domains, queues, asset-fallback metadata) have been published. The
-    // hourly `reconcileLiveRouting` safety net uses this as its sole health
-    // predicate: NULL/false rows are republished byte-identically until the
-    // mark flips true. Nullable, no default — pre-existing rows read as NULL
-    // and qualify for a one-time backfill within the recency window.
-    routing_published: boolean('routing_published'),
   },
   (table) => [
     index('idx_deployments_project_id').on(table.project_id, table.created_at),

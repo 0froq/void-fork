@@ -130,11 +130,6 @@ jobs:
       - run: vp run build
         working-directory: framework
       - run: vp install --frozen-lockfile
-      # Phase 1 ran the PR branch's vite-plus, which may have written a task
-      # cache the prod branch's older vite-plus cannot read ("Unrecognized
-      # database version"). The checkout above keeps untracked state, so drop
-      # the cache before building with the prod toolchain.
-      - run: vp cache clean
       - run: mkdir -p packages/dashboard/.void && echo '{"files":[]}' > packages/dashboard/.void/tsconfig.json
       - run: vp run build
       - run: vp run test

@@ -8,17 +8,13 @@ import adminProjects from './admin/routes/projects.tsx';
 import adminSignupControl from './admin/routes/signup-control.tsx';
 import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
 import adminUsers from './admin/routes/users.tsx';
-import { hmacSignState } from './auth/hmac.ts';
-import { DEFAULT_DISPATCH_NAMESPACE } from './constants.ts';
 import { type CronFireMessage, processCronFiresBatch } from './cron-fires-queue.ts';
 import { CronScheduler } from './cron-scheduler.ts';
 import {
   createDb,
   getUsersWithProjectsBatch,
   unsuspendUserIfReason,
-  getDomainsByProjectId,
   getDomainsByProjectIds,
-  getRecentlyLiveActiveDeployments,
   getPendingDomainsOlderThan,
   getPendingDomains,
   getPendingDomainsNewerThan,
@@ -29,21 +25,17 @@ import {
   getProject,
   getProjectsByIds,
   getUsersByIds,
-  lockProjectAndGetActiveDeploymentId,
-  publishRoutingIfStillActive,
   type Db,
 } from './db.ts';
 import { escapeHtml } from './email.ts';
 import type { ApiEnv } from './env.ts';
 import { ErrorAlertMonitor } from './error-alert-monitor.ts';
 import { authMiddleware } from './middleware/auth.ts';
-import { getProjectDeploymentWorkerName, getProjectQueueName } from './naming.ts';
 import { tryActivateDomain } from './provisioning/activate-domain.ts';
 import {
   CloudflareApiError,
   deleteCustomHostname,
   getCustomHostname,
-  getDispatchWorkerProxyToken,
 } from './provisioning/cloudflare-api.ts';
 import auth from './routes/auth.ts';
 import deleteRoute from './routes/delete.ts';
@@ -58,18 +50,11 @@ import projects from './routes/projects.ts';
 import revalidate from './routes/revalidate.ts';
 import secrets from './routes/secrets.ts';
 import { projectUsage, accountUsage } from './routes/usage.ts';
-import {
-  applyCurrentSuspension,
-  buildRoutingJson,
-  buildStaticRoutingJson,
-  setProjectsRoutingSuspension,
-  sweepStaleQueueRoutes,
-  writeProjectAccountEntry,
-} from './routing.ts';
+import { setProjectsRoutingSuspension } from './routing.ts';
 import { SandboxConcurrencyCounter } from './sandbox-concurrency-counter.ts';
 import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
-import type { DeployManifest, Domain, Project } from './types.ts';
+import type { Domain, Project } from './types.ts';
 import { UsageCounter } from './usage-counter.ts';
 import { processUsageEventBatch } from './usage-queue.ts';
 
@@ -173,25 +158,6 @@ export const FAST_CRON = '*/2 * * * *';
 
 const MAX_PENDING_RECONCILE_PER_RUN = 200; // bound CF polling + protect later maintenance; tunable
 
-// Recency window for the hourly live-routing reconciler: legacy NULL-marker
-// active deployments are re-checked only if they went live within the last
-// 24h. Bounds the one-time NULL backfill — a deploy whose routing-KV publish
-// was lost (transient KV error after the go-live tx committed, all in-request
-// retries exhausted) leaves a missing/stale slug route, and on a FIRST deploy
-// the project is unreachable (dispatch routes purely from ROUTING KV). The
-// window is wide enough that an hourly tick always re-checks a freshly-live
-// deploy several times before it ages out, but narrow enough that the
-// steady-state scan stays small. Explicitly-unpublished rows
-// (`routing_published=false`, written only by the rollback go-live tx) are
-// EXEMPT from the window — a rollback target is usually older than 24h and
-// would otherwise stay invisible to the reconciler forever (see
-// `getRecentlyLiveActiveDeployments`).
-const RECONCILE_LIVE_ROUTING_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-// Bound the per-run reconcile scan + KV reads/writes; tunable. Reuses the same
-// cap style as MAX_PENDING_RECONCILE_PER_RUN.
-const MAX_LIVE_ROUTING_RECONCILE_PER_RUN = 200;
-
 async function scheduled(
   controller: ScheduledController,
   env: ApiEnv['Bindings'],
@@ -229,13 +195,6 @@ async function scheduled(
       }
     })
     .catch((err) => console.error('[scheduled] failed to clean up stale deployments:', err));
-
-  // Republish slug/account/domain routing for recently-live deployments whose
-  // ROUTING KV is missing or stale. Best-effort and isolated like the reapers
-  // around it — one failure must not block the rest of the hourly maintenance.
-  await reconcileLiveRouting(env, db, controller.scheduledTime).catch((err) =>
-    console.error('[scheduled] live-routing reconcile failed:', err),
-  );
 
   // Purge expired OAuth nonces and auth codes left by abandoned login flows (best-effort)
   await purgeExpiredOAuthNonces(db).catch((err) =>
@@ -362,333 +321,6 @@ async function reconcilePendingDomains(
     console.log(
       '[scheduled] auto-activated ' + activated + '/' + pending.length + ' pending domain(s)',
     );
-  }
-}
-
-// Resolve the `proxyToken` to write into a `queue:<name>` route for the
-// CURRENT active worker, mirroring `resolveRollbackProxyToken` in
-// `routes/projects.ts` (which we do NOT import — the low-level
-// `getDispatchWorkerProxyToken` is called directly here to keep the same
-// semantics without a cross-route dependency).
-//
-// The user worker validates the queue token by EXACT string-compare against its
-// own baked `__VOID_PROXY_TOKEN` binding, frozen at the worker's deploy time. A
-// blind `hmacSignState(projectId, JWT_SECRET)` recompute would mismatch — and
-// 401 the worker into an infinite `batch.retryAll()` — if `JWT_SECRET` rotated
-// after that deploy. So:
-//   - `found`   → use the baked token as-is.
-//   - `missing` → legacy worker with no baked binding; re-derive from the
-//                 current secret with a WARNING (safe only if the secret has not
-//                 rotated since this deploy — matches resolveRollbackProxyToken).
-//   - `error`   → transient CF failure; THROW so the caller's tx aborts and the
-//                 row is left UNMARKED (retried next run). Never write a guessed
-//                 token that would 401 the worker indefinitely.
-async function resolveQueueProxyToken(
-  env: ApiEnv['Bindings'],
-  workerName: string,
-  projectId: string,
-): Promise<string> {
-  const dispatchNamespace = env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
-  const lookup = await getDispatchWorkerProxyToken(
-    env.CF_ACCOUNT_ID,
-    env.CF_API_TOKEN,
-    dispatchNamespace,
-    workerName,
-  );
-  if (lookup.kind === 'found') {
-    return lookup.token;
-  }
-  if (lookup.kind === 'error') {
-    throw new Error(
-      `live-routing reconcile: could not read __VOID_PROXY_TOKEN from worker "${workerName}": ${lookup.error.message}`,
-    );
-  }
-  // lookup.kind === 'missing' — legacy worker.
-  console.warn(
-    `[scheduled] live-routing reconcile: worker "${workerName}" has no __VOID_PROXY_TOKEN binding; falling back to current-secret derivation. If JWT_SECRET has rotated since this deployment was live, you must redeploy the project instead.`,
-  );
-  return hmacSignState(projectId, env.JWT_SECRET);
-}
-
-// Republish ALL post-go-live routing KV for active deployments that are NOT
-// yet marked `routing_published`. Closes a gap left by the
-// routing-after-tx reorder: a deploy can commit live (DB `active_deployment_id`
-// flipped) yet fail to publish routing KV after the in-request retries are
-// exhausted (e.g. a transient KV error). The slug is the FIRST key written, so
-// inferring health from the slug entry alone would leave a
-// slug-success-but-later-key-failure (account/domain/queue/asset metadata)
-// unhealed forever. The durable `routing_published` marker — set only on a FULL
-// publish success — is the sole health predicate instead. On a FIRST deploy a
-// missing slug also leaves the project UNREACHABLE (dispatch routes purely from
-// ROUTING KV and never reads `active_deployment_id` for traffic).
-//
-// Every selected row gets an UNCONDITIONAL full rebuild — slug, account, every
-// active domain, queue consumers, and the WfP asset-fallback metadata — written
-// byte-identically to the deploy path, then the marker is set so the row
-// converges (next run filters it out by the query). Pre-existing NULL-marker
-// rows are backfilled once within the recency window.
-//
-// CONCURRENCY (the stale-snapshot clobber). The query SELECTs a snapshot of
-// active deployments once, then heals each row from that snapshot. A concurrent
-// deploy can commit + flip `active_deployment_id` to a NEWER deployment between
-// the SELECT and a row's KV writes; replaying the OLD snapshot's routing would
-// clobber the newer live deployment's slug/domain routes (dispatch routes purely
-// from these KV values) and stamp the stale row published so it never repairs.
-// To stay symmetric with the deploy go-live tx (which takes `SELECT id FROM
-// projects ... FOR UPDATE`, commits the pointer flip, THEN publishes routing
-// lock-free), each row's heal runs inside a tx that takes the SAME project-row
-// `FOR UPDATE` lock and RE-READS `active_deployment_id`. The KV puts + marker run
-// ONLY if it still equals the snapshot's `deploymentId`; otherwise the row is
-// SKIPPED (a newer deploy owns routing and has/will publish it, and the stale row
-// self-excludes from the next query since it is no longer the active deployment).
-// The lock is held across the KV puts + the mark so a concurrent deploy's FOR
-// UPDATE serializes behind it. After the matching re-read the snapshot's
-// manifest/slug/assetHashes are still valid (same deployment ⇒ same data), so no
-// re-fetch is needed. The reconciler never writes anything but the CURRENT active
-// deployment's routing (or nothing) — it introduces no pre-commit routing write
-// (there is no deploy tx here; it is a lock + re-check around idempotent KV
-// overwrites).
-//
-// Queue routes ARE reconciled here. A `queue:<name>` route embeds a `proxyToken`
-// that the user worker validates by EXACT string-compare against its own baked
-// `__VOID_PROXY_TOKEN` binding, frozen at the worker's deploy time. Recomputing
-// `hmacSignState(projectId, JWT_SECRET)` would mismatch (→ worker 401 →
-// `retryAll()` forever) if `JWT_SECRET` rotated after that deploy, so the token
-// is sourced from the worker's BAKED binding via `getDispatchWorkerProxyToken`,
-// mirroring `resolveRollbackProxyToken` (found → baked; missing → warned legacy
-// re-derivation; error → leave the row unmarked to retry, never guess). Healing
-// slug+account+domain also transitively unblocks a stuck custom domain via the
-// existing `reconcilePendingDomains` activation gate (which requires live slug
-// routing).
-async function reconcileLiveRouting(
-  env: ApiEnv['Bindings'],
-  db: Db,
-  scheduledTime: number,
-): Promise<void> {
-  const nowMs = Number.isFinite(scheduledTime) ? scheduledTime : Date.now();
-  const sinceIso = new Date(nowMs - RECONCILE_LIVE_ROUTING_WINDOW_MS).toISOString();
-  const rows = await getRecentlyLiveActiveDeployments(
-    db,
-    sinceIso,
-    MAX_LIVE_ROUTING_RECONCILE_PER_RUN,
-  );
-  if (rows.length === 0) {
-    return;
-  }
-  if (rows.length === MAX_LIVE_ROUTING_RECONCILE_PER_RUN) {
-    console.warn(
-      `[scheduled] live-routing reconcile hit the per-run cap (${MAX_LIVE_ROUTING_RECONCILE_PER_RUN}); remaining recently-live deployments will be processed on the next run`,
-    );
-  }
-
-  // Batch-load owners for the deduped user set so we can derive each project's
-  // plan (dispatch limits + the account entry's `plan`) without a per-row query.
-  const ownerIds = [...new Set(rows.map((r) => r.userId))];
-  const owners = await getUsersByIds(db, ownerIds);
-  const planByUserId = new Map(owners.map((u) => [u.id, u.plan]));
-
-  // F5: per-run cap-starvation risk is accepted/deferred. Rows whose pointer
-  // moved are SKIPPED and self-exclude from the next query (no longer active), so
-  // they do not accumulate. The only rows that can stay persistently unmarked are
-  // genuinely-unhealable active ones — in practice just the persistent-queue-token
-  // -error class (a per-worker CF fault while resolving the baked token in F2),
-  // which is bounded per worker, not fleet-wide. A >200 simultaneous backlog of
-  // such rows is not a credible operational state, so no schema column is added to
-  // bound it; the oldest-first ordering + recency window keep the residual benign.
-  // The cap-warning log above is the operational signal: if a real backlog is ever
-  // observed, the minimal fix is raising MAX_LIVE_ROUTING_RECONCILE_PER_RUN (a
-  // constant, no schema). Every per-row failure/skip is logged and never aborts the
-  // batch.
-  let healed = 0;
-  for (const row of rows) {
-    try {
-      // The `routing_published` marker (via the query filter) already selected
-      // only genuinely-unpublished rows, so there is no fast-path skip — every
-      // row gets an UNCONDITIONAL full rebuild. Read the existing slug entry only
-      // to preserve any `suspended` marker (parity with the deploy path, which
-      // carries `existingEntry?.suspended` forward). This KV read is lock-free
-      // and outside the per-row tx — it does not need the project lock and keeps
-      // the FOR UPDATE window tight.
-      const raw = await env.ROUTING.get(row.slug);
-      const parsed = raw ? JSON.parse(raw) : null;
-
-      // Rebuild the routing JSON exactly as deploy/rollback do from the active
-      // deployment's manifest.
-      const manifest: DeployManifest | null = row.manifest ? JSON.parse(row.manifest) : null;
-      const plan = planByUserId.get(row.userId) ?? 'free';
-      const isStatic = row.type === 'static' || row.type === 'spa';
-
-      let routingJson: string;
-      const workerName = getProjectDeploymentWorkerName(row.slug, row.deploymentId);
-      if (isStatic) {
-        const assetConfig = manifest?.assetConfig ?? {
-          not_found_handling: row.type === 'spa' ? 'single-page-application' : '404-page',
-        };
-        routingJson = buildStaticRoutingJson({
-          projectId: row.projectId,
-          userId: row.userId,
-          deploymentId: row.deploymentId,
-          assetConfig,
-          manifest,
-          suspended: parsed?.suspended,
-        });
-      } else {
-        const planLimits = getPlanLimits(plan);
-        const dispatchLimits =
-          planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
-            ? {
-                ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
-                ...(planLimits.subRequestsPerInvocation > 0
-                  ? { subRequests: planLimits.subRequestsPerInvocation }
-                  : {}),
-              }
-            : null;
-        // WfP asset-fallback metadata. `asset_hashes != null` is the exact proxy
-        // for the deploy path's `assetCount > 0` gate (deploy.ts only writes
-        // `asset_hashes` inside `if (assetCount > 0)`), and `buildRoutingJson`
-        // appends these fields last, so field order stays byte-identical.
-        const hasAssets = row.assetHashes != null;
-        routingJson = buildRoutingJson({
-          workerName,
-          projectId: row.projectId,
-          userId: row.userId,
-          manifest,
-          deploymentId: row.deploymentId,
-          dispatchLimits,
-          suspended: parsed?.suspended,
-          hasCrons: !!manifest?.schedules?.length,
-          assetManifestId: hasAssets ? row.deploymentId : undefined,
-          assetConfig: hasAssets
-            ? (manifest?.assetConfig ?? { not_found_handling: 'none' })
-            : undefined,
-        });
-      }
-
-      // F1: heal under the SAME project-row FOR UPDATE lock the deploy go-live
-      // tx and the primary publishers take, then RE-READ `active_deployment_id`
-      // and proceed ONLY if it still equals this snapshot's deployment. A
-      // concurrent deploy that flipped the pointer between the snapshot SELECT
-      // and now owns routing — replaying the stale snapshot would clobber the
-      // newer live deployment's routes. `publishRoutingIfStillActive` holds the
-      // lock across the KV puts + the mark so a concurrent deploy's FOR UPDATE
-      // serializes behind it (one uniform lock+re-check used by deploy, rollback,
-      // and this reconciler).
-      // The pointer still matches the snapshot ⇒ snapshot data is current.
-      // Idempotent overwrite: slug route, the per-project account entry (the
-      // rollback path omits this — it is covered here), every active custom
-      // domain's route, and (WfP only) the queue routes.
-      const publishRow = async (txDb: Db): Promise<void> => {
-        // RE-READ the current slug entry's `suspended` marker UNDER THE LOCK and
-        // fold it into the rebuilt JSON. `routingJson` was built from a PRE-LOCK
-        // snapshot of `suspended` (read outside the per-row tx); a guarded
-        // suspension (`guardedRoutingKvRmw`) can serialize FIRST and stamp
-        // `suspended` onto the slug route, and writing the stale snapshot here
-        // would drop that marker. The corrected JSON flows into BOTH the slug
-        // write and the domain writes below.
-        const slugJson = await applyCurrentSuspension(env.ROUTING, row.slug, routingJson);
-        await env.ROUTING.put(row.slug, slugJson);
-        await writeProjectAccountEntry(env.ROUTING, row.projectId, row.userId, plan);
-        // Re-read active domains UNDER THE LOCK (via the lock-tx handle), not
-        // from a pre-publish snapshot, so a concurrent domain activate/delete
-        // cannot strand a newly-active domain or recreate a deleted one. Mirrors
-        // the deploy/rollback publishers.
-        const projectDomains = await getDomainsByProjectId(txDb, row.projectId);
-        for (const domain of projectDomains) {
-          if (domain.status === 'active') {
-            await env.ROUTING.put(`domain:${domain.hostname}`, slugJson);
-          }
-        }
-
-        // Queue routes (WfP only). The deploy path writes one `queue:<name>`
-        // entry per manifest queue with the same shape — `getProjectQueueName`
-        // matches the provisioned `queue_name`. F2: the `proxyToken` MUST be the
-        // worker's BAKED `__VOID_PROXY_TOKEN`, which the user worker validates by
-        // exact string-compare. Recomputing `hmacSignState` would 401 the worker
-        // if `JWT_SECRET` rotated after its deploy. Resolve from the worker's
-        // baked binding, mirroring `resolveRollbackProxyToken`'s found/missing/
-        // error handling. Resolve once per row (hoisted out of the queue loop).
-        // EXPECTED queue-route keys for the active manifest. Built from the
-        // same `getProjectQueueName` the deploy/rollback paths use so the key
-        // shape (`queue:<projectId>-<name>` lowercased, `_`→`-`) matches the
-        // provisioned `queue_name` exactly. A static active deployment (or one
-        // that became static via rollback) binds NO queues and has NO consumer
-        // worker, so its expected set is EMPTY — the sweep below drops every
-        // `queue:<projectId>-` route. The queue-route WRITES stay WfP-only
-        // (static targets have no worker to dispatch to).
-        const expectedQueueKeys = new Set<string>();
-        if (!isStatic) {
-          const queues = manifest?.queues ?? [];
-          for (const q of queues) {
-            expectedQueueKeys.add(`queue:${getProjectQueueName(row.projectId, q.name)}`);
-          }
-          if (queues.length > 0) {
-            const proxyToken = await resolveQueueProxyToken(env, workerName, row.projectId);
-            for (const q of queues) {
-              await env.ROUTING.put(
-                `queue:${getProjectQueueName(row.projectId, q.name)}`,
-                JSON.stringify({
-                  workerName,
-                  projectId: row.projectId,
-                  queueName: q.name,
-                  proxyToken,
-                }),
-              );
-            }
-          }
-        }
-        // Delete-sweep (mirrors rollback's post-commit sweep in
-        // `routes/projects.ts`). Rollback's post-commit publish can fail
-        // BEFORE/DURING its own sweep, leaving the active target unmarked with
-        // a stale `queue:<projectId>-<oldName>` route from a previous
-        // deployment still live in KV — dispatch would relay that queue's
-        // batches to the now-evicted worker. The reconciler heals the active
-        // manifest's queues above, but must ALSO drop queue routes the active
-        // deployment no longer binds, or the stale route survives hidden behind
-        // `routing_published=true` (the row never re-selects). Runs
-        // UNCONDITIONALLY — for a static active deployment the expected set is
-        // empty, so every `queue:<projectId>-` route is swept (a static target
-        // binds zero queues). Runs under the same active-pointer lock as the
-        // writes above (inside this guarded publish callback) via the shared
-        // `sweepStaleQueueRoutes`.
-        await sweepStaleQueueRoutes(env.ROUTING, row.projectId, expectedQueueKeys);
-      };
-      // 'superseded' → a newer deploy owns routing (or the project lost this
-      // deployment as active): the stale row self-excludes from the next query.
-      // 'failed' → a put threw; the row stays unmarked and retries next run.
-      const outcome = await publishRoutingIfStillActive(
-        db,
-        row.projectId,
-        row.deploymentId,
-        publishRow,
-      );
-      if (outcome === 'superseded') {
-        console.log(
-          `[scheduled] live-routing reconcile skipped slug ${row.slug}: deployment ${row.deploymentId} is no longer active (a newer deploy owns routing)`,
-        );
-        continue;
-      }
-      if (outcome === 'failed') {
-        // A put threw inside the helper. Mirror the prior per-row failure path:
-        // log and move on (the row stays unmarked → healed next run). Throw so
-        // the surrounding catch logs the project context uniformly.
-        throw new Error(`routing publish failed for slug ${row.slug}`);
-      }
-      healed += 1;
-      console.log(
-        `[scheduled] live-routing reconcile healed slug ${row.slug} -> deployment ${row.deploymentId}`,
-      );
-    } catch (err) {
-      // Per-row isolation: a single bad row (e.g. an unparseable manifest) must
-      // never abort the batch (parity with reconcilePendingDomains).
-      console.error(
-        `[scheduled] failed to reconcile live routing for project ${row.projectId} (slug ${row.slug}):`,
-        err,
-      );
-    }
-  }
-
-  if (healed > 0) {
-    console.log(`[scheduled] live-routing reconcile healed ${healed}/${rows.length} project(s)`);
   }
 }
 
@@ -820,35 +452,10 @@ async function processUserRollover(
         continue;
       }
       const routing = JSON.parse(raw);
-      if (routing.userId) {
-        continue;
+      if (!routing.userId) {
+        routing.userId = user.id;
+        await env.ROUTING.put(project.slug, JSON.stringify(routing));
       }
-      // Lock-guarded RMW: this is a legacy-entry backfill (every current writer
-      // — deploy/rollback/reconciler — already includes `userId`), but read +
-      // write are NOT atomic. A concurrent deploy/rollback publishing a NEW slug
-      // route in the window between the read above and the write would be
-      // clobbered (and since the newer active is `routing_published=true`, the
-      // reconciler — which only heals unpublished rows — never heals it). Take
-      // the SAME project FOR UPDATE lock the publishers take, RE-READ the entry
-      // under the lock, and backfill ONLY if `userId` is STILL absent. A
-      // concurrent publish either committed before this lock (re-read sees its
-      // `userId` → no-op, its route survives) or serializes behind this short
-      // RMW (then overwrites it). The KV put nests no pg write — same shape as
-      // the reconciler's lock + KV publish.
-      await db.transaction(async (tx) => {
-        const txDb = tx as unknown as Db;
-        await lockProjectAndGetActiveDeploymentId(txDb, project.id);
-        const lockedRaw = await env.ROUTING.get(project.slug);
-        if (!lockedRaw) {
-          return;
-        }
-        const lockedRouting = JSON.parse(lockedRaw);
-        if (lockedRouting.userId) {
-          return;
-        }
-        lockedRouting.userId = user.id;
-        await env.ROUTING.put(project.slug, JSON.stringify(lockedRouting));
-      });
     }
 
     // Also backfill domain:* entries — check all projects, not just those that needed
@@ -870,27 +477,10 @@ async function processUserRollover(
             continue;
           }
           const routing = JSON.parse(raw);
-          if (routing.userId) {
-            continue;
+          if (!routing.userId) {
+            routing.userId = user.id;
+            await env.ROUTING.put(`domain:${domain.hostname}`, JSON.stringify(routing));
           }
-          // Lock-guarded RMW — same rationale as the slug backfill above: take
-          // the project FOR UPDATE lock, RE-READ the `domain:*` entry under the
-          // lock, and backfill ONLY if `userId` is STILL absent, so a concurrent
-          // deploy/rollback publishing this domain route is not clobbered.
-          await db.transaction(async (tx) => {
-            const txDb = tx as unknown as Db;
-            await lockProjectAndGetActiveDeploymentId(txDb, projectId);
-            const lockedRaw = await env.ROUTING.get(`domain:${domain.hostname}`);
-            if (!lockedRaw) {
-              return;
-            }
-            const lockedRouting = JSON.parse(lockedRaw);
-            if (lockedRouting.userId) {
-              return;
-            }
-            lockedRouting.userId = user.id;
-            await env.ROUTING.put(`domain:${domain.hostname}`, JSON.stringify(lockedRouting));
-          });
         }
       }
     }

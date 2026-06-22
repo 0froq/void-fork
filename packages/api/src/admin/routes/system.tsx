@@ -168,7 +168,7 @@ adminSystem.get('/health', async (context) => {
 // dispatch started forwarding `x-void-internal`. Idempotent — re-running
 // only touches entries missing a token.
 adminSystem.post('/backfill-queue-tokens', async (context) => {
-  const result = await backfillQueueTokens(context.env.ROUTING, context.get('db'), {
+  const result = await backfillQueueTokens(context.env.ROUTING, {
     accountId: context.env.CF_ACCOUNT_ID,
     apiToken: context.env.CF_API_TOKEN,
     dispatchNamespace: context.env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE,

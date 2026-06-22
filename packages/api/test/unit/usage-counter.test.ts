@@ -13,12 +13,7 @@ const dbCalls = {
   unsuspendIfReason: [] as Array<{ id: string; reason: string }>,
 };
 vi.mock('../../src/db.ts', () => ({
-  // `setProjectsRoutingSuspension` now runs its fan-out inside a per-project
-  // `FOR UPDATE` lock-tx, so the sentinel must support `db.transaction(cb)`.
-  createDb: () => ({
-    __mock: 'db',
-    transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb({ __mock: 'tx' }),
-  }),
+  createDb: () => ({ __mock: 'db' }),
   suspendUser: vi.fn(async (_db: unknown, id: string, reason: string) => {
     dbCalls.suspend.push({ id, reason });
   }),
@@ -32,8 +27,6 @@ vi.mock('../../src/db.ts', () => ({
   // project's active domains here. Default to none so request-suspension tests
   // that don't seed domains keep their slug-only behaviour.
   getDomainsByProjectIds: vi.fn(async () => new Map()),
-  // Taken (lock-only) inside the suspension fan-out tx; the value is unused.
-  lockProjectAndGetActiveDeploymentId: vi.fn(async () => null),
 }));
 
 import {

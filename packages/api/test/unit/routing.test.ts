@@ -29,17 +29,6 @@ function createKvStore(initial: Record<string, string> = {}): {
   return { store, puts, kv };
 }
 
-// `setProjectsRoutingSuspension` now runs its fan-out inside a per-project
-// `FOR UPDATE` lock-tx (serializing with publishers). The lock value is unused by
-// suspension; this stub just satisfies `db.transaction(cb)` and the lock query
-// (`lockProjectAndGetActiveDeploymentId` → `tx.execute(SELECT ... FOR UPDATE)`).
-function lockTxStub(): Parameters<typeof setProjectsRoutingSuspension>[1] {
-  const tx = { execute: async () => ({ rows: [{ active_deployment_id: null }] }) };
-  return {
-    transaction: async (cb: (t: unknown) => Promise<unknown>) => cb(tx),
-  } as unknown as Parameters<typeof setProjectsRoutingSuspension>[1];
-}
-
 describe('buildRoutingJson', () => {
   const base = {
     workerName: 'user-app',
@@ -283,7 +272,7 @@ describe('setProjectsRoutingSuspension', () => {
         ],
       ]) as unknown as Awaited<ReturnType<typeof import('../../src/db.ts').getDomainsByProjectIds>>,
     );
-    const db = lockTxStub();
+    const db = {} as Parameters<typeof setProjectsRoutingSuspension>[1];
     await setProjectsRoutingSuspension(kv, db, [{ id: 'proj_a', slug: 'slug-a' }], {
       op: 'suspend',
       reason: 'requests_exceeded',
@@ -306,7 +295,7 @@ describe('setProjectsRoutingSuspension', () => {
         ['proj_a', [{ project_id: 'proj_a', hostname: 'active.com', status: 'active' }]],
       ]) as unknown as Awaited<ReturnType<typeof import('../../src/db.ts').getDomainsByProjectIds>>,
     );
-    const db = lockTxStub();
+    const db = {} as Parameters<typeof setProjectsRoutingSuspension>[1];
     await setProjectsRoutingSuspension(kv, db, [{ id: 'proj_a', slug: 'slug-a' }], {
       op: 'unsuspend',
       matchReason: null,
@@ -326,7 +315,7 @@ describe('setProjectsRoutingSuspension', () => {
         ['proj_a', [{ project_id: 'proj_a', hostname: 'active.com', status: 'active' }]],
       ]) as unknown as Awaited<ReturnType<typeof import('../../src/db.ts').getDomainsByProjectIds>>,
     );
-    const db = lockTxStub();
+    const db = {} as Parameters<typeof setProjectsRoutingSuspension>[1];
     await setProjectsRoutingSuspension(kv, db, [{ id: 'proj_a', slug: 'slug-a' }], {
       op: 'unsuspend',
       matchReason: 'requests_exceeded',
@@ -339,7 +328,7 @@ describe('setProjectsRoutingSuspension', () => {
   it('no-ops without a domains query when given zero projects', async () => {
     const { kv, puts } = createKvStore({});
     const spy = vi.spyOn(await import('../../src/db.ts'), 'getDomainsByProjectIds');
-    const db = lockTxStub();
+    const db = {} as Parameters<typeof setProjectsRoutingSuspension>[1];
     await setProjectsRoutingSuspension(kv, db, [], {
       op: 'suspend',
       reason: 'requests_exceeded',
