@@ -22,7 +22,7 @@ catalogs:
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.1
   vitest: 4.1.9
-  hono: 4.12.26
+  hono: 4.12.18
   void: link:framework/packages/void
   '@void/react': link:framework/packages/react
   '@void/vue': link:framework/packages/vue
@@ -46,6 +46,9 @@ importers:
 
   packages/api:
     dependencies:
+      '@cloudflare/containers':
+        specifier: 0.3.3
+        version: 0.3.3
       '@cloudflare/sandbox':
         specifier: 0.12.1
         version: 0.12.1
@@ -65,8 +68,11 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260617.1)(@electric-sql/pglite@0.5.3)(@types/pg@8.20.0)(pg@8.21.0)
       hono:
-        specifier: 4.12.26
-        version: 4.12.26
+        specifier: 4.12.18
+        version: 4.12.18
+      jose:
+        specifier: 6.2.3
+        version: 6.2.3
       mime:
         specifier: ^4.1.0
         version: 4.1.0
@@ -112,8 +118,8 @@ importers:
         specifier: workspace:*
         version: link:../ui
       hono:
-        specifier: 4.12.26
-        version: 4.12.26
+        specifier: 4.12.18
+        version: 4.12.18
       react:
         specifier: ^19.2.6
         version: 19.2.7
@@ -198,8 +204,8 @@ importers:
         specifier: workspace:*
         version: link:../api
       hono:
-        specifier: 4.12.26
-        version: 4.12.26
+        specifier: 4.12.18
+        version: 4.12.18
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
@@ -308,6 +314,9 @@ packages:
   '@clack/prompts@1.5.1':
     resolution: {integrity: sha512-zccHj2z2oCCO4yrDiRSlFOxWerGqRiysP7a5jPK6uoI9URKAquwY42Dd/iUP8JWHxEzdRe4TlbvZCo8z1/mhrw==}
     engines: {node: '>= 20.12.0'}
+
+  '@cloudflare/containers@0.3.3':
+    resolution: {integrity: sha512-ZSXmArCoo5bVTp8pGAJdl5WKmwtZDcffJqr4JcZEbSmMIFjU+AlBqgysuxXMgu03Rp239cOdqerbjK7H0K2krQ==}
 
   '@cloudflare/containers@0.3.7':
     resolution: {integrity: sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw==}
@@ -2197,13 +2206,16 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  hono@4.12.26:
-    resolution: {integrity: sha512-uyZtpnYxM9CmQ7QsQknM4zN8EftNqhON1qYeIKM0Se67CCEe2c44xyGURwB0axX2fBDu1dqHrHAc1hmNT8ITkw==}
+  hono@4.12.18:
+    resolution: {integrity: sha512-RWzP96k/yv0PQfyXnWjs6zot20TqfpfsNXhOnev8d1InAxubW93L11/oNUc3tQqn2G0bSdAOBpX+2uDFHV7kdQ==}
     engines: {node: '>=16.9.0'}
 
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
+
+  jose@6.2.3:
+    resolution: {integrity: sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -2763,6 +2775,8 @@ snapshots:
       sisteransi: 1.0.5
     optional: true
 
+  '@cloudflare/containers@0.3.3': {}
+
   '@cloudflare/containers@0.3.7': {}
 
   '@cloudflare/kv-asset-handler@0.5.0': {}
@@ -2772,7 +2786,7 @@ snapshots:
       '@cloudflare/containers': 0.3.7
       aws4fetch: 1.0.20
       capnweb: 0.8.0
-      hono: 4.12.26
+      hono: 4.12.18
 
   '@cloudflare/unenv-preset@2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260617.1)':
     dependencies:
@@ -4012,9 +4026,11 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  hono@4.12.26: {}
+  hono@4.12.18: {}
 
   jiti@2.7.0: {}
+
+  jose@6.2.3: {}
 
   js-tokens@4.0.0: {}
 

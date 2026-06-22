@@ -161,24 +161,25 @@ Void is split across two codebases in this repo:
 
 ### Where Code for X Lives
 
-| Feature                                                                       | Primary code paths                                                                                                                                |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vite plugin and local runtime                                                 | `framework/packages/void/src/index.ts`, `plugin-*`, `runtime/*`                                                                                   |
-| CLI commands                                                                  | `framework/packages/void/src/cli/*`                                                                                                               |
-| File-based API routing                                                        | `framework/packages/void/src/router/*`, `runtime/handler.ts`                                                                                      |
-| Pages routing, loaders, actions, named actions, deferred props                | `framework/packages/void/src/pages/*`, adapter runtimes in `framework/packages/{vue,react,svelte,solid}/src/runtime/*`                            |
-| Typed route/page/action codegen                                               | `framework/packages/void/src/codegen/*`, `routes-stub.ts`                                                                                         |
-| Binding inference                                                             | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/inference/*`                                                      |
-| Drizzle integration and migrations                                            | `framework/packages/void/src/drizzle/*`, `framework/packages/void/src/migrations/*`                                                               |
-| Framework detection and deploy presets                                        | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/cli/preset.ts`                                                    |
-| Platform auth and project APIs                                                | `packages/api/src/routes/*`, `packages/api/src/auth/*`, `packages/api/src/middleware/*`                                                           |
-| Internal admin UI                                                             | `packages/api/src/admin/*`                                                                                                                        |
-| Deploy pipeline                                                               | `framework/packages/void/src/cli/deploy.ts`, `packages/api/src/routes/deploy.ts`, `packages/api/src/assets.ts`, `packages/api/src/provisioning/*` |
-| Hostname routing, static serving, ISR, redirects, rewrites, headers, metering | `packages/dispatch/src/*`                                                                                                                         |
-| AI metering, BYOK AI gateway, remote D1/KV/R2 access, revalidation bridge     | `packages/proxy/src/*`                                                                                                                            |
-| Runtime logs and live tailing                                                 | `packages/tail/src/index.ts`, `packages/api/src/admin/routes/deployments.tsx`                                                                     |
-| User-facing dashboard                                                         | `packages/dashboard/pages/*`, `packages/dashboard/middleware/01.auth.ts`, `packages/dashboard/lib/api.ts`                                         |
-| Shared internal styling                                                       | `packages/ui/src/base.css`, `packages/ui/src/theme.css`                                                                                           |
+| Feature                                                                       | Primary code paths                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vite plugin and local runtime                                                 | `framework/packages/void/src/index.ts`, `plugin-*`, `runtime/*`                                                                                                                                                                        |
+| CLI commands                                                                  | `framework/packages/void/src/cli/*`                                                                                                                                                                                                    |
+| File-based API routing                                                        | `framework/packages/void/src/router/*`, `runtime/handler.ts`                                                                                                                                                                           |
+| Pages routing, loaders, actions, named actions, deferred props                | `framework/packages/void/src/pages/*`, adapter runtimes in `framework/packages/{vue,react,svelte,solid}/src/runtime/*`                                                                                                                 |
+| Typed route/page/action codegen                                               | `framework/packages/void/src/codegen/*`, `routes-stub.ts`                                                                                                                                                                              |
+| Binding inference                                                             | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/inference/*`                                                                                                                                           |
+| Drizzle integration and migrations                                            | `framework/packages/void/src/drizzle/*`, `framework/packages/void/src/migrations/*`                                                                                                                                                    |
+| Framework detection and deploy presets                                        | `framework/packages/void/src/plugin-inference.ts`, `framework/packages/void/src/cli/preset.ts`                                                                                                                                         |
+| Platform auth and project APIs                                                | `packages/api/src/routes/*`, `packages/api/src/auth/*`, `packages/api/src/middleware/*`                                                                                                                                                |
+| Internal admin UI                                                             | `packages/api/src/admin/*`                                                                                                                                                                                                             |
+| Deploy pipeline                                                               | `framework/packages/void/src/cli/deploy.ts`, `packages/api/src/routes/deploy.ts`, `packages/api/src/assets.ts`, `packages/api/src/provisioning/*`                                                                                      |
+| Deploy on GitHub (App connect, webhooks, OIDC, build containers)              | `packages/api/src/routes/{github,webhooks,auth-oidc}.ts`, `packages/api/src/github/*`, `packages/api/src/build-scheduler.ts`, `packages/api/src/build-manager.ts`, `packages/api/container/*`, `packages/api/src/auth/deploy-token.ts` |
+| Hostname routing, static serving, ISR, redirects, rewrites, headers, metering | `packages/dispatch/src/*`                                                                                                                                                                                                              |
+| AI metering, BYOK AI gateway, remote D1/KV/R2 access, revalidation bridge     | `packages/proxy/src/*`                                                                                                                                                                                                                 |
+| Runtime logs and live tailing                                                 | `packages/tail/src/index.ts`, `packages/api/src/admin/routes/deployments.tsx`                                                                                                                                                          |
+| User-facing dashboard                                                         | `packages/dashboard/pages/*`, `packages/dashboard/middleware/01.auth.ts`, `packages/dashboard/lib/api.ts`                                                                                                                              |
+| Shared internal styling                                                       | `packages/ui/src/base.css`, `packages/ui/src/theme.css`                                                                                                                                                                                |
 
 The dashboard depends on `void` and `@void/react`, resolved via pnpm workspace overrides to `link:framework/...` (the git submodule). CI checks out the submodule and builds it before the platform `vp install`.
 
@@ -231,6 +232,7 @@ The control plane.
 - Exposes the API used by the CLI and dashboard.
 - Runs deploys, rollbacks, provisioning, routing updates, queue setup, and retention cleanup.
 - Also contains the internal admin UI in `src/admin/`.
+- Hosts **Deploy on GitHub**: connect a repo via a GitHub App, and a `git push` triggers an automatic build + deploy. Routes under `/github`, `/webhooks/github`, `/auth/github-oidc`, and `/projects/:id/github` handle App install/connect, webhook verification, and GitHub Actions OIDC. Builds run in one of two executors — a Cloudflare Container (default) or GitHub Actions — coordinated by the `BuildScheduler` and `BuildManager` Durable Objects. The build environment runs the real `void deploy` CLI with a short-lived scoped deploy token, so the deploy pipeline itself is unchanged.
 
 ### `packages/dashboard`
 
@@ -271,17 +273,19 @@ The runtime log pipeline.
 
 ## Tooling
 
-| Tool     | Version   | Purpose                                                                                        |
-| -------- | --------- | ---------------------------------------------------------------------------------------------- |
-| Node.js  | 24.13.1   | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
-| Vite+    | 0.2.x     | Unified toolchain (`vp`, Vite, Vitest, Oxlint, Oxfmt)                                          |
-| pnpm     | 11.x      | Package manager with workspaces + catalog                                                      |
-| wrangler | 4.x       | CF Worker dev/deploy (api, dispatch)                                                           |
-| drizzle  | 0.45.x    | Type-safe ORM for API PostgreSQL (schema + queries + migrations)                               |
-| vitest   | via Vite+ | Unit + integration tests                                                                       |
-| oxlint   | via Vite+ | Linting                                                                                        |
-| oxfmt    | via Vite+ | Formatting                                                                                     |
-| vite     | via Vite+ | Dev server + build (dashboard)                                                                 |
+| Tool                   | Version   | Purpose                                                                                        |
+| ---------------------- | --------- | ---------------------------------------------------------------------------------------------- |
+| Node.js                | 24.13.1   | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
+| Vite+                  | 0.2.x     | Unified toolchain (`vp`, Vite, Vitest, Oxlint, Oxfmt)                                          |
+| pnpm                   | 11.x      | Package manager with workspaces + catalog                                                      |
+| wrangler               | 4.x       | CF Worker dev/deploy (api, dispatch)                                                           |
+| drizzle                | 0.45.x    | Type-safe ORM for API PostgreSQL (schema + queries + migrations)                               |
+| vitest                 | via Vite+ | Unit + integration tests                                                                       |
+| oxlint                 | via Vite+ | Linting                                                                                        |
+| oxfmt                  | via Vite+ | Formatting                                                                                     |
+| vite                   | via Vite+ | Dev server + build (dashboard)                                                                 |
+| jose                   | 6.x       | RS256 GitHub App JWT, scoped deploy tokens, GitHub Actions OIDC verification (`api`)           |
+| @cloudflare/containers | 0.3.x     | `BuildManager` container base class for Deploy-on-GitHub builds (`api`)                        |
 
 ## Testing
 
@@ -318,3 +322,5 @@ Staging hostnames are gated by Cloudflare Access (GitHub organization `voidzero-
 - **Project type field is `mode` in DB, `type` everywhere else** — The `projects` table column is `mode` (DB column name), but the Drizzle schema field and all TypeScript code use `type` (`type: text("mode")`). The `DeployManifest` field is `type`, the API function is `updateProjectType`, and all views/templates reference `project.type`. Values: `"void"` (Void apps), `"spa"`, `"static"`, `"framework"` (3rd-party meta-frameworks like Astro/SvelteKit).
 - **Static deployments use KV/R2, not WfP** — Projects with type `"static"` or `"spa"` are served directly by dispatch from content-addressed KV/R2 assets. No WfP worker script is created for those deploys.
 - **WfP deploys mirror assets to KV/R2 as a safety net** — Projects with type `"void"` or `"framework"` still serve assets via CF's per-worker `ASSETS` binding. Each deploy _also_ mirrors assets to `STATIC_ASSETS`/`STATIC_ASSETS_R2` and writes a serving manifest to `ROUTING` KV. When CF returns the `Assets have not yet been deployed to this script.` stub (see `meta/design-docs/0065`, `meta/design-docs/0066`), dispatch detects it and serves from the mirror. CF remains primary; the mirror is only consulted on stub detection.
+- **Deploy-on-GitHub builds run the real `void deploy` CLI** — The build environment (CF Container or GitHub Actions) does not re-implement packaging or POST artifacts to the API. It runs `npx void deploy` with a short-lived, project-scoped deploy token (`aud: "deploy"`, 15-min TTL, minted by `src/auth/deploy-token.ts`). There is **no** `POST /builds/:id/artifacts` endpoint and `routes/deploy.ts` is unchanged. Design docs `0010`/`0011` predate the JSON-manifest, direct-to-R2 deploy endpoint and describe a stale artifact-upload premise — do not follow them verbatim.
+- **Container→DO live-log transport is not yet wired (follow-up)** — `BuildManager` exposes a WebSocket log endpoint and the build agent serves `GET /logs?since=N`, but nothing yet streams container stdout into the DO. Wiring requires either a `ContainerProxy` `outboundByHost` handler on `BuildManager` or a DO `containerFetch` pull-loop against the agent. This is non-critical: there is no log UI consuming it yet, and builds succeed regardless.

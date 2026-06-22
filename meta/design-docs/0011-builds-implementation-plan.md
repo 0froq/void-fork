@@ -1,7 +1,32 @@
 # Implementation Plan: Void Builds Service
 
-**Updated:** 2026-03-05
-**Status:** Not started yet
+**Updated:** 2026-06-08
+**Status:** Implemented (backend, no UI)
+
+> **Implementation note (2026-06):** This plan shipped its backend, but with
+> material divergences. See
+> [0010-builds.md → Implementation divergences (2026-06)](./0010-builds.md#implementation-divergences-2026-06)
+> for the authoritative summary. Per-step status is annotated inline below.
+>
+> Quick map of what changed vs this plan:
+>
+> | Step                          | Status         | Note                                                                                                                                                                                                     |
+> | ----------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | 1 Schema/types/helpers        | Done (+)       | Also added `github_installations` table and `github_connections.build_executor` column. Migration is `0020_nifty_black_bird.sql`.                                                                        |
+> | 2 Tiers                       | Done           | As written.                                                                                                                                                                                              |
+> | 3 Refactor deploy pipeline    | **Dropped**    | No pipeline extraction; `deploy.ts` unchanged. Container runs the real `void deploy` CLI instead.                                                                                                        |
+> | 4 Platform API routes         | Done (changed) | `POST /builds/:id/artifacts` **dropped**. Added `routes/github.ts`, `routes/auth-oidc.ts` (GitHub Actions OIDC), and the `workflow_run` webhook path. Build-token replaced by a scoped deploy-token JWT. |
+> | 5 BuildScheduler DO           | Done           | File is flat at `src/build-scheduler.ts`, not `durable-objects/`.                                                                                                                                        |
+> | 6 BuildManager DO + Container | Done (changed) | File is flat at `src/build-manager.ts`. GitHub helpers split into `src/github/{app-jwt,installation-token,webhook-verify,oidc-verify}.ts` (not `github/token.ts`). Build-token → `auth/deploy-token.ts`. |
+> | 7 Wrangler config             | Done           | Migration tag is **v5**, not v3.                                                                                                                                                                         |
+> | 8 Build container image       | Done           | Agent runs `npx void deploy`, not FormData packaging.                                                                                                                                                    |
+> | 9 Dashboard / admin UI        | **Deferred**   | No UI this round. WS log endpoint exists, no consumer.                                                                                                                                                   |
+> | 10 Integration testing        | Done (backend) | ~180 tests across new suites.                                                                                                                                                                            |
+> | 11 Documentation              | Done           | This annotation + 0010 divergences + progress.md.                                                                                                                                                        |
+>
+> A second executor — **GitHub Actions via OIDC** — was added on top of this
+> plan (it was container-only). `void init --github` scaffolds a workflow that
+> deploys with no stored secret.
 
 ## Context
 
@@ -346,6 +371,14 @@ export function getBuildInstanceType(plan: PlanId): string {
 
 ## Step 3: Refactor Deploy Pipeline
 
+> **DROPPED (2026-06).** This step was not done and is not needed. The build
+> container runs the **real `void deploy` CLI** with a short-lived scoped token,
+> so it reuses the existing deploy endpoint as-is. `deploy.ts` is **unchanged**;
+> there is no `deploy-pipeline.ts` and no `POST /builds/:id/artifacts`. The
+> premise (a new internal artifacts endpoint re-running the pipeline) was stale:
+> the deploy endpoint is now JSON-manifest-only with direct-to-R2 asset upload.
+> The rest of this section is retained for historical context only.
+
 Extract the core deploy logic from the `POST /:id/deploy` handler (~818 lines) into a reusable function so both the existing CLI deploy endpoint and the new internal build artifacts endpoint can call it.
 
 **Create `packages/api/src/deploy-pipeline.ts`:**
@@ -371,6 +404,21 @@ Note: The deploy pipeline now includes asset preflight dedup, ISR, prerendering,
 ---
 
 ## Step 4: Platform API Routes
+
+> **CHANGED (2026-06).**
+>
+> - `POST /builds/:buildId/artifacts` (4b) was **dropped** — see Step 3.
+> - The HMAC build-token was replaced by a scoped deploy-token JWT
+>   (`auth/deploy-token.ts`, `aud: 'deploy'`, 15-min, project-scoped).
+> - GitHub connection routes (4c) live in `routes/github.ts` (split into
+>   `githubRoutes` + `githubProjectRoutes`), with `POST/GET/PATCH/DELETE
+/projects/:id/github`, plus install-url / installations / callback.
+> - A new `routes/auth-oidc.ts` (`POST /auth/github-oidc`) was added for the
+>   **GitHub Actions executor**: verify the runner's OIDC token against GitHub's
+>   JWKS, create an Actions build row, mint a scoped `VOID_TOKEN`.
+> - The webhook handler also handles `workflow_run` (completes Actions builds)
+>   and `installation_repositories`; the OAuth callback backfills
+>   installation → user.
 
 ### 4a. GitHub webhook handler
 
@@ -454,7 +502,10 @@ GITHUB_WEBHOOK_SECRET?: string;
 
 ## Step 5: BuildScheduler Durable Object
 
-**Create `packages/api/src/durable-objects/build-scheduler.ts`:**
+> **CHANGED (2026-06).** The DO file is **flat** at
+> `packages/api/src/build-scheduler.ts`, not in a `durable-objects/` directory.
+
+**Create `packages/api/src/build-scheduler.ts`:**
 
 ```typescript
 import { DurableObject } from 'cloudflare:workers';
@@ -499,7 +550,21 @@ The scheduler only reschedules its alarm when there are queued builds. When the 
 
 ## Step 6: BuildManager Durable Object + Container
 
-**Create `packages/api/src/durable-objects/build-manager.ts`:**
+> **CHANGED (2026-06).**
+>
+> - The DO file is **flat** at `packages/api/src/build-manager.ts` (extends
+>   `Container` from `@cloudflare/containers@0.3.3`). Build config/types in
+>   `src/build-types.ts`.
+> - GitHub crypto helpers were split into `src/github/` — `app-jwt.ts` (RS256
+>   App JWT via `jose`), `installation-token.ts` (cached 1h installation token +
+>   `generateSourceTarballUrl`), `webhook-verify.ts` (HMAC-SHA256),
+>   `oidc-verify.ts` (Actions JWKS verify) — **not** a single `github/token.ts`.
+> - "Build token generation" was replaced by `auth/deploy-token.ts`
+>   (`signDeployToken` — scoped `aud: 'deploy'` JWT), **not** an HMAC build-token.
+> - Container → DO live-log transport is **not yet wired** (follow-up); the
+>   agent's `GET /logs?since=N` endpoint exists.
+
+**Create `packages/api/src/build-manager.ts`:**
 
 This is the most complex component. It extends `Container` from `@cloudflare/containers`.
 
@@ -566,17 +631,26 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
 
 ### GitHub App token generation
 
-**Create `packages/api/src/github/token.ts`:**
+> **CHANGED (2026-06).** Split into `packages/api/src/github/app-jwt.ts`
+> (RS256 App JWT via `jose`) and `installation-token.ts` (cached 1h installation
+> token + `generateSourceTarballUrl`), not a single `github/token.ts`.
 
-- `generateInstallationToken(appId, privateKey, installationId): string` — Creates JWT signed with app private key, calls `POST /app/installations/{id}/access_tokens`
-- `generateSourceUrl(repoFullName, commitSha): string` — Returns `https://api.github.com/repos/{owner}/{repo}/tarball/{sha}`
+**Create `packages/api/src/github/{app-jwt,installation-token}.ts`:**
+
+- App JWT signed with the app private key, then `POST /app/installations/{id}/access_tokens` for the cached installation token
+- `generateSourceTarballUrl(repoFullName, commitSha)` — Returns `https://api.github.com/repos/{owner}/{repo}/tarball/{sha}`
 
 ### Build token generation
 
-**Create `packages/api/src/auth/build-token.ts`:**
+> **CHANGED (2026-06).** Replaced by a scoped **deploy-token JWT**
+> (`packages/api/src/auth/deploy-token.ts`), not an HMAC build-token. The
+> container authenticates `void deploy` with this token; there is no artifacts
+> endpoint to authenticate against.
 
-- `generateBuildToken(buildId, secret): string` — HMAC-SHA256 of build ID
-- `verifyBuildToken(buildId, token, secret): boolean`
+**Create `packages/api/src/auth/deploy-token.ts`:**
+
+- `signDeployToken(...)` — mints a 15-min `aud: 'deploy'`, project-scoped JWT
+- `middleware/auth.ts` accepts `aud` `'api'` or `'deploy'`; `routes/deploy.ts` adds a one-line project-scope guard
 
 ### Verify
 
@@ -615,22 +689,27 @@ Add container definition:
 ],
 ```
 
-Add DO migration (appended to existing migrations array — currently at v2):
+Add DO migration (appended to existing migrations array):
+
+> **CHANGED (2026-06).** The actual tag is **v5** (not v3), applied to
+> top-level + `env.production` + `env.staging`.
 
 ```jsonc
 {
-  "tag": "v3",
+  "tag": "v5",
   "new_sqlite_classes": ["BuildScheduler", "BuildManager"],
 },
 ```
 
-Mirror all changes in the `env.staging` section with equivalent config.
+Mirror all changes in the `env.staging` (and `env.production`) section with equivalent config.
 
 **Update exports in `packages/api/src/index.ts`:**
 
+> **CHANGED (2026-06).** Flat paths, not `durable-objects/`.
+
 ```typescript
-export { BuildScheduler } from './durable-objects/build-scheduler';
-export { BuildManager } from './durable-objects/build-manager';
+export { BuildScheduler } from './build-scheduler';
+export { BuildManager } from './build-manager';
 ```
 
 Add new secrets (via `wrangler secret put`):
@@ -660,6 +739,13 @@ CMD ["node", "/build-agent.mjs"]
 ```
 
 **Create `packages/api/container/build-agent.mjs`:**
+
+> **CHANGED (2026-06).** The agent does **not** package FormData or POST to an
+> artifacts endpoint. It downloads the GitHub tarball, installs deps, and runs
+> the **real CLI**: `npx void deploy --project $slug` with `VOID_TOKEN` +
+> `VOID_API_URL` in env (the scoped deploy-token). Steps 5–6 below (package
+> output / assets-check / POST artifacts) are obsolete. `VOID_FALLBACK_VERSION`
+> is currently `'latest'` — pin before production.
 
 The agent script handles the full build lifecycle inside the container:
 
@@ -701,6 +787,12 @@ The agent script handles the full build lifecycle inside the container:
 ---
 
 ## Step 9: Dashboard — Builds Views
+
+> **DEFERRED (2026-06).** No UI shipped this round — neither the user-facing
+> Vue build views nor the admin Hono-JSX build views. The `BuildManager`
+> WebSocket log endpoint exists but has no consumer yet, and the container → DO
+> live-log transport is not wired. The rest of this section is the intended
+> future design.
 
 ### 9a. User-Facing Dashboard (`packages/dashboard`)
 
@@ -819,33 +911,43 @@ app.route('/admin/builds', adminBuilds);
 
 ## New Files Summary
 
-| File                                                  | Purpose                                                            |
-| ----------------------------------------------------- | ------------------------------------------------------------------ |
-| `packages/api/src/deploy-pipeline.ts`                 | Extracted deploy pipeline (shared by deploy + artifacts endpoints) |
-| `packages/api/src/routes/webhooks.ts`                 | GitHub webhook handler                                             |
-| `packages/api/src/routes/builds.ts`                   | Build status, cancel, logs, artifacts, GitHub connection routes    |
-| `packages/api/src/durable-objects/build-scheduler.ts` | BuildScheduler DO                                                  |
-| `packages/api/src/durable-objects/build-manager.ts`   | BuildManager DO + Container                                        |
-| `packages/api/src/github/token.ts`                    | GitHub App JWT + installation token generation                     |
-| `packages/api/src/auth/build-token.ts`                | Build token generation/verification                                |
-| `packages/api/container/Dockerfile`                   | Build container image                                              |
-| `packages/api/container/build-agent.mjs`              | Build agent script                                                 |
-| `packages/api/src/admin/views/builds-list.tsx`        | Admin builds list view                                             |
-| `packages/api/src/admin/routes/builds.tsx`            | Admin builds routes                                                |
-| `packages/dashboard/pages/projects/[id]/builds/`      | User-facing build list + detail pages                              |
+> **As-shipped (2026-06).** Strikethrough = dropped/deferred; bold = renamed or
+> added relative to this plan.
+
+| File                                                                                     | Purpose                                                                    |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| ~~`packages/api/src/deploy-pipeline.ts`~~                                                | **DROPPED** — no pipeline extraction (container runs `void deploy`)        |
+| `packages/api/src/routes/webhooks.ts`                                                    | GitHub webhook handler (push / installation / `workflow_run`)              |
+| **`packages/api/src/routes/github.ts`**                                                  | **ADDED** — install-url, installations, callback, connect/get/patch/delete |
+| **`packages/api/src/routes/auth-oidc.ts`**                                               | **ADDED** — `POST /auth/github-oidc` (GitHub Actions executor)             |
+| **`packages/api/src/build-scheduler.ts`**                                                | BuildScheduler DO (**flat**, not `durable-objects/`)                       |
+| **`packages/api/src/build-manager.ts`**                                                  | BuildManager DO + Container (**flat**)                                     |
+| **`packages/api/src/build-types.ts`**                                                    | **ADDED** — `BuildConfig`, `BuildLogLine`                                  |
+| **`packages/api/src/github/{app-jwt,installation-token,webhook-verify,oidc-verify}.ts`** | **RENAMED/SPLIT** — was `github/token.ts`                                  |
+| **`packages/api/src/auth/deploy-token.ts`**                                              | **RENAMED** — scoped deploy-token JWT, was `auth/build-token.ts`           |
+| `packages/api/container/Dockerfile`                                                      | Build container image                                                      |
+| `packages/api/container/build-agent.mjs`                                                 | Build agent script (runs `void deploy`)                                    |
+| ~~`packages/api/src/admin/views/builds-list.tsx`~~                                       | **DEFERRED** — no admin UI this round                                      |
+| ~~`packages/api/src/admin/routes/builds.tsx`~~                                           | **DEFERRED** — no admin UI this round                                      |
+| ~~`packages/dashboard/pages/projects/[id]/builds/`~~                                     | **DEFERRED** — no user UI this round                                       |
+| `packages/api/drizzle/0020_nifty_black_bird.sql`                                         | **ADDED** — migration (builds, github_connections, github_installations)   |
+| framework: `.github/workflows/void-deploy.yml` (scaffolded)                              | **ADDED** — `void init --github` OIDC workflow                             |
 
 ## Modified Files Summary
 
-| File                                            | Changes                                                                 |
-| ----------------------------------------------- | ----------------------------------------------------------------------- |
-| `packages/api/src/schema.ts`                    | Add `builds`, `githubConnections` tables                                |
-| `packages/api/src/types.ts`                     | Add `Build`, `GitHubConnection` inferred types                          |
-| `packages/api/src/db.ts`                        | Add build + github_connection Drizzle query helpers                     |
-| `packages/api/src/tiers.ts`                     | Add `concurrentBuilds`, `buildTimeoutMinutes`, `getBuildInstanceType()` |
-| `packages/api/src/env.ts`                       | Add DO bindings, GitHub App secrets to `ApiEnv`                         |
-| `packages/api/src/index.ts`                     | Mount webhook/build routes, export DO classes                           |
-| `packages/api/src/routes/deploy.ts`             | Refactor to use `runDeployPipeline()` from deploy-pipeline.ts           |
-| `packages/api/wrangler.jsonc`                   | Add containers, durable_objects bindings, v3 migration (prod + staging) |
-| `packages/api/src/admin/views/layout.tsx`       | Add Builds nav link                                                     |
-| `packages/api/src/admin/routes/deployments.tsx` | Add build link to deployment detail                                     |
-| `packages/api/src/admin/views/dashboard.tsx`    | Add build count stat card                                               |
+| File                                                | Changes                                                                                 |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `packages/api/src/schema.ts`                        | Add `builds`, `githubConnections` tables                                                |
+| `packages/api/src/types.ts`                         | Add `Build`, `GitHubConnection` inferred types                                          |
+| `packages/api/src/db.ts`                            | Add build + github_connection Drizzle query helpers                                     |
+| `packages/api/src/tiers.ts`                         | Add `concurrentBuilds`, `buildTimeoutMinutes`, `getBuildInstanceType()`                 |
+| `packages/api/src/env.ts`                           | Add DO bindings, GitHub App secrets to `ApiEnv`                                         |
+| `packages/api/src/index.ts`                         | Mount webhook/build routes, export DO classes                                           |
+| `packages/api/src/routes/deploy.ts`                 | **UNCHANGED pipeline** — added a one-line project-scope guard only                      |
+| `packages/api/src/auth/jwt` (`signJwt`)             | **ADDED** — optional `{ ttlSeconds }`                                                   |
+| `packages/api/src/middleware/auth.ts`               | **ADDED** — accept `aud` `'api'` or `'deploy'`, set `deployScope`                       |
+| `packages/api/wrangler.jsonc`                       | Add containers, durable_objects bindings, **v5** migration (top-level + prod + staging) |
+| ~~`packages/api/src/admin/views/layout.tsx`~~       | **DEFERRED** — no admin Builds nav                                                      |
+| ~~`packages/api/src/admin/routes/deployments.tsx`~~ | **DEFERRED** — no build link in deployment detail                                       |
+| ~~`packages/api/src/admin/views/dashboard.tsx`~~    | **DEFERRED** — no build count stat card                                                 |
+| framework: `cli/init.ts`, `cli/help.ts`, `docs/*`   | **ADDED** — `void init --github` scaffolding + docs                                     |

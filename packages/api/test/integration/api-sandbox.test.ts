@@ -753,7 +753,7 @@ describe('per-deploy sandbox integration', () => {
   });
 
   // ----------------------------------------------------------------------
-  // P6: deploy-pipeline integration — sandbox-using user worker uploads
+  // deploy-pipeline integration — sandbox-using user worker uploads
   // include the platform queue + identity bindings, and the routing-switch
   // step writes the per-project `{userId, plan}` entry the proxy's sandbox
   // gate reads (packages/proxy/src/sandbox.ts).

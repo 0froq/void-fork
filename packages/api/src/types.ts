@@ -11,6 +11,9 @@ import type {
   invitations,
   projectMigrations,
   projectDatabaseCredentials,
+  builds,
+  githubConnections,
+  githubInstallations,
 } from './schema.ts';
 
 export type InvitationStatus = 'pending' | 'accepted' | 'revoked';
@@ -27,6 +30,9 @@ export type PlatformEvent = InferSelectModel<typeof platformEvents>;
 export type Invitation = InferSelectModel<typeof invitations>;
 export type ProjectMigration = InferSelectModel<typeof projectMigrations>;
 export type ProjectDatabaseCredentials = InferSelectModel<typeof projectDatabaseCredentials>;
+export type Build = InferSelectModel<typeof builds>;
+export type GitHubConnection = InferSelectModel<typeof githubConnections>;
+export type GitHubInstallation = InferSelectModel<typeof githubInstallations>;
 
 export type MigrationMeta = Readonly<{
   name: string;

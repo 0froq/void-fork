@@ -4,6 +4,20 @@ export type JwtPayload = Readonly<{
   aud: string;
   iat: number;
   exp: number;
+  /**
+   * Optional project scope. Present on `aud:'deploy'` tokens minted for
+   * remote builds — pins the token to a single project so the deploy
+   * endpoint can reject cross-project use. Absent on `aud:'api'` tokens.
+   */
+  project?: string;
+  /**
+   * Optional build binding. Present on `aud:'deploy'` tokens minted for a
+   * specific remote build (CF Container or GitHub Actions) — ties the token
+   * to that build's row so the deploy endpoint can reject a stale runner once
+   * its build is no longer active (e.g. superseded/cancelled by a newer push
+   * or run). Absent on full `aud:'api'` tokens and legacy deploy tokens.
+   */
+  build?: string;
 }>;
 
 const EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
@@ -71,12 +85,14 @@ async function hmacVerify(data: string, signature: string, secret: string): Prom
 export async function signJwt(
   payload: Omit<JwtPayload, 'iat' | 'exp'>,
   secret: string,
+  opts?: { ttlSeconds?: number },
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
+  const ttlSeconds = opts?.ttlSeconds ?? EXPIRY_SECONDS;
   const fullPayload: JwtPayload = {
     ...payload,
     iat: now,
-    exp: now + EXPIRY_SECONDS,
+    exp: now + ttlSeconds,
   };
 
   const header = base64url(

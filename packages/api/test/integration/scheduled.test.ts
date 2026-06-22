@@ -1,6 +1,7 @@
+import { eq, sql } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vite-plus/test';
 import { scheduled } from '../../src/index.ts';
-import { domains } from '../../src/schema.ts';
+import { builds, domains, projects } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -43,6 +44,8 @@ function makeBindings(e: TestEnv) {
     CRON_SCHEDULER: e.CRON_SCHEDULER,
     ERROR_ALERT_MONITOR: e.ERROR_ALERT_MONITOR,
     SANDBOX_CONCURRENCY_COUNTER: e.SANDBOX_CONCURRENCY_COUNTER,
+    BUILD_SCHEDULER: e.BUILD_SCHEDULER,
+    BUILD_MANAGER: e.BUILD_MANAGER,
     CRON_FIRES_QUEUE: { send: async () => {}, sendBatch: async () => {} } as unknown as Queue<
       import('../../src/cron-fires-queue.ts').CronFireMessage
     >,
@@ -58,6 +61,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // clearTables does not touch the builds table; delete any rows this suite
+  // seeded first so the FK to projects/users doesn't block clearTables.
+  await env.db.delete(builds);
   await clearTables(env.db);
 });
 
@@ -122,6 +128,193 @@ describe('scheduled()', () => {
 
     // Should complete without errors across multiple batches
     await expect(scheduled(mockController, makeBindings(env), mockCtx)).resolves.toBeUndefined();
+  });
+
+  // The hourly scheduled fallback best-effort re-pokes BUILD_SCHEDULER whenever
+  // queued container builds remain, in case the webhook's inline poke was lost.
+  // It must key that decision off hasQueuedContainerBuilds (ANY queued container
+  // build) — NOT getQueuedBuilds, which excludes builds whose project already has
+  // an active build and therefore returns [] for a fully-blocked queue.
+  describe('build scheduler re-poke', () => {
+    function pokeSpyBindings(e: TestEnv): {
+      bindings: ReturnType<typeof makeBindings>;
+      pokes: Array<string>;
+    } {
+      const pokes: Array<string> = [];
+      const spyScheduler = {
+        idFromName: (name: string) => ({ toString: () => name }),
+        get: (_id: unknown) => ({
+          // index.ts calls `scheduler.fetch(urlString, { method: 'POST' })`,
+          // so normalize the (input, init) overload into a Request before
+          // inspecting it — a DO stub.fetch accepts the same shape as fetch().
+          fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+            const req = input instanceof Request ? input : new Request(input, init);
+            const url = new URL(req.url);
+            if (req.method === 'POST' && url.pathname === '/poke') {
+              pokes.push(url.toString());
+            }
+            return Response.json({ ok: true });
+          },
+        }),
+      } as unknown as DurableObjectNamespace;
+      return { bindings: { ...makeBindings(e), BUILD_SCHEDULER: spyScheduler }, pokes };
+    }
+
+    it('re-pokes when a startable queued container build exists', async () => {
+      const { id } = await createTestUser(env.db, 'queued-startable', 'github', undefined, 'free');
+      const proj = await createTestProject(env.db, id);
+      await env.db.insert(builds).values({
+        id: 'bld_startable',
+        project_id: proj.id,
+        user_id: id,
+        executor: 'container',
+        status: 'queued',
+      });
+
+      const { bindings, pokes } = pokeSpyBindings(env);
+      try {
+        await scheduled(mockController, bindings, mockCtx);
+        expect(pokes.length).toBe(1);
+      } finally {
+        await env.db.delete(builds);
+      }
+    });
+
+    it('re-pokes when the queue is fully blocked (no startable rows but queued work remains)', async () => {
+      // The project already has an ACTIVE build, so getQueuedBuilds excludes the
+      // project entirely and returns [] — but a queued container build still
+      // exists, so hasQueuedContainerBuilds is true and the fallback must poke.
+      const { id } = await createTestUser(env.db, 'queued-blocked', 'github', undefined, 'free');
+      const proj = await createTestProject(env.db, id);
+      await env.db.insert(builds).values([
+        {
+          id: 'bld_active',
+          project_id: proj.id,
+          user_id: id,
+          executor: 'container',
+          status: 'building',
+        },
+        {
+          id: 'bld_blocked',
+          project_id: proj.id,
+          user_id: id,
+          executor: 'container',
+          status: 'queued',
+        },
+      ]);
+
+      const { bindings, pokes } = pokeSpyBindings(env);
+      try {
+        await scheduled(mockController, bindings, mockCtx);
+        expect(pokes.length).toBe(1);
+      } finally {
+        await env.db.delete(builds);
+      }
+    });
+
+    it('does not re-poke when no queued container builds remain', async () => {
+      const { id } = await createTestUser(env.db, 'no-queued', 'github', undefined, 'free');
+      const proj = await createTestProject(env.db, id);
+      await env.db.insert(builds).values({
+        id: 'bld_done',
+        project_id: proj.id,
+        user_id: id,
+        executor: 'container',
+        status: 'complete',
+      });
+
+      const { bindings, pokes } = pokeSpyBindings(env);
+      try {
+        await scheduled(mockController, bindings, mockCtx);
+        expect(pokes.length).toBe(0);
+      } finally {
+        await env.db.delete(builds);
+      }
+    });
+  });
+
+  // The container reaper's DB terminalize frees the slot + revokes the token,
+  // but the `started_at > maxAge` predicate does not prove the container is gone
+  // (the DO may have been evicted / its alarm lost). The scheduled handler must
+  // therefore best-effort issue a BuildManager cancelBuild for each reaped id so
+  // a still-alive orphan is actually stopped. This is the regression Codex asked
+  // for: the slot is not "safely reclaimed" until a stop attempt is made.
+  describe('stale container reaper', () => {
+    function cancelSpyBindings(e: TestEnv): {
+      bindings: ReturnType<typeof makeBindings>;
+      cancels: Array<{ id: string; reason: string }>;
+    } {
+      const cancels: Array<{ id: string; reason: string }> = [];
+      const spyManager = {
+        // cancelContainerBuildDos resolves the DO by `idFromName(build.id)`, so
+        // round-trip the build id through the stub name to assert it later.
+        idFromName: (name: string) => ({ toString: () => name }),
+        get: (idObj: { toString: () => string }) => ({
+          cancelBuild: async (reason: string) => {
+            cancels.push({ id: idObj.toString(), reason });
+          },
+        }),
+      } as unknown as DurableObjectNamespace;
+      return { bindings: { ...makeBindings(e), BUILD_MANAGER: spyManager }, cancels };
+    }
+
+    it('triggers a BuildManager cancel for each stale active container build', async () => {
+      const { id } = await createTestUser(env.db, 'stale-container', 'github', undefined, 'free');
+      const proj = await createTestProject(env.db, id);
+
+      // Over-age active container build (started 90 min ago > 75 min cutoff).
+      await env.db.insert(builds).values({
+        id: 'bld_stale',
+        project_id: proj.id,
+        user_id: id,
+        executor: 'container',
+        status: 'building',
+        started_at: sql`now() - interval '90 minute'`,
+      });
+      // Fresh active container build — must NOT be cancelled.
+      await env.db.insert(builds).values({
+        id: 'bld_fresh',
+        project_id: proj.id,
+        user_id: id,
+        executor: 'container',
+        status: 'building',
+        started_at: sql`now() - interval '5 minute'`,
+      });
+
+      const { bindings, cancels } = cancelSpyBindings(env);
+      try {
+        await scheduled(mockController, bindings, mockCtx);
+
+        // The stale row was terminalized (slot freed + token revoked)...
+        const stale = await env.db.select().from(builds).where(eq(builds.id, 'bld_stale'));
+        expect(stale[0]?.status).toBe('failed');
+        // ...AND a stop attempt was made for it (and only it).
+        expect(cancels).toEqual([{ id: 'bld_stale', reason: 'stale build reaper' }]);
+      } finally {
+        await env.db.delete(builds);
+      }
+    });
+
+    it('makes no cancel attempt when no stale container builds exist', async () => {
+      const { id } = await createTestUser(env.db, 'no-stale', 'github', undefined, 'free');
+      const proj = await createTestProject(env.db, id);
+      await env.db.insert(builds).values({
+        id: 'bld_recent',
+        project_id: proj.id,
+        user_id: id,
+        executor: 'container',
+        status: 'building',
+        started_at: sql`now() - interval '5 minute'`,
+      });
+
+      const { bindings, cancels } = cancelSpyBindings(env);
+      try {
+        await scheduled(mockController, bindings, mockCtx);
+        expect(cancels).toEqual([]);
+      } finally {
+        await env.db.delete(builds);
+      }
+    });
   });
 
   it('isolates errors — one user failure does not block others', async () => {

@@ -7,9 +7,10 @@ import {
   setActiveDeployment,
   setAppliedMigrations,
 } from '../../src/db.ts';
+import * as db from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { users } from '../../src/schema.ts';
-import { domains, resources, projectDatabaseCredentials } from '../../src/schema.ts';
+import { domains, projects, resources, projectDatabaseCredentials } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -470,6 +471,68 @@ describe('GET /projects/:id/database-url', () => {
     expect(await getRes.json()).toEqual({ url: connectionString });
   });
 
+  it('returns 409 from POST /:id/database once teardown has begun', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app-deleting');
+    // Teardown flips status to 'deleting' under a row lock before tearing down
+    // CF resources; provisioning a Hyperdrive after that would orphan it.
+    await env.db.update(projects).set({ status: 'deleting' }).where(eq(projects.id, project.id));
+
+    const cf = mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'postgresql://void_user:pass@db.example.com/appdb',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'Project is being deleted' });
+    // Bailed before touching Cloudflare — no Hyperdrive create attempted.
+    expect(cf).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the created Hyperdrive when persisting its resource row fails (POST /database)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-rollback-post');
+    const cf = mockCfApi();
+    // Force the resources-row INSERT to fail AFTER CF created the Hyperdrive
+    // (models a concurrent teardown deleting the project → FK violation). The
+    // route must delete the just-created CF Hyperdrive so it doesn't orphan.
+    vi.spyOn(db, 'createResource').mockRejectedValueOnce(new Error('insert failed'));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'postgresql://void_user:pass@db.example.com/appdb',
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(500);
+
+    // The Hyperdrive CF object we created was rolled back (DELETE to its config).
+    const hdDeletes = cf.mock.calls.filter(
+      ([url, init]) =>
+        (init as RequestInit | undefined)?.method === 'DELETE' &&
+        /\/hyperdrive\/configs\/[^/]+$/.test(String(url)),
+    );
+    expect(hdDeletes.length).toBeGreaterThan(0);
+  });
+
   it('round-trips the connection string via PUT /:id/database-url', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'pg-app-get-rt-put');
@@ -498,6 +561,32 @@ describe('GET /projects/:id/database-url', () => {
     );
     expect(getRes.status).toBe(200);
     expect(await getRes.json()).toEqual({ url: connectionString });
+  });
+
+  it('returns 409 from PUT /:id/database-url once teardown has begun', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'pg-app-put-deleting');
+    await env.db.update(projects).set({ status: 'deleting' }).where(eq(projects.id, project.id));
+
+    const cf = mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'postgres://void_user:secret@db.example.com/mydb',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'Project is being deleted' });
+    expect(cf).not.toHaveBeenCalled();
   });
 
   it('last PUT wins — GET returns the most recently written URL', async () => {

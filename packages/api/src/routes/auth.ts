@@ -26,6 +26,7 @@ import {
   storeAuthCode,
   consumeAuthCode,
   consumeCliAuthCode,
+  linkGitHubInstallationToUser,
 } from '../db.ts';
 import { sendWelcomeEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
@@ -401,6 +402,16 @@ app.get('/callback', async (context) => {
           console.error(`[github-preview] Failed to grant void-sdk/void access to ${login}:`, err),
         ),
       );
+    }
+
+    // Backfill GitHub App installations created before this user signed in.
+    // `providerId` is the user's numeric GitHub account id, matched against
+    // `github_installations.account_id`. Best-effort — a failure here must
+    // never block login.
+    try {
+      await linkGitHubInstallationToUser(db, providerId, user.id);
+    } catch (err) {
+      console.error(`[github-app] Failed to backfill installations for ${login}:`, err);
     }
   }
 

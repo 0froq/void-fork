@@ -9,6 +9,10 @@ vi.mock('../../src/provisioning/cloudflare-api', () => ({
   createKVNamespace: vi.fn().mockResolvedValue({ id: 'kv-id-456', title: 'test-KV' }),
   createR2Bucket: vi.fn().mockResolvedValue({ name: 'test-STORAGE' }),
   createQueue: vi.fn().mockResolvedValue({ queue_id: 'queue-id-789', queue_name: 'test-queue' }),
+  deleteD1Database: vi.fn().mockResolvedValue(undefined),
+  deleteKVNamespace: vi.fn().mockResolvedValue(undefined),
+  deleteR2Bucket: vi.fn().mockResolvedValue(undefined),
+  deleteQueue: vi.fn().mockResolvedValue(undefined),
   getD1DatabaseByName: vi.fn().mockResolvedValue({ uuid: 'd1-looked-up', name: 'test-DB' }),
   getKVNamespaceByTitle: vi.fn().mockResolvedValue({ id: 'kv-looked-up', title: 'test-KV' }),
   getQueueByName: vi.fn().mockResolvedValue({ queue_id: 'queue-looked-up', queue_name: 'test-q' }),
@@ -38,6 +42,7 @@ import {
   createKVNamespace,
   createR2Bucket,
   createQueue,
+  deleteD1Database,
   getD1DatabaseByName,
   getKVNamespaceByTitle,
   getQueueByName,
@@ -73,6 +78,54 @@ describe('provisionBindings', () => {
     expect(bindings[0]).toEqual({ type: 'd1', name: 'DB', id: 'd1-uuid-123' });
     // + 3 always-injected proxy bindings
     expect(bindings).toHaveLength(4);
+  });
+
+  it('rolls back the CF resource it created when the resources-row INSERT fails', async () => {
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ['DB'] } };
+    // Model a concurrent-teardown FK violation: the row INSERT throws AFTER CF
+    // created the D1 database. Without rollback this leaves an orphaned CF object
+    // with no durable handle (the cascade-capture sweep never sees it).
+    vi.mocked(createResource).mockRejectedValueOnce(new Error('insert failed (FK violation)'));
+
+    await expect(
+      provisionBindings(
+        mockDb,
+        ACCOUNT_ID,
+        API_TOKEN,
+        PROJECT_ID,
+        manifest,
+        JWT_SECRET,
+        'void-proxy',
+      ),
+    ).rejects.toThrow('insert failed');
+
+    // CF created it...
+    expect(createD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'proj-abc123-db');
+    // ...and the rollback deleted exactly that object.
+    expect(deleteD1Database).toHaveBeenCalledWith(ACCOUNT_ID, API_TOKEN, 'd1-uuid-123');
+  });
+
+  it('does NOT roll back a CF resource adopted via the already-exists lookup', async () => {
+    const manifest: DeployManifest = { version: 1, bindings: { d1: ['DB'] } };
+    // createCfResource hits "already exists" → lookupCfResource adopts a
+    // pre-existing object we do NOT own. Even if the row INSERT then fails, we
+    // must not delete someone else's resource.
+    vi.mocked(createD1Database).mockRejectedValueOnce(new Error('database already exists'));
+    vi.mocked(createResource).mockRejectedValueOnce(new Error('insert failed (FK violation)'));
+
+    await expect(
+      provisionBindings(
+        mockDb,
+        ACCOUNT_ID,
+        API_TOKEN,
+        PROJECT_ID,
+        manifest,
+        JWT_SECRET,
+        'void-proxy',
+      ),
+    ).rejects.toThrow('insert failed');
+
+    expect(deleteD1Database).not.toHaveBeenCalled();
   });
 
   it('provisions KV when manifest requires it', async () => {

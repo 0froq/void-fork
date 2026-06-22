@@ -15,13 +15,13 @@ How we deploy, what we provision, and how the system is configured.
 
 Five Cloudflare Workers:
 
-| Worker           | Package              | Purpose                                                                                                                             |
-| ---------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `void-proxy`     | `packages/proxy`     | Unified proxy — AI inference metering + D1/KV/R2 remote bindings for local dev                                                      |
-| `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering                                          |
-| `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                                      |
-| `void-tail`      | `packages/tail`      | Tail worker — captures user worker logs to Analytics Engine + live tailing via Durable Object WebSockets                            |
-| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` + custom domain traffic to user workers (via Workers for Platforms), static assets, and ISR cache |
+| Worker           | Package              | Purpose                                                                                                                                                                                                                  |
+| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `void-proxy`     | `packages/proxy`     | Unified proxy — AI inference metering + D1/KV/R2 remote bindings for local dev                                                                                                                                           |
+| `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering; also hosts the `BuildScheduler` + `BuildManager` Durable Objects and a build container for Deploy-on-GitHub container builds |
+| `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                                                                                                                           |
+| `void-tail`      | `packages/tail`      | Tail worker — captures user worker logs to Analytics Engine + live tailing via Durable Object WebSockets                                                                                                                 |
+| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` + custom domain traffic to user workers (via Workers for Platforms), static assets, and ISR cache                                                                                      |
 
 ## Environments
 
@@ -122,12 +122,30 @@ Set via `wrangler secret put <NAME>` (separate values per environment):
 | `JWT_SECRET`                        | Signs auth JWTs                                  |
 | `PROJECT_SECRET_KEYS_JSON`          | JSON keyring for encrypted project secrets       |
 | `PROJECT_SECRET_ACTIVE_KEY_VERSION` | Active key version for new project-secret writes |
-| `GITHUB_CLIENT_ID`                  | GitHub OAuth app client ID                       |
-| `GITHUB_CLIENT_SECRET`              | GitHub OAuth app client secret                   |
+| `GITHUB_CLIENT_ID`                  | GitHub OAuth app client ID (user sign-in)        |
+| `GITHUB_CLIENT_SECRET`              | GitHub OAuth app client secret (user sign-in)    |
 | `GOOGLE_CLIENT_ID`                  | Google OAuth app client ID                       |
 | `GOOGLE_CLIENT_SECRET`              | Google OAuth app client secret                   |
 | `R2_ACCESS_KEY_ID`                  | R2 access key ID for presigning asset PUT URLs   |
 | `R2_SECRET_ACCESS_KEY`              | R2 secret access key for presigning asset PUTs   |
+| `GITHUB_APP_ID`                     | GitHub App ID (Deploy on GitHub — see below)     |
+| `GITHUB_APP_PRIVATE_KEY`            | GitHub App private key, PKCS#8 PEM (see below)   |
+| `GITHUB_WEBHOOK_SECRET`             | HMAC secret verifying GitHub App webhooks        |
+| `GITHUB_APP_SLUG`                   | GitHub App slug (builds the install URL)         |
+
+The last four (`GITHUB_APP_*`, `GITHUB_WEBHOOK_SECRET`) belong to the **GitHub
+App** used for Deploy on GitHub — distinct from `GITHUB_CLIENT_ID` /
+`GITHUB_CLIENT_SECRET`, which are the GitHub **OAuth app** for user sign-in. All
+four are optional: when unset, the worker still runs and the `/webhooks/github`
+and `/auth/github-oidc` endpoints return `503`. See
+[GitHub App (Deploy on GitHub)](#github-app-deploy-on-github).
+
+`GITHUB_APP_PRIVATE_KEY` must be **PKCS#8** PEM. GitHub issues a PKCS#1 key;
+convert it before storing:
+
+```bash
+openssl pkcs8 -topk8 -nocrypt -in github-app-pkcs1.pem -out github-app-pkcs8.pem
+```
 
 R2 presigning also needs the bucket NAME — not just the binding — because the
 `STATIC_ASSETS_R2` binding only surfaces the `R2Bucket` object. The name is
@@ -233,6 +251,67 @@ Zone-level (on `void.app`):
 | Workers Routes | Edit   | Set dispatch worker route patterns (`*.void.app/*`) |
 | DNS            | Read   | Zone lookup for route binding                       |
 
+### GitHub App (Deploy on GitHub)
+
+A single GitHub App backs the "Deploy on GitHub" feature — connect a repo, and a
+git push builds and deploys automatically. This is separate from the GitHub
+**OAuth app** used for user sign-in (`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`).
+
+**One-time GitHub App creation** (manual, in the `voidzero-dev` org's GitHub App
+settings). After creation, set the four `GITHUB_APP_*` / `GITHUB_WEBHOOK_SECRET`
+secrets on the API worker (see [API Worker Secrets](#api-worker-secrets)).
+
+Repository permissions:
+
+| Permission    | Access |
+| ------------- | ------ |
+| Contents      | Read   |
+| Metadata      | Read   |
+| Pull requests | Read   |
+| Checks        | Write  |
+
+No `Contents: Write`, no `Workflows`. The App only reads source and reports
+build status via Checks.
+
+Webhook events: `push`, `installation`, `installation_repositories`,
+`pull_request`, `workflow_run`.
+
+Webhook URLs (one App, both environments):
+
+- `https://api.void.cloud/webhooks/github`
+- `https://api.staging.void.cloud/webhooks/github`
+
+**Build executors.** A connected repo builds in one of two ways, selected per
+connection (`github_connections.build_executor`, default `container`):
+
+| Executor         | How it runs                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------- |
+| `container`      | Cloudflare Container driven by the `BuildManager` Durable Object — runs the real `void deploy` CLI in-cloud    |
+| `github_actions` | GitHub Actions in the user's repo; the workflow authenticates back via GitHub OIDC at `POST /auth/github-oidc` |
+
+Container builds are queued and rate-limited per plan tier by the
+`BuildScheduler` Durable Object (see `packages/api/src/tiers.ts` for
+`concurrentBuilds` / `buildTimeoutMinutes`). The Actions executor needs no stored
+secret — the workflow scaffolded by `void init --github` mints a short-lived
+scoped `VOID_TOKEN` from its OIDC identity.
+
+**Build container sizing (`packages/api/wrangler.jsonc` `containers[]`).** The
+`BuildManager` container runs at `instance_type: standard-1` (1/2 vCPU, 4 GiB,
+8 GB disk) — the floor for an `install` + Vite production build; the Wrangler
+default (`lite`, 256 MiB) OOMs. The per-plan `standard-*` sizing in
+`tiers.ts:getBuildInstanceType` is **metadata-only** (recorded into
+`builds.instance_type` for observability) — `@cloudflare/containers@0.3.3` cannot
+size a container per-start, so every build uses the static `standard-1` regardless
+of plan. `rollout_active_grace_period: 3900` (65 min = the 60-min
+`DEPLOY_TOKEN_HARD_MAX_MINUTES` build cap + 5 min margin) keeps an in-flight build
+from being SIGTERM'd when an `api`-worker deploy re-rolls the container app (the
+`api` worker hosts `BuildManager` and is the first step of every deploy). Tradeoff:
+a routine `api` rollout can be delayed up to ~65 min **if** a max-length build is in
+flight when the container app re-rolls; a shorter grace would let rollouts finish
+sooner but risks killing rare long builds. Both values (instance size = billing
+cost; grace = rollout-delay tradeoff) are cost/product decisions — revisit if build
+durations or rollout cadence change.
+
 ### CLI Staging Mode
 
 Internal-only toggle for pointing the CLI at staging. Not documented in public docs.
@@ -255,13 +334,15 @@ Production hostnames are **not** gated — this applies to staging only, even th
 
 **Identity policy:** each of the four Access Applications has one `Allow` rule: `GitHub organization = voidzero-dev` via GitHub as the IdP. Log into CF Zero Trust with any GitHub account that is a member of the `voidzero-dev` GitHub organization to pass. Email-based matching is avoided because GitHub does not reliably expose a primary email unless the user has made it public. Members whose org membership is private must click **Grant** on the OAuth consent screen the first time they sign in; if the org ever enforces SAML SSO, each member must also SSO-authorize the CF Access OAuth app via `github.com/orgs/voidzero-dev/sso`.
 
-**Bypass rules** (do not prompt for Access login — paths hit by third-party OAuth redirects):
+**Bypass rules** (do not prompt for Access login — paths hit by third-party OAuth redirects or by GitHub itself, which cannot present Access credentials):
 
 - `api.staging.void.cloud/auth/callback`
 - `api.staging.void.cloud/admin/callback`
 - `dash.staging.void.cloud/auth/callback`
+- `api.staging.void.cloud/webhooks/github`
+- `api.staging.void.cloud/auth/github-oidc`
 
-Each path is self-validating in application code via HMAC-signed `state` and nonce cookies, so bypassing Access does not weaken auth.
+Each path is self-validating in application code, so bypassing Access does not weaken auth: the OAuth callbacks use HMAC-signed `state` and nonce cookies, `/webhooks/github` verifies the GitHub HMAC webhook signature, and `/auth/github-oidc` verifies the GitHub Actions OIDC token against GitHub's JWKS. GitHub (delivering webhooks, or an Actions runner calling the OIDC endpoint) cannot present CF Access service-token or JWT credentials, so these paths must bypass.
 
 ### Teammate dev setup (browser-based, no shared secret)
 
@@ -294,14 +375,15 @@ The framework's `cfAccessHeaders` helper resolves credentials in this priority o
 
 Callers:
 
-| Caller                                   | How credentials are resolved                                                                                                                                              |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Void CLI (`void deploy`, `void whoami`…) | Eager `cloudflared` probe at client construction → sets `CF_ACCESS_TOKEN`. `CF_ACCESS_CLIENT_ID`/`SECRET` in env override the probe.                                      |
-| Smoke-test CI workflow                   | `.github/workflows/smoke-test.yml` → `$CF_ACCESS_CLIENT_ID_STAGING` / `$CF_ACCESS_CLIENT_SECRET_STAGING` (service token)                                                  |
-| Remote D1/KV/R2 bindings in local dev    | Whatever env vars the local process inherits; CLI's `CF_ACCESS_TOKEN` is forwarded to miniflare                                                                           |
-| Deployed staging user workers            | `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` set as worker env bindings (rare — only if the worker calls `proxy.staging.void.cloud` directly via `__VOID_PROXY_URL`) |
+| Caller                                   | How credentials are resolved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Void CLI (`void deploy`, `void whoami`…) | Eager `cloudflared` probe at client construction → sets `CF_ACCESS_TOKEN`. `CF_ACCESS_CLIENT_ID`/`SECRET` in env override the probe.                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Smoke-test CI workflow                   | `.github/workflows/smoke-test.yml` → `$CF_ACCESS_CLIENT_ID_STAGING` / `$CF_ACCESS_CLIENT_SECRET_STAGING` (service token)                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Container build executor (staging)       | `BuildManager` forwards the staging API worker's `CF_ACCESS_CLIENT_ID_STAGING` / `CF_ACCESS_CLIENT_SECRET_STAGING` into the build container as `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`. The build-agent scrubs them from untrusted install children and re-injects them only into the trusted `void deploy` child (mirrors `VOID_TOKEN`). The container can't do the interactive `cloudflared` flow (no TTY/binary). Set both as **staging API worker** secrets (`wrangler secret put … --env staging`); unset on prod (not Access-gated). |
+| Remote D1/KV/R2 bindings in local dev    | Whatever env vars the local process inherits; CLI's `CF_ACCESS_TOKEN` is forwarded to miniflare                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Deployed staging user workers            | `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` set as worker env bindings (rare — only if the worker calls `proxy.staging.void.cloud` directly via `__VOID_PROXY_URL`)                                                                                                                                                                                                                                                                                                                                                                            |
 
-**Rotating the service token:** rotate in the CF Zero Trust dashboard, update the 1Password entry and both `Staging` GitHub secrets, and notify anyone with the creds set in their shell. No code change required. Teammate JWTs (via `cloudflared`) are per-user and unaffected.
+**Rotating the service token:** rotate in the CF Zero Trust dashboard, update the 1Password entry, both `Staging` GitHub secrets, and the staging API worker's `CF_ACCESS_CLIENT_ID_STAGING` / `CF_ACCESS_CLIENT_SECRET_STAGING` secrets (used by the container build executor), and notify anyone with the creds set in their shell. No code change required. Teammate JWTs (via `cloudflared`) are per-user and unaffected.
 
 **Rollback:** delete the four Access Applications in CF Zero Trust. Code changes are inert when neither credential path is populated, so no code rollback needed.
 
@@ -425,12 +507,23 @@ Steps to provision a new environment from scratch (e.g. reproducing staging):
    wrangler secret put JWT_SECRET --env <name>
    wrangler secret put PROJECT_SECRET_KEYS_JSON --env <name>
    wrangler secret put PROJECT_SECRET_ACTIVE_KEY_VERSION --env <name>
-   wrangler secret put GITHUB_CLIENT_ID --env <name>
-   wrangler secret put GITHUB_CLIENT_SECRET --env <name>
+   wrangler secret put GITHUB_CLIENT_ID --env <name>      # OAuth app (user sign-in)
+   wrangler secret put GITHUB_CLIENT_SECRET --env <name>  # OAuth app (user sign-in)
    wrangler secret put GOOGLE_CLIENT_ID --env <name>
    wrangler secret put GOOGLE_CLIENT_SECRET --env <name>
    wrangler secret put R2_ACCESS_KEY_ID --env <name>
    wrangler secret put R2_SECRET_ACCESS_KEY --env <name>
+
+   # GitHub App (Deploy on GitHub) — optional; endpoints 503 until set
+   wrangler secret put GITHUB_APP_ID --env <name>
+   wrangler secret put GITHUB_APP_PRIVATE_KEY --env <name>  # PKCS#8 PEM (convert with openssl pkcs8 -topk8 -nocrypt)
+   wrangler secret put GITHUB_WEBHOOK_SECRET --env <name>
+   wrangler secret put GITHUB_APP_SLUG --env <name>
+
+   # Staging ONLY — CF Access service token so container builds can reach the
+   # Access-gated staging API (see Staging Access Control). Omit on prod.
+   wrangler secret put CF_ACCESS_CLIENT_ID_STAGING --env staging
+   wrangler secret put CF_ACCESS_CLIENT_SECRET_STAGING --env staging
 
    ```
 

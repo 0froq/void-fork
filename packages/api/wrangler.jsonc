@@ -64,6 +64,14 @@
         "name": "SANDBOX_CONCURRENCY_COUNTER",
         "class_name": "SandboxConcurrencyCounter",
       },
+      {
+        "name": "BUILD_SCHEDULER",
+        "class_name": "BuildScheduler",
+      },
+      {
+        "name": "BUILD_MANAGER",
+        "class_name": "BuildManager",
+      },
     ],
   },
   "migrations": [
@@ -82,6 +90,24 @@
     {
       "tag": "v4",
       "new_classes": ["SandboxConcurrencyCounter"],
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["BuildScheduler", "BuildManager"],
+    },
+  ],
+  "containers": [
+    {
+      "class_name": "BuildManager",
+      "image": "./container/Dockerfile",
+      "max_instances": 50,
+      // standard-1 = 1/2 vCPU, 4 GiB, 8 GB disk. The default (lite, 256 MiB) OOMs
+      // on `npm/pnpm install` + a real Vite production build. Per-plan standard-*
+      // sizing in src/tiers.ts is metadata-only (the lib can't size per-start).
+      "instance_type": "standard-1",
+      // Don't SIGTERM an in-flight build during an api-worker rollout. 3900s = the
+      // 60-min DEPLOY_TOKEN_HARD_MAX_MINUTES build cap + 5 min margin.
+      "rollout_active_grace_period": 3900,
     },
   ],
   "queues": {
@@ -180,8 +206,30 @@
             "name": "SANDBOX_CONCURRENCY_COUNTER",
             "class_name": "SandboxConcurrencyCounter",
           },
+          {
+            "name": "BUILD_SCHEDULER",
+            "class_name": "BuildScheduler",
+          },
+          {
+            "name": "BUILD_MANAGER",
+            "class_name": "BuildManager",
+          },
         ],
       },
+      "containers": [
+        {
+          "class_name": "BuildManager",
+          "image": "./container/Dockerfile",
+          "max_instances": 50,
+          // standard-1 = 1/2 vCPU, 4 GiB, 8 GB disk. The default (lite, 256 MiB) OOMs
+          // on `npm/pnpm install` + a real Vite production build. Per-plan standard-*
+          // sizing in src/tiers.ts is metadata-only (the lib can't size per-start).
+          "instance_type": "standard-1",
+          // Don't SIGTERM an in-flight build during an api-worker rollout. 3900s = the
+          // 60-min DEPLOY_TOKEN_HARD_MAX_MINUTES build cap + 5 min margin.
+          "rollout_active_grace_period": 3900,
+        },
+      ],
       "queues": {
         "producers": [{ "binding": "CRON_FIRES_QUEUE", "queue": "void-cron-fires" }],
         "consumers": [
@@ -262,8 +310,30 @@
             "name": "SANDBOX_CONCURRENCY_COUNTER",
             "class_name": "SandboxConcurrencyCounter",
           },
+          {
+            "name": "BUILD_SCHEDULER",
+            "class_name": "BuildScheduler",
+          },
+          {
+            "name": "BUILD_MANAGER",
+            "class_name": "BuildManager",
+          },
         ],
       },
+      "containers": [
+        {
+          "class_name": "BuildManager",
+          "image": "./container/Dockerfile",
+          "max_instances": 50,
+          // standard-1 = 1/2 vCPU, 4 GiB, 8 GB disk. The default (lite, 256 MiB) OOMs
+          // on `npm/pnpm install` + a real Vite production build. Per-plan standard-*
+          // sizing in src/tiers.ts is metadata-only (the lib can't size per-start).
+          "instance_type": "standard-1",
+          // Don't SIGTERM an in-flight build during an api-worker rollout. 3900s = the
+          // 60-min DEPLOY_TOKEN_HARD_MAX_MINUTES build cap + 5 min margin.
+          "rollout_active_grace_period": 3900,
+        },
+      ],
       "queues": {
         "producers": [{ "binding": "CRON_FIRES_QUEUE", "queue": "void-cron-fires-staging" }],
         "consumers": [

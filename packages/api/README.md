@@ -2,7 +2,7 @@
 
 Control-plane API and internal admin UI for Void.
 
-It owns platform auth, projects, deployments, domains, secrets, provisioning, rollback, and usage/account enforcement. The worker uses Hono plus Drizzle over PostgreSQL via Hyperdrive.
+It owns platform auth, projects, deployments, domains, secrets, provisioning, rollback, usage/account enforcement, and Deploy-on-GitHub (GitHub App connect, push-triggered builds, GitHub Actions OIDC). The worker uses Hono plus Drizzle over PostgreSQL via Hyperdrive.
 
 ## Architecture
 
@@ -13,6 +13,7 @@ It owns platform auth, projects, deployments, domains, secrets, provisioning, ro
 - **Background work**:
   - `scheduled()` for periodic usage enforcement and rollover checks
   - `queue()` for usage-event ingestion
+- **Deploy on GitHub**: GitHub App install/connect, webhook-driven builds, and GitHub Actions OIDC. Builds run in a `BuildManager` Cloudflare Container (default) or via GitHub Actions, queued and concurrency-gated by the `BuildScheduler` Durable Object
 
 ## Source Layout
 
@@ -29,15 +30,24 @@ src/
   cron-scheduler.ts           # Durable Object for project crons
   usage-counter.ts            # Durable Object for per-user usage counters
   usage-queue.ts              # Queue consumer logic
-  tiers.ts                    # Plan limits + helpers
+  tiers.ts                    # Plan limits + helpers (incl. concurrentBuilds, buildTimeoutMinutes, getBuildInstanceType)
+  build-scheduler.ts          # Durable Object: global build queue + per-tier concurrency
+  build-manager.ts            # Durable Object (extends @cloudflare/containers Container): per-build container
+  build-types.ts              # BuildConfig, BuildLogLine
+  github/                     # GitHub App crypto: app-jwt, installation-token, webhook-verify, oidc-verify
   provisioning/               # Worker/resource provisioning + cleanup
   migrations/                 # Validation + legacy remote D1 runner
+  auth/
+    deploy-token.ts           # Mint short-lived project-scoped deploy JWT (aud: "deploy")
   routes/
-    auth.ts                   # OAuth login/callback
+    auth.ts                   # OAuth login/callback (also backfills GitHub installation -> user)
     me.ts                     # Current user
     projects.ts               # Project CRUD, migrations, logs, PG DB ops
-    deploy.ts                 # Deploy pipeline
+    deploy.ts                 # Deploy pipeline (accepts api- or deploy-scoped tokens)
     delete.ts                 # Project deletion
+    github.ts                 # GitHub App install/connect + per-project connection routes
+    webhooks.ts               # POST /webhooks/github (HMAC-verified push/installation/workflow_run)
+    auth-oidc.ts              # POST /auth/github-oidc (verify Actions OIDC, mint scoped token)
     revalidate.ts             # Dashboard/admin ISR revalidation
     internal-revalidate.ts    # Proxy -> API ISR revalidation
     internal-resolve-resource.ts
@@ -49,11 +59,13 @@ src/
     routes/                   # Admin pages, users/projects/deployments/platform/signup-control
     views/                    # Hono JSX view layer
     middleware/auth.ts
+container/
+  Dockerfile                  # node:24-slim + corepack + bun build image
+  build-agent.mjs             # Downloads source tarball, installs deps, runs `npx void deploy`
 drizzle/
   0000_*.sql
-  0001_*.sql
-  0002_*.sql
-  0003_*.sql
+  ...
+  0020_*.sql                  # builds, github_connections, github_installations tables
 ```
 
 ## Main Route Groups
@@ -72,7 +84,18 @@ drizzle/
   - domains
   - usage
   - PostgreSQL project database provisioning/update
+  - `/projects/:id/github` — connect/inspect/update/disconnect the GitHub repo (POST/GET/PATCH/DELETE; auth + ownership)
 - `GET /usage`
+
+### Deploy on GitHub
+
+- `GET /github/install-url` (auth) — start GitHub App installation
+- `GET /github/installations` (auth) — installations accessible to the user
+- `GET /github/callback` (public, HMAC-signed state) — App install callback
+- `POST /webhooks/github` (public, HMAC-verified) — `push` queues a container build and pokes the scheduler; `installation`/`installation_repositories` sync access; `workflow_run` completes GitHub Actions builds
+- `POST /auth/github-oidc` (public) — verify a GitHub Actions OIDC token, create the Actions build row, and mint a scoped `VOID_TOKEN` (`{ oidcToken, project }` -> `{ token, projectId, buildId }`)
+
+The webhook and OIDC endpoints return `503` when the GitHub App secrets are unset, so the worker runs without them. On staging, both paths must be on the Cloudflare Access **bypass** list (GitHub cannot present Access credentials).
 
 ### Internal API
 
@@ -128,6 +151,18 @@ Dashboard auth uses the same JWT model, stored in the `void_token` cookie.
 2. store small assets in `STATIC_ASSETS` KV and large assets in `STATIC_ASSETS_R2`
 3. write a manifest to `ROUTING`
 4. point routing at `staticDeploymentId` instead of a worker
+
+## Deploy on GitHub
+
+Connect a repo through a GitHub App; a `git push` then builds and deploys automatically.
+
+- **Connect**: the user installs the App (`/github/install-url` -> `/github/callback`) and links a repo to a project via `/projects/:id/github`. Installation-to-user mapping lives in `github_installations`; the OAuth callback backfills it on sign-in.
+- **Trigger**: `POST /webhooks/github` verifies the HMAC signature, then on `push` writes a `builds` row and pokes the `BuildScheduler`.
+- **Executors** (per `github_connections.build_executor`, default `container`):
+  - **CF Container** — `BuildScheduler` (global, alarm-driven queue with per-tier concurrency from `tiers.ts`) atomically claims a build and RPCs `BuildManager` to start a container. `BuildManager` extends `@cloudflare/containers` `Container`, enforces a timeout alarm, and persists status to Postgres via Hyperdrive.
+  - **GitHub Actions** — `void init --github` scaffolds a workflow that calls `POST /auth/github-oidc`; the verified job runs `void deploy` and reports back via the `workflow_run` webhook.
+- **Build mechanism**: both executors run the real `void deploy` CLI with a short-lived, project-scoped deploy token (`aud: "deploy"`, minted by `auth/deploy-token.ts`). There is no artifact-upload endpoint; `routes/deploy.ts` is unchanged. The container agent (`container/build-agent.mjs`) downloads the source tarball, installs deps, and runs `npx void deploy --project <slug>` with `VOID_TOKEN` + `VOID_API_URL`.
+- **Known follow-up**: container→DO live-log streaming is not yet wired (the WS log endpoint and the agent's `GET /logs?since=N` exist, but nothing connects them). There is no build log UI yet.
 
 ## Usage and Plan Enforcement
 
@@ -187,6 +222,8 @@ Secrets used at runtime:
 
 `PROJECT_SECRET_KEYS_JSON` is a JSON object mapping key-version strings to base64-encoded 32-byte AES keys. `PROJECT_SECRET_ACTIVE_KEY_VERSION` selects which version is used for new project-secret writes.
 
+`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` are the OAuth app used for **user sign-in**. They are distinct from the Deploy-on-GitHub App secrets below.
+
 Optional vars:
 
 - `AUTH_REDIRECT_URI`
@@ -194,12 +231,18 @@ Optional vars:
 - `GITHUB_PREVIEW_REPO_PAT`
 - `VOID_PROXY_SERVICE`
 - `SITE_DOMAIN`
+- `GITHUB_APP_ID` — Deploy-on-GitHub App identifier
+- `GITHUB_APP_PRIVATE_KEY` — PKCS#8 PEM (convert GitHub's PKCS#1 with `openssl pkcs8 -topk8 -nocrypt`)
+- `GITHUB_APP_SLUG` — App slug, used to build the install URL
+- `GITHUB_WEBHOOK_SECRET` — HMAC secret for `POST /webhooks/github`
+
+The four `GITHUB_APP_*` secrets are optional: when unset, `/webhooks/github` and `/auth/github-oidc` return `503` and the rest of the worker runs normally. They are the App for Deploy-on-GitHub, separate from the sign-in OAuth app above.
 
 Set `GITHUB_PREVIEW_REPO_PAT` to automatically invite GitHub-authenticated users to `void-sdk/void` with read-only access. The PAT should be a fine-grained token with `Administration` repository permission `write` for that repository.
 
 ## Tests
 
-Unit coverage includes provisioning, JWT/auth helpers, deploy manifest validation, usage counters, cron scheduling, and legacy D1 migration helpers.
+Unit coverage includes provisioning, JWT/auth helpers, deploy manifest validation, usage counters, cron scheduling, legacy D1 migration helpers, and Deploy-on-GitHub crypto (App JWT, installation token, webhook HMAC verification, OIDC verification) plus the scoped deploy-token minting.
 
 Integration coverage includes:
 
@@ -209,3 +252,4 @@ Integration coverage includes:
 - custom domains and secrets
 - admin dashboard
 - scheduled usage enforcement
+- GitHub App connect/webhook/OIDC routes and the `BuildScheduler` queue/concurrency behavior

@@ -462,7 +462,16 @@ const app = new Hono<ApiEnv>()
   // List all projects for the current user
   .get('/', async (context) => {
     const userId = context.get('user').id;
-    const projects = await getProjectsByUserId(context.get('db'), userId);
+    const allProjects = await getProjectsByUserId(context.get('db'), userId);
+
+    // A project-scoped deploy token (aud:'deploy') is minted to deploy ONE
+    // project and only needs the scoped project present here for the CLI's
+    // slug→id resolution. Restrict the listing to that project so a leaked
+    // build-time token cannot enumerate every other project's domains,
+    // deployments, traffic, and health. Full `api` tokens (deployScope unset)
+    // keep the complete listing.
+    const deployScope = context.get('deployScope');
+    const projects = deployScope ? allProjects.filter((p) => p.id === deployScope) : allProjects;
 
     // Batch-fetch domains for all projects in a single query
     const projectIds = projects.map((p) => p.id);
@@ -580,8 +589,24 @@ const app = new Hono<ApiEnv>()
     }
 
     const deployments = await getProjectDeployments(context.get('db'), project.id, 20);
+    // A project-scoped deploy token (aud:'deploy') runs in the UNTRUSTED build
+    // environment (CF Container / GitHub Actions). The deploy manifest's `vars`
+    // field carries plaintext env values (uploaded as plain_text Worker
+    // bindings), so returning full historical manifests here would let a leaked
+    // build token or a compromised build dependency read every project's env
+    // history. Strip the secret-bearing fields for deploy-token callers while
+    // KEEPING `manifest.live` — the deploy CLI reads only `manifest.live`
+    // (bindingName/className) from this endpoint to restore live bindings on
+    // deploy-on-GitHub builds. Full `api` tokens (deployScope unset) leave the
+    // rows untouched, so the dashboard/admin still see complete manifests.
+    const sanitized = context.get('deployScope')
+      ? deployments.map((deployment) => ({
+          ...deployment,
+          manifest: sanitizeManifestForDeployToken(deployment.manifest),
+        }))
+      : deployments;
     return context.json({
-      deployments,
+      deployments: sanitized,
       activeDeploymentId: project.active_deployment_id,
     });
   })
@@ -1751,13 +1776,27 @@ const app = new Hono<ApiEnv>()
     if (!project || project.user_id !== context.get('user').id) {
       return context.json({ error: 'Not found' }, 404);
     }
+    // Refuse to provision once teardown has begun. Project teardown revokes
+    // in-flight build deploy tokens up front, but a token captured just before
+    // that (or a full `api` token used by the owner concurrently with their own
+    // delete) could otherwise still reach this provisioning route and create a
+    // Hyperdrive whose `resources` row the teardown cascade then deletes WITHOUT
+    // deleting the CF Hyperdrive (no name-based orphan sweep for hyperdrive).
+    // This closes the COMMON case (teardown already started at read time). The
+    // narrow residual — status flips after this unlocked read but before the
+    // resources-row INSERT lands — is the pre-existing orphan-on-concurrent-
+    // create class (design-doc 0067; the full fix is project-level locking, not
+    // scoped here). Bail before touching Cloudflare.
+    if (project.status === 'deleting') {
+      return context.json({ error: 'Project is being deleted' }, 409);
+    }
 
     const { connectionString } = await context.req.json<{ connectionString: string }>();
     if (!connectionString?.startsWith('postgres')) {
       return context.json({ error: 'Invalid connection string' }, 400);
     }
 
-    const { createHyperdrive, updateHyperdrive, getHyperdriveByName } =
+    const { createHyperdrive, updateHyperdrive, getHyperdriveByName, deleteHyperdrive } =
       await import('../provisioning/cloudflare-api.ts');
     const { createResource, getProjectResources } = await import('../db.ts');
 
@@ -1773,6 +1812,10 @@ const app = new Hono<ApiEnv>()
 
     const resourceName = getHyperdriveResourceName(projectId);
     let hyperdriveId: string;
+    // Track whether WE created the CF Hyperdrive (vs. adopting a pre-existing one
+    // via the already-exists branch) — only a self-created object is safe to roll
+    // back if the resources-row INSERT below fails.
+    let hyperdriveCreatedByUs = false;
     try {
       const hd = await createHyperdrive(
         context.env.CF_ACCOUNT_ID,
@@ -1781,6 +1824,7 @@ const app = new Hono<ApiEnv>()
         connectionString,
       );
       hyperdriveId = hd.id;
+      hyperdriveCreatedByUs = true;
     } catch (err: unknown) {
       if (isAlreadyExistsError(err)) {
         // CF already has a Hyperdrive for this name (orphaned from a prior partial failure).
@@ -1844,7 +1888,23 @@ const app = new Hono<ApiEnv>()
       );
     }
 
-    await createResource(context.get('db'), projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
+    try {
+      await createResource(context.get('db'), projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
+    } catch (err) {
+      // The resources row didn't persist (most often a FK violation because
+      // teardown deleted the project concurrently). Without the row the cascade
+      // can't see the Hyperdrive, so it would orphan. Delete what we created
+      // before failing. Best-effort; pre-existing Hyperdrives we merely adopted
+      // are left alone.
+      if (hyperdriveCreatedByUs) {
+        await deleteHyperdrive(
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
+          hyperdriveId,
+        ).catch(() => {});
+      }
+      throw err;
+    }
     return context.json({ ok: true });
   })
 
@@ -1855,13 +1915,21 @@ const app = new Hono<ApiEnv>()
     if (!project || project.user_id !== context.get('user').id) {
       return context.json({ error: 'Not found' }, 404);
     }
+    // Same teardown guard as POST /:id/database — its create-new-Hyperdrive
+    // branch below can orphan a CF Hyperdrive the same way. This route is
+    // `api`-token-only (not deploy-token-reachable), so the only racer is the
+    // owner deleting their own project concurrently; bail once teardown has
+    // begun. Same pre-existing residual TOCTOU applies (design-doc 0067).
+    if (project.status === 'deleting') {
+      return context.json({ error: 'Project is being deleted' }, 409);
+    }
 
     const { connectionString } = await context.req.json<{ connectionString: string }>();
     if (!connectionString?.startsWith('postgres')) {
       return context.json({ error: 'Invalid connection string' }, 400);
     }
 
-    const { createHyperdrive, updateHyperdrive, getHyperdriveByName } =
+    const { createHyperdrive, updateHyperdrive, getHyperdriveByName, deleteHyperdrive } =
       await import('../provisioning/cloudflare-api.ts');
     const { createResource, getProjectResources } = await import('../db.ts');
 
@@ -1890,6 +1958,8 @@ const app = new Hono<ApiEnv>()
       // Create new Hyperdrive config
       const resourceName = getHyperdriveResourceName(projectId);
       let hyperdriveId: string;
+      // See POST /:id/database — only roll back a Hyperdrive WE created.
+      let hyperdriveCreatedByUs = false;
       try {
         const hd = await createHyperdrive(
           context.env.CF_ACCOUNT_ID,
@@ -1898,6 +1968,7 @@ const app = new Hono<ApiEnv>()
           connectionString,
         );
         hyperdriveId = hd.id;
+        hyperdriveCreatedByUs = true;
       } catch (err: unknown) {
         if (isAlreadyExistsError(err)) {
           // CF already has a Hyperdrive for this name (orphaned from a prior partial failure).
@@ -1932,7 +2003,26 @@ const app = new Hono<ApiEnv>()
           throw err;
         }
       }
-      await createResource(context.get('db'), projectId, 'hyperdrive', hyperdriveId, 'HYPERDRIVE');
+      try {
+        await createResource(
+          context.get('db'),
+          projectId,
+          'hyperdrive',
+          hyperdriveId,
+          'HYPERDRIVE',
+        );
+      } catch (err) {
+        // Row didn't persist (e.g. concurrent teardown FK violation) → delete the
+        // Hyperdrive we just created so it doesn't orphan. Best-effort.
+        if (hyperdriveCreatedByUs) {
+          await deleteHyperdrive(
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
+            hyperdriveId,
+          ).catch(() => {});
+        }
+        throw err;
+      }
     }
 
     // CF accepted the connection string — persist it as our cached copy.
@@ -2042,6 +2132,39 @@ function toDatabaseProvisioningError(
   }
 
   return null;
+}
+
+/**
+ * Strip plaintext-secret-bearing fields from a deployment manifest before it
+ * is returned to a project-scoped deploy token (aud:'deploy').
+ *
+ * `manifest.vars` is the only top-level manifest field carrying raw env values
+ * — they are uploaded as `plain_text` Worker bindings at deploy time (see
+ * `routes/deploy.ts`). Real secrets travel as `secret_text` sourced from the
+ * project secrets store, NOT from the manifest, so there is no `manifest.secrets`
+ * field to strip. The CLI reads ONLY `manifest.live` (bindingName/className)
+ * from the deployments endpoint to restore live bindings, so every other field
+ * — including `live` — is preserved.
+ *
+ * Fail-safe: a null/empty input, or any manifest that does not parse as JSON,
+ * collapses to `null`. We never return an unparseable manifest string that
+ * might still contain secret values to an untrusted build environment.
+ */
+function sanitizeManifestForDeployToken(raw: string | null): string | null {
+  if (!raw) {
+    return null;
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  delete parsed.vars;
+  return JSON.stringify(parsed);
 }
 
 function tryParse(json: string): ReadonlyArray<unknown> {

@@ -8,6 +8,8 @@ import adminProjects from './admin/routes/projects.tsx';
 import adminSignupControl from './admin/routes/signup-control.tsx';
 import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
 import adminUsers from './admin/routes/users.tsx';
+import { BuildManager } from './build-manager.ts';
+import { BuildScheduler } from './build-scheduler.ts';
 import { type CronFireMessage, processCronFiresBatch } from './cron-fires-queue.ts';
 import { CronScheduler } from './cron-scheduler.ts';
 import {
@@ -22,6 +24,9 @@ import {
   purgeExpiredOAuthNonces,
   purgeExpiredAuthCodes,
   failStaleDeployments,
+  failStaleActiveContainerBuilds,
+  failStaleActiveGithubActionsBuilds,
+  hasQueuedContainerBuilds,
   getProject,
   getProjectsByIds,
   getUsersByIds,
@@ -30,6 +35,7 @@ import {
 import { escapeHtml } from './email.ts';
 import type { ApiEnv } from './env.ts';
 import { ErrorAlertMonitor } from './error-alert-monitor.ts';
+import { cancelContainerBuildDos } from './github/cancel-builds.ts';
 import { authMiddleware } from './middleware/auth.ts';
 import { tryActivateDomain } from './provisioning/activate-domain.ts';
 import {
@@ -37,10 +43,12 @@ import {
   deleteCustomHostname,
   getCustomHostname,
 } from './provisioning/cloudflare-api.ts';
+import { oidcRoutes } from './routes/auth-oidc.ts';
 import auth from './routes/auth.ts';
 import deleteRoute from './routes/delete.ts';
 import deploy from './routes/deploy.ts';
 import domains from './routes/domains.ts';
+import { githubProjectRoutes, githubRoutes } from './routes/github.ts';
 import internalResolveResource from './routes/internal-resolve-resource.ts';
 import internalResolveWorker from './routes/internal-resolve-worker.ts';
 import internalRevalidate from './routes/internal-revalidate.ts';
@@ -50,6 +58,7 @@ import projects from './routes/projects.ts';
 import revalidate from './routes/revalidate.ts';
 import secrets from './routes/secrets.ts';
 import { projectUsage, accountUsage } from './routes/usage.ts';
+import { webhookRoutes } from './routes/webhooks.ts';
 import { setProjectsRoutingSuspension } from './routing.ts';
 import { SandboxConcurrencyCounter } from './sandbox-concurrency-counter.ts';
 import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
@@ -115,10 +124,13 @@ const app = new Hono<ApiEnv>()
 </body></html>`);
   })
   .route('/auth', auth)
+  .route('/auth', oidcRoutes)
   .route('/internal/revalidate', internalRevalidate)
   .route('/internal/resolve-resource', internalResolveResource)
   .route('/internal/resolve-worker', internalResolveWorker)
   .route('/internal/verify-owner', internalVerifyOwner)
+  .route('/webhooks', webhookRoutes)
+  .route('/github', githubRoutes)
   .use('/me', authMiddleware)
   .route('/me', me)
   .use('/projects/*', authMiddleware)
@@ -128,6 +140,7 @@ const app = new Hono<ApiEnv>()
   .route('/projects', revalidate)
   .route('/projects', secrets)
   .route('/projects', domains)
+  .route('/projects', githubProjectRoutes)
   .route('/projects', projectUsage)
   .use('/usage', authMiddleware)
   .route('/usage', accountUsage);
@@ -157,6 +170,20 @@ const RECENT_PENDING_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 export const FAST_CRON = '*/2 * * * *';
 
 const MAX_PENDING_RECONCILE_PER_RUN = 200; // bound CF polling + protect later maintenance; tunable
+
+// Max age before an ACTIVE GitHub Actions build is force-failed by the hourly
+// reaper. Comfortably exceeds the largest plan `buildTimeoutMinutes` (20) plus
+// margin, so a still-running build is never reaped — only ones whose
+// `workflow_run` completion was missed (or whose connection was removed
+// mid-run) and that would otherwise pin a concurrency slot forever.
+const STALE_ACTIONS_BUILD_MAX_AGE_MINUTES = 60;
+
+// Max age (from `started_at`) before an ACTIVE container build is force-failed
+// by the hourly reaper. The hard-max build timeout is 60 min, so 75 leaves a
+// 15-min margin: this only ever catches rows whose BuildManager DO timeout
+// already fired (or whose DO died) but whose terminal-status write to Postgres
+// failed, leaving the row pinning a concurrency slot forever.
+const STALE_CONTAINER_BUILD_MAX_AGE_MINUTES = 75;
 
 async function scheduled(
   controller: ScheduledController,
@@ -195,6 +222,71 @@ async function scheduled(
       }
     })
     .catch((err) => console.error('[scheduled] failed to clean up stale deployments:', err));
+
+  // Auto-fail GitHub Actions builds stuck ACTIVE far longer than any plan's
+  // build timeout. A missed `workflow_run` completion webhook — or a disconnect
+  // mid-run — would otherwise leave an Actions build active forever, pinning one
+  // of the owner's concurrency slots. Container builds free their slot via the
+  // BuildManager DO timeout, so this is scoped to executor='github_actions'.
+  // Best-effort and isolated like the steps around it.
+  await failStaleActiveGithubActionsBuilds(db, STALE_ACTIONS_BUILD_MAX_AGE_MINUTES)
+    .then((n) => {
+      if (n > 0) {
+        console.log(`[scheduled] auto-failed ${n} stale github_actions build(s)`);
+      }
+    })
+    .catch((err) =>
+      console.error('[scheduled] failed to clean up stale github_actions builds:', err),
+    );
+
+  // Auto-fail container builds stuck ACTIVE far longer than the hard-max build
+  // timeout. The BuildManager DO normally reaps these via its own timeout, but
+  // if that timeout path tears down the container yet its terminal-status write
+  // to Postgres throws (Hyperdrive transient failure), the row stays ACTIVE
+  // forever — pinning a concurrency slot and blocking the project's queue.
+  //
+  // Two phases, ordered deliberately. (1) The DB terminalize is AUTHORITATIVE:
+  // it frees the concurrency slot and revokes the bound deploy token (build-row
+  // status is the token authority) even if the DO is unreachable — that is the
+  // whole point of this backstop, so it must run first and stand alone. (2) The
+  // `started_at > maxAge` predicate does NOT prove the container is gone: if the
+  // DO was evicted or its timeout alarm lost, the container may still be RUNNING.
+  // So we best-effort issue a BuildManager `cancelBuild` for each reaped id —
+  // stopping any still-alive orphan (halting its billing) and converging DO-local
+  // status. cancelBuild against an already-terminal row is harmless: it still
+  // calls stop() but its CAS no-ops the DB write (no double-deploy), setting
+  // DO-local status to 'cancelled' while the DB row stays 'failed' — both
+  // terminal, acceptable. A DO RPC failure must NOT break the handler (the slot
+  // is already freed by phase 1), so this is wrapped best-effort and isolated
+  // like the steps around it. Scoped to executor='container'.
+  await failStaleActiveContainerBuilds(db, STALE_CONTAINER_BUILD_MAX_AGE_MINUTES)
+    .then(async (staleIds) => {
+      if (staleIds.length > 0) {
+        console.log(`[scheduled] auto-failed ${staleIds.length} stale container build(s)`);
+        await cancelContainerBuildDos(
+          env,
+          staleIds.map((id) => ({ id, executor: 'container' as const })),
+          'stale build reaper',
+        );
+      }
+    })
+    .catch((err) => console.error('[scheduled] failed to clean up stale container builds:', err));
+
+  // Re-arm the build scheduler if any container builds are still queued. The
+  // webhook push handler pokes BUILD_SCHEDULER best-effort after inserting a
+  // build row; the DO lets its alarm lapse on an empty queue. If that poke
+  // failed (DO transport error, etc.) the row would sit `queued` with no alarm
+  // to drain it. This cron safety net guarantees an orphaned queued build is
+  // picked up within one tick. Best-effort and isolated like the steps around
+  // it — one failure must not block the rest of the hourly maintenance.
+  await hasQueuedContainerBuilds(db)
+    .then(async (hasQueued) => {
+      if (hasQueued) {
+        const scheduler = env.BUILD_SCHEDULER.get(env.BUILD_SCHEDULER.idFromName('global'));
+        await scheduler.fetch('https://scheduler/poke', { method: 'POST' });
+      }
+    })
+    .catch((err) => console.error('[scheduled] failed to re-arm build scheduler:', err));
 
   // Purge expired OAuth nonces and auth codes left by abandoned login flows (best-effort)
   await purgeExpiredOAuthNonces(db).catch((err) =>
@@ -562,7 +654,14 @@ async function processUserRollover(
   );
 }
 
-export { UsageCounter, CronScheduler, ErrorAlertMonitor, SandboxConcurrencyCounter };
+export {
+  UsageCounter,
+  CronScheduler,
+  ErrorAlertMonitor,
+  SandboxConcurrencyCounter,
+  BuildScheduler,
+  BuildManager,
+};
 export type AppType = typeof app;
 export { app, scheduled };
 

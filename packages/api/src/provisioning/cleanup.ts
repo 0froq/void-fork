@@ -11,15 +11,17 @@ import {
   getDomainsByProjectId,
   getProject,
   getProjectResources,
+  terminateBuildsForProject,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
+import { cancelContainerBuildDos } from '../github/cancel-builds.ts';
 import {
   getLegacyProjectWorkerName,
   getProjectDeploymentWorkerName,
   getProjectQueueName,
 } from '../naming.ts';
 import { deployments as deploymentsTable, projects as projectsTable } from '../schema.ts';
-import type { DeployManifest, Project, Resource } from '../types.ts';
+import type { Build, DeployManifest, Project, Resource } from '../types.ts';
 import {
   deleteCustomHostname,
   deleteD1Database,
@@ -184,11 +186,15 @@ async function cleanupBestEffortResources(
   context: Context<ApiEnv>,
   projectId: string,
   project: Pick<Project, 'slug'>,
-): Promise<ReadonlyArray<string>> {
+): Promise<{ warnings: ReadonlyArray<string>; cleanedCfIds: ReadonlySet<string> }> {
   const warnings: Array<string> = [];
   const warn = (msg: string) => (err: unknown) => {
     warnings.push(`${msg}: ${err instanceof Error ? err.message : String(err)}`);
   };
+  // cf_ids whose CF object this sweep attempted to delete, so the post-cascade
+  // race-window cleanup can skip them (it only needs the rows created AFTER the
+  // snapshot below).
+  const cleanedCfIds = new Set<string>();
 
   const [projectDeployments, resources, projectDomains] = await Promise.all([
     getAllProjectDeployments(context.get('db'), projectId),
@@ -252,6 +258,7 @@ async function cleanupBestEffortResources(
     if (resource.type === 'container') {
       continue;
     }
+    cleanedCfIds.add(resource.cf_id);
     const del = deleteCloudflareResource(
       context.env.CF_ACCOUNT_ID,
       context.env.CF_API_TOKEN,
@@ -302,13 +309,14 @@ async function cleanupBestEffortResources(
   }
 
   await Promise.all(cleanup);
-  return warnings;
+  return { warnings, cleanedCfIds };
 }
 
 /**
- * Acquire the project-row lock, flip status='deleting' (if not already), and
- * mark every non-terminal deployment as 'canceling'. Idempotent for repeated
- * teardown attempts.
+ * Acquire the project-row lock, flip status='deleting' (if not already), mark
+ * every non-terminal deployment as 'canceling', and terminalize every in-flight
+ * build. Returns the terminalized builds so the caller can stop their container
+ * DOs. Idempotent for repeated teardown attempts.
  *
  * Holding the FOR UPDATE lock across the status flip + deployment cancellation
  * serializes with the deploy pipeline's atomic precheck-and-claim transaction,
@@ -317,9 +325,24 @@ async function cleanupBestEffortResources(
  * its NEXT `assertDeploymentNotCanceled` / `assertProjectNotDeleting` call
  * inside `routes/deploy.ts` and abort before issuing further CF mutations
  * (worker PUT, asset session, routing flip, etc.).
+ *
+ * Builds are terminalized HERE — at the very start of teardown, before any CF
+ * cleanup — rather than only in `deleteProjectCascade` at the end. A build-scoped
+ * deploy token is accepted while its bound build row is active
+ * (`middleware/auth.ts`), so leaving builds active through the (multi-second) CF
+ * cleanup window would let a still-live token keep hitting deploy-token
+ * provisioning routes (e.g. POST /:id/database) and create CF resources the
+ * cascade then orphans. The CAS in `terminateBuildsForProject` revokes each
+ * token now; the caller stops the container DOs immediately after this commit.
+ * The project FOR UPDATE lock is the one build-creation takes, so a racing
+ * push/OIDC either committed before this lock (caught here) or serializes after
+ * it (caught by `deleteProjectCascade`'s own terminate at the end).
  */
-async function lockAndMarkDeleting(db: Db, projectId: string): Promise<void> {
-  await db.transaction(async (tx) => {
+async function lockAndMarkDeleting(
+  db: Db,
+  projectId: string,
+): Promise<ReadonlyArray<{ id: string; executor: Build['executor']; status: Build['status'] }>> {
+  return await db.transaction(async (tx) => {
     await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
     const txDb = tx as unknown as Db;
     const lockedProject = await getProject(txDb, projectId);
@@ -351,28 +374,84 @@ async function lockAndMarkDeleting(db: Db, projectId: string): Promise<void> {
           notInArray(deploymentsTable.status, TERMINAL_DEPLOYMENT_STATUSES),
         ),
       );
+    // Revoke in-flight build deploy tokens up front (see doc above). Idempotent
+    // on replay (already-terminal builds are not re-matched by the CAS).
+    return await terminateBuildsForProject(txDb, projectId, { reason: 'project deleted' });
   });
+}
+
+/**
+ * Delete the CF object (and queue routing KV entry) behind any resource whose row
+ * the cascade removed but whose cf_id the pre-cascade best-effort sweep did NOT
+ * already handle. These are orphan-on-concurrent-create races: a provisioning
+ * route (`POST/PUT /:id/database`) or a deploy (`provisionBindings`) that inserted
+ * a `resources` row AFTER `cleanupBestEffortResources` took its one-time snapshot
+ * but before the cascade — so the CF object was never deleted, yet its only
+ * durable handle (the row) is now gone. `deleteProjectCascade` returns the
+ * COMPLETE set of committed resources (its FOR UPDATE conflicts with the INSERT's
+ * FK FOR KEY SHARE), so this catches every such straggler. Containers are excluded
+ * — they have their own deterministic-name double-sweep in
+ * `cleanupCriticalResources`. Best-effort: failures become warnings. Normally a
+ * no-op (no concurrent create → every row was in the snapshot). See design-doc 0067.
+ */
+async function cleanupRaceWindowResourceOrphans(
+  context: Context<ApiEnv>,
+  projectId: string,
+  deletedResources: ReadonlyArray<Resource>,
+  cleanedCfIds: ReadonlySet<string>,
+): Promise<ReadonlyArray<string>> {
+  const warnings: Array<string> = [];
+  const warn = (msg: string) => (err: unknown) => {
+    warnings.push(`${msg}: ${err instanceof Error ? err.message : String(err)}`);
+  };
+  const orphans = deletedResources.filter(
+    (r) => r.type !== 'container' && !cleanedCfIds.has(r.cf_id),
+  );
+  await Promise.all(
+    orphans.flatMap((r) => {
+      const tasks = [
+        deleteCloudflareResource(context.env.CF_ACCOUNT_ID, context.env.CF_API_TOKEN, r).catch(
+          warn(`Failed to delete race-window ${r.type} resource ${r.cf_id}`),
+        ),
+      ];
+      if (r.type === 'queue') {
+        tasks.push(
+          context.env.ROUTING.delete(
+            `queue:${getProjectQueueName(projectId, r.binding_name)}`,
+          ).catch(warn(`Failed to delete race-window queue routing entry for ${r.cf_id}`)),
+        );
+      }
+      return tasks;
+    }),
+  );
+  return warnings;
 }
 
 /**
  * Tear down a project end-to-end:
  *   1. Take FOR UPDATE on the project row, flip status='deleting' (if not
- *      already), and mark all non-terminal deployments as 'canceling' so any
- *      in-flight deploy aborts before further CF mutations.
+ *      already), mark all non-terminal deployments as 'canceling' so any
+ *      in-flight deploy aborts before further CF mutations, and terminalize all
+ *      in-flight builds (revoking their deploy tokens). Then stop the container
+ *      DOs of those builds — BEFORE any CF cleanup runs, so a still-running build
+ *      can't keep acting on its now-revoked token during the cleanup window.
  *   2. Run critical CF cleanup (container apps + per-deploy container
  *      orphan recovery). Throws on non-404 failure; the caller should surface
  *      a 5xx and the DB row remains, allowing retry.
  *   3. Run best-effort CF cleanup (D1, KV, R2, queues, hyperdrive, custom
  *      hostnames, routing entries, deployment workers). Failures become
  *      warnings.
- *   4. Cascade-delete the project from the DB (domains → resources →
- *      secrets → deployments → project).
+ *   4. Cascade-delete the project from the DB (terminalize any build that raced
+ *      in after step 1 → domains → resources → secrets → builds → deployments →
+ *      project), then best-effort stop the container DOs of any such late build
+ *      and delete the CF object behind any resource that raced the step-3
+ *      snapshot (a provisioning route / deploy that inserted a row after it).
  *
  * This is the ONLY caller of `cleanupCriticalResources`,
  * `cleanupBestEffortResources`, and `deleteProjectCascade` for the project-
  * teardown flow. Route handlers must use this helper instead of calling those
- * pieces directly so the lock + status flip + deployment cancellation cannot
- * be bypassed.
+ * pieces directly so the lock + status flip + deployment/build cancellation
+ * cannot be bypassed.
  */
 export async function teardownProject(
   context: Context<ApiEnv>,
@@ -380,13 +459,37 @@ export async function teardownProject(
   project: Pick<Project, 'slug' | 'status'>,
 ): Promise<{ warnings: ReadonlyArray<string> }> {
   // Always run lock + mark — idempotent for `status='deleting'` (the helper
-  // skips the flip and just (re-)marks any non-terminal deployments). This
-  // covers retried teardown after partial failure where the previous attempt
-  // crashed before deployment cancellations committed.
-  await lockAndMarkDeleting(context.get('db'), projectId);
+  // skips the flip and just (re-)marks any non-terminal deployments + builds).
+  // This covers retried teardown after partial failure where the previous
+  // attempt crashed before the cancellations committed.
+  const cancelledOnLock = await lockAndMarkDeleting(context.get('db'), projectId);
+  // Stop the container DOs for the builds revoked above BEFORE any CF cleanup
+  // begins (post-commit, never under the row lock — it's a DO round-trip), so
+  // their tokens are dead and their containers stopped before we touch CF.
+  await cancelContainerBuildDos(context.env, cancelledOnLock, 'project deleted');
 
   await cleanupCriticalResources(context, projectId, project);
-  const warnings = await cleanupBestEffortResources(context, projectId, project);
-  await deleteProjectCascade(context.get('db'), projectId);
-  return { warnings };
+  const { warnings: bestEffortWarnings, cleanedCfIds } = await cleanupBestEffortResources(
+    context,
+    projectId,
+    project,
+  );
+  // deleteProjectCascade re-terminalizes under the project lock to catch a build
+  // that raced in after step 1 committed (build creation takes the same lock),
+  // and returns both that build and every resource row it deleted.
+  const { cancelledBuilds, deletedResources } = await deleteProjectCascade(
+    context.get('db'),
+    projectId,
+  );
+  await cancelContainerBuildDos(context.env, cancelledBuilds, 'project deleted');
+  // Close the orphan-on-concurrent-create window: delete the CF object behind any
+  // resource whose row was created AFTER the best-effort snapshot above (so its
+  // cf_id isn't in `cleanedCfIds`) and just cascade-deleted. Normally empty.
+  const orphanWarnings = await cleanupRaceWindowResourceOrphans(
+    context,
+    projectId,
+    deletedResources,
+    cleanedCfIds,
+  );
+  return { warnings: [...bestEffortWarnings, ...orphanWarnings] };
 }

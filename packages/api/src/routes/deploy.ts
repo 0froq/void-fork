@@ -44,6 +44,8 @@ import {
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
   upsertProjectSecret,
+  getBuild,
+  ACTIVE_BUILD_STATUSES,
   CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES,
   type Db,
 } from '../db.ts';
@@ -73,7 +75,7 @@ import {
   projectAccountKey,
   writeProjectAccountEntry,
 } from '../routing.ts';
-import { deployments } from '../schema.ts';
+import { builds, deployments } from '../schema.ts';
 import { getPlanLimits, isWithinLimit, STATIC_RETENTION_LIMIT } from '../tiers.ts';
 import {
   MANIFEST_REDIRECT_RULE_STATUSES,
@@ -1149,6 +1151,52 @@ async function assertProjectNotDeleting(db: Db, projectId: string): Promise<void
   }
 }
 
+// Sentinel thrown by the final-publish transaction when the deploy token's
+// bound build is no longer active. The up-front guard in
+// `handleManifestOnlyDeploy` checks the build once at request entry, but the
+// request then spends minutes parsing the body, prechecking, uploading assets
+// to R2, and provisioning. During that window a newer GitHub Actions run's
+// OIDC exchange can mark the OLD bound build `cancelled` (the "superseded by
+// newer run" UPDATE in `createGithubActionsBuildWithinLimit`). Without a
+// re-check the superseded runner would still publish stale code. This message
+// is routed through the SAME rollback branch as PROJECT_DELETING_ERROR_MESSAGE
+// so the deployment never goes live.
+const SUPERSEDED_BUILD_ERROR_MESSAGE = 'bound build was superseded';
+
+/**
+ * Re-check the deploy token's bound build under a row lock, inside the final
+ * publish transaction, immediately before the deployment flips to `live`. The
+ * `FOR UPDATE` lock serializes against the supersede UPDATE in
+ * `createGithubActionsBuildWithinLimit` (which row-locks the matching `builds`
+ * rows as it cancels them), so a build that gets superseded mid-flight is
+ * observed as terminal here and the publish is aborted.
+ *
+ * No-op when the token carries no `build` claim (full-API tokens, legacy
+ * deploy tokens). Throws SUPERSEDED_BUILD_ERROR_MESSAGE on a non-active or
+ * project-mismatched build, mirroring the up-front guard's reject semantics.
+ */
+async function assertBoundBuildStillActive(
+  txDb: Db,
+  deployBuild: string | undefined,
+  projectId: string,
+): Promise<void> {
+  if (!deployBuild) {
+    return;
+  }
+  const [boundBuild] = await txDb
+    .select()
+    .from(builds)
+    .where(eq(builds.id, deployBuild))
+    .for('update')
+    .limit(1);
+  if (!boundBuild || !ACTIVE_BUILD_STATUSES.includes(boundBuild.status)) {
+    throw new Error(SUPERSEDED_BUILD_ERROR_MESSAGE);
+  }
+  if (boundBuild.project_id !== projectId) {
+    throw new Error(SUPERSEDED_BUILD_ERROR_MESSAGE);
+  }
+}
+
 export function buildWebSocketUploadMigrations(
   migrations: ReadonlyArray<WebSocketMigrationMeta> | undefined,
 ):
@@ -1952,6 +2000,24 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
   }
   if (project.user_id !== context.get('user').id) {
     return context.json({ error: 'forbidden' }, 403);
+  }
+  // Scoped deploy tokens (aud:'deploy') are pinned to a single project. Reject
+  // any attempt to use one against a different project. Full api tokens leave
+  // deployScope unset and skip this guard.
+  const deployScope = context.get('deployScope');
+  if (deployScope && deployScope !== projectId) {
+    return context.json({ error: 'forbidden' }, 403);
+  }
+  // A scoped deploy token may carry the build it was minted for. Reject it once
+  // that build is no longer active (e.g. superseded/cancelled by a newer push or
+  // run), so a stale runner can't deploy an older commit after being superseded.
+  // Tokens without a build claim (full-API tokens, legacy deploy tokens) skip this.
+  const deployBuild = context.get('deployBuild');
+  if (deployBuild) {
+    const build = await getBuild(context.get('db'), deployBuild);
+    if (!build || !ACTIVE_BUILD_STATUSES.includes(build.status)) {
+      return context.json({ error: 'forbidden' }, 403);
+    }
   }
   if (project.status === 'deleting') {
     return context.json({ error: 'project is being deleted' }, 410);
@@ -2796,6 +2862,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             if (!lockedProject || lockedProject.status === 'deleting') {
               throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
             }
+            // Re-check the bound build under a row lock before going live. The
+            // up-front guard can pass and then a newer GitHub Actions run
+            // supersede (cancel) this build while we spent minutes building and
+            // uploading; without this re-check a superseded runner would still
+            // go live with stale code. See `assertBoundBuildStillActive`.
+            await assertBoundBuildStillActive(txDb, deployBuild, projectId);
             await updateDeploymentStatus(txDb, deployment.id, 'live', undefined, {
               force: true,
             });
@@ -3722,6 +3794,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           if (!lockedProject || lockedProject.status === 'deleting') {
             throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
           }
+          // Re-check the bound build under a row lock before going live. The
+          // up-front guard can pass and then a newer GitHub Actions run
+          // supersede (cancel) this build while we spent minutes building and
+          // uploading; without this re-check a superseded runner would still
+          // go live with stale code. See `assertBoundBuildStillActive`.
+          await assertBoundBuildStillActive(txDb, deployBuild, projectId);
           await updateDeploymentStatus(txDb, deployment.id, 'live', undefined, {
             force: true,
           });
@@ -4003,9 +4081,16 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         const failedWorkerName = workerName!;
         const failedDispatchNamespace = dispatchNamespace!;
 
+        // SUPERSEDED is thrown only inside the go-live tx (by
+        // `assertBoundBuildStillActive`), so the message alone identifies it.
+        // A teardown race is PROJECT_DELETING thrown AFTER routing was switched
+        // (the in-tx delete re-check). Both abort the go-live: roll back the
+        // routing keys this attempt wrote and tear down the worker/bundle/
+        // container state, then mark the deployment failed (never live).
+        const supersededBuild = raw === SUPERSEDED_BUILD_ERROR_MESSAGE;
         const teardownRaceLost = routingSwitched && raw === PROJECT_DELETING_ERROR_MESSAGE;
-        if (teardownRaceLost) {
-          logger.error('catch', 'teardown_race_lost', err, {
+        if (teardownRaceLost || supersededBuild) {
+          logger.error('catch', supersededBuild ? 'superseded_build' : 'teardown_race_lost', err, {
             workerName: failedWorkerName,
             writtenRoutingKeyCount: writtenRoutingKeys.length,
           });
@@ -4065,7 +4150,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             deploymentId: failedDeployment.id,
             from: currentStatus,
             to: 'failed',
-            reason: 'teardown_race_lost',
+            reason: supersededBuild ? 'superseded_build' : 'teardown_race_lost',
           });
           await updateDeploymentStatus(context.get('db'), failedDeployment.id, 'failed', msg).catch(
             () => {},

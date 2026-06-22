@@ -100,10 +100,16 @@
 
 ## Phase 5: GitHub + Build Containers
 
-- [ ] GitHub App for webhook-based deploys
-- [ ] Build infrastructure (CF containers)
+- [x] GitHub App for webhook-based deploys (backend)
+- [x] Build infrastructure (CF containers) (backend)
+  - [x] Also delivered a GitHub Actions executor (OIDC, no stored secret) alongside the CF Container executor
 - [ ] Preview deployments per PR (paid)
 - [ ] User dashboard
+
+> **Note (2026-06):** "Deploy on GitHub" shipped backend-only. The build admin
+> UI and user-facing build views are **deferred** (no UI this round); the
+> WebSocket log endpoint exists but has no consumer yet. See
+> [0010-builds.md → Implementation divergences (2026-06)](./design-docs/0010-builds.md#implementation-divergences-2026-06).
 
 **Milestone:** Vercel / Netlify core DX parity.
 

@@ -9,6 +9,10 @@ import {
   createKVNamespace,
   createR2Bucket,
   createQueue,
+  deleteD1Database,
+  deleteKVNamespace,
+  deleteQueue,
+  deleteR2Bucket,
   getD1DatabaseByName,
   getKVNamespaceByTitle,
   getQueueByName,
@@ -128,9 +132,14 @@ async function ensureResource(
     return found;
   }
   let cfId: string;
+  // Track whether WE created the CF object. Only a self-created object is safe to
+  // roll back below — an already-exists lookup may be adopting a pre-existing
+  // resource we don't own.
+  let createdByUs = false;
 
   try {
     cfId = await createCfResource(type, accountId, apiToken, resourceName);
+    createdByUs = true;
   } catch (err) {
     if (isAlreadyExistsError(err)) {
       cfId = await lookupCfResource(type, accountId, apiToken, resourceName);
@@ -139,7 +148,46 @@ async function ensureResource(
     }
   }
 
-  return createResource(db, projectId, type, cfId, bindingName);
+  try {
+    return await createResource(db, projectId, type, cfId, bindingName);
+  } catch (err) {
+    // The CF object exists but its `resources` row did not persist — most often a
+    // FK violation because teardown deleted the project concurrently (the project
+    // FOR UPDATE in deleteProjectCascade serializes against this INSERT's FK FOR
+    // KEY SHARE). Without the row there is no durable handle, and teardown's
+    // cascade-capture sweep can't see it, so it would orphan the CF object. Delete
+    // what we just created before rethrowing. Best-effort: a failure here only
+    // falls back to the same orphan we're trying to avoid. (Pre-existing objects
+    // adopted via the already-exists lookup are left alone — not ours to delete.)
+    if (createdByUs) {
+      await deleteCfResource(type, accountId, apiToken, cfId).catch(() => {});
+    }
+    throw err;
+  }
+}
+
+/** Delete a CF resource by type — the rollback dual of {@link createCfResource}. */
+function deleteCfResource(
+  type: Resource['type'],
+  accountId: string,
+  apiToken: string,
+  cfId: string,
+): Promise<void> {
+  switch (type) {
+    case 'd1':
+      return deleteD1Database(accountId, apiToken, cfId);
+    case 'kv':
+      return deleteKVNamespace(accountId, apiToken, cfId);
+    case 'r2':
+      return deleteR2Bucket(accountId, apiToken, cfId);
+    case 'queue':
+      return deleteQueue(accountId, apiToken, cfId);
+    case 'hyperdrive':
+    case 'container':
+      // ensureResource never creates these (createCfResource throws first), so a
+      // rollback can't reach here. Resolve so the type switch stays exhaustive.
+      return Promise.resolve();
+  }
 }
 
 async function createCfResource(

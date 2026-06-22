@@ -1,8 +1,16 @@
 # Builds — CI/Build Service
 
 **Date:** 2026-02-19
-**Updated:** 2026-03-05
-**Status:** Design
+**Updated:** 2026-06-08
+**Status:** Implemented (backend, no UI)
+
+> **Implementation note (2026-06):** The backend shipped, but the build
+> mechanism diverged from this design in several material ways. The sections
+> below describe the _original_ design; read
+> [Implementation divergences (2026-06)](#implementation-divergences-2026-06)
+> at the end before treating anything here as current. The diagrams, the
+> `POST /builds/:id/artifacts` endpoint, the FormData artifact flow, and the
+> single-executor container model are all stale.
 
 ---
 
@@ -462,3 +470,124 @@ These can be cleanly added without modifying the Phase 1 architecture:
 
 - Override default `vite build` with user-specified command in project settings
 - For non-Vite projects or custom build pipelines
+
+---
+
+## Implementation divergences (2026-06)
+
+The "Deploy on GitHub" feature shipped its backend in June 2026. Several parts
+of the original design above were written against assumptions that became stale
+during implementation. This section is authoritative where it conflicts with
+the design above.
+
+### 1. Build mechanism: run the real `void deploy` CLI, no artifacts endpoint
+
+The container does **not** re-implement packaging and POST FormData artifacts.
+Instead, the build agent runs the **real `void deploy` CLI** inside the
+container with a short-lived, project-scoped token:
+
+```
+npx void deploy --project $slug   # with VOID_TOKEN + VOID_API_URL in env
+```
+
+Consequences:
+
+- There is **no** `POST /builds/:id/artifacts` endpoint. (Design "Artifact Flow"
+  and the corresponding row in "Platform API Endpoints" are dropped.)
+- There is **no** deploy-pipeline extraction. `packages/api/src/routes/deploy.ts`
+  is **unchanged**; the deploy endpoint stays JSON-manifest-only with
+  direct-to-R2 asset upload.
+- The container reuses the exact same deploy path as a local `void deploy`, so
+  there is zero divergence between local and remote deploys.
+
+The original premise (container POSTs FormData to a new internal endpoint that
+re-runs the pipeline) was stale: the deploy endpoint had already moved to a
+JSON-manifest / direct-to-R2 model, so re-implementing packaging in the
+container was both unnecessary and wrong.
+
+**Scoped deploy token (replaces the HMAC build-token):**
+
+- `signDeployToken()` (`packages/api/src/auth/deploy-token.ts`) mints a 15-min
+  `aud: 'deploy'`, project-scoped JWT.
+- `signJwt()` gained an optional `{ ttlSeconds }`.
+- `middleware/auth.ts` accepts `aud` of `'api'` **or** `'deploy'` (sets a
+  `deployScope` on the context); `routes/deploy.ts` has a one-line project-scope
+  guard. The pipeline is otherwise untouched.
+
+### 2. Two build executors (container is default; GitHub Actions via OIDC added)
+
+The design was container-only. The shipped feature has **two** executors,
+selected by `github_connections.build_executor` (`'container' | 'github_actions'`,
+default `'container'`):
+
+- **CF Container** (default) — `BuildScheduler` + `BuildManager` DOs as designed.
+- **GitHub Actions via OIDC** — `void init --github` scaffolds
+  `.github/workflows/void-deploy.yml`. The workflow runs `void deploy` on GitHub's
+  runners and authenticates with **no stored secret**: it presents a GitHub
+  Actions OIDC token to `POST /auth/github-oidc`, which verifies it against
+  GitHub's JWKS and mints a scoped `VOID_TOKEN`. `workflow_run` webhooks complete
+  the Actions-side build row.
+
+### 3. No UI this round (deferred)
+
+Design "Dashboard Integration" (user-facing Vue build views + admin Hono-JSX
+build views) is **deferred**. The WebSocket log API endpoint exists on
+`BuildManager` but has no consumer yet.
+
+### 4. Durable Objects: flat files, migration tag v5
+
+- DO classes live **flat** in `packages/api/src/` (`build-scheduler.ts`,
+  `build-manager.ts`), not in a `durable-objects/` directory.
+- The wrangler DO migration tag is **v5** (`new_sqlite_classes`:
+  `[BuildScheduler, BuildManager]`), applied to top-level + `env.production` +
+  `env.staging`.
+- `BuildManager` extends `Container` from `@cloudflare/containers@0.3.3`; the
+  `containers` block binds it to `./container/Dockerfile` in all three scopes.
+
+### 5. Extra schema beyond the original two tables
+
+In addition to `builds` and `github_connections`:
+
+- `github_connections` gained a `build_executor` column
+  (`'container' | 'github_actions'`, default `'container'`).
+- A new `github_installations` table maps GitHub installation IDs to users and
+  tracks accessible repos. The OAuth callback backfills installation → user.
+- Migration: `packages/api/drizzle/0020_nifty_black_bird.sql` (additive — 3
+  `CREATE TABLE`).
+
+### New / changed surfaces (not in the original design)
+
+- `packages/api/src/github/`: `app-jwt.ts` (RS256 App JWT), `installation-token.ts`
+  (cached 1h installation token + tarball URL), `webhook-verify.ts`
+  (HMAC-SHA256), `oidc-verify.ts` (GitHub Actions JWKS verify). Dependency: `jose`.
+- Routes mounted in `index.ts`: `routes/github.ts` (install-url, installations,
+  callback, per-project connect/get/patch/delete), `routes/webhooks.ts`
+  (`push` → queue container build + poke scheduler; `installation` /
+  `installation_repositories`; `workflow_run`), `routes/auth-oidc.ts`
+  (`POST /auth/github-oidc`).
+- Container: `packages/api/container/` — `Dockerfile` (node:24-slim + corepack +
+  bun) and `build-agent.mjs`.
+- Tiers: `PlanLimits.concurrentBuilds` + `.buildTimeoutMinutes` (0 = unlimited);
+  `getBuildInstanceType(plan)` → `standard-1/2/3`. Values: free 1/10, solo 2/15,
+  pro 3/15, sponsored 6/20, custom 0/0.
+
+### New secrets
+
+`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PKCS#8 PEM), `GITHUB_WEBHOOK_SECRET`,
+`GITHUB_APP_SLUG` — per-env, declared **optional** in `env.ts` (webhook + OIDC
+endpoints return 503 when unset). Distinct from the existing
+`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` (user sign-in OAuth app). Staging
+Cloudflare Access must add `/webhooks/github` and `/auth/github-oidc` to the
+bypass list (GitHub cannot present Access creds).
+
+### Known follow-ups (not done this round)
+
+- **Container → DO live-log transport is not yet wired.** Needs either a
+  `ContainerProxy` `outboundByHost` handler on `BuildManager` or a DO
+  `containerFetch` pull-loop against the agent's `GET /logs?since=N` endpoint
+  (which exists). Non-critical: there is no log UI yet and builds succeed
+  regardless.
+- **`build-agent.mjs` `VOID_FALLBACK_VERSION` is `'latest'`** — pin to a
+  published `void` version before production.
+- **UIs**: admin + user-facing build views.
+- **Preview deployments per PR.**

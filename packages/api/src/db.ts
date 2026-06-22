@@ -35,14 +35,20 @@ import {
   migrationRenames,
   projectMigrations,
   projectDatabaseCredentials,
+  builds,
+  githubConnections,
+  githubInstallations,
 } from './schema.ts';
-import type { DomainVerificationData } from './schema.ts';
+import type { DomainVerificationData, GitHubInstallationRepository } from './schema.ts';
 import type { AllowlistEntry } from './signup-allowlist.ts';
 import type { PlanId } from './tiers.ts';
 import type {
+  Build,
   Deployment,
   DeploymentStatus,
   Domain,
+  GitHubConnection,
+  GitHubInstallation,
   Invitation,
   OAuthAccount,
   PlatformEvent,
@@ -1334,13 +1340,68 @@ export async function deleteProject(db: Db, id: string): Promise<void> {
   await db.delete(projects).where(eq(projects.id, id));
 }
 
-export async function deleteProjectCascade(db: Db, projectId: string): Promise<void> {
-  await db.transaction(async (tx) => {
+/**
+ * Cascade-delete a project and everything that references it. Returns:
+ *  - `cancelledBuilds`: the in-flight builds terminalized here, so the caller can
+ *    best-effort stop their still-running container BuildManager DOs (see
+ *    {@link cancelContainerBuildDos}) AFTER this tx commits.
+ *  - `deletedResources`: every `resources` row this tx removed. Because the
+ *    project FOR UPDATE lock below conflicts with the `FOR KEY SHARE` a resources
+ *    INSERT takes on the same project row (FK), this is the COMPLETE set of
+ *    resources that ever committed — a row created concurrently either committed
+ *    before this lock (so the DELETE sees it) or blocks then FK-fails. The caller
+ *    deletes the CF object for any resource not already cleaned by the pre-cascade
+ *    best-effort sweep, closing the orphan-on-concurrent-create window (a
+ *    provisioning route or deploy that raced teardown and inserted a row after the
+ *    sweep's one-time snapshot). See design-doc 0067 for the broader race.
+ */
+export async function deleteProjectCascade(
+  db: Db,
+  projectId: string,
+): Promise<{
+  cancelledBuilds: ReadonlyArray<{
+    id: string;
+    executor: Build['executor'];
+    status: Build['status'];
+  }>;
+  deletedResources: ReadonlyArray<Resource>;
+}> {
+  return await db.transaction(async (tx) => {
+    const txDb = tx as unknown as Db;
+    // Lock the project row FOR UPDATE — the SAME lock the build-creation paths
+    // take FIRST (supersedeAndCreateContainerBuild, createGithubActionsBuildWithinLimit)
+    // — so a concurrent push/OIDC can't insert a fresh build BETWEEN the
+    // terminalize below and the builds delete. A build that committed before this
+    // lock is caught by terminateBuildsForProject; one that lost the race blocks
+    // until this tx commits, then finds the project (and its ON DELETE CASCADE
+    // github_connections row) gone and creates nothing.
+    await tx.execute(sql`SELECT id FROM ${projects} WHERE id = ${projectId} FOR UPDATE`);
+    // Terminalize + capture in-flight builds BEFORE deleting their rows. The build
+    // row is the only durable handle the reaper/cancel path uses to stop a running
+    // container DO; once the row is gone the DO (or a GitHub Actions runner) would
+    // keep building until its own timeout, burning fleet/runner capacity for a
+    // project that no longer exists. The caller stops the container DOs after this
+    // tx commits; github_actions builds have no DO, so terminalizing (then
+    // deleting) their row to revoke the deploy token is all that's possible.
+    const cancelled = await terminateBuildsForProject(txDb, projectId, {
+      reason: 'project deleted',
+    });
     await tx.delete(domains).where(eq(domains.project_id, projectId));
-    await tx.delete(resources).where(eq(resources.project_id, projectId));
+    // RETURNING the deleted rows so the caller can clean up the CF object behind
+    // any resource that raced teardown's one-time best-effort snapshot (its row
+    // is removed here, so without this it would have no durable handle left).
+    const deletedResources = await tx
+      .delete(resources)
+      .where(eq(resources.project_id, projectId))
+      .returning();
     await tx.delete(projectSecrets).where(eq(projectSecrets.project_id, projectId));
+    // builds reference both projects and deployments with ON DELETE NO ACTION,
+    // so they must be removed before the deployments delete below (otherwise the
+    // build->deployment FK aborts the teardown transaction).
+    await tx.delete(builds).where(eq(builds.project_id, projectId));
     await tx.delete(deployments).where(eq(deployments.project_id, projectId));
     await tx.delete(projects).where(eq(projects.id, projectId));
+    return { cancelledBuilds: cancelled, deletedResources };
   });
 }
 
@@ -1973,4 +2034,1849 @@ export async function consumeCliAuthCode(
 /** Delete expired auth codes left behind by abandoned login flows. */
 export async function purgeExpiredAuthCodes(db: Db): Promise<void> {
   await db.delete(authCodes).where(sql`expires_at <= now()`);
+}
+
+// ---------------------------------------------------------------------------
+// builds
+// ---------------------------------------------------------------------------
+
+/**
+ * Build statuses that count as "in-flight" for per-user concurrency limits.
+ * A build occupies a concurrency slot once it has been claimed (`starting`)
+ * through to the moment it stops (`complete`/`failed`/`cancelled`). `queued`
+ * builds are NOT counted — they have not yet been assigned a slot.
+ */
+export const ACTIVE_BUILD_STATUSES: Array<Build['status']> = ['starting', 'building', 'deploying'];
+
+export async function createBuild(
+  db: Db,
+  args: {
+    projectId: string;
+    userId: string;
+    executor?: Build['executor'];
+    commitSha?: string | null;
+    branch?: string | null;
+    githubRunId?: string | null;
+    githubRunAttempt?: string | null;
+    logsUrl?: string | null;
+    instanceType?: string | null;
+    status?: Build['status'];
+  },
+): Promise<Build> {
+  const id = generateId('bld');
+  const [row] = await db
+    .insert(builds)
+    .values({
+      id,
+      project_id: args.projectId,
+      user_id: args.userId,
+      executor: args.executor ?? 'container',
+      status: args.status ?? 'queued',
+      commit_sha: args.commitSha ?? null,
+      branch: args.branch ?? null,
+      github_run_id: args.githubRunId ?? null,
+      github_run_attempt: args.githubRunAttempt ?? null,
+      logs_url: args.logsUrl ?? null,
+      instance_type: args.instanceType ?? null,
+    })
+    .returning();
+  return row;
+}
+
+export async function getBuild(db: Db, id: string): Promise<Build | null> {
+  const [row] = await db.select().from(builds).where(eq(builds.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function getProjectBuilds(
+  db: Db,
+  projectId: string,
+  limit = 20,
+): Promise<ReadonlyArray<Build>> {
+  return db
+    .select()
+    .from(builds)
+    .where(eq(builds.project_id, projectId))
+    .orderBy(desc(builds.created_at))
+    .limit(limit);
+}
+
+export async function updateBuildStatus(
+  db: Db,
+  id: string,
+  status: Build['status'],
+  opts?: {
+    error?: string | null;
+    exitCode?: number | null;
+    instanceType?: string | null;
+    startedAt?: string;
+    completedAt?: string;
+    deploymentId?: string | null;
+  },
+): Promise<void> {
+  await db
+    .update(builds)
+    .set({
+      status,
+      error: opts?.error === undefined ? sql`${builds.error}` : opts.error,
+      exit_code: opts?.exitCode === undefined ? sql`${builds.exit_code}` : opts.exitCode,
+      instance_type:
+        opts?.instanceType === undefined ? sql`${builds.instance_type}` : opts.instanceType,
+      started_at: opts?.startedAt === undefined ? sql`${builds.started_at}` : opts.startedAt,
+      completed_at:
+        opts?.completedAt === undefined ? sql`${builds.completed_at}` : opts.completedAt,
+      deployment_id:
+        opts?.deploymentId === undefined ? sql`${builds.deployment_id}` : opts.deploymentId,
+    })
+    .where(eq(builds.id, id));
+}
+
+/**
+ * Set status='building' ONLY if the row is still 'starting'. Returns true if it
+ * updated. Prevents a delayed onStart from resurrecting a row that a fast-exit
+ * onStop already drove terminal.
+ *
+ * `instanceType` is the container's resolved size, only ever observed at start
+ * time. The scheduler claims the row `queued -> starting` WITHOUT it, so this is
+ * the single point it lands — folded into the same guarded CAS so it can never
+ * resurrect a terminal row (matches `updateBuildStatus`'s "keep current unless
+ * provided" merge: omit → keep, value/null → write).
+ */
+export async function markBuildBuildingIfStarting(
+  db: Db,
+  id: string,
+  opts?: { instanceType?: string | null },
+): Promise<boolean> {
+  const result = await db
+    .update(builds)
+    .set({
+      status: 'building',
+      instance_type:
+        opts?.instanceType === undefined ? sql`${builds.instance_type}` : opts.instanceType,
+    })
+    .where(and(eq(builds.id, id), eq(builds.status, 'starting')));
+  return updatedRowCount(result) > 0;
+}
+
+/**
+ * Return a build to 'queued' ONLY if it is still 'starting'. Returns true if it
+ * updated. Used by the scheduler's capacity-shed retry AND the BuildManager
+ * freshness-recheck retry: if a concurrent terminalizer (push-supersede,
+ * branch/executor change, disconnect, install removal) already drove the claimed
+ * row terminal, this no-ops and the terminal status is preserved — so a
+ * superseded commit can't be resurrected and redeployed. Leaving `started_at`
+ * stamped is harmless: the next claim re-stamps it.
+ */
+export async function requeueBuildIfStarting(db: Db, id: string): Promise<boolean> {
+  const result = await db
+    .update(builds)
+    .set({ status: 'queued' })
+    .where(and(eq(builds.id, id), eq(builds.status, 'starting')));
+  return updatedRowCount(result) > 0;
+}
+
+/**
+ * Apply a TERMINAL status ONLY if the row is currently active
+ * (starting/building/deploying). Returns true if it updated. Prevents a
+ * duplicate/late lifecycle event from clobbering an earlier terminal outcome.
+ */
+export async function markBuildTerminalIfActive(
+  db: Db,
+  id: string,
+  status: 'complete' | 'failed' | 'cancelled',
+  opts?: {
+    error?: string | null;
+    exitCode?: number | null;
+    completedAt?: string;
+    deploymentId?: string | null;
+  },
+): Promise<boolean> {
+  const result = await db
+    .update(builds)
+    .set({
+      status,
+      error: opts?.error === undefined ? sql`${builds.error}` : opts.error,
+      exit_code: opts?.exitCode === undefined ? sql`${builds.exit_code}` : opts.exitCode,
+      completed_at:
+        opts?.completedAt === undefined ? sql`${builds.completed_at}` : opts.completedAt,
+      deployment_id:
+        opts?.deploymentId === undefined ? sql`${builds.deployment_id}` : opts.deploymentId,
+    })
+    .where(and(eq(builds.id, id), inArray(builds.status, ACTIVE_BUILD_STATUSES)));
+  return updatedRowCount(result) > 0;
+}
+
+/**
+ * Apply a non-terminal PROGRESS status ('building'|'deploying') ONLY while the
+ * row is still active. Returns true if it updated. Prevents a forged/late agent
+ * progress report from resurrecting a row a concurrent terminalizer (push-supersede,
+ * disconnect, branch/executor change, app removal) already drove `cancelled` — which
+ * would re-enable the bound deploy token (the deploy-token guard treats any ACTIVE
+ * status as valid).
+ */
+export async function markBuildProgressIfActive(
+  db: Db,
+  id: string,
+  status: 'building' | 'deploying',
+): Promise<boolean> {
+  const result = await db
+    .update(builds)
+    .set({ status })
+    .where(and(eq(builds.id, id), inArray(builds.status, ACTIVE_BUILD_STATUSES)));
+  return updatedRowCount(result) > 0;
+}
+
+/**
+ * Number of rows an UPDATE/DELETE touched, normalized across drivers: pg
+ * (Hyperdrive, production) reports `rowCount`; PGlite (integration tests)
+ * reports `affectedRows`. A guarded CAS must read whichever the active driver
+ * provides — without this, a successful CAS reads as `undefined`/0 under PGlite
+ * and the caller wrongly treats it as a no-op.
+ */
+function updatedRowCount(result: { rowCount?: number | null; affectedRows?: number }): number {
+  return result.rowCount ?? result.affectedRows ?? 0;
+}
+
+/**
+ * Count a user's in-flight builds (statuses `starting`/`building`/`deploying`).
+ * Used by the scheduler to enforce per-user tier build concurrency before
+ * claiming a queued build.
+ */
+export async function countUserActiveBuilds(db: Db, userId: string): Promise<number> {
+  const [result] = await db
+    .select({ count: count() })
+    .from(builds)
+    .where(and(eq(builds.user_id, userId), inArray(builds.status, ACTIVE_BUILD_STATUSES)));
+  return result?.count ?? 0;
+}
+
+/**
+ * The oldest queued container build for each project that has NO active build
+ * (at most one row per project per tick). Only `container` builds are scheduled
+ * by the platform — `github_actions` builds run on GitHub's runners and never
+ * sit in this queue.
+ *
+ * Fixes starvation: per-project serialization is enforced at claim time
+ * (`claimBuildForStartWithinLimit` refuses to start a build if its project
+ * already has an active build), so surfacing rows for an already-active project
+ * just wastes the scan window and HIDES other projects' startable builds. The
+ * correlated `NOT EXISTS` excludes any project with an active build, and one
+ * row per idle project (its oldest queued build) is returned — so a genuinely
+ * startable build is never starved behind a blocked one.
+ *
+ * Fixes per-user-cap starvation: the per-user concurrency cap is
+ * plan-derived (TypeScript, not a DB column), so it is NOT enforced in SQL
+ * here. Instead the scheduler computes which users are AT their cap and passes
+ * those ids in `excludeUserIds`, so this scan never wastes its window on rows
+ * the claim step would only reject. Without it, the lowest-`project_id` rows of
+ * a capped tenant would fill the scan limit every tick and indefinitely delay
+ * an unrelated under-cap tenant's builds.
+ *
+ * Ordering is AGE-FAIR: the outer query sorts by `created_at asc` (oldest
+ * waiting work first) and applies `limit`, instead of the old
+ * lowest-`project_id`-first order which let a low-id project monopolize the
+ * scan window. Because `DISTINCT ON (project_id)` requires `project_id` to lead
+ * its ORDER BY, the per-project "oldest queued build" pick is computed in an
+ * inner subquery (`DISTINCT ON (project_id) ... ORDER BY project_id,
+ * created_at asc`), then the OUTER query re-sorts those rows by `created_at asc`
+ * and limits — surfacing the globally oldest-waiting startable builds.
+ *
+ * NOTE: this can return `[]` while queued builds still exist (all their
+ * projects are active, or all their owners are capped). The scheduler's
+ * reschedule recheck must therefore key its heartbeat off
+ * `hasQueuedContainerBuilds` (any queued row), not off this function, so a
+ * blocked-but-present queue keeps an alarm armed until a project frees or an
+ * owner drops below their cap.
+ */
+export async function getQueuedBuilds(
+  db: Db,
+  limit = 50,
+  excludeUserIds: ReadonlyArray<string> = [],
+): Promise<ReadonlyArray<Build>> {
+  // Inner: each idle project's OLDEST queued container build. DISTINCT ON
+  // requires its column (`project_id`) to lead the ORDER BY, so age fairness
+  // can't be expressed here — it is applied by the outer query below.
+  const oldestPerProject = db
+    .selectDistinctOn([builds.project_id])
+    .from(builds)
+    .where(
+      and(
+        eq(builds.status, 'queued'),
+        eq(builds.executor, 'container'),
+        // Exclude projects that already have an active build (per-project
+        // serialization is enforced at claim time; surfacing blocked rows just
+        // wastes the scan window and hides other projects' startable builds).
+        sql`not exists (
+          select 1 from ${builds} as active_builds
+          where active_builds.project_id = ${builds.project_id}
+            and active_builds.status in ('starting', 'building', 'deploying')
+        )`,
+        // Skip rows owned by users the scheduler has computed to be AT their
+        // plan's concurrency cap — the claim step would only reject them, and
+        // surfacing them wastes the scan window (cap is plan-derived, so the
+        // exclude set is computed in TS, never as a tier number in SQL). Omit
+        // the clause entirely when empty: `NOT IN ()` is invalid SQL.
+        excludeUserIds.length > 0 ? notInArray(builds.user_id, [...excludeUserIds]) : undefined,
+      ),
+    )
+    .orderBy(builds.project_id, asc(builds.created_at))
+    .as('oldest_per_project');
+
+  // Outer: re-sort the per-project candidates oldest-first and limit, so the
+  // scan surfaces the globally oldest-waiting startable builds rather than the
+  // lowest project_ids.
+  return db.select().from(oldestPerProject).orderBy(asc(oldestPerProject.created_at)).limit(limit);
+}
+
+/**
+ * For each user that owns at least one QUEUED container build, returns their
+ * plan plus the count of their builds currently in `ACTIVE_BUILD_STATUSES`
+ * (`starting`/`building`/`deploying`). The scheduler uses this to decide which
+ * owners are AT their plan's concurrency cap (cap is plan-derived in
+ * `getPlanLimits`, NOT a DB column) and pass those ids to `getQueuedBuilds` as
+ * `excludeUserIds`, so a capped tenant's rows never starve the scan window.
+ *
+ * Only `container` builds gate scheduling, so the queued-work filter is scoped
+ * to that executor. The active-build count is NOT executor-scoped: an active
+ * `github_actions` build also occupies a concurrency slot (mirroring
+ * `claimBuildForStartWithinLimit`'s per-user count), so it must count toward the
+ * cap.
+ */
+export async function getUsersWithQueuedContainerBuilds(
+  db: Db,
+): Promise<ReadonlyArray<{ userId: string; plan: string; activeBuilds: number }>> {
+  const rows = await db
+    .select({
+      userId: users.id,
+      plan: users.plan,
+      // Correlated count of this user's in-flight builds (any executor). The
+      // FILTER over a LEFT JOIN keeps users whose only builds are queued
+      // (activeBuilds = 0) in the result.
+      activeBuilds: sql<number>`count(${builds.id}) filter (
+        where ${inArray(builds.status, ACTIVE_BUILD_STATUSES)}
+      )`,
+    })
+    .from(users)
+    .innerJoin(
+      // Restrict to users who own at least one queued container build — the
+      // only work this scan can ever start.
+      sql`(
+        select distinct ${builds.user_id} as user_id from ${builds}
+        where ${builds.status} = 'queued' and ${builds.executor} = 'container'
+      ) as queued_owners`,
+      sql`queued_owners.user_id = ${users.id}`,
+    )
+    .leftJoin(builds, eq(builds.user_id, users.id))
+    .groupBy(users.id, users.plan);
+  return rows.map((r) => ({
+    userId: r.userId,
+    plan: r.plan,
+    activeBuilds: Number(r.activeBuilds),
+  }));
+}
+
+/**
+ * Whether ANY queued container build exists (regardless of whether its project
+ * is currently active). The build scheduler uses this for its reschedule
+ * recheck: `getQueuedBuilds` can return `[]` while queued builds are merely
+ * blocked behind active projects, so keying the heartbeat off this guarantees
+ * the alarm stays armed until a project frees and the build becomes startable.
+ */
+export async function hasQueuedContainerBuilds(db: Db): Promise<boolean> {
+  const [row] = await db
+    .select({ id: builds.id })
+    .from(builds)
+    .where(and(eq(builds.status, 'queued'), eq(builds.executor, 'container')))
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * Supersede older queued container builds when a newer push arrives for the
+ * same project+branch, so the newest commit wins instead of whichever build
+ * happens to finish last. Only QUEUED rows are cancelled — already-running
+ * builds are left alone (cancelling them would waste in-flight compute).
+ */
+export async function cancelQueuedBuildsForProjectBranch(
+  db: Db,
+  projectId: string,
+  branch: string,
+): Promise<void> {
+  await db
+    .update(builds)
+    .set({ status: 'cancelled', error: 'superseded by newer push', completed_at: sql`now()` })
+    .where(
+      and(
+        eq(builds.project_id, projectId),
+        eq(builds.branch, branch),
+        eq(builds.status, 'queued'),
+        eq(builds.executor, 'container'),
+      ),
+    );
+}
+
+/**
+ * The newest non-terminal (queued/starting/building/deploying) container build
+ * for this exact commit on this project+branch, or null. Used to make webhook
+ * redelivery idempotent — a redelivered push for a commit already in flight
+ * must not create a duplicate build.
+ */
+export async function findNonTerminalBuildForCommit(
+  db: Db,
+  projectId: string,
+  branch: string,
+  commitSha: string,
+): Promise<Build | null> {
+  const [row] = await db
+    .select()
+    .from(builds)
+    .where(
+      and(
+        eq(builds.project_id, projectId),
+        eq(builds.branch, branch),
+        eq(builds.commit_sha, commitSha),
+        inArray(builds.status, ['queued', 'starting', 'building', 'deploying']),
+        eq(builds.executor, 'container'),
+      ),
+    )
+    .orderBy(desc(builds.created_at))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Atomically supersede older queued container builds and enqueue a new one for
+ * a push, under a per-project FOR UPDATE lock so concurrent webhook deliveries
+ * for the same project+branch can't interleave their supersede+create steps
+ * (which previously let an older push cancel a newer queued build and then
+ * enqueue the older commit). Semantics are LAST-PROCESSED-WINS — the honest
+ * guarantee for unordered webhooks; the GitHub push payload carries no reliable
+ * commit-ordering signal, so true latest-commit-wins under out-of-order delivery
+ * of DIFFERENT commits is intentionally NOT attempted.
+ *
+ * Reuse vs. rebuild for this EXACT commit on this project+branch:
+ *   - An ACTIVE build (queued/starting/building/deploying) is ALWAYS reused
+ *     (in-flight idempotency for a redelivered push).
+ *   - A `complete` build is reused ONLY when this commit is what the project is
+ *     CURRENTLY LIVE ON (a true webhook redelivery). If the live deployment is a
+ *     DIFFERENT commit — a force-push ROLLBACK to a previously-deployed SHA
+ *     (deploy A, deploy B, force-push branch back to A) — the old `complete`
+ *     build is NOT reused; a fresh `queued` build is enqueued so the rollback
+ *     actually re-deploys A. "Live is this commit" is decided inside the same
+ *     transaction under the project lock: prefer the authoritative
+ *     `builds.deployment_id == projects.active_deployment_id` link, falling back
+ *     to `deployments.commit == args.commitSha`. Container builds record NEITHER
+ *     (`deployment_id` and `deployments.commit` are both NULL for the default
+ *     executor), so a complete-SHA push that can't be PROVEN live conservatively
+ *     rebuilds — at worst a redundant rebuild of an identical commit, never a
+ *     missed rollback.
+ *   - A prior `failed`/`cancelled` build does NOT block a new one, so re-pushing
+ *     a commit after a failed build still retries.
+ *
+ * Conflicting active builds are ALWAYS terminated first — before the reuse
+ * lookup — so this holds even on a `complete`-SHA reuse/rebuild: a force-push
+ * ROLLBACK to a previously-deployed SHA still cancels any newer in-flight build
+ * for the now-off-branch commit (which would otherwise keep a live deploy token
+ * and publish the stale newer commit). `exceptCommitSha` spares this push's own
+ * commit, so a same-commit redelivery still dedups with `cancelled: []` and
+ * never self-cancels.
+ *
+ * Serializes against a concurrent `PATCH /projects/:id/github` (which locks
+ * `github_connections`, can re-point the branch / switch executor, and
+ * terminates old-config builds). After taking the project lock, this LOCKS and
+ * RE-READS the project's single `github_connections` row (the column is UNIQUE
+ * per project) and rejects — returning `{ build: null, skipped: 'config-changed' }`
+ * with `cancelled: []` — when the connection no longer matches this push's
+ * branch or its executor is no longer `container`. Either ordering is safe: a
+ * PATCH that committed first is observed here (we see the new config and skip);
+ * if we committed first, the PATCH's own terminate step (it holds the same lock)
+ * catches the build we just enqueued. Lock order is projects -> github_connections
+ * (no path inverts it), so no deadlock. This closes the gap where an orphan
+ * queued build for a now-disabled branch/executor escaped both the scheduler and
+ * the JIT freshness gate.
+ */
+/**
+ * Re-check, INSIDE a build-creation transaction, that the GitHub App installation
+ * still grants access to the repo. Both build txns already hold a `FOR UPDATE`
+ * lock on the `github_connections` row, which serializes against the revocation
+ * webhooks (App suspend/uninstall, repo removal) — they lock the same connection
+ * rows BEFORE flipping `github_installations` status / repo set. So a PLAIN
+ * (non-locking) read here, under READ COMMITTED, observes the committed
+ * installation state: a revocation that committed AFTER the resolver's checks but
+ * BEFORE this tx is caught. The same lock order in both paths means no deadlock,
+ * and the plain read avoids any lock-order concern on `github_installations`.
+ *
+ * FAILS CLOSED: returns false unless the row exists AND `status === 'active'` AND
+ * the repo is still in the install's selection — an `all`-repos install grants
+ * every repo (membership not enforced, so the repo id is irrelevant), a `selected`
+ * install requires the repo's immutable numeric id to be in the cached set. A null
+ * `repositoryId` fails closed for a `selected` install (membership unprovable by
+ * id) but an active `all` install still grants coverage. Mirrors the membership
+ * predicate in `getGitHubActionsConnectionsByRepo` / `getGitHubConnectionsByRepo`.
+ */
+async function installationCoversRepoInTx(
+  tx: Db,
+  installationId: string,
+  repositoryId: string | null,
+): Promise<boolean> {
+  // An `all`-repos install grants every repo regardless of id; only a `selected`
+  // install needs the immutable numeric id in the cached set, so a null repo id
+  // can't match there and fails closed via the `false` arm below. Checking null
+  // BEFORE the `all` branch (the old unconditional `return false`) wrongly treated
+  // a legacy null-id connection on an `all` install as install-revoked.
+  const [row] = await tx
+    .select({
+      status: githubInstallations.status,
+      repository_selection: githubInstallations.repository_selection,
+    })
+    .from(githubInstallations)
+    .where(
+      and(
+        eq(githubInstallations.installation_id, installationId),
+        eq(githubInstallations.status, 'active'),
+        or(
+          eq(githubInstallations.repository_selection, 'all'),
+          repositoryId === null
+            ? sql`false`
+            : sql`${githubInstallations.repositories} @> ${JSON.stringify([{ id: Number(repositoryId) }])}::jsonb`,
+        ),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * Non-transaction sibling of `installationCoversRepoInTx`: a fresh, plain
+ * (non-locking) read that the GitHub App installation still grants access to the
+ * repo. Identical fail-closed predicate — returns false unless the
+ * `github_installations` row exists AND `status === 'active'` AND the repo is
+ * still in the install's selection (`repository_selection === 'all'`, or the
+ * immutable numeric repo id is in the cached `repositories` set). A null
+ * `repositoryId` fails closed for a `selected` install (membership unprovable by
+ * id) but an active `all` install still grants coverage (id irrelevant).
+ *
+ * Used by the container `BuildManager.startBuild` to re-verify coverage at token
+ * mint, AFTER a queue wait during which an uninstall/suspension/repo-removal
+ * webhook may have committed an update to the row (a TOCTOU the enqueue-time
+ * `installationCoversRepoInTx` check can't catch). Under READ COMMITTED this
+ * plain read observes that committed revocation, so the build fails closed
+ * before minting a deploy token.
+ */
+export async function installationCoversRepo(
+  db: Db,
+  installationId: string,
+  repositoryId: string | null,
+): Promise<boolean> {
+  // An `all`-repos install grants every repo regardless of id; only a `selected`
+  // install needs the immutable numeric id in the cached set, so a null repo id
+  // can't match there and fails closed via the `false` arm below. Checking null
+  // BEFORE the `all` branch (the old unconditional `return false`) wrongly treated
+  // a legacy null-id connection on an `all` install as install-revoked.
+  const [row] = await db
+    .select({
+      status: githubInstallations.status,
+      repository_selection: githubInstallations.repository_selection,
+    })
+    .from(githubInstallations)
+    .where(
+      and(
+        eq(githubInstallations.installation_id, installationId),
+        eq(githubInstallations.status, 'active'),
+        or(
+          eq(githubInstallations.repository_selection, 'all'),
+          repositoryId === null
+            ? sql`false`
+            : sql`${githubInstallations.repositories} @> ${JSON.stringify([{ id: Number(repositoryId) }])}::jsonb`,
+        ),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+export async function supersedeAndCreateContainerBuild(
+  db: Db,
+  args: {
+    projectId: string;
+    userId: string;
+    branch: string;
+    commitSha: string;
+    connectionId: string;
+    installationId: string;
+    repositoryId: string | null;
+  },
+): Promise<{
+  build: Build | null;
+  reused: boolean;
+  cancelled: ReadonlyArray<{ id: string; executor: Build['executor']; status: Build['status'] }>;
+  skipped?: 'config-changed' | 'install-revoked' | 'connection-replaced' | 'project-deleting';
+}> {
+  return db.transaction(async (tx) => {
+    // Serialize all push processing for this project (project<->branch is 1:1 via
+    // the unique github_connections.project_id; the project row always exists),
+    // and re-read its status under the lock. teardownProject's lockAndMarkDeleting
+    // takes the SAME projects FOR UPDATE then flips status='deleting' before the
+    // later cascade deletes the connection; a push landing in that window would
+    // otherwise enqueue a container build for a project being torn down — burning
+    // a scarce build slot (the scheduler + JIT recheck don't reject deleting
+    // projects; only the cascade's terminate eventually cancels it). Mirror the
+    // GitHub Actions path (createGithubActionsBuildWithinLimit) and skip instead.
+    // Lock order is unchanged (projects-first), so the round-4 40P01 class stays
+    // closed.
+    const [proj] = await tx
+      .select({ status: projects.status })
+      .from(projects)
+      .where(eq(projects.id, args.projectId))
+      .for('update')
+      .limit(1);
+    if (!proj || proj.status === 'deleting') {
+      return { build: null, reused: false, cancelled: [], skipped: 'project-deleting' };
+    }
+
+    // Serialize against PATCH /projects/:id/github: lock + re-read the single
+    // connection (project_id is UNIQUE). If a concurrent config change committed
+    // first, the row's branch/executor no longer matches this push — skip rather
+    // than enqueue an orphan build for a now-disabled branch/executor that neither
+    // the scheduler nor the JIT freshness gate would catch. The PATCH holds the
+    // same lock and its terminate step handles old-build cleanup, so we return
+    // `cancelled: []` here.
+    const [conn] = await tx
+      .select({
+        id: githubConnections.id,
+        branch: githubConnections.branch,
+        executor: githubConnections.build_executor,
+      })
+      .from(githubConnections)
+      .where(eq(githubConnections.project_id, args.projectId))
+      .for('update')
+      .limit(1);
+    if (!conn || conn.branch !== args.branch || conn.executor !== 'container') {
+      return { build: null, reused: false, cancelled: [], skipped: 'config-changed' };
+    }
+
+    // Assert the locked connection is the SAME row the caller resolved. project_id
+    // is UNIQUE, so a disconnect+reconnect to a DIFFERENT repo (same branch/executor)
+    // DELETEs the old row and CREATEs a new one with a fresh id between resolution and
+    // this tx. The branch/executor guard above and the install check below both pass
+    // for such a swap (the install check keys on the PASSED installationId), so the
+    // id-match is the only guard that catches a cross-repo swap — without it the old
+    // repo's push would enqueue a build + mint a deploy token for a project now bound
+    // to a different repo. The reconnect/disconnect already terminalized old builds
+    // under its own lock, so `cancelled: []` is correct.
+    if (conn.id !== args.connectionId) {
+      return { build: null, reused: false, cancelled: [], skipped: 'connection-replaced' };
+    }
+
+    // Re-check installation status + repo membership under the connection lock.
+    // The push resolver checked the install at resolve time, but a revocation
+    // (App suspend/uninstall, repo removal) can commit AFTER that check and BEFORE
+    // this tx — within the installation-token cache window — and would otherwise
+    // enqueue a build + mint a deploy token for a now-revoked install. The
+    // revocation webhooks lock these same connection rows FIRST, so this plain
+    // read (under READ COMMITTED) sees their committed status. Fails closed.
+    if (
+      !(await installationCoversRepoInTx(
+        tx as unknown as Db,
+        args.installationId,
+        args.repositoryId,
+      ))
+    ) {
+      return { build: null, reused: false, cancelled: [], skipped: 'install-revoked' };
+    }
+
+    // Supersede older queued AND active (starting/building/deploying) container
+    // builds for this branch whose commit is NOT the new head — FIRST, before the
+    // dedup/reuse lookup, so it runs even when this push reuses an already-`complete`
+    // build. This closes the rollback gap: a force-push BACK to a previously-deployed
+    // SHA reuses the old `complete` build, but a newer in-flight build for the
+    // now-off-branch commit must still be cancelled — otherwise it keeps a live
+    // deploy token (the final guard only checks active+project, not freshness) and
+    // would publish the stale newer commit. `exceptCommitSha` spares this push's own
+    // commit (so a same-commit redelivery never self-cancels and returns
+    // `cancelled: []` when nothing else conflicts); the `branch` filter spares other
+    // branches.
+    const cancelled = await terminateBuildsForProject(tx as unknown as Db, args.projectId, {
+      branch: args.branch,
+      executor: 'container',
+      exceptCommitSha: args.commitSha,
+      reason: 'superseded by newer push',
+    });
+
+    // (a) active in-flight build for this commit → always reuse.
+    const [activeExisting] = await tx
+      .select()
+      .from(builds)
+      .where(
+        and(
+          eq(builds.project_id, args.projectId),
+          eq(builds.branch, args.branch),
+          eq(builds.commit_sha, args.commitSha),
+          eq(builds.executor, 'container'),
+          inArray(builds.status, ['queued', 'starting', 'building', 'deploying']),
+        ),
+      )
+      .orderBy(desc(builds.created_at))
+      .limit(1);
+    if (activeExisting) {
+      // Re-stamp created_at to now() on reuse, so a concurrent branch-delete fence
+      // captured BEFORE this push cannot cancel a build this push just re-adopted.
+      // The branch-delete path cancels active builds with created_at <= a fence it
+      // sampled before confirming the branch absent. On a SAME-SHA recreate (delete
+      // then recreate at the same commit), this reuse path returns the pre-existing
+      // active row instead of inserting a fresh one — so without re-stamping, the
+      // reused row keeps its pre-fence created_at and a delete that interleaves AFTER
+      // this push (it lost the connection FOR UPDATE race) would wrongly terminalize
+      // a valid build. Bumping created_at makes the row post-fence, closing that
+      // TOCTOU. Safe for every other consumer: the container reaper keys on
+      // started_at (not created_at), the github_actions reaper filters
+      // executor != container, and the dedup lookups order by created_at desc (this
+      // row stays newest, which is correct — it is the current build for the commit).
+      const [refreshed] = await tx
+        .update(builds)
+        .set({ created_at: sql`now()` })
+        .where(eq(builds.id, activeExisting.id))
+        .returning();
+      return { build: refreshed ?? activeExisting, reused: true, cancelled };
+    }
+
+    // (b) completed build for this commit → reuse only if this commit is already live.
+    const [completeExisting] = await tx
+      .select()
+      .from(builds)
+      .where(
+        and(
+          eq(builds.project_id, args.projectId),
+          eq(builds.branch, args.branch),
+          eq(builds.commit_sha, args.commitSha),
+          eq(builds.executor, 'container'),
+          eq(builds.status, 'complete'),
+        ),
+      )
+      .orderBy(desc(builds.created_at))
+      .limit(1);
+    if (completeExisting) {
+      const [proj] = await tx
+        .select({ active: projects.active_deployment_id })
+        .from(projects)
+        .where(eq(projects.id, args.projectId))
+        .limit(1);
+      let liveIsThisCommit = false;
+      if (proj?.active) {
+        if (completeExisting.deployment_id && completeExisting.deployment_id === proj.active) {
+          liveIsThisCommit = true;
+        } else {
+          const [dep] = await tx
+            .select({ commit: deployments.commit })
+            .from(deployments)
+            .where(eq(deployments.id, proj.active))
+            .limit(1);
+          liveIsThisCommit = dep?.commit != null && dep.commit === args.commitSha;
+        }
+      }
+      if (liveIsThisCommit) {
+        return { build: completeExisting, reused: true, cancelled };
+      }
+      // else: rollback — fall through to insert a fresh queued build.
+    }
+
+    const id = generateId('bld');
+    const [row] = await tx
+      .insert(builds)
+      .values({
+        id,
+        project_id: args.projectId,
+        user_id: args.userId,
+        executor: 'container',
+        status: 'queued',
+        commit_sha: args.commitSha,
+        branch: args.branch,
+      })
+      .returning();
+    return { build: row, reused: false, cancelled };
+  });
+}
+
+/**
+ * Atomically claim a queued build for starting. The `WHERE id=? AND
+ * status='queued'` guard plus `RETURNING` removes the read-then-write race:
+ * only one caller can flip a given build out of `queued`, so two schedulers
+ * racing the same build will see exactly one non-null return. Stamps
+ * `started_at` at claim time.
+ */
+export async function claimBuildForStart(db: Db, id: string): Promise<Build | null> {
+  const [row] = await db
+    .update(builds)
+    .set({ status: 'starting', started_at: sql`now()` })
+    .where(and(eq(builds.id, id), eq(builds.status, 'queued')))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Look up a build by its owning project and the GitHub Actions `workflow_run.id`
+ * recorded on the row at OIDC-exchange time. A GitHub `run_id` is unique only
+ * WITHIN a repository, not globally, so build identity is scoped to the
+ * connection's project: matching by `run_id` alone would let a `workflow_run`
+ * webhook (or an OIDC reuse lookup) from one repo resolve a different project's
+ * build that happens to share the numeric id. Used by the `workflow_run`
+ * webhook (after resolving the connection by repo) to mark an Actions build
+ * complete/failed, and by the OIDC exchange to reuse an in-flight build.
+ *
+ * A GitHub RERUN of the same `run_id` creates a fresh build once the prior
+ * attempt is terminal, so a (project, run_id) can have multiple rows (one
+ * active rerun + older terminal attempts). Active builds are ordered first so
+ * the `workflow_run` webhook finalizes the in-flight rerun rather than an old
+ * terminal row even when `created_at` ties; `created_at desc` breaks ties
+ * within each group.
+ */
+export async function getBuildByProjectAndRunId(
+  db: Db,
+  projectId: string,
+  githubRunId: string,
+): Promise<Build | null> {
+  const [row] = await db
+    .select()
+    .from(builds)
+    .where(and(eq(builds.project_id, projectId), eq(builds.github_run_id, githubRunId)))
+    .orderBy(sql`(${inArray(builds.status, ACTIVE_BUILD_STATUSES)}) desc`, desc(builds.created_at))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Resolve a build by `(project, run_id, run_attempt)` — the attempt-aware
+ * counterpart of `getBuildByProjectAndRunId`. A GitHub RERUN reuses the same
+ * `run_id` with an incremented `run_attempt`, so the `workflow_run` completion
+ * handler must scope to the attempt: a redelivered/late completion for attempt
+ * 1 must NOT resolve to attempt 2's active build (which would let it finalize
+ * the wrong attempt). When `githubRunAttempt` is null (an old delivery whose
+ * payload lacks `run_attempt`), it falls back to `IS NULL` so old null-attempt
+ * rows still match. Active builds are ordered first (then `created_at desc`),
+ * mirroring `getBuildByProjectAndRunId`, so the in-flight attempt wins on a tie.
+ */
+export async function getBuildByProjectRunIdAndAttempt(
+  db: Db,
+  projectId: string,
+  githubRunId: string,
+  githubRunAttempt: string | null,
+): Promise<Build | null> {
+  const attemptMatch =
+    githubRunAttempt != null
+      ? eq(builds.github_run_attempt, githubRunAttempt)
+      : isNull(builds.github_run_attempt);
+  const [row] = await db
+    .select()
+    .from(builds)
+    .where(
+      and(eq(builds.project_id, projectId), eq(builds.github_run_id, githubRunId), attemptMatch),
+    )
+    .orderBy(sql`(${inArray(builds.status, ACTIVE_BUILD_STATUSES)}) desc`, desc(builds.created_at))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Terminalize every ACTIVE (`starting`/`building`/`deploying`) GitHub Actions
+ * build for a project, marking them `cancelled` and stamping `completed_at`.
+ *
+ * Called when a project's GitHub connection is deleted. GitHub Actions builds
+ * are created ACTIVE by the OIDC exchange and finalized by the `workflow_run`
+ * webhook, which first resolves the CURRENT connection — so if the connection
+ * is gone, a completion webhook is ignored and the build would stay active
+ * forever, permanently consuming one of the owner's concurrency slots. Scoped
+ * to `executor = 'github_actions'`: container builds free their slot via the
+ * BuildManager DO timeout and must not be touched here. Returns the number of
+ * builds terminalized.
+ */
+export async function terminateActiveGithubActionsBuildsForProject(
+  db: Db,
+  projectId: string,
+): Promise<number> {
+  const result = await db
+    .update(builds)
+    .set({
+      status: 'cancelled',
+      error: sql`COALESCE(${builds.error}, 'github connection removed')`,
+      completed_at: sql`COALESCE(${builds.completed_at}, now())`,
+    })
+    .where(
+      and(
+        eq(builds.project_id, projectId),
+        eq(builds.executor, 'github_actions'),
+        inArray(builds.status, ACTIVE_BUILD_STATUSES),
+      ),
+    );
+  return result.rowCount ?? 0;
+}
+
+/**
+ * Terminalize (cancel) a project's QUEUED + ACTIVE builds, optionally filtered
+ * by branch and/or executor. Used when a connection is disconnected or its
+ * branch/executor changes, so in-flight builds for the old config can't keep a
+ * live deploy token (the middleware guard rejects a token whose bound
+ * build is no longer active). Returns the cancelled builds (id + executor +
+ * prior status) so the caller can best-effort stop active container BuildManager
+ * DOs.
+ */
+export async function terminateBuildsForProject(
+  db: Db,
+  projectId: string,
+  opts?: {
+    branch?: string;
+    executor?: Build['executor'];
+    exceptCommitSha?: string;
+    reason?: string;
+    // Only terminalize builds created at or before this timestamp. Used by the
+    // branch-delete path as a monotonic fence: the caller confirms the branch is
+    // absent, then cancels — but a build enqueued in that window (a branch
+    // recreated + pushed before this UPDATE runs) is created AFTER the fence and
+    // must survive. Without it, a stale/out-of-order delete could clobber a fresh
+    // valid build for the recreated branch. The caller MUST source this from the
+    // database clock (`select now()`), the same clock that stamps `created_at`, so
+    // the two are never compared across independent (Worker vs Postgres) clocks.
+    // The boundary is inclusive (`<=`): a build whose created_at lands exactly on
+    // the fence existed when absence-checking began and is an orphan, so cancel it
+    // — a recreate-race build is always created strictly after the fence. Compared
+    // as an absolute instant (`::timestamptz`): `created_at` is `timestamp without
+    // time zone`, so a naive compare against a UTC `...Z` string drops the offset
+    // and misfires under any non-UTC session timezone.
+    createdBefore?: string;
+  },
+): Promise<ReadonlyArray<{ id: string; executor: Build['executor']; status: Build['status'] }>> {
+  const conds = [
+    eq(builds.project_id, projectId),
+    inArray(builds.status, ['queued', 'starting', 'building', 'deploying']),
+  ];
+  if (opts?.branch !== undefined) {
+    conds.push(eq(builds.branch, opts.branch));
+  }
+  if (opts?.executor !== undefined) {
+    conds.push(eq(builds.executor, opts.executor));
+  }
+  if (opts?.exceptCommitSha !== undefined) {
+    conds.push(ne(builds.commit_sha, opts.exceptCommitSha));
+  }
+  if (opts?.createdBefore !== undefined) {
+    conds.push(sql`${builds.created_at} <= ${opts.createdBefore}::timestamptz`);
+  }
+  const affected = await db
+    .update(builds)
+    .set({
+      status: 'cancelled',
+      error: sql`COALESCE(${builds.error}, ${opts?.reason ?? 'connection changed'})`,
+      completed_at: sql`COALESCE(${builds.completed_at}, now())`,
+    })
+    .where(and(...conds))
+    .returning({ id: builds.id, executor: builds.executor, status: builds.status });
+  return affected;
+}
+
+/**
+ * Fail GitHub Actions builds stuck ACTIVE beyond `maxAgeMinutes` (measured from
+ * `created_at`). A missed `workflow_run` completion webhook — or a disconnect
+ * mid-run that a reaper tick raced — would otherwise leave an Actions build
+ * active forever, permanently consuming a concurrency slot. Scoped to
+ * `executor = 'github_actions'`: container builds are reaped by their own
+ * BuildManager DO timeout, so they're intentionally excluded here. Marks them
+ * `failed` and stamps `completed_at`. Returns the number of builds failed.
+ */
+export async function failStaleActiveGithubActionsBuilds(
+  db: Db,
+  maxAgeMinutes: number,
+): Promise<number> {
+  const result = await db
+    .update(builds)
+    .set({
+      status: 'failed',
+      error: sql`COALESCE(${builds.error}, 'build timed out')`,
+      completed_at: sql`COALESCE(${builds.completed_at}, now())`,
+    })
+    .where(
+      and(
+        eq(builds.executor, 'github_actions'),
+        inArray(builds.status, ACTIVE_BUILD_STATUSES),
+        sql`${builds.created_at} < now() - (${maxAgeMinutes} * interval '1 minute')`,
+      ),
+    );
+  return result.rowCount ?? 0;
+}
+
+/**
+ * Fail container builds stuck ACTIVE beyond `maxAgeMinutes` (measured from
+ * `started_at`, NOT `created_at`). DB-only backstop for the BuildManager DO:
+ * the timeout/cancel path tears down the container and pokes the scheduler
+ * INDEPENDENT of the Postgres terminal-status write, so if `markBuildTerminalIfActive`
+ * throws (Hyperdrive/Postgres transient failure) the row stays ACTIVE forever —
+ * permanently consuming the owner's concurrency slot, blocking the project's
+ * queue (`claimBuildForStartWithinLimit` / `getQueuedBuilds`), and honoring the
+ * bound deploy token until JWT expiry. The github_actions reaper above
+ * intentionally excludes container builds on the assumption their DO timeout
+ * reaps them; this covers exactly the case that assumption violates.
+ *
+ * Age is keyed off `started_at` (stamped at claim by `claimBuildForStartWithinLimit`
+ * and never cleared) because a container build can sit `queued` a long time
+ * (up to ~30 min under capacity backoff) before starting — `created_at` would
+ * risk reaping a build that hasn't started yet. A null `started_at` never
+ * matches the `<` comparison, so queued/unstarted rows are implicitly guarded.
+ *
+ * The DB terminalize is the AUTHORITATIVE slot-freeing + token-revoking action:
+ * it frees all three concurrency gates and (within TTL) revokes the bound deploy
+ * token even if the DO is unreachable — that is the whole point of this backstop.
+ * The motivating case (timeout path stopped the container before its failed DB
+ * write threw) leaves no live container, so the DB write alone suffices. But the
+ * `started_at > maxAge` predicate does NOT prove the container is gone: if the DO
+ * was evicted or its timeout alarm was lost, the container may still be RUNNING.
+ * So the caller best-effort issues a BuildManager `cancelBuild` for each returned
+ * id AFTER this commits — stopping any still-alive orphan and converging DO-local
+ * status. Returning the reaped ids (not just a count) is what enables that.
+ *
+ * Marks them `failed` and stamps `completed_at`. Returns the reaped build ids.
+ */
+export async function failStaleActiveContainerBuilds(
+  db: Db,
+  maxAgeMinutes: number,
+): Promise<ReadonlyArray<string>> {
+  const rows = await db
+    .update(builds)
+    .set({
+      status: 'failed',
+      error: sql`COALESCE(${builds.error}, 'build exceeded max lifetime (stale reaper)')`,
+      completed_at: sql`COALESCE(${builds.completed_at}, now())`,
+    })
+    .where(
+      and(
+        eq(builds.executor, 'container'),
+        inArray(builds.status, ACTIVE_BUILD_STATUSES),
+        sql`${builds.started_at} < now() - (${maxAgeMinutes} * interval '1 minute')`,
+      ),
+    )
+    .returning({ id: builds.id });
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Atomically acquire a per-user build slot for a GitHub Actions `run_id` and
+ * create the `building` row, all under a single transaction that holds a
+ * `SELECT … FOR UPDATE` lock on the owner's `users` row.
+ *
+ * The previous count-then-insert flow (count active builds, then insert in a
+ * SEPARATE op) was race-prone: two parallel OIDC exchanges for DIFFERENT
+ * `run_id`s could each read capacity below the cap before either inserted, then
+ * both insert — bypassing `concurrentBuilds`. The composite partial-unique
+ * index only guards the SAME `run_id`, not the cross-run capacity check.
+ *
+ * Serializing slot acquisition per user (FOR UPDATE on the user row, mirroring
+ * the deploy/migration FOR UPDATE pattern) closes that window: the second
+ * exchange blocks until the first commits, then observes the updated count.
+ *
+ * Idempotent reuse of an already-ACTIVE build for the same `(project, run_id)`
+ * neither counts against the cap nor double-inserts. `limit <= 0` means
+ * unlimited. Returns `{ outcome: 'limit-exceeded' }` (no insert) when a NEW run
+ * would exceed the cap; the caller maps that to 429.
+ *
+ * Per-project latest-wins supersede: after the idempotent same-run reuse check,
+ * a NEWER run for the same project+branch (a DIFFERENT `run_id`) supersedes
+ * older active Actions builds — marking them terminal so they free the owner's
+ * concurrency slot and can't race `void deploy` for the project (the GitHub
+ * Actions executor has no per-project active-build serialization like the
+ * container scheduler's `claimBuildForStartWithinLimit`).
+ */
+export async function createGithubActionsBuildWithinLimit(
+  db: Db,
+  args: {
+    projectId: string;
+    userId: string;
+    limit: number;
+    commitSha?: string | null;
+    branch?: string | null;
+    githubRunId: string;
+    githubRunAttempt?: string | null;
+    logsUrl?: string | null;
+    connectionId: string;
+    installationId: string;
+    repositoryId: string | null;
+  },
+): Promise<
+  | { outcome: 'created' | 'reused'; build: Build }
+  | { outcome: 'limit-exceeded' }
+  | { outcome: 'connection-removed' }
+  | { outcome: 'connection-replaced' }
+  | { outcome: 'branch-mismatch' }
+  | { outcome: 'install-revoked' }
+  | { outcome: 'project-deleting' }
+> {
+  return db.transaction(async (tx) => {
+    // Lock the PROJECT row FIRST — before the users + github_connections locks
+    // below — so this path acquires projects-before-connection, the SAME order
+    // as deleteProjectCascade / lockAndMarkDeleting (projects FOR UPDATE, then
+    // the cascaded connection) and the push path (supersedeAndCreateContainerBuild).
+    // Without it, the builds INSERT below takes an implicit FK `FOR KEY SHARE` on
+    // the projects row AFTER we already hold the connection `FOR UPDATE`, inverting
+    // the lock order against a concurrent teardown (which holds projects FOR UPDATE
+    // then needs this connection) → a Postgres deadlock (40P01) aborts one of the
+    // two. Reject a project being torn down (or already gone): minting a deploy
+    // token for a deleting project would create an orphan build the cascade then
+    // has to cancel.
+    const [proj] = await tx
+      .select({ status: projects.status })
+      .from(projects)
+      .where(eq(projects.id, args.projectId))
+      .for('update')
+      .limit(1);
+    if (!proj || proj.status === 'deleting') {
+      return { outcome: 'project-deleting' };
+    }
+
+    // Serialize per-user slot acquisition. Concurrent exchanges for the same
+    // owner block here until the holder commits, so the count below always
+    // observes prior inserts.
+    await tx.execute(sql`SELECT id FROM ${users} WHERE id = ${args.userId} FOR UPDATE`);
+
+    // Serialize against DELETE /projects/:id/github: lock + re-read the connection
+    // inside this tx. If a concurrent disconnect committed first, the row is gone
+    // and we must NOT create a build / mint a token for a removed connection —
+    // otherwise an orphan active build would never be finalized (the workflow_run
+    // webhook ignores a missing connection) and a just-disconnected repo could
+    // still deploy. The disconnect path takes the SAME `FOR UPDATE` lock on this
+    // row, so the two are mutually exclusive: disconnect-first => we see no row
+    // and reject; build-first => the disconnect's terminate step then cancels the
+    // build we just created. Lock order is projects -> users -> github_connections
+    // (projects locked above so it matches teardown's projects-first order); the
+    // disconnect locks only github_connections, so there is no opposite-order
+    // acquirer and no deadlock.
+    const [conn] = await tx
+      .select({ id: githubConnections.id, branch: githubConnections.branch })
+      .from(githubConnections)
+      .where(
+        and(
+          eq(githubConnections.project_id, args.projectId),
+          eq(githubConnections.build_executor, 'github_actions'),
+        ),
+      )
+      .for('update')
+      .limit(1);
+    if (!conn) {
+      return { outcome: 'connection-removed' };
+    }
+
+    // Assert the locked connection is the SAME row the caller resolved. project_id
+    // is UNIQUE, so a disconnect+reconnect to a DIFFERENT repo (same branch/executor)
+    // DELETEs the old row and CREATEs a new one with a fresh id between resolution and
+    // this tx. The install check below keys on the PASSED installationId, so a
+    // same-installation two-repo swap passes it — the id-match is the only guard that
+    // catches a cross-repo swap. Without it the old repo's workflow would create a
+    // build + mint a deploy token for a project now bound to a different repo. Placed
+    // before the install check because an id mismatch is more specific.
+    if (conn.id !== args.connectionId) {
+      return { outcome: 'connection-replaced' };
+    }
+
+    // Re-check installation status + repo membership under the connection lock.
+    // The OIDC resolver (and the live getRepoInstallation call) checked the install
+    // earlier, but a revocation (App suspend/uninstall, repo removal) can commit
+    // AFTER those checks and BEFORE this tx — within the installation-token cache
+    // window — and would otherwise create a `building` row + mint a deploy token
+    // for a now-revoked install. The revocation webhooks lock these same connection
+    // rows FIRST, so this plain read (under READ COMMITTED) sees their committed
+    // status. Fails closed.
+    if (
+      !(await installationCoversRepoInTx(
+        tx as unknown as Db,
+        args.installationId,
+        args.repositoryId,
+      ))
+    ) {
+      return { outcome: 'install-revoked' };
+    }
+
+    // Re-validate the branch under the row lock. auth-oidc's pre-tx branch check
+    // can race a PATCH that re-points the branch after the check but before this
+    // lock; the locked row is authoritative. Reject if the connected branch moved.
+    if (args.branch != null && args.branch !== '' && conn.branch !== args.branch) {
+      return { outcome: 'branch-mismatch' };
+    }
+
+    // Idempotent reuse: an already in-flight build for this exact run ATTEMPT
+    // does not consume a new slot and must not be double-inserted. Matching on
+    // the attempt (not run_id alone) ensures a RERUN — same run_id, incremented
+    // run_attempt — does NOT wrongly reuse the prior attempt's build. Falls back
+    // to IS NULL when the attempt is null (backward-compat for tokens that lack
+    // the claim).
+    const attemptMatch =
+      args.githubRunAttempt != null
+        ? eq(builds.github_run_attempt, args.githubRunAttempt)
+        : isNull(builds.github_run_attempt);
+    const [existing] = await tx
+      .select()
+      .from(builds)
+      .where(
+        and(
+          eq(builds.project_id, args.projectId),
+          eq(builds.github_run_id, args.githubRunId),
+          attemptMatch,
+        ),
+      )
+      .orderBy(
+        sql`(${inArray(builds.status, ACTIVE_BUILD_STATUSES)}) desc`,
+        desc(builds.created_at),
+      )
+      .limit(1);
+    if (existing && ACTIVE_BUILD_STATUSES.includes(existing.status)) {
+      return { outcome: 'reused', build: existing };
+    }
+
+    // Latest-wins: a newer run for the same project+branch supersedes ALL other
+    // active GitHub Actions builds — including an older ATTEMPT of the SAME
+    // run_id (a rerun reuses run_id with an incremented run_attempt). The
+    // idempotent-reuse check above already returned early for an ACTIVE exact
+    // (run_id, attempt) row, and this row's INSERT happens AFTER this UPDATE, so
+    // the current attempt can't self-cancel. Marking them terminal frees the
+    // owner's concurrency slot and revokes their deploy token so they can't race
+    // `void deploy` for the project — without this, a still-ACTIVE attempt-1
+    // (whose completion webhook was missed) would survive until the 60m reaper.
+    // (The scaffolded workflow's `concurrency: cancel-in-progress` cancels the
+    // older RUN on GitHub's side; this is the server-side backstop.)
+    if (args.branch != null && args.branch !== '') {
+      await tx
+        .update(builds)
+        .set({ status: 'cancelled', error: 'superseded by newer run', completed_at: sql`now()` })
+        .where(
+          and(
+            eq(builds.project_id, args.projectId),
+            eq(builds.branch, args.branch),
+            eq(builds.executor, 'github_actions'),
+            inArray(builds.status, ACTIVE_BUILD_STATUSES),
+          ),
+        );
+    }
+
+    if (args.limit > 0) {
+      const [result] = await tx
+        .select({ count: count() })
+        .from(builds)
+        .where(and(eq(builds.user_id, args.userId), inArray(builds.status, ACTIVE_BUILD_STATUSES)));
+      if ((result?.count ?? 0) >= args.limit) {
+        return { outcome: 'limit-exceeded' };
+      }
+    }
+
+    const id = generateId('bld');
+    const [row] = await tx
+      .insert(builds)
+      .values({
+        id,
+        project_id: args.projectId,
+        user_id: args.userId,
+        executor: 'github_actions',
+        status: 'building',
+        commit_sha: args.commitSha ?? null,
+        branch: args.branch ?? null,
+        github_run_id: args.githubRunId,
+        github_run_attempt: args.githubRunAttempt ?? null,
+        logs_url: args.logsUrl ?? null,
+      })
+      .returning();
+    return { outcome: 'created', build: row };
+  });
+}
+
+/**
+ * Atomically claim a QUEUED container build for starting, enforcing the owner's
+ * per-user active-build cap in the SAME transaction.
+ *
+ * This is the container-scheduler counterpart to
+ * `createGithubActionsBuildWithinLimit`: it takes the SAME `SELECT … FOR UPDATE`
+ * lock on the owner's `users` row, so the scheduler path and the OIDC path are
+ * mutually exclusive per user and can't both observe sub-cap capacity and both
+ * create active builds. The previous flow (`countUserActiveBuilds` then a
+ * separate `claimBuildForStart`) read the count outside the claim, so a parallel
+ * OIDC exchange could slip a build in between and bust the cap.
+ *
+ * Steps inside one transaction, under the per-user lock:
+ *   1. `SELECT … FOR UPDATE` the owner's users row (serializes with the OIDC
+ *      path and other scheduler scans for the same owner).
+ *   2. If `limit > 0` and the owner already has `>= limit` active builds, return
+ *      false WITHOUT claiming. `limit === 0` means unlimited (no cap).
+ *   3. If the build's project already has an active build, return false WITHOUT
+ *      claiming (leave this build queued for a later tick). This enforces AT
+ *      MOST ONE active build per project at a time, which serializes
+ *      same-branch deploys (project↔branch is 1:1 via the unique
+ *      `github_connections.project_id`). Serializing per project avoids the
+ *      project-level deploy guard's 409 (`getActiveDeployment` →
+ *      `ConcurrentDeployError`) and gives latest-wins via FIFO queue drain:
+ *      two rapid pushes no longer both reach `void deploy` and leave the older
+ *      commit live. Liveness: a stuck active build is freed by the build
+ *      wall-clock timeout (`enforceTimeout`) and the deploy stale reaper, so the
+ *      queue can't deadlock.
+ *   4. Otherwise flip THIS build `queued -> starting` only if it is STILL
+ *      `queued` (guards the read-then-write race: only one caller wins), stamp
+ *      `started_at`, and return true. Return false if it was no longer queued
+ *      (already claimed elsewhere).
+ *
+ * Returns true iff this call claimed the build (caller should proceed to start
+ * it); false when at cap, when the project already has an active build, or when
+ * already claimed (caller leaves it for a later tick).
+ */
+export async function claimBuildForStartWithinLimit(
+  db: Db,
+  args: { buildId: string; userId: string; projectId: string; limit: number },
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    // Serialize per-user slot acquisition against the OIDC path and other
+    // scheduler scans for the same owner.
+    await tx.execute(sql`SELECT id FROM ${users} WHERE id = ${args.userId} FOR UPDATE`);
+
+    if (args.limit > 0) {
+      const [result] = await tx
+        .select({ count: count() })
+        .from(builds)
+        .where(and(eq(builds.user_id, args.userId), inArray(builds.status, ACTIVE_BUILD_STATUSES)));
+      if ((result?.count ?? 0) >= args.limit) {
+        return false;
+      }
+    }
+
+    // Per-project serialization: at most one active build per project. All
+    // builds for a project share one owner (`projects.user_id`), so this read
+    // is race-free under the per-user FOR UPDATE lock taken above. No executor
+    // filtering on purpose: an active github_actions build also blocks starting
+    // a container build for the same project, which is correct.
+    const [active] = await tx
+      .select({ count: count() })
+      .from(builds)
+      .where(
+        and(eq(builds.project_id, args.projectId), inArray(builds.status, ACTIVE_BUILD_STATUSES)),
+      );
+    if ((active?.count ?? 0) > 0) {
+      return false;
+    }
+
+    // Atomic claim: only flips the row if it is still `queued`, so two scans
+    // racing the same build see exactly one non-empty RETURNING.
+    const claimed = await tx
+      .update(builds)
+      .set({ status: 'starting', started_at: sql`now()` })
+      .where(and(eq(builds.id, args.buildId), eq(builds.status, 'queued')))
+      .returning({ id: builds.id });
+    return claimed.length > 0;
+  });
+}
+
+/**
+ * The most recent deployment for a project at a given commit SHA. Used to link
+ * a finished build back to the deployment the `void deploy` CLI created.
+ */
+export async function getDeploymentByProjectAndCommit(
+  db: Db,
+  projectId: string,
+  commitSha: string,
+): Promise<Deployment | null> {
+  const [row] = await db
+    .select()
+    .from(deployments)
+    .where(and(eq(deployments.project_id, projectId), eq(deployments.commit, commitSha)))
+    .orderBy(desc(deployments.created_at))
+    .limit(1);
+  return row ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// github_connections
+// ---------------------------------------------------------------------------
+
+export async function createGitHubConnection(
+  db: Db,
+  args: {
+    projectId: string;
+    installationId: string;
+    repoFullName: string;
+    // The repo's immutable numeric GitHub id (as text), captured from the
+    // installation's cached repository list at connect time. Optional only so
+    // pre-existing callers/tests compile; the connect handler always supplies it
+    // and webhook/OIDC resolution keys on it (full_name is mutable).
+    repositoryId?: string | null;
+    branch?: string;
+    buildExecutor?: GitHubConnection['build_executor'];
+  },
+): Promise<GitHubConnection> {
+  const id = generateId('ghc');
+  const [row] = await db
+    .insert(githubConnections)
+    .values({
+      id,
+      project_id: args.projectId,
+      installation_id: args.installationId,
+      repo_full_name: args.repoFullName,
+      repository_id: args.repositoryId ?? null,
+      branch: args.branch ?? 'main',
+      build_executor: args.buildExecutor ?? 'container',
+    })
+    .returning();
+  return row;
+}
+
+export async function getGitHubConnection(
+  db: Db,
+  projectId: string,
+): Promise<GitHubConnection | null> {
+  const [row] = await db
+    .select()
+    .from(githubConnections)
+    .where(eq(githubConnections.project_id, projectId))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Look up the connection for a webhook-delivered repo within an installation,
+ * joining `projects` to surface the owning `user_id` (needed to attribute a
+ * build and enforce that user's tier concurrency). Returns the connection
+ * fields plus `user_id`, or null when no project is connected to that repo.
+ *
+ * Resolution keys on the IMMUTABLE numeric repository id (`repository.id` in
+ * webhook payloads) so a repo rename/delete/name-reuse under the same
+ * installation can't match a DIFFERENT repository to this connection. When the
+ * caller has a `repositoryId`, a connection is matched ONLY by that id — it
+ * FAILS CLOSED: a `repository_id IS NULL` row is NOT matched by name fallback,
+ * because a deleted/renamed-and-reused repo name under the same installation
+ * could otherwise match a stale null-id connection and authorize the WRONG
+ * project. Only when the caller has no `repositoryId` (malformed/partial
+ * webhook) does every connection fall back to a `repo_full_name` match — the
+ * pre-id behavior.
+ *
+ * Returns ALL connections for the repo within the installation: a repo may back
+ * multiple projects (only `project_id` is unique), so the caller disambiguates
+ * (e.g. by push branch or workflow run id).
+ *
+ * The push webhook is App-lifecycle driven but a SIGNED, redelivered/delayed
+ * push can still arrive AFTER the App is suspended/uninstalled or the repo
+ * dropped from the install — and within the ~55-min installation-token cache
+ * window it would otherwise resolve a connection, mint a fresh deploy token, and
+ * deploy. Guard against that by INNER JOINing `github_installations` (via the
+ * connection's `installation_id`) and requiring `status = 'active'`, plus
+ * confirming the repo is still in the installation's selection — mirroring the
+ * OIDC resolver. An `all`-repos install grants every repo (the `repositories`
+ * cache is irrelevant); a `selected` install requires membership in the cached
+ * set (an empty array under `selected` means "no repos" and is rejected).
+ *
+ * Unlike the OIDC resolver, this does NOT bind to a repo-owner id: the push path
+ * resolves by `installation_id` (a repo transfer creates a NEW installation) and
+ * the push payload carries no owner field. It also does NOT filter by
+ * `build_executor` — the push handler legitimately branches on both executors.
+ */
+export async function getGitHubConnectionsByRepo(
+  db: Db,
+  installationId: string,
+  repoFullName: string,
+  repositoryId?: string | null,
+): Promise<Array<GitHubConnection & { user_id: string }>> {
+  const matchClause =
+    repositoryId === undefined || repositoryId === null
+      ? eq(githubConnections.repo_full_name, repoFullName)
+      : eq(githubConnections.repository_id, repositoryId);
+  const rows = await db
+    .select({
+      ...getTableColumns(githubConnections),
+      user_id: projects.user_id,
+    })
+    .from(githubConnections)
+    .innerJoin(projects, eq(githubConnections.project_id, projects.id))
+    .innerJoin(
+      githubInstallations,
+      eq(githubConnections.installation_id, githubInstallations.installation_id),
+    )
+    .where(
+      and(
+        eq(githubConnections.installation_id, installationId),
+        matchClause,
+        eq(githubInstallations.status, 'active'),
+        or(
+          // "all repositories" install => every repo is granted.
+          eq(githubInstallations.repository_selection, 'all'),
+          // "selected" install => enforce the repo is in the cached set. The
+          // `repositories` jsonb stores `id` as a NUMBER, so when the caller has
+          // the immutable repo id, check membership by id (rename-safe). Fall
+          // back to name membership only when no id is available.
+          repositoryId === undefined || repositoryId === null
+            ? sql`${githubInstallations.repositories} @> ${JSON.stringify([{ full_name: repoFullName }])}::jsonb`
+            : sql`${githubInstallations.repositories} @> ${JSON.stringify([{ id: Number(repositoryId) }])}::jsonb`,
+        ),
+      ),
+    );
+  return rows;
+}
+
+/**
+ * Self-heal stored repo names after a GitHub repository rename. A push is routed
+ * by the immutable repository id, but the container build fetches its source
+ * tarball from the stored `repo_full_name`; correct every connection in this
+ * installation that points at this repository id but carries a stale name.
+ */
+export async function updateGitHubConnectionRepoNamesByRepoId(
+  db: Db,
+  installationId: string,
+  repositoryId: string,
+  newRepoFullName: string,
+): Promise<void> {
+  await db
+    .update(githubConnections)
+    .set({ repo_full_name: newRepoFullName, updated_at: sql`now()` })
+    .where(
+      and(
+        eq(githubConnections.installation_id, installationId),
+        eq(githubConnections.repository_id, repositoryId),
+        ne(githubConnections.repo_full_name, newRepoFullName),
+      ),
+    );
+}
+
+/**
+ * Resolve the GitHub Actions connection for a repo at OIDC-exchange time.
+ *
+ * The Actions executor authenticates by presenting a GitHub OIDC token whose
+ * `repository` claim names the repo; there is no installation id in that flow,
+ * so we look up by `repo_full_name` alone and require `build_executor =
+ * 'github_actions'` (a `container`-executor connection must never be driven by
+ * the OIDC endpoint). Joins `projects` to surface the owning `user_id` (to
+ * attribute the build) and `slug` (to cross-check the workflow's declared
+ * `--project <slug>`). When multiple connections name the same repo, the
+ * newest by `created_at` wins.
+ *
+ * GitHub Actions OIDC is independent of the GitHub App lifecycle, so a repo
+ * workflow could otherwise keep exchanging OIDC tokens for Void deploy tokens
+ * after the App is suspended/deleted or the repo dropped from the install.
+ * Guard against that by INNER JOINing `github_installations` (via the
+ * connection's `installation_id`) and requiring `status = 'active'`, plus
+ * confirming the repo is still in the installation's selection. Selection is
+ * keyed off GitHub's `repository_selection`: an `all`-repos install grants
+ * every repo (membership is not enforced — the `repositories` cache is
+ * irrelevant), while a `selected` install requires the repo to be a member of
+ * the cached set. An empty `repositories` array under `selected` therefore
+ * means "no repos" and is correctly rejected — it is no longer overloaded to
+ * mean "all".
+ *
+ * Returns ALL github_actions connections for the repo; a repo may back multiple
+ * projects (only `project_id` is unique). The caller disambiguates by the
+ * workflow's requested project slug.
+ *
+ * When `repositoryOwnerId` (the OIDC `repository_owner_id` claim) is supplied,
+ * an OIDC match additionally requires the repo's CURRENT owner account to equal
+ * the installation's `account_id`. The `repository_id` is immutable across a
+ * repo TRANSFER, so without this an org→org transfer (same id, new owner) would
+ * match the OLD owner's stale `all`-repos connection and mint a deploy token for
+ * the wrong project. A null/undefined owner id (legacy, no claim) skips the
+ * owner check to preserve pre-claim behavior; the OIDC route always passes it.
+ */
+export async function getGitHubActionsConnectionsByRepo(
+  db: Db,
+  repoFullName: string,
+  repositoryId?: string | null,
+  repositoryOwnerId?: string | null,
+): Promise<Array<GitHubConnection & { user_id: string; project_slug: string }>> {
+  // Key on the IMMUTABLE numeric repository id (`claims.repository_id`) so a
+  // rename/name-reuse can't point a stale `repo_full_name` at this connection.
+  // When the claim carries an id, connections are matched ONLY by id and the
+  // lookup FAILS CLOSED: a null-id row is NOT matched by name fallback, since a
+  // renamed-and-reused repo name could otherwise match a stale null-id
+  // connection and mint a deploy token for the WRONG project. Only a missing
+  // claim id falls back to `repo_full_name` for every row (pre-id behavior).
+  const repoMatch =
+    repositoryId === undefined || repositoryId === null
+      ? eq(githubConnections.repo_full_name, repoFullName)
+      : eq(githubConnections.repository_id, repositoryId);
+  const rows = await db
+    .select({
+      ...getTableColumns(githubConnections),
+      user_id: projects.user_id,
+      project_slug: projects.slug,
+    })
+    .from(githubConnections)
+    .innerJoin(projects, eq(githubConnections.project_id, projects.id))
+    .innerJoin(
+      githubInstallations,
+      eq(githubConnections.installation_id, githubInstallations.installation_id),
+    )
+    .where(
+      and(
+        repoMatch,
+        // Bind the connection's installation account to the OIDC repo owner. The
+        // `repository_id` is immutable across a repo TRANSFER, so this top-level
+        // condition (applies to BOTH the 'all' and 'selected' branches below)
+        // rejects a transferred repo (same id, NEW owner) that would otherwise
+        // match the old owner's stale connection. Skipped when no owner id is
+        // supplied (legacy/no-claim).
+        repositoryOwnerId === undefined || repositoryOwnerId === null || repositoryOwnerId === ''
+          ? undefined
+          : eq(githubInstallations.account_id, repositoryOwnerId),
+        eq(githubConnections.build_executor, 'github_actions'),
+        eq(githubInstallations.status, 'active'),
+        or(
+          // "all repositories" install => every repo is granted.
+          eq(githubInstallations.repository_selection, 'all'),
+          // "selected" install => enforce the repo is in the cached set. The
+          // `repositories` jsonb stores `id` as a NUMBER (see
+          // `GitHubInstallationRepository.id: number` and `normalizeRepositories`),
+          // so when the caller has the immutable repo id, check membership by id
+          // (rename-safe). Fall back to name membership only when no id is
+          // available (legacy/no-claim).
+          repositoryId === undefined || repositoryId === null
+            ? sql`${githubInstallations.repositories} @> ${JSON.stringify([{ full_name: repoFullName }])}::jsonb`
+            : sql`${githubInstallations.repositories} @> ${JSON.stringify([{ id: Number(repositoryId) }])}::jsonb`,
+        ),
+      ),
+    );
+  return rows;
+}
+
+export async function updateGitHubConnection(
+  db: Db,
+  projectId: string,
+  updates: {
+    branch?: string;
+    buildExecutor?: GitHubConnection['build_executor'];
+  },
+): Promise<void> {
+  await db
+    .update(githubConnections)
+    .set({
+      branch: updates.branch === undefined ? sql`${githubConnections.branch}` : updates.branch,
+      build_executor:
+        updates.buildExecutor === undefined
+          ? sql`${githubConnections.build_executor}`
+          : updates.buildExecutor,
+      updated_at: sql`now()`,
+    })
+    .where(eq(githubConnections.project_id, projectId));
+}
+
+export async function deleteGitHubConnection(db: Db, projectId: string): Promise<void> {
+  await db.delete(githubConnections).where(eq(githubConnections.project_id, projectId));
+}
+
+// ---------------------------------------------------------------------------
+// github_installations
+// ---------------------------------------------------------------------------
+
+export async function upsertGitHubInstallation(
+  db: Db,
+  args: {
+    installationId: string;
+    userId?: string | null;
+    accountLogin: string;
+    accountId: string;
+    accountType: GitHubInstallation['account_type'];
+    repositories: ReadonlyArray<GitHubInstallationRepository>;
+    // GitHub's `repository_selection` (`all` | `selected`). Optional so callers
+    // that don't carry it (e.g. the OAuth callback re-upsert) preserve the
+    // existing value on conflict; defaults to `selected` on insert, the safe
+    // direction (requires explicit membership unless proven all-repos).
+    repositorySelection?: GitHubInstallation['repository_selection'];
+    // When true, the conflict path ALSO rolls repo membership forward to the
+    // fresh `repositories` / `repositorySelection` carried in args. Only the
+    // OAuth callback caller sets this — it just refetched the LIVE membership via
+    // `listInstallationRepositories`, so its data is authoritative on reconnect /
+    // `setup_action=update`. The webhook `installation.created` caller leaves it
+    // off (default), keeping the stale-`created` membership guard below intact.
+    refreshMembership?: boolean;
+  },
+): Promise<GitHubInstallation> {
+  const id = generateId('ghi');
+  const [row] = await db
+    .insert(githubInstallations)
+    .values({
+      id,
+      installation_id: args.installationId,
+      user_id: args.userId ?? null,
+      account_login: args.accountLogin,
+      account_id: args.accountId,
+      account_type: args.accountType,
+      repositories: args.repositories,
+      repository_selection: args.repositorySelection ?? 'selected',
+    })
+    .onConflictDoUpdate({
+      target: githubInstallations.installation_id,
+      set: {
+        // Preserve an already-linked user_id when a webhook upsert arrives with
+        // no user (install-before-signin can be backfilled later). When a user
+        // is provided, adopt it ONLY if the row is unowned or already owned by
+        // the same user — never re-own a row linked to a DIFFERENT user. This
+        // guards the concurrent-callback race (realistic for org installs) that
+        // the non-transactional read-then-write backstop in routes/github.ts
+        // cannot catch. (Done in the column expression, not setWhere: setWhere
+        // would freeze repositories/status refreshes on the webhook re-upsert,
+        // and `user_id = NULL` is never true.)
+        user_id:
+          args.userId === undefined || args.userId === null
+            ? sql`${githubInstallations.user_id}`
+            : sql`CASE WHEN ${githubInstallations.user_id} IS NULL OR ${githubInstallations.user_id} = ${args.userId} THEN ${args.userId} ELSE ${githubInstallations.user_id} END`,
+        account_login: args.accountLogin,
+        account_id: args.accountId,
+        account_type: args.accountType,
+        // By default, do NOT overwrite repo-membership (`repositories` /
+        // `repository_selection`) on the conflict path. GitHub never reuses
+        // installation_ids, so a `created` that conflicts with an existing row is
+        // ALWAYS a stale/redelivered event and its payload membership is never
+        // newer than what we already hold. The INSERT above seeds both on the
+        // genuine first install, and the `installation_repositories` webhook
+        // handler is the authoritative writer for every membership/selection
+        // change thereafter (under a FOR UPDATE lock). Overwriting here would let
+        // a redelivered original `created` (e.g. repos [A]) roll back a cache the
+        // handler correctly advanced (e.g. [A, B]), or downgrade an `all`
+        // selection back to `selected` — silently rejecting pushes/OIDC for the
+        // dropped repos until the next selection refresh.
+        //
+        // EXCEPTION: the OAuth callback caller (routes/github.ts) sets
+        // `refreshMembership: true`. It just refetched the LIVE membership via
+        // `listInstallationRepositories`, so on reconnect / `setup_action=update`
+        // its data IS authoritative and must roll the cache forward (otherwise
+        // newly-added repos / a widen-to-`all` stay rejected until the next
+        // webhook). The membership keys are spread in only for that caller, so the
+        // generated SQL is byte-identical to the webhook path when the flag is off.
+        ...(args.refreshMembership
+          ? {
+              repositories: args.repositories,
+              // NULL-safe: never blank an existing selection if the caller omitted it.
+              repository_selection:
+                args.repositorySelection ?? sql`${githubInstallations.repository_selection}`,
+            }
+          : {}),
+        // Do NOT let a conflict-update revive a terminal/suspended row. A genuine
+        // reinstall ALWAYS gets a NEW installation_id from GitHub (ids are never
+        // reused), so it hits the INSERT branch above (status defaults to active),
+        // never this conflict path. Therefore a `created` that conflicts with an
+        // existing row is always a stale/redelivered event — and if that row is
+        // currently `deleted` (uninstalled) or `suspended`, a LATER lifecycle event
+        // set it so. Flipping it back to `active` here would re-enable push/OIDC
+        // resolution (the resolvers gate only on status='active') for an App the
+        // user already removed. Keep `deleted`/`suspended` terminal; only the real
+        // `installation.unsuspend` webhook (markGitHubInstallationStatus) clears a
+        // suspension. `active` rows stay active (the common create-before-callback
+        // backfill case is a no-op).
+        status: sql`CASE WHEN ${githubInstallations.status} IN ('deleted', 'suspended') THEN ${githubInstallations.status} ELSE 'active' END`,
+        updated_at: sql`now()`,
+      },
+    })
+    .returning();
+  return row;
+}
+
+export async function getGitHubInstallation(
+  db: Db,
+  installationId: string,
+): Promise<GitHubInstallation | null> {
+  const [row] = await db
+    .select()
+    .from(githubInstallations)
+    .where(eq(githubInstallations.installation_id, installationId))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getGitHubInstallationsByUser(
+  db: Db,
+  userId: string,
+): Promise<ReadonlyArray<GitHubInstallation>> {
+  return db
+    .select()
+    .from(githubInstallations)
+    .where(eq(githubInstallations.user_id, userId))
+    .orderBy(desc(githubInstallations.created_at));
+}
+
+export async function setGitHubInstallationRepositories(
+  db: Db,
+  installationId: string,
+  repositories: ReadonlyArray<GitHubInstallationRepository>,
+  // Optional `repository_selection` (`all` | `selected`) delivered alongside the
+  // installation_repositories delta. When provided it is updated atomically with
+  // the cached set so an install that flips to `all` (or back to `selected`)
+  // stays in sync; when omitted the stored selection is preserved.
+  repositorySelection?: GitHubInstallation['repository_selection'],
+): Promise<void> {
+  await db
+    .update(githubInstallations)
+    .set({
+      repositories,
+      repository_selection:
+        repositorySelection === undefined
+          ? sql`${githubInstallations.repository_selection}`
+          : repositorySelection,
+      updated_at: sql`now()`,
+    })
+    .where(eq(githubInstallations.installation_id, installationId));
+}
+
+export async function markGitHubInstallationStatus(
+  db: Db,
+  installationId: string,
+  status: GitHubInstallation['status'],
+): Promise<void> {
+  await db
+    .update(githubInstallations)
+    .set({ status, updated_at: sql`now()` })
+    .where(eq(githubInstallations.installation_id, installationId));
+}
+
+/**
+ * Apply a suspension (installation.suspend), guarded so it NEVER overwrites a
+ * `deleted` row. A delayed/redelivered `suspend` landing AFTER a later
+ * `installation.deleted` would otherwise walk the terminal row back to
+ * `suspended`, which then re-satisfies unsuspendGitHubInstallation's
+ * `status='suspended'` guard — letting a subsequent stale `unsuspend` reactivate
+ * an App the user already removed. GitHub never reuses installation_ids, so a
+ * suspend hitting a `deleted` row is always stale; leave it terminal. The
+ * `deleted` webhook keeps using markGitHubInstallationStatus (deleted is the
+ * terminalizing write and must apply unconditionally).
+ */
+export async function suspendGitHubInstallation(db: Db, installationId: string): Promise<void> {
+  await db
+    .update(githubInstallations)
+    .set({ status: 'suspended', updated_at: sql`now()` })
+    .where(
+      and(
+        eq(githubInstallations.installation_id, installationId),
+        ne(githubInstallations.status, 'deleted'),
+      ),
+    );
+}
+
+/**
+ * Clear a suspension (installation.unsuspend), guarded to the `suspended`→`active`
+ * transition ONLY. A delayed or redelivered `unsuspend` that lands AFTER a later
+ * `installation.deleted` must NOT revive the terminal row — the connection
+ * resolvers gate solely on status='active', so reviving a deleted install would
+ * let a removed App resume push/OIDC deploys (the same class as the stale-`created`
+ * guard in upsertGitHubInstallation, which this path bypasses). GitHub never
+ * reuses installation_ids, so a genuine reinstall is a NEW row, never an
+ * unsuspend; an unsuspend hitting a `deleted` (or already-`active`) row is always
+ * stale and is left untouched.
+ */
+export async function unsuspendGitHubInstallation(db: Db, installationId: string): Promise<void> {
+  await db
+    .update(githubInstallations)
+    .set({ status: 'active', updated_at: sql`now()` })
+    .where(
+      and(
+        eq(githubInstallations.installation_id, installationId),
+        eq(githubInstallations.status, 'suspended'),
+      ),
+    );
+}
+
+/**
+ * Backfill the owning user on installations created before sign-in. Matches by
+ * `account_id` and only adopts the user where `user_id` is still NULL, so a
+ * later sign-in by the GitHub account that performed the install claims its
+ * unlinked installation(s) without clobbering already-linked ones.
+ */
+export async function linkGitHubInstallationToUser(
+  db: Db,
+  accountId: string,
+  userId: string,
+): Promise<void> {
+  await db
+    .update(githubInstallations)
+    .set({ user_id: userId, updated_at: sql`now()` })
+    .where(and(eq(githubInstallations.account_id, accountId), isNull(githubInstallations.user_id)));
 }

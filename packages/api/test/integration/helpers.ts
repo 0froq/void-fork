@@ -69,6 +69,8 @@ export type TestEnv = {
   CRON_SCHEDULER: DurableObjectNamespace;
   ERROR_ALERT_MONITOR: DurableObjectNamespace;
   SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounter>;
+  BUILD_SCHEDULER: DurableObjectNamespace;
+  BUILD_MANAGER: DurableObjectNamespace;
   /** Test-only override for the deploy handler's heartbeat interval. */
   DEPLOY_HEARTBEAT_INTERVAL_MS?: number;
 };
@@ -421,6 +423,8 @@ export async function setupEnv(): Promise<TestEnv> {
     ERROR_ALERT_MONITOR: createMockDoNamespace(),
     SANDBOX_CONCURRENCY_COUNTER:
       createMockDoNamespace() as unknown as DurableObjectNamespace<SandboxConcurrencyCounter>,
+    BUILD_SCHEDULER: createMockDoNamespace(),
+    BUILD_MANAGER: createMockDoNamespace(),
   };
 }
 
@@ -515,7 +519,7 @@ export async function createTestDeployment(
     | 'canceled' = 'live',
   source?: string,
   errorMessage?: string,
-  options?: { cliVersion?: string | null },
+  options?: { cliVersion?: string | null; commit?: string | null },
 ): Promise<{ id: string }> {
   const n = ++deploymentCounter;
   const id = `dpl_test${n}`;
@@ -530,6 +534,10 @@ export async function createTestDeployment(
     status,
     source: source ?? null,
     cli_version: options?.cliVersion ?? null,
+    // The commit this deployment published, when the caller wants to exercise
+    // the `deployments.commit == pushed SHA` freshness fallback (the supersede
+    // rollback gate). Left null otherwise (container deploys record no commit).
+    commit: options?.commit ?? null,
     error_message: errorMessage ?? null,
     // Production deploys always have a manifest set after `updateDeploymentManifest`
     // (post-parse). Test fixtures seeding rows directly need a non-null

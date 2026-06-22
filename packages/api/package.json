@@ -28,6 +28,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@cloudflare/containers": "0.3.3",
     "@cloudflare/sandbox": "0.12.1",
     "@voidcloud/isr-shared": "workspace:*",
     "aws4fetch": "^1.0.20",
@@ -35,6 +36,7 @@
     "cron-parser": "5.5.0",
     "drizzle-orm": "^0.45.2",
     "hono": "catalog:",
+    "jose": "6.2.3",
     "mime": "^4.1.0",
     "pg": "8.21.0"
   },

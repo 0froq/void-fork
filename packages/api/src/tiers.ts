@@ -23,6 +23,10 @@ export type PlanLimits = Readonly<{
   sandboxRuntimeSecondsPerMonth: number;
   /** Max simultaneous live sandbox containers (0 = unlimited) */
   sandboxMaxConcurrentInstances: number;
+  /** Max simultaneous in-flight deploy builds (0 = unlimited) */
+  concurrentBuilds: number;
+  /** Max wall-clock minutes per build before timeout (0 = unlimited) */
+  buildTimeoutMinutes: number;
 }>;
 
 const GB = 1024 * 1024 * 1024;
@@ -41,6 +45,8 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     // 0 = unlimited in PlanLimits convention, so 1 effectively disables sandbox for free users.
     sandboxRuntimeSecondsPerMonth: 1,
     sandboxMaxConcurrentInstances: 1,
+    concurrentBuilds: 1,
+    buildTimeoutMinutes: 10,
   },
   solo: {
     requestsPerMonth: 10_000_000,
@@ -54,6 +60,8 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     retainedDeployments: 5,
     sandboxRuntimeSecondsPerMonth: 30 * 3600,
     sandboxMaxConcurrentInstances: 2,
+    concurrentBuilds: 2,
+    buildTimeoutMinutes: 15,
   },
   pro: {
     requestsPerMonth: 100_000_000,
@@ -67,6 +75,8 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     retainedDeployments: 25,
     sandboxRuntimeSecondsPerMonth: 200 * 3600,
     sandboxMaxConcurrentInstances: 10,
+    concurrentBuilds: 3,
+    buildTimeoutMinutes: 15,
   },
   sponsored: {
     requestsPerMonth: 0,
@@ -80,6 +90,8 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     retainedDeployments: 0,
     sandboxRuntimeSecondsPerMonth: 0,
     sandboxMaxConcurrentInstances: 0,
+    concurrentBuilds: 6,
+    buildTimeoutMinutes: 20,
   },
   custom: {
     requestsPerMonth: 0,
@@ -93,6 +105,8 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
     retainedDeployments: 0,
     sandboxRuntimeSecondsPerMonth: 0,
     sandboxMaxConcurrentInstances: 0,
+    concurrentBuilds: 0,
+    buildTimeoutMinutes: 0,
   },
 };
 
@@ -102,6 +116,33 @@ export const STATIC_RETENTION_LIMIT = 100;
 /** Returns plan limits, defaulting to free tier for unknown plans. */
 export function getPlanLimits(plan: string): PlanLimits {
   return PLAN_LIMITS[plan as PlanId] ?? PLAN_LIMITS.free;
+}
+
+/** Container instance size used for a plan's deploy builds. */
+export type BuildInstanceType = 'standard-1' | 'standard-2' | 'standard-3';
+
+/**
+ * Returns the build container instance type for a plan, defaulting to standard-1.
+ *
+ * NOTE: this is metadata-only. `@cloudflare/containers@0.3.3` `start()` accepts no
+ * per-start instance-size option, so this value cannot actually size a container at
+ * launch — it is only recorded into the `builds.instance_type` DB column for
+ * observability (and a possible future multi-DO-class design). The ACTUAL instance
+ * size is the static `instance_type` in `wrangler.jsonc` (currently `standard-1`).
+ */
+export function getBuildInstanceType(plan: PlanId): BuildInstanceType {
+  switch (plan) {
+    case 'free':
+    case 'solo':
+      return 'standard-1';
+    case 'pro':
+      return 'standard-2';
+    case 'sponsored':
+    case 'custom':
+      return 'standard-3';
+    default:
+      return 'standard-1';
+  }
 }
 
 /** Checks if current usage is within the limit. 0 = unlimited. */

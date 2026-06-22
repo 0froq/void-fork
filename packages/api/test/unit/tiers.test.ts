@@ -3,6 +3,7 @@ import {
   PLAN_LIMITS,
   STATIC_RETENTION_LIMIT,
   getPlanLimits,
+  getBuildInstanceType,
   isWithinLimit,
   getCurrentBillingPeriodStart,
   type PlanId,
@@ -79,6 +80,24 @@ describe('PLAN_LIMITS', () => {
       PLAN_LIMITS.solo.sandboxRuntimeSecondsPerMonth,
     );
   });
+
+  it('defines build concurrency limits per tier', () => {
+    expect(PLAN_LIMITS.free.concurrentBuilds).toBe(1);
+    expect(PLAN_LIMITS.solo.concurrentBuilds).toBe(2);
+    expect(PLAN_LIMITS.pro.concurrentBuilds).toBe(3);
+    expect(PLAN_LIMITS.sponsored.concurrentBuilds).toBe(6);
+    // 0 = unlimited by the shared isWithinLimit convention.
+    expect(PLAN_LIMITS.custom.concurrentBuilds).toBe(0);
+  });
+
+  it('defines build timeout minutes per tier', () => {
+    expect(PLAN_LIMITS.free.buildTimeoutMinutes).toBe(10);
+    expect(PLAN_LIMITS.solo.buildTimeoutMinutes).toBe(15);
+    expect(PLAN_LIMITS.pro.buildTimeoutMinutes).toBe(15);
+    expect(PLAN_LIMITS.sponsored.buildTimeoutMinutes).toBe(20);
+    // 0 = unlimited by the shared isWithinLimit convention.
+    expect(PLAN_LIMITS.custom.buildTimeoutMinutes).toBe(0);
+  });
 });
 
 describe('getPlanLimits', () => {
@@ -93,6 +112,26 @@ describe('getPlanLimits', () => {
   it('returns free tier limits for unknown plans', () => {
     expect(getPlanLimits('unknown')).toBe(PLAN_LIMITS.free);
     expect(getPlanLimits('')).toBe(PLAN_LIMITS.free);
+  });
+});
+
+describe('getBuildInstanceType', () => {
+  it('returns standard-1 for free and solo', () => {
+    expect(getBuildInstanceType('free')).toBe('standard-1');
+    expect(getBuildInstanceType('solo')).toBe('standard-1');
+  });
+
+  it('returns standard-2 for pro', () => {
+    expect(getBuildInstanceType('pro')).toBe('standard-2');
+  });
+
+  it('returns standard-3 for sponsored and custom', () => {
+    expect(getBuildInstanceType('sponsored')).toBe('standard-3');
+    expect(getBuildInstanceType('custom')).toBe('standard-3');
+  });
+
+  it('defaults to standard-1 for unknown plans', () => {
+    expect(getBuildInstanceType('unknown' as PlanId)).toBe('standard-1');
   });
 });
 

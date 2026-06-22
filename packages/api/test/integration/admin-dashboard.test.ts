@@ -1,7 +1,14 @@
 import { eq } from 'drizzle-orm';
 import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vite-plus/test';
 import { app } from '../../src/index.ts';
-import { deployments, domains, invitations, projects, users } from '../../src/schema.ts';
+import {
+  deployments,
+  domains,
+  githubInstallations,
+  invitations,
+  projects,
+  users,
+} from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -761,6 +768,45 @@ describe('POST /admin/users/:id/suspend + unsuspend', () => {
       .from(users)
       .where(eq(users.id, user.id));
     expect(row.suspended_reason).toBe('admin_suspended');
+  });
+});
+
+describe('POST /admin/users/:id/delete', () => {
+  test('deletes a user with a linked github installation (FK set null, not a 500)', async () => {
+    mockCfApi();
+    const admin = await createTestUser(env.db, 'admin-udel', 'github', undefined, 'free', 'admin');
+    const user = await createTestUser(env.db, 'gh-linked-user');
+    // A GitHub App installation linked to the user (the backfilled state). The
+    // FK is `on delete set null`, so deleting the owner must orphan the row, not
+    // violate the constraint.
+    await env.db.insert(githubInstallations).values({
+      id: 'ghi_udel_test',
+      installation_id: 'inst-udel-1',
+      user_id: user.id,
+      account_login: 'octo-org',
+      account_id: '4242',
+      account_type: 'Organization',
+    });
+
+    const res = await req(`/admin/users/${user.id}/delete`, admin.adminJwt, {
+      method: 'POST',
+      body: '',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' } as Record<string, string>,
+    });
+    expect(res.status).toBe(302);
+
+    // User gone; installation orphaned back to the unlinked state.
+    expect((await env.db.select().from(users).where(eq(users.id, user.id))).length).toBe(0);
+    const [install] = await env.db
+      .select()
+      .from(githubInstallations)
+      .where(eq(githubInstallations.id, 'ghi_udel_test'));
+    expect(install).toBeDefined();
+    expect(install.user_id).toBeNull();
+
+    // Keep the suite self-contained (clearTables doesn't cover installations).
+    await env.db.delete(githubInstallations).where(eq(githubInstallations.id, 'ghi_udel_test'));
+    vi.restoreAllMocks();
   });
 });
 

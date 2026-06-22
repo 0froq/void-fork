@@ -36,6 +36,40 @@ export type ApiEnv = Env & {
     GITHUB_CLIENT_ID: string;
     GITHUB_CLIENT_SECRET: string;
     GITHUB_PREVIEW_REPO_PAT?: string;
+    /**
+     * GitHub App credentials for the "Deploy on GitHub" build system. Distinct
+     * from the OAuth-login `GITHUB_CLIENT_ID/SECRET` above. All optional so old
+     * code (and environments without the App configured) tolerates absence —
+     * the webhook/OIDC routes return inert when these are unset.
+     */
+    GITHUB_APP_ID?: string;
+    /** App private key in PKCS#8 PEM form (`openssl pkcs8 -topk8 -nocrypt`). */
+    GITHUB_APP_PRIVATE_KEY?: string;
+    GITHUB_WEBHOOK_SECRET?: string;
+    GITHUB_APP_SLUG?: string;
+    /**
+     * GitHub App user-to-server OAuth credentials (the App's own client id/secret,
+     * distinct from `GITHUB_APP_ID`/`GITHUB_APP_PRIVATE_KEY` and from the login
+     * `GITHUB_CLIENT_ID/SECRET`). Used to verify installation ownership for
+     * organization installs via `GET /user/installations` when the App has
+     * "Request user authorization (OAuth) during installation" enabled. Optional:
+     * when unset, the install callback falls back to the personal account-id match.
+     */
+    GITHUB_APP_CLIENT_ID?: string;
+    GITHUB_APP_CLIENT_SECRET?: string;
+    /**
+     * CF Access service-token pair for reaching the Access-gated staging hosts
+     * (`api.staging.void.cloud`). Held ONLY by the staging API worker. The
+     * `BuildManager` forwards these into a staging container build so the
+     * `void deploy` child can authenticate past CF Access when calling the
+     * staging deploy endpoint — non-interactive automation can't do the
+     * `cloudflared` browser flow. Optional: unset everywhere except staging, so
+     * production (not Access-gated) and dev tolerate absence. See
+     * `meta/operations.md` (Staging Access Control) and the `void-staging-programmatic`
+     * service token.
+     */
+    CF_ACCESS_CLIENT_ID_STAGING?: string;
+    CF_ACCESS_CLIENT_SECRET_STAGING?: string;
     GOOGLE_CLIENT_ID: string;
     GOOGLE_CLIENT_SECRET: string;
     AUTH_REDIRECT_URI?: string;
@@ -67,6 +101,16 @@ export type ApiEnv = Env & {
     CRON_SCHEDULER: DurableObjectNamespace;
     ERROR_ALERT_MONITOR: DurableObjectNamespace;
     SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounter>;
+    /**
+     * Singleton DO that queues `executor='container'` builds and enforces
+     * per-user tier concurrency before handing each build to a BuildManager.
+     */
+    BUILD_SCHEDULER: DurableObjectNamespace;
+    /**
+     * Per-build DO (keyed by build id) that runs the build container, streams
+     * logs, and writes status transitions back to Postgres.
+     */
+    BUILD_MANAGER: DurableObjectNamespace;
     /**
      * Producer for the cron-firing queue. Used by `CronScheduler.alarm()` to
      * enqueue user-worker invocations from inside its Durable Object context.
@@ -109,5 +153,19 @@ export type ApiEnv = Env & {
   Variables: {
     user: User;
     db: Db;
+    /**
+     * Project id a scoped deploy token is pinned to. Set by `authMiddleware`
+     * for `aud:'deploy'` tokens; absent for full `aud:'api'` tokens. The deploy
+     * endpoint guards on this so a deploy token can only deploy its own project.
+     */
+    deployScope?: string;
+    /**
+     * Build id a scoped deploy token is bound to. Set by `authMiddleware` for
+     * `aud:'deploy'` tokens that carry a `build` claim; absent for full
+     * `aud:'api'` tokens and legacy deploy tokens. The deploy endpoint rejects
+     * the token once this build is no longer active (superseded/cancelled), so
+     * a stale runner can't deploy an older commit after being superseded.
+     */
+    deployBuild?: string;
   };
 };

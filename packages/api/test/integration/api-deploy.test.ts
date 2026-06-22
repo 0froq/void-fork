@@ -13,6 +13,7 @@ import { computeAssetHash } from '../../src/assets.ts';
 import { updateDeploymentStatus } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import {
+  builds,
   deployments,
   resources,
   domains,
@@ -50,6 +51,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // builds reference projects via FK and clearTables() does not touch them, so
+  // clear builds first (mirrors deploy-token-scope.test.ts).
+  await env.db.delete(builds);
   await clearTables(env.db);
 });
 

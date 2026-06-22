@@ -9,8 +9,10 @@ import {
   afterEach,
   vi,
 } from 'vite-plus/test';
+import { createBuild } from '../../src/db.ts';
+import * as db from '../../src/db.ts';
 import app from '../../src/index.ts';
-import { resources, projects, deployments } from '../../src/schema.ts';
+import { resources, projects, deployments, builds } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -23,6 +25,26 @@ import {
 } from './helpers.ts';
 
 let env: TestEnv;
+
+// A BUILD_MANAGER stand-in that records which build ids received a `cancelBuild`
+// RPC (the DO name is the build id). Mirrors the helper in api-webhooks.test.ts /
+// api-github.test.ts: teardown's container-build cleanup calls `cancelBuild` on
+// BuildManager, so we assert it was invoked rather than touching a real DO.
+function recordingBuildManager(): {
+  namespace: DurableObjectNamespace;
+  cancelledIds: ReadonlyArray<string>;
+} {
+  const cancelledIds: Array<string> = [];
+  const namespace = {
+    idFromName: (name: string) => ({ toString: () => name }) as unknown as DurableObjectId,
+    get: (id: DurableObjectId) => ({
+      cancelBuild: async (_reason?: string) => {
+        cancelledIds.push(id.toString());
+      },
+    }),
+  } as unknown as DurableObjectNamespace;
+  return { namespace, cancelledIds };
+}
 
 beforeAll(async () => {
   env = await setupEnv();
@@ -172,6 +194,87 @@ describe('DELETE /projects/:id', () => {
     // Verify KV routing removed
     const routing = await env.ROUTING.get('full-app');
     expect(routing).toBeNull();
+  });
+
+  it('terminalizes in-flight builds and tears down their container DOs', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'building-app');
+    mockCfApi();
+
+    // Two in-flight builds: a container build (has a live DO) and a
+    // github_actions build (no DO — token revoked purely by terminalizing the
+    // row). Both must be gone after delete, and the container DO torn down.
+    const containerBuild = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      status: 'building',
+    });
+    const actionsBuild = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'github_actions',
+      status: 'building',
+    });
+
+    const { namespace, cancelledIds } = recordingBuildManager();
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      { ...env, BUILD_MANAGER: namespace },
+    );
+    expect(res.status).toBe(200);
+
+    // The container build's DO got a cancelBuild RPC; github_actions has no DO.
+    expect(cancelledIds).toContain(containerBuild.id);
+    expect(cancelledIds).not.toContain(actionsBuild.id);
+
+    // Both build rows are gone — their deploy tokens are dead (the auth guard
+    // rejects any token whose bound build row is missing / not ACTIVE).
+    const remaining = await env.db.select().from(builds).where(eq(builds.project_id, project.id));
+    expect(remaining).toHaveLength(0);
+  });
+
+  it('deletes the CF object for a resource that raced the teardown snapshot', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'race-orphan-app');
+    // A real D1 resource row exists at cascade time.
+    await addResource(project.id, 'd1', 'd1-raced-uuid', 'DB');
+
+    const cf = mockCfApi();
+    // Simulate the orphan-on-concurrent-create race: teardown's one-time resource
+    // snapshot MISSES this row (modelled here as a row inserted after the snapshot
+    // read). With getProjectResources returning [], cleanupBestEffortResources
+    // cleans nothing — so the ONLY path that can delete the CF D1 object is the
+    // post-cascade race-window sweep (deleteProjectCascade RETURNs the row →
+    // cleanupRaceWindowResourceOrphans).
+    vi.spyOn(db, 'getProjectResources').mockResolvedValue([]);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // The race-window sweep deleted the CF D1 object behind the missed row.
+    const d1Deletes = cf.mock.calls.filter(
+      ([url, init]) =>
+        (init as RequestInit | undefined)?.method === 'DELETE' &&
+        String(url).includes('/d1/database/d1-raced-uuid'),
+    );
+    expect(d1Deletes.length).toBeGreaterThan(0);
+
+    // And the row is gone.
+    const remaining = await env.db
+      .select()
+      .from(resources)
+      .where(eq(resources.project_id, project.id));
+    expect(remaining).toHaveLength(0);
   });
 
   it('returns warnings on CF resource deletion failure', async () => {

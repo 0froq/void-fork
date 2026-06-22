@@ -330,6 +330,186 @@ export const projectDatabaseCredentials = pgTable('project_database_credentials'
 });
 
 // ---------------------------------------------------------------------------
+// github_installations — GitHub App installations.
+//
+// `user_id` is nullable to support install-before-signin: a user can install
+// the GitHub App before (or instead of) signing in, in which case the
+// installation lands here unlinked and is backfilled in the GitHub OAuth
+// callback (`linkGitHubInstallationToUser`). `repositories` mirrors the
+// installation's repository selection as a JSON array of `{ full_name, id }`.
+// ---------------------------------------------------------------------------
+export type GitHubInstallationRepository = Readonly<{
+  full_name: string;
+  id: number;
+}>;
+
+export const githubInstallations = pgTable(
+  'github_installations',
+  {
+    id: text('id').primaryKey(),
+    installation_id: text('installation_id').notNull().unique(),
+    // `set null` (not the default NO ACTION): an installation can be linked to a
+    // user (backfilled in the OAuth callback), but deleting that user must not
+    // fail on this FK. Orphaning the row back to user_id=null returns it to the
+    // install-before-signin state, recoverable by re-linking.
+    user_id: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+    account_login: text('account_login').notNull(),
+    account_id: text('account_id').notNull(),
+    account_type: text('account_type').notNull().$type<'User' | 'Organization'>(),
+    repositories: jsonb('repositories')
+      .notNull()
+      .default(sql`'[]'::jsonb`)
+      .$type<ReadonlyArray<GitHubInstallationRepository>>(),
+    // GitHub's `repository_selection`: `all` grants every repo in the account
+    // (the `repositories` cache is then irrelevant); `selected` restricts to
+    // the cached set. Defaults to `selected` so the OIDC connection lookup
+    // requires explicit membership unless a webhook proves an all-repos
+    // install — an empty `repositories` array no longer means "all".
+    repository_selection: text('repository_selection')
+      .notNull()
+      .default('selected')
+      .$type<'all' | 'selected'>(),
+    status: text('status').notNull().default('active').$type<'active' | 'suspended' | 'deleted'>(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_github_installations_user_id').on(table.user_id),
+    index('idx_github_installations_account_id').on(table.account_id),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// github_connections — links a project to a GitHub repository + branch.
+//
+// `project_id` is unique (one connection per project) and cascades on project
+// delete (mirrors `project_secrets`). `build_executor` selects which build
+// backend runs on push: CF Containers (`container`) or GitHub Actions
+// (`github_actions`).
+// ---------------------------------------------------------------------------
+export const githubConnections = pgTable(
+  'github_connections',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
+      .notNull()
+      .unique()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    installation_id: text('installation_id').notNull(),
+    repo_full_name: text('repo_full_name').notNull(),
+    // The repository's immutable numeric GitHub id (as text). A repo can be
+    // renamed, deleted, or have its name reused under the same installation, so
+    // `repo_full_name` is mutable and unsafe as a routing key — a rename/reuse
+    // could match a DIFFERENT repository to this connection and deploy to the
+    // wrong project. Webhook (`repository.id`) and OIDC (`claims.repository_id`)
+    // resolution match on this immutable id, treating `repo_full_name` as
+    // display/fetch metadata. Nominally nullable, but the resolvers FAIL CLOSED:
+    // when the caller has an id, a null-id row is NOT matched by `repo_full_name`
+    // fallback (a renamed-and-reused name could otherwise authorize the wrong
+    // project). New connections always populate it at connect time; the only
+    // name fallback left is for callers with no id at all (malformed/partial
+    // webhook). A `repo_full_name` match is used solely in that no-id case.
+    repository_id: text('repository_id'),
+    branch: text('branch').notNull().default('main'),
+    build_executor: text('build_executor')
+      .notNull()
+      .default('container')
+      .$type<'container' | 'github_actions'>(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_github_connections_installation_id').on(table.installation_id),
+    index('idx_github_connections_repo_full_name').on(table.repo_full_name),
+    // Webhook resolution matches on the immutable (installation_id, repository_id).
+    index('idx_github_connections_installation_repo_id').on(
+      table.installation_id,
+      table.repository_id,
+    ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// builds — server-side build runs (one per push that triggers a build).
+//
+// A build runs the real `void deploy` CLI in a build environment (CF Container
+// or GitHub Actions runner) and produces a `deployment_id` once the deploy
+// endpoint accepts the manifest. `executor` records which backend ran it;
+// `status` tracks the build lifecycle independent of the deployment's status.
+// ---------------------------------------------------------------------------
+export const builds = pgTable(
+  'builds',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
+      .notNull()
+      .references(() => projects.id),
+    user_id: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    executor: text('executor')
+      .notNull()
+      .default('container')
+      .$type<'container' | 'github_actions'>(),
+    status: text('status')
+      .notNull()
+      .default('queued')
+      .$type<
+        'queued' | 'starting' | 'building' | 'deploying' | 'complete' | 'failed' | 'cancelled'
+      >(),
+    commit_sha: text('commit_sha'),
+    branch: text('branch'),
+    deployment_id: text('deployment_id').references(() => deployments.id),
+    github_run_id: text('github_run_id'),
+    // The GitHub Actions `run_attempt` (as text, nullable). A workflow RERUN
+    // reuses the same `run_id` with an incremented `run_attempt`, so the pair
+    // `(github_run_id, github_run_attempt)` — not `run_id` alone — identifies a
+    // single attempt. Nullable for backward-compat: container builds and rows
+    // created before this column carry NULL. The `workflow_run` completion
+    // handler matches on the attempt so a redelivered/late completion from
+    // attempt 1 cannot finalize attempt 2's active build.
+    github_run_attempt: text('github_run_attempt'),
+    logs_url: text('logs_url'),
+    error: text('error'),
+    exit_code: integer('exit_code'),
+    instance_type: text('instance_type'),
+    started_at: timestamp('started_at', { mode: 'string' }),
+    completed_at: timestamp('completed_at', { mode: 'string' }),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_builds_project_created').on(table.project_id, table.created_at),
+    index('idx_builds_status').on(table.status),
+    index('idx_builds_user_status').on(table.user_id, table.status),
+    // A GitHub Actions `run_id` is unique only WITHIN a repository, not
+    // globally, so build identity is scoped to the connection's project. The
+    // composite partial unique index closes the concurrent-OIDC-exchange race
+    // (two ACTIVE rows for one run on the same project) without colliding across
+    // projects that happen to share a numeric run_id. `github_run_id IS NULL`
+    // rows (the container-build path) are exempt.
+    //
+    // Scoped to ACTIVE statuses (`starting`/`building`/`deploying`, mirroring
+    // `ACTIVE_BUILD_STATUSES` in db.ts): the invariant is "at most one ACTIVE
+    // build per (project, run_id, run_attempt)". A GitHub RERUN reuses the same
+    // `run_id` with an incremented `run_attempt`, so the attempt is part of the
+    // key — two attempts of the same run can be transiently active (e.g. a
+    // redelivered late completion for attempt 1 while attempt 2 builds) without
+    // violating uniqueness, while a duplicate concurrent insert for the SAME
+    // attempt is still rejected. A GitHub RERUN after the prior attempt reaches
+    // a terminal status (`complete`/`failed`/`cancelled`) must be able to start
+    // a fresh build, so terminal rows are intentionally NOT covered. Rows with a
+    // NULL `github_run_attempt` (container builds, or rows created before this
+    // column) are not covered by the partial WHERE — fine, this feature is not
+    // yet in production.
+    uniqueIndex('idx_builds_project_github_run_id')
+      .on(table.project_id, table.github_run_id, table.github_run_attempt)
+      .where(
+        sql`${table.github_run_id} IS NOT NULL AND ${table.github_run_attempt} IS NOT NULL AND ${table.status} IN ('starting', 'building', 'deploying')`,
+      ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // invitations
 // ---------------------------------------------------------------------------
 export const invitations = pgTable(
