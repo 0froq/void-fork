@@ -1298,6 +1298,18 @@ describe('GET /github/install-url', () => {
       true,
     );
   });
+
+  it('returns 403 github_identity_required when the caller has no github identity', async () => {
+    // A user authed via a non-github provider has no linked github oauth row,
+    // so getCallerGitHubAccountId resolves null and the gate must reject.
+    const user = await createTestUser(env.db, 'nogithub', 'google');
+    const res = await app.fetch(
+      new Request('http://localhost/github/install-url', authed(user.jwt)),
+      { ...env, GITHUB_APP_SLUG: 'void-deploy' },
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'github_identity_required' });
+  });
 });
 
 describe('GET /github/callback', () => {

@@ -45,6 +45,7 @@ export function isAppUserOAuthConfigured(env: ApiEnv['Bindings']): boolean {
 async function exchangeInstallCodeForUserToken(
   env: ApiEnv['Bindings'],
   code: string,
+  redirectUri?: string,
 ): Promise<string | null> {
   const e = env as AppOAuthEnv;
   const res = await fetch('https://github.com/login/oauth/access_token', {
@@ -58,6 +59,7 @@ async function exchangeInstallCodeForUserToken(
       client_id: e.GITHUB_APP_CLIENT_ID,
       client_secret: e.GITHUB_APP_CLIENT_SECRET,
       code,
+      ...(redirectUri ? { redirect_uri: redirectUri } : {}),
     }),
   });
 
@@ -101,6 +103,39 @@ async function fetchUserAccountId(userToken: string): Promise<string | null> {
   }
   const data = (await res.json()) as AuthenticatedUserResponse;
   return typeof data.id === 'number' ? String(data.id) : null;
+}
+
+/**
+ * Exchange a GitHub App user-OAuth `code` for the code-holder's numeric GitHub
+ * account id — pure identity, NO installation involved (RFC 0074 link flow).
+ *
+ * Wraps {@link exchangeInstallCodeForUserToken} → {@link fetchUserAccountId}:
+ * the install `code` is traded for a transient user-to-server token, then
+ * `GET /user` yields the holder's numeric id. The token is used only for that
+ * one read and never persisted. Returns `null` on ANY failure (App not
+ * configured, bad/expired code, `GET /user` error) so the caller fails closed.
+ *
+ * This is distinct from {@link authorizeInstallViaUserToken}, which requires an
+ * `installationId`; linking proves identity only and has no installation.
+ *
+ * When `redirectUri` is provided it is forwarded on the token-exchange POST. It
+ * MUST be byte-identical to the `redirect_uri` sent on the authorize redirect —
+ * GitHub OAuth requires the exchange `redirect_uri` to match the authorize one
+ * when present (the link flow sends it; the install flow sends none).
+ */
+export async function exchangeCodeForUserAccountId(
+  env: ApiEnv['Bindings'],
+  code: string,
+  redirectUri?: string,
+): Promise<string | null> {
+  if (!isAppUserOAuthConfigured(env)) {
+    return null;
+  }
+  const userToken = await exchangeInstallCodeForUserToken(env, code, redirectUri);
+  if (!userToken) {
+    return null;
+  }
+  return fetchUserAccountId(userToken);
 }
 
 /**

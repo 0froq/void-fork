@@ -1,6 +1,12 @@
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { hmacSignState, hmacVerifyState } from '../auth/hmac.ts';
+import {
+  CLI_CODE_CHALLENGE_METHOD,
+  createCodeChallenge,
+  isValidCodeVerifier,
+} from '../auth/pkce.ts';
 import { DEFAULT_DASHBOARD_URL } from '../constants.ts';
 import type { Db } from '../db.ts';
 import {
@@ -9,6 +15,10 @@ import {
   getGitHubConnection,
   getGitHubInstallation,
   getGitHubInstallationsByUser,
+  GitHubIdentityAlreadyLinkedError,
+  GitHubIdentityConflictError,
+  linkGitHubIdentity,
+  linkGitHubInstallationToUser,
   getProject,
   terminateBuildsForProject,
   updateGitHubConnection,
@@ -18,13 +28,98 @@ import type { ApiEnv } from '../env.ts';
 import { cancelContainerBuildDos } from '../github/cancel-builds.ts';
 import { listInstallationRepositories } from '../github/installation-repos.ts';
 import { getInstallationAccount, getInstallationToken } from '../github/installation-token.ts';
-import { authorizeInstallViaUserToken } from '../github/user-installations.ts';
+import {
+  authorizeInstallViaUserToken,
+  exchangeCodeForUserAccountId,
+  isAppUserOAuthConfigured,
+} from '../github/user-installations.ts';
+import { localhostRedirectResponse } from '../html-redirect.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { githubConnections, oauthAccounts } from '../schema.ts';
 import type { Build, GitHubInstallation } from '../types.ts';
+import { isLocalhostRedirect } from './auth.ts';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const GITHUB_API_VERSION = '2026-03-10';
+
+// RFC 0074 link flow. The signed `state` carried through the GitHub
+// App user-authorization redirect lives 10 minutes (the human takes the
+// browser detour). The `link_code` minted by the public callback and handed
+// back to the initiator's localhost lives 5 minutes (a tight machine-to-machine
+// turnaround), mirroring the CLI auth-code TTL in `routes/auth.ts`.
+const LINK_STATE_TTL_MS = 10 * 60 * 1000;
+const LINK_CODE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * The signed `state` minted by `GET /github/link-url` and verified by the public
+ * `GET /github/link-callback`. Deliberately carries NO Void user id: the bind is
+ * deferred to the authenticated `POST /github/link/complete`, keyed on the
+ * bearer-token holder (RFC 0074 §"Threat L1"). `purpose` discriminates this
+ * state from the install-flow state so the two can never be cross-replayed.
+ */
+type LinkState = {
+  redirect: string;
+  purpose: 'link';
+  codeChallenge: string;
+  codeChallengeMethod: 'S256';
+  exp: number;
+};
+
+/**
+ * The stateless, HMAC-signed `link_code` minted by the public callback and
+ * redirected to the initiator's localhost. It binds the GitHub identity proven
+ * in the callback (`providerId`) to the PKCE challenge the initiator chose, so
+ * only the holder of the matching `code_verifier` can complete the link. Still
+ * NO Void user id — the completing bearer token is the only thing that decides
+ * which account the identity binds to.
+ */
+type LinkCode = {
+  providerId: string;
+  codeChallenge: string;
+  codeChallengeMethod: 'S256';
+  exp: number;
+};
+
+/**
+ * Mirror the EXACT `${btoa(JSON.stringify(payload))}.${signature}` scheme the
+ * install-url + `/callback` already use (signed with `JWT_SECRET`).
+ */
+async function signLinkPayload(payload: LinkState | LinkCode, secret: string): Promise<string> {
+  const encoded = btoa(JSON.stringify(payload));
+  const signature = await hmacSignState(encoded, secret);
+  return `${encoded}.${signature}`;
+}
+
+/**
+ * Verify a signed link payload (state or code): split on the LAST `.`, check the
+ * HMAC, then `JSON.parse(atob(...))`. Returns `null` on any failure (malformed,
+ * bad signature, unparseable) so callers fail closed with a single 400.
+ */
+async function verifyLinkPayload<T>(token: string, secret: string): Promise<T | null> {
+  const dotIndex = token.lastIndexOf('.');
+  if (dotIndex === -1) {
+    return null;
+  }
+  const encoded = token.slice(0, dotIndex);
+  const signature = token.slice(dotIndex + 1);
+  const valid = await hmacVerifyState(encoded, signature, secret);
+  if (!valid) {
+    return null;
+  }
+  try {
+    return JSON.parse(atob(encoded)) as T;
+  } catch {
+    return null;
+  }
+}
+
+// The GitHub App user-OAuth callback URL for THIS environment, derived from the
+// request origin (no new env var). link-url sends it as redirect_uri on authorize;
+// link-callback MUST send the byte-identical value on the token exchange (GitHub
+// OAuth requires redirect_uri to match when present on authorize).
+function linkCallbackUrl(context: Context<ApiEnv>): string {
+  return new URL('/github/link-callback', new URL(context.req.url).origin).toString();
+}
 
 /**
  * True only when all GitHub App credentials are configured. Env vars are
@@ -77,10 +172,15 @@ async function resolveRepositoryId(
  * the GitHub-side proof that the caller controls an installation's account.
  */
 async function getCallerGitHubAccountId(db: Db, userId: string): Promise<string | null> {
+  // Deterministic: pick the earliest-linked github identity. Without an
+  // explicit ordering the row chosen by `limit(1)` is arbitrary, so a stray
+  // second github row (RFC 0074 enforces one per account, but defends in depth)
+  // would sign a nondeterministic account id into install `state`.
   const [row] = await db
     .select({ providerId: oauthAccounts.provider_id })
     .from(oauthAccounts)
     .where(and(eq(oauthAccounts.user_id, userId), eq(oauthAccounts.provider, 'github')))
+    .orderBy(asc(oauthAccounts.created_at))
     .limit(1);
   return row?.providerId ?? null;
 }
@@ -130,7 +230,7 @@ export const githubRoutes = new Hono<ApiEnv>()
     // identity cannot establish that proof, so they cannot connect.
     const githubAccountId = await getCallerGitHubAccountId(context.get('db'), user.id);
     if (githubAccountId === null) {
-      return context.json({ error: 'GitHub account required to connect an installation' }, 403);
+      return context.json({ error: 'github_identity_required' }, 403);
     }
 
     const stateData = JSON.stringify({
@@ -151,6 +251,216 @@ export const githubRoutes = new Hono<ApiEnv>()
     const user = context.get('user');
     const installations = await getGitHubInstallationsByUser(context.get('db'), user.id);
     return context.json(installations);
+  })
+
+  // -------------------------------------------------------------------------
+  // RFC 0074 — authenticated GitHub-identity link flow (deferred bind).
+  //
+  // A GitHub user authorizing in their browser must end up linked to the Void
+  // account that ran the CLI (the bearer-token holder), NOT to a user id baked
+  // into the OAuth state. Binding in the public callback to a state-embedded
+  // user id would be an account-linking CSRF: an attacker mints a link URL,
+  // phishes a victim into authorizing, and the victim's GitHub binds to the
+  // attacker. We defeat that by deferring the bind — the public callback only
+  // mints a PKCE-bound `link_code` and redirects it to the initiator's
+  // localhost; the bind happens in the authenticated `POST /link/complete`
+  // keyed on the token-holder. An attacker can only ever link their own
+  // identity.
+  // -------------------------------------------------------------------------
+
+  // Begin the link flow — return the GitHub App user-authorization URL the CLI
+  // opens in the user's browser. The signed state carries the localhost
+  // redirect + PKCE challenge and an expiry, but NO Void user id.
+  .get('/link-url', authMiddleware, async (context) => {
+    if (!isAppUserOAuthConfigured(context.env)) {
+      return context.json(
+        {
+          error: 'github_oauth_not_configured',
+          message: 'GitHub App user OAuth is not configured',
+        },
+        503,
+      );
+    }
+
+    const redirect = context.req.query('redirect');
+    const codeChallenge = context.req.query('code_challenge');
+    const codeChallengeMethod = context.req.query('code_challenge_method');
+
+    if (!redirect) {
+      return context.json({ error: 'redirect parameter is required' }, 400);
+    }
+    let redirectUrl: URL;
+    try {
+      redirectUrl = new URL(redirect);
+    } catch {
+      return context.json({ error: 'redirect must be a localhost URL' }, 400);
+    }
+    if (!isLocalhostRedirect(redirectUrl)) {
+      return context.json({ error: 'redirect must be a localhost URL' }, 400);
+    }
+    if (!codeChallenge) {
+      return context.json({ error: 'code_challenge is required' }, 400);
+    }
+    // Method is optional, but if present it MUST be S256 (the only method we
+    // verify against in /complete) — mirror the CLI-login PKCE guard.
+    if (codeChallengeMethod !== undefined && codeChallengeMethod !== CLI_CODE_CHALLENGE_METHOD) {
+      return context.json({ error: 'code_challenge_method must be S256' }, 400);
+    }
+
+    const state: LinkState = {
+      redirect,
+      purpose: 'link',
+      codeChallenge,
+      codeChallengeMethod: CLI_CODE_CHALLENGE_METHOD,
+      exp: Date.now() + LINK_STATE_TTL_MS,
+    };
+    const signedState = await signLinkPayload(state, context.env.JWT_SECRET);
+
+    // The App user-authorization URL. GitHub Apps don't take an OAuth `scope`
+    // param — the App's permissions govern, and `GET /user` works with any
+    // user token. The callback URL is derived from THIS request's origin so it
+    // resolves correctly per environment (prod/staging/local) without a new env
+    // var — same host the CLI just hit to reach this route.
+    const callbackUrl = linkCallbackUrl(context);
+    const url =
+      `https://github.com/login/oauth/authorize?client_id=${context.env.GITHUB_APP_CLIENT_ID}` +
+      `&redirect_uri=${encodeURIComponent(callbackUrl)}` +
+      `&state=${encodeURIComponent(signedState)}`;
+
+    return context.json({ url });
+  })
+
+  // Public link callback. GitHub redirects the browser here after the user
+  // authorizes. Trust is established via the signed state minted at /link-url;
+  // there is no session. This route NEVER binds an identity — it only proves
+  // which GitHub account authorized and hands a PKCE-bound `link_code` back to
+  // the initiator's localhost.
+  .get('/link-callback', async (context) => {
+    const code = context.req.query('code');
+    const stateParam = context.req.query('state');
+
+    if (!stateParam) {
+      return context.json({ error: 'missing state' }, 400);
+    }
+    const state = await verifyLinkPayload<LinkState>(stateParam, context.env.JWT_SECRET);
+    if (!state || state.purpose !== 'link') {
+      return context.json({ error: 'invalid state' }, 400);
+    }
+    if (typeof state.exp !== 'number' || Date.now() >= state.exp) {
+      return context.json({ error: 'invalid state' }, 400);
+    }
+    if (typeof state.redirect !== 'string' || typeof state.codeChallenge !== 'string') {
+      return context.json({ error: 'invalid state' }, 400);
+    }
+    let redirectUrl: URL;
+    try {
+      redirectUrl = new URL(state.redirect);
+    } catch {
+      return context.json({ error: 'invalid state' }, 400);
+    }
+    // Re-validate the redirect at use time — it is the only place we send the
+    // link_code, so it must still be a localhost URL even though /link-url
+    // already checked it (defense in depth against a forged-but-valid state).
+    if (!isLocalhostRedirect(redirectUrl)) {
+      return context.json({ error: 'invalid state' }, 400);
+    }
+
+    if (!code) {
+      // GitHub denial / missing code. State + redirect are validated, so bounce the
+      // error to the CLI's localhost listener (instead of JSON on the API host, which
+      // never reaches the listener → `void github link` hangs until timeout). The
+      // merged CLI's describeError surfaces `?error=`.
+      redirectUrl.searchParams.set('error', context.req.query('error') || 'github_oauth_failed');
+      return localhostRedirectResponse(redirectUrl.toString());
+    }
+
+    // Exchange the App user-OAuth code for the authorizing user's numeric GitHub
+    // account id. Pure identity — NO installation. Null on any failure.
+    const providerId = await exchangeCodeForUserAccountId(
+      context.env,
+      code,
+      linkCallbackUrl(context),
+    );
+    if (providerId === null) {
+      // Exchange/identity failure. Same rationale as the missing-code branch:
+      // bounce to the CLI's localhost so the failure surfaces instead of hanging.
+      redirectUrl.searchParams.set('error', 'github_oauth_failed');
+      return localhostRedirectResponse(redirectUrl.toString());
+    }
+
+    // Mint a stateless, PKCE-bound link_code and redirect it to the initiator's
+    // localhost. The bind itself is deferred to the authenticated /complete.
+    const linkCode: LinkCode = {
+      providerId,
+      codeChallenge: state.codeChallenge,
+      codeChallengeMethod: CLI_CODE_CHALLENGE_METHOD,
+      exp: Date.now() + LINK_CODE_TTL_MS,
+    };
+    const signedLinkCode = await signLinkPayload(linkCode, context.env.JWT_SECRET);
+
+    redirectUrl.searchParams.set('link_code', signedLinkCode);
+    // 200 + JS redirect, not 302 — the redirect target is always localhost
+    // (validated above via isLocalhostRedirect) and `wrangler dev` mangles
+    // `Location: http://localhost:*` headers (see html-redirect.ts / meta/lessons.md),
+    // which would otherwise drop the link_code and stall local `void github link`.
+    return localhostRedirectResponse(redirectUrl.toString());
+  })
+
+  // Complete the link — the ONLY place an identity is bound. Authenticated:
+  // the bind is keyed on the bearer-token holder (`context.get('user').id`),
+  // never on anything carried in the link flow. Requires a valid PKCE verifier
+  // matching the link_code's challenge, so only the initiator (who minted the
+  // challenge) can redeem the code.
+  .post('/link/complete', authMiddleware, async (context) => {
+    const body = await context.req
+      .json<{ link_code?: unknown; code_verifier?: unknown }>()
+      .catch(() => null);
+    if (!body || typeof body.link_code !== 'string' || typeof body.code_verifier !== 'string') {
+      return context.json({ error: 'link_code and code_verifier are required' }, 400);
+    }
+
+    const linkCode = await verifyLinkPayload<LinkCode>(body.link_code, context.env.JWT_SECRET);
+    if (!linkCode || typeof linkCode.providerId !== 'string') {
+      return context.json({ error: 'invalid link_code' }, 400);
+    }
+    if (typeof linkCode.exp !== 'number' || Date.now() >= linkCode.exp) {
+      return context.json({ error: 'invalid link_code' }, 400);
+    }
+
+    // PKCE: the verifier must be well-formed AND its S256 challenge must equal
+    // the one bound into the link_code. The method must be S256.
+    if (
+      linkCode.codeChallengeMethod !== CLI_CODE_CHALLENGE_METHOD ||
+      !isValidCodeVerifier(body.code_verifier) ||
+      (await createCodeChallenge(body.code_verifier)) !== linkCode.codeChallenge
+    ) {
+      return context.json({ error: 'invalid_verifier' }, 400);
+    }
+
+    const user = context.get('user');
+    try {
+      const result = await linkGitHubIdentity(context.get('db'), user.id, linkCode.providerId);
+
+      // Backfill GitHub App installations created before this user linked their
+      // github identity — same best-effort claim the login callback runs
+      // (auth.ts). `providerId` is matched against `github_installations.account_id`.
+      // Best-effort: a backfill failure must NEVER fail the link.
+      try {
+        await linkGitHubInstallationToUser(context.get('db'), linkCode.providerId, user.id);
+      } catch (err) {
+        console.error(`[github-link] Failed to backfill installations for ${user.id}:`, err);
+      }
+
+      return context.json({ status: result });
+    } catch (error) {
+      if (error instanceof GitHubIdentityAlreadyLinkedError) {
+        return context.json({ error: 'github_already_linked' }, 409);
+      }
+      if (error instanceof GitHubIdentityConflictError) {
+        return context.json({ error: 'github_identity_conflict' }, 409);
+      }
+      throw error;
+    }
   })
 
   // Public install callback. GitHub redirects the browser here after the user

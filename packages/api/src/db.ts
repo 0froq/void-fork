@@ -169,6 +169,121 @@ export async function createOAuthAccount(
   return row;
 }
 
+/**
+ * Thrown by {@link linkGitHubIdentity} when the requested GitHub identity is
+ * already linked to a *different* Void user. Routes (RFC 0074, Task 2) map this
+ * to HTTP 409 — it is the stable contract for that mapping.
+ */
+export class GitHubIdentityConflictError extends Error {
+  constructor() {
+    super('GitHub account already linked to another user');
+    this.name = 'GitHubIdentityConflictError';
+  }
+}
+
+/**
+ * Thrown by {@link linkGitHubIdentity} when *this* Void user already has a
+ * DIFFERENT GitHub identity linked. RFC 0074 models a single GitHub identity per
+ * Void account; routes map this to HTTP 409 with a code distinct from
+ * {@link GitHubIdentityConflictError} (which is the other-user case).
+ */
+export class GitHubIdentityAlreadyLinkedError extends Error {
+  constructor() {
+    super('Void account already has a different GitHub identity linked');
+    this.name = 'GitHubIdentityAlreadyLinkedError';
+  }
+}
+
+/** Postgres `unique_violation` SQLSTATE — surfaced by both `pg` and PGlite. */
+const PG_UNIQUE_VIOLATION = '23505';
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === PG_UNIQUE_VIOLATION
+  );
+}
+
+/**
+ * Link a GitHub OAuth identity to an *already-authenticated* Void user
+ * (RFC 0074 — decouple GitHub-for-deploys from the login provider).
+ *
+ * Returns `'linked'` when a new row was created and `'already_linked'` when the
+ * identity is already owned by `userId` (idempotent no-op). Throws
+ * {@link GitHubIdentityConflictError} when the identity belongs to a different
+ * user, and {@link GitHubIdentityAlreadyLinkedError} when this user already has a
+ * DIFFERENT github identity (RFC 0074: one GitHub identity per Void account).
+ *
+ * Concurrency: the whole check-then-insert runs in a transaction that first
+ * takes a `SELECT … FOR UPDATE` lock on the `userId` row. That serializes
+ * concurrent links for the SAME user — `oauth_accounts` is unique only on
+ * `(provider, provider_id)`, so without the lock two parallel links of DIFFERENT
+ * github ids for one user could both pass the existing-github check and insert,
+ * leaving two github rows (breaking RFC 0074's one-github-per-account invariant).
+ * The lock makes the second link block until the first commits, then observe its
+ * row and reject. A concurrent DIFFERENT-user link of the SAME github id is not
+ * serialized by the per-user lock; that collides on the `(provider, provider_id)`
+ * unique index instead — the insert raises a unique violation, we roll back,
+ * re-resolve ownership OUTSIDE the aborted transaction, and map to the same
+ * return/throw contract so a raw pg `23505` never escapes.
+ */
+export async function linkGitHubIdentity(
+  db: Db,
+  userId: string,
+  providerId: string,
+): Promise<'linked' | 'already_linked'> {
+  try {
+    return await db.transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      // Serialize concurrent same-user links (see doc comment). Mirrors the
+      // deploy/build per-user FOR UPDATE pattern.
+      await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, userId))
+        .for('update')
+        .limit(1);
+
+      const owner = await getUserByOAuthAccount(txDb, 'github', providerId);
+      if (owner) {
+        if (owner.id === userId) {
+          return 'already_linked';
+        }
+        throw new GitHubIdentityConflictError();
+      }
+
+      // Enforce one github identity per Void account: a pre-existing github row
+      // for this user must be a DIFFERENT provider_id (the same-id case is the
+      // `owner.id === userId` short-circuit above), so reject.
+      const existing = await txDb
+        .select({ providerId: oauthAccounts.provider_id })
+        .from(oauthAccounts)
+        .where(and(eq(oauthAccounts.user_id, userId), eq(oauthAccounts.provider, 'github')))
+        .limit(1);
+      if (existing.length > 0) {
+        throw new GitHubIdentityAlreadyLinkedError();
+      }
+
+      await createOAuthAccount(txDb, userId, 'github', providerId);
+      return 'linked';
+    });
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+    // Lost the `(provider, provider_id)` insert race to a concurrent
+    // DIFFERENT-user link of the same github id (the per-user FOR UPDATE lock
+    // does not serialize across users). The transaction rolled back; re-resolve
+    // ownership outside it.
+    const winner = await getUserByOAuthAccount(db, 'github', providerId);
+    if (winner?.id === userId) {
+      return 'already_linked';
+    }
+    throw new GitHubIdentityConflictError();
+  }
+}
+
 export async function updateUserPlan(db: Db, id: string, plan: PlanId): Promise<void> {
   await db.update(users).set({ plan }).where(eq(users.id, id));
 }

@@ -13,6 +13,11 @@ import {
 } from '../auth/google.ts';
 import { hmacSignState, hmacVerifyState } from '../auth/hmac.ts';
 import { signJwt } from '../auth/jwt.ts';
+import {
+  CLI_CODE_CHALLENGE_METHOD,
+  createCodeChallenge,
+  isValidCodeVerifier,
+} from '../auth/pkce.ts';
 import { DEFAULT_DASHBOARD_URL } from '../constants.ts';
 import {
   getUserByOAuthAccount,
@@ -27,17 +32,19 @@ import {
   consumeAuthCode,
   consumeCliAuthCode,
   linkGitHubInstallationToUser,
+  linkGitHubIdentity,
+  GitHubIdentityAlreadyLinkedError,
 } from '../db.ts';
 import { sendWelcomeEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
 import { isDevBypass } from '../env.ts';
+import { localhostRedirectResponse } from '../html-redirect.ts';
 import { users } from '../schema.ts';
 import { isSignupAllowed, getAllowlist } from '../signup-allowlist.ts';
 
 const DEFAULT_REDIRECT_URI = 'https://api.void.cloud/auth/callback';
 const DASHBOARD_AUTH_CODE_TTL_SECONDS = 5 * 60;
 const CLI_AUTH_CODE_TTL_SECONDS = 5 * 60;
-const CLI_CODE_CHALLENGE_METHOD = 'S256';
 
 const app = new Hono<ApiEnv>();
 
@@ -66,30 +73,8 @@ export function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
   }
 }
 
-function isLocalhostRedirect(url: URL): boolean {
+export function isLocalhostRedirect(url: URL): boolean {
   return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
-}
-
-function isValidCodeVerifier(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length >= 43 &&
-    value.length <= 128 &&
-    /^[A-Za-z0-9._~-]+$/.test(value)
-  );
-}
-
-function base64Url(buffer: ArrayBuffer): string {
-  let value = '';
-  for (const byte of new Uint8Array(buffer)) {
-    value += String.fromCharCode(byte);
-  }
-  return btoa(value).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
-}
-
-async function createCodeChallenge(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  return base64Url(digest);
 }
 
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
@@ -205,24 +190,9 @@ app.get('/dev-login', async (context) => {
 
   const url = redirectUrl;
   url.searchParams.set('token', jwt);
-  // 200 + JS redirect, not 302. `wrangler dev` rewrites `Location: http://localhost:*`
-  // headers (prepending the dev origin port), so a real 302 here arrives at the browser
-  // as `localhost:8787:8787:5173/...` and ERR_INVALID_REDIRECTs. Tests that run via
-  // `app.fetch` directly do not hit wrangler, so this code path returns the same HTML
-  // shape in both contexts and the test verifies the embedded target URL.
-  const target = url.toString();
-  // Encode for safe embedding inside a JS string literal. JWT content is ASCII-safe but
-  // be defensive — encodeURI is too coarse (it preserves quotes), JSON.stringify gives
-  // us a properly-escaped string literal.
-  const targetLiteral = JSON.stringify(target);
-  const body =
-    `<!doctype html><meta charset="utf-8"><title>Dev login</title>` +
-    `<script>location.replace(${targetLiteral})</script>` +
-    `<noscript><meta http-equiv="refresh" content="0;url=${target.replaceAll('"', '&quot;')}"></noscript>`;
-  return new Response(body, {
-    status: 200,
-    headers: { 'content-type': 'text/html; charset=utf-8' },
-  });
+  // 200 + JS redirect, not 302 — the target is always localhost and `wrangler dev`
+  // mangles `Location: http://localhost:*` headers (see html-redirect.ts / meta/lessons.md).
+  return localhostRedirectResponse(url.toString(), 'Dev login');
 });
 
 // GET /auth/callback?code=...&state=...
@@ -318,6 +288,11 @@ app.get('/callback', async (context) => {
   const previewRepo =
     resolvedProvider === 'github' ? getGitHubPreviewRepoConfig(context.env) : null;
 
+  // Set when the email-match branch rejects a SECOND github identity for an account that already has one
+  // (RFC 0074). The user is signed into the existing account, but `providerId` is NOT their github identity, so
+  // the github-identity-derived side effects below (installation backfill, preview-repo access) must be skipped.
+  let githubIdentityRejected = false;
+
   // Upsert user — check oauth_accounts first, then email, then create
   let user = await getUserByOAuthAccount(db, resolvedProvider, providerId);
   if (user) {
@@ -333,10 +308,29 @@ app.get('/callback', async (context) => {
       }
     }
   } else if (email && emailVerified) {
-    // Link new provider to existing account with the same email
+    // Link new provider to existing account with the same email.
     const existing = await getUserByEmail(db, email);
     if (existing) {
-      await createOAuthAccount(db, existing.id, resolvedProvider, providerId);
+      if (resolvedProvider === 'github') {
+        // Enforce RFC 0074's one-github-identity-per-account invariant on the login
+        // path too (Vercel model: a Void account has a single GitHub login identity;
+        // extra repo access is via installations, not a second identity). `providerId`
+        // is guaranteed NOT yet an oauth row (the getUserByOAuthAccount branch above
+        // handled that), so linkGitHubIdentity either links it (existing had no github)
+        // or throws GitHubIdentityAlreadyLinkedError (existing already linked a
+        // DIFFERENT github) — in which case sign the user into the existing account
+        // WITHOUT creating a duplicate github row.
+        try {
+          await linkGitHubIdentity(db, existing.id, providerId);
+        } catch (err) {
+          if (!(err instanceof GitHubIdentityAlreadyLinkedError)) {
+            throw err;
+          }
+          githubIdentityRejected = true;
+        }
+      } else {
+        await createOAuthAccount(db, existing.id, resolvedProvider, providerId);
+      }
       user = existing;
     }
   }
@@ -395,7 +389,7 @@ app.get('/callback', async (context) => {
     }
   }
 
-  if (resolvedProvider === 'github') {
+  if (resolvedProvider === 'github' && !githubIdentityRejected) {
     if (previewRepo) {
       context.executionCtx.waitUntil(
         ensureGitHubPreviewRepoAccess(previewRepo, login).catch((err) =>

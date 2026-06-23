@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   describe,
   it,
@@ -10,8 +10,13 @@ import {
   vi,
 } from 'vite-plus/test';
 import { hmacSignState } from '../../src/auth/hmac.ts';
+import {
+  createOAuthAccount,
+  getUserByOAuthAccount,
+  upsertGitHubInstallation,
+} from '../../src/db.ts';
 import app from '../../src/index.ts';
-import { invitations, users } from '../../src/schema.ts';
+import { githubInstallations, invitations, oauthAccounts, users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -35,6 +40,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // github_installations isn't known to the shared clearTables helper; clear it
+  // before it removes the users they reference (mirrors the routes test).
+  await env.db.delete(githubInstallations);
   await clearTables(env.db);
   delete env.GITHUB_PREVIEW_REPO_PAT;
   await env.ROUTING.delete('signup:enabled');
@@ -370,6 +378,115 @@ describe('email verification gating on account linking', () => {
       'https://api.github.com/repos/void-sdk/void/collaborators/preview-gh-user',
       expect.objectContaining({ method: 'PUT' }),
     );
+  });
+
+  it('does not link a SECOND github identity when the existing account already has one (RFC 0074 one-github invariant)', async () => {
+    // Alice signed in via google, then linked github id X.
+    const existing = await createTestUser(env.db, 'one-github-alice', 'google', 'google-alice');
+    await env.db
+      .update(users)
+      .set({ email: 'one-github@example.com' })
+      .where(eq(users.id, existing.id));
+    await createOAuthAccount(env.db, existing.id, 'github', '111111'); // X
+
+    // An UNOWNED installation whose account_id is the REJECTED github id Y.
+    // Because Y is rejected as an identity, the backfill must NOT claim it.
+    await upsertGitHubInstallation(env.db, {
+      installationId: '600',
+      userId: null,
+      accountLogin: 'another-gh-account',
+      accountId: '222222', // Y
+      accountType: 'User',
+      repositories: [{ full_name: 'another-gh-account/app', id: 1 }],
+    });
+
+    const state = await buildSignedState('github');
+    await seedOAuthNonce(env.db, 'test-nonce');
+    // Now log in with a DIFFERENT github id Y whose verified email matches Alice.
+    vi.stubGlobal(
+      'fetch',
+      mockGitHubApi({
+        id: 222222, // Y != X
+        login: 'another-gh-account',
+        email: 'one-github@example.com',
+        emailVerified: true,
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: 'oauth_nonce=test-nonce' },
+      }),
+      env,
+      executionCtx,
+    );
+
+    // Signed into the EXISTING account (not a new user)...
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    const token = new URL(location).searchParams.get('token')!;
+    const { verifyJwt } = await import('../../src/auth/jwt.ts');
+    const payload = await verifyJwt(token, JWT_SECRET);
+    expect(payload).toBeDefined();
+    expect(payload!.sub).toBe(existing.id);
+
+    // ...and NO github row for Y was created (still exactly one github row, X).
+    const githubRows = await env.db
+      .select({ providerId: oauthAccounts.provider_id })
+      .from(oauthAccounts)
+      .where(and(eq(oauthAccounts.user_id, existing.id), eq(oauthAccounts.provider, 'github')));
+    expect(githubRows.length).toBe(1);
+    expect(githubRows[0]!.providerId).toBe('111111');
+    expect(await getUserByOAuthAccount(env.db, 'github', '222222')).toBeNull();
+
+    // ...and the unowned installation for the REJECTED id Y was NOT claimed.
+    const [install] = await env.db
+      .select({ userId: githubInstallations.user_id })
+      .from(githubInstallations)
+      .where(eq(githubInstallations.installation_id, '600'));
+    expect(install?.userId).toBeNull();
+  });
+
+  it('consolidates a github login onto an existing account that has NO github yet (cross-provider link unchanged)', async () => {
+    // Bob signed in via google, has NO github identity.
+    const existing = await createTestUser(env.db, 'no-github-bob', 'google', 'google-bob');
+    await env.db
+      .update(users)
+      .set({ email: 'no-github@example.com' })
+      .where(eq(users.id, existing.id));
+
+    const state = await buildSignedState('github');
+    await seedOAuthNonce(env.db, 'test-nonce');
+    vi.stubGlobal(
+      'fetch',
+      mockGitHubApi({
+        id: 333333,
+        login: 'bob-gh',
+        email: 'no-github@example.com',
+        emailVerified: true,
+      }),
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: 'oauth_nonce=test-nonce' },
+      }),
+      env,
+      executionCtx,
+    );
+
+    // Signed into the existing account...
+    expect(res.status).toBe(302);
+    const location = res.headers.get('Location')!;
+    const token = new URL(location).searchParams.get('token')!;
+    const { verifyJwt } = await import('../../src/auth/jwt.ts');
+    const payload = await verifyJwt(token, JWT_SECRET);
+    expect(payload).toBeDefined();
+    expect(payload!.sub).toBe(existing.id);
+
+    // ...and the github row WAS created and is owned by the existing account.
+    const owner = await getUserByOAuthAccount(env.db, 'github', '333333');
+    expect(owner?.id).toBe(existing.id);
   });
 
   it('does not create a duplicate preview repo invitation when one is already pending', async () => {

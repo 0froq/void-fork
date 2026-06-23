@@ -47,8 +47,16 @@ export async function hmacVerifyState(
   secret: string,
 ): Promise<boolean> {
   const key = await getVerifyKey(secret);
-  const padded = signature.replace(/-/g, '+').replace(/_/g, '/');
-  const binary = atob(padded);
-  const sigBytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  let sigBytes: Uint8Array<ArrayBuffer>;
+  try {
+    const padded = signature.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(padded);
+    sigBytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  } catch {
+    // Malformed base64url signature → invalid signature, NOT a server error.
+    // Without this, an unauthenticated caller can force a 500 by sending a
+    // non-decodable signature (e.g. `state=abc.*`) to any HMAC-verified route.
+    return false;
+  }
   return crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(data));
 }
