@@ -1,5 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import { cancel, isCancel, log, select, text } from '@clack/prompts';
-import { openBrowser, getToken } from './auth.ts';
+import {
+  awaitBrowserCallback,
+  createCodeChallenge,
+  createCodeVerifier,
+  openBrowser,
+  getToken,
+} from './auth.ts';
 import {
   PlatformApiError,
   PlatformClient,
@@ -107,6 +114,8 @@ export async function runGithubCommand(root: string, args: GithubArgs): Promise<
       return runInstallations(client);
     case 'connect':
       return runConnect(root, client, args);
+    case 'link':
+      return runGithubLink(root, client);
   }
 }
 
@@ -114,24 +123,124 @@ export async function runGithubCommand(root: string, args: GithubArgs): Promise<
 // install
 // ---------------------------------------------------------------------------
 
-async function runInstall(root: string, client: PlatformClient): Promise<void> {
+/**
+ * `void github install` — print the GitHub App install URL and open it.
+ *
+ * If the account has no linked GitHub identity, the server returns a 403 with
+ * the stable code `github_identity_required` (Task 3). Rather than telling the
+ * user to `void auth login` (which risks forking into a second account), we run
+ * the link flow inline and retry the install URL exactly once.
+ *
+ * `linkIdentity` is injectable so tests can supply a fake linker instead of
+ * starting a real localhost callback server / browser.
+ */
+export async function runInstall(
+  root: string,
+  client: PlatformClient,
+  linkIdentity: (root: string, client: PlatformClient) => Promise<void> = runGithubLink,
+): Promise<void> {
   let url: string;
   try {
     ({ url } = await client.getGithubInstallUrl());
   } catch (err) {
-    if (err instanceof PlatformApiError && err.status === 403) {
-      log.error(
-        'Your account has no linked GitHub identity. Run `void auth login` and choose GitHub.',
-      );
-      process.exit(1);
+    if (
+      err instanceof PlatformApiError &&
+      err.status === 403 &&
+      err.code === 'github_identity_required'
+    ) {
+      log.message('Your Void account needs a linked GitHub identity. Starting the GitHub link…');
+      await linkIdentity(root, client);
+      try {
+        ({ url } = await client.getGithubInstallUrl());
+      } catch (retryErr) {
+        // Only the SAME identity-required 403 means linking didn't take — show
+        // the actionable link/install guidance. Any other failure (401, 426,
+        // 500, a different 403) is the real error and must surface normally.
+        if (
+          retryErr instanceof PlatformApiError &&
+          retryErr.status === 403 &&
+          retryErr.code === 'github_identity_required'
+        ) {
+          log.error(
+            'Could not start the GitHub App install after linking. Try `void github link`, then `void github install` again.',
+          );
+          process.exit(1);
+        }
+        throw retryErr;
+      }
+    } else {
+      throw err;
     }
-    throw err;
   }
 
   log.message(`Open this URL to install the Void GitHub App:\n${pc.cyan(url)}`);
   const { execFile } = await import('node:child_process');
   openBrowser(url, execFile);
   log.message('After installing, run `void github connect` to link a repository to your project.');
+}
+
+// ---------------------------------------------------------------------------
+// link
+// ---------------------------------------------------------------------------
+
+/**
+ * Link the current Void account (the logged-in CLI token holder) to a GitHub
+ * identity. Drives the platform's 3-endpoint link flow with a localhost +
+ * PKCE handshake, mirroring `void auth login`.
+ *
+ * Exported so Task 5 can call it (e.g. when `github install` returns 403 for a
+ * GitHub-less account, prompt to link and retry). The success path is
+ * non-exiting so a caller can continue; only error paths exit/throw.
+ */
+export async function runGithubLink(root: string, client: PlatformClient): Promise<void> {
+  void root; // Reserved for the signature Task 5 reuses; routing uses `client`.
+
+  const verifier = createCodeVerifier();
+  const challenge = createCodeChallenge(verifier);
+  const state = randomBytes(32).toString('hex');
+
+  // completeGithubLink runs INSIDE the request handler (via finalize), so the
+  // browser only shows the success page after the link actually succeeds; a 409
+  // conflict rejects out of awaitBrowserCallback and is mapped below.
+  let status: 'linked' | 'already_linked';
+  try {
+    ({ status } = await awaitBrowserCallback<{ status: 'linked' | 'already_linked' }>({
+      state,
+      buildAuthUrl: async (callback) => {
+        callback.searchParams.set('state', state);
+        const { url } = await client.getGithubLinkUrl(callback.href, challenge);
+        return url;
+      },
+      describeError: (p) => (p.get('error') ? 'GitHub authorization failed.' : null),
+      onUrl: (url) => log.message(`Open this URL to link your GitHub account:\n${pc.cyan(url)}`),
+      finalize: async (params) => {
+        const linkCode = params.get('link_code');
+        if (!linkCode) {
+          throw new Error('github: link callback did not return a link code.');
+        }
+        return client.completeGithubLink(linkCode, verifier);
+      },
+    }));
+  } catch (err) {
+    if (err instanceof PlatformApiError && err.code === 'github_already_linked') {
+      log.error('Your Void account is already linked to a different GitHub account.');
+      process.exit(1);
+    }
+    if (
+      err instanceof PlatformApiError &&
+      (err.status === 409 || err.code === 'github_identity_conflict')
+    ) {
+      log.error('This GitHub account is already linked to another Void account.');
+      process.exit(1);
+    }
+    throw err;
+  }
+
+  if (status === 'already_linked') {
+    log.success('GitHub account already linked.');
+  } else {
+    log.success('GitHub account linked.');
+  }
 }
 
 // ---------------------------------------------------------------------------
