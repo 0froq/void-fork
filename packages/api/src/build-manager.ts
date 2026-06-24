@@ -5,6 +5,7 @@ import {
   signDeployToken,
 } from './auth/deploy-token.ts';
 import { type BuildConfig, type BuildLogLine, isContainerCapacityError } from './build-types.ts';
+import { SITE_DOMAIN } from './constants.ts';
 import {
   createDb,
   getBuild,
@@ -339,7 +340,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
           name: 'Void Build',
           headSha: config.commitSha,
           externalId: config.buildId,
-          detailsUrl: `https://${config.projectSlug}.void.app`,
+          detailsUrl: this.projectUrl(config),
           title: 'Void build in progress',
           summary: `Building \`${config.branch}\` @ ${config.commitSha.slice(0, 7)}`,
         });
@@ -591,7 +592,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         // never contradicts the DB.
         if (won) {
           await this.finalizeCheckRun(config, 'failure', {
-            detailsUrl: `https://${config.projectSlug}.void.app`,
+            detailsUrl: this.projectUrl(config),
             title: 'Void build failed',
             summary: message,
           });
@@ -603,6 +604,17 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       }
       throw error;
     }
+  }
+
+  /**
+   * The project's public traffic URL — used as the check-run `details_url`. Staging
+   * and production serve user traffic on different base domains (`staging.void.app`
+   * vs `void.app`), so the link must be env-aware: read the per-environment
+   * `SITE_DOMAIN` binding (the same source the deploy-URL output uses), falling back
+   * to the production constant when unset.
+   */
+  private projectUrl(config: BuildConfig): string {
+    return `https://${config.projectSlug}.${this.env.SITE_DOMAIN ?? SITE_DOMAIN}`;
   }
 
   /**
@@ -680,7 +692,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       config,
       conclusion as CheckRunConclusion,
       {
-        detailsUrl: `https://${config.projectSlug}.void.app`,
+        detailsUrl: this.projectUrl(config),
         title: `Void build ${conclusion === 'success' ? 'succeeded' : conclusion}`,
         summary: `Build ${status}.`,
       },
@@ -797,7 +809,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         // hand) so a deployment lookup miss does NOT cost the link.
         if (won) {
           await this.finalizeCheckRun(config, 'success', {
-            detailsUrl: `https://${config.projectSlug}.void.app`,
+            detailsUrl: this.projectUrl(config),
             title: 'Void build succeeded',
             summary: deploymentId ? 'Deployment is live.' : 'Build complete.',
           });
@@ -820,7 +832,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         // the out-of-band recorded outcome so GitHub matches the DB.
         if (won) {
           await this.finalizeCheckRun(config, 'failure', {
-            detailsUrl: `https://${config.projectSlug}.void.app`,
+            detailsUrl: this.projectUrl(config),
             title: 'Void build failed',
             summary: `Build exited with code ${params.exitCode}.`,
           });
@@ -860,7 +872,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       // the out-of-band recorded outcome so GitHub matches the DB.
       if (won) {
         await this.finalizeCheckRun(config, 'failure', {
-          detailsUrl: `https://${config.projectSlug}.void.app`,
+          detailsUrl: this.projectUrl(config),
           title: 'Void build failed',
           summary: message,
         });
@@ -939,7 +951,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       // the out-of-band recorded outcome so GitHub matches the DB.
       if (won) {
         await this.finalizeCheckRun(config, 'failure', {
-          detailsUrl: `https://${config.projectSlug}.void.app`,
+          detailsUrl: this.projectUrl(config),
           title: 'Void build failed',
           summary: 'build timed out',
         });
@@ -995,6 +1007,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         // outcome so GitHub matches the DB.
         if (won) {
           await this.finalizeCheckRun(config, 'cancelled', {
+            detailsUrl: this.projectUrl(config),
             title: 'Void build cancelled',
             summary: reason,
           });

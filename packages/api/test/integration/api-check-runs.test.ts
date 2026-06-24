@@ -646,7 +646,12 @@ describe('BuildManager check-run lifecycle — finalize terminal sites', () => {
     await m.cancelBuild('project disconnected');
 
     expect(patches).toHaveLength(1);
-    expect(patches[0].body).toMatchObject({ conclusion: 'cancelled' });
+    // details_url is now set on the cancel finalize (was previously omitted) and is
+    // env-aware via projectUrl() — default env (no SITE_DOMAIN) → prod fallback.
+    expect(patches[0].body).toMatchObject({
+      conclusion: 'cancelled',
+      details_url: 'https://my-app.void.app',
+    });
     const output = patches[0].body?.output as { summary?: string };
     expect(output.summary).toBe('project disconnected');
   });
@@ -1381,5 +1386,65 @@ describe('BuildManager check-run lifecycle — pre-start finalize is CAS-aware (
     expect(patches).toHaveLength(1);
     expect(patches[0].body).toMatchObject({ status: 'completed', conclusion: 'cancelled' });
     expect(dbState.status.get('b1')).toBe('cancelled');
+  });
+});
+
+describe('BuildManager check-run lifecycle — details_url is env-aware (SITE_DOMAIN)', () => {
+  // The check-run details_url links to the project's public traffic URL. Staging and
+  // production serve on different base domains, so the link must follow the
+  // per-environment SITE_DOMAIN binding (the same source the deploy-URL output uses),
+  // not a hardcoded `.void.app`.
+  it('staging SITE_DOMAIN → create + finalize link to {slug}.staging.void.app', async () => {
+    const { posts, patches } = installFetch();
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    env.SITE_DOMAIN = 'staging.void.app';
+    const m = makeManager(ctx, env);
+
+    await m.startBuild(makeConfig());
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({ details_url: 'https://my-app.staging.void.app' });
+
+    await m.onStop({ exitCode: 0, reason: 'exit' });
+    expect(patches).toHaveLength(1);
+    expect(patches[0].body).toMatchObject({ details_url: 'https://my-app.staging.void.app' });
+  });
+
+  it('unset SITE_DOMAIN → falls back to the production {slug}.void.app', async () => {
+    const { posts } = installFetch();
+    const ctx = makeStubCtx();
+    const env = makeEnv(); // SITE_DOMAIN unset
+    const m = makeManager(ctx, env);
+
+    await m.startBuild(makeConfig());
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({ details_url: 'https://my-app.void.app' });
+  });
+
+  // The status→conclusion helper (`finalizeCheckRunToStatus`) is a SEPARATE detailsUrl
+  // site from the create POST + the direct finalizeCheckRun terminal sites. It is reached
+  // by the pre-start prior-run finalizes and by the lost-CAS recorded-outcome path, so it
+  // must be env-aware too. Exercise it via the non-identical-head pre-start branch with a
+  // prior-attempt run id, and assert the PATCH links to the staging domain.
+  it('staging SITE_DOMAIN → finalizeCheckRunToStatus PATCH links to the staging domain', async () => {
+    vi.mocked(getBranchHeadComparisonStatus).mockResolvedValueOnce('behind');
+    dbState.checkRunIds.set('b1', String(CHECK_RUN_ID)); // prior-attempt run to finalize
+    const { posts, patches } = installFetch();
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    env.SITE_DOMAIN = 'staging.void.app';
+    const m = makeManager(ctx, env);
+
+    await m.startBuild(makeConfig());
+
+    // Cancelled before the create block → no POST; the prior run is finalized via
+    // finalizeCheckRunToStatus, whose PATCH must use the staging domain.
+    expect(posts).toHaveLength(0);
+    expect(patches).toHaveLength(1);
+    expect(patches[0].body).toMatchObject({
+      status: 'completed',
+      conclusion: 'cancelled',
+      details_url: 'https://my-app.staging.void.app',
+    });
   });
 });
