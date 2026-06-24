@@ -1,0 +1,287 @@
+import type { ApiEnv } from '../env.ts';
+import { GITHUB_API_BASE, GITHUB_API_VERSION, getInstallationToken } from './installation-token.ts';
+
+/**
+ * GitHub Check Run helper. Both functions are BEST-EFFORT and NEVER throw: a
+ * failed check-run write must not fail (or even perturb) the build it reports
+ * on. They catch network errors, retry only transient failures (5xx / network /
+ * token-mint), do NOT retry definitive 4xx, log every failure via the shared
+ * `area:'github'` warn shape, and return `null` (create) / `false` (complete)
+ * on permanent failure.
+ *
+ * Uses the App's existing `Checks: Write` permission — the only GitHub calls are
+ * POST/PATCH `/repos/{repoFullName}/check-runs[/{id}]`. The module is
+ * executor-agnostic (plain args only) so both build executors can call it.
+ */
+
+/** A completed check-run's terminal conclusion. */
+export type CheckRunConclusion = 'success' | 'failure' | 'cancelled';
+
+// Same retry shape as `getBranchHeadComparisonStatus` (compare): up to 2 extra
+// attempts with a short fixed delay on transient 5xx/network/token-mint. A 4xx
+// is definitive and returns immediately. Named for check-runs rather than
+// "compare" — same values (2 / 250).
+const CHECK_RUN_RETRY_ATTEMPTS = 2;
+const CHECK_RUN_RETRY_DELAY_MS = 250;
+
+type CheckRunCreateResponse = Readonly<{ id?: number | string }>;
+
+type FailureReason = 'token-mint-failed' | 'network-error' | 'http-4xx' | 'http-5xx' | 'exhausted';
+
+function errInfo(err: unknown): { name?: string; message: string } {
+  if (err instanceof Error) {
+    return { name: err.name, message: err.message };
+  }
+  return { message: String(err) };
+}
+
+// area:'github' distinguishes from the deploy-pipeline logger (area:'deploy').
+// Mirrors the Feature-A warn shape; `phase` differentiates create vs complete.
+function logFailure(
+  phase: 'check-run-create' | 'check-run-complete',
+  reason: FailureReason,
+  fields: Record<string, unknown>,
+): void {
+  try {
+    console.warn(
+      JSON.stringify({
+        ts: Date.now(),
+        lvl: 'warn',
+        area: 'github',
+        phase,
+        reason,
+        msg: `${phase} failed: ${reason}`,
+        ...fields,
+      }),
+    );
+  } catch {
+    console.warn(`${phase} failed: ${reason}`);
+  }
+}
+
+/**
+ * POST `/repos/{repoFullName}/check-runs` to create an `in_progress` check run.
+ * Returns the numeric check-run id as a string, or `null` on permanent failure.
+ *
+ * The build is already past the queue when this is called, so the run starts
+ * `in_progress` (never `queued`). `external_id = buildId` is a reference/audit
+ * field, NOT a GitHub idempotency key — `POST /check-runs` creates a NEW run on
+ * every call. So this create POST is SINGLE-SHOT: it is never retried on a 5xx or
+ * network failure (an ambiguous failure where GitHub created the run but the
+ * response was lost would otherwise duplicate it and orphan the first
+ * `in_progress`). Only the pre-POST token mint is retried. Dedup across requeues /
+ * webhook redeliveries is handled by the caller's reuse gate (DO storage /
+ * `builds.check_run_id`).
+ */
+export async function createCheckRun(
+  env: ApiEnv['Bindings'],
+  installationId: string,
+  repoFullName: string,
+  opts: {
+    name: string;
+    headSha: string;
+    externalId: string;
+    detailsUrl?: string;
+    title: string;
+    summary: string;
+  },
+): Promise<string | null> {
+  const body = JSON.stringify({
+    name: opts.name,
+    head_sha: opts.headSha,
+    status: 'in_progress',
+    external_id: opts.externalId,
+    ...(opts.detailsUrl ? { details_url: opts.detailsUrl } : {}),
+    output: { title: opts.title, summary: opts.summary },
+  });
+
+  for (let attempt = 0; attempt <= CHECK_RUN_RETRY_ATTEMPTS; attempt++) {
+    let token: string;
+    try {
+      token = await getInstallationToken(env, installationId);
+    } catch (err) {
+      logFailure('check-run-create', 'token-mint-failed', {
+        installationId,
+        repoFullName,
+        headSha: opts.headSha,
+        externalId: opts.externalId,
+        attempt,
+        err: errInfo(err),
+      });
+      if (attempt < CHECK_RUN_RETRY_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, CHECK_RUN_RETRY_DELAY_MS));
+      }
+      continue;
+    }
+    try {
+      const res = await fetch(`${GITHUB_API_BASE}/repos/${repoFullName}/check-runs`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'void-api',
+          'X-GitHub-Api-Version': GITHUB_API_VERSION,
+        },
+        body,
+      });
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as CheckRunCreateResponse;
+        if (data.id === undefined || data.id === null) {
+          // 2xx without a usable id — definitive (not worth retrying), but the
+          // run can't be tracked, so report null.
+          logFailure('check-run-create', 'http-4xx', {
+            installationId,
+            repoFullName,
+            externalId: opts.externalId,
+            attempt,
+            status: res.status,
+            body: 'missing id in response',
+          });
+          return null;
+        }
+        return String(data.id);
+      }
+      // Non-success: return null WITHOUT retrying the POST (it is not idempotent —
+      // see the function doc). 4xx is definitive (no access / bad ref); a 5xx or
+      // network failure is AMBIGUOUS (the run may have been created), so a retry
+      // risks a duplicate. Either way the create is single-shot.
+      const errBody = (await res.text().catch(() => '<unreadable>')).slice(0, 500);
+      logFailure('check-run-create', res.status < 500 ? 'http-4xx' : 'http-5xx', {
+        installationId,
+        repoFullName,
+        externalId: opts.externalId,
+        attempt,
+        status: res.status,
+        statusText: res.statusText,
+        body: errBody,
+      });
+      return null;
+    } catch (err) {
+      // Network failure on the POST is ambiguous (the run may have been created) —
+      // do NOT retry (would risk a duplicate). Single-shot create.
+      logFailure('check-run-create', 'network-error', {
+        installationId,
+        repoFullName,
+        externalId: opts.externalId,
+        attempt,
+        err: errInfo(err),
+      });
+      return null;
+    }
+  }
+  logFailure('check-run-create', 'exhausted', {
+    installationId,
+    repoFullName,
+    externalId: opts.externalId,
+    attempts: CHECK_RUN_RETRY_ATTEMPTS + 1,
+  });
+  return null;
+}
+
+/**
+ * PATCH `/repos/{repoFullName}/check-runs/{checkRunId}` to mark a check run
+ * `completed` with a terminal `conclusion`. Returns `true` on `res.ok`, or
+ * `false` on permanent failure. Best-effort — never throws.
+ */
+export async function completeCheckRun(
+  env: ApiEnv['Bindings'],
+  installationId: string,
+  repoFullName: string,
+  checkRunId: string,
+  opts: {
+    conclusion: CheckRunConclusion;
+    detailsUrl?: string;
+    title: string;
+    summary: string;
+  },
+): Promise<boolean> {
+  const body = JSON.stringify({
+    status: 'completed',
+    conclusion: opts.conclusion,
+    ...(opts.detailsUrl ? { details_url: opts.detailsUrl } : {}),
+    output: { title: opts.title, summary: opts.summary },
+  });
+
+  for (let attempt = 0; attempt <= CHECK_RUN_RETRY_ATTEMPTS; attempt++) {
+    let token: string;
+    try {
+      token = await getInstallationToken(env, installationId);
+    } catch (err) {
+      logFailure('check-run-complete', 'token-mint-failed', {
+        installationId,
+        repoFullName,
+        checkRunId,
+        conclusion: opts.conclusion,
+        attempt,
+        err: errInfo(err),
+      });
+      if (attempt < CHECK_RUN_RETRY_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, CHECK_RUN_RETRY_DELAY_MS));
+      }
+      continue;
+    }
+    try {
+      const res = await fetch(
+        `${GITHUB_API_BASE}/repos/${repoFullName}/check-runs/${encodeURIComponent(checkRunId)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'void-api',
+            'X-GitHub-Api-Version': GITHUB_API_VERSION,
+          },
+          body,
+        },
+      );
+      if (res.ok) {
+        return true;
+      }
+      const errBody = (await res.text().catch(() => '<unreadable>')).slice(0, 500);
+      if (res.status < 500) {
+        logFailure('check-run-complete', 'http-4xx', {
+          installationId,
+          repoFullName,
+          checkRunId,
+          conclusion: opts.conclusion,
+          attempt,
+          status: res.status,
+          statusText: res.statusText,
+          body: errBody,
+        });
+        return false;
+      }
+      logFailure('check-run-complete', 'http-5xx', {
+        installationId,
+        repoFullName,
+        checkRunId,
+        conclusion: opts.conclusion,
+        attempt,
+        status: res.status,
+        body: errBody,
+      });
+    } catch (err) {
+      logFailure('check-run-complete', 'network-error', {
+        installationId,
+        repoFullName,
+        checkRunId,
+        conclusion: opts.conclusion,
+        attempt,
+        err: errInfo(err),
+      });
+    }
+    if (attempt < CHECK_RUN_RETRY_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, CHECK_RUN_RETRY_DELAY_MS));
+    }
+  }
+  logFailure('check-run-complete', 'exhausted', {
+    installationId,
+    repoFullName,
+    checkRunId,
+    conclusion: opts.conclusion,
+    attempts: CHECK_RUN_RETRY_ATTEMPTS + 1,
+  });
+  return false;
+}

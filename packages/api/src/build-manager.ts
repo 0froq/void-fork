@@ -14,9 +14,11 @@ import {
   markBuildProgressIfActive,
   markBuildTerminalIfActive,
   requeueBuildIfStarting,
+  setBuildCheckRunId,
   type Db,
 } from './db.ts';
 import type { ApiEnv } from './env.ts';
+import { type CheckRunConclusion, completeCheckRun, createCheckRun } from './github/check-run.ts';
 import {
   generateSourceTarballUrl,
   getBranchHeadComparisonStatus,
@@ -27,6 +29,8 @@ import {
 const STORAGE_KEY_CONFIG = 'buildConfig';
 /** DO storage key for the per-build agent secret minted at `startBuild()`. */
 const STORAGE_KEY_AGENT_TOKEN = 'agentToken';
+/** DO storage key for the GitHub Check Run id created at `startBuild()`. */
+const STORAGE_KEY_CHECK_RUN = 'checkRunId';
 
 /** Build statuses past which no further transition should occur. */
 const TERMINAL_STATUSES: ReadonlyArray<StoredBuildStatus> = ['complete', 'failed', 'cancelled'];
@@ -113,6 +117,17 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
   override enableInternet = true;
   override sleepAfter = `${SLEEP_AFTER_MINUTES}m`;
 
+  // In-memory fallback for the just-created check-run id, set in startBuild right
+  // after createCheckRun. The durable sources are DO storage + `builds.check_run_id`,
+  // but if BOTH best-effort persists fail the id lives only here — and the terminal
+  // finalizers (onStop/onError/enforceTimeout) are SEPARATE invocations with no
+  // access to startBuild's local variable. This field survives create→terminal within
+  // the build's lifetime (the DO is actively running the container), so finalize can
+  // still PATCH the run. Strictly additive: consulted only behind explicitId/DO/PG,
+  // and lost on eviction leaves behavior identical to today (no-op). The DO is keyed
+  // per build, so there is no cross-build staleness.
+  private activeCheckRunId: string | null = null;
+
   private db(): Db {
     return createDb(this.env.HYPERDRIVE.connectionString);
   }
@@ -187,12 +202,27 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         const row = await getBuild(this.db(), config.buildId);
         const ageMs = row?.created_at ? Date.now() - new Date(row.created_at).getTime() : 0;
         if (ageMs > FRESHNESS_VERIFY_MAX_AGE_MS) {
-          await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
+          const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
             error: 'could not verify branch head is current before timeout',
             completedAt: new Date().toISOString(),
           });
           await this.setStatus('failed');
           await this.broadcast({ type: 'status', status: 'failed' });
+          // Finalize a run created on a PRIOR attempt (a capacity requeue re-runs
+          // startBuild on the same build id; the persisted `builds.check_run_id`
+          // survives the requeue). No-ops on a first attempt (no run yet).
+          // CAS-aware (mirrors the catch site below + the 6 terminal sites): the
+          // awaits above (getBranchHeadComparisonStatus) release the DO input gate,
+          // so a concurrent terminalizer (terminateBuildsForProject commits an
+          // out-of-band terminal status, then the cancelBuild RPC) can win the row
+          // with a DIFFERENT status. PATCH 'failure' only when THIS site won the CAS;
+          // on a loss finalize to the recorded outcome so GitHub never contradicts
+          // the authoritative DB row.
+          if (won) {
+            await this.finalizeCheckRunToStatus(config, 'failed');
+          } else {
+            await this.finalizeCheckRunToRecordedOutcome(config);
+          }
         } else {
           await requeueBuildIfStarting(this.db(), config.buildId);
         }
@@ -202,12 +232,20 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       if (headComparison !== 'identical') {
         // ahead/behind/diverged → the commit is no longer the branch head (superseded
         // or rolled back / force-pushed away). Cancel; do NOT mint or start.
-        await markBuildTerminalIfActive(this.db(), config.buildId, 'cancelled', {
+        const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'cancelled', {
           error: 'commit is no longer the branch head',
           completedAt: new Date().toISOString(),
         });
         await this.setStatus('cancelled');
         await this.broadcast({ type: 'status', status: 'cancelled' });
+        // Finalize a run created on a PRIOR attempt (see the aged-out branch above).
+        // CAS-aware (see the aged-out branch): on a lost CAS finalize to the recorded
+        // outcome so GitHub never contradicts the authoritative DB row.
+        if (won) {
+          await this.finalizeCheckRunToStatus(config, 'cancelled');
+        } else {
+          await this.finalizeCheckRunToRecordedOutcome(config);
+        }
         await this.pokeScheduler();
         return;
       }
@@ -233,12 +271,20 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         config.repositoryId,
       );
       if (!covered) {
-        await markBuildTerminalIfActive(this.db(), config.buildId, 'cancelled', {
+        const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'cancelled', {
           error: 'github app installation no longer covers this repository',
           completedAt: new Date().toISOString(),
         });
         await this.setStatus('cancelled');
         await this.broadcast({ type: 'status', status: 'cancelled' });
+        // Finalize a run created on a PRIOR attempt (see the aged-out branch above).
+        // CAS-aware (see the aged-out branch): on a lost CAS finalize to the recorded
+        // outcome so GitHub never contradicts the authoritative DB row.
+        if (won) {
+          await this.finalizeCheckRunToStatus(config, 'cancelled');
+        } else {
+          await this.finalizeCheckRunToRecordedOutcome(config);
+        }
         await this.pokeScheduler();
         return;
       }
@@ -259,9 +305,91 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       if (!row || row.status !== 'starting') {
         if (row && TERMINAL_STATUSES.includes(row.status)) {
           await this.setStatus(row.status);
+          // Finalize a run created on a PRIOR attempt that this requeue is now
+          // abandoning (out-of-band cancel during the queue wait). No-ops on a first
+          // attempt (no run yet); on a requeue the id is in DO storage / builds row.
+          await this.finalizeCheckRunToStatus(config, row.status);
         }
         await this.pokeScheduler();
         return;
+      }
+
+      // Create the GitHub Check Run now that EVERY pre-start recheck passed — this
+      // build WILL start, so the run begins `in_progress`. BEST-EFFORT: a create
+      // failure (returns null) must never fail or perturb the build. Two guards:
+      //   (a) Idempotent reuse across requeue — a capacity-to-start error re-throws
+      //       WITHOUT terminalizing, the scheduler re-queues, and startBuild re-runs
+      //       on the SAME DO. We reuse the id from DO storage, or — if that best-effort
+      //       cache write was lost — from the persisted `builds.check_run_id` on the
+      //       `row` already read above, so a requeue never POSTs a SECOND `Void Build`
+      //       run (which would orphan the first one `in_progress`).
+      //   (b) SHA guard — config.commitSha is `build.commit_sha ?? ''`; a check-run
+      //       POST with head_sha:'' is a guaranteed GitHub 422, so skip creation when
+      //       the SHA is empty (no run to orphan; finalizers no-op on the absent id).
+      // The DO-storage write is the input-gated source of truth for finalizers; the
+      // Postgres write is best-effort (DO KV/DB awaits aren't input-gated). A transient
+      // create failure returns null and is NOT stored, so a later requeue retries it.
+      let checkRunId: string | null =
+        (await this.ctx.storage.get<string>(STORAGE_KEY_CHECK_RUN)) ??
+        this.activeCheckRunId ??
+        row.check_run_id ??
+        null;
+      if (!checkRunId && config.commitSha) {
+        checkRunId = await createCheckRun(this.env, config.installationId, config.repoFullName, {
+          name: 'Void Build',
+          headSha: config.commitSha,
+          externalId: config.buildId,
+          detailsUrl: `https://${config.projectSlug}.void.app`,
+          title: 'Void build in progress',
+          summary: `Building \`${config.branch}\` @ ${config.commitSha.slice(0, 7)}`,
+        });
+        if (checkRunId) {
+          // Record the id in-memory FIRST — before the best-effort persists below — so
+          // even if BOTH the DO put and the Postgres persist fail, a later terminal
+          // finalizer (a separate invocation) can still recover it for this build.
+          this.activeCheckRunId = checkRunId;
+          // BEST-EFFORT cache of the run id. This put + the Postgres persist below
+          // must NOT enter the outer build-start catch: a failure to cache check-run
+          // metadata is not a build failure. If the DO-storage put rejects, the id is
+          // lost for finalizers (they no-op on the absent id) but the build proceeds;
+          // a later requeue re-runs createCheckRun (the idempotent reuse only kicks in
+          // once the put succeeds), so this self-heals. Swallow + log, never rethrow.
+          let cached = false;
+          try {
+            await this.ctx.storage.put<string>(STORAGE_KEY_CHECK_RUN, checkRunId);
+            cached = true;
+          } catch (err) {
+            console.warn('startBuild: caching check_run_id in DO storage failed', err);
+          }
+          try {
+            await setBuildCheckRunId(this.db(), config.buildId, checkRunId);
+          } catch (err) {
+            console.warn(
+              cached
+                ? 'startBuild: persisting check_run_id failed (DO cache retains it)'
+                : 'startBuild: persisting check_run_id failed (DO cache also failed)',
+              err,
+            );
+          }
+        }
+
+        // The createCheckRun fetch above yielded the DO input gate, so a cancelBuild
+        // RPC could have terminalized this build mid-POST (its finalizeCheckRun ran
+        // BEFORE the id was stored → no-op). Re-read the authoritative row: if it is no
+        // longer 'starting', sync local status, finalize the just-created run to the
+        // recorded outcome, and do NOT mint tokens / start a container. Mirrors the
+        // pre-create cancel recheck above; runs only when a create POST happened.
+        const recheck = await getBuild(this.db(), config.buildId);
+        if (!recheck || recheck.status !== 'starting') {
+          if (recheck && TERMINAL_STATUSES.includes(recheck.status)) {
+            await this.setStatus(recheck.status);
+            // Pass the in-hand `checkRunId`: the run was just created this invocation,
+            // so this finalizes it even if both the DO put and the PG persist failed.
+            await this.finalizeCheckRunToStatus(config, recheck.status, checkRunId);
+          }
+          await this.pokeScheduler();
+          return;
+        }
       }
 
       // Fail fast on a staging platform misconfiguration. Staging API hosts sit
@@ -446,15 +574,138 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       // transient Hyperdrive/Postgres throw on the terminal write can't skip the
       // queue re-arm and strand the slot until the stale reaper.
       try {
-        await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
+        const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
           error: message,
           completedAt: new Date().toISOString(),
         });
         await this.broadcast({ type: 'status', status: 'failed' });
+        // Finalize the check-run here too: the run is created BEFORE signDeployToken /
+        // this.start() / the staging-misconfig check, so a throw in that window marks
+        // the build `failed` HERE and no onStop ever finalizes it (force-stop →
+        // onStop's terminal-status guard no-op). Without this the run is stranded
+        // `in_progress` forever. The capacity-error branch re-throws above and never
+        // reaches here, so the requeued build correctly keeps its run `in_progress`.
+        // CAS-aware: only PATCH 'failure' when THIS site won the terminal transition.
+        // On a lost CAS (the row was terminalized out-of-band, e.g. a concurrent
+        // cancel) read the authoritative row and finalize to ITS outcome, so GitHub
+        // never contradicts the DB.
+        if (won) {
+          await this.finalizeCheckRun(config, 'failure', {
+            detailsUrl: `https://${config.projectSlug}.void.app`,
+            title: 'Void build failed',
+            summary: message,
+          });
+        } else {
+          await this.finalizeCheckRunToRecordedOutcome(config);
+        }
       } finally {
         await this.pokeScheduler();
       }
       throw error;
+    }
+  }
+
+  /**
+   * Finalize this build's GitHub Check Run with a terminal conclusion. BEST-EFFORT:
+   * resolves the run id from, in order, an explicit in-hand id → the in-memory
+   * `activeCheckRunId` → input-gated DO storage → the persisted `builds.check_run_id`,
+   * so a DO-storage miss (eviction, a rejected cache put, a transient loss) OR a dual
+   * persist failure cannot strand an already-created run `in_progress`. No-ops when no
+   * source has an id (no run was created, or create failed), and never throws so the
+   * caller's `finally { pokeScheduler() }` always runs. `completeCheckRun` already
+   * swallows internally; the extra try/catch is belt-and-suspenders.
+   */
+  private async finalizeCheckRun(
+    config: BuildConfig,
+    conclusion: CheckRunConclusion,
+    opts: { detailsUrl?: string; title: string; summary: string },
+    explicitId?: string | null,
+  ): Promise<void> {
+    // Prefer the in-hand id, then the in-memory field (survives create→terminal within
+    // the build's lifetime), then the durable sources. The first two are authoritative
+    // even when BOTH the DO-storage put and the Postgres persist failed.
+    let checkRunId =
+      explicitId ??
+      this.activeCheckRunId ??
+      (await this.ctx.storage.get<string>(STORAGE_KEY_CHECK_RUN));
+    if (!checkRunId) {
+      // DO storage missed — recover the id from Postgres (written by
+      // `setBuildCheckRunId` at create). Best-effort: a read failure leaves the id
+      // unknown and the run unfinalized (cosmetic), never throwing out of finalize.
+      try {
+        checkRunId = (await getBuild(this.db(), config.buildId))?.check_run_id ?? undefined;
+      } catch (err) {
+        console.warn('finalizeCheckRun: builds.check_run_id fallback read failed', err);
+      }
+    }
+    if (!checkRunId) {
+      return;
+    }
+    try {
+      await completeCheckRun(this.env, config.installationId, config.repoFullName, checkRunId, {
+        conclusion,
+        ...opts,
+      });
+    } catch (err) {
+      console.warn('finalizeCheckRun: best-effort PATCH failed', err);
+    }
+  }
+
+  /**
+   * Finalize the check-run to the AUTHORITATIVE build status — used on the rare
+   * lost-CAS path (the row was terminalized out-of-band, e.g. an admin/disconnect
+   * cancel) and the post-create cancellation recheck. Maps the DB's terminal
+   * status to its check-run conclusion so GitHub always matches the recorded
+   * outcome instead of this site's assumed one. No-ops (returns) for a non-terminal
+   * status; delegates to `finalizeCheckRun`, which itself no-ops on an absent id
+   * and never throws.
+   */
+  private async finalizeCheckRunToStatus(
+    config: BuildConfig,
+    status: string,
+    explicitId?: string | null,
+  ): Promise<void> {
+    const conclusion =
+      status === 'complete'
+        ? 'success'
+        : status === 'cancelled'
+          ? 'cancelled'
+          : status === 'failed'
+            ? 'failure'
+            : null;
+    if (!conclusion) {
+      return;
+    }
+    await this.finalizeCheckRun(
+      config,
+      conclusion as CheckRunConclusion,
+      {
+        detailsUrl: `https://${config.projectSlug}.void.app`,
+        title: `Void build ${conclusion === 'success' ? 'succeeded' : conclusion}`,
+        summary: `Build ${status}.`,
+      },
+      explicitId,
+    );
+  }
+
+  /**
+   * Lost-CAS finalize: read the AUTHORITATIVE build status and finalize the check-run
+   * to it. Used at every terminal site when `markBuildTerminalIfActive` lost (the row
+   * was terminalized out-of-band). BEST-EFFORT — the `getBuild` is wrapped so a
+   * transient read failure logs and returns instead of throwing out of the terminal
+   * handler (which would skip the PATCH AND propagate); the slot is freed regardless
+   * by the caller's `finally { pokeScheduler() }`.
+   */
+  private async finalizeCheckRunToRecordedOutcome(config: BuildConfig): Promise<void> {
+    let status: string | undefined;
+    try {
+      status = (await getBuild(this.db(), config.buildId))?.status;
+    } catch (err) {
+      console.warn('finalizeCheckRunToRecordedOutcome: getBuild failed (best-effort)', err);
+      return;
+    }
+    if (status) {
+      await this.finalizeCheckRunToStatus(config, status);
     }
   }
 
@@ -532,24 +783,50 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         // CAS terminal-if-active: the in-memory guard above is defense in depth;
         // this is the authoritative check against clobbering an outcome a
         // concurrent terminal write (e.g. the timeout) already recorded in the DB.
-        await markBuildTerminalIfActive(db, config.buildId, 'complete', {
+        const won = await markBuildTerminalIfActive(db, config.buildId, 'complete', {
           exitCode: 0,
           completedAt,
           deploymentId,
         });
         await this.broadcast({ type: 'status', status: 'complete' });
+        // CAS-aware finalize: only PATCH 'success' when THIS exit-0 won the terminal
+        // transition. On a lost CAS (the row was terminalized out-of-band first, e.g.
+        // an admin cancel committed 'cancelled') finalizing 'success' would contradict
+        // the DB. Read the authoritative row and finalize to ITS recorded outcome so
+        // GitHub matches the DB. `details_url` comes from `projectSlug` (already in
+        // hand) so a deployment lookup miss does NOT cost the link.
+        if (won) {
+          await this.finalizeCheckRun(config, 'success', {
+            detailsUrl: `https://${config.projectSlug}.void.app`,
+            title: 'Void build succeeded',
+            summary: deploymentId ? 'Deployment is live.' : 'Build complete.',
+          });
+        } else {
+          await this.finalizeCheckRunToRecordedOutcome(config);
+        }
       } finally {
         await this.pokeScheduler();
       }
     } else {
       await this.setStatus('failed');
       try {
-        await markBuildTerminalIfActive(db, config.buildId, 'failed', {
+        const won = await markBuildTerminalIfActive(db, config.buildId, 'failed', {
           error: `build exited with code ${params.exitCode} (${params.reason})`,
           exitCode: params.exitCode,
           completedAt,
         });
         await this.broadcast({ type: 'status', status: 'failed' });
+        // CAS-aware: finalize 'failure' only when THIS site won; otherwise finalize to
+        // the out-of-band recorded outcome so GitHub matches the DB.
+        if (won) {
+          await this.finalizeCheckRun(config, 'failure', {
+            detailsUrl: `https://${config.projectSlug}.void.app`,
+            title: 'Void build failed',
+            summary: `Build exited with code ${params.exitCode}.`,
+          });
+        } else {
+          await this.finalizeCheckRunToRecordedOutcome(config);
+        }
       } finally {
         await this.pokeScheduler();
       }
@@ -574,11 +851,22 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     // the container has already errored.
     await this.setStatus('failed');
     try {
-      await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
+      const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
         error: message,
         completedAt: new Date().toISOString(),
       });
       await this.broadcast({ type: 'status', status: 'failed' });
+      // CAS-aware: finalize 'failure' only when THIS site won; otherwise finalize to
+      // the out-of-band recorded outcome so GitHub matches the DB.
+      if (won) {
+        await this.finalizeCheckRun(config, 'failure', {
+          detailsUrl: `https://${config.projectSlug}.void.app`,
+          title: 'Void build failed',
+          summary: message,
+        });
+      } else {
+        await this.finalizeCheckRunToRecordedOutcome(config);
+      }
     } finally {
       await this.pokeScheduler();
     }
@@ -642,11 +930,22 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     await this.setStatus('failed');
     await this.forceStopContainer();
     try {
-      await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
+      const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
         error: 'build timed out',
         completedAt: new Date().toISOString(),
       });
       await this.broadcast({ type: 'status', status: 'failed' });
+      // CAS-aware: finalize 'failure' only when THIS site won; otherwise finalize to
+      // the out-of-band recorded outcome so GitHub matches the DB.
+      if (won) {
+        await this.finalizeCheckRun(config, 'failure', {
+          detailsUrl: `https://${config.projectSlug}.void.app`,
+          title: 'Void build failed',
+          summary: 'build timed out',
+        });
+      } else {
+        await this.finalizeCheckRunToRecordedOutcome(config);
+      }
     } finally {
       // Free the slot even if the DB write (or broadcast) threw.
       await this.pokeScheduler();
@@ -684,11 +983,24 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     await this.forceStopContainer();
     try {
       if (shouldTerminalize) {
-        await markBuildTerminalIfActive(this.db(), config.buildId, 'cancelled', {
+        const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'cancelled', {
           error: reason,
           completedAt: new Date().toISOString(),
         });
         await this.broadcast({ type: 'status', status: 'cancelled' });
+        // Only when terminalizing: a late cancel against an already-terminal row must
+        // not re-PATCH and clobber the recorded outcome. `config` is non-null here
+        // (shouldTerminalize requires config != null). CAS-aware: finalize 'cancelled'
+        // only when THIS site won; otherwise finalize to the out-of-band recorded
+        // outcome so GitHub matches the DB.
+        if (won) {
+          await this.finalizeCheckRun(config, 'cancelled', {
+            title: 'Void build cancelled',
+            summary: reason,
+          });
+        } else {
+          await this.finalizeCheckRunToRecordedOutcome(config);
+        }
       }
     } finally {
       // Free the slot even if the DB write (or broadcast) threw.

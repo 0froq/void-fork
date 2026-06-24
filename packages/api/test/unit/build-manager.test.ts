@@ -237,6 +237,15 @@ vi.mock('../../src/github/installation-token.ts', () => ({
   // it per-case ('ahead'/'behind'/'diverged' → cancel, null → requeue/age-fail).
   getBranchHeadComparisonStatus: vi.fn(async () => 'identical'),
 }));
+// check-run.ts is mocked here so startBuild's BEST-EFFORT check-run create is INERT
+// in this suite — it must not make outbound `fetch` calls or consume a
+// `getInstallationToken` mock. `createCheckRun` returns null by default (no run
+// created → finalizers no-op), keeping every existing lifecycle assertion unchanged.
+// The real create/finalize wiring is covered by test/integration/api-check-runs.test.ts.
+vi.mock('../../src/github/check-run.ts', () => ({
+  createCheckRun: vi.fn(async () => null),
+  completeCheckRun: vi.fn(async () => false),
+}));
 
 // Helpers from the container build agent. Importing the .mjs only pulls in its
 // exported helpers — the entrypoint guard keeps `main()` from running the

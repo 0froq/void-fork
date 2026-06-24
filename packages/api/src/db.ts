@@ -2322,6 +2322,15 @@ export async function markBuildTerminalIfActive(
 }
 
 /**
+ * Persist the GitHub Check Run id created for this build. Unguarded by status:
+ * the build's own Durable Object is the only writer of its `check_run_id`, so
+ * there is no concurrent writer to CAS against.
+ */
+export async function setBuildCheckRunId(db: Db, id: string, checkRunId: string): Promise<void> {
+  await db.update(builds).set({ check_run_id: checkRunId }).where(eq(builds.id, id));
+}
+
+/**
  * Apply a non-terminal PROGRESS status ('building'|'deploying') ONLY while the
  * row is still active. Returns true if it updated. Prevents a forged/late agent
  * progress report from resurrecting a row a concurrent terminalizer (push-supersede,

@@ -30,6 +30,7 @@ import {
   markBuildProgressIfActive,
   markGitHubInstallationStatus,
   requeueBuildIfStarting,
+  setBuildCheckRunId,
   setGitHubInstallationRepositories,
   supersedeAndCreateContainerBuild,
   terminateBuildsForProject,
@@ -1716,6 +1717,18 @@ describe('builds', () => {
     await updateBuildStatus(env.db, build.id, 'complete');
     expect(await markBuildProgressIfActive(env.db, build.id, 'deploying')).toBe(false);
     expect((await getBuild(env.db, build.id))!.status).toBe('complete');
+  });
+
+  it('setBuildCheckRunId persists the check-run id and getBuild reads it back', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const build = await createBuild(env.db, { projectId: project.id, userId: user.id });
+
+    // A fresh build has no check run yet.
+    expect((await getBuild(env.db, build.id))!.check_run_id).toBeNull();
+
+    await setBuildCheckRunId(env.db, build.id, '99001');
+    expect((await getBuild(env.db, build.id))!.check_run_id).toBe('99001');
   });
 
   it('claimBuildForStartWithinLimit serializes builds per project (at most one active)', async () => {

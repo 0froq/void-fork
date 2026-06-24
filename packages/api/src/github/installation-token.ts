@@ -1,8 +1,8 @@
 import type { ApiEnv } from '../env.ts';
 import { createAppJwt } from './app-jwt.ts';
 
-const GITHUB_API_BASE = 'https://api.github.com';
-const GITHUB_API_VERSION = '2026-03-10';
+export const GITHUB_API_BASE = 'https://api.github.com';
+export const GITHUB_API_VERSION = '2026-03-10';
 
 type AccessTokenResponse = Readonly<{
   token: string;
@@ -144,6 +144,34 @@ type CompareResponse = Readonly<{ status?: string }>;
 const COMPARE_RETRY_ATTEMPTS = 2;
 const COMPARE_RETRY_DELAY_MS = 250;
 
+function errInfo(err: unknown): { name?: string; message: string } {
+  if (err instanceof Error) {
+    return { name: err.name, message: err.message };
+  }
+  return { message: String(err) };
+}
+
+// area:'github' distinguishes from the deploy-pipeline logger (area:'deploy').
+function logCompareFailure(
+  reason: 'token-mint-failed' | 'network-error' | 'http-4xx' | 'http-5xx' | 'exhausted',
+  fields: Record<string, unknown>,
+): void {
+  try {
+    console.warn(
+      JSON.stringify({
+        ts: Date.now(),
+        lvl: 'warn',
+        area: 'github',
+        phase: 'branch-head-compare',
+        msg: `branch-head compare failed: ${reason}`,
+        ...fields,
+      }),
+    );
+  } catch {
+    console.warn(`branch-head compare failed: ${reason}`);
+  }
+}
+
 export async function getBranchHeadComparisonStatus(
   env: ApiEnv['Bindings'],
   installationId: string,
@@ -152,8 +180,27 @@ export async function getBranchHeadComparisonStatus(
   branch: string,
 ): Promise<string | null> {
   for (let attempt = 0; attempt <= COMPARE_RETRY_ATTEMPTS; attempt++) {
+    let token: string;
     try {
-      const token = await getInstallationToken(env, installationId);
+      token = await getInstallationToken(env, installationId);
+    } catch (err) {
+      // Minting the installation token failed (e.g. broken App key, GitHub
+      // 401/5xx on the access-token POST). Treat as transient — log the cause
+      // (this would otherwise be a silent unhandled rejection), then retry.
+      logCompareFailure('token-mint-failed', {
+        installationId,
+        repoFullName,
+        baseSha,
+        branch,
+        attempt,
+        err: errInfo(err),
+      });
+      if (attempt < COMPARE_RETRY_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, COMPARE_RETRY_DELAY_MS));
+      }
+      continue;
+    }
+    try {
       const res = await fetch(
         `${GITHUB_API_BASE}/repos/${repoFullName}/compare/${encodeURIComponent(baseSha)}...${encodeURIComponent(branch)}`,
         {
@@ -173,15 +220,51 @@ export async function getBranchHeadComparisonStatus(
       // other 4xx is definitive (no such repo/ref, App lacks access) — return
       // null without burning retries.
       if (res.status < 500) {
+        const body = (await res.text().catch(() => '<unreadable>')).slice(0, 500);
+        logCompareFailure('http-4xx', {
+          installationId,
+          repoFullName,
+          baseSha,
+          branch,
+          attempt,
+          status: res.status,
+          statusText: res.statusText,
+          body,
+        });
         return null;
       }
-    } catch {
+      const body = (await res.text().catch(() => '<unreadable>')).slice(0, 500);
+      logCompareFailure('http-5xx', {
+        installationId,
+        repoFullName,
+        baseSha,
+        branch,
+        attempt,
+        status: res.status,
+        body,
+      });
+    } catch (err) {
       // Network/transport failure — transient, fall through to retry.
+      logCompareFailure('network-error', {
+        installationId,
+        repoFullName,
+        baseSha,
+        branch,
+        attempt,
+        err: errInfo(err),
+      });
     }
     if (attempt < COMPARE_RETRY_ATTEMPTS) {
       await new Promise((r) => setTimeout(r, COMPARE_RETRY_DELAY_MS));
     }
   }
+  logCompareFailure('exhausted', {
+    installationId,
+    repoFullName,
+    baseSha,
+    branch,
+    attempts: COMPARE_RETRY_ATTEMPTS + 1,
+  });
   return null;
 }
 

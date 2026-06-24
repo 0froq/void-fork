@@ -470,6 +470,11 @@ export const builds = pgTable(
     // attempt 1 cannot finalize attempt 2's active build.
     github_run_attempt: text('github_run_attempt'),
     logs_url: text('logs_url'),
+    // GitHub Check Run id (numeric, stored as text like github_run_id), or NULL.
+    // NULL = no check-run was created (Actions builds, builds that failed a
+    // pre-create recheck, builds created before this column, or a best-effort
+    // create failure). Finalizers no-op when NULL. Additive-only; backward-compat.
+    check_run_id: text('check_run_id'),
     error: text('error'),
     exit_code: integer('exit_code'),
     instance_type: text('instance_type'),

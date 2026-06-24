@@ -313,7 +313,8 @@ Repository permissions:
 | Checks        | Write  |
 
 No `Contents: Write`, no `Workflows`. The App only reads source and reports
-build status via Checks.
+build status via Checks — `Checks: Write` is now exercised by the "Void Build"
+Check Run that container builds publish.
 
 Webhook events: `push`, `installation`, `installation_repositories`,
 `pull_request`, `workflow_run`.
