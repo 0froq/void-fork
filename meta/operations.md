@@ -364,6 +364,13 @@ would let rollouts finish sooner but risks killing rare long builds. Both knobs
 (instance size = billing cost; grace = rollout-delay tradeoff) are cost/product
 decisions — revisit if build durations or rollout cadence change.
 
+**Where to see build logs.** The admin panel shows per-project builds at
+`/admin/projects/:id` (ongoing build highlighted) and a build detail page at
+`/admin/builds/:id`. For `container` builds the detail page tails logs live
+(client-side polling of `GET /admin/builds/:id/logs?since=N`, which fronts the
+`BuildManager`/`BuildManagerLarge` DO that ran the build). For `github_actions`
+builds it links out to the GitHub Actions run instead.
+
 ### CLI Staging Mode
 
 Internal-only toggle for pointing the CLI at staging. Not documented in public docs.

@@ -106,9 +106,11 @@
 - [ ] Preview deployments per PR (paid)
 - [ ] User dashboard
 
-> **Note (2026-06):** "Deploy on GitHub" shipped backend-only. The build admin
-> UI and user-facing build views are **deferred** (no UI this round); the
-> WebSocket log endpoint exists but has no consumer yet. See
+> **Note (2026-06):** "Deploy on GitHub" shipped backend-only. The **admin**
+> build UI has since landed — a per-project Builds section + build detail page
+> with a client-side polling live-log tail for container builds, fed by the now-
+> wired container→DO log transport (`BuildManager.pollLogs()` pulling the agent's
+> `GET /logs?since=N`). **User-facing** build views remain deferred. See
 > [0010-builds.md → Implementation divergences (2026-06)](./design-docs/0010-builds.md#implementation-divergences-2026-06).
 
 **Milestone:** Vercel / Netlify core DX parity.

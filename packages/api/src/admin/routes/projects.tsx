@@ -5,6 +5,7 @@ import {
   countProjects,
   searchProjects,
   getProject,
+  getProjectBuilds,
   getProjectDeployments,
   getProjectResources,
   getUser,
@@ -12,6 +13,7 @@ import {
 } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import { teardownProject } from '../../provisioning/cleanup.ts';
+import { BuildTable } from '../views/build-table.tsx';
 import { DeploymentTable } from '../views/deployment-table.tsx';
 import { Layout } from '../views/layout.tsx';
 import { ProjectsListPage } from '../views/projects-list.tsx';
@@ -58,11 +60,12 @@ app.get('/:id', async (context) => {
   if (!project) {
     return context.html('<h1>Project not found</h1>', 404);
   }
-  const [deployments, resources, owner, domains] = await Promise.all([
+  const [deployments, resources, owner, domains, builds] = await Promise.all([
     getProjectDeployments(context.get('db'), project.id, 10),
     getProjectResources(context.get('db'), project.id),
     getUser(context.get('db'), project.user_id),
     getDomainsByProjectId(context.get('db'), project.id),
+    getProjectBuilds(context.get('db'), project.id),
   ]);
 
   const cfAccountId = context.env.CF_ACCOUNT_ID;
@@ -176,6 +179,9 @@ app.get('/:id', async (context) => {
         activeDeploymentId={project.active_deployment_id}
         tz={tz}
       />
+
+      <h2>Builds ({builds.length})</h2>
+      <BuildTable builds={builds} tz={tz} />
 
       <h2>Danger Zone</h2>
       <form

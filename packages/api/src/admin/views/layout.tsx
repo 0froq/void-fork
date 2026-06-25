@@ -30,6 +30,7 @@ export function Layout({
           button.danger-sm { color: red; border-color: red; font-size: 0.7rem; padding: 2px 6px; }
           h1 { margin-bottom: 10px; }
           h2 { margin-top: 60px; margin-bottom: 10px; }
+          tr.build-active { background: #fef9c3; }
         `}</style>
       </head>
       <body>

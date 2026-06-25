@@ -35,9 +35,31 @@ vi.mock('@cloudflare/containers', () => ({
     // a post-launch onStart reject leaves a LIVE container — modeled by this flag
     // staying true after start() rejects.
     _containerRunning = false;
+    // Settable per-test: backs `container.getTcpPort(port).fetch(url)` (the
+    // non-starting port fetch pollLogs uses). Called as (url, port) to match the
+    // assertions in the pollLogs suite.
+    _portFetch: ((url: string, port: number) => Promise<Response>) | null = null;
     constructor(ctx: unknown, env: unknown) {
       this.ctx = ctx;
       this.env = env;
+    }
+    // Mirrors the real base `this.container = ctx.container`. `.running` reflects the
+    // launched/stopped flag the stub already tracks (set by start()/stop()/destroy()).
+    // `getTcpPort().fetch()` is the NON-starting port fetch — it never auto-starts,
+    // modeling that the real raw port fetch FAILS (rather than starting) when the
+    // container is down.
+    get container() {
+      return {
+        running: this._containerRunning,
+        getTcpPort: (port: number) => ({
+          fetch: (url: string) => {
+            if (!this._portFetch) {
+              throw new Error('container port fetch not stubbed');
+            }
+            return this._portFetch(url, port);
+          },
+        }),
+      };
     }
     // Faithful model of the base `start()` (container.js:554-570): it LAUNCHES the
     // container (`startContainerIfNotRunning`, ~1321) and THEN runs onStart inside
@@ -328,8 +350,24 @@ function makeStubCtx() {
         }
         return { toArray: () => [] };
       }
+      if (query.startsWith('SELECT MAX(seq)')) {
+        // Mirror `SELECT MAX(seq) AS max FROM logs`: NULL (→ JS null) when empty.
+        const max = logs.length > 0 ? logs.reduce((m, r) => (r.seq > m ? r.seq : m), 0) : null;
+        return { toArray: () => [{ max }] };
+      }
       if (query.startsWith('SELECT')) {
-        return { toArray: () => logs.slice().sort((a, b) => a.seq - b.seq) };
+        // Honor a `WHERE seq > ?` bound when present (the GET /logs poll read);
+        // without modeling the filter it would silently no-op in tests (cf. the
+        // rowCount/PGlite lesson). The WS-replay SELECT carries no binding, so
+        // `since` defaults to -Infinity and every row passes.
+        const since = bindings.length > 0 ? (bindings[0] as number) : Number.NEGATIVE_INFINITY;
+        return {
+          toArray: () =>
+            logs
+              .slice()
+              .sort((a, b) => a.seq - b.seq)
+              .filter((r) => r.seq > since),
+        };
       }
       return { toArray: () => [] };
     },
@@ -526,7 +564,12 @@ describe('BuildManager.startBuild', () => {
     // the base Container owns the single DO alarm to drive its monitor/onStop
     // loop, so the manager must never write the alarm directly.
     expect(ctx.storage.setAlarm).not.toHaveBeenCalled();
-    expect(scheduledTasks(m)).toEqual([{ whenSeconds: 10 * 60, callback: 'enforceTimeout' }]);
+    // onStart arms the log pull-loop (first tick at 1s) before startBuild arms the
+    // timeout (10 min = 600s); both go through the base scheduler, never setAlarm.
+    expect(scheduledTasks(m)).toEqual([
+      { whenSeconds: 1, callback: 'pollLogs' },
+      { whenSeconds: 10 * 60, callback: 'enforceTimeout' },
+    ]);
     // The deploy token is bound to THIS build so the deploy endpoint can reject
     // it once the build is no longer active (superseded/cancelled by a newer push).
     const ident = vi.mocked(signDeployToken).mock.calls[0]?.[0];
@@ -635,7 +678,7 @@ describe('BuildManager.startBuild', () => {
     // idle-stop never fires for a busy container, so an orphaned build could
     // otherwise run unbounded. Falls back to DEPLOY_TOKEN_HARD_MAX_MINUTES (60).
     expect(ctx.storage.setAlarm).not.toHaveBeenCalled();
-    expect(scheduledTasks(m)).toEqual([{ whenSeconds: 60 * 60, callback: 'enforceTimeout' }]);
+    expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 60 * 60, callback: 'enforceTimeout' });
   });
 
   it('caps the timeout at the hard max when timeoutMinutes exceeds it', async () => {
@@ -644,7 +687,7 @@ describe('BuildManager.startBuild', () => {
     const m = makeManager(ctx, env);
     await m.startBuild(makeConfig({ timeoutMinutes: 120 }));
     // A plan timeout above the hard max (60) is clamped to it.
-    expect(scheduledTasks(m)).toEqual([{ whenSeconds: 60 * 60, callback: 'enforceTimeout' }]);
+    expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 60 * 60, callback: 'enforceTimeout' });
   });
 
   // The deploy token is minted *before* download + install + deploy, so its
@@ -1163,7 +1206,7 @@ describe('BuildManager.startBuild freshness recheck', () => {
 
     expect(vi.mocked(signDeployToken)).toHaveBeenCalledOnce();
     expect(containerCalls.started).toBe(1);
-    expect(scheduledTasks(m)).toEqual([{ whenSeconds: 10 * 60, callback: 'enforceTimeout' }]);
+    expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 10 * 60, callback: 'enforceTimeout' });
   });
 });
 
@@ -1239,7 +1282,7 @@ describe('BuildManager.startBuild installation coverage recheck (TOCTOU)', () =>
     );
     expect(vi.mocked(signDeployToken)).toHaveBeenCalledOnce();
     expect(containerCalls.started).toBe(1);
-    expect(scheduledTasks(m)).toEqual([{ whenSeconds: 10 * 60, callback: 'enforceTimeout' }]);
+    expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 10 * 60, callback: 'enforceTimeout' });
   });
 });
 
@@ -1756,24 +1799,19 @@ describe('BuildManager.cancelBuild (internal RPC)', () => {
   });
 });
 
-describe('BuildManager.fetch /logs + WebSocket replay', () => {
-  it('appends posted log lines to SQLite and replays them on WS upgrade', async () => {
+describe('BuildManager log ingest + WebSocket replay', () => {
+  it('appends ingested log lines to SQLite and replays them on WS upgrade', async () => {
     const ctx = makeStubCtx();
     const env = makeEnv();
     const m = makeManager(ctx, env);
     await m.startBuild(makeConfig());
 
-    const lines = [
-      { line: 'installing deps', stream: 'stdout', ts: 1 },
-      { line: 'build done', stream: 'stdout', ts: 2 },
-    ];
-    const res = await m.fetch(
-      agentRequest(ctx, 'https://manager/logs', {
-        method: 'POST',
-        body: JSON.stringify(lines),
-      }),
-    );
-    expect(res.status).toBe(200);
+    // Seed via ingestLines (the pull-loop sink) — the sole producer now that the
+    // DO no longer accepts a POST /logs ingest.
+    await (m as unknown as { ingestLines: (lines: Array<LogRow>) => Promise<void> }).ingestLines([
+      { line: 'installing deps', stream: 'stdout', ts: 1 } as unknown as LogRow,
+      { line: 'build done', stream: 'stdout', ts: 2 } as unknown as LogRow,
+    ]);
     expect(ctx._logs).toHaveLength(2);
 
     // WS upgrade → replays stored logs then a caught_up marker.
@@ -1801,10 +1839,9 @@ describe('BuildManager.fetch /logs + WebSocket replay', () => {
     for (let i = 1; i <= total; i++) {
       batch.push({ line: `line ${i}`, stream: 'stdout', ts: i });
     }
-    const res = await m.fetch(
-      agentRequest(ctx, 'https://manager/logs', { method: 'POST', body: JSON.stringify(batch) }),
+    await (m as unknown as { ingestLines: (lines: Array<LogRow>) => Promise<void> }).ingestLines(
+      batch as unknown as Array<LogRow>,
     );
-    expect(res.status).toBe(200);
 
     // Table is bounded to the cap, retaining the NEWEST lines (tail), dropping the
     // oldest (head). Pre-fix it held all `total` rows.
@@ -1830,12 +1867,9 @@ describe('BuildManager.fetch /logs + WebSocket replay', () => {
     const server = ctx._sockets[0];
     server.sent = []; // drop the caught_up marker
 
-    await m.fetch(
-      agentRequest(ctx, 'https://manager/logs', {
-        method: 'POST',
-        body: JSON.stringify([{ line: 'live line', stream: 'stderr', ts: 3 }]),
-      }),
-    );
+    await (m as unknown as { ingestLines: (lines: Array<LogRow>) => Promise<void> }).ingestLines([
+      { line: 'live line', stream: 'stderr', ts: 3 } as unknown as LogRow,
+    ]);
 
     const live = server.sent.map((s) => JSON.parse(s));
     expect(live.some((msg) => msg.type === 'log' && msg.line === 'live line')).toBe(true);
@@ -1872,6 +1906,375 @@ describe('BuildManager.fetch /logs + WebSocket replay', () => {
   });
 });
 
+// The admin worker (which holds the DO binding) polls the DO's stored logs over a
+// plain, unauthenticated `GET /logs?since=N`. It is READ-ONLY: no inserts, no
+// status writes, no broadcast — it just reads the SQLite `logs` table and returns
+// JSON `{ lines: Array<{seq,line,stream,ts}>, lastSeq }` (rows with seq > N, asc).
+// It must COEXIST with the WS upgrade (which branches first on the `Upgrade`
+// header). Logs reach the store via the pull-loop sink (`ingestLines`); there is
+// no longer a POST /logs ingest path.
+describe('BuildManager.fetch GET /logs?since=N (admin poll read)', () => {
+  /** Seed a batch of lines through the pull-loop sink (`ingestLines`). */
+  async function seedLogs(
+    _ctx: ReturnType<typeof makeStubCtx>,
+    m: BuildManager,
+    lines: Array<{ line: string; stream: string; ts: number }>,
+  ): Promise<void> {
+    await (m as unknown as { ingestLines: (lines: Array<LogRow>) => Promise<void> }).ingestLines(
+      lines as unknown as Array<LogRow>,
+    );
+  }
+
+  it('since=0 returns all stored rows (seq+line+stream+ts) and the max seq as lastSeq', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    await seedLogs(ctx, m, [
+      { line: 'installing deps', stream: 'stdout', ts: 10 },
+      { line: 'build done', stream: 'stdout', ts: 20 },
+    ]);
+
+    const res = await m.fetch(new Request('https://manager/logs?since=0', { method: 'GET' }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      lines: Array<{ seq: number; line: string; stream: string; ts: number }>;
+      lastSeq: number;
+    };
+    expect(body.lines).toEqual([
+      { seq: 1, line: 'installing deps', stream: 'stdout', ts: 10 },
+      { seq: 2, line: 'build done', stream: 'stdout', ts: 20 },
+    ]);
+    expect(body.lastSeq).toBe(2);
+  });
+
+  it('since=K returns ONLY rows with seq > K (asc), with lastSeq = max seq', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    await seedLogs(ctx, m, [
+      { line: 'a', stream: 'stdout', ts: 1 },
+      { line: 'b', stream: 'stdout', ts: 2 },
+      { line: 'c', stream: 'stderr', ts: 3 },
+    ]);
+
+    const res = await m.fetch(new Request('https://manager/logs?since=1', { method: 'GET' }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      lines: Array<{ seq: number; line: string; stream: string; ts: number }>;
+      lastSeq: number;
+    };
+    // seq 1 ('a') is excluded; only seq > 1 returned.
+    expect(body.lines).toEqual([
+      { seq: 2, line: 'b', stream: 'stdout', ts: 2 },
+      { seq: 3, line: 'c', stream: 'stderr', ts: 3 },
+    ]);
+    expect(body.lastSeq).toBe(3);
+  });
+
+  it('empty table returns { lines: [], lastSeq: <since> } (cursor held at the request)', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // No logs ingested. since=0 → empty list, lastSeq echoes the requested 0.
+    const res = await m.fetch(new Request('https://manager/logs?since=0', { method: 'GET' }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { lines: Array<unknown>; lastSeq: number };
+    expect(body.lines).toEqual([]);
+    expect(body.lastSeq).toBe(0);
+
+    // A non-zero cursor against an empty table echoes that cursor (never moves back).
+    const res2 = await m.fetch(new Request('https://manager/logs?since=7', { method: 'GET' }));
+    const body2 = (await res2.json()) as { lines: Array<unknown>; lastSeq: number };
+    expect(body2.lines).toEqual([]);
+    expect(body2.lastSeq).toBe(7);
+  });
+
+  it('treats a missing/NaN since as 0 (returns everything)', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    await seedLogs(ctx, m, [{ line: 'only', stream: 'stdout', ts: 1 }]);
+
+    // No `since` param at all → defaults to 0.
+    const missing = await m.fetch(new Request('https://manager/logs', { method: 'GET' }));
+    const missingBody = (await missing.json()) as {
+      lines: Array<{ seq: number }>;
+      lastSeq: number;
+    };
+    expect(missingBody.lines.map((r) => r.seq)).toEqual([1]);
+    expect(missingBody.lastSeq).toBe(1);
+
+    // A non-numeric `since` → NaN → defaults to 0.
+    const nan = await m.fetch(new Request('https://manager/logs?since=abc', { method: 'GET' }));
+    const nanBody = (await nan.json()) as { lines: Array<{ seq: number }>; lastSeq: number };
+    expect(nanBody.lines.map((r) => r.seq)).toEqual([1]);
+    expect(nanBody.lastSeq).toBe(1);
+  });
+
+  it('is READ-ONLY: no status write, no new rows, no broadcast to attached sockets', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    await seedLogs(ctx, m, [{ line: 'x', stream: 'stdout', ts: 1 }]);
+
+    // Attach a socket and drop the replayed history so any GET-triggered send shows.
+    await m.fetch(new Request('https://manager/', { headers: { Upgrade: 'websocket' } }));
+    const server = ctx._sockets[0];
+    server.sent = [];
+    dbState.writes = [];
+    const rowsBefore = ctx._logs.length;
+
+    await m.fetch(new Request('https://manager/logs?since=0', { method: 'GET' }));
+
+    expect(ctx._logs.length).toBe(rowsBefore); // no inserts
+    expect(dbState.writes).toEqual([]); // no status writes
+    expect(server.sent).toEqual([]); // no broadcast
+  });
+
+  it('does NOT collide with the WS upgrade: a GET WITHOUT the Upgrade header reads logs', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    await seedLogs(ctx, m, [{ line: 'log', stream: 'stdout', ts: 1 }]);
+
+    // GET /logs (no Upgrade) → JSON read (status 200), NOT a 101 upgrade.
+    const read = await m.fetch(new Request('https://manager/logs?since=0', { method: 'GET' }));
+    expect(read.status).toBe(200);
+    expect(ctx._sockets.length).toBe(0); // no socket accepted
+
+    // The WS path still works: a GET WITH the Upgrade header upgrades (101).
+    const upgrade = await m.fetch(
+      new Request('https://manager/logs', { headers: { Upgrade: 'websocket' } }),
+    );
+    expect(upgrade.status).toBe(101);
+    expect(ctx._sockets.length).toBe(1);
+  });
+});
+
+// The DO pulls build-log lines from the in-container agent (`GET /logs?since=N`)
+// over the NON-starting raw port fetch (`container.getTcpPort(port).fetch(url)`),
+// ingests them into the SQLite `logs` table + WS fan-out, advances an in-memory
+// cursor, and re-arms itself via the base scheduler — the same
+// `schedule(seconds, 'method')` mechanism `enforceTimeout` uses. The non-starting
+// port fetch (NOT the auto-starting `containerFetch`) means a poll racing a
+// just-exited container can never resurrect it. The stub's `container` getter routes
+// `getTcpPort(port).fetch(url)` to a settable `_portFetch`, so each test stubs it.
+describe('BuildManager.pollLogs (DO log pull-loop)', () => {
+  /**
+   * Stub the non-starting port fetch (`container.getTcpPort(port).fetch(url)`) on the
+   * manager to return canned `GET /logs` responses. Backed by the stub's `_portFetch`,
+   * invoked as `(url, port)` so the existing `(url, port)` assertions still hold.
+   */
+  function stubPortFetch(
+    m: BuildManager,
+    responses: Array<{ lines: Array<LogRow>; lastSeq: number } | Error>,
+  ): ReturnType<typeof vi.fn> {
+    let call = 0;
+    const fn = vi.fn(async (_url: string, _port?: number) => {
+      const next = responses[Math.min(call, responses.length - 1)];
+      call += 1;
+      if (next instanceof Error) {
+        throw next;
+      }
+      return new RealResponse(JSON.stringify(next), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    (m as unknown as { _portFetch: typeof fn })._portFetch = fn;
+    return fn;
+  }
+
+  /** Read the in-memory log cursor the loop advances. */
+  function logCursor(m: BuildManager): number {
+    return (m as unknown as { logCursor: number }).logCursor;
+  }
+
+  it('pulls two batches: ingests lines, advances the cursor, and re-arms', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // Attach a socket so the broadcast side of ingest is observable; drop replay.
+    await m.fetch(new Request('https://manager/', { headers: { Upgrade: 'websocket' } }));
+    const server = ctx._sockets[0];
+    server.sent = [];
+
+    // Drive pollLogs directly across two batches (not via runDueSchedules — that
+    // would also fire the 600s enforceTimeout armed at startBuild). Clear the
+    // schedule first so each re-arm is observed in isolation.
+    const fetchFn = stubPortFetch(m, [
+      {
+        lines: [
+          { seq: 1, line: 'installing deps', stream: 'stdout', ts: 1 },
+          { seq: 2, line: 'compiling', stream: 'stdout', ts: 2 },
+        ],
+        lastSeq: 2,
+      },
+      {
+        lines: [{ seq: 3, line: 'uploading', stream: 'stdout', ts: 3 }],
+        lastSeq: 3,
+      },
+    ]);
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    // First poll: requests with the initial cursor (0) on port 4000.
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn.mock.calls[0][0]).toBe('http://manager/logs?since=0');
+    expect(fetchFn.mock.calls[0][1]).toBe(4000);
+
+    // Lines ingested into SQLite (seq stripped before insert) + broadcast over WS.
+    expect(ctx._logs.map((r) => r.line)).toEqual(['installing deps', 'compiling']);
+    const broadcast = server.sent.map((s) => JSON.parse(s));
+    expect(broadcast.some((m) => m.type === 'log' && m.line === 'installing deps')).toBe(true);
+    expect(broadcast.some((m) => m.type === 'log' && m.line === 'compiling')).toBe(true);
+
+    // Cursor advanced to lastSeq; the loop re-armed itself.
+    expect(logCursor(m)).toBe(2);
+    expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(true);
+
+    // Second poll continues from the advanced cursor (since=2).
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+    expect(fetchFn.mock.calls[1][0]).toBe('http://manager/logs?since=2');
+    expect(ctx._logs.map((r) => r.line)).toEqual(['installing deps', 'compiling', 'uploading']);
+    expect(logCursor(m)).toBe(3);
+    expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(true);
+  });
+
+  it('returns without rescheduling when the build status is terminal', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    const fetchFn = stubPortFetch(m, [{ lines: [], lastSeq: 0 }]);
+
+    // Drive the build terminal (mirrors a completed container).
+    dbState.status.set('b1', 'building');
+    await m.onStop({ exitCode: 0, reason: 'exit' });
+    expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'complete' });
+
+    // Clear the schedule armed at startBuild so we observe ONLY pollLogs' decision.
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+
+    // Self-terminated: no agent poll, no re-arm.
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(false);
+  });
+
+  it('does not pull (clean early-out) once the container has exited, even if status is not yet terminal', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    const fetchFn = stubPortFetch(m, [{ lines: [], lastSeq: 0 }]);
+
+    // The container exited between polls but onStop hasn't run yet, so the
+    // persisted status is still `building` (non-terminal). The running guard must
+    // skip the fetch entirely and end the loop (onStop finalizes the build).
+    (m as unknown as { _containerRunning: boolean })._containerRunning = false;
+
+    // Clear the schedule armed at startBuild so we observe ONLY pollLogs' decision.
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+
+    // No port fetch and no re-arm — the loop stopped so onStop can finalize the build.
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(false);
+  });
+
+  it('swallows a port-fetch throw (no unhandled throw) and re-arms', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    const fetchFn = stubPortFetch(m, [new Error('container mid-start')]);
+
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+    // Must not throw out of pollLogs even though the port fetch rejects.
+    await expect(
+      (m as unknown as { pollLogs: () => Promise<void> }).pollLogs(),
+    ).resolves.toBeUndefined();
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    // Nothing ingested; the loop still re-armed (the container may come up next tick).
+    expect(ctx._logs).toHaveLength(0);
+    expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(true);
+  });
+
+  it('uses the non-starting port fetch (never the auto-starting containerFetch) so a poll cannot resurrect the container', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig()); // running=true, status building
+
+    // Spy on the auto-starting containerFetch — it must NEVER be called by pollLogs.
+    const autoStart = vi.fn(async () => new RealResponse('{}', { status: 200 }));
+    (m as unknown as { containerFetch: typeof autoStart }).containerFetch = autoStart;
+
+    const portFetch = stubPortFetch(m, [{ lines: [], lastSeq: 0 }]);
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+
+    expect(portFetch).toHaveBeenCalledTimes(1); // pulled via the non-starting path
+    expect(autoStart).not.toHaveBeenCalled(); // never the auto-starting path
+  });
+
+  it('arms the first pollLogs tick in startBuild (after the CAS to building)', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // Both the timeout AND the log poll loop are armed via the base scheduler.
+    expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 1, callback: 'pollLogs' });
+    expect(scheduledTasks(m).some((t) => t.callback === 'enforceTimeout')).toBe(true);
+  });
+});
+
+describe('BuildManager.ingestLines (the pull-loop sink)', () => {
+  it('inserts each line into SQLite and broadcasts it (sole producer is pollLogs)', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    await m.fetch(new Request('https://manager/', { headers: { Upgrade: 'websocket' } }));
+    const server = ctx._sockets[0];
+    server.sent = [];
+
+    // Call ingestLines directly with BuildLogLine shape (no seq).
+    await (m as unknown as { ingestLines: (lines: Array<LogRow>) => Promise<void> }).ingestLines([
+      { line: 'a', stream: 'stdout', ts: 1 } as unknown as LogRow,
+      { line: 'b', stream: 'stderr', ts: 2 } as unknown as LogRow,
+    ]);
+
+    expect(ctx._logs.map((r) => r.line)).toEqual(['a', 'b']);
+    const sent = server.sent.map((s) => JSON.parse(s));
+    expect(sent).toContainEqual({ type: 'log', line: 'a', stream: 'stdout', ts: 1 });
+    expect(sent).toContainEqual({ type: 'log', line: 'b', stream: 'stderr', ts: 2 });
+  });
+});
+
 describe('BuildManager agent-control auth + transition guards', () => {
   it('rejects POST /status without the agent secret (401) and leaves status unchanged', async () => {
     const ctx = makeStubCtx();
@@ -1893,23 +2296,6 @@ describe('BuildManager agent-control auth + transition guards', () => {
     // rejected control POST must leave it there.)
     expect(dbState.writes).toEqual([]);
     expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'building' });
-  });
-
-  it('rejects POST /logs without the agent secret (401)', async () => {
-    const ctx = makeStubCtx();
-    const env = makeEnv();
-    const m = makeManager(ctx, env);
-    await m.startBuild(makeConfig());
-
-    const res = await m.fetch(
-      new Request('https://manager/logs', {
-        method: 'POST',
-        body: JSON.stringify([{ line: 'x', stream: 'stdout', ts: 1 }]),
-      }),
-    );
-
-    expect(res.status).toBe(401);
-    expect(ctx._logs).toHaveLength(0);
   });
 
   it('rejects POST /cancel without the agent secret (401) and does not stop the container', async () => {

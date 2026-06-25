@@ -39,10 +39,17 @@ const TERMINAL_STATUSES: ReadonlyArray<StoredBuildStatus> = ['complete', 'failed
 // Hard cap on rows retained in the DO SQLite `logs` table. A verbose/chatty build
 // (huge installer/compiler output) would otherwise grow the table without bound
 // for the build's lifetime — risking DO storage pressure and an O(rows) WebSocket
-// replay on connect. `handleLogs` evicts the oldest rows past this cap, keeping
+// replay on connect. `ingestLines` evicts the oldest rows past this cap, keeping
 // the most-recent window (a tail is what a live log view wants). Mirrors the
 // container agent's in-memory ring bound (build-agent.mjs MAX_BUFFERED_LOG_LINES).
 export const MAX_STORED_LOG_LINES = 10000;
+
+// Cadence of the DO→container log pull-loop. The agent buffers stdout/stderr and
+// serves `GET /logs?since=N`; the DO polls on this interval, ingesting any new
+// lines into the SQLite `logs` table + WS fan-out. ~1–2s keeps a live log view
+// near-real-time without hammering the container. The loop is armed in `onStart`
+// (first tick at 1s) and re-armed by `pollLogs` until the build is terminal.
+const POLL_SECONDS = 1;
 
 // Pin the build container's fallback Void CLI to the platform's shipped version.
 // Keep in sync with framework/packages/void/package.json (the submodule the
@@ -128,6 +135,15 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
   // and lost on eviction leaves behavior identical to today (no-op). The DO is keyed
   // per build, so there is no cross-build staleness.
   private activeCheckRunId: string | null = null;
+
+  // Cursor for the DO→container log pull-loop: the highest agent `seq` already
+  // ingested. `pollLogs` requests `GET /logs?since=logCursor` and advances it to
+  // the response's `lastSeq`. In-memory ONLY (NOT persisted to ctx.storage):
+  // exactly one build runs per DO and there is no restart-resume — a fresh DO
+  // starts at 0 and replays from the agent's buffer, and the agent's own ring is
+  // the source of truth, so a persisted cursor would add no correctness and only
+  // risk skipping unbuffered lines after an eviction.
+  private logCursor = 0;
 
   private db(): Db {
     return createDb(this.env.HYPERDRIVE.connectionString);
@@ -741,6 +757,12 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     }
     await this.setStatus('building');
     await this.broadcast({ type: 'status', status: 'building' });
+    // Start the DO→container log pull-loop once the container is live and the row
+    // is `building`. First tick fires soon (1s); `pollLogs` re-arms itself on the
+    // POLL_SECONDS cadence and self-terminates when the build goes terminal. Armed
+    // via the SAME base scheduler as `enforceTimeout` (never a raw setAlarm — the
+    // base Container owns the single DO alarm for its monitor loop + onStop).
+    await this.schedule(1, 'pollLogs');
   }
 
   override async onStop(params: {
@@ -1028,18 +1050,20 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     if (request.headers.get('Upgrade') === 'websocket') {
       return this.handleWebSocketUpgrade();
     }
+    // Admin log poll: a plain (no-Upgrade) `GET /logs?since=N` read of the stored
+    // SQLite `logs` table. Branches AFTER the WS upgrade above so a GET WITH the
+    // upgrade header still takes the WS path. DOs aren't publicly reachable — only
+    // our worker holds the binding — so no token auth; this is strictly READ-ONLY
+    // (no inserts, no status writes, no broadcast, no container fetch).
+    if (request.method === 'GET' && path === '/logs') {
+      return this.handleReadLogs(url);
+    }
     // Agent control endpoints are authenticated with the per-build secret so a
     // malicious repo build step can't POST forged logs/status to the DO even if
     // it discovers the endpoint URL.
-    if (
-      request.method === 'POST' &&
-      (path === '/logs' || path === '/status' || path === '/cancel')
-    ) {
+    if (request.method === 'POST' && (path === '/status' || path === '/cancel')) {
       if (!(await this.isAuthorizedAgent(request))) {
         return Response.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-      }
-      if (path === '/logs') {
-        return this.handleLogs(request);
       }
       if (path === '/status') {
         return this.handleStatus(request);
@@ -1082,8 +1106,41 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     );
   }
 
-  private async handleLogs(request: Request): Promise<Response> {
-    const lines = (await request.json()) as ReadonlyArray<BuildLogLine>;
+  /**
+   * READ-ONLY poll read of the stored `logs` table for the admin worker.
+   * `GET /logs?since=N` → `{ lines: Array<{seq,line,stream,ts}>, lastSeq }` where
+   * `lines` are the rows with `seq > N` (ascending) and `lastSeq` is the table's
+   * MAX(seq) — or the requested `since` when the table is empty, so a poller's
+   * cursor never moves backward across an empty response (same monotonic intent
+   * as `pollLogs`). A missing/non-numeric `since` is treated as 0. No inserts, no
+   * status writes, no broadcast — this only reads SQLite.
+   */
+  private handleReadLogs(url: URL): Response {
+    this.ensureLogTable();
+    const raw = Number(url.searchParams.get('since'));
+    const since = Number.isFinite(raw) ? raw : 0;
+    const lines = this.ctx.storage.sql
+      .exec<{ seq: number; line: string; stream: string; ts: number }>(
+        'SELECT seq, line, stream, ts FROM logs WHERE seq > ? ORDER BY seq ASC',
+        since,
+      )
+      .toArray();
+    const maxRow = this.ctx.storage.sql
+      .exec<{ max: number | null }>('SELECT MAX(seq) AS max FROM logs')
+      .toArray()[0];
+    const lastSeq = maxRow?.max ?? since;
+    return Response.json({ lines, lastSeq });
+  }
+
+  /**
+   * Persist a batch of log lines into the SQLite `logs` table (bounded to the
+   * most-recent MAX_STORED_LOG_LINES rows) and fan each out over the WebSocket.
+   * Fed ONLY by the DO→container pull-loop (`pollLogs`) — the single
+   * authoritative transport for container output into the DO sink. (The agent
+   * still POSTs to `DO_LOG_URL`, but that push has no route back to the DO, so
+   * it never reaches here; the pull-loop is the sole producer.)
+   */
+  private async ingestLines(lines: ReadonlyArray<BuildLogLine>): Promise<void> {
     this.ensureLogTable();
     for (const entry of lines) {
       this.ctx.storage.sql.exec(
@@ -1106,7 +1163,86 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     for (const entry of lines) {
       await this.broadcast({ type: 'log', ...entry });
     }
-    return Response.json({ ok: true });
+  }
+
+  /**
+   * DO→container log pull-loop. The agent buffers stdout/stderr and serves
+   * `GET /logs?since=N` (`{ lines: Array<{seq,line,stream,ts}>, lastSeq }`); this
+   * method polls it, ingests any new lines (cursor-stripped), advances the cursor
+   * to `lastSeq`, and re-arms itself — the only transport feeding container output
+   * into the DO's store + WS fan-out. Public + named so the base scheduler can
+   * resolve it as a callback (same mechanism as `enforceTimeout`); we MUST NOT
+   * override `alarm()` (the base owns the single DO alarm).
+   *
+   * Self-terminating: returns WITHOUT re-arming once the build is gone or terminal
+   * so the loop stops at completion. CRITICALLY, this uses a NON-STARTING fetch —
+   * `this.container.getTcpPort(port).fetch(url)` — NOT `this.containerFetch(...)`.
+   * `containerFetch` AUTO-STARTS a stopped container (its own internal
+   * `container.running` re-check happens AFTER an `await getState()`, container.js:847),
+   * so even with the `container.running` guard below a build that exits in the
+   * guard→fetch TOCTOU window could be RESURRECTED — rerunning install/build/`void
+   * deploy`. The raw port fetch is `containerFetch` MINUS that auto-start branch:
+   * identical on a running/healthy container, but it FAILS (caught + swallowed)
+   * instead of restarting an exited one, so a poll can never resurrect a finished
+   * build. The `container.running` guard is kept purely as a cheap early-out for
+   * the common already-exited case (it avoids a 1s busy-retry; onStop finalizes).
+   * A transient fetch failure is swallowed and the loop re-arms to retry next tick.
+   */
+  async pollLogs(): Promise<void> {
+    const config = await this.getConfig();
+    if (!config || TERMINAL_STATUSES.includes(config.status)) {
+      // No build, or the build finished — stop the loop (do NOT re-arm).
+      return;
+    }
+    // The base copies `ctx.container` into a private field; read the same object via
+    // a public-typed cast. We need both `running` (the cheap early-out below) and
+    // `getTcpPort` (the NON-starting fetch path used in the try block).
+    const container = (
+      this as unknown as {
+        container?: {
+          running: boolean;
+          getTcpPort(port: number): { fetch(url: string): Promise<Response> };
+        };
+      }
+    ).container;
+    // Common case: the container has already exited. Stop the loop (do NOT re-arm)
+    // — onStop will finalize the build. Skips the fetch entirely.
+    if (!container?.running) {
+      return;
+    }
+    try {
+      // NON-STARTING fetch. Unlike `this.containerFetch(...)`, `getTcpPort().fetch()`
+      // does NOT auto-start a stopped container (containerFetch's auto-start branch,
+      // container.js:847, is exactly what we must avoid here). So even if the
+      // container exits in the TOCTOU window between the running guard above and this
+      // call, the fetch FAILS (caught below) instead of RESURRECTING the just-finished
+      // build — which would otherwise rerun install/build/`void deploy`. On a
+      // running/healthy container this is identical to what containerFetch does after
+      // its start check.
+      const res = await container
+        .getTcpPort(this.defaultPort)
+        .fetch(`http://manager/logs?since=${this.logCursor}`);
+      if (res.ok) {
+        const body = (await res.json()) as {
+          lines: Array<BuildLogLine & { seq: number }>;
+          lastSeq: number;
+        };
+        if (body.lines.length > 0) {
+          await this.ingestLines(body.lines.map(({ line, stream, ts }) => ({ line, stream, ts })));
+        }
+        // Monotonic-advance: never move the cursor backward if a stale/empty
+        // response reports a lower lastSeq than we've already ingested.
+        this.logCursor = Math.max(this.logCursor, body.lastSeq);
+      }
+    } catch (err) {
+      // Container gone / mid-start / transient — swallow and retry on the next tick.
+      // Must NOT throw out of a scheduled callback.
+      console.warn('pollLogs: container log fetch failed (will retry)', err);
+    }
+    // Re-arm. Reached on success AND on a swallowed fetch error (the container may
+    // still be running and just briefly unreachable). The running guard above ends
+    // the loop once the container is gone.
+    await this.schedule(POLL_SECONDS, 'pollLogs');
   }
 
   private async handleStatus(request: Request): Promise<Response> {

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
+import adminBuilds from './admin/routes/builds.tsx';
 import adminDeployments from './admin/routes/deployments.tsx';
 import adminInvitations from './admin/routes/invitations.tsx';
 import adminLogin from './admin/routes/login.ts';
@@ -151,6 +152,7 @@ app.use('/admin/*', adminAuthMiddleware);
 app.get('/admin/', adminAuthMiddleware, dashboardHandler);
 app.route('/admin/users', adminUsers);
 app.route('/admin/projects', adminProjects);
+app.route('/admin/builds', adminBuilds);
 app.route('/admin/deployments', adminDeployments);
 app.route('/admin/signup-control', adminSignupControl);
 app.route('/admin/invitations', adminInvitations);

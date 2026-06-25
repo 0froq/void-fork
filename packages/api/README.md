@@ -57,8 +57,8 @@ src/
     domains.ts
     usage.ts
   admin/
-    routes/                   # Admin pages, users/projects/deployments/platform/signup-control
-    views/                    # Hono JSX view layer
+    routes/                   # Admin pages: users/projects/deployments/platform/signup-control, plus builds.tsx (build detail page + /logs poll endpoint)
+    views/                    # Hono JSX view layer (incl. build-table.tsx, build-logs.tsx)
     middleware/auth.ts
 container/
   Dockerfile                  # node:24-slim + corepack + bun build image
@@ -108,6 +108,8 @@ The webhook and OIDC endpoints return `503` when the GitHub App secrets are unse
 
 - `/admin/users`
 - `/admin/projects`
+- `/admin/builds/:id` — build detail page (live log panel for container builds; GitHub link for `github_actions`)
+- `/admin/builds/:id/logs?since=N` — build-log poll endpoint backing the live tail; container builds front the `BuildManager`/`BuildManagerLarge` DO's read-only `GET /logs?since=N` (routed by `instance_type` via `buildManagerNamespace`), `github_actions` builds return the external `logs_url`
 - `/admin/deployments`
 - `/admin/signup-control`
 - `/admin/platform`
@@ -164,7 +166,7 @@ Connect a repo through a GitHub App; a `git push` then builds and deploys automa
   - **GitHub Actions** — `void init --github` scaffolds a workflow that calls `POST /auth/github-oidc`; the verified job runs `void deploy` and reports back via the `workflow_run` webhook.
 - **Build mechanism**: both executors run the real `void deploy` CLI with a short-lived, project-scoped deploy token (`aud: "deploy"`, minted by `auth/deploy-token.ts`). There is no artifact-upload endpoint; `routes/deploy.ts` is unchanged. The container agent (`container/build-agent.mjs`) downloads the source tarball, installs deps, and runs `npx void deploy --project <slug>` with `VOID_TOKEN` + `VOID_API_URL`.
 - **Check Run**: container builds publish a "Void Build" GitHub Check Run (head SHA = the build's `commit_sha`/webhook `after`), created `in_progress` at build start and finalized `success`/`failure`/`cancelled` at every terminal site. Best-effort — a Check Run API error never fails or perturbs a build/deploy. `details_url` is the project's dashboard URL `https://{projectSlug}.void.app` for the in-progress/success/failure states (omitted on cancel). The helper (`github/check-run.ts`) is executor-agnostic; Actions check-runs are deferred (the native workflow check already covers them) and the helper is ready for a future PR. `Checks: Write` is already granted, so no permission change was needed. `builds.check_run_id` has no index (nothing queries by it — deferred).
-- **Known follow-up**: container→DO live-log streaming is not yet wired (the WS log endpoint and the agent's `GET /logs?since=N` exist, but nothing connects them). There is no build log UI yet.
+- **Build logs**: `BuildManager` pulls container stdout/stderr into the DO with a `pollLogs()` loop — `containerFetch` against the agent's `GET /logs?since=N` on a ~1s cadence, advancing an in-memory cursor and feeding the SQLite `logs` table + WebSocket fan-out (self-terminates on terminal status). The DO also serves a read-only `GET /logs?since=N` -> `{ lines, lastSeq }`. The admin build views (below) consume this; `github_actions` builds have no DO log store and link out to their GitHub Actions run.
 
 ## Usage and Plan Enforcement
 
@@ -182,6 +184,7 @@ Notable sections:
 - user search, plan changes, suspension controls
 - project and deployment inspection
 - deployment log viewing
+- per-project Builds section (ongoing build highlighted) plus a build detail page with a client-side polling live-log tail for container builds (mirrors the deployment live-tail; not a WebSocket), or a GitHub Actions link for `github_actions` builds. The tail polls `GET /admin/builds/:id/logs?since=N`, which fronts the `BuildManager`/`BuildManagerLarge` DO's read-only `GET /logs?since=N` (DO chosen by `instance_type` via `buildManagerNamespace`).
 - signup allowlist/private-beta controls
 - platform worker version history and orchestrated rollback
 
