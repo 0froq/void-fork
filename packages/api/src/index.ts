@@ -8,7 +8,7 @@ import adminProjects from './admin/routes/projects.tsx';
 import adminSignupControl from './admin/routes/signup-control.tsx';
 import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
 import adminUsers from './admin/routes/users.tsx';
-import { BuildManager } from './build-manager.ts';
+import { BuildManager, BuildManagerLarge } from './build-manager.ts';
 import { BuildScheduler } from './build-scheduler.ts';
 import { type CronFireMessage, processCronFiresBatch } from './cron-fires-queue.ts';
 import { CronScheduler } from './cron-scheduler.ts';
@@ -260,12 +260,16 @@ async function scheduled(
   // is already freed by phase 1), so this is wrapped best-effort and isolated
   // like the steps around it. Scoped to executor='container'.
   await failStaleActiveContainerBuilds(db, STALE_CONTAINER_BUILD_MAX_AGE_MINUTES)
-    .then(async (staleIds) => {
-      if (staleIds.length > 0) {
-        console.log(`[scheduled] auto-failed ${staleIds.length} stale container build(s)`);
+    .then(async (staleBuilds) => {
+      if (staleBuilds.length > 0) {
+        console.log(`[scheduled] auto-failed ${staleBuilds.length} stale container build(s)`);
         await cancelContainerBuildDos(
           env,
-          staleIds.map((id) => ({ id, executor: 'container' as const })),
+          // The reaper deals only with container builds; carry each build's
+          // instance_type so the cancel addresses the SAME size namespace the
+          // scheduler started it on (a paid build cancelled against the base
+          // namespace would miss its live container).
+          staleBuilds.map((b) => ({ ...b, executor: 'container' as const })),
           'stale build reaper',
         );
       }
@@ -661,6 +665,7 @@ export {
   SandboxConcurrencyCounter,
   BuildScheduler,
   BuildManager,
+  BuildManagerLarge,
 };
 export type AppType = typeof app;
 export { app, scheduled };

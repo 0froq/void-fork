@@ -2131,6 +2131,7 @@ describe('claimBuildForStartWithinLimit', () => {
       userId: user.id,
       projectId: project.id,
       limit: 1,
+      instanceType: 'standard-4',
     });
     expect(claimed).toBe(true);
 
@@ -2161,6 +2162,7 @@ describe('claimBuildForStartWithinLimit', () => {
       userId: user.id,
       projectId: project.id,
       limit: 1,
+      instanceType: 'standard-4',
     });
     expect(claimed).toBe(false);
     // The queued build is left untouched for a later tick.
@@ -2183,6 +2185,7 @@ describe('claimBuildForStartWithinLimit', () => {
       userId: user.id,
       projectId: project.id,
       limit: 0,
+      instanceType: 'standard-4',
     });
     expect(claimed).toBe(false);
   });
@@ -2208,6 +2211,7 @@ describe('claimBuildForStartWithinLimit', () => {
       userId: user.id,
       projectId: project.id,
       limit: 0,
+      instanceType: 'standard-4',
     });
     expect(claimed).toBe(true);
     expect((await getBuild(env.db, queued.id))!.status).toBe('starting');
@@ -2232,6 +2236,7 @@ describe('claimBuildForStartWithinLimit', () => {
         userId: user.id,
         projectId: project.id,
         limit: 1,
+        instanceType: 'standard-4',
       }),
       createGithubActionsBuildWithinLimit(env.db, {
         projectId: project.id,

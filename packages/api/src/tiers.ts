@@ -118,30 +118,38 @@ export function getPlanLimits(plan: string): PlanLimits {
   return PLAN_LIMITS[plan as PlanId] ?? PLAN_LIMITS.free;
 }
 
+/** Build container for free plans: `standard-3` (2 vCPU / 8 GiB / 16 GB, `BuildManager`). */
+export const BUILD_INSTANCE_FREE = 'standard-3';
+/** Build container for paid plans: `standard-4` (4 vCPU / 12 GiB / 20 GB, `BuildManagerLarge`). */
+export const BUILD_INSTANCE_LARGE = 'standard-4';
+
 /** Container instance size used for a plan's deploy builds. */
-export type BuildInstanceType = 'standard-1' | 'standard-2' | 'standard-3';
+export type BuildInstanceType = typeof BUILD_INSTANCE_FREE | typeof BUILD_INSTANCE_LARGE;
 
 /**
- * Returns the build container instance type for a plan, defaulting to standard-1.
+ * Returns the build container instance type for a plan, defaulting to the free
+ * (smaller, cheaper) container.
  *
- * NOTE: this is metadata-only. `@cloudflare/containers@0.3.3` `start()` accepts no
- * per-start instance-size option, so this value cannot actually size a container at
- * launch — it is only recorded into the `builds.instance_type` DB column for
- * observability (and a possible future multi-DO-class design). The ACTUAL instance
- * size is the static `instance_type` in `wrangler.jsonc` (currently `standard-1`).
+ * This value is BOTH the persisted size-of-record (written to the
+ * `builds.instance_type` DB column) AND the routing key that selects which
+ * container-enabled DO class — and thus which static container size — the build
+ * runs on. `@cloudflare/containers@0.3.3` has no per-start sizing, so each size
+ * is a distinct DO class with a fixed `instance_type` in wrangler.jsonc;
+ * `buildManagerNamespace` (build-namespace.ts) maps this value to the class:
+ * `BUILD_INSTANCE_LARGE` → `BuildManagerLarge` (standard-4), everything else →
+ * the base `BuildManager` (standard-3).
  */
 export function getBuildInstanceType(plan: PlanId): BuildInstanceType {
   switch (plan) {
     case 'free':
+      return BUILD_INSTANCE_FREE;
     case 'solo':
-      return 'standard-1';
     case 'pro':
-      return 'standard-2';
     case 'sponsored':
     case 'custom':
-      return 'standard-3';
+      return BUILD_INSTANCE_LARGE;
     default:
-      return 'standard-1';
+      return BUILD_INSTANCE_FREE;
   }
 }
 

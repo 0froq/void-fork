@@ -450,10 +450,14 @@ describe('builds', () => {
     const otherProject = await createTestProject(env.db, user.id);
 
     // Cancelled: queued/starting/building/deploying, both executors.
+    // Stamp a known instance_type on this one so the returned object's
+    // instance_type can be asserted to round-trip (the post-commit DO teardown
+    // needs it to address the right container-size namespace).
     const queuedContainer = await createBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       status: 'queued',
+      instanceType: 'standard-4',
     });
     const startingContainer = await createBuild(env.db, {
       projectId: project.id,
@@ -500,6 +504,11 @@ describe('builds', () => {
     expect(cancelled.every((b) => b.status === 'cancelled')).toBe(true);
     expect(cancelled.filter((b) => b.executor === 'container')).toHaveLength(3);
     expect(cancelled.filter((b) => b.executor === 'github_actions')).toHaveLength(1);
+    // instance_type is carried out so the caller can address the right
+    // container-size namespace; the stamped build round-trips its value, the
+    // unstamped ones surface null.
+    expect(cancelled.find((b) => b.id === queuedContainer.id)?.instance_type).toBe('standard-4');
+    expect(cancelled.find((b) => b.id === startingContainer.id)?.instance_type).toBeNull();
 
     for (const id of [
       queuedContainer.id,
@@ -650,7 +659,7 @@ describe('builds', () => {
     // The returned `status` reflects the post-UPDATE row (RETURNING returns new
     // values), so the superseded build reports `cancelled`.
     expect(superseded.cancelled).toEqual([
-      { id: created.build!.id, executor: 'container', status: 'cancelled' },
+      { id: created.build!.id, executor: 'container', status: 'cancelled', instance_type: null },
     ]);
     const cancelledAaa = await getBuild(env.db, created.build!.id);
     expect(cancelledAaa!.status).toBe('cancelled');
@@ -826,7 +835,9 @@ describe('builds', () => {
     expect(rollback.build!.status).toBe('queued');
     expect(rollback.build!.commit_sha).toBe('C1');
     // The newer active B2 is in the cancelled set with its post-UPDATE status.
-    expect(rollback.cancelled).toEqual([{ id: b2.id, executor: 'container', status: 'cancelled' }]);
+    expect(rollback.cancelled).toEqual([
+      { id: b2.id, executor: 'container', status: 'cancelled', instance_type: null },
+    ]);
     const cancelledB2 = await getBuild(env.db, b2.id);
     expect(cancelledB2!.status).toBe('cancelled');
     expect(cancelledB2!.error).toBe('superseded by newer push');
@@ -1047,7 +1058,7 @@ describe('builds', () => {
     // The returned `status` reflects the post-UPDATE row (RETURNING returns new
     // values), so the cancelled active build reports `cancelled`, not `building`.
     expect(result.cancelled).toEqual([
-      { id: active.id, executor: 'container', status: 'cancelled' },
+      { id: active.id, executor: 'container', status: 'cancelled', instance_type: null },
     ]);
     const updated = await getBuild(env.db, active.id);
     expect(updated!.status).toBe('cancelled');
@@ -1546,11 +1557,14 @@ describe('builds', () => {
     const project = await createTestProject(env.db, user.id);
 
     // Over-age active container build: started 90 min ago (> 75 min cutoff).
+    // Stamp a known instance_type so the reaped object round-trips it out — the
+    // scheduled reaper needs it to address the right container-size namespace.
     const stale = await createBuild(env.db, {
       projectId: project.id,
       userId: user.id,
       executor: 'container',
       status: 'building',
+      instanceType: 'standard-4',
     });
     await env.db
       .update(builds)
@@ -1571,10 +1585,11 @@ describe('builds', () => {
 
     expect(await countUserActiveBuilds(env.db, user.id)).toBe(2);
 
-    // Returns the reaped ids (not just a count) so the scheduled handler can
-    // best-effort stop the still-alive containers via BuildManager.
+    // Returns the reaped builds (not just a count, and now each with its
+    // instance_type) so the scheduled handler can best-effort stop the
+    // still-alive containers via the correctly-sized BuildManager namespace.
     const reaped = await failStaleActiveContainerBuilds(env.db, 75);
-    expect(reaped).toEqual([stale.id]);
+    expect(reaped).toEqual([{ id: stale.id, instance_type: 'standard-4' }]);
 
     const staleRow = await getBuild(env.db, stale.id);
     expect(staleRow?.status).toBe('failed');
@@ -1759,6 +1774,7 @@ describe('builds', () => {
         userId: user.id,
         projectId: project.id,
         limit,
+        instanceType: 'standard-4',
       }),
     ).toBe(true);
     expect((await getBuild(env.db, a.id))!.status).toBe('starting');
@@ -1771,6 +1787,7 @@ describe('builds', () => {
         userId: user.id,
         projectId: project.id,
         limit,
+        instanceType: 'standard-4',
       }),
     ).toBe(false);
     expect((await getBuild(env.db, b.id))!.status).toBe('queued');
@@ -1786,6 +1803,7 @@ describe('builds', () => {
         userId: user.id,
         projectId: project.id,
         limit,
+        instanceType: 'standard-4',
       }),
     ).toBe(true);
     expect((await getBuild(env.db, b.id))!.status).toBe('starting');
@@ -1808,6 +1826,7 @@ describe('builds', () => {
         userId: user.id,
         projectId: projectA.id,
         limit,
+        instanceType: 'standard-4',
       }),
     ).toBe(true);
     expect(
@@ -1816,11 +1835,48 @@ describe('builds', () => {
         userId: user.id,
         projectId: projectB.id,
         limit,
+        instanceType: 'standard-4',
       }),
     ).toBe(true);
 
     expect((await getBuild(env.db, a.id))!.status).toBe('starting');
     expect((await getBuild(env.db, b.id))!.status).toBe('starting');
+  });
+
+  it('claimBuildForStartWithinLimit persists the effective instance_type at claim time', async () => {
+    // Regression: the scheduler routes the container START on the effective
+    // instance_type (a paid/legacy-null row recomputes standard-4 and runs on
+    // BUILD_MANAGER_LARGE), but the claim used to SET only status/started_at,
+    // leaving instance_type NULL until onStart back-filled it. A cancel/reap in
+    // the START->onStart window then read the still-NULL value and addressed the
+    // WRONG (base) namespace, leaking the paid container. The claim must persist
+    // the effective size in the SAME tx so the size-of-record is correct the
+    // instant the row goes `starting`.
+    const user = await createTestUser(env.db, 'claiminst', 'github', undefined, 'pro');
+    const project = await createTestProject(env.db, user.id);
+    // A legacy row with no persisted instance_type (queued before enqueue-
+    // persistence). The scheduler recomputes standard-4 from the paid plan.
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      instanceType: null,
+    });
+    expect((await getBuild(env.db, build.id))!.instance_type).toBeNull();
+
+    const claimed = await claimBuildForStartWithinLimit(env.db, {
+      buildId: build.id,
+      userId: user.id,
+      projectId: project.id,
+      limit: 3,
+      instanceType: 'standard-4',
+    });
+    expect(claimed).toBe(true);
+
+    // The effective size is persisted at CLAIM time — before any onStart — so a
+    // cancel/reap in the start window addresses BUILD_MANAGER_LARGE, not base.
+    const row = await getBuild(env.db, build.id);
+    expect(row!.status).toBe('starting');
+    expect(row!.instance_type).toBe('standard-4');
   });
 
   it('updateBuildStatus sets terminal metadata and leaves untouched fields alone', async () => {
@@ -1891,6 +1947,7 @@ describe('builds', () => {
       userId: user.id,
       executor: 'container',
       status: 'building',
+      instanceType: 'standard-4',
     });
     const actions = await createBuild(env.db, {
       projectId: project.id,
@@ -1908,6 +1965,9 @@ describe('builds', () => {
     expect(cancelledBuilds.map((b) => b.id).sort()).toEqual([container.id, actions.id].sort());
     expect(cancelledBuilds.find((b) => b.id === container.id)?.executor).toBe('container');
     expect(cancelledBuilds.find((b) => b.id === actions.id)?.executor).toBe('github_actions');
+    // instance_type round-trips so teardownProject stops the container DO on the
+    // correctly-sized BuildManager namespace.
+    expect(cancelledBuilds.find((b) => b.id === container.id)?.instance_type).toBe('standard-4');
     // The rows are deleted by the cascade.
     expect(await getProjectBuilds(env.db, project.id)).toEqual([]);
   });

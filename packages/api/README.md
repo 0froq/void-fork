@@ -13,7 +13,7 @@ It owns platform auth, projects, deployments, domains, secrets, provisioning, ro
 - **Background work**:
   - `scheduled()` for periodic usage enforcement and rollover checks
   - `queue()` for usage-event ingestion
-- **Deploy on GitHub**: GitHub App install/connect, webhook-driven builds, and GitHub Actions OIDC. Builds run in a `BuildManager` Cloudflare Container (default) or via GitHub Actions, queued and concurrency-gated by the `BuildScheduler` Durable Object
+- **Deploy on GitHub**: GitHub App install/connect, webhook-driven builds, and GitHub Actions OIDC. Builds run in a Cloudflare Container (default; one of two plan-sized DO classes, `BuildManager` or `BuildManagerLarge`) or via GitHub Actions, queued and concurrency-gated by the `BuildScheduler` Durable Object
 
 ## Source Layout
 
@@ -30,9 +30,10 @@ src/
   cron-scheduler.ts           # Durable Object for project crons
   usage-counter.ts            # Durable Object for per-user usage counters
   usage-queue.ts              # Queue consumer logic
-  tiers.ts                    # Plan limits + helpers (incl. concurrentBuilds, buildTimeoutMinutes, getBuildInstanceType)
+  tiers.ts                    # Plan limits + helpers (incl. concurrentBuilds, buildTimeoutMinutes; getBuildInstanceType selects the build-container size/class by plan)
   build-scheduler.ts          # Durable Object: global build queue + per-tier concurrency
-  build-manager.ts            # Durable Object (extends @cloudflare/containers Container): per-build container
+  build-manager.ts            # Durable Objects (extend @cloudflare/containers Container): BuildManager (free standard-3 = 2/8/16) + BuildManagerLarge (paid standard-4)
+  build-namespace.ts          # buildManagerNamespace: maps builds.instance_type -> the BuildManager/BuildManagerLarge DO class
   build-types.ts              # BuildConfig, BuildLogLine
   github/                     # GitHub App crypto: app-jwt, installation-token, webhook-verify, oidc-verify
   provisioning/               # Worker/resource provisioning + cleanup
@@ -159,7 +160,7 @@ Connect a repo through a GitHub App; a `git push` then builds and deploys automa
 - **Connect**: the user installs the App (`/github/install-url` -> `/github/callback`) and links a repo to a project via `/projects/:id/github`. Installation-to-user mapping lives in `github_installations`; the OAuth callback backfills it on sign-in.
 - **Trigger**: `POST /webhooks/github` verifies the HMAC signature, then on `push` writes a `builds` row and pokes the `BuildScheduler`.
 - **Executors** (per `github_connections.build_executor`, default `container`):
-  - **CF Container** — `BuildScheduler` (global, alarm-driven queue with per-tier concurrency from `tiers.ts`) atomically claims a build and RPCs `BuildManager` to start a container. `BuildManager` extends `@cloudflare/containers` `Container`, enforces a timeout alarm, and persists status to Postgres via Hyperdrive.
+  - **CF Container** — `BuildScheduler` (global, alarm-driven queue with per-tier concurrency from `tiers.ts`) atomically claims a build and starts a container on one of two classes by the owner's plan: `BuildManager` (free, `standard-3` = 2 vCPU / 8 GiB / 16 GB) or `BuildManagerLarge` (paid, `standard-4` = 4 vCPU / 12 GiB / 20 GB, Cloudflare's max per-container size). The class is routed by the persisted `builds.instance_type` (`standard-3` / `standard-4`, derived from the plan by `getBuildInstanceType`) via `buildManagerNamespace` in `build-namespace.ts`; cancel and reaper paths use the same picker, so they address the same class the build started on. `BuildManagerLarge` extends `BuildManager`, which extends `@cloudflare/containers` `Container`, enforces a timeout alarm, and persists status to Postgres via Hyperdrive.
   - **GitHub Actions** — `void init --github` scaffolds a workflow that calls `POST /auth/github-oidc`; the verified job runs `void deploy` and reports back via the `workflow_run` webhook.
 - **Build mechanism**: both executors run the real `void deploy` CLI with a short-lived, project-scoped deploy token (`aud: "deploy"`, minted by `auth/deploy-token.ts`). There is no artifact-upload endpoint; `routes/deploy.ts` is unchanged. The container agent (`container/build-agent.mjs`) downloads the source tarball, installs deps, and runs `npx void deploy --project <slug>` with `VOID_TOKEN` + `VOID_API_URL`.
 - **Check Run**: container builds publish a "Void Build" GitHub Check Run (head SHA = the build's `commit_sha`/webhook `after`), created `in_progress` at build start and finalized `success`/`failure`/`cancelled` at every terminal site. Best-effort — a Check Run API error never fails or perturbs a build/deploy. `details_url` is the project's dashboard URL `https://{projectSlug}.void.app` for the in-progress/success/failure states (omitted on cancel). The helper (`github/check-run.ts`) is executor-agnostic; Actions check-runs are deferred (the native workflow check already covers them) and the helper is ready for a future PR. `Checks: Write` is already granted, so no permission change was needed. `builds.check_run_id` has no index (nothing queries by it — deferred).

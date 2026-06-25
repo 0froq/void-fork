@@ -15,13 +15,13 @@ How we deploy, what we provision, and how the system is configured.
 
 Five Cloudflare Workers:
 
-| Worker           | Package              | Purpose                                                                                                                                                                                                                  |
-| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `void-proxy`     | `packages/proxy`     | Unified proxy — AI inference metering + D1/KV/R2 remote bindings for local dev                                                                                                                                           |
-| `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering; also hosts the `BuildScheduler` + `BuildManager` Durable Objects and a build container for Deploy-on-GitHub container builds |
-| `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                                                                                                                           |
-| `void-tail`      | `packages/tail`      | Tail worker — captures user worker logs to Analytics Engine + live tailing via Durable Object WebSockets                                                                                                                 |
-| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` + custom domain traffic to user workers (via Workers for Platforms), static assets, and ISR cache                                                                                      |
+| Worker           | Package              | Purpose                                                                                                                                                                                                                                                                                                                                           |
+| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `void-proxy`     | `packages/proxy`     | Unified proxy — AI inference metering + D1/KV/R2 remote bindings for local dev                                                                                                                                                                                                                                                                    |
+| `void-api`       | `packages/api`       | Control Plane API + Admin Dashboard — OAuth, project CRUD, deploy pipeline, usage metering; also hosts the `BuildScheduler` Durable Object and two Deploy-on-GitHub build-container DO classes sized by plan: `BuildManager` (free, `standard-3` = 2 vCPU / 8 GiB / 16 GB) and `BuildManagerLarge` (paid, `standard-4` = 4 vCPU / 12 GiB / 20 GB) |
+| `void-dashboard` | `packages/dashboard` | User-facing dashboard — project management, deployments, usage                                                                                                                                                                                                                                                                                    |
+| `void-tail`      | `packages/tail`      | Tail worker — captures user worker logs to Analytics Engine + live tailing via Durable Object WebSockets                                                                                                                                                                                                                                          |
+| `void-dispatch`  | `packages/dispatch`  | Edge router — routes `*.void.app` + custom domain traffic to user workers (via Workers for Platforms), static assets, and ISR cache                                                                                                                                                                                                               |
 
 ## Environments
 
@@ -327,10 +327,10 @@ Webhook URLs (one App, both environments):
 **Build executors.** A connected repo builds in one of two ways, selected per
 connection (`github_connections.build_executor`, default `container`):
 
-| Executor         | How it runs                                                                                                    |
-| ---------------- | -------------------------------------------------------------------------------------------------------------- |
-| `container`      | Cloudflare Container driven by the `BuildManager` Durable Object — runs the real `void deploy` CLI in-cloud    |
-| `github_actions` | GitHub Actions in the user's repo; the workflow authenticates back via GitHub OIDC at `POST /auth/github-oidc` |
+| Executor         | How it runs                                                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `container`      | Cloudflare Container driven by a `BuildManager`/`BuildManagerLarge` Durable Object (size by plan) — runs the real `void deploy` CLI in-cloud |
+| `github_actions` | GitHub Actions in the user's repo; the workflow authenticates back via GitHub OIDC at `POST /auth/github-oidc`                               |
 
 Container builds are queued and rate-limited per plan tier by the
 `BuildScheduler` Durable Object (see `packages/api/src/tiers.ts` for
@@ -338,22 +338,31 @@ Container builds are queued and rate-limited per plan tier by the
 secret — the workflow scaffolded by `void init --github` mints a short-lived
 scoped `VOID_TOKEN` from its OIDC identity.
 
-**Build container sizing (`packages/api/wrangler.jsonc` `containers[]`).** The
-`BuildManager` container runs at `instance_type: standard-1` (1/2 vCPU, 4 GiB,
-8 GB disk) — the floor for an `install` + Vite production build; the Wrangler
-default (`lite`, 256 MiB) OOMs. The per-plan `standard-*` sizing in
-`tiers.ts:getBuildInstanceType` is **metadata-only** (recorded into
-`builds.instance_type` for observability) — `@cloudflare/containers@0.3.3` cannot
-size a container per-start, so every build uses the static `standard-1` regardless
-of plan. `rollout_active_grace_period: 3900` (65 min = the 60-min
+**Build container sizing (`packages/api/wrangler.jsonc` `containers[]`).** Builds
+run on one of two container sizes by the project owner's plan. Free plans use the
+`BuildManager` class at `instance_type: standard-3` = 2 vCPU / 8 GiB / 16 GB disk
+(a big step up from the Wrangler default `lite`, 256 MiB, which OOMs on an
+`install` + Vite production build). Paid plans (solo / pro / sponsored / custom) use
+the `BuildManagerLarge` class at `instance_type: standard-4` = 4 vCPU / 12 GiB / 20 GB
+— Cloudflare's max per-container size, so paid builds cannot go bigger (custom
+instance types are bounded by `standard-4`, and also require ≥3 GiB memory per
+vCPU, which is why free runs `standard-3` rather than a 4-vCPU / 8 GiB custom box).
+`@cloudflare/containers@0.3.3` cannot size a container per-start, so each size is a
+distinct container-enabled DO class with a fixed `instance_type`; the routing key is
+the persisted `builds.instance_type` (`standard-3` / `standard-4`), derived from the plan by
+`tiers.ts:getBuildInstanceType` and mapped to the DO class by
+`build-namespace.ts:buildManagerNamespace`. The scheduler, cancel, and reaper
+paths all use that picker so they address the same class. GitHub Actions builds
+run on GitHub runners (no container) and have no `instance_type`.
+`rollout_active_grace_period: 3900` (65 min = the 60-min
 `DEPLOY_TOKEN_HARD_MAX_MINUTES` build cap + 5 min margin) keeps an in-flight build
 from being SIGTERM'd when an `api`-worker deploy re-rolls the container app (the
-`api` worker hosts `BuildManager` and is the first step of every deploy). Tradeoff:
-a routine `api` rollout can be delayed up to ~65 min **if** a max-length build is in
-flight when the container app re-rolls; a shorter grace would let rollouts finish
-sooner but risks killing rare long builds. Both values (instance size = billing
-cost; grace = rollout-delay tradeoff) are cost/product decisions — revisit if build
-durations or rollout cadence change.
+`api` worker hosts both build-container classes and is the first step of every
+deploy). Tradeoff: a routine `api` rollout can be delayed up to ~65 min **if** a
+max-length build is in flight when the container app re-rolls; a shorter grace
+would let rollouts finish sooner but risks killing rare long builds. Both knobs
+(instance size = billing cost; grace = rollout-delay tradeoff) are cost/product
+decisions — revisit if build durations or rollout cadence change.
 
 ### CLI Staging Mode
 

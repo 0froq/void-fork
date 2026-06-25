@@ -26,6 +26,10 @@ type FakeBuild = {
   // this against the connection's `build_executor`. Defaults to 'container' (the
   // only executor the scheduler drains).
   executor?: 'container' | 'github_actions';
+  // Container size of record persisted on the row at enqueue. START prefers this
+  // over a plan recompute; null models a legacy row queued before
+  // enqueue-persistence (START recomputes from the owner's plan).
+  instance_type?: string | null;
   // Optional wall-clock age used by the fake getQueuedBuilds to model the real
   // helper's age-fair ordering. Larger = older. Defaults to insertion order.
   age?: number;
@@ -73,6 +77,7 @@ const db = {
     userId: string;
     projectId: string;
     limit: number;
+    instanceType: string;
   }>,
 };
 
@@ -118,7 +123,13 @@ vi.mock('../../src/db.ts', () => ({
   claimBuildForStartWithinLimit: vi.fn(
     async (
       _db: unknown,
-      args: { buildId: string; userId: string; projectId: string; limit: number },
+      args: {
+        buildId: string;
+        userId: string;
+        projectId: string;
+        limit: number;
+        instanceType: string;
+      },
     ) => {
       db.claimArgs.push(args);
       const active = db.activeByUser.get(args.userId) ?? 0;
@@ -186,6 +197,7 @@ import {
   getGitHubConnection,
   getQueuedBuilds,
   markBuildTerminalIfActive,
+  requeueBuildIfStarting,
 } from '../../src/db.ts';
 import type { ApiEnv } from '../../src/env.ts';
 
@@ -209,15 +221,40 @@ function makeStubCtx() {
   };
 }
 
-function makeEnv(startBuild: ReturnType<typeof vi.fn>) {
-  const stub = { startBuild };
-  const idFromName = vi.fn((name: string) => ({ name }));
-  const get = vi.fn(() => stub);
+// Two distinct DO namespaces — base (free `standard-3`) and large (paid
+// `standard-4`) — each with its own idFromName/get/startBuild spies so a test can
+// assert WHICH namespace the scheduler routed a build's container start to.
+//
+// Single-arg form `makeEnv(startBuild)`: BOTH namespaces invoke the SAME
+// `startBuild`, so every pre-existing assertion on `startBuild` keeps working
+// regardless of which namespace handled the build.
+//
+// Per-namespace form `makeEnv({ base, large })`: each fleet gets its OWN
+// startBuild spy, so a test can make ONE fleet throw the container-capacity error
+// while the other still starts — proving capacity shedding is per-namespace, not
+// a global break.
+function makeEnv(
+  arg:
+    | ReturnType<typeof vi.fn>
+    | { base: ReturnType<typeof vi.fn>; large: ReturnType<typeof vi.fn> },
+) {
+  const baseStart = typeof arg === 'function' ? arg : arg.base;
+  const largeStart = typeof arg === 'function' ? arg : arg.large;
+  function makeNamespace(startBuild: ReturnType<typeof vi.fn>) {
+    const stub = { startBuild };
+    const idFromName = vi.fn((name: string) => ({ name }));
+    const get = vi.fn(() => stub);
+    return { idFromName, get };
+  }
+  const BUILD_MANAGER = makeNamespace(baseStart);
+  const BUILD_MANAGER_LARGE = makeNamespace(largeStart);
   return {
     HYPERDRIVE: { connectionString: 'postgres://fake' },
-    BUILD_MANAGER: { idFromName, get },
+    BUILD_MANAGER,
+    BUILD_MANAGER_LARGE,
   } as unknown as ApiEnv['Bindings'] & {
-    BUILD_MANAGER: { idFromName: typeof idFromName; get: typeof get };
+    BUILD_MANAGER: typeof BUILD_MANAGER;
+    BUILD_MANAGER_LARGE: typeof BUILD_MANAGER_LARGE;
   };
 }
 
@@ -355,8 +392,8 @@ describe('BuildScheduler.alarm', () => {
     expect(cfg.login).toBe('octocat');
     expect(cfg.repoFullName).toBe('owner/repo');
     expect(cfg.installationId).toBe('inst1');
-    // free plan → standard-1, 10 min
-    expect(cfg.instanceType).toBe('standard-1');
+    // free plan → standard-3, 10 min
+    expect(cfg.instanceType).toBe('standard-3');
     expect(cfg.timeoutMinutes).toBe(10);
     // BUILD_MANAGER keyed by build id.
     expect(
@@ -366,7 +403,9 @@ describe('BuildScheduler.alarm', () => {
     // the cap + claim went through the single atomic primitive holding the
     // per-user FOR UPDATE lock, with the plan's concurrency cap (free = 1).
     expect(claimBuildForStartWithinLimit).toHaveBeenCalledOnce();
-    expect(db.claimArgs).toEqual([{ buildId: 'b1', userId: 'u1', projectId: 'p1', limit: 1 }]);
+    expect(db.claimArgs).toEqual([
+      { buildId: 'b1', userId: 'u1', projectId: 'p1', limit: 1, instanceType: 'standard-3' },
+    ]);
   });
 
   it('enforces per-user tier concurrency (free plan = 1)', async () => {
@@ -411,8 +450,8 @@ describe('BuildScheduler.alarm', () => {
 
     // Both builds went through the atomic primitive (FIFO scan preserved).
     expect(db.claimArgs).toEqual([
-      { buildId: 'b1', userId: 'u1', projectId: 'p1', limit: 3 },
-      { buildId: 'b2', userId: 'u1', projectId: 'p2', limit: 3 },
+      { buildId: 'b1', userId: 'u1', projectId: 'p1', limit: 3, instanceType: 'standard-4' },
+      { buildId: 'b2', userId: 'u1', projectId: 'p2', limit: 3, instanceType: 'standard-4' },
     ]);
     // Only the claimed build (b1) was started.
     expect(startBuild).toHaveBeenCalledOnce();
@@ -434,7 +473,98 @@ describe('BuildScheduler.alarm', () => {
 
     expect(startBuild).toHaveBeenCalledOnce();
     const cfg = startBuild.mock.calls[0][0] as unknown as { instanceType: string };
-    expect(cfg.instanceType).toBe('standard-2');
+    expect(cfg.instanceType).toBe('standard-4');
+  });
+
+  it('routes a PAID-plan build to the BUILD_MANAGER_LARGE namespace (not BUILD_MANAGER)', async () => {
+    // A paid plan (pro) with no persisted instance_type recomputes standard-4 and
+    // must start its container on the LARGE DO class — never the base class.
+    db.users.set('u1', { plan: 'pro', login: 'octocat' });
+    enqueue({ id: 'b1', user_id: 'u1', project_id: 'p1' });
+    const startBuild = vi.fn(async (_cfg: unknown) => {});
+    const ctx = makeStubCtx();
+    const env = makeEnv(startBuild) as unknown as {
+      BUILD_MANAGER: { idFromName: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
+      BUILD_MANAGER_LARGE: { idFromName: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
+    };
+    const s = makeScheduler(ctx, env as unknown as ApiEnv['Bindings']);
+
+    await s.alarm();
+
+    expect(startBuild).toHaveBeenCalledOnce();
+    // The container start went through the LARGE namespace, keyed by build id.
+    expect(env.BUILD_MANAGER_LARGE.idFromName).toHaveBeenCalledWith('b1');
+    expect(env.BUILD_MANAGER_LARGE.get).toHaveBeenCalledOnce();
+    // The base namespace was NOT used for this build.
+    expect(env.BUILD_MANAGER.idFromName).not.toHaveBeenCalled();
+    expect(env.BUILD_MANAGER.get).not.toHaveBeenCalled();
+  });
+
+  it('routes a FREE-plan build to the BUILD_MANAGER namespace (not BUILD_MANAGER_LARGE)', async () => {
+    db.users.set('u1', { plan: 'free', login: 'octocat' });
+    enqueue({ id: 'b1', user_id: 'u1', project_id: 'p1' });
+    const startBuild = vi.fn(async (_cfg: unknown) => {});
+    const ctx = makeStubCtx();
+    const env = makeEnv(startBuild) as unknown as {
+      BUILD_MANAGER: { idFromName: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
+      BUILD_MANAGER_LARGE: { idFromName: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
+    };
+    const s = makeScheduler(ctx, env as unknown as ApiEnv['Bindings']);
+
+    await s.alarm();
+
+    expect(startBuild).toHaveBeenCalledOnce();
+    expect(env.BUILD_MANAGER.idFromName).toHaveBeenCalledWith('b1');
+    expect(env.BUILD_MANAGER.get).toHaveBeenCalledOnce();
+    expect(env.BUILD_MANAGER_LARGE.idFromName).not.toHaveBeenCalled();
+    expect(env.BUILD_MANAGER_LARGE.get).not.toHaveBeenCalled();
+  });
+
+  it('routes by the PERSISTED instance_type (standard-4) even when the owner plan would recompute smaller', async () => {
+    // Persisted value is the single source of truth: a row stamped standard-4 at
+    // enqueue routes LARGE even if the owner's plan has since dropped to free
+    // (which would recompute standard-3). A plan change can't relocate an
+    // in-flight build's container size.
+    db.users.set('u1', { plan: 'free', login: 'octocat' });
+    enqueue({ id: 'b1', user_id: 'u1', project_id: 'p1', instance_type: 'standard-4' });
+    const startBuild = vi.fn(async (_cfg: unknown) => {});
+    const ctx = makeStubCtx();
+    const env = makeEnv(startBuild) as unknown as {
+      BUILD_MANAGER: { idFromName: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
+      BUILD_MANAGER_LARGE: { idFromName: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
+    };
+    const s = makeScheduler(ctx, env as unknown as ApiEnv['Bindings']);
+
+    await s.alarm();
+
+    expect(startBuild).toHaveBeenCalledOnce();
+    const cfg = startBuild.mock.calls[0][0] as unknown as { instanceType: string };
+    expect(cfg.instanceType).toBe('standard-4');
+    expect(env.BUILD_MANAGER_LARGE.idFromName).toHaveBeenCalledWith('b1');
+    expect(env.BUILD_MANAGER.idFromName).not.toHaveBeenCalled();
+  });
+
+  it('recomputes from the plan for a legacy null instance_type row (paid plan → LARGE)', async () => {
+    // A row queued before enqueue-persistence has instance_type === null. START
+    // falls back to a plan recompute; a paid plan recomputes standard-4 and routes
+    // LARGE (and the config carries standard-4 so onStart's CAS back-fills it).
+    db.users.set('u1', { plan: 'pro', login: 'octocat' });
+    enqueue({ id: 'b1', user_id: 'u1', project_id: 'p1', instance_type: null });
+    const startBuild = vi.fn(async (_cfg: unknown) => {});
+    const ctx = makeStubCtx();
+    const env = makeEnv(startBuild) as unknown as {
+      BUILD_MANAGER: { idFromName: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
+      BUILD_MANAGER_LARGE: { idFromName: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
+    };
+    const s = makeScheduler(ctx, env as unknown as ApiEnv['Bindings']);
+
+    await s.alarm();
+
+    expect(startBuild).toHaveBeenCalledOnce();
+    const cfg = startBuild.mock.calls[0][0] as unknown as { instanceType: string };
+    expect(cfg.instanceType).toBe('standard-4');
+    expect(env.BUILD_MANAGER_LARGE.idFromName).toHaveBeenCalledWith('b1');
+    expect(env.BUILD_MANAGER.idFromName).not.toHaveBeenCalled();
   });
 
   it('skips a build whose atomic claim is lost (primitive returns false)', async () => {
@@ -537,7 +667,9 @@ describe('BuildScheduler.alarm', () => {
 
     // Only the eligible owner's build was claimed + started; the capped owner's
     // build was never even inspected (no claim attempt for b1).
-    expect(db.claimArgs).toEqual([{ buildId: 'b2', userId: 'u2', projectId: 'p2', limit: 1 }]);
+    expect(db.claimArgs).toEqual([
+      { buildId: 'b2', userId: 'u2', projectId: 'p2', limit: 1, instanceType: 'standard-3' },
+    ]);
     expect(startBuild).toHaveBeenCalledOnce();
     expect((startBuild.mock.calls[0][0] as { buildId: string }).buildId).toBe('b2');
   });
@@ -576,39 +708,116 @@ describe('BuildScheduler.alarm', () => {
     expect(armed).toBeGreaterThanOrEqual(now + 20_000);
   });
 
-  it('breaks the scan on the first capacity error (does not drain the rest of the batch)', async () => {
-    // startBuild does the GitHub branch-head compare + installation-token mint
-    // BEFORE the container start() throws capacity, so continuing to drain the
-    // batch at fleet capacity burns a GitHub/token round-trip per build for builds
-    // that will all hit the same full fleet. The scheduler must STOP at the first
-    // capacity error: only the build it already claimed (b1) is requeued, the rest
-    // of the batch (b2) is never claimed or started, and the alarm re-arms with the
-    // jittered capacity backoff.
-    db.users.set('u1', { plan: 'pro', login: 'octocat' });
-    // b1 is oldest (scanned first), b2 newer. Distinct projects so both would be
-    // startable absent the capacity shed.
-    enqueue({ id: 'b1', user_id: 'u1', project_id: 'p1', age: 2 });
-    enqueue({ id: 'b2', user_id: 'u1', project_id: 'p2', age: 1 });
-    const startBuild = vi.fn(async (_cfg: unknown) => {
+  it('per-namespace shedding: a FREE fleet capacity error does NOT stall a later PAID build on LARGE', async () => {
+    // Two independent container fleets. A FREE build hitting capacity on the base
+    // BUILD_MANAGER must NOT break the scan and stall a queued PAID build that
+    // targets the (non-saturated) BUILD_MANAGER_LARGE. The free build is requeued
+    // and its fleet marked saturated; the scan CONTINUES and the paid build still
+    // starts on LARGE.
+    db.users.set('uf', { plan: 'free', login: 'freeuser' });
+    db.users.set('up', { plan: 'pro', login: 'prouser' });
+    // b-free is oldest (scanned first) and routes to base; b-paid is newer and
+    // routes to LARGE. Distinct owners + projects so both are independently
+    // startable.
+    enqueue({ id: 'b-free', user_id: 'uf', project_id: 'pf', age: 2 });
+    enqueue({ id: 'b-paid', user_id: 'up', project_id: 'pp', age: 1 });
+    const base = vi.fn(async (_cfg: unknown) => {
       throw new Error('there is no container instance that can be provided to this durable object');
     });
+    const large = vi.fn(async (_cfg: unknown) => {});
     const ctx = makeStubCtx();
-    const env = makeEnv(startBuild);
+    const env = makeEnv({ base, large }) as unknown as ApiEnv['Bindings'] & {
+      BUILD_MANAGER: { idFromName: ReturnType<typeof vi.fn> };
+      BUILD_MANAGER_LARGE: { idFromName: ReturnType<typeof vi.fn> };
+    };
     const s = makeScheduler(ctx, env);
     const now = Date.now();
 
     await s.alarm();
 
-    // startBuild was attempted exactly once — for b1 — then the scan broke.
-    expect(startBuild).toHaveBeenCalledOnce();
-    expect((startBuild.mock.calls[0][0] as { buildId: string }).buildId).toBe('b1');
-    // b2 was NEVER claimed (the scan broke before reaching it).
-    expect(db.claimArgs).toEqual([{ buildId: 'b1', userId: 'u1', projectId: 'p1', limit: 3 }]);
-    // Only b1 (the claimed row) was requeued; nothing failed.
+    // The free build was attempted on base (and threw capacity); the paid build
+    // still started on LARGE — no global break.
+    expect(base).toHaveBeenCalledOnce();
+    expect((base.mock.calls[0][0] as { buildId: string }).buildId).toBe('b-free');
+    expect(large).toHaveBeenCalledOnce();
+    expect((large.mock.calls[0][0] as { buildId: string }).buildId).toBe('b-paid');
+    expect(env.BUILD_MANAGER_LARGE.idFromName).toHaveBeenCalledWith('b-paid');
+    // The shed free build was requeued (guarded CAS), nothing failed/dropped.
+    expect(db.requeued).toEqual(['b-free']);
+    expect(db.failed).toEqual([]);
+    // A fleet was saturated this tick → capacity backoff (>= now + 20s).
+    expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
+    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    expect(armed).toBeGreaterThanOrEqual(now + 20_000);
+  });
+
+  it('per-namespace shedding: a PAID fleet capacity error does NOT stall a later FREE build on base', async () => {
+    // The symmetric case: LARGE is full, base is not. A paid build hitting
+    // capacity on LARGE must not break the scan and stall a queued free build that
+    // targets the base BUILD_MANAGER.
+    db.users.set('up', { plan: 'pro', login: 'prouser' });
+    db.users.set('uf', { plan: 'free', login: 'freeuser' });
+    enqueue({ id: 'b-paid', user_id: 'up', project_id: 'pp', age: 2 }); // oldest → LARGE
+    enqueue({ id: 'b-free', user_id: 'uf', project_id: 'pf', age: 1 }); // newer → base
+    const base = vi.fn(async (_cfg: unknown) => {});
+    const large = vi.fn(async (_cfg: unknown) => {
+      throw new Error('there is no container instance that can be provided to this durable object');
+    });
+    const ctx = makeStubCtx();
+    const env = makeEnv({ base, large }) as unknown as ApiEnv['Bindings'] & {
+      BUILD_MANAGER: { idFromName: ReturnType<typeof vi.fn> };
+    };
+    const s = makeScheduler(ctx, env);
+    const now = Date.now();
+
+    await s.alarm();
+
+    // The paid build threw capacity on LARGE; the free build still started on base.
+    expect(large).toHaveBeenCalledOnce();
+    expect((large.mock.calls[0][0] as { buildId: string }).buildId).toBe('b-paid');
+    expect(base).toHaveBeenCalledOnce();
+    expect((base.mock.calls[0][0] as { buildId: string }).buildId).toBe('b-free');
+    expect(env.BUILD_MANAGER.idFromName).toHaveBeenCalledWith('b-free');
+    // The shed paid build was requeued; nothing failed/dropped.
+    expect(db.requeued).toEqual(['b-paid']);
+    expect(db.failed).toEqual([]);
+    // A fleet saturated → capacity backoff.
+    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    expect(armed).toBeGreaterThanOrEqual(now + 20_000);
+  });
+
+  it('skips a same-fleet build after that fleet saturated this tick (no second startBuild on the full fleet)', async () => {
+    // Once a fleet is marked saturated this tick, a LATER build targeting the SAME
+    // fleet is skipped up front — it is NOT claimed and startBuild is NOT attempted
+    // (which would burn another GitHub compare + token mint against the full fleet).
+    // Only the first build (which actually hit capacity) is claimed + requeued.
+    db.users.set('uf', { plan: 'free', login: 'freeuser' });
+    // Both route to base; distinct projects so both would be startable absent
+    // capacity. b1 oldest (hits capacity), b2 newer (same fleet → skipped).
+    enqueue({ id: 'b1', user_id: 'uf', project_id: 'p1', age: 2 });
+    enqueue({ id: 'b2', user_id: 'uf', project_id: 'p2', age: 1 });
+    const base = vi.fn(async (_cfg: unknown) => {
+      throw new Error('there is no container instance that can be provided to this durable object');
+    });
+    const large = vi.fn(async (_cfg: unknown) => {});
+    const ctx = makeStubCtx();
+    const env = makeEnv({ base, large });
+    const s = makeScheduler(ctx, env);
+    const now = Date.now();
+
+    await s.alarm();
+
+    // startBuild was attempted exactly once (b1); b2 was skipped before any claim.
+    expect(base).toHaveBeenCalledOnce();
+    expect((base.mock.calls[0][0] as { buildId: string }).buildId).toBe('b1');
+    // Only b1 was claimed; b2 (same saturated fleet) was never claimed or started.
+    expect(db.claimArgs).toEqual([
+      { buildId: 'b1', userId: 'uf', projectId: 'p1', limit: 1, instanceType: 'standard-3' },
+    ]);
+    // Only b1 (the claimed row) was requeued; b2 stays queued; nothing dropped.
     expect(db.requeued).toEqual(['b1']);
     expect(db.failed).toEqual([]);
-    // The alarm re-armed with the capacity backoff (>= now + 20s).
-    expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
+    // Capacity backoff applied because the base fleet saturated this tick.
     const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
     expect(armed).toBeGreaterThanOrEqual(now + 20_000);
   });
@@ -724,6 +933,61 @@ describe('BuildScheduler.alarm', () => {
     // so b1 — still `starting` in the DB — is reaped on a later tick instead of
     // the scheduler going dark.
     expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
+  });
+
+  // The capacity-shed requeue write (requeueBuildIfStarting) is itself a
+  // Hyperdrive/Postgres call. If it THROWS (transient outage), the error must not
+  // escape `alarm()` — that would (a) skip marking the fleet saturated, so later
+  // same-fleet builds would NOT be skipped, and (b) skip the tail re-arm/backoff,
+  // so the scheduler goes quiet while the row stays `starting` until the stale
+  // reaper. The fleet must be marked saturated BEFORE the (best-effort) requeue:
+  // swallow + log, keep the fleet saturated, keep draining the OTHER fleet, keep
+  // the backoff armed. Mirrors the generic-error branch's terminal-write guard.
+  it('keeps the fleet saturated and re-arms the backoff when the capacity requeue write throws (slot-safe)', async () => {
+    db.users.set('uf', { plan: 'free', login: 'freeuser' });
+    db.users.set('up', { plan: 'pro', login: 'prouser' });
+    // b-free (oldest → base) hits capacity; b-free2 (same owner-distinct project →
+    // base) targets the SAME fleet and must be skipped once base is saturated;
+    // b-paid (newer → LARGE) targets the OTHER fleet and must still start.
+    enqueue({ id: 'b-free', user_id: 'uf', project_id: 'pf', age: 3 });
+    enqueue({ id: 'b-free2', user_id: 'uf', project_id: 'pf2', age: 2 });
+    enqueue({ id: 'b-paid', user_id: 'up', project_id: 'pp', age: 1 });
+    const base = vi.fn(async (_cfg: unknown) => {
+      throw new Error('there is no container instance that can be provided to this durable object');
+    });
+    const large = vi.fn(async (_cfg: unknown) => {});
+    // The capacity branch's requeueBuildIfStarting hits a transient DB outage on
+    // the first (and only) capacity-shed build.
+    vi.mocked(requeueBuildIfStarting).mockRejectedValueOnce(new Error('hyperdrive timeout'));
+    const ctx = makeStubCtx();
+    const env = makeEnv({ base, large });
+    const s = makeScheduler(ctx, env);
+    const now = Date.now();
+
+    // (a) alarm() resolves — the requeue write error does not escape.
+    await expect(s.alarm()).resolves.toBeUndefined();
+
+    // (b) the base fleet was still treated as saturated despite the throw: the
+    // same-fleet b-free2 was skipped up front (never claimed, never started), so
+    // base.startBuild ran exactly once (b-free, which hit capacity).
+    expect(base).toHaveBeenCalledOnce();
+    expect((base.mock.calls[0][0] as { buildId: string }).buildId).toBe('b-free');
+    expect(db.claimArgs.some((a) => a.buildId === 'b-free2')).toBe(false);
+
+    // (c) the OTHER fleet still drained: the paid build started on LARGE.
+    expect(large).toHaveBeenCalledOnce();
+    expect((large.mock.calls[0][0] as { buildId: string }).buildId).toBe('b-paid');
+
+    // (d) the throw was swallowed, so the row was never recorded as requeued and
+    // nothing was failed/dropped (it stays `starting` for the stale reaper).
+    expect(db.requeued).toEqual([]);
+    expect(db.failed).toEqual([]);
+
+    // (e) the tail reschedule still ran with the capacity backoff (a fleet
+    // saturated this tick → >= now + 20s), so the scheduler does not go dark.
+    expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
+    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    expect(armed).toBeGreaterThanOrEqual(now + 20_000);
   });
 
   it('cancels a queued build whose branch no longer matches the connection (DiD)', async () => {

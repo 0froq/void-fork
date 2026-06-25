@@ -341,7 +341,14 @@ async function cleanupBestEffortResources(
 async function lockAndMarkDeleting(
   db: Db,
   projectId: string,
-): Promise<ReadonlyArray<{ id: string; executor: Build['executor']; status: Build['status'] }>> {
+): Promise<
+  ReadonlyArray<{
+    id: string;
+    executor: Build['executor'];
+    status: Build['status'];
+    instance_type: string | null;
+  }>
+> {
   return await db.transaction(async (tx) => {
     await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
     const txDb = tx as unknown as Db;

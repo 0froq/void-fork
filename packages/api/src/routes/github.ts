@@ -799,7 +799,11 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
         return { cancelled: [], updated: null, gone: true };
       }
 
-      const terminated: Array<{ id: string; executor: Build['executor'] }> = [];
+      const terminated: Array<{
+        id: string;
+        executor: Build['executor'];
+        instance_type: string | null;
+      }> = [];
       if (newBranch !== undefined && newBranch !== current.branch) {
         terminated.push(
           ...(await terminateBuildsForProject(txDb, projectId, {

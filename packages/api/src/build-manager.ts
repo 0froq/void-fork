@@ -1203,3 +1203,13 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     }
   }
 }
+
+/**
+ * Larger build container for paid plans. Identical behavior to BuildManager —
+ * it exists only as a distinct container-enabled DO class so wrangler.jsonc can
+ * bind it to a bigger static `instance_type` (standard-4). @cloudflare/containers
+ * has no per-start sizing, so a second class is the only way to offer a second
+ * container size. Routing (which class a build uses) is decided elsewhere by the
+ * build's persisted instance_type.
+ */
+export class BuildManagerLarge extends BuildManager {}

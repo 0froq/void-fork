@@ -46,6 +46,7 @@ function makeBindings(e: TestEnv) {
     SANDBOX_CONCURRENCY_COUNTER: e.SANDBOX_CONCURRENCY_COUNTER,
     BUILD_SCHEDULER: e.BUILD_SCHEDULER,
     BUILD_MANAGER: e.BUILD_MANAGER,
+    BUILD_MANAGER_LARGE: e.BUILD_MANAGER_LARGE,
     CRON_FIRES_QUEUE: { send: async () => {}, sendBatch: async () => {} } as unknown as Queue<
       import('../../src/cron-fires-queue.ts').CronFireMessage
     >,
@@ -242,33 +243,59 @@ describe('scheduled()', () => {
   describe('stale container reaper', () => {
     function cancelSpyBindings(e: TestEnv): {
       bindings: ReturnType<typeof makeBindings>;
-      cancels: Array<{ id: string; reason: string }>;
+      // Separate recorders per size so a routing assertion can prove the reaper
+      // forwarded each build's instance_type and addressed the right class.
+      baseCancels: Array<{ id: string; reason: string }>;
+      largeCancels: Array<{ id: string; reason: string }>;
     } {
-      const cancels: Array<{ id: string; reason: string }> = [];
-      const spyManager = {
-        // cancelContainerBuildDos resolves the DO by `idFromName(build.id)`, so
-        // round-trip the build id through the stub name to assert it later.
-        idFromName: (name: string) => ({ toString: () => name }),
-        get: (idObj: { toString: () => string }) => ({
-          cancelBuild: async (reason: string) => {
-            cancels.push({ id: idObj.toString(), reason });
-          },
-        }),
-      } as unknown as DurableObjectNamespace;
-      return { bindings: { ...makeBindings(e), BUILD_MANAGER: spyManager }, cancels };
+      const baseCancels: Array<{ id: string; reason: string }> = [];
+      const largeCancels: Array<{ id: string; reason: string }> = [];
+      // cancelContainerBuildDos resolves the DO by `idFromName(build.id)`, so
+      // round-trip the build id through the stub name to assert it later.
+      const makeSpy = (sink: Array<{ id: string; reason: string }>) =>
+        ({
+          idFromName: (name: string) => ({ toString: () => name }),
+          get: (idObj: { toString: () => string }) => ({
+            cancelBuild: async (reason: string) => {
+              sink.push({ id: idObj.toString(), reason });
+            },
+          }),
+        }) as unknown as DurableObjectNamespace;
+      return {
+        bindings: {
+          ...makeBindings(e),
+          BUILD_MANAGER: makeSpy(baseCancels),
+          BUILD_MANAGER_LARGE: makeSpy(largeCancels),
+        },
+        baseCancels,
+        largeCancels,
+      };
     }
 
-    it('triggers a BuildManager cancel for each stale active container build', async () => {
+    it('triggers a BuildManager cancel for each stale active container build on the correctly-sized namespace', async () => {
       const { id } = await createTestUser(env.db, 'stale-container', 'github', undefined, 'free');
       const proj = await createTestProject(env.db, id);
 
-      // Over-age active container build (started 90 min ago > 75 min cutoff).
+      // Over-age active PAID (standard-4) container build (> 75 min cutoff). Its
+      // cancel must land on BUILD_MANAGER_LARGE, NOT the base namespace.
       await env.db.insert(builds).values({
-        id: 'bld_stale',
+        id: 'bld_stale_paid',
         project_id: proj.id,
         user_id: id,
         executor: 'container',
         status: 'building',
+        instance_type: 'standard-4',
+        started_at: sql`now() - interval '90 minute'`,
+      });
+      // Over-age active FREE (null instance_type legacy) container build — its
+      // cancel must land on the base BUILD_MANAGER.
+      await env.db.insert(builds).values({
+        id: 'bld_stale_free',
+        project_id: proj.id,
+        user_id: id,
+        executor: 'container',
+        status: 'building',
+        instance_type: null,
         started_at: sql`now() - interval '90 minute'`,
       });
       // Fresh active container build — must NOT be cancelled.
@@ -281,15 +308,18 @@ describe('scheduled()', () => {
         started_at: sql`now() - interval '5 minute'`,
       });
 
-      const { bindings, cancels } = cancelSpyBindings(env);
+      const { bindings, baseCancels, largeCancels } = cancelSpyBindings(env);
       try {
         await scheduled(mockController, bindings, mockCtx);
 
-        // The stale row was terminalized (slot freed + token revoked)...
-        const stale = await env.db.select().from(builds).where(eq(builds.id, 'bld_stale'));
-        expect(stale[0]?.status).toBe('failed');
-        // ...AND a stop attempt was made for it (and only it).
-        expect(cancels).toEqual([{ id: 'bld_stale', reason: 'stale build reaper' }]);
+        // Both stale rows were terminalized (slot freed + token revoked)...
+        const paid = await env.db.select().from(builds).where(eq(builds.id, 'bld_stale_paid'));
+        expect(paid[0]?.status).toBe('failed');
+        // ...AND each got a stop attempt on its OWN size namespace: the paid
+        // build on LARGE, the free/null build on the base manager. The reaper
+        // forwarded instance_type so the cancel can't miss a live container.
+        expect(largeCancels).toEqual([{ id: 'bld_stale_paid', reason: 'stale build reaper' }]);
+        expect(baseCancels).toEqual([{ id: 'bld_stale_free', reason: 'stale build reaper' }]);
       } finally {
         await env.db.delete(builds);
       }
@@ -307,10 +337,11 @@ describe('scheduled()', () => {
         started_at: sql`now() - interval '5 minute'`,
       });
 
-      const { bindings, cancels } = cancelSpyBindings(env);
+      const { bindings, baseCancels, largeCancels } = cancelSpyBindings(env);
       try {
         await scheduled(mockController, bindings, mockCtx);
-        expect(cancels).toEqual([]);
+        expect(baseCancels).toEqual([]);
+        expect(largeCancels).toEqual([]);
       } finally {
         await env.db.delete(builds);
       }

@@ -45,8 +45,10 @@ export type BuildLogLine = {
 };
 
 /**
- * The capacity-exhaustion error thrown by `@cloudflare/containers` when the
- * global BuildManager fleet is at its `max_instances` cap. This is the library's
+ * The capacity-exhaustion error thrown by `@cloudflare/containers` when a
+ * BuildManager fleet is at its `max_instances` cap. There are two independent
+ * fleets — base `BUILD_MANAGER` (free) and `BUILD_MANAGER_LARGE` (paid) — each
+ * with its own cap, so capacity is per-fleet, not global. This is the library's
  * own public contract (it matches the same substring in `isNoInstanceError`), so
  * classifying on it is as reliable as the library's own retry logic. A capacity
  * failure is transient platform pressure, NOT a build failure — the build should

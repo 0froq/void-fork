@@ -116,22 +116,19 @@ describe('getPlanLimits', () => {
 });
 
 describe('getBuildInstanceType', () => {
-  it('returns standard-1 for free and solo', () => {
-    expect(getBuildInstanceType('free')).toBe('standard-1');
-    expect(getBuildInstanceType('solo')).toBe('standard-1');
+  it('returns the free (standard-3) container for the free plan', () => {
+    expect(getBuildInstanceType('free')).toBe('standard-3');
   });
 
-  it('returns standard-2 for pro', () => {
-    expect(getBuildInstanceType('pro')).toBe('standard-2');
+  it('returns the large (standard-4) container for paid plans', () => {
+    expect(getBuildInstanceType('solo')).toBe('standard-4');
+    expect(getBuildInstanceType('pro')).toBe('standard-4');
+    expect(getBuildInstanceType('sponsored')).toBe('standard-4');
+    expect(getBuildInstanceType('custom')).toBe('standard-4');
   });
 
-  it('returns standard-3 for sponsored and custom', () => {
-    expect(getBuildInstanceType('sponsored')).toBe('standard-3');
-    expect(getBuildInstanceType('custom')).toBe('standard-3');
-  });
-
-  it('defaults to standard-1 for unknown plans', () => {
-    expect(getBuildInstanceType('unknown' as PlanId)).toBe('standard-1');
+  it('defaults to the free (standard-3) container for unknown plans', () => {
+    expect(getBuildInstanceType('unknown' as PlanId)).toBe('standard-3');
   });
 });
 

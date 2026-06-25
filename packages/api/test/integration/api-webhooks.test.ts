@@ -308,11 +308,49 @@ describe('POST /webhooks/github', () => {
     expect(build!.branch).toBe('main');
     expect(build!.project_id).toBe(project.id);
     expect(build!.user_id).toBe(user.id);
+    // The owner is a free-plan user (createTestUser default), so the build's
+    // container size is resolved + persisted at enqueue as the free class.
+    expect(build!.instance_type).toBe('standard-3');
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [pokeUrl, pokeInit] = fetchSpy.mock.calls[0]! as [string, RequestInit];
     expect(pokeUrl).toContain('/poke');
     expect(pokeInit.method).toBe('POST');
+  });
+
+  it("persists a paid owner's container size (standard-4) on the build row at enqueue", async () => {
+    // The connection owner is a paid plan (pro), so the push handler resolves the
+    // owner's plan and stamps the large container size on the row at enqueue —
+    // before the scheduler ever runs — making it the persisted size-of-record.
+    const user = await createTestUser(env.db, 'paid-owner', 'github', undefined, 'pro');
+    const project = await createTestProject(env.db, user.id, 'wh-paid');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '556',
+      repoFullName: 'octo/paid',
+      repositoryId: '5561',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await seedInstallation(env.db, '556');
+    const { app, appEnv } = makeApp(env);
+
+    const res = await post(app, appEnv, 'push', {
+      ref: 'refs/heads/main',
+      after: 'paid123',
+      installation: { id: 556 },
+      repository: { full_name: 'octo/paid', id: 5561 },
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok: boolean; buildId?: string };
+    expect(json.buildId).toBeTruthy();
+
+    const build = await getBuild(env.db, json.buildId!);
+    expect(build!.executor).toBe('container');
+    expect(build!.user_id).toBe(user.id);
+    // pro plan → standard-4, stamped at enqueue.
+    expect(build!.instance_type).toBe('standard-4');
   });
 
   it('ignores a stale push whose sha is behind the branch head (compare === ahead)', async () => {

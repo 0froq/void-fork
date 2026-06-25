@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { BuildManager } from './build-manager.ts';
+import { buildManagerNamespace } from './build-namespace.ts';
 import { type BuildConfig, isContainerCapacityError } from './build-types.ts';
 import {
   claimBuildForStartWithinLimit,
@@ -95,10 +96,17 @@ export class BuildScheduler extends DurableObject<ApiEnv['Bindings']> {
       return;
     }
 
-    // Set when a container-capacity error sheds the scan early (see the capacity
-    // branch below). Drives the longer, jittered re-arm so we don't hot-loop
-    // GitHub/token calls every 2s while the fleet is full.
-    let capacityShed = false;
+    // Container namespaces (fleets) found AT capacity THIS tick. There are now
+    // two independent container apps — base `BUILD_MANAGER` (free) and
+    // `BUILD_MANAGER_LARGE` (paid `standard-4`) — each with its own
+    // `max_instances`. `getQueuedBuilds` returns a mixed free+paid list ordered
+    // by age, so shedding must be PER-NAMESPACE: one fleet being full must not
+    // stall builds that target the other (non-saturated) fleet. Keyed on the
+    // stable namespace binding identity (`this.env.BUILD_MANAGER` vs
+    // `this.env.BUILD_MANAGER_LARGE`). Per-tick local state — rebuilt each alarm,
+    // never persisted. Drives the longer, jittered re-arm so we don't hot-loop
+    // GitHub/token calls every 2s while a fleet is full.
+    const saturatedNamespaces = new Set<DurableObjectNamespace>();
     for (const build of queued) {
       const user = await getUser(db, build.user_id);
       if (!user) {
@@ -160,6 +168,31 @@ export class BuildScheduler extends DurableObject<ApiEnv['Bindings']> {
         continue;
       }
 
+      // Container size of record: prefer the value persisted at enqueue; only
+      // recompute from the plan for legacy rows queued before enqueue-persistence
+      // (instance_type === null). The persisted value is authoritative — it is
+      // what onStart's CAS lands and what dictates which DO namespace this build
+      // runs on, so a plan change between enqueue and start can't relocate an
+      // in-flight build to a different container size. Computed BEFORE the claim
+      // so the claim can persist it in the same tx (see below) and so its target
+      // namespace can be checked against this tick's saturated set.
+      const instanceType = build.instance_type ?? getBuildInstanceType(user.plan);
+
+      // Route the container start to the DO class matching the build's size.
+      // `@cloudflare/containers` has no per-start sizing, so each size is a
+      // distinct DO class; buildManagerNamespace maps standard-4 → the large
+      // class and everything else (free/legacy/null) → the base class.
+      const ns = buildManagerNamespace(this.env, instanceType);
+
+      // Per-namespace shedding: if this build's target fleet already hit capacity
+      // THIS tick, skip it without attempting a start (and without claiming) —
+      // it would only hit the same full fleet, burning a GitHub compare + token
+      // mint. A build targeting the OTHER (non-saturated) fleet is unaffected, so
+      // the scan keeps draining it.
+      if (saturatedNamespaces.has(ns)) {
+        continue;
+      }
+
       // Atomically enforce the per-user cap AND claim queued->starting in a
       // SINGLE transaction holding `SELECT ... FOR UPDATE` on the owner's users
       // row — the SAME lock the OIDC path (`createGithubActionsBuildWithinLimit`)
@@ -168,16 +201,19 @@ export class BuildScheduler extends DurableObject<ApiEnv['Bindings']> {
       // exchange can't both observe sub-cap capacity and both create active
       // builds (which the old separate count-then-claim allowed). `limit === 0`
       // means unlimited. Returns false when at cap OR when the build was already
-      // claimed elsewhere; either way leave it for a later tick. This is the
-      // commit point: only pure config assembly + the try/catch-wrapped
-      // startBuild follow it, so nothing can throw between the claim and the
-      // BuildManager that owns the timeout.
+      // claimed elsewhere; either way leave it for a later tick. The claim also
+      // persists the effective instanceType in the same tx, so a cancel/reap in
+      // the START->onStart window reads the correct size and addresses the right
+      // DO namespace. This is the commit point: only pure config assembly + the
+      // try/catch-wrapped startBuild follow it, so nothing can throw between the
+      // claim and the BuildManager that owns the timeout.
       const limit = getPlanLimits(user.plan).concurrentBuilds;
       const claimed = await claimBuildForStartWithinLimit(db, {
         buildId: build.id,
         userId: build.user_id,
         projectId: build.project_id,
         limit,
+        instanceType,
       });
       if (!claimed) {
         continue;
@@ -199,37 +235,54 @@ export class BuildScheduler extends DurableObject<ApiEnv['Bindings']> {
         // App installation still covers this repo before minting the deploy
         // token; a null id fails that check closed.
         repositoryId: connection.repository_id,
-        instanceType: getBuildInstanceType(user.plan),
+        // Carry the effective size into the config so onStart's CAS persists it
+        // for any legacy-null row (back-filling the size-of-record on first start).
+        instanceType,
         timeoutMinutes: getPlanLimits(user.plan).buildTimeoutMinutes,
       };
 
-      const stub = this.env.BUILD_MANAGER.get(
-        this.env.BUILD_MANAGER.idFromName(build.id),
-      ) as unknown as DurableObjectStub<BuildManager>;
+      // `ns` (the build's target fleet) was resolved above; address the per-build
+      // BuildManager on it, keyed by build id.
+      const stub = ns.get(ns.idFromName(build.id)) as unknown as DurableObjectStub<BuildManager>;
       try {
         await stub.startBuild(config);
       } catch (error) {
         if (isContainerCapacityError(error)) {
-          // Global BuildManager fleet (max_instances) is full — transient platform
-          // pressure, not a build failure. Return the row to `queued` so the next
-          // alarm retries it once an instance frees; the heartbeat keeps the alarm
-          // armed while queued work remains. Guarded (starting -> queued only): if a
-          // concurrent terminalizer (push-supersede, branch/executor change,
-          // disconnect, install removal) already drove this claimed row terminal
-          // while startBuild was in flight, this no-ops and the terminal status is
-          // preserved — a superseded/cancelled commit can't be resurrected here.
-          await requeueBuildIfStarting(db, build.id);
-          // Stop scanning the rest of the batch. startBuild does the GitHub
-          // branch-head compare + installation-token mint BEFORE the container
-          // start() throws capacity, so continuing to drain at fleet capacity would
-          // burn up to SCAN_LIMIT GitHub/token calls every tick on builds that will
-          // all hit the same full fleet. Only THIS build was claimed (queued ->
-          // starting) — the rest of the batch was never claimed, and builds already
-          // started earlier this tick are genuine successes, so they are left as-is.
+          // This build's target fleet (`ns`.max_instances) is full — transient
+          // platform pressure, not a build failure. Return the row to `queued` so
+          // a later alarm retries it once an instance frees; the heartbeat keeps
+          // the alarm armed while queued work remains. Guarded (starting -> queued
+          // only): if a concurrent terminalizer (push-supersede, branch/executor
+          // change, disconnect, install removal) already drove this claimed row
+          // terminal while startBuild was in flight, this no-ops and the terminal
+          // status is preserved — a superseded/cancelled commit can't be
+          // resurrected here.
+          // Mark only THIS fleet saturated and KEEP scanning (do NOT break).
+          // There are two independent container fleets now; a free build hitting
+          // capacity on base must not stall a paid build that targets the (non-
+          // saturated) LARGE fleet, and vice versa. Further builds targeting this
+          // same saturated fleet are skipped up front (the pre-claim check above),
+          // so we never re-run the GitHub compare + token mint against a full
+          // fleet — but builds targeting the other fleet still drain this tick.
           // The longer jittered re-arm below backs off until a slot frees (a
           // completion poke re-arms sooner).
-          capacityShed = true;
-          break;
+          //
+          // Mark the fleet saturated BEFORE the requeue write so a transient throw
+          // in requeueBuildIfStarting can't escape the loop and leave later
+          // same-fleet builds un-skipped or skip the tail re-arm/backoff below.
+          // Best-effort requeue (mirrors the generic-error branch's terminal-write
+          // guard): on failure the row stays `starting` and the stale reaper
+          // reclaims it, while the scan continues and the backoff stays armed.
+          saturatedNamespaces.add(ns);
+          try {
+            await requeueBuildIfStarting(db, build.id);
+          } catch (requeueError) {
+            console.error(
+              `[build-scheduler] failed to requeue build ${build.id} after a capacity error; it will be reaped as stale (continuing the scan so the backoff stays armed)`,
+              requeueError,
+            );
+          }
+          continue;
         }
         // Defense-in-depth: a throw here must not abort the rest of the scan.
         // BuildManager.startBuild already fails the row + frees the slot on a
@@ -277,16 +330,17 @@ export class BuildScheduler extends DurableObject<ApiEnv['Bindings']> {
     // project is always picked up on the next tick. Compute the wake time from
     // the current clock + offset, exactly like CronScheduler.
     if (await hasQueuedContainerBuilds(db)) {
-      // When the scan was shed because the fleet is at capacity, back off with a
-      // jittered delay instead of the normal 2s cadence — otherwise we'd re-run
-      // the GitHub compare + token mint every 2s for builds that will keep
-      // hitting the full fleet. The backoff is only the missed-poke backstop:
-      // BuildManager.onStop / timeout / cancelBuild all pokeScheduler() (a ~50ms
-      // alarm), and setAlarm overwrites the pending backoff to the earliest armed
-      // time, so a freed slot pulls the next scan in immediately.
-      const delay = capacityShed
-        ? CAPACITY_BACKOFF_BASE_MS + Math.floor(Math.random() * CAPACITY_BACKOFF_JITTER_MS)
-        : RESCAN_DELAY_MS;
+      // When at least one fleet hit capacity this tick, back off with a jittered
+      // delay instead of the normal 2s cadence — otherwise we'd re-run the GitHub
+      // compare + token mint every 2s for builds that will keep hitting the full
+      // fleet. The backoff is only the missed-poke backstop: BuildManager.onStop /
+      // timeout / cancelBuild all pokeScheduler() (a ~50ms alarm), and setAlarm
+      // overwrites the pending backoff to the earliest armed time, so a freed slot
+      // pulls the next scan in immediately.
+      const delay =
+        saturatedNamespaces.size > 0
+          ? CAPACITY_BACKOFF_BASE_MS + Math.floor(Math.random() * CAPACITY_BACKOFF_JITTER_MS)
+          : RESCAN_DELAY_MS;
       await this.ctx.storage.setAlarm(Date.now() + delay);
     }
   }

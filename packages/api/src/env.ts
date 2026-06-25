@@ -108,9 +108,19 @@ export type ApiEnv = Env & {
     BUILD_SCHEDULER: DurableObjectNamespace;
     /**
      * Per-build DO (keyed by build id) that runs the build container, streams
-     * logs, and writes status transitions back to Postgres.
+     * logs, and writes status transitions back to Postgres. The base (free)
+     * size: `standard-3` = 2 vCPU / 8 GiB / 16 GB.
      */
     BUILD_MANAGER: DurableObjectNamespace;
+    /**
+     * Larger per-build DO for paid plans — same `BuildManager` behavior, but a
+     * distinct container-enabled DO class bound to a bigger static
+     * `instance_type` (standard-4). `@cloudflare/containers` has no per-start
+     * sizing, so a second class is the only way to offer a second size.
+     * `buildManagerNamespace` picks between this and `BUILD_MANAGER` by the
+     * build's persisted instance_type.
+     */
+    BUILD_MANAGER_LARGE: DurableObjectNamespace;
     /**
      * Producer for the cron-firing queue. Used by `CronScheduler.alarm()` to
      * enqueue user-worker invocations from inside its Durable Object context.

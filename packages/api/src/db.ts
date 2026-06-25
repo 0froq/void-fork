@@ -1478,6 +1478,7 @@ export async function deleteProjectCascade(
     id: string;
     executor: Build['executor'];
     status: Build['status'];
+    instance_type: string | null;
   }>;
   deletedResources: ReadonlyArray<Resource>;
 }> {
@@ -2251,11 +2252,11 @@ export async function updateBuildStatus(
  * updated. Prevents a delayed onStart from resurrecting a row that a fast-exit
  * onStop already drove terminal.
  *
- * `instanceType` is the container's resolved size, only ever observed at start
- * time. The scheduler claims the row `queued -> starting` WITHOUT it, so this is
- * the single point it lands — folded into the same guarded CAS so it can never
- * resurrect a terminal row (matches `updateBuildStatus`'s "keep current unless
- * provided" merge: omit → keep, value/null → write).
+ * `instanceType` is the container's resolved size. The scheduler now persists it
+ * in the same claim tx (`queued -> starting`), so this is an idempotent safety-net
+ * re-write — folded into the same guarded CAS so it can never resurrect a terminal
+ * row (matches `updateBuildStatus`'s "keep current unless provided" merge: omit →
+ * keep, value/null → write).
  */
 export async function markBuildBuildingIfStarting(
   db: Db,
@@ -2729,11 +2730,23 @@ export async function supersedeAndCreateContainerBuild(
     connectionId: string;
     installationId: string;
     repositoryId: string | null;
+    /**
+     * Container size of record for this build, resolved from the owner's plan at
+     * enqueue (`getBuildInstanceType`). Persisted on the row so START routes to
+     * the matching DO namespace deterministically; omit/null leaves a legacy-null
+     * row that START recomputes from the plan.
+     */
+    instanceType?: string | null;
   },
 ): Promise<{
   build: Build | null;
   reused: boolean;
-  cancelled: ReadonlyArray<{ id: string; executor: Build['executor']; status: Build['status'] }>;
+  cancelled: ReadonlyArray<{
+    id: string;
+    executor: Build['executor'];
+    status: Build['status'];
+    instance_type: string | null;
+  }>;
   skipped?: 'config-changed' | 'install-revoked' | 'connection-replaced' | 'project-deleting';
 }> {
   return db.transaction(async (tx) => {
@@ -2915,6 +2928,7 @@ export async function supersedeAndCreateContainerBuild(
         status: 'queued',
         commit_sha: args.commitSha,
         branch: args.branch,
+        instance_type: args.instanceType ?? null,
       })
       .returning();
     return { build: row, reused: false, cancelled };
@@ -3067,7 +3081,14 @@ export async function terminateBuildsForProject(
     // and misfires under any non-UTC session timezone.
     createdBefore?: string;
   },
-): Promise<ReadonlyArray<{ id: string; executor: Build['executor']; status: Build['status'] }>> {
+): Promise<
+  ReadonlyArray<{
+    id: string;
+    executor: Build['executor'];
+    status: Build['status'];
+    instance_type: string | null;
+  }>
+> {
   const conds = [
     eq(builds.project_id, projectId),
     inArray(builds.status, ['queued', 'starting', 'building', 'deploying']),
@@ -3092,7 +3113,16 @@ export async function terminateBuildsForProject(
       completed_at: sql`COALESCE(${builds.completed_at}, now())`,
     })
     .where(and(...conds))
-    .returning({ id: builds.id, executor: builds.executor, status: builds.status });
+    .returning({
+      id: builds.id,
+      executor: builds.executor,
+      status: builds.status,
+      // Carried out so the post-commit DO teardown can address the SAME
+      // container-size namespace the scheduler started this build on
+      // (`buildManagerNamespace`); a paid (standard-4) build cancelled against
+      // the base namespace would miss its live container.
+      instance_type: builds.instance_type,
+    });
   return affected;
 }
 
@@ -3152,15 +3182,19 @@ export async function failStaleActiveGithubActionsBuilds(
  * `started_at > maxAge` predicate does NOT prove the container is gone: if the DO
  * was evicted or its timeout alarm was lost, the container may still be RUNNING.
  * So the caller best-effort issues a BuildManager `cancelBuild` for each returned
- * id AFTER this commits — stopping any still-alive orphan and converging DO-local
- * status. Returning the reaped ids (not just a count) is what enables that.
+ * build AFTER this commits — stopping any still-alive orphan and converging
+ * DO-local status. Returning the reaped builds (not just a count) is what enables
+ * that, and each carries its `instance_type` so the cancel addresses the SAME
+ * container-size namespace the scheduler started it on (`buildManagerNamespace`):
+ * a paid (standard-4) build cancelled against the base namespace would miss its
+ * live container. Executor is implicitly `container` (this reaper is scoped to it).
  *
- * Marks them `failed` and stamps `completed_at`. Returns the reaped build ids.
+ * Marks them `failed` and stamps `completed_at`. Returns the reaped builds.
  */
 export async function failStaleActiveContainerBuilds(
   db: Db,
   maxAgeMinutes: number,
-): Promise<ReadonlyArray<string>> {
+): Promise<ReadonlyArray<{ id: string; instance_type: string | null }>> {
   const rows = await db
     .update(builds)
     .set({
@@ -3175,8 +3209,8 @@ export async function failStaleActiveContainerBuilds(
         sql`${builds.started_at} < now() - (${maxAgeMinutes} * interval '1 minute')`,
       ),
     )
-    .returning({ id: builds.id });
-  return rows.map((row) => row.id);
+    .returning({ id: builds.id, instance_type: builds.instance_type });
+  return rows;
 }
 
 /**
@@ -3444,7 +3478,19 @@ export async function createGithubActionsBuildWithinLimit(
  */
 export async function claimBuildForStartWithinLimit(
   db: Db,
-  args: { buildId: string; userId: string; projectId: string; limit: number },
+  args: {
+    buildId: string;
+    userId: string;
+    projectId: string;
+    limit: number;
+    // The effective container size the scheduler will route this start on (the
+    // persisted value, or a plan recompute for a legacy-null row). Persisted in
+    // THIS claim tx — before the DO is addressed — so a cancel/reap in the
+    // START->onStart window reads the correct size and addresses the namespace
+    // that actually owns the running container. onStart's CAS later lands the
+    // same value (now idempotent).
+    instanceType: string;
+  },
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     // Serialize per-user slot acquisition against the OIDC path and other
@@ -3477,10 +3523,14 @@ export async function claimBuildForStartWithinLimit(
     }
 
     // Atomic claim: only flips the row if it is still `queued`, so two scans
-    // racing the same build see exactly one non-empty RETURNING.
+    // racing the same build see exactly one non-empty RETURNING. Persist the
+    // effective instance_type in the SAME SET so the size-of-record is correct
+    // the instant the row goes `starting` — a cancel/reap in the START->onStart
+    // window then addresses the right DO namespace instead of mapping a still-
+    // NULL value to the base class and leaking the paid container.
     const claimed = await tx
       .update(builds)
-      .set({ status: 'starting', started_at: sql`now()` })
+      .set({ status: 'starting', started_at: sql`now()`, instance_type: args.instanceType })
       .where(and(eq(builds.id, args.buildId), eq(builds.status, 'queued')))
       .returning({ id: builds.id });
     return claimed.length > 0;

@@ -72,6 +72,10 @@
         "name": "BUILD_MANAGER",
         "class_name": "BuildManager",
       },
+      {
+        "name": "BUILD_MANAGER_LARGE",
+        "class_name": "BuildManagerLarge",
+      },
     ],
   },
   "migrations": [
@@ -95,16 +99,32 @@
       "tag": "v5",
       "new_sqlite_classes": ["BuildScheduler", "BuildManager"],
     },
+    {
+      "tag": "v6",
+      "new_sqlite_classes": ["BuildManagerLarge"],
+    },
   ],
   "containers": [
     {
       "class_name": "BuildManager",
       "image": "./container/Dockerfile",
       "max_instances": 50,
-      // standard-1 = 1/2 vCPU, 4 GiB, 8 GB disk. The default (lite, 256 MiB) OOMs
-      // on `npm/pnpm install` + a real Vite production build. Per-plan standard-*
-      // sizing in src/tiers.ts is metadata-only (the lib can't size per-start).
-      "instance_type": "standard-1",
+      // Free-plan build container: standard-3 = 2 vCPU / 8 GiB / 16 GB. (CF caps a
+      // single container at standard-4 = 4 vCPU / 12 GiB / 20 GB, and custom types
+      // require >=3 GiB/vCPU, so a 4-vCPU free box can't stay at 8 GiB.) Paid plans
+      // use the BuildManagerLarge container below. Per-build routing by plan is in
+      // src/build-scheduler.ts via builds.instance_type.
+      "instance_type": "standard-3",
+      // Don't SIGTERM an in-flight build during an api-worker rollout. 3900s = the
+      // 60-min DEPLOY_TOKEN_HARD_MAX_MINUTES build cap + 5 min margin.
+      "rollout_active_grace_period": 3900,
+    },
+    {
+      "class_name": "BuildManagerLarge",
+      "image": "./container/Dockerfile",
+      "max_instances": 50,
+      // Paid-plan build container: standard-4 = 4 vCPU / 12 GiB / 20 GB (the CF max).
+      "instance_type": "standard-4",
       // Don't SIGTERM an in-flight build during an api-worker rollout. 3900s = the
       // 60-min DEPLOY_TOKEN_HARD_MAX_MINUTES build cap + 5 min margin.
       "rollout_active_grace_period": 3900,
@@ -214,6 +234,10 @@
             "name": "BUILD_MANAGER",
             "class_name": "BuildManager",
           },
+          {
+            "name": "BUILD_MANAGER_LARGE",
+            "class_name": "BuildManagerLarge",
+          },
         ],
       },
       "containers": [
@@ -221,10 +245,22 @@
           "class_name": "BuildManager",
           "image": "./container/Dockerfile",
           "max_instances": 50,
-          // standard-1 = 1/2 vCPU, 4 GiB, 8 GB disk. The default (lite, 256 MiB) OOMs
-          // on `npm/pnpm install` + a real Vite production build. Per-plan standard-*
-          // sizing in src/tiers.ts is metadata-only (the lib can't size per-start).
-          "instance_type": "standard-1",
+          // Free-plan build container: standard-3 = 2 vCPU / 8 GiB / 16 GB. (CF caps a
+          // single container at standard-4 = 4 vCPU / 12 GiB / 20 GB, and custom types
+          // require >=3 GiB/vCPU, so a 4-vCPU free box can't stay at 8 GiB.) Paid plans
+          // use the BuildManagerLarge container below. Per-build routing by plan is in
+          // src/build-scheduler.ts via builds.instance_type.
+          "instance_type": "standard-3",
+          // Don't SIGTERM an in-flight build during an api-worker rollout. 3900s = the
+          // 60-min DEPLOY_TOKEN_HARD_MAX_MINUTES build cap + 5 min margin.
+          "rollout_active_grace_period": 3900,
+        },
+        {
+          "class_name": "BuildManagerLarge",
+          "image": "./container/Dockerfile",
+          "max_instances": 50,
+          // Paid-plan build container: standard-4 = 4 vCPU / 12 GiB / 20 GB (the CF max).
+          "instance_type": "standard-4",
           // Don't SIGTERM an in-flight build during an api-worker rollout. 3900s = the
           // 60-min DEPLOY_TOKEN_HARD_MAX_MINUTES build cap + 5 min margin.
           "rollout_active_grace_period": 3900,
@@ -318,6 +354,10 @@
             "name": "BUILD_MANAGER",
             "class_name": "BuildManager",
           },
+          {
+            "name": "BUILD_MANAGER_LARGE",
+            "class_name": "BuildManagerLarge",
+          },
         ],
       },
       "containers": [
@@ -325,10 +365,22 @@
           "class_name": "BuildManager",
           "image": "./container/Dockerfile",
           "max_instances": 50,
-          // standard-1 = 1/2 vCPU, 4 GiB, 8 GB disk. The default (lite, 256 MiB) OOMs
-          // on `npm/pnpm install` + a real Vite production build. Per-plan standard-*
-          // sizing in src/tiers.ts is metadata-only (the lib can't size per-start).
-          "instance_type": "standard-1",
+          // Free-plan build container: standard-3 = 2 vCPU / 8 GiB / 16 GB. (CF caps a
+          // single container at standard-4 = 4 vCPU / 12 GiB / 20 GB, and custom types
+          // require >=3 GiB/vCPU, so a 4-vCPU free box can't stay at 8 GiB.) Paid plans
+          // use the BuildManagerLarge container below. Per-build routing by plan is in
+          // src/build-scheduler.ts via builds.instance_type.
+          "instance_type": "standard-3",
+          // Don't SIGTERM an in-flight build during an api-worker rollout. 3900s = the
+          // 60-min DEPLOY_TOKEN_HARD_MAX_MINUTES build cap + 5 min margin.
+          "rollout_active_grace_period": 3900,
+        },
+        {
+          "class_name": "BuildManagerLarge",
+          "image": "./container/Dockerfile",
+          "max_instances": 50,
+          // Paid-plan build container: standard-4 = 4 vCPU / 12 GiB / 20 GB (the CF max).
+          "instance_type": "standard-4",
           // Don't SIGTERM an in-flight build during an api-worker rollout. 3900s = the
           // 60-min DEPLOY_TOKEN_HARD_MAX_MINUTES build cap + 5 min margin.
           "rollout_active_grace_period": 3900,

@@ -71,6 +71,7 @@ export type TestEnv = {
   SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounter>;
   BUILD_SCHEDULER: DurableObjectNamespace;
   BUILD_MANAGER: DurableObjectNamespace;
+  BUILD_MANAGER_LARGE: DurableObjectNamespace;
   /** Test-only override for the deploy handler's heartbeat interval. */
   DEPLOY_HEARTBEAT_INTERVAL_MS?: number;
 };
@@ -425,6 +426,7 @@ export async function setupEnv(): Promise<TestEnv> {
       createMockDoNamespace() as unknown as DurableObjectNamespace<SandboxConcurrencyCounter>,
     BUILD_SCHEDULER: createMockDoNamespace(),
     BUILD_MANAGER: createMockDoNamespace(),
+    BUILD_MANAGER_LARGE: createMockDoNamespace(),
   };
 }
 

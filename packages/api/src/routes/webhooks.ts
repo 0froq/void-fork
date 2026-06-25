@@ -6,6 +6,7 @@ import {
   getDeploymentByProjectAndCommit,
   getGitHubConnectionsByRepo,
   getGitHubInstallation,
+  getUser,
   markBuildTerminalIfActive,
   markGitHubInstallationStatus,
   setGitHubInstallationRepositories,
@@ -28,6 +29,7 @@ import {
 import { verifyGithubWebhookSignature } from '../github/webhook-verify.ts';
 import { githubConnections, githubInstallations } from '../schema.ts';
 import type { GitHubInstallationRepository } from '../schema.ts';
+import { getBuildInstanceType } from '../tiers.ts';
 import type { Build } from '../types.ts';
 
 const app = new Hono<ApiEnv>();
@@ -244,8 +246,12 @@ app.post('/github', async (context) => {
             .from(githubConnections)
             .where(eq(githubConnections.installation_id, String(installationId)))
             .for('update');
-          const acc: Array<{ id: string; executor: Build['executor']; status: Build['status'] }> =
-            [];
+          const acc: Array<{
+            id: string;
+            executor: Build['executor'];
+            status: Build['status'];
+            instance_type: string | null;
+          }> = [];
           for (const conn of conns) {
             // Per-connection repo match. This is a REVOCATION path (terminalize
             // an orphaned build's token), so the matcher is inclusive: match by
@@ -342,6 +348,7 @@ app.post('/github', async (context) => {
         id: string;
         executor: Build['executor'];
         status: Build['status'];
+        instance_type: string | null;
       }> = [];
       for (const connection of matching) {
         if (connection.build_executor !== 'container') {
@@ -378,6 +385,11 @@ app.post('/github', async (context) => {
         // enqueued to re-deploy it. The supersede also terminalizes older ACTIVE
         // builds (revoking their deploy token + freeing their slot); their DOs are
         // torn down after the tx commits, below.
+        // Resolve the owner's plan to fix the build's container size AT ENQUEUE so
+        // the row carries its own size-of-record. An orphaned connection (owner
+        // deleted) yields a null instance_type — START recomputes from plan there,
+        // and a null/unknown value routes to the safe base namespace either way.
+        const owner = await getUser(db, connection.user_id);
         const { build, cancelled } = await supersedeAndCreateContainerBuild(db, {
           projectId: connection.project_id,
           userId: connection.user_id,
@@ -386,6 +398,7 @@ app.post('/github', async (context) => {
           connectionId: connection.id,
           installationId: connection.installation_id,
           repositoryId: connection.repository_id,
+          instanceType: owner ? getBuildInstanceType(owner.plan) : null,
         });
         cancelledContainerBuilds.push(...cancelled);
         // `build` is null on any skip: a concurrent PATCH /projects/:id/github
@@ -483,8 +496,12 @@ app.post('/github', async (context) => {
           } else {
             await suspendGitHubInstallation(txDb, String(installationId));
           }
-          const acc: Array<{ id: string; executor: Build['executor']; status: Build['status'] }> =
-            [];
+          const acc: Array<{
+            id: string;
+            executor: Build['executor'];
+            status: Build['status'];
+            instance_type: string | null;
+          }> = [];
           for (const conn of connections) {
             acc.push(...(await terminateBuildsForProject(txDb, conn.project_id, { reason })));
           }
@@ -663,7 +680,12 @@ app.post('/github', async (context) => {
         if (staleDowngrade) {
           return [];
         }
-        const acc: Array<{ id: string; executor: Build['executor']; status: Build['status'] }> = [];
+        const acc: Array<{
+          id: string;
+          executor: Build['executor'];
+          status: Build['status'];
+          instance_type: string | null;
+        }> = [];
         for (const conn of connections) {
           const matched =
             conn.repository_id != null
