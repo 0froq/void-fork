@@ -12,7 +12,7 @@ jobs:
   lint-and-check:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
@@ -21,7 +21,7 @@ jobs:
           cache: true
           node-version-file: .node-version
           run-install: false
-      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
@@ -47,7 +47,7 @@ jobs:
           - suite: integration
             pattern: api/test/integration
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
@@ -56,7 +56,7 @@ jobs:
           cache: true
           node-version-file: .node-version
           run-install: false
-      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
@@ -90,7 +90,7 @@ jobs:
           --health-retries=5
     steps:
       # --- Phase 1: Apply PR branch migrations to real PG ---
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
@@ -99,7 +99,7 @@ jobs:
           cache: true
           node-version-file: .node-version
           run-install: false
-      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
@@ -113,7 +113,7 @@ jobs:
           DATABASE_URL: postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
 
       # --- Phase 2: Run prod branch tests against new schema ---
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: prod
           clean: false
