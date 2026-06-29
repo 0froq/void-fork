@@ -9,7 +9,7 @@
 # Env vars injected by the DO at start():
 #   BUILD_ID, PROJECT_ID, PROJECT_SLUG, SOURCE_TARBALL_URL, SOURCE_TOKEN,
 #   VOID_TOKEN, VOID_API_URL, VOID_PROJECT, DO_LOG_URL, AGENT_TOKEN
-FROM node:26-slim
+FROM node:24-slim
 
 # node:24-slim ships `tar` + `gzip` but is otherwise minimal. We add:
 #   ca-certificates       HTTPS for the tarball fetch, npm/bun installs, deploy upload
