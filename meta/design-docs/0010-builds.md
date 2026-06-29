@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-19
 **Updated:** 2026-06-08
-**Status:** Implemented (backend, no UI)
+**Status:** Implemented (backend + admin build UI; user-facing dashboard views deferred)
 
 > **Implementation note (2026-06):** The backend shipped, but the build
 > mechanism diverged from this design in several material ways. The sections
@@ -508,7 +508,11 @@ container was both unnecessary and wrong.
 **Scoped deploy token (replaces the HMAC build-token):**
 
 - `signDeployToken()` (`packages/api/src/auth/deploy-token.ts`) mints a 15-min
-  `aud: 'deploy'`, project-scoped JWT.
+  `aud: 'deploy'`, project-scoped JWT. (15 min is the default; the container
+  build path sizes the TTL to the owner plan's `buildTimeoutMinutes`, hard-capped
+  at 60 min + a 300s margin via `deployTokenTtlSecondsForBuildMinutes`. The token
+  also carries an optional `build` claim and is revoked the moment that build row
+  leaves `ACTIVE_BUILD_STATUSES`.)
 - `signJwt()` gained an optional `{ ttlSeconds }`.
 - `middleware/auth.ts` accepts `aud` of `'api'` **or** `'deploy'` (sets a
   `deployScope` on the context); `routes/deploy.ts` has a one-line project-scope
@@ -528,13 +532,16 @@ default `'container'`):
   GitHub's JWKS and mints a scoped `VOID_TOKEN`. `workflow_run` webhooks complete
   the Actions-side build row.
 
-### 3. No UI this round (deferred)
+### 3. Admin build UI shipped; user-facing dashboard deferred
 
-Design "Dashboard Integration" (user-facing Vue build views + admin Hono-JSX
-build views) is **deferred**. The WebSocket log API endpoint exists on
-`BuildManager` but has no consumer yet.
+The admin Hono-JSX build views shipped: a per-project Builds section on
+`/admin/projects/:id` (`admin/routes/projects.tsx` + `admin/views/build-table.tsx`)
+and a build detail page `GET /admin/builds/:id` (`admin/routes/builds.tsx`) with a
+client-side polling live-log panel (`admin/views/build-logs.tsx`, `setInterval` ->
+`/admin/builds/:id/logs?since=N`) — NOT the DO WebSocket. The user-facing Vue
+dashboard build views remain deferred.
 
-### 4. Durable Objects: flat files, migration tag v5
+### 4. Durable Objects: flat files, migration tags v5 + v6
 
 - DO classes live **flat** in `packages/api/src/` (`build-scheduler.ts`,
   `build-manager.ts`), not in a `durable-objects/` directory.
@@ -543,6 +550,12 @@ build views) is **deferred**. The WebSocket log API endpoint exists on
   `env.staging`.
 - `BuildManager` extends `Container` from `@cloudflare/containers@0.3.3`; the
   `containers` block binds it to `./container/Dockerfile` in all three scopes.
+- A later migration tag v6 (`new_sqlite_classes: [BuildManagerLarge]`) added a
+  second container DO class `export class BuildManagerLarge extends BuildManager {}`,
+  bound as `BUILD_MANAGER_LARGE`. It exists solely to bind a larger static
+  `instance_type` (`@cloudflare/containers@0.3.x` has no per-start sizing). Free
+  builds use `BuildManager` (standard-3); paid builds use `BuildManagerLarge`
+  (standard-4), selected per-build by `buildManagerNamespace(instance_type)`.
 
 ### 5. Extra schema beyond the original two tables
 
@@ -552,8 +565,10 @@ In addition to `builds` and `github_connections`:
   (`'container' | 'github_actions'`, default `'container'`).
 - A new `github_installations` table maps GitHub installation IDs to users and
   tracks accessible repos. The OAuth callback backfills installation → user.
-- Migration: `packages/api/drizzle/0020_nifty_black_bird.sql` (additive — 3
-  `CREATE TABLE`).
+- Migrations: `packages/api/drizzle/0027_github_deploy.sql` (creates `builds`,
+  `github_connections`, `github_installations`; idempotent `IF NOT EXISTS`) and
+  `0028_check_runs.sql` (`ALTER TABLE builds ADD COLUMN check_run_id`).
+  Re-stamped past 0026 during the #179 routing split.
 
 ### New / changed surfaces (not in the original design)
 
@@ -568,7 +583,9 @@ In addition to `builds` and `github_connections`:
 - Container: `packages/api/container/` — `Dockerfile` (node:24-slim + corepack +
   bun) and `build-agent.mjs`.
 - Tiers: `PlanLimits.concurrentBuilds` + `.buildTimeoutMinutes` (0 = unlimited);
-  `getBuildInstanceType(plan)` → `standard-1/2/3`. Values: free 1/10, solo 2/15,
+  `getBuildInstanceType(plan)` -> two sizes only: free -> standard-3
+  (`BUILD_INSTANCE_FREE`), and solo|pro|sponsored|custom -> standard-4
+  (`BUILD_INSTANCE_LARGE`). Concurrency/timeout per plan: free 1/10, solo 2/15,
   pro 3/15, sponsored 6/20, custom 0/0.
 
 ### New secrets
@@ -582,12 +599,12 @@ bypass list (GitHub cannot present Access creds).
 
 ### Known follow-ups (not done this round)
 
-- **Container → DO live-log transport is not yet wired.** Needs either a
-  `ContainerProxy` `outboundByHost` handler on `BuildManager` or a DO
-  `containerFetch` pull-loop against the agent's `GET /logs?since=N` endpoint
-  (which exists). Non-critical: there is no log UI yet and builds succeed
-  regardless.
-- **`build-agent.mjs` `VOID_FALLBACK_VERSION` is `'latest'`** — pin to a
-  published `void` version before production.
-- **UIs**: admin + user-facing build views.
+- **Container → DO live-log transport — DONE.** Wired via a DO pull-loop:
+  `pollLogs()` (`build-manager.ts`) PULLS the agent's `GET /logs?since=N`
+  (~1s cadence, self-terminating on terminal status) into the SQLite `logs`
+  table + WS fan-out, and is the single producer. It uses a non-starting
+  `getTcpPort(defaultPort).fetch()` — NOT `containerFetch` — to avoid
+  resurrecting an exited container. The `ContainerProxy`/`outboundByHost`
+  alternative was not used.
+- User-facing dashboard build views (admin build views shipped — see #3).
 - **Preview deployments per PR.**

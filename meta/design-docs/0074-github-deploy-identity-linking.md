@@ -1,10 +1,12 @@
 ---
 title: Decouple GitHub-for-Deploys from Login Provider (First-Class Identity Linking)
-status: proposed
+status: implemented
 created: 2026-06-23
 ---
 
 # RFC: Decouple GitHub-for-Deploys from the Login Provider
+
+> **Status: implemented** — shipped via voidzero-dev/void#230 (CLI) + void-platform#194 (API). The only remaining owner action is registering `/github/link-callback` in the GitHub App's Callback URL list.
 
 ## Summary
 

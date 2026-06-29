@@ -1,6 +1,6 @@
 ---
 title: Compare-Failure Logging + GitHub Check Runs for Deploy-on-GitHub Builds (SDD Plan)
-status: ready to implement
+status: implemented
 created: 2026-06-23
 ---
 

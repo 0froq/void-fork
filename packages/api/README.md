@@ -66,7 +66,8 @@ container/
 drizzle/
   0000_*.sql
   ...
-  0020_*.sql                  # builds, github_connections, github_installations tables
+  0027_github_deploy.sql      # builds, github_connections, github_installations tables
+  0028_check_runs.sql         # builds.check_run_id
 ```
 
 ## Main Route Groups
@@ -166,7 +167,7 @@ Connect a repo through a GitHub App; a `git push` then builds and deploys automa
   - **GitHub Actions** — `void init --github` scaffolds a workflow that calls `POST /auth/github-oidc`; the verified job runs `void deploy` and reports back via the `workflow_run` webhook.
 - **Build mechanism**: both executors run the real `void deploy` CLI with a short-lived, project-scoped deploy token (`aud: "deploy"`, minted by `auth/deploy-token.ts`). There is no artifact-upload endpoint; `routes/deploy.ts` is unchanged. The container agent (`container/build-agent.mjs`) downloads the source tarball, installs deps, and runs `npx void deploy --project <slug>` with `VOID_TOKEN` + `VOID_API_URL`.
 - **Check Run**: container builds publish a "Void Build" GitHub Check Run (head SHA = the build's `commit_sha`/webhook `after`), created `in_progress` at build start and finalized `success`/`failure`/`cancelled` at every terminal site. Best-effort — a Check Run API error never fails or perturbs a build/deploy. `details_url` is the project's dashboard URL `https://{projectSlug}.void.app` for the in-progress/success/failure states (omitted on cancel). The helper (`github/check-run.ts`) is executor-agnostic; Actions check-runs are deferred (the native workflow check already covers them) and the helper is ready for a future PR. `Checks: Write` is already granted, so no permission change was needed. `builds.check_run_id` has no index (nothing queries by it — deferred).
-- **Build logs**: `BuildManager` pulls container stdout/stderr into the DO with a `pollLogs()` loop — `containerFetch` against the agent's `GET /logs?since=N` on a ~1s cadence, advancing an in-memory cursor and feeding the SQLite `logs` table + WebSocket fan-out (self-terminates on terminal status). The DO also serves a read-only `GET /logs?since=N` -> `{ lines, lastSeq }`. The admin build views (below) consume this; `github_actions` builds have no DO log store and link out to their GitHub Actions run.
+- **Build logs**: `BuildManager` pulls container stdout/stderr into the DO with a `pollLogs()` loop — a non-starting `getTcpPort().fetch()` against the agent's `GET /logs?since=N` (deliberately NOT `containerFetch`, which would auto-resurrect an exited container) on a ~1s cadence, advancing an in-memory cursor and feeding the SQLite `logs` table + WebSocket fan-out (self-terminates on terminal status). The DO also serves a read-only `GET /logs?since=N` -> `{ lines, lastSeq }`. The admin build views (below) consume this; `github_actions` builds have no DO log store and link out to their GitHub Actions run.
 
 ## Usage and Plan Enforcement
 
