@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'pathe';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { buildEnv, runDeploy } from '../../src/cli/deploy.ts';
 
@@ -8,11 +11,17 @@ const mockWarn = vi.fn();
 const mockSuccess = vi.fn();
 const mockGetToken = vi.fn();
 const mockGetTokenSource = vi.fn();
+const mockGetApiUrl = vi.fn();
 const mockListProjects = vi.fn();
 const mockIsExpiredTokenError = vi.fn();
 const mockPromptForLoginToken = vi.fn();
+const mockIsOidcAvailable = vi.fn();
+const mockExchangeOidc = vi.fn();
+const mockMaskSecret = vi.fn();
+const mockClientCtor = vi.fn();
 
 const originalIsTTY = process.stdin.isTTY;
+let savedVoidToken: string | undefined;
 
 vi.mock('@clack/prompts', () => ({
   intro: vi.fn(),
@@ -34,10 +43,20 @@ vi.mock('@clack/prompts', () => ({
 vi.mock('../../src/cli/auth', () => ({
   getToken: (...args: Array<unknown>) => mockGetToken(...args),
   getTokenSource: (...args: Array<unknown>) => mockGetTokenSource(...args),
+  getApiUrl: (...args: Array<unknown>) => mockGetApiUrl(...args),
+}));
+
+vi.mock('../../src/cli/github-oidc', () => ({
+  isGithubActionsOidcAvailable: (...args: Array<unknown>) => mockIsOidcAvailable(...args),
+  exchangeGithubOidcForDeployToken: (...args: Array<unknown>) => mockExchangeOidc(...args),
+  maskGithubActionsSecret: (...args: Array<unknown>) => mockMaskSecret(...args),
 }));
 
 vi.mock('../../src/cli/client', () => ({
   PlatformClient: class {
+    constructor(...args: Array<unknown>) {
+      mockClientCtor(...args);
+    }
     listProjects(...args: Array<unknown>) {
       return mockListProjects(...args);
     }
@@ -57,18 +76,33 @@ beforeEach(() => {
   mockSuccess.mockReset();
   mockGetToken.mockReset();
   mockGetTokenSource.mockReset();
+  mockGetApiUrl.mockReset();
   mockListProjects.mockReset();
   mockIsExpiredTokenError.mockReset();
   mockPromptForLoginToken.mockReset();
+  mockIsOidcAvailable.mockReset();
+  mockExchangeOidc.mockReset();
+  mockMaskSecret.mockReset();
+  mockClientCtor.mockReset();
 
   mockGetToken.mockReturnValue('token');
   mockGetTokenSource.mockReturnValue('manual');
+  mockGetApiUrl.mockReturnValue('https://api.test');
+  // Default: not running in GitHub Actions, so the OIDC branch is inert and the
+  // existing auth tests are unaffected.
+  mockIsOidcAvailable.mockReturnValue(false);
+  mockExchangeOidc.mockResolvedValue('minted-token');
   mockListProjects.mockRejectedValue(new Error('expired-token'));
   mockIsExpiredTokenError.mockImplementation((error: unknown) => {
     return error instanceof Error && error.message === 'expired-token';
   });
   mockPromptForLoginToken.mockResolvedValue('fresh-token');
   Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+
+  // Isolate process.env.VOID_TOKEN across tests: the OIDC branch now exports
+  // the minted token there, so start each test clean and restore afterwards.
+  savedVoidToken = process.env.VOID_TOKEN;
+  delete process.env.VOID_TOKEN;
 });
 
 describe('runDeploy auth failures', () => {
@@ -99,6 +133,114 @@ describe('runDeploy auth failures', () => {
     await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow(
       '`VOID_TOKEN` is invalid or expired. Generate a new token and try again.',
     );
+  });
+});
+
+describe('runDeploy GitHub Actions OIDC exchange', () => {
+  it('exchanges an OIDC token for a deploy token when no VOID_TOKEN and in Actions', async () => {
+    mockGetToken.mockReturnValue(null);
+    mockIsOidcAvailable.mockReturnValue(true);
+    mockExchangeOidc.mockResolvedValue('minted-token');
+
+    // The deploy still fails later (listProjects is mocked to reject), but the
+    // OIDC exchange must run first and mint the token the client is built with.
+    await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow();
+
+    expect(mockExchangeOidc).toHaveBeenCalledTimes(1);
+    expect(mockExchangeOidc).toHaveBeenCalledWith('https://api.test', 'my-app');
+    expect(mockMaskSecret).toHaveBeenCalledWith('minted-token');
+  });
+
+  it('prefers OIDC over an AMBIENT saved keychain/file token in Actions (no VOID_TOKEN env)', async () => {
+    // Regression guard: on a self-hosted / reused runner a leftover
+    // `void auth login` credential lives in the keychain/config file, so
+    // getToken() returns it — but there is NO explicit VOID_TOKEN env. The
+    // deploy MUST still mint a fresh project-scoped OIDC deploy token and use
+    // THAT, not the broad long-lived saved token. (Before the fix, getToken was
+    // consulted first and the ambient token preempted OIDC entirely.)
+    mockGetToken.mockReturnValue('ambient-saved-token');
+    mockIsOidcAvailable.mockReturnValue(true);
+    mockExchangeOidc.mockResolvedValue('minted-token');
+
+    await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow();
+
+    // The OIDC exchange ran...
+    expect(mockExchangeOidc).toHaveBeenCalledTimes(1);
+    expect(mockExchangeOidc).toHaveBeenCalledWith('https://api.test', 'my-app');
+    expect(mockMaskSecret).toHaveBeenCalledWith('minted-token');
+    // ...the minted token was exported for the build/prerender...
+    expect(process.env.VOID_TOKEN).toBe('minted-token');
+    // ...and the PlatformClient was built with the MINTED token, NOT the saved one.
+    expect(mockClientCtor).toHaveBeenCalledTimes(1);
+    expect(mockClientCtor.mock.calls[0][0]).toBe('minted-token');
+  });
+
+  it('uses the saved keychain/file token when NOT in Actions (local dev, no exchange)', async () => {
+    // Local dev: not in GitHub Actions, no VOID_TOKEN env, but a saved token is
+    // present. It must be used directly with no OIDC exchange.
+    mockGetToken.mockReturnValue('ambient-saved-token');
+    mockIsOidcAvailable.mockReturnValue(false);
+
+    await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow();
+
+    expect(mockExchangeOidc).not.toHaveBeenCalled();
+    expect(mockMaskSecret).not.toHaveBeenCalled();
+    expect(mockClientCtor).toHaveBeenCalledTimes(1);
+    expect(mockClientCtor.mock.calls[0][0]).toBe('ambient-saved-token');
+    // The saved token is never promoted into process.env (still clean here).
+    expect(process.env.VOID_TOKEN).toBeUndefined();
+  });
+
+  it('exports the minted token to process.env.VOID_TOKEN so the build/prerender getToken sees it', async () => {
+    mockGetToken.mockReturnValue(null);
+    mockIsOidcAvailable.mockReturnValue(true);
+    mockExchangeOidc.mockResolvedValue('minted-token');
+
+    // The deploy throws later (listProjects rejects), but the OIDC branch runs
+    // first. The minted token must land in process.env.VOID_TOKEN — the
+    // downstream `vite build` child (which inherits process.env) and the
+    // in-process prerender both re-read it via getToken(), which reads
+    // process.env.VOID_TOKEN first. A local variable can't reach either.
+    await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow();
+
+    expect(process.env.VOID_TOKEN).toBe('minted-token');
+  });
+
+  it('does NOT overwrite an explicit VOID_TOKEN in process.env (no mint)', async () => {
+    // getToken returns a token (explicit VOID_TOKEN / keychain / file), so the
+    // OIDC branch is skipped and the existing process.env.VOID_TOKEN is left
+    // untouched — no re-mint, no clobber.
+    mockGetToken.mockReturnValue('explicit-token');
+    mockIsOidcAvailable.mockReturnValue(true);
+    process.env.VOID_TOKEN = 'explicit-env-token';
+
+    await expect(runDeploy(process.cwd(), { projectSlug: 'my-app' })).rejects.toThrow();
+
+    expect(mockExchangeOidc).not.toHaveBeenCalled();
+    expect(process.env.VOID_TOKEN).toBe('explicit-env-token');
+  });
+
+  it('errors when in Actions but the project is unknown', async () => {
+    mockGetToken.mockReturnValue(null);
+    mockIsOidcAvailable.mockReturnValue(true);
+
+    const root = mkdtempSync(join(tmpdir(), 'void-oidc-'));
+    const savedProject = process.env.VOID_PROJECT;
+    delete process.env.VOID_PROJECT;
+    try {
+      // No --project, no VOID_PROJECT, no .void/project.json → slug is unknown.
+      await expect(runDeploy(root)).rejects.toThrow(
+        'running in GitHub Actions but the project is unknown',
+      );
+      expect(mockExchangeOidc).not.toHaveBeenCalled();
+    } finally {
+      if (savedProject === undefined) {
+        delete process.env.VOID_PROJECT;
+      } else {
+        process.env.VOID_PROJECT = savedProject;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -225,4 +367,9 @@ describe('buildEnv', () => {
 
 afterEach(() => {
   Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+  if (savedVoidToken === undefined) {
+    delete process.env.VOID_TOKEN;
+  } else {
+    process.env.VOID_TOKEN = savedVoidToken;
+  }
 });
