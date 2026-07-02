@@ -14,8 +14,13 @@ import { GITHUB_API_BASE, GITHUB_API_VERSION, getInstallationToken } from './ins
  * executor-agnostic (plain args only) so both build executors can call it.
  */
 
-/** A completed check-run's terminal conclusion. */
-export type CheckRunConclusion = 'success' | 'failure' | 'cancelled';
+/**
+ * A completed check-run's terminal conclusion. The container path uses
+ * success/failure/cancelled; the github_actions path additionally maps GitHub's
+ * `workflow_run.conclusion === 'timed_out'` faithfully. All four are valid
+ * GitHub Checks conclusions.
+ */
+export type CheckRunConclusion = 'success' | 'failure' | 'cancelled' | 'timed_out';
 
 // Same retry shape as `getBranchHeadComparisonStatus` (compare): up to 2 extra
 // attempts with a short fixed delay on transient 5xx/network/token-mint. A 4xx

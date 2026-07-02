@@ -19,6 +19,7 @@ import {
   getGitHubInstallation,
   getProjectBuilds,
   markGitHubInstallationStatus,
+  setBuildCheckRunId,
   upsertGitHubInstallation,
 } from '../../src/db.ts';
 import type { Db } from '../../src/db.ts';
@@ -104,6 +105,11 @@ vi.mock('../../src/github/installation-token.ts', () => ({
   },
   getBranchExistence: async () => branchExistence,
   getInstallationToken: async () => 'tok',
+  // check-run.ts imports these constants from installation-token.ts; the mock
+  // replaces the whole module, so re-export them or completeCheckRun's fetch URL
+  // resolves to `undefined` and throws.
+  GITHUB_API_BASE: 'https://api.github.com',
+  GITHUB_API_VERSION: '2026-03-10',
 }));
 
 vi.mock('../../src/github/installation-repos.ts', () => ({
@@ -209,10 +215,25 @@ async function post(
   } else if (options?.signature !== null) {
     headers['X-Hub-Signature-256'] = await sign(options?.secret ?? WEBHOOK_SECRET, body);
   }
-  return app.fetch(
+  // The workflow_run handler defers the best-effort "Void Build" check-run
+  // completion onto `executionCtx.waitUntil` (off the webhook 2xx path). Capture
+  // those promises and await them before returning so tests can assert the PATCH
+  // deterministically — real Workers await waitUntil on response close; Hono
+  // passes the ctx through but does not await.
+  const pending: Array<Promise<unknown>> = [];
+  const executionCtx = {
+    waitUntil: (p: Promise<unknown>) => {
+      pending.push(p);
+    },
+    passThroughOnException: () => {},
+  } as unknown as ExecutionContext;
+  const res = await app.fetch(
     new Request('http://localhost/webhooks/github', { method: 'POST', headers, body }),
     { ...appEnv, GITHUB_WEBHOOK_SECRET: withSecret ? WEBHOOK_SECRET : undefined },
+    executionCtx,
   );
+  await Promise.all(pending);
+  return res;
 }
 
 beforeAll(async () => {
@@ -238,6 +259,8 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // Some check-run tests stub the global `fetch`; unstub so it never leaks.
+  vi.unstubAllGlobals();
 });
 
 describe('POST /webhooks/github', () => {
@@ -1085,6 +1108,253 @@ describe('POST /webhooks/github', () => {
     const updated = await getBuild(env.db, build.id);
     expect(updated!.status).toBe('failed');
     expect(updated!.deployment_id).toBeNull();
+  });
+
+  // github_actions builds have no BuildManager DO, so the "Void Build" check run
+  // created at OIDC-exchange time is finalized HERE, on workflow_run:completed.
+  // A successful run PATCHes the run to completed/success.
+  it('completes the "Void Build" check run on workflow_run:completed (success)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'wh-check-ok');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '331',
+      repoFullName: 'octo/check-ok',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+    await seedInstallation(env.db, '331');
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'github_actions',
+      status: 'building',
+      commitSha: 'sha-check-ok',
+      branch: 'main',
+      githubRunId: '424250',
+    });
+    await setBuildCheckRunId(env.db, build.id, '5001');
+
+    // getInstallationToken is module-mocked (returns 'tok'), so completeCheckRun's
+    // only network call is the PATCH — capture it.
+    const fetchSpy = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      Response.json({ id: 5001 }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { app, appEnv } = makeApp(env);
+    const res = await post(app, appEnv, 'workflow_run', {
+      action: 'completed',
+      installation: { id: 331 },
+      repository: { full_name: 'octo/check-ok' },
+      workflow_run: { id: 424250, conclusion: 'success', head_sha: 'sha-check-ok' },
+    });
+
+    expect(res.status).toBe(200);
+    expect((await getBuild(env.db, build.id))!.status).toBe('complete');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    expect(url).toContain('/repos/octo/check-ok/check-runs/5001');
+    expect(init.method).toBe('PATCH');
+    const body = JSON.parse(init.body as string) as { status: string; conclusion: string };
+    expect(body.status).toBe('completed');
+    expect(body.conclusion).toBe('success');
+  });
+
+  // A failed run PATCHes the run to completed/failure.
+  it('completes the "Void Build" check run on workflow_run:completed (failure)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'wh-check-fail');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '332',
+      repoFullName: 'octo/check-fail',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+    await seedInstallation(env.db, '332');
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'github_actions',
+      status: 'building',
+      commitSha: 'sha-check-fail',
+      branch: 'main',
+      githubRunId: '424251',
+    });
+    await setBuildCheckRunId(env.db, build.id, '5002');
+
+    const fetchSpy = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      Response.json({ id: 5002 }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { app, appEnv } = makeApp(env);
+    const res = await post(app, appEnv, 'workflow_run', {
+      action: 'completed',
+      installation: { id: 332 },
+      repository: { full_name: 'octo/check-fail' },
+      workflow_run: { id: 424251, conclusion: 'failure', head_sha: 'sha-check-fail' },
+    });
+
+    expect(res.status).toBe(200);
+    expect((await getBuild(env.db, build.id))!.status).toBe('failed');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    expect(url).toContain('/repos/octo/check-fail/check-runs/5002');
+    const body = JSON.parse(init.body as string) as { conclusion: string };
+    expect(body.conclusion).toBe('failure');
+  });
+
+  // No check_run_id (create failed, or a build predating the column) => the
+  // completion is a no-op: no PATCH is attempted, and the build still finalizes.
+  it('does not PATCH a check run when the build has no check_run_id', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'wh-check-none');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '333',
+      repoFullName: 'octo/check-none',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+    await seedInstallation(env.db, '333');
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'github_actions',
+      status: 'building',
+      commitSha: 'sha-check-none',
+      branch: 'main',
+      githubRunId: '424252',
+    });
+    // No setBuildCheckRunId — check_run_id stays NULL.
+
+    const fetchSpy = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      Response.json({}),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { app, appEnv } = makeApp(env);
+    const res = await post(app, appEnv, 'workflow_run', {
+      action: 'completed',
+      installation: { id: 333 },
+      repository: { full_name: 'octo/check-none' },
+      workflow_run: { id: 424252, conclusion: 'success', head_sha: 'sha-check-none' },
+    });
+
+    expect(res.status).toBe(200);
+    expect((await getBuild(env.db, build.id))!.status).toBe('complete');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // The completion is best-effort: even if completeCheckRun throws, the webhook
+  // must still return 2xx and the build must still be finalized.
+  it('still returns 2xx and finalizes the build when completeCheckRun throws', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'wh-check-throw');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '334',
+      repoFullName: 'octo/check-throw',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+    await seedInstallation(env.db, '334');
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'github_actions',
+      status: 'building',
+      commitSha: 'sha-check-throw',
+      branch: 'main',
+      githubRunId: '424253',
+    });
+    await setBuildCheckRunId(env.db, build.id, '5003');
+
+    // completeCheckRun is designed never to throw, but the handler wraps it
+    // defensively; force a throw to prove that guard holds.
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi
+      .spyOn(checkRunModule, 'completeCheckRun')
+      .mockRejectedValue(new Error('check-run PATCH exploded'));
+    try {
+      const { app, appEnv } = makeApp(env);
+      const res = await post(app, appEnv, 'workflow_run', {
+        action: 'completed',
+        installation: { id: 334 },
+        repository: { full_name: 'octo/check-throw' },
+        workflow_run: { id: 424253, conclusion: 'success', head_sha: 'sha-check-throw' },
+      });
+
+      expect(res.status).toBe(200);
+      expect((await getBuild(env.db, build.id))!.status).toBe('complete');
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // The check reflects GitHub's RUN outcome, so completion is driven from the
+  // workflow_run conclusion INDEPENDENT of our internal build-status CAS. Ten
+  // out-of-band paths (push-supersede, OIDC latest-wins, disconnect, app/repo
+  // removal, teardown, reaper, ...) can drive the build terminal WITHOUT touching
+  // its check; GitHub still fires workflow_run:completed (even for a run it
+  // cancelled via concurrency). A workflow_run for an ALREADY-TERMINAL build that
+  // carries a check_run_id must STILL PATCH the check — otherwise it stays
+  // stranded `in_progress` forever. Also exercises the widened conclusion mapping
+  // (cancelled → 'cancelled').
+  it('completes the "Void Build" check run even when the build is already terminal', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'wh-check-terminal');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '335',
+      repoFullName: 'octo/check-terminal',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+    await seedInstallation(env.db, '335');
+    // Seed the build ALREADY terminal (an out-of-band cancel won the race before
+    // the completion webhook arrived) but carrying a check_run_id.
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'github_actions',
+      status: 'cancelled',
+      commitSha: 'sha-check-terminal',
+      branch: 'main',
+      githubRunId: '424260',
+    });
+    await setBuildCheckRunId(env.db, build.id, '5010');
+
+    const fetchSpy = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      Response.json({ id: 5010 }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { app, appEnv } = makeApp(env);
+    const res = await post(app, appEnv, 'workflow_run', {
+      action: 'completed',
+      installation: { id: 335 },
+      repository: { full_name: 'octo/check-terminal' },
+      workflow_run: { id: 424260, conclusion: 'cancelled', head_sha: 'sha-check-terminal' },
+    });
+
+    expect(res.status).toBe(200);
+    // The DB row stays terminal — the CAS no-ops on an already-terminal build.
+    expect((await getBuild(env.db, build.id))!.status).toBe('cancelled');
+
+    // ...but the check was STILL PATCHed to the mapped conclusion.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    expect(url).toContain('/repos/octo/check-terminal/check-runs/5010');
+    expect(init.method).toBe('PATCH');
+    const body = JSON.parse(init.body as string) as { status: string; conclusion: string };
+    expect(body.status).toBe('completed');
+    expect(body.conclusion).toBe('cancelled');
   });
 
   it('still terminalizes the actions build when the deployment lookup throws (slot-pin fix)', async () => {

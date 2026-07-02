@@ -20,6 +20,7 @@ import {
   getBuild,
   getProjectBuilds,
   markGitHubInstallationStatus,
+  setBuildCheckRunId,
   setGitHubInstallationRepositories,
   updateBuildStatus,
   updateGitHubConnection,
@@ -120,6 +121,23 @@ function setCompareSideEffect(fn: (() => Promise<void>) | null): void {
   compareSideEffect = fn;
 }
 
+// Controls the mocked `POST /repos/{repo}/check-runs` response for the
+// best-effort "Void Build" check-run create at the end of a successful
+// exchange. Default 200 returns a fixed id so happy-path exchanges persist it; a
+// >=400 status models a create failure (`createCheckRun` returns null) — the
+// exchange must still mint a token and persist NO check_run_id. Reset each test.
+const CHECK_RUN_ID = '999001';
+let checkRunCreateStatus = 200;
+function setCheckRunCreateStatus(status: number): void {
+  checkRunCreateStatus = status;
+}
+// Counts successful `POST /check-runs` create calls across a test. The create
+// mock returns a DISTINCT id per call (999001, 999002, ...) so a duplicated
+// create on a repeated exchange is observable both by the count AND by a changed
+// persisted `check_run_id`. A single-exchange test still sees the first id
+// (999001 === CHECK_RUN_ID). Reset in beforeEach.
+let checkRunCreateCount = 0;
+
 const APP_ID = '123456';
 const APP_KEY = 'pkcs8-pem-placeholder';
 
@@ -174,6 +192,10 @@ async function exchange(
   options?: { withSecrets?: boolean },
 ): Promise<Response> {
   const withSecrets = options?.withSecrets ?? true;
+  // The route creates+persists the best-effort "Void Build" check run
+  // SYNCHRONOUSLY (awaited before the token response), so the check-run POST and
+  // persisted `check_run_id` are already durable when `app.fetch` resolves — no
+  // `waitUntil` flush needed.
   return app.fetch(
     new Request('http://localhost/auth/github-oidc', {
       method: 'POST',
@@ -242,6 +264,9 @@ beforeEach(async () => {
   setCompareStatus('identical');
   setCompareStatusQueue([]);
   setCompareSideEffect(null);
+  // Default the best-effort check-run create to succeed with a fixed id.
+  setCheckRunCreateStatus(200);
+  checkRunCreateCount = 0;
   // The OIDC route now makes a live `GET /repos/{repo}/installation` call
   // and a live `GET /repos/{repo}/compare/{base}...{branch}` call for
   // the stale-SHA guard (which first mints an installation token via
@@ -258,6 +283,17 @@ beforeEach(async () => {
           token: 'installation-token-stub',
           expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         });
+      }
+      if (url.includes('/check-runs')) {
+        // The best-effort "Void Build" check-run create (end of the exchange).
+        if (checkRunCreateStatus < 200 || checkRunCreateStatus >= 300) {
+          return new Response('check-run create failed', { status: checkRunCreateStatus });
+        }
+        // Distinct id per successful create so a duplicate create is observable.
+        // The first call returns 999001 (=== CHECK_RUN_ID) so single-exchange
+        // tests keep asserting that value.
+        checkRunCreateCount += 1;
+        return Response.json({ id: 999000 + checkRunCreateCount });
       }
       if (url.includes('/compare/')) {
         // Fire the one-shot revocation side effect: the compare call is
@@ -548,6 +584,63 @@ describe('POST /auth/github-oidc', () => {
     expect(build.branch).toBe('main');
     expect(build.github_run_id).toBe('424242');
     expect(build.logs_url).toBe('https://github.com/octo/repo/actions/runs/424242');
+  });
+
+  // The github_actions executor has no BuildManager DO, so the OIDC exchange is
+  // the only place the "Void Build" check run can be created. A successful create
+  // must persist the returned id onto the build so the workflow_run completion
+  // handler can finalize it.
+  it('creates and persists a "Void Build" check run for a github_actions exchange', async () => {
+    const user = await createTestUser(env.db, 'octo-check');
+    const project = await createTestProject(env.db, user.id, 'oidc-check');
+    await seedActiveInstallation(env.db, '1');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '1',
+      repoFullName: 'octo/repo',
+      repositoryId: '42',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+    const app = makeApp(env);
+    setVerifyResult(makeClaims({ sha: 'commit-check', run_id: '424243' }));
+
+    const res = await exchange(app, env, { oidcToken: 'good', project: project.slug });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { buildId: string };
+
+    const build = await getBuild(env.db, json.buildId);
+    expect(build!.check_run_id).toBe(CHECK_RUN_ID);
+  });
+
+  // A check-run create is BEST-EFFORT: the deploy is the critical path and the
+  // check is cosmetic. A failed create (5xx here) must NOT fail the OIDC exchange
+  // or block the deploy token — the exchange still returns 200 + a token, and the
+  // build simply carries a NULL check_run_id (finalizers no-op on it).
+  it('does not fail the exchange when check-run creation fails', async () => {
+    const user = await createTestUser(env.db, 'octo-check-fail');
+    const project = await createTestProject(env.db, user.id, 'oidc-check-fail');
+    await seedActiveInstallation(env.db, '1');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '1',
+      repoFullName: 'octo/repo',
+      repositoryId: '42',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+    const app = makeApp(env);
+    setVerifyResult(makeClaims({ run_id: '424244' }));
+    // The check-run POST fails; createCheckRun returns null.
+    setCheckRunCreateStatus(500);
+
+    const res = await exchange(app, env, { oidcToken: 'good', project: project.slug });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { token: string; buildId: string };
+    expect(json.token).toBeTruthy();
+
+    const build = await getBuild(env.db, json.buildId);
+    expect(build!.check_run_id).toBeNull();
   });
 
   // Rerun-correctness — the exchange captures the OIDC `run_attempt` claim onto
@@ -975,6 +1068,75 @@ describe('POST /auth/github-oidc', () => {
     const projectBuilds = await getProjectBuilds(env.db, project.id);
     expect(projectBuilds.length).toBe(1);
     expect(projectBuilds[0]!.github_run_id).toBe('555');
+  });
+
+  // A repeated exchange for the SAME run reuses the in-flight build (above). That
+  // reused row already carries the check_run_id its creating exchange persisted,
+  // so the check-run create MUST be skipped — otherwise a retry POSTs a SECOND
+  // "Void Build" run and overwrites the id, orphaning the first `in_progress`
+  // forever. Distinct per-call ids make an accidental duplicate visible (both the
+  // POST count and the persisted id would change).
+  it('creates the "Void Build" check run exactly once across repeated exchanges for the same run', async () => {
+    const user = await createTestUser(env.db, 'octo-check-dup');
+    const project = await createTestProject(env.db, user.id, 'oidc-check-dup');
+    await seedActiveInstallation(env.db, '1');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '1',
+      repoFullName: 'octo/repo',
+      repositoryId: '42',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+
+    const app = makeApp(env);
+
+    setVerifyResult(makeClaims({ run_id: '556' }));
+    const first = await exchange(app, env, { oidcToken: 'good', project: project.slug });
+    expect(first.status).toBe(200);
+    const firstJson = (await first.json()) as { buildId: string };
+    // The creating exchange POSTed the check run once and persisted its id.
+    expect(checkRunCreateCount).toBe(1);
+    const firstBuild = await getBuild(env.db, firstJson.buildId);
+    expect(firstBuild!.check_run_id).toBe('999001');
+
+    setVerifyResult(makeClaims({ run_id: '556' }));
+    const second = await exchange(app, env, { oidcToken: 'good', project: project.slug });
+    expect(second.status).toBe(200);
+    const secondJson = (await second.json()) as { buildId: string };
+    expect(secondJson.buildId).toBe(firstJson.buildId);
+
+    // No SECOND check-run POST — the reused build already had one.
+    expect(checkRunCreateCount).toBe(1);
+    // check_run_id is unchanged (NOT overwritten with a second run's id).
+    const reusedBuild = await getBuild(env.db, secondJson.buildId);
+    expect(reusedBuild!.check_run_id).toBe('999001');
+  });
+
+  // Hardening for the pathological concurrent same-(run, attempt) residual: two
+  // truly overlapping exchanges can both read a null id and both POST, but
+  // setBuildCheckRunId is CAS `check_run_id IS NULL`, so the second (racing)
+  // persist no-ops rather than clobbering the first — the DB keeps ONE stable,
+  // completion-tracked id.
+  it('setBuildCheckRunId is immutable once set (never overwrites a persisted id)', async () => {
+    const user = await createTestUser(env.db, 'octo-check-immutable');
+    const project = await createTestProject(env.db, user.id, 'oidc-check-immutable');
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'github_actions',
+      status: 'building',
+      commitSha: 'sha-immutable',
+      branch: 'main',
+      githubRunId: '777',
+    });
+
+    await setBuildCheckRunId(env.db, build.id, '900001');
+    expect((await getBuild(env.db, build.id))!.check_run_id).toBe('900001');
+
+    // A racing second write for the same build must NOT clobber the persisted id.
+    await setBuildCheckRunId(env.db, build.id, '900002');
+    expect((await getBuild(env.db, build.id))!.check_run_id).toBe('900001');
   });
 
   it('enforces a single build row per project+GitHub run ATTEMPT at the DB layer', async () => {

@@ -2323,12 +2323,21 @@ export async function markBuildTerminalIfActive(
 }
 
 /**
- * Persist the GitHub Check Run id created for this build. Unguarded by status:
- * the build's own Durable Object is the only writer of its `check_run_id`, so
- * there is no concurrent writer to CAS against.
+ * Persist the GitHub Check Run id created for this build — FIRST-WRITER-WINS,
+ * immutable once set (CAS on `check_run_id IS NULL`). The container path's DO is
+ * the sole writer, but the github_actions path's writer is the OIDC exchange
+ * route, where two TRULY CONCURRENT exchanges for the same (project, run,
+ * attempt) can both observe a null id during the create+persist window. The CAS
+ * makes a persisted id immutable, so the second (racing) write no-ops rather than
+ * clobbering the first — the DB keeps ONE stable, completion-tracked id. It does
+ * NOT prevent the pathological second GitHub POST itself (a bounded, cosmetic
+ * residual documented in `routes/auth-oidc.ts`).
  */
 export async function setBuildCheckRunId(db: Db, id: string, checkRunId: string): Promise<void> {
-  await db.update(builds).set({ check_run_id: checkRunId }).where(eq(builds.id, id));
+  await db
+    .update(builds)
+    .set({ check_run_id: checkRunId })
+    .where(and(eq(builds.id, id), isNull(builds.check_run_id)));
 }
 
 /**

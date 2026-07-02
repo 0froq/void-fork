@@ -20,6 +20,7 @@ import {
 import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { cancelContainerBuildDos } from '../github/cancel-builds.ts';
+import { completeCheckRun, type CheckRunConclusion } from '../github/check-run.ts';
 import { listInstallationRepositories } from '../github/installation-repos.ts';
 import {
   getBranchExistence,
@@ -82,6 +83,26 @@ type WorkflowRunPayload = {
     head_sha?: string;
   };
 };
+
+// GitHub's `workflow_run.conclusion` → a GitHub Checks conclusion. The
+// "Void Build" check reports GitHub's RUN outcome (not our internal build
+// status), so it is driven straight from this payload field. GitHub Checks
+// accepts success | failure | cancelled | timed_out (among others); we map the
+// non-success outcomes we care about faithfully and collapse everything else
+// (action_required, neutral, skipped, stale, startup_failure, null) to
+// 'failure'.
+function mapWorkflowRunConclusion(conclusion: string | null | undefined): CheckRunConclusion {
+  switch (conclusion) {
+    case 'success':
+      return 'success';
+    case 'cancelled':
+      return 'cancelled';
+    case 'timed_out':
+      return 'timed_out';
+    default:
+      return 'failure';
+  }
+}
 
 function normalizeRepositories(
   repos: ReadonlyArray<{ full_name?: string; id?: number }> | undefined,
@@ -763,15 +784,79 @@ app.post('/github', async (context) => {
       }
 
       const succeeded = data.workflow_run?.conclusion === 'success';
+      // The "Void Build" check reports GitHub's RUN outcome, so its conclusion is
+      // derived from the webhook payload — NOT from our internal build status.
+      const checkConclusion = mapWorkflowRunConclusion(data.workflow_run?.conclusion);
       const headSha = data.workflow_run?.head_sha;
 
       const buildIds: Array<string> = [];
       for (const candidate of candidates) {
-        // Only finalize a build that is still ACTIVE. If a candidate is already
-        // terminal (a redelivered or duplicate completion), leave it untouched
-        // so a stale delivery can't clobber the recorded outcome. Combined with
-        // the attempt match above, a redelivered attempt-1 completion neither
-        // resolves to attempt-2's build NOR re-finalizes attempt-1's terminal row.
+        const candidateHeadSha = headSha ?? candidate.commit_sha;
+
+        // Complete the "Void Build" GitHub Check Run from GitHub's workflow_run
+        // conclusion, INDEPENDENT of our internal build-status CAS below.
+        // github_actions builds have no BuildManager DO, so completion happens
+        // HERE (the container executor completes inside its DO). The check mirrors
+        // GitHub's run outcome, so it must be finalized even when our build row was
+        // already driven terminal OUT-OF-BAND — push-supersede, OIDC latest-wins,
+        // connection disconnect, branch/executor change, App uninstall/suspend,
+        // repo removal, project teardown, or the stale-build reaper. None of those
+        // paths touch the check, yet GitHub still fires workflow_run:completed
+        // (including for a run it cancelled via `concurrency`); driving completion
+        // off the CAS (as before) left the check stranded `in_progress`. Placed
+        // BEFORE the active-status skip below so an already-terminal candidate is
+        // still completed. Idempotent — re-PATCHing a completed run just re-sets
+        // the same conclusion, so a redelivery is harmless. Guarded on
+        // `check_run_id` (no-op when none was created — a create failure, or a
+        // build predating the column). Deferred via `waitUntil` and wrapped
+        // defensively so a slow/failing/throwing Checks call never perturbs the
+        // webhook 2xx (`completeCheckRun` is already best-effort).
+        if (candidate.check_run_id) {
+          const short = (candidateHeadSha ?? '').slice(0, 7);
+          const branchLabel = candidate.branch ?? '';
+          const checkRunId = candidate.check_run_id;
+          const detailsUrl = candidate.logs_url ?? undefined;
+          const title =
+            checkConclusion === 'success'
+              ? 'Void deploy succeeded'
+              : checkConclusion === 'cancelled'
+                ? 'Void deploy cancelled'
+                : 'Void deploy failed';
+          const summary =
+            checkConclusion === 'success'
+              ? `Deployed \`${branchLabel}\` @ ${short} via GitHub Actions`
+              : checkConclusion === 'cancelled'
+                ? `GitHub Actions run for \`${branchLabel}\` @ ${short} was cancelled`
+                : `GitHub Actions deploy failed for \`${branchLabel}\` @ ${short}`;
+          context.executionCtx.waitUntil(
+            (async () => {
+              try {
+                await completeCheckRun(
+                  context.env,
+                  String(installationId),
+                  repoFullName,
+                  checkRunId,
+                  {
+                    conclusion: checkConclusion,
+                    title,
+                    summary,
+                    detailsUrl,
+                  },
+                );
+              } catch (err) {
+                console.warn('[webhooks] workflow_run: best-effort completeCheckRun failed', err);
+              }
+            })(),
+          );
+        }
+
+        // DB side (CAS-guarded): only finalize a build that is still ACTIVE. If a
+        // candidate is already terminal (a redelivered/duplicate completion, or an
+        // out-of-band terminalizer won the race), leave the row untouched so a
+        // stale delivery can't clobber the recorded outcome. Combined with the
+        // attempt match above, a redelivered attempt-1 completion neither resolves
+        // to attempt-2's build NOR re-finalizes attempt-1's terminal row. (The
+        // check was already completed above — it tracks GitHub's run, not our row.)
         if (!ACTIVE_BUILD_STATUSES.includes(candidate.status)) {
           continue;
         }
@@ -783,7 +868,6 @@ app.post('/github', async (context) => {
         // deploy token, and pins the user's concurrency slot until the hourly
         // reaper. On lookup failure, finalize WITHOUT the deployment link (mirrors
         // BuildManager.onStop's best-effort lookup on the container path).
-        const candidateHeadSha = headSha ?? candidate.commit_sha;
         let deploymentId: string | null = null;
         if (succeeded && candidateHeadSha) {
           try {

@@ -5,8 +5,10 @@ import {
   getGitHubActionsConnectionsByRepo,
   getUser,
   markBuildTerminalIfActive,
+  setBuildCheckRunId,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
+import { createCheckRun } from '../github/check-run.ts';
 import {
   getBranchHeadComparisonStatus,
   getRepoInstallation,
@@ -333,6 +335,73 @@ app.post('/github-oidc', async (context) => {
       return context.json({ error: 'unable to verify branch head; retry' }, 503);
     }
     return context.json({ error: 'oidc sha is not the current branch head' }, 409);
+  }
+
+  // Best-effort: create the executor-agnostic "Void Build" GitHub Check Run so
+  // the github_actions path reports deploy status on the commit — mirroring the
+  // container path (which creates it inside the BuildManager DO). Placed AFTER
+  // the post-create freshness re-check so the cancel-and-return branch above can
+  // never strand a run `in_progress`: past this point the build WILL proceed
+  // (the token is minted next). The Actions executor has no DO, so this is the
+  // only place to create the run; the `workflow_run:completed` webhook finalizes
+  // it.
+  //
+  // Kept SYNCHRONOUS (awaited before the token is minted below) on purpose: the
+  // create + persist must be durable before the deploy proceeds. Deferring it via
+  // `waitUntil` would (a) let a rapid repeated exchange for the same run read the
+  // reused row while `check_run_id` is still null — the first exchange's deferred
+  // persist not yet committed — and POST a DUPLICATE check, defeating the guard
+  // below; and (b) open a window where `workflow_run:completed` arrives before the
+  // id is persisted, so the webhook sees null and never completes the run (a new
+  // stuck-`in_progress` class). Awaiting closes both. The added latency is bounded
+  // (the exchange already makes several GitHub round-trips) and best-effort: a
+  // check-run failure MUST NOT fail the OIDC exchange — `createCheckRun` swallows
+  // its own errors and returns null, but the block is wrapped defensively so a
+  // throw (e.g. from `setBuildCheckRunId`) is logged rather than surfaced.
+  //
+  // Guarded on `!build.check_run_id`: a repeated exchange for the SAME (project,
+  // run, attempt) while the build is still active reuses the in-flight row
+  // (`result.outcome === 'reused'`), which — now that create is synchronous —
+  // already carries the check_run_id its creating exchange persisted. Creating
+  // again would POST a SECOND "Void Build" run and overwrite the id, orphaning the
+  // first `in_progress` forever. A reused build whose earlier create FAILED still
+  // has a null id, so a retry is allowed and cannot duplicate.
+  //
+  // Residual (bounded, cosmetic): two TRULY CONCURRENT exchanges for the same
+  // (project, run, attempt) can both read a null id inside this create+persist
+  // window and both POST — a duplicate check, one left `in_progress`. That needs
+  // parallel `void deploy` runs in the SAME run+attempt (a single deploy exchanges
+  // once; a re-run gets a new attempt → a new row/check; CLI retries are
+  // sequential → already closed by the sync guard), so it is a pathological-
+  // workflow case with no deploy/security impact. `setBuildCheckRunId` is CAS
+  // `check_run_id IS NULL` (immutable once set), so the DB still keeps ONE stable,
+  // completion-tracked id rather than clobbering.
+  if (!build.check_run_id) {
+    try {
+      const checkRunId = await createCheckRun(
+        context.env,
+        connection.installation_id,
+        claims.repository,
+        {
+          name: 'Void Build',
+          headSha: claims.sha,
+          externalId: build.id,
+          // The GitHub Actions run page is this build's real details view (the
+          // Actions executor has no DO log store — it links out to the run), so
+          // point `details_url` there rather than the project's public URL the
+          // container path uses. `build.logs_url` is the same run URL the webhook
+          // completion reads, so create and complete stay consistent.
+          detailsUrl: build.logs_url ?? undefined,
+          title: 'Void deploy in progress',
+          summary: `Deploying \`${branch}\` @ ${claims.sha.slice(0, 7)} via GitHub Actions`,
+        },
+      );
+      if (checkRunId) {
+        await setBuildCheckRunId(db, build.id, checkRunId);
+      }
+    } catch (err) {
+      console.warn('[auth-oidc] best-effort check-run create failed', err);
+    }
   }
 
   // Size the token to cover the whole workflow (it is exchanged BEFORE
