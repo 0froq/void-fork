@@ -47,9 +47,15 @@ jobs:
       - run: vp install
         working-directory: framework
 
+      # Invoke the freshly built CLI directly instead of `vp exec void`.
+      # The `void` bin (dist/cli/cli.mjs) is only built by the `vp run build`
+      # step above, but the bin symlink is created at install time — and the
+      # post-build `vp install` short-circuits ("Already up to date") without
+      # re-linking node_modules/.bin/void, so `vp exec void` can't find it.
+      # dist/cli/cli.mjs is guaranteed to exist here because the build ran.
       - name: Deploy kitchen-sink
         working-directory: framework/playground/kitchen-sink
-        run: vp exec void deploy --project kitchen-sink
+        run: node node_modules/void/dist/cli/cli.mjs deploy --project kitchen-sink
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}
           VOID_API_URL: https://api.staging.void.cloud
