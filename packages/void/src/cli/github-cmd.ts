@@ -458,12 +458,14 @@ async function runConnect(
   // -------------------------------------------------------------------------
   // 6. Connect
   // -------------------------------------------------------------------------
+  let connection: GithubConnection;
   try {
-    await client.connectGithub(projectId, {
+    connection = await client.connectGithub(projectId, {
       installationId: installation.installation_id,
       repoFullName,
       branch,
       buildExecutor: executor,
+      workflowPath: args.workflowPath,
     });
   } catch (err) {
     if (err instanceof PlatformApiError) {
@@ -477,6 +479,17 @@ async function runConnect(
       throw err;
     }
     throw err;
+  }
+
+  // Fail closed when an explicit --workflow was not applied. An older platform
+  // that predates workflow_path silently drops the field and returns success
+  // while staying pinned to the default, so the user would wrongly believe their
+  // custom workflow is authorized to deploy. Verify the server echoed it back.
+  if (args.workflowPath !== undefined && connection.workflow_path !== args.workflowPath) {
+    log.error(
+      `connect: server did not apply --workflow ${args.workflowPath} (got ${connection.workflow_path ?? 'none'}). The platform may be too old to support a custom workflow path.`,
+    );
+    process.exit(1);
   }
 
   log.success(`Connected ${repoFullName} (${branch}) → project. Push to ${branch} to deploy.`);
@@ -497,9 +510,14 @@ export async function runGithubUpdate(
   // Guard BEFORE any project resolution or connection read so this usage error
   // never depends on API state (e.g. a disconnected project must not surface the
   // "connect first" 404 message in place of the missing-flags error).
-  if (!isTTY && args.branch === undefined && args.executor === undefined) {
+  if (
+    !isTTY &&
+    args.branch === undefined &&
+    args.executor === undefined &&
+    args.workflowPath === undefined
+  ) {
     log.error(
-      'update: Nothing to update. Pass --branch <name> and/or --executor <container|github_actions>.',
+      'update: Nothing to update. Pass --branch <name>, --executor <container|github_actions>, and/or --workflow <.github/workflows/...>.',
     );
     process.exit(1);
   }
@@ -617,18 +635,31 @@ export async function runGithubUpdate(
   // -------------------------------------------------------------------------
   // 4. Build a patch carrying ONLY the fields that actually changed.
   // -------------------------------------------------------------------------
-  const patch: { branch?: string; buildExecutor?: 'container' | 'github_actions' } = {};
+  const patch: {
+    branch?: string;
+    buildExecutor?: 'container' | 'github_actions';
+    workflowPath?: string;
+  } = {};
   if (branch !== current.branch) {
     patch.branch = branch;
   }
   if (executor !== current.build_executor) {
     patch.buildExecutor = executor;
   }
+  // workflow_path is flag-only (no interactive prompt): change it only when
+  // --workflow was passed AND it differs from the stored value.
+  if (args.workflowPath !== undefined && args.workflowPath !== current.workflow_path) {
+    patch.workflowPath = args.workflowPath;
+  }
 
   // -------------------------------------------------------------------------
   // 5. No-op guard — never hit the API when nothing changed.
   // -------------------------------------------------------------------------
-  if (patch.branch === undefined && patch.buildExecutor === undefined) {
+  if (
+    patch.branch === undefined &&
+    patch.buildExecutor === undefined &&
+    patch.workflowPath === undefined
+  ) {
     log.info(
       `No changes. ${current.repo_full_name} already deploys from ${current.branch} via ${current.build_executor}.`,
     );
@@ -655,7 +686,17 @@ export async function runGithubUpdate(
     throw err;
   }
 
+  // Fail closed when an explicit --workflow was not applied — same old-platform
+  // compatibility hazard as connect: the server could return success while
+  // ignoring the unknown field, leaving the workflow pin unchanged.
+  if (patch.workflowPath !== undefined && updated.workflow_path !== patch.workflowPath) {
+    log.error(
+      `update: server did not apply --workflow ${patch.workflowPath} (got ${updated.workflow_path ?? 'none'}). The platform may be too old to support a custom workflow path.`,
+    );
+    process.exit(1);
+  }
+
   log.success(
-    `Updated ${updated.repo_full_name} → branch ${updated.branch}, executor ${updated.build_executor}.`,
+    `Updated ${updated.repo_full_name} → branch ${updated.branch}, executor ${updated.build_executor}, workflow ${updated.workflow_path}.`,
   );
 }
