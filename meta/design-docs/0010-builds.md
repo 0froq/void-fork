@@ -1,7 +1,7 @@
 # Builds — CI/Build Service
 
 **Date:** 2026-02-19
-**Updated:** 2026-06-08
+**Updated:** 2026-07-02
 **Status:** Implemented (backend + admin build UI; user-facing dashboard views deferred)
 
 > **Implementation note (2026-06):** The backend shipped, but the build
@@ -608,3 +608,140 @@ bypass list (GitHub cannot present Access creds).
   alternative was not used.
 - User-facing dashboard build views (admin build views shipped — see #3).
 - **Preview deployments per PR.**
+
+---
+
+## Configurable Deploy-Workflow Path (SDD Plan — 2026-07-02)
+
+> Subagent-driven-development plan. Each `Task N` is independently implementable
+> by one subagent. Extends the OIDC executor described in [§2](#2-two-build-executors-container-is-default-github-actions-via-oidc-added);
+> no new design doc — this is the home of the `void-deploy.yml` pin.
+
+### Motivation
+
+The OIDC exchange (`packages/api/src/routes/auth-oidc.ts`) hardcodes the
+authorized workflow as `SCAFFOLD_WORKFLOW_PATH = '.github/workflows/void-deploy.yml'`
+(`:26`, enforced `:131`). Baking a filename into the backend is inflexible;
+owners should own their workflow layout. Make the authorized path a
+**per-connection, owner-set** value, **defaulting to the current constant** so
+nothing changes for existing users.
+
+### Security invariant (must be preserved)
+
+The pin's value = _only the workflow the project **owner** designated may mint a
+deploy token_. Preserve it by keeping the authorized path **server-side on the
+`github_connections` row**, set only through owner-authenticated surfaces
+(`POST`/`PATCH /projects/:id/github` — both `authMiddleware` + `project.user_id`
+403-gated). It is **never** read from the repo and **never** written by the
+webhook (`repo` rename → touches only `repo_full_name`) or the OIDC path (never
+writes the connection). Those are the only untrusted inputs, so the boundary
+holds by construction.
+
+Accepted second-order tradeoff (owner's informed choice): pointing the path at a
+fat multi-purpose workflow (`ci.yml`) enlarges the deploy-oracle surface — any
+compromised step there with `id-token: write` could mint. The backend cannot
+detect this; it sees only the OIDC claim (path/event/ref/sha), never the file's
+contents.
+
+### Semantics
+
+**Single path per connection, REPLACE (not a list).** Setting
+`workflow_path = .github/workflows/ci.yml` means `void-deploy.yml` is no longer
+authorized (→ 401). Default `.github/workflows/void-deploy.yml`.
+
+**A pin change is atomic, like a branch/executor change** (added after the
+adversarial review). `workflow_path` is a trust-boundary field, so re-pinning
+must not leave the old workflow able to deploy through an already-minted token or
+a check→lock race. The `PATCH` therefore terminalizes in-flight `github_actions`
+builds when the pin changes (revoking their deploy tokens; container builds don't
+use the workflow gate), and `createGithubActionsBuildWithinLimit` re-reads
+`workflow_path` under the same `FOR UPDATE` connection lock it already uses for
+`branch`, rejecting with a `workflow-mismatch` (409) when the token's workflow no
+longer matches the current pin. This mirrors the existing branch/executor
+handling exactly. The CLI also fails closed if a `--workflow` request is not
+echoed back by the server (an older API that silently drops the field).
+
+### Design summary
+
+- **Data.** `githubConnections` (`schema.ts:390`) gains
+  `workflow_path: text('workflow_path').notNull().default('.github/workflows/void-deploy.yml')`
+  after `build_executor`. `GitHubConnection` is inferred (`types.ts:34`) → picks
+  it up. The OIDC read `getGitHubActionsConnectionsByRepo` (`db.ts`) spreads
+  `getTableColumns(githubConnections)` → column auto-selected, **no query edit**.
+- **Enforcement.** Move the path gate from **before** the connection lookup
+  (`auth-oidc.ts:131`, global const) to **after** connection selection (beside
+  the existing post-lookup `build_executor` check, `auth-oidc.ts:~169`);
+  compare `workflowPathForRepo(workflowRef, claims.repository)` against
+  `connection.workflow_path`. Keep `workflowPathForRepo` and its `null`
+  anti-spoof behavior verbatim. `SCAFFOLD_WORKFLOW_PATH` survives as the shared
+  default constant.
+- **Setter.** `POST /projects/:id/github` (create, `routes/github.ts:~633`) and
+  `PATCH` (update, `:~747`) accept optional `workflow_path`; `db.ts` helpers
+  `createGitHubConnection` / `updateGitHubConnection` persist it.
+- **Validation** (API, authoritative, 400 on fail): non-empty; `startsWith`
+  `.github/workflows/`; ends `.yml`|`.yaml`; no `..`; no leading `/`. (GitHub
+  only runs workflows under `.github/workflows/`, so anything else can never
+  match a real `workflow_ref` — fail loudly now, not silently-never-authorized
+  later.)
+- **CLI** (framework, `packages/void`): `void github connect --workflow <path>`
+  and `void github update --workflow <path>` → `client.ts` connect/update send
+  `workflow_path`; `github-cmd.ts` parses the flag.
+
+### Out of scope
+
+Scaffolder path-awareness (`init.ts` keeps writing `void-deploy.yml`; advanced
+users hand-manage a custom file); dashboard UI (marketing site only); multiple
+/ glob paths.
+
+### Tasks
+
+**Task 1 — Schema + migration (platform, `packages/api`).**
+Add the `workflow_path` column to `githubConnections` in `schema.ts`. Generate
+`drizzle/0029_github_workflow_path.sql` via `pnpm -C packages/api db:generate`
+(emits `.sql` + `_journal.json` + `0029_snapshot.json` together — do not
+hand-edit meta). SQL is
+`ALTER TABLE "github_connections" ADD COLUMN "workflow_path" text DEFAULT '.github/workflows/void-deploy.yml' NOT NULL;`.
+_Verify:_ `vp run check` clean; `0029_*` present, journal `idx: 29`;
+`GitHubConnection` includes `workflow_path`. _Depends:_ none.
+
+**Task 2 — db.ts helpers persist the column (platform).**
+`createGitHubConnection` inserts `workflow_path` (default constant when
+omitted); `updateGitHubConnection` updates it when provided. _Verify:_
+typecheck; signatures. _Depends:_ Task 1.
+
+**Task 3 — API setter + validation (platform, `routes/github.ts`).**
+POST + PATCH read optional `workflow_path`, run a `validateWorkflowPath()` util
+(rules above), 400 on invalid, pass to the Task-2 helpers. _Verify:_ typecheck.
+_Depends:_ Task 2.
+
+**Task 4 — OIDC enforcement per-connection (platform, `routes/auth-oidc.ts`).**
+Remove the global gate at `:131`; re-add after connection selection, comparing
+`workflowPathForRepo(...)` to `connection.workflow_path`. Keep
+`SCAFFOLD_WORKFLOW_PATH` as the default constant. _Verify:_ control-flow reasoning;
+covered by Task 5. _Depends:_ Task 1.
+
+**Task 5 — Tests (platform, `packages/api/test/integration`).**
+`api-oidc.test.ts`: (a) default back-compat — existing scaffolded / `other.yml`
+/ spoofed-prefix cases still pass; (b) `workflow_path='.github/workflows/ci.yml'`
+→ `ci.yml` mints 200, `void-deploy.yml` → 401; (c) two projects, same repo,
+different paths → each mints only its own, cross → 401. Connection-CRUD test:
+POST/PATCH invalid path → 400, `.yaml` ok, value persisted + read back.
+_Verify:_ `vp test run` on these files green. _Depends:_ Tasks 2–4.
+
+**Task 6 — CLI flags (framework, `packages/void`) — SEPARATE REPO.**
+Pre-req: `git submodule update --init framework` (uninitialized in this
+worktree). `client.ts` connect + update helpers add optional `workflowPath` →
+body `workflow_path`; `github-cmd.ts` connect + update parse `--workflow <path>`
+(client-side validate for a friendly error; API stays authoritative). Contract:
+body field is `workflow_path` (fixed by Task 3). _Verify:_ framework typecheck +
+`github-cmd` tests. _Depends:_ Task 3 (field-name contract) — buildable in
+parallel once fixed.
+
+### Commit / rollout
+
+Two repos → per CLAUDE.md commit **framework (Task 6) first, then platform, then
+bump the submodule pointer**; in this worktree the framework submodule has a
+separate object store, so cherry-pick back to main + amend the pointer per the
+worktree recipe. **All commits require explicit user confirmation.** Deploy:
+additive column, migrate then deploy API; old code tolerates the new column — no
+two-phase concern.

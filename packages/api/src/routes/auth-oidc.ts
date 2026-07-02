@@ -18,13 +18,6 @@ import { getPlanLimits } from '../tiers.ts';
 
 const app = new Hono<ApiEnv>();
 
-// The scaffolded deploy workflow (`void init` writes this exact path; see the
-// CLI's `getWorkflowYaml` / `setupGithubActions`). The OIDC exchange binds the
-// minted deploy token to THIS workflow file so an arbitrary other workflow in
-// the connected repo that can request `id-token: write` (e.g. a hand-added
-// workflow, or an unsafe `pull_request_target`) can't mint a deploy token.
-const SCAFFOLD_WORKFLOW_PATH = '.github/workflows/void-deploy.yml';
-
 // Only trusted, write-access-gated trigger events may mint a deploy token.
 // `push` is the scaffolded trigger; `workflow_dispatch` is a collaborator-only
 // manual run. PR-family events (`pull_request`, `pull_request_target`) are
@@ -121,17 +114,6 @@ app.post('/github-oidc', async (context) => {
     return context.json({ error: 'oidc token event is not an allowed deploy trigger' }, 401);
   }
 
-  // Bind the token to the scaffolded deploy workflow: the running workflow file
-  // must be `void-deploy.yml` under the OIDC token's own repository. This blocks
-  // any OTHER workflow in the repo (which could also request `id-token: write`)
-  // from being used as a deploy oracle, while still allowing the scaffolded
-  // workflow on its connected branch (push or a manual dispatch of THAT file).
-  // Matched against `claims.repository` (the running repo) so the path can't be
-  // spoofed via a different repo prefix.
-  if (workflowPathForRepo(workflowRef, claims.repository) !== SCAFFOLD_WORKFLOW_PATH) {
-    return context.json({ error: 'oidc token is not from the void deploy workflow' }, 401);
-  }
-
   const db = context.get('db');
   const connections = await getGitHubActionsConnectionsByRepo(
     db,
@@ -168,6 +150,22 @@ app.post('/github-oidc', async (context) => {
   // through the OIDC path.
   if (connection.build_executor !== 'github_actions') {
     return context.json({ error: 'connection is not configured for github actions' }, 401);
+  }
+
+  // Bind the deploy token to the connection's authorized workflow file
+  // (owner-configured `workflow_path`, default `.github/workflows/void-deploy.yml`
+  // as scaffolded by `void init --github`). The running workflow file must equal
+  // that path under the OIDC token's OWN repository, so any OTHER workflow in the
+  // repo that can request `id-token: write` (a hand-added workflow, an unsafe
+  // `pull_request_target`) can't act as a deploy oracle. `workflowPathForRepo`
+  // matches against `claims.repository` and returns null on a prefix mismatch
+  // (which never equals the stored path), so the path can't be spoofed via a
+  // different repo prefix. Checked AFTER connection selection so each connection
+  // pins its own workflow; a rejected request costs one indexed SELECT (the JWT
+  // is already verified and keyed on the verified repo id).
+  const tokenWorkflowPath = workflowPathForRepo(workflowRef, claims.repository);
+  if (tokenWorkflowPath !== connection.workflow_path) {
+    return context.json({ error: 'oidc token is not from the void deploy workflow' }, 401);
   }
 
   const user = await getUser(db, connection.user_id);
@@ -272,6 +270,10 @@ app.post('/github-oidc', async (context) => {
     connectionId: connection.id,
     installationId: connection.installation_id,
     repositoryId: connection.repository_id,
+    // tokenWorkflowPath is non-null here: it passed the `!== connection.workflow_path`
+    // gate above against a NOT NULL column, so it equals the snapshot pin. Re-checked
+    // under the row lock so a concurrent workflow_path PATCH fails this exchange closed.
+    expectedWorkflowPath: tokenWorkflowPath,
   });
   if (result.outcome === 'limit-exceeded') {
     return context.json({ error: 'concurrent build limit reached' }, 429);
@@ -295,6 +297,12 @@ app.post('/github-oidc', async (context) => {
   }
   if (result.outcome === 'branch-mismatch') {
     return context.json({ error: 'connected branch changed concurrently' }, 409);
+  }
+  if (result.outcome === 'workflow-mismatch') {
+    // The owner re-pinned workflow_path between the pre-tx gate and this locked
+    // re-read; the token's workflow is no longer the authorized one. Do not mint.
+    // 409: a concurrent config change, same class as branch-mismatch above.
+    return context.json({ error: 'authorized workflow changed concurrently' }, 409);
   }
   if (result.outcome === 'project-deleting') {
     // The project is being torn down (or already gone) concurrently with this

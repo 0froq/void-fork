@@ -377,6 +377,126 @@ describe('POST /projects/:id/github', () => {
     expect(await getGitHubConnection(env.db, project.id)).toBeNull();
   });
 
+  it('persists a custom workflow_path (.yaml accepted)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'gh-wf-custom');
+    await upsertGitHubInstallation(env.db, {
+      installationId: '211',
+      userId: user.id,
+      accountLogin: 'acme',
+      accountId: 'acc_1',
+      accountType: 'Organization',
+      repositories: [{ full_name: 'acme/app', id: 1 }],
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          installationId: '211',
+          repoFullName: 'acme/app',
+          workflowPath: '.github/workflows/deploy.yaml',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const connection = (await res.json()) as { workflow_path: string };
+    expect(connection.workflow_path).toBe('.github/workflows/deploy.yaml');
+    const persisted = await getGitHubConnection(env.db, project.id);
+    expect(persisted?.workflow_path).toBe('.github/workflows/deploy.yaml');
+  });
+
+  it('defaults workflow_path to the scaffolded void-deploy.yml when omitted', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'gh-wf-default');
+    await upsertGitHubInstallation(env.db, {
+      installationId: '212',
+      userId: user.id,
+      accountLogin: 'acme',
+      accountId: 'acc_1',
+      accountType: 'Organization',
+      repositories: [{ full_name: 'acme/app', id: 1 }],
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installationId: '212', repoFullName: 'acme/app' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const persisted = await getGitHubConnection(env.db, project.id);
+    expect(persisted?.workflow_path).toBe('.github/workflows/void-deploy.yml');
+  });
+
+  it('returns 400 when workflowPath is outside .github/workflows/', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'gh-wf-badprefix');
+    await upsertGitHubInstallation(env.db, {
+      installationId: '213',
+      userId: user.id,
+      accountLogin: 'acme',
+      accountId: 'acc_1',
+      accountType: 'Organization',
+      repositories: [{ full_name: 'acme/app', id: 1 }],
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        // No `.github/workflows/` prefix — GitHub could never run it, so it could
+        // never match a real OIDC workflow_ref.
+        body: JSON.stringify({
+          installationId: '213',
+          repoFullName: 'acme/app',
+          workflowPath: 'ci.yml',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('invalid workflowPath');
+    expect(await getGitHubConnection(env.db, project.id)).toBeNull();
+  });
+
+  it('returns 400 when workflowPath contains a .. traversal', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'gh-wf-traversal');
+    await upsertGitHubInstallation(env.db, {
+      installationId: '214',
+      userId: user.id,
+      accountLogin: 'acme',
+      accountId: 'acc_1',
+      accountType: 'Organization',
+      repositories: [{ full_name: 'acme/app', id: 1 }],
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          installationId: '214',
+          repoFullName: 'acme/app',
+          workflowPath: '.github/workflows/../../evil.yml',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('invalid workflowPath');
+    expect(await getGitHubConnection(env.db, project.id)).toBeNull();
+  });
+
   // connecting against a suspended/deleted installation must be rejected.
   // getGitHubInstallation returns suspended/deleted rows, and a `selected` install
   // keeps its cached repos, so the connect would otherwise succeed — but every
@@ -756,6 +876,79 @@ describe('PATCH /projects/:id/github', () => {
     expect(updated.build_executor).toBe('github_actions');
   });
 
+  it('updates workflow_path', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'gh-patch-wf');
+    await upsertGitHubInstallation(env.db, {
+      installationId: '778',
+      userId: user.id,
+      accountLogin: 'acme',
+      accountId: 'acc_7',
+      accountType: 'User',
+      repositories: [{ full_name: 'acme/app', id: 1 }],
+    });
+    await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installationId: '778', repoFullName: 'acme/app' }),
+      }),
+      env,
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflowPath: '.github/workflows/ci.yml' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { workflow_path: string }).workflow_path).toBe(
+      '.github/workflows/ci.yml',
+    );
+    const persisted = await getGitHubConnection(env.db, project.id);
+    expect(persisted?.workflow_path).toBe('.github/workflows/ci.yml');
+  });
+
+  it('returns 400 when workflowPath is invalid on PATCH', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'gh-patch-wf-bad');
+    await upsertGitHubInstallation(env.db, {
+      installationId: '779',
+      userId: user.id,
+      accountLogin: 'acme',
+      accountId: 'acc_7',
+      accountType: 'User',
+      repositories: [{ full_name: 'acme/app', id: 1 }],
+    });
+    await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installationId: '779', repoFullName: 'acme/app' }),
+      }),
+      env,
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflowPath: 'not-under-workflows.yml' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('invalid workflowPath');
+    // The connection's workflow_path is unchanged (still the default).
+    const persisted = await getGitHubConnection(env.db, project.id);
+    expect(persisted?.workflow_path).toBe('.github/workflows/void-deploy.yml');
+  });
+
   it('returns 404 when there is no connection to patch', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'gh-patch-404');
@@ -884,6 +1077,71 @@ describe('PATCH /projects/:id/github', () => {
     expect((await getBuild(env.db, actionsBuild.id))!.status).toBe('building');
     // DO cancel attempted for the cancelled CONTAINER build.
     expect(cancelledIds).toEqual([containerBuild.id]);
+  });
+
+  // A workflow_path change is a trust-boundary change: it must orphan in-flight
+  // github_actions builds authorized under the OLD pin (their deploy token stays
+  // valid while the build is active), the SAME way branch/executor changes do.
+  // Container builds don't use the workflow gate, so they keep running.
+  it('cancels in-flight github_actions builds on a workflow_path change', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'gh-patch-workflow');
+    await upsertGitHubInstallation(env.db, {
+      installationId: '783',
+      userId: user.id,
+      accountLogin: 'acme',
+      accountId: 'acc_w',
+      accountType: 'User',
+      repositories: [{ full_name: 'acme/app', id: 1 }],
+    });
+    await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        // github_actions executor, default workflow (.github/workflows/void-deploy.yml).
+        body: JSON.stringify({
+          installationId: '783',
+          repoFullName: 'acme/app',
+          buildExecutor: 'github_actions',
+        }),
+      }),
+      env,
+    );
+
+    const actionsBuild = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'github_actions',
+      status: 'building',
+    });
+    const containerBuild = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      status: 'building',
+    });
+
+    const { namespace, cancelledIds } = recordingBuildManager();
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/github`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflowPath: '.github/workflows/ci.yml' }),
+      }),
+      { ...env, BUILD_MANAGER: namespace },
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { workflow_path: string }).workflow_path).toBe(
+      '.github/workflows/ci.yml',
+    );
+
+    // The github_actions build (authorized under the OLD pin) is cancelled; the
+    // container build is untouched (it never used the workflow gate).
+    expect((await getBuild(env.db, actionsBuild.id))!.status).toBe('cancelled');
+    expect((await getBuild(env.db, actionsBuild.id))!.error).toBe('workflow path changed');
+    expect((await getBuild(env.db, containerBuild.id))!.status).toBe('building');
+    // github_actions builds have no container DO, so no DO cancel is attempted.
+    expect(cancelledIds).toEqual([]);
   });
 
   // A no-op PATCH (values unchanged) must terminalize NOTHING.

@@ -415,6 +415,12 @@ export const githubConnections = pgTable(
       .notNull()
       .default('container')
       .$type<'container' | 'github_actions'>(),
+    // The `.github/workflows/*.yml` file the GitHub Actions OIDC exchange binds
+    // the deploy token to (see `routes/auth-oidc.ts`). Owner-configurable per
+    // connection; defaults to the file `void init --github` scaffolds. Only the
+    // owner-authenticated connect/update routes write this — never the webhook
+    // or the OIDC path — so it stays a trusted, server-side pin.
+    workflow_path: text('workflow_path').notNull().default('.github/workflows/void-deploy.yml'),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
     updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
   },

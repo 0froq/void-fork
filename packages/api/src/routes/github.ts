@@ -622,6 +622,20 @@ export const githubRoutes = new Hono<ApiEnv>()
     return context.redirect(`${dashboardUrl}/settings/connections`);
   });
 
+// The OIDC exchange (`routes/auth-oidc.ts`) binds a deploy token to the
+// workflow file at the connection's `workflow_path`. GitHub only runs workflows
+// under `.github/workflows/`, so a path outside it (or one with `..`) can never
+// match a real OIDC `workflow_ref` — reject it here at the owner-authenticated
+// setter for a clear error, rather than a silently-never-authorized deploy.
+function isValidWorkflowPath(path: string): boolean {
+  return (
+    path.length > 0 &&
+    path.startsWith('.github/workflows/') &&
+    (path.endsWith('.yml') || path.endsWith('.yaml')) &&
+    !path.includes('..')
+  );
+}
+
 // ---------------------------------------------------------------------------
 // /projects — per-project connection CRUD. Mounted UNDER the global
 // `app.use('/projects/*', authMiddleware)`, so auth is already applied; each
@@ -645,6 +659,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       repoFullName?: unknown;
       branch?: unknown;
       buildExecutor?: unknown;
+      workflowPath?: unknown;
     }>();
 
     if (typeof body.installationId !== 'string' || body.installationId === '') {
@@ -662,6 +677,12 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
     }
     if (body.branch !== undefined && (typeof body.branch !== 'string' || body.branch === '')) {
       return context.json({ error: 'invalid branch' }, 400);
+    }
+    if (
+      body.workflowPath !== undefined &&
+      (typeof body.workflowPath !== 'string' || !isValidWorkflowPath(body.workflowPath))
+    ) {
+      return context.json({ error: 'invalid workflowPath' }, 400);
     }
 
     // The installation must belong to the caller and grant access to the repo.
@@ -719,6 +740,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       repositoryId: String(repositoryId),
       branch: body.branch,
       buildExecutor: body.buildExecutor,
+      workflowPath: body.workflowPath,
     });
 
     return context.json(connection);
@@ -759,7 +781,11 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       return context.json({ error: 'connection not found' }, 404);
     }
 
-    const body = await context.req.json<{ branch?: unknown; buildExecutor?: unknown }>();
+    const body = await context.req.json<{
+      branch?: unknown;
+      buildExecutor?: unknown;
+      workflowPath?: unknown;
+    }>();
     if (body.branch !== undefined && (typeof body.branch !== 'string' || body.branch === '')) {
       return context.json({ error: 'invalid branch' }, 400);
     }
@@ -770,8 +796,15 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
     ) {
       return context.json({ error: 'invalid buildExecutor' }, 400);
     }
+    if (
+      body.workflowPath !== undefined &&
+      (typeof body.workflowPath !== 'string' || !isValidWorkflowPath(body.workflowPath))
+    ) {
+      return context.json({ error: 'invalid workflowPath' }, 400);
+    }
     const newBranch: string | undefined = body.branch;
     const newExecutor = body.buildExecutor as Build['executor'] | undefined;
+    const newWorkflowPath: string | undefined = body.workflowPath;
 
     // A branch or executor change orphans any in-flight build for the OLD config:
     // its deploy token must be revoked so a build started for the prior
@@ -820,10 +853,27 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
           })),
         );
       }
+      // A workflow_path change is a trust-boundary change: the OIDC gate only
+      // mints a deploy token for the pinned workflow, so re-pinning must revoke
+      // any in-flight github_actions build authorized under the OLD pin (its
+      // token stays valid while the build is active). Builds don't record the
+      // workflow that authorized them, so terminalize ALL in-flight
+      // github_actions builds — every active one predates this new pin. Container
+      // builds don't use the workflow gate, so they're untouched. The locked
+      // re-read in createGithubActionsBuildWithinLimit closes the concurrent race.
+      if (newWorkflowPath !== undefined && newWorkflowPath !== current.workflow_path) {
+        terminated.push(
+          ...(await terminateBuildsForProject(txDb, projectId, {
+            executor: 'github_actions',
+            reason: 'workflow path changed',
+          })),
+        );
+      }
 
       await updateGitHubConnection(txDb, projectId, {
         branch: newBranch,
         buildExecutor: newExecutor,
+        workflowPath: newWorkflowPath,
       });
       const next = await getGitHubConnection(txDb, projectId);
       return { cancelled: terminated, updated: next, gone: false };

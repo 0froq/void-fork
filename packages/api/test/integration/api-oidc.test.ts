@@ -1369,6 +1369,7 @@ describe('POST /auth/github-oidc', () => {
         connectionId: connection.id,
         installationId: '1',
         repositoryId: '42',
+        expectedWorkflowPath: '.github/workflows/void-deploy.yml',
       }),
       createGithubActionsBuildWithinLimit(env.db, {
         projectId: project.id,
@@ -1378,6 +1379,7 @@ describe('POST /auth/github-oidc', () => {
         connectionId: connection.id,
         installationId: '1',
         repositoryId: '42',
+        expectedWorkflowPath: '.github/workflows/void-deploy.yml',
       }),
     ]);
 
@@ -1524,6 +1526,9 @@ describe('POST /auth/github-oidc', () => {
       projectId: project.id,
       installationId: '1',
       repoFullName: 'octo/repo',
+      // repositoryId set so the connection resolves and the request reaches the
+      // (post-lookup) workflow-path gate — the point of THIS test.
+      repositoryId: '42',
       branch: 'main',
       buildExecutor: 'github_actions',
     });
@@ -1549,6 +1554,9 @@ describe('POST /auth/github-oidc', () => {
       projectId: project.id,
       installationId: '1',
       repoFullName: 'octo/repo',
+      // repositoryId set so the connection resolves and the spoofed path is
+      // rejected by the workflow-path gate (not by connection-not-found).
+      repositoryId: '42',
       branch: 'main',
       buildExecutor: 'github_actions',
     });
@@ -1604,6 +1612,106 @@ describe('POST /auth/github-oidc', () => {
     const res = await exchange(app, env, { oidcToken: 'good', project: project.slug });
     expect(res.status).toBe(200);
     expect((await getProjectBuilds(env.db, project.id)).length).toBe(1);
+  });
+
+  it('mints a token when the run matches the connection custom workflow_path', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'oidc-custom-workflow');
+    await seedActiveInstallation(env.db, '1');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '1',
+      repoFullName: 'octo/repo',
+      repositoryId: '42',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+      // Owner pinned a non-scaffolded workflow file.
+      workflowPath: '.github/workflows/ci.yml',
+    });
+
+    const app = makeApp(env);
+    const ciRef = 'octo/repo/.github/workflows/ci.yml@refs/heads/main';
+    setVerifyResult(makeClaims({ workflow_ref: ciRef, job_workflow_ref: ciRef }));
+
+    const res = await exchange(app, env, { oidcToken: 'good', project: project.slug });
+    expect(res.status).toBe(200);
+    expect((await getProjectBuilds(env.db, project.id)).length).toBe(1);
+  });
+
+  it('returns 401 for the scaffolded void-deploy.yml when the connection pins a custom path', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'oidc-custom-rejects-default');
+    await seedActiveInstallation(env.db, '1');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '1',
+      repoFullName: 'octo/repo',
+      repositoryId: '42',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+      workflowPath: '.github/workflows/ci.yml',
+    });
+
+    const app = makeApp(env);
+    // makeClaims defaults to the scaffolded void-deploy.yml path, which this
+    // connection no longer authorizes (it pins ci.yml) — REPLACE semantics.
+    setVerifyResult(makeClaims());
+
+    const res = await exchange(app, env, { oidcToken: 'good', project: project.slug });
+    expect(res.status).toBe(401);
+    expect((await getProjectBuilds(env.db, project.id)).length).toBe(0);
+  });
+
+  it('pins each connection to its own workflow_path when two projects share a repo', async () => {
+    const user = await createTestUser(env.db);
+    const projectDefault = await createTestProject(env.db, user.id, 'oidc-iso-default');
+    const projectCustom = await createTestProject(env.db, user.id, 'oidc-iso-custom');
+    await seedActiveInstallation(env.db, '1');
+    // Both projects connect to the SAME repo via the same installation; each
+    // pins a DIFFERENT workflow. A global constant could not produce the
+    // asymmetric rejections below.
+    await createGitHubConnection(env.db, {
+      projectId: projectDefault.id,
+      installationId: '1',
+      repoFullName: 'octo/repo',
+      repositoryId: '42',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+      // default workflow_path === '.github/workflows/void-deploy.yml'
+    });
+    await createGitHubConnection(env.db, {
+      projectId: projectCustom.id,
+      installationId: '1',
+      repoFullName: 'octo/repo',
+      repositoryId: '42',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+      workflowPath: '.github/workflows/ci.yml',
+    });
+
+    const app = makeApp(env);
+    const defaultRef = 'octo/repo/.github/workflows/void-deploy.yml@refs/heads/main';
+    const ciRef = 'octo/repo/.github/workflows/ci.yml@refs/heads/main';
+
+    // The default-pinned project rejects a ci.yml run...
+    setVerifyResult(makeClaims({ workflow_ref: ciRef, job_workflow_ref: ciRef }));
+    const crossA = await exchange(app, env, { oidcToken: 'good', project: projectDefault.slug });
+    expect(crossA.status).toBe(401);
+
+    // ...and the ci.yml-pinned project rejects the scaffolded void-deploy.yml run.
+    setVerifyResult(makeClaims({ workflow_ref: defaultRef, job_workflow_ref: defaultRef }));
+    const crossB = await exchange(app, env, { oidcToken: 'good', project: projectCustom.slug });
+    expect(crossB.status).toBe(401);
+
+    // No build was created for either cross-workflow attempt.
+    expect((await getProjectBuilds(env.db, projectDefault.id)).length).toBe(0);
+    expect((await getProjectBuilds(env.db, projectCustom.id)).length).toBe(0);
+
+    // Each still mints for ITS OWN workflow (custom pins ci.yml).
+    setVerifyResult(makeClaims({ workflow_ref: ciRef, job_workflow_ref: ciRef }));
+    const own = await exchange(app, env, { oidcToken: 'good', project: projectCustom.slug });
+    expect(own.status).toBe(200);
+    expect((await getProjectBuilds(env.db, projectCustom.id)).length).toBe(1);
   });
 
   // ---------------------------------------------------------------------------
@@ -2410,6 +2518,7 @@ describe('claimBuildForStartWithinLimit', () => {
         connectionId: 'ghc_absent',
         installationId: 'none',
         repositoryId: '42',
+        expectedWorkflowPath: '.github/workflows/void-deploy.yml',
       }),
     ]);
 

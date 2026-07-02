@@ -3263,6 +3263,11 @@ export async function createGithubActionsBuildWithinLimit(
     connectionId: string;
     installationId: string;
     repositoryId: string | null;
+    // The authorized workflow path the OIDC gate matched (the token's own
+    // workflow file). Re-checked under the connection lock so a concurrent
+    // PATCH that re-pins `workflow_path` can't let a now-de-authorized workflow
+    // slip a build through the check→lock window. See the re-validation below.
+    expectedWorkflowPath: string;
   },
 ): Promise<
   | { outcome: 'created' | 'reused'; build: Build }
@@ -3270,6 +3275,7 @@ export async function createGithubActionsBuildWithinLimit(
   | { outcome: 'connection-removed' }
   | { outcome: 'connection-replaced' }
   | { outcome: 'branch-mismatch' }
+  | { outcome: 'workflow-mismatch' }
   | { outcome: 'install-revoked' }
   | { outcome: 'project-deleting' }
 > {
@@ -3313,7 +3319,11 @@ export async function createGithubActionsBuildWithinLimit(
     // disconnect locks only github_connections, so there is no opposite-order
     // acquirer and no deadlock.
     const [conn] = await tx
-      .select({ id: githubConnections.id, branch: githubConnections.branch })
+      .select({
+        id: githubConnections.id,
+        branch: githubConnections.branch,
+        workflow_path: githubConnections.workflow_path,
+      })
       .from(githubConnections)
       .where(
         and(
@@ -3362,6 +3372,18 @@ export async function createGithubActionsBuildWithinLimit(
     // lock; the locked row is authoritative. Reject if the connected branch moved.
     if (args.branch != null && args.branch !== '' && conn.branch !== args.branch) {
       return { outcome: 'branch-mismatch' };
+    }
+
+    // Re-validate the authorized workflow path under the SAME row lock — the same
+    // TOCTOU class as the branch check above. auth-oidc's pre-tx gate compares the
+    // OIDC token's own workflow file against the connection SNAPSHOT; a PATCH that
+    // re-pins workflow_path can commit between that check and this lock. A
+    // workflow_path change cannot filter-cancel by workflow (builds don't record
+    // the workflow that authorized them), so the locked row is the authority:
+    // reject if the token's workflow no longer matches the current pin, closing the
+    // window in which a just-de-authorized workflow could still mint a token.
+    if (conn.workflow_path !== args.expectedWorkflowPath) {
+      return { outcome: 'workflow-mismatch' };
     }
 
     // Idempotent reuse: an already in-flight build for this exact run ATTEMPT
@@ -3581,6 +3603,11 @@ export async function createGitHubConnection(
     repositoryId?: string | null;
     branch?: string;
     buildExecutor?: GitHubConnection['build_executor'];
+    // The `.github/workflows/*.yml` file the OIDC exchange binds the deploy
+    // token to. Optional: when omitted the column default applies (the
+    // scaffolded `void-deploy.yml`). Validated by the connect route before it
+    // reaches here.
+    workflowPath?: string;
   },
 ): Promise<GitHubConnection> {
   const id = generateId('ghc');
@@ -3594,6 +3621,7 @@ export async function createGitHubConnection(
       repository_id: args.repositoryId ?? null,
       branch: args.branch ?? 'main',
       build_executor: args.buildExecutor ?? 'container',
+      ...(args.workflowPath !== undefined ? { workflow_path: args.workflowPath } : {}),
     })
     .returning();
   return row;
@@ -3818,6 +3846,7 @@ export async function updateGitHubConnection(
   updates: {
     branch?: string;
     buildExecutor?: GitHubConnection['build_executor'];
+    workflowPath?: string;
   },
 ): Promise<void> {
   await db
@@ -3828,6 +3857,10 @@ export async function updateGitHubConnection(
         updates.buildExecutor === undefined
           ? sql`${githubConnections.build_executor}`
           : updates.buildExecutor,
+      workflow_path:
+        updates.workflowPath === undefined
+          ? sql`${githubConnections.workflow_path}`
+          : updates.workflowPath,
       updated_at: sql`now()`,
     })
     .where(eq(githubConnections.project_id, projectId));

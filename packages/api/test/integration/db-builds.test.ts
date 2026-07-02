@@ -2003,6 +2003,38 @@ describe('builds', () => {
 // ---------------------------------------------------------------------------
 
 describe('createGithubActionsBuildWithinLimit', () => {
+  // The workflow_path gate in auth-oidc runs against the connection SNAPSHOT; the
+  // locked re-read here is the authority. A concurrent PATCH that re-pins
+  // workflow_path between the gate and this lock must fail the exchange closed so
+  // a just-de-authorized workflow can't mint a token through the race window.
+  it('rejects with workflow-mismatch when the pin no longer matches the token workflow', async () => {
+    const user = await createTestUser(env.db, 'gha-wf-mismatch', 'github', undefined, 'pro');
+    const project = await createTestProject(env.db, user.id);
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: 'inst-wf',
+      repoFullName: 'acme/wf',
+      repositoryId: DEFAULT_REPO_ID,
+      buildExecutor: 'github_actions',
+      // Pin (the locked row) is the default void-deploy.yml.
+    });
+    await seedActiveInstall(env.db, 'inst-wf');
+
+    // expectedWorkflowPath is the OIDC token's OWN workflow (ci.yml) — it passed
+    // the pre-tx gate when the pin was ci.yml, but the pin is now the default.
+    const result = await createGithubActionsBuildWithinLimit(env.db, {
+      projectId: project.id,
+      connectionId: (await getGitHubConnection(env.db, project.id))!.id,
+      userId: user.id,
+      limit: 3,
+      githubRunId: '9001',
+      installationId: 'inst-wf',
+      repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/ci.yml',
+    });
+    expect(result.outcome).toBe('workflow-mismatch');
+  });
+
   it('supersedes an older active run for the same project+branch (latest-wins)', async () => {
     const user = await createTestUser(env.db, 'gha-supersede', 'github', undefined, 'pro');
     const project = await createTestProject(env.db, user.id);
@@ -2024,6 +2056,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '1001',
       installationId: 'inst-supersede',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(first.outcome).toBe('created');
     if (first.outcome !== 'created') {
@@ -2040,6 +2073,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '1002',
       installationId: 'inst-supersede',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(second.outcome).toBe('created');
     if (second.outcome !== 'created') {
@@ -2076,6 +2110,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '2001',
       installationId: 'inst-reuse',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(first.outcome).toBe('created');
     if (first.outcome !== 'created') {
@@ -2091,6 +2126,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '2001',
       installationId: 'inst-reuse',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(repeat.outcome).toBe('reused');
     if (repeat.outcome !== 'reused') {
@@ -2138,6 +2174,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '3002',
       installationId: 'inst-branch',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(onMain.outcome).toBe('created');
 
@@ -2167,6 +2204,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '4001',
       installationId: 'inst-cap',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(first.outcome).toBe('created');
     if (first.outcome !== 'created') {
@@ -2184,6 +2222,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '4002',
       installationId: 'inst-cap',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(second.outcome).toBe('created');
     if (second.outcome !== 'created') {
@@ -2209,6 +2248,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '4003',
       installationId: 'inst-cap',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(capped.outcome).toBe('limit-exceeded');
   });
@@ -2232,6 +2272,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '5001',
       installationId: 'none',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(result.outcome).toBe('connection-removed');
 
@@ -2264,6 +2305,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '5002',
       installationId: 'inst-container',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(result.outcome).toBe('connection-removed');
 
@@ -2297,6 +2339,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '7001',
       installationId: 'inst-branch-mismatch',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(result.outcome).toBe('branch-mismatch');
 
@@ -2327,6 +2370,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '7002',
       installationId: 'inst-no-branch',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(result.outcome).toBe('created');
 
@@ -2360,6 +2404,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunAttempt: '1',
       installationId: 'inst-rerun',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(attempt1.outcome).toBe('created');
     if (attempt1.outcome !== 'created') {
@@ -2378,6 +2423,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunAttempt: '2',
       installationId: 'inst-rerun',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(attempt2.outcome).toBe('created');
     if (attempt2.outcome !== 'created') {
@@ -2397,6 +2443,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunAttempt: '2',
       installationId: 'inst-rerun',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(repeat.outcome).toBe('reused');
     if (repeat.outcome !== 'reused') {
@@ -2432,6 +2479,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunAttempt: '1',
       installationId: 'inst-rerun-supersede',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(attempt1.outcome).toBe('created');
     if (attempt1.outcome !== 'created') {
@@ -2450,6 +2498,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunAttempt: '2',
       installationId: 'inst-rerun-supersede',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(attempt2.outcome).toBe('created');
     if (attempt2.outcome !== 'created') {
@@ -2491,6 +2540,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '8001',
       installationId: 'inst-revoked-susp',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(result.outcome).toBe('install-revoked');
     expect(await getProjectBuilds(env.db, project.id)).toHaveLength(0);
@@ -2518,6 +2568,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '8002',
       installationId: 'inst-revoked-del',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(result.outcome).toBe('install-revoked');
     expect(await getProjectBuilds(env.db, project.id)).toHaveLength(0);
@@ -2550,6 +2601,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '8003',
       installationId: 'inst-revoked-sel',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(result.outcome).toBe('install-revoked');
     expect(await getProjectBuilds(env.db, project.id)).toHaveLength(0);
@@ -2582,6 +2634,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '8004',
       installationId: 'inst-revoked-ok',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(result.outcome).toBe('created');
     expect(await getProjectBuilds(env.db, project.id)).toHaveLength(1);
@@ -2632,6 +2685,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '9001',
       installationId: 'inst-replaced',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(replaced.outcome).toBe('connection-replaced');
     expect(await getProjectBuilds(env.db, project.id)).toHaveLength(0);
@@ -2646,6 +2700,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       githubRunId: '9001',
       installationId: 'inst-replaced',
       repositoryId: DEFAULT_REPO_ID,
+      expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });
     expect(ok.outcome).toBe('created');
     expect(await getProjectBuilds(env.db, project.id)).toHaveLength(1);
