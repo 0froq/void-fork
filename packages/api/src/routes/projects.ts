@@ -1,11 +1,15 @@
 import { sql as drizzleSql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { hmacSignState } from '../auth/hmac.ts';
+import { buildManagerNamespace } from '../build-namespace.ts';
+import { isTerminalBuildStatus } from '../build-status.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
 import type { Db } from '../db.ts';
 import {
   createProject,
+  getBuild,
   getProject,
+  getProjectBuilds,
   getProjectBySlug,
   getProjectsByUserId,
   getLatestDeploymentsByProjectIds,
@@ -44,7 +48,7 @@ import {
 import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
 import { tokenizeSql } from '../sql/tokenize.ts';
 import { getPlanLimits } from '../tiers.ts';
-import type { DeployManifest } from '../types.ts';
+import type { Build, DeployManifest } from '../types.ts';
 import { getRequestsDataset, queryProjectRequestOverview } from './usage.ts';
 
 export const RESERVED_SLUGS = new Set([
@@ -455,6 +459,22 @@ function hasUnauthorizedDestructive(
     }
   }
   return violations;
+}
+
+function toBuildSummary(build: Build) {
+  return {
+    id: build.id,
+    status: build.status,
+    executor: build.executor,
+    commit_sha: build.commit_sha,
+    branch: build.branch,
+    exit_code: build.exit_code,
+    error: build.error,
+    logs_url: build.logs_url,
+    created_at: build.created_at,
+    started_at: build.started_at,
+    completed_at: build.completed_at,
+  };
 }
 
 const app = new Hono<ApiEnv>()
@@ -1767,6 +1787,98 @@ const app = new Hono<ApiEnv>()
     }));
 
     return context.json({ data });
+  })
+
+  // List recent builds for a project (owner-guarded).
+  .get('/:id/builds', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
+    if (!project) {
+      return context.json({ error: 'project not found' }, 404);
+    }
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
+    }
+    const rawLimit = Number(context.req.query('limit'));
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 20;
+    const rows = await getProjectBuilds(context.get('db'), project.id, limit);
+    return context.json({ builds: rows.map(toBuildSummary) });
+  })
+  // Build logs for one of a project's builds (owner-guarded). Fronts the
+  // BuildManager DO for container builds; github_actions builds return their
+  // external GitHub Actions URL (no DO log store exists for them).
+  .get('/:id/builds/:buildId/logs', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
+    if (!project) {
+      return context.json({ error: 'project not found' }, 404);
+    }
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
+    }
+    const build = await getBuild(context.get('db'), context.req.param('buildId'));
+    if (!build || build.project_id !== project.id) {
+      return context.json({ error: 'build not found' }, 404);
+    }
+
+    const raw = Number(context.req.query('since'));
+    const since = Number.isFinite(raw) ? raw : 0;
+    const terminal = isTerminalBuildStatus(build.status);
+
+    if (build.executor !== 'container') {
+      return context.json({
+        lines: [],
+        lastSeq: 0,
+        status: build.status,
+        terminal,
+        external: build.logs_url ?? null,
+      });
+    }
+
+    const ns = buildManagerNamespace(context.env, build.instance_type);
+    const stub = ns.get(ns.idFromName(build.id));
+    const res = await stub.fetch(`http://manager/logs?since=${since}`);
+    const body = (await res.json()) as {
+      lines: ReadonlyArray<{ seq: number; line: string; stream: string; ts: number }>;
+      lastSeq: number;
+      status?: string;
+      terminal?: boolean;
+    };
+    // The DO holds the authoritative live status. A completion path sets the DO
+    // terminal FIRST, then does the Postgres CAS write — so if that PG write
+    // throws, the PG `build.status` row can lag ACTIVE until the stale reaper.
+    // OR the two terminal signals (terminal is never resurrected) so a `--follow`
+    // client stops promptly instead of polling through that window.
+    const doTerminal = body.terminal === true;
+    if (doTerminal && !terminal) {
+      // Snapshot was non-terminal but the DO is terminal. Two cases:
+      //  (a) a concurrent terminalizer committed cancelled/failed after our
+      //      snapshot — Postgres is authoritative, use the fresh status; or
+      //  (b) the genuine stale-active window (PG terminal write threw) — PG is
+      //      still non-terminal, so trust the DO's local terminal status.
+      const fresh = await getBuild(context.get('db'), build.id);
+      if (fresh && isTerminalBuildStatus(fresh.status)) {
+        return context.json({
+          lines: body.lines,
+          lastSeq: body.lastSeq,
+          status: fresh.status,
+          terminal: true,
+          external: null,
+        });
+      }
+      return context.json({
+        lines: body.lines,
+        lastSeq: body.lastSeq,
+        status: body.status ?? build.status,
+        terminal: true,
+        external: null,
+      });
+    }
+    return context.json({
+      lines: body.lines,
+      lastSeq: body.lastSeq,
+      status: build.status,
+      terminal,
+      external: null,
+    });
   })
 
   // Provision Hyperdrive for a PostgreSQL project

@@ -1,10 +1,7 @@
+import { isTerminalBuildStatus } from '../../build-status.ts';
 import type { Build } from '../../types.ts';
 
-const TERMINAL_STATUSES: ReadonlyArray<Build['status']> = ['complete', 'failed', 'cancelled'];
-
-export function isTerminalBuildStatus(status: Build['status']): boolean {
-  return TERMINAL_STATUSES.includes(status);
-}
+export { isTerminalBuildStatus };
 
 /**
  * Live build-log panel for container builds. Mirrors the polling approach in

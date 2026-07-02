@@ -2040,6 +2040,48 @@ describe('BuildManager.fetch GET /logs?since=N (admin poll read)', () => {
     expect(server.sent).toEqual([]); // no broadcast
   });
 
+  it('surfaces the DO-local status + terminal from config (non-terminal while running)', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    // Pin a deterministic non-terminal status (startBuild → onStart may flip
+    // 'starting' → 'building'); the point is terminal:false while running.
+    await (m as unknown as { setStatus: (s: string) => Promise<void> }).setStatus('building');
+
+    const res = await m.fetch(new Request('https://manager/logs?since=0', { method: 'GET' }));
+    const body = (await res.json()) as { status: string | null; terminal: boolean };
+    expect(body.status).toBe('building');
+    expect(body.terminal).toBe(false);
+  });
+
+  it('surfaces terminal:true once the DO config reaches a terminal status (DO-authoritative)', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // Drive the DO-local status terminal (mirrors a completion path's setStatus).
+    await (m as unknown as { setStatus: (s: string) => Promise<void> }).setStatus('complete');
+
+    const res = await m.fetch(new Request('https://manager/logs?since=0', { method: 'GET' }));
+    const body = (await res.json()) as { status: string | null; terminal: boolean };
+    expect(body.status).toBe('complete');
+    expect(body.terminal).toBe(true);
+  });
+
+  it('returns status:null, terminal:false when no build config exists yet', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    // No startBuild → no stored config.
+
+    const res = await m.fetch(new Request('https://manager/logs?since=0', { method: 'GET' }));
+    const body = (await res.json()) as { status: string | null; terminal: boolean };
+    expect(body.status).toBeNull();
+    expect(body.terminal).toBe(false);
+  });
+
   it('does NOT collide with the WS upgrade: a GET WITHOUT the Upgrade header reads logs', async () => {
     const ctx = makeStubCtx();
     const env = makeEnv();

@@ -4,6 +4,7 @@ import {
   deployTokenTtlSecondsForBuildMinutes,
   signDeployToken,
 } from './auth/deploy-token.ts';
+import { isTerminalBuildStatus } from './build-status.ts';
 import { type BuildConfig, type BuildLogLine, isContainerCapacityError } from './build-types.ts';
 import { SITE_DOMAIN } from './constants.ts';
 import {
@@ -1108,14 +1109,22 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
 
   /**
    * READ-ONLY poll read of the stored `logs` table for the admin worker.
-   * `GET /logs?since=N` → `{ lines: Array<{seq,line,stream,ts}>, lastSeq }` where
-   * `lines` are the rows with `seq > N` (ascending) and `lastSeq` is the table's
-   * MAX(seq) — or the requested `since` when the table is empty, so a poller's
-   * cursor never moves backward across an empty response (same monotonic intent
-   * as `pollLogs`). A missing/non-numeric `since` is treated as 0. No inserts, no
-   * status writes, no broadcast — this only reads SQLite.
+   * `GET /logs?since=N` → `{ lines: Array<{seq,line,stream,ts}>, lastSeq, status,
+   * terminal }` where `lines` are the rows with `seq > N` (ascending) and
+   * `lastSeq` is the table's MAX(seq) — or the requested `since` when the table
+   * is empty, so a poller's cursor never moves backward across an empty response
+   * (same monotonic intent as `pollLogs`). A missing/non-numeric `since` is
+   * treated as 0. No inserts, no status writes, no broadcast — this only reads
+   * SQLite + DO storage.
+   *
+   * `status`/`terminal` are surfaced from the DO-local config (the authoritative
+   * live status): every completion path sets the DO status terminal FIRST, then
+   * does the Postgres CAS write — so if that PG write throws, the PG row can lag
+   * ACTIVE until the stale reaper while the DO/container is already terminal.
+   * Exposing the DO's terminal here lets `void build logs --follow` stop promptly
+   * instead of polling for ~2h. `null`/`false` when no config exists yet.
    */
-  private handleReadLogs(url: URL): Response {
+  private async handleReadLogs(url: URL): Promise<Response> {
     this.ensureLogTable();
     const raw = Number(url.searchParams.get('since'));
     const since = Number.isFinite(raw) ? raw : 0;
@@ -1129,7 +1138,13 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       .exec<{ max: number | null }>('SELECT MAX(seq) AS max FROM logs')
       .toArray()[0];
     const lastSeq = maxRow?.max ?? since;
-    return Response.json({ lines, lastSeq });
+    const cfg = await this.getConfig();
+    return Response.json({
+      lines,
+      lastSeq,
+      status: cfg?.status ?? null,
+      terminal: cfg ? isTerminalBuildStatus(cfg.status) : false,
+    });
   }
 
   /**
