@@ -274,7 +274,7 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       await page.fill('input[placeholder="my-value"]', 'hello');
       await Promise.all([
         page.waitForResponse(
-          (response) => response.url().includes('/kv') && r.request().method() === 'POST',
+          (response) => response.url().includes('/kv') && response.request().method() === 'POST',
         ),
         page.click('button:has-text("Set")'),
       ]);
@@ -364,7 +364,8 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       await page.fill('input[placeholder="my-value"]', 'queued');
       await Promise.all([
         page.waitForResponse(
-          (response) => response.url().includes('/queues') && r.request().method() === 'POST',
+          (response) =>
+            response.url().includes('/queues') && response.request().method() === 'POST',
         ),
         page.click('button:has-text("Send to Queue")'),
       ]);
