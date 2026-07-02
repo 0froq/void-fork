@@ -21,6 +21,9 @@ import {
   invitations,
   oauthNonces,
   authCodes,
+  builds,
+  githubConnections,
+  githubInstallations,
 } from '../../src/schema.ts';
 import type { PlanId } from '../../src/tiers.ts';
 import { loadPGliteTemplateBundle } from './db-template.ts';
@@ -446,6 +449,14 @@ export async function clearTables(db: Db): Promise<void> {
   await db.delete(domains);
   await db.delete(resources);
   await db.delete(projectSecrets);
+  // `builds` references deployments/projects/users WITHOUT `onDelete: 'cascade'`
+  // (a project delete in prod is expected to remove its builds explicitly), so a
+  // leftover build row would block the deletes below. Delete it first. Under the
+  // shared real-Postgres run (schema-compat, `fileParallelism: false`) rows survive
+  // across files, so this must mirror `clearBuildTables` in the build-creating tests.
+  await db.delete(builds);
+  await db.delete(githubConnections);
+  await db.delete(githubInstallations);
   await db.delete(deployments);
   await db.delete(projects);
   await db.delete(invitations);
