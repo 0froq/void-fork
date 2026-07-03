@@ -2926,3 +2926,125 @@ describe('static deployment caching (KV/R2)', () => {
     );
   });
 });
+
+describe('static asset content-type normalization', () => {
+  // Assets uploaded before the CLI's MIME table knew an extension carry a
+  // stored `application/octet-stream` content type (R2 httpMetadata / KV `ct`
+  // metadata). Dispatch must treat that stored default as "unknown" and
+  // re-derive from the path so already-deployed files serve correctly.
+  function createContentTypeEnv(options: {
+    manifest: Record<string, string>;
+    kvAssets?: Record<string, { body: string; ct: string }>;
+    r2Assets?: Record<string, { body: string; contentType: string }>;
+  }): Env {
+    return {
+      ROUTING: {
+        get: async (key: string) =>
+          key.startsWith('manifest:')
+            ? JSON.stringify(options.manifest)
+            : JSON.stringify({
+                workerName: '',
+                projectId: 'proj-1',
+                staticDeploymentId: 'deploy-abc',
+                version: 'deploy-abc',
+              }),
+      },
+      DISPATCH: { get: vi.fn(() => ({ fetch: vi.fn() })) },
+      ISR_CACHE: { getWithMetadata: async () => ({ value: null, metadata: null }) },
+      STATIC_ASSETS: {
+        getWithMetadata: async (key: string) => {
+          const hash = key.replace(/^assets\/[^/]+\//, '');
+          const asset = options.kvAssets?.[hash];
+          if (!asset) {
+            return { value: null, metadata: null };
+          }
+          return {
+            value: new TextEncoder().encode(asset.body).buffer,
+            metadata: { ct: asset.ct },
+          };
+        },
+      },
+      STATIC_ASSETS_R2: {
+        get: async (key: string) => {
+          const hash = key.replace(/^assets\/[^/]+\//, '');
+          const asset = options.r2Assets?.[hash];
+          if (!asset) {
+            return null;
+          }
+          return {
+            body: asset.body,
+            size: asset.body.length,
+            httpEtag: '"ad7a5ae51c0bc3bbd2d6c7cbdc238c3e"',
+            httpMetadata: { contentType: asset.contentType },
+          };
+        },
+      },
+      ANALYTICS: { writeDataPoint: () => {} },
+    } as unknown as Env;
+  }
+
+  it('re-derives content type for .md stored in R2 as application/octet-stream', async () => {
+    const env = createContentTypeEnv({
+      manifest: { '/guide/page.md': '!hash_md' },
+      r2Assets: { hash_md: { body: '# hello', contentType: 'application/octet-stream' } },
+    });
+
+    const res = await app.fetch(
+      new Request('https://test.void.app/guide/page.md'),
+      env,
+      createCtx(),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
+  });
+
+  it('re-derives content type for .md stored in KV as application/octet-stream', async () => {
+    const env = createContentTypeEnv({
+      manifest: { '/guide/page.md': 'hash_md' },
+      kvAssets: { hash_md: { body: '# hello', ct: 'application/octet-stream' } },
+    });
+
+    const res = await app.fetch(
+      new Request('https://test.void.app/guide/page.md'),
+      env,
+      createCtx(),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
+  });
+
+  it('honors an explicit stored content type that is not octet-stream', async () => {
+    const env = createContentTypeEnv({
+      manifest: { '/guide/page.md': 'hash_md' },
+      kvAssets: { hash_md: { body: '# hello', ct: 'text/plain; charset=utf-8' } },
+    });
+
+    const res = await app.fetch(
+      new Request('https://test.void.app/guide/page.md'),
+      env,
+      createCtx(),
+    );
+    expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+  });
+
+  it('keeps application/octet-stream when the extension is also unknown', async () => {
+    const env = createContentTypeEnv({
+      manifest: { '/file.xyz': 'hash_xyz' },
+      kvAssets: { hash_xyz: { body: 'data', ct: 'application/octet-stream' } },
+    });
+
+    const res = await app.fetch(new Request('https://test.void.app/file.xyz'), env, createCtx());
+    expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
+  });
+
+  it('omits the Content-Type header for the application/null sentinel', async () => {
+    const env = createContentTypeEnv({
+      manifest: { '/data.bin': 'hash_bin' },
+      kvAssets: { hash_bin: { body: 'data', ct: 'application/null' } },
+    });
+
+    const res = await app.fetch(new Request('https://test.void.app/data.bin'), env, createCtx());
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBeNull();
+  });
+});

@@ -196,6 +196,23 @@ describe('getContentType', () => {
     expect(getContentType('/module.wasm')).toBe('application/wasm');
   });
 
+  it('returns text/markdown for .md files', () => {
+    expect(getContentType('/guide/github-actions-cache.md')).toBe('text/markdown; charset=utf-8');
+  });
+
+  it('returns text/markdown for .markdown files', () => {
+    expect(getContentType('/notes.markdown')).toBe('text/markdown; charset=utf-8');
+  });
+
+  it('returns text/yaml for .yaml and .yml files', () => {
+    expect(getContentType('/config.yaml')).toBe('text/yaml; charset=utf-8');
+    expect(getContentType('/config.yml')).toBe('text/yaml; charset=utf-8');
+  });
+
+  it('returns application/toml for .toml files', () => {
+    expect(getContentType('/config.toml')).toBe('application/toml');
+  });
+
   it('returns application/octet-stream for unknown extensions', () => {
     expect(getContentType('/file.xyz')).toBe('application/octet-stream');
   });

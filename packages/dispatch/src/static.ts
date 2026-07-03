@@ -127,6 +127,11 @@ const MIME_TYPES: Record<string, string> = {
   svg: 'image/svg+xml; charset=utf-8',
   txt: 'text/plain; charset=utf-8',
   csv: 'text/csv; charset=utf-8',
+  md: 'text/markdown; charset=utf-8',
+  markdown: 'text/markdown; charset=utf-8',
+  yaml: 'text/yaml; charset=utf-8',
+  yml: 'text/yaml; charset=utf-8',
+  toml: 'application/toml',
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -155,4 +160,33 @@ const MIME_TYPES: Record<string, string> = {
 export function getContentType(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() ?? '';
   return MIME_TYPES[ext] ?? 'application/octet-stream';
+}
+
+/**
+ * Resolve the Content-Type to serve for a stored asset, reconciling the value
+ * persisted at upload time (R2 `httpMetadata.contentType` / KV `ct` metadata)
+ * with a fresh path-based lookup. Returns `undefined` when no Content-Type
+ * header should be emitted.
+ *
+ * `application/null` is a sentinel (matching Wrangler) meaning "omit the
+ * Content-Type header entirely".
+ *
+ * `application/octet-stream` is the uploader's no-information default: older
+ * CLI versions stamped it on any extension their MIME table did not recognize
+ * (e.g. `.md`). Because assets are content-addressed and never re-uploaded,
+ * those stale octet-stream values can't be corrected at the source, so we
+ * treat a stored octet-stream as "unknown" and re-derive from the path here.
+ * Any other stored value is authoritative and honored as-is.
+ */
+export function resolveAssetContentType(
+  stored: string | null | undefined,
+  path: string,
+): string | undefined {
+  if (stored === 'application/null') {
+    return undefined;
+  }
+  if (!stored || stored === 'application/octet-stream') {
+    return getContentType(path);
+  }
+  return stored;
 }

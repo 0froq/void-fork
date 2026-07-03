@@ -18,7 +18,7 @@ import {
 } from './isr.ts';
 import { recordRequest, sendUsageEvent, type RequestType } from './metering.ts';
 import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules.ts';
-import { resolveStaticPath, getContentType } from './static.ts';
+import { resolveStaticPath, resolveAssetContentType } from './static.ts';
 import type { AssetConfig } from './static.ts';
 import { buildVariantOriginalUrl, type QueryAllowlist } from './variant-key.ts';
 
@@ -1132,13 +1132,12 @@ async function fetchStaticAsset(
     if (!obj) {
       return null;
     }
-    const contentType = obj.httpMetadata?.contentType ?? getContentType(path);
+    const contentType = resolveAssetContentType(obj.httpMetadata?.contentType, path);
     const headers: HeadersInit = {
       ETag: obj.httpEtag,
       ...(obj.size ? { 'Content-Length': String(obj.size) } : {}),
     };
-    // "application/null" is a sentinel meaning "no Content-Type header" (matches Wrangler)
-    if (contentType && contentType !== 'application/null') {
+    if (contentType) {
       (headers as Record<string, string>)['Content-Type'] = contentType;
     }
     return new Response(obj.body, { headers });
@@ -1151,11 +1150,11 @@ async function fetchStaticAsset(
       cacheTtl: 86400,
     });
     if (scoped.value) {
-      const contentType = scoped.metadata?.ct ?? getContentType(path);
+      const contentType = resolveAssetContentType(scoped.metadata?.ct, path);
       const headers: HeadersInit = {
         'Content-Length': String((scoped.value as ArrayBuffer).byteLength),
       };
-      if (contentType && contentType !== 'application/null') {
+      if (contentType) {
         (headers as Record<string, string>)['Content-Type'] = contentType;
       }
       return new Response(scoped.value, { headers });
@@ -1169,12 +1168,11 @@ async function fetchStaticAsset(
   if (!value) {
     return null;
   }
-  const contentType = metadata?.ct ?? getContentType(path);
+  const contentType = resolveAssetContentType(metadata?.ct, path);
   const headers: HeadersInit = {
     'Content-Length': String((value as ArrayBuffer).byteLength),
   };
-  // "application/null" is a sentinel meaning "no Content-Type header" (matches Wrangler)
-  if (contentType && contentType !== 'application/null') {
+  if (contentType) {
     (headers as Record<string, string>)['Content-Type'] = contentType;
   }
   return new Response(value, { headers });
