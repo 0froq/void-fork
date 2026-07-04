@@ -187,11 +187,15 @@ function formatMigrationFailure(result: UserWorkerMigrationResult): string {
   return result.error ?? 'unknown error';
 }
 
+type CapabilityProbeResult =
+  | { ok: true; caps: WorkerMigrationCapabilities }
+  | { ok: false; reason: string };
+
 async function probeWorkerMigrationCapabilities(
   userWorker: Fetcher,
   token: string,
   logger: DeployLogger,
-): Promise<WorkerMigrationCapabilities | null> {
+): Promise<CapabilityProbeResult> {
   try {
     const response = await userWorker.fetch(
       new Request('https://internal/__void/migrate/capabilities', {
@@ -199,14 +203,28 @@ async function probeWorkerMigrationCapabilities(
         signal: AbortSignal.timeout(10_000),
       }),
     );
-    if (!response.ok) {
-      return null;
-    }
     const text = await response.text();
-    if (isCfAssetPlainText(text)) {
-      return null;
+    if (!response.ok) {
+      return {
+        ok: false,
+        reason: `worker capabilities probe HTTP ${response.status}: ${text.slice(0, 200)}`,
+      };
     }
-    const data = JSON.parse(text) as WorkerMigrationCapabilities;
+    if (isCfAssetPlainText(text)) {
+      return {
+        ok: false,
+        reason: 'worker not serving its own code yet (Cloudflare asset stub)',
+      };
+    }
+    let data: WorkerMigrationCapabilities;
+    try {
+      data = JSON.parse(text) as WorkerMigrationCapabilities;
+    } catch {
+      return {
+        ok: false,
+        reason: `worker capabilities probe returned non-JSON: ${text.slice(0, 200)}`,
+      };
+    }
     if (
       data?.protocolVersion !== 2 ||
       data?.dialect !== 'sqlite' ||
@@ -214,14 +232,21 @@ async function probeWorkerMigrationCapabilities(
       typeof data.migrationListHash !== 'string' ||
       data.destructiveValidation !== 'passed'
     ) {
-      return null;
+      return {
+        ok: false,
+        reason: `worker capabilities probe shape invalid: ${text.slice(0, 200)}`,
+      };
     }
-    return data;
+    return { ok: true, caps: data };
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
     logger.warn('migrate', 'capability_probe_failed', {
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg,
     });
-    return null;
+    return {
+      ok: false,
+      reason: `worker capabilities probe request failed: ${errMsg}`,
+    };
   }
 }
 
@@ -3470,7 +3495,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           }
 
           const manifestProtocol = manifest.migrations.protocolVersion;
-          const stableCapabilities =
+          const probe =
             manifestProtocol === 2
               ? await probeWorkerMigrationCapabilities(
                   context.env.DISPATCH.get(workerName),
@@ -3478,6 +3503,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                   logger,
                 )
               : null;
+          const stableCapabilities = probe && probe.ok ? probe.caps : null;
           const canUseStable =
             stableCapabilities &&
             stableCapabilities.protocolVersion === 2 &&
@@ -3487,7 +3513,37 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             stableCapabilities.destructiveValidation === 'passed';
 
           if (manifestProtocol === 2 && !canUseStable) {
-            throw new Error('migration protocol v2 capability negotiation failed');
+            const reason = !probe
+              ? 'no capability probe performed'
+              : !probe.ok
+                ? probe.reason
+                : (() => {
+                    const c = probe.caps;
+                    const m = manifest.migrations;
+                    const diffs: Array<string> = [];
+                    if (c.protocolVersion !== 2) {
+                      diffs.push(`protocolVersion worker=${c.protocolVersion} manifest=2`);
+                    }
+                    if (c.dialect !== m.dialect) {
+                      diffs.push(`dialect worker=${c.dialect} manifest=${m.dialect}`);
+                    }
+                    if (c.classifierVersion !== m.classifierVersion) {
+                      diffs.push(
+                        `classifierVersion worker=${c.classifierVersion} manifest=${m.classifierVersion}`,
+                      );
+                    }
+                    if (c.migrationListHash !== m.migrationListHash) {
+                      diffs.push(
+                        `migrationListHash worker=${c.migrationListHash} manifest=${m.migrationListHash}`,
+                      );
+                    }
+                    if (c.destructiveValidation !== 'passed') {
+                      diffs.push(`destructiveValidation=${c.destructiveValidation}`);
+                    }
+                    return `deployed worker build differs from manifest (${diffs.join('; ')})`;
+                  })();
+            logger.warn('migrate', 'capability_negotiation_failed', { reason });
+            throw new Error(`migration protocol v2 capability negotiation failed: ${reason}`);
           }
 
           emit({ event: 'migration_start', pending: manifest.migrations.pending });

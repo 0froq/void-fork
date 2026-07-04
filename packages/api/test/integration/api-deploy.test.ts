@@ -1807,6 +1807,132 @@ describe('POST /projects/:id/deploy', () => {
       }
     });
 
+    it('capability negotiation surfaces the classifierVersion skew reason', async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'migrate-v2-skew-test');
+      mockCfApi({
+        createD1: () => cfSuccess({ uuid: 'd1-v2-skew-uuid', name: 'test-db' }),
+      });
+
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            if (url.pathname === '/__void/ready') {
+              return Response.json({ ready: true });
+            }
+            if (url.pathname === '/__void/migrate/capabilities') {
+              // worker build reports a different classifierVersion than the manifest (2 vs 1)
+              return Response.json({
+                protocolVersion: 2,
+                endpoints: {
+                  app: '/__void/migrate/app',
+                  auth: '/__void/migrate/auth',
+                  reconcile: '/__void/migrate/app/attempt/:attemptId',
+                },
+                dialect: 'sqlite',
+                classifierVersion: 2,
+                migrationListHash: 'sha256:test-list',
+                destructiveValidation: 'passed',
+              });
+            }
+            return new Response('unexpected', { status: 500 });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+
+      try {
+        const res = await app.fetch(
+          await buildDeployRequest(env, project.id, user.jwt, {
+            manifest: {
+              version: 3,
+              bindings: { d1: ['DB'] },
+              migrations: {
+                dialect: 'sqlite',
+                pending: 1,
+                protocolVersion: 2,
+                classifierVersion: 1,
+                migrationListHash: 'sha256:test-list',
+                stability: 'stable',
+              },
+            },
+          }),
+          env,
+        );
+        expect(res.status).toBe(200);
+        const events = parseDeployStream(await res.text());
+        const last = events.at(-1) as { event: string; message: string };
+        expect(last.event).toBe('error');
+        expect(last.message).toContain('classifierVersion');
+        expect(last.message).toContain('worker=2');
+        expect(last.message).toContain('manifest=1');
+        expect(last.message).not.toBe('migration protocol v2 capability negotiation failed');
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    });
+
+    it('capability negotiation surfaces the worker error body when the probe fails', async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'migrate-v2-probe-fail-test');
+      mockCfApi({
+        createD1: () => cfSuccess({ uuid: 'd1-v2-probe-fail-uuid', name: 'test-db' }),
+      });
+
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            if (url.pathname === '/__void/ready') {
+              return Response.json({ ready: true });
+            }
+            if (url.pathname === '/__void/migrate/capabilities') {
+              // worker rejects the probe with a rich error body and a non-2xx status
+              return Response.json(
+                {
+                  ok: false,
+                  error: 'migration protocol v2 execution plans are missing',
+                  migrations: [],
+                },
+                { status: 500 },
+              );
+            }
+            return new Response('unexpected', { status: 500 });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+
+      try {
+        const res = await app.fetch(
+          await buildDeployRequest(env, project.id, user.jwt, {
+            manifest: {
+              version: 3,
+              bindings: { d1: ['DB'] },
+              migrations: {
+                dialect: 'sqlite',
+                pending: 1,
+                protocolVersion: 2,
+                classifierVersion: 1,
+                migrationListHash: 'sha256:test-list',
+                stability: 'stable',
+              },
+            },
+          }),
+          env,
+        );
+        expect(res.status).toBe(200);
+        const events = parseDeployStream(await res.text());
+        const last = events.at(-1) as { event: string; message: string };
+        expect(last.event).toBe('error');
+        expect(last.message).toContain('execution plans are missing');
+        expect(last.message).toContain('500');
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    });
+
     it('compat path retries migration with longer window when readiness probe returns 404', async () => {
       const user = await createTestUser(env.db);
       const project = await createTestProject(env.db, user.id, 'migrate-compat-retry-test');
