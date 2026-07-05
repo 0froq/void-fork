@@ -209,6 +209,10 @@ const HELP_TREE: HelpTree = {
         description: "Show a project's GitHub connection (repo, branch, executor, workflow)",
       },
       { command: 'link', description: 'Link your GitHub account to Void' },
+      {
+        command: 'join',
+        description: "Join your organization's shared GitHub App installations",
+      },
     ],
     children: {
       install: basicSubcommand(
@@ -220,6 +224,10 @@ const HELP_TREE: HelpTree = {
         'void github installations',
       ),
       link: basicSubcommand('Link your GitHub account to Void.', 'void github link'),
+      join: basicSubcommand(
+        "Join your organization's shared GitHub App installations.",
+        'void github join',
+      ),
       connect: {
         summary: 'Connect a repository to a project for automatic deploys.',
         usage: ['void github connect [project] [options]'],

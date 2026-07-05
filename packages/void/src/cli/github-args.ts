@@ -19,12 +19,14 @@ export const githubSubcommands: Array<SubcommandDef> = [
     description: "Show a project's GitHub connection (repo, branch, executor, workflow)",
   },
   { name: 'link', description: 'Link your GitHub account to Void' },
+  { name: 'join', description: "Join your organization's shared GitHub App installations" },
 ];
 
 export type GithubArgs =
   | { subcommand: 'install' }
   | { subcommand: 'installations' }
   | { subcommand: 'link' }
+  | { subcommand: 'join' }
   | {
       subcommand: 'connect';
       projectName: string;
@@ -64,6 +66,13 @@ export function parseGithubArgs(args: Array<string>): GithubArgs {
   }
 
   if (subcommand === 'link') {
+    if (rest.length > 0) {
+      throw new Error(`github: Unexpected argument '${rest[0]}'.`);
+    }
+    return { subcommand };
+  }
+
+  if (subcommand === 'join') {
     if (rest.length > 0) {
       throw new Error(`github: Unexpected argument '${rest[0]}'.`);
     }
@@ -247,5 +256,7 @@ export function parseGithubArgs(args: Array<string>): GithubArgs {
     return { subcommand, projectName };
   }
 
-  throw new Error('github: Usage: void github <install|installations|connect|update|status|link>.');
+  throw new Error(
+    'github: Usage: void github <install|installations|connect|update|status|link|join>.',
+  );
 }

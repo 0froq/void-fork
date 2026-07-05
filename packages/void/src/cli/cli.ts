@@ -206,7 +206,7 @@ if (helpPath) {
     },
     {
       name: 'github',
-      hint: 'install | installations | connect | update | status | link',
+      hint: 'install | installations | connect | update | status | link | join',
       description: 'Connect a GitHub repository for automatic deploys',
     },
     {
