@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
-    "@cloudflare/sandbox": "0.12.2",
+    "@cloudflare/sandbox": "0.12.3",
     "@voidcloud/isr-shared": "workspace:*",
     "aws4fetch": "^1.0.20",
     "blake3-jit": "^1.1.0",
@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
-    "@electric-sql/pglite": "0.5.3",
+    "@electric-sql/pglite": "0.5.4",
     "@types/pg": "8.20.0",
     "@typescript/native-preview": "catalog:",
     "drizzle-kit": "^0.31.10",
