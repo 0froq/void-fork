@@ -20,13 +20,13 @@ jobs:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
 
-      - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1.12.0
+      - uses: voidzero-dev/setup-vp@35171c92dd08b67d5a9d3f2a4327800e58396f2a # v1.13.0
         with:
           cache: true
           node-version-file: .node-version
           run-install: false
 
-      - uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: framework/node_modules
           key: framework-${{ hashFiles('framework/pnpm-lock.yaml') }}
