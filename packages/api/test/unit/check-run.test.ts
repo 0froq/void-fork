@@ -275,12 +275,13 @@ describe('completeCheckRun', () => {
     vi.unstubAllGlobals();
   });
 
-  function callComplete(installationId: string): Promise<boolean> {
+  function callComplete(installationId: string, extra?: { text?: string }): Promise<boolean> {
     return completeCheckRun(makeEnv(), installationId, REPO, CHECK_RUN_ID, {
       conclusion: 'success',
       detailsUrl: 'https://example.com/build/123',
       title: 'Done',
       summary: 'Build succeeded',
+      ...extra,
     });
   }
 
@@ -317,6 +318,69 @@ describe('completeCheckRun', () => {
     expect(patchBody!.status).toBe('completed');
     expect(patchBody!.conclusion).toBe('success');
     expect(patchBody!.output).toEqual({ title: 'Done', summary: 'Build succeeded' });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  // complete with `text` => PATCH body's output.text is the given string
+  // verbatim, title/summary unchanged.
+  it('includes output.text in the PATCH body when text is provided', async () => {
+    const installationId = nextInstallId();
+    const logTail = '```\nlog line 1\nlog line 2\n```';
+    let patchBody: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = urlOf(input);
+        if (isTokenMint(url)) {
+          return accessTokenOk();
+        }
+        if (isCheckRun(url)) {
+          patchBody = JSON.parse(init!.body as string) as Record<string, unknown>;
+          return Response.json({ id: 99001 }, { status: 200 });
+        }
+        throw new Error(`Unmocked fetch: ${url}`);
+      }),
+    );
+
+    const result = await callComplete(installationId, { text: logTail });
+
+    expect(result).toBe(true);
+    expect(patchBody).toBeDefined();
+    expect(patchBody!.output).toEqual({
+      title: 'Done',
+      summary: 'Build succeeded',
+      text: logTail,
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  // complete without `text` => PATCH body's output has NO `text` key at all
+  // (assert key absence, not just an undefined value).
+  it('omits the text key from output when text is not provided', async () => {
+    const installationId = nextInstallId();
+    let patchBody: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = urlOf(input);
+        if (isTokenMint(url)) {
+          return accessTokenOk();
+        }
+        if (isCheckRun(url)) {
+          patchBody = JSON.parse(init!.body as string) as Record<string, unknown>;
+          return Response.json({ id: 99001 }, { status: 200 });
+        }
+        throw new Error(`Unmocked fetch: ${url}`);
+      }),
+    );
+
+    const result = await callComplete(installationId);
+
+    expect(result).toBe(true);
+    expect(patchBody).toBeDefined();
+    const output = patchBody!.output as Record<string, unknown>;
+    expect('text' in output).toBe(false);
+    expect(output).toEqual({ title: 'Done', summary: 'Build succeeded' });
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
@@ -368,5 +432,137 @@ describe('completeCheckRun', () => {
     const reasons = reasonsOf(warnSpy, 'check-run-complete');
     expect(reasons).toContain('token-mint-failed');
     expect(reasons).toContain('exhausted');
+  });
+
+  // 422 fallback: GitHub validates output.text server-side (65535 UTF-8 BYTES
+  // and content checks beyond size). The complete PATCH is idempotent, so a
+  // 422 on a body that included `text` is retried ONCE without `output.text` —
+  // a rejected tail must never cost the completion itself.
+  it('retries ONCE without output.text when a 422 rejects a body that included text', async () => {
+    const installationId = nextInstallId();
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = urlOf(input);
+        if (isTokenMint(url)) {
+          return accessTokenOk();
+        }
+        if (isCheckRun(url)) {
+          const body = JSON.parse(init!.body as string) as Record<string, unknown>;
+          bodies.push(body);
+          if ('text' in (body.output as Record<string, unknown>)) {
+            return new Response(
+              '{"message":"Validation Failed: text maximum bytesize of 65535 exceeded"}',
+              { status: 422, statusText: 'Unprocessable Entity' },
+            );
+          }
+          return Response.json({ id: 99001 }, { status: 200 });
+        }
+        throw new Error(`Unmocked fetch: ${url}`);
+      }),
+    );
+
+    const result = await callComplete(installationId, { text: 'some rejected log tail' });
+
+    expect(result).toBe(true);
+    expect(bodies).toHaveLength(2);
+    expect('text' in (bodies[0].output as Record<string, unknown>)).toBe(true);
+    // Fallback body: identical minus output.text.
+    expect('text' in (bodies[1].output as Record<string, unknown>)).toBe(false);
+    expect(bodies[1].output).toEqual({ title: 'Done', summary: 'Build succeeded' });
+    expect(bodies[1].status).toBe('completed');
+    expect(bodies[1].conclusion).toBe('success');
+    expect(bodies[1].details_url).toBe('https://example.com/build/123');
+    const reasons = reasonsOf(warnSpy, 'check-run-complete');
+    expect(reasons).toEqual(['text-rejected-retry']);
+  });
+
+  // Non-422 4xx stays definitive even when text was included — no fallback.
+  it('keeps a non-422 4xx single-shot even when text was included', async () => {
+    const installationId = nextInstallId();
+    let patchCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = urlOf(input);
+        if (isTokenMint(url)) {
+          return accessTokenOk();
+        }
+        if (isCheckRun(url)) {
+          patchCount += 1;
+          return new Response('Forbidden', { status: 403, statusText: 'Forbidden' });
+        }
+        throw new Error(`Unmocked fetch: ${url}`);
+      }),
+    );
+
+    const result = await callComplete(installationId, { text: 'a log tail' });
+
+    expect(result).toBe(false);
+    expect(patchCount).toBe(1);
+    const reasons = reasonsOf(warnSpy, 'check-run-complete');
+    expect(reasons).toEqual(['http-4xx']);
+  });
+
+  // 422 on a body that never had text => nothing to strip, no retry.
+  it('does not retry a 422 when the body never included text', async () => {
+    const installationId = nextInstallId();
+    let patchCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = urlOf(input);
+        if (isTokenMint(url)) {
+          return accessTokenOk();
+        }
+        if (isCheckRun(url)) {
+          patchCount += 1;
+          return new Response('{"message":"Validation Failed"}', {
+            status: 422,
+            statusText: 'Unprocessable Entity',
+          });
+        }
+        throw new Error(`Unmocked fetch: ${url}`);
+      }),
+    );
+
+    const result = await callComplete(installationId);
+
+    expect(result).toBe(false);
+    expect(patchCount).toBe(1);
+    const reasons = reasonsOf(warnSpy, 'check-run-complete');
+    expect(reasons).toEqual(['http-4xx']);
+  });
+
+  // The fallback follows the existing definitive-4xx handling when it ALSO
+  // fails: exactly two PATCHes (strip once, then definitive), returns false.
+  it('returns false after exactly two PATCHes when the text-less fallback also 422s', async () => {
+    const installationId = nextInstallId();
+    let patchCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = urlOf(input);
+        if (isTokenMint(url)) {
+          return accessTokenOk();
+        }
+        if (isCheckRun(url)) {
+          patchCount += 1;
+          return new Response('{"message":"Validation Failed"}', {
+            status: 422,
+            statusText: 'Unprocessable Entity',
+          });
+        }
+        throw new Error(`Unmocked fetch: ${url}`);
+      }),
+    );
+
+    const result = await callComplete(installationId, { text: 'a log tail' });
+
+    expect(result).toBe(false);
+    expect(patchCount).toBe(2);
+    const reasons = reasonsOf(warnSpy, 'check-run-complete');
+    expect(reasons).toEqual(['text-rejected-retry', 'http-4xx']);
   });
 });

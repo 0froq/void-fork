@@ -45,6 +45,26 @@ const TERMINAL_STATUSES: ReadonlyArray<StoredBuildStatus> = ['complete', 'failed
 // container agent's in-memory ring bound (build-agent.mjs MAX_BUFFERED_LOG_LINES).
 export const MAX_STORED_LOG_LINES = 10000;
 
+// Bounds for the log tail embedded in the completed check-run's `output.text`.
+// Both caps are UTF-8 BYTE caps, because that is what GitHub validates (its
+// 422 reads "maximum bytesize of 65535") — a UTF-16 `.length` cap would let
+// CJK (~3 bytes per code unit) or emoji (4 bytes per 2 units) content pass our
+// limit while far exceeding GitHub's. The 60000 content cap normally leaves
+// fence/header/marker headroom under GitHub's 65535 cap, but the fence is
+// sized past the content's backtick runs (see below), so the hard cap is
+// enforced on the whole rendered string too.
+export const CHECK_RUN_LOG_TAIL_LINES = 100;
+export const CHECK_RUN_LOG_TAIL_MAX_BYTES = 60000;
+
+// GitHub's hard cap on a check run's output.text: 65535 UTF-8 BYTES (GitHub
+// validates bytesize, not character count). A longer string makes GitHub
+// reject the entire PATCH — stranding the run with no text at all — so the
+// WHOLE rendered string (header + marker + fence delimiters + content) must
+// honor it, not just the content: the fence delimiters grow past the longest
+// backtick run in the content, so a pathological all-backtick line can blow
+// far past the fixed small overhead the 60000 content cap budgeted for.
+export const CHECK_RUN_OUTPUT_TEXT_MAX_BYTES = 65535;
+
 // Cadence of the DO→container log pull-loop. The agent buffers stdout/stderr and
 // serves `GET /logs?since=N`; the DO polls on this interval, ingesting any new
 // lines into the SQLite `logs` table + WS fan-out. ~1–2s keeps a live log view
@@ -89,6 +109,112 @@ function timingSafeEqual(a: string, b: string): boolean {
     mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
   return mismatch === 0;
+}
+
+// GitHub's output.text caps are UTF-8 bytesize caps — measure with one shared
+// encoder (available in both Workers and the Node/Miniflare test env).
+const utf8 = new TextEncoder();
+
+function utf8Length(text: string): number {
+  return utf8.encode(text).length;
+}
+
+/**
+ * Drop `cut` leading UTF-16 code units from `line`, advancing one further when
+ * the cut would land on a low surrogate (0xDC00–0xDFFF): slicing there strands
+ * the low half of a split pair at the front of the kept tail, which re-encodes
+ * as a 3-byte U+FFFD — garbage in the output (and bytes the caller's byte
+ * accounting never budgeted for).
+ */
+function sliceTailAtUnit(line: string, cut: number): string {
+  const code = line.charCodeAt(cut);
+  return line.slice(code >= 0xdc00 && code <= 0xdfff ? cut + 1 : cut);
+}
+
+/** Longest run of consecutive backticks in `text` (0 when there are none). */
+function longestBacktickRun(text: string): number {
+  let longest = 0;
+  for (const match of text.matchAll(/`+/g)) {
+    if (match[0].length > longest) {
+      longest = match[0].length;
+    }
+  }
+  return longest;
+}
+
+/**
+ * Render the check-run `output.text` log tail: `lines` (already chronological —
+ * the newest CHECK_RUN_LOG_TAIL_LINES captured) in a `text` fence under a
+ * `**Last {M} log lines:**` header, with an `_…earlier lines omitted._` marker
+ * whenever fewer lines are rendered than `totalCaptured`. The fence delimiters
+ * are max(6, longest backtick run in the kept content + 1) — a log line can
+ * never close the fence, so raw (attacker-influenced) build output cannot
+ * escape the code block into check-run markdown. Byte-capped at
+ * CHECK_RUN_LOG_TAIL_MAX_BYTES (UTF-8 — GitHub validates bytesize): the
+ * OLDEST remaining line is dropped while the joined content exceeds the cap;
+ * a single still-over-cap line keeps its LAST bytes (the tail is what a
+ * failure diagnosis wants), never cutting a surrogate pair in half. The WHOLE
+ * rendered string is then forced under CHECK_RUN_OUTPUT_TEXT_MAX_BYTES the
+ * same way (oldest-drop, then lone-line tail-truncation), because the dynamic
+ * fence can outgrow the headroom the content cap budgeted for. Returns null
+ * when nothing was captured (`text` is then omitted from the PATCH).
+ */
+export function formatLogTailMarkdown(lines: Array<string>, totalCaptured: number): string | null {
+  if (lines.length === 0) {
+    return null;
+  }
+  const kept = [...lines];
+  // Joined UTF-8 byte length = sum(line byte lengths) + (n - 1) one-byte '\n'
+  // separators; dropping the oldest removes its bytes + one separator. Tracked
+  // incrementally (no O(n²) joins).
+  let joinedBytes = kept.reduce((sum, line) => sum + utf8Length(line), 0) + (kept.length - 1);
+  while (joinedBytes > CHECK_RUN_LOG_TAIL_MAX_BYTES && kept.length > 1) {
+    joinedBytes -= utf8Length(kept.shift() as string) + 1;
+  }
+  // Lone still-over-cap line: keep its LAST <= cap bytes. Bytes don't map 1:1
+  // to code units, so converge: one dropped unit removes at most 3 bytes (the
+  // largest UTF-8 encoding of a single UTF-16 code unit — a surrogate PAIR is
+  // 4 bytes but 2 units), so a step of ceil(overflow / 3) never drops more
+  // units than could possibly be needed; each dropped unit removes at least
+  // 1 byte and the loop re-measures, so it terminates.
+  while (kept.length === 1 && joinedBytes > CHECK_RUN_LOG_TAIL_MAX_BYTES) {
+    kept[0] = sliceTailAtUnit(kept[0], Math.ceil((joinedBytes - CHECK_RUN_LOG_TAIL_MAX_BYTES) / 3));
+    joinedBytes = utf8Length(kept[0]);
+  }
+  const render = (): string => {
+    const fence = '`'.repeat(Math.max(6, Math.max(...kept.map(longestBacktickRun)) + 1));
+    const parts = [`**Last ${kept.length} log lines:**`, ''];
+    if (totalCaptured > kept.length) {
+      parts.push('_…earlier lines omitted._', '');
+    }
+    parts.push(`${fence}text`, kept.join('\n'), fence);
+    return parts.join('\n');
+  };
+  // Whole-string invariant (see CHECK_RUN_OUTPUT_TEXT_MAX_BYTES): shrink the
+  // content — same rules as the content cap above — and re-derive the fence
+  // until the fully-rendered string fits GitHub's bytesize cap. Content
+  // shrinks every pass, so this terminates.
+  let rendered = render();
+  let renderedBytes = utf8Length(rendered);
+  while (renderedBytes > CHECK_RUN_OUTPUT_TEXT_MAX_BYTES) {
+    if (kept.length > 1) {
+      kept.shift();
+    } else {
+      // One front code unit dropped shrinks the render by at most 5 BYTES:
+      // at most 3 content bytes (the largest UTF-8 encoding of one code unit)
+      // plus at most 2 fence bytes (the longest backtick run shrinks by at
+      // most 1, taking one one-byte backtick off each of the two delimiters).
+      // So a step of ceil(overflowBytes / 5) never drops more units than
+      // could possibly be needed — never over-truncates the tail — while each
+      // dropped unit still removes at least 1 byte (and the fence can only
+      // shrink), so the re-measuring loop converges without a per-unit pass.
+      const overflow = renderedBytes - CHECK_RUN_OUTPUT_TEXT_MAX_BYTES;
+      kept[0] = sliceTailAtUnit(kept[0], Math.ceil(overflow / 5));
+    }
+    rendered = render();
+    renderedBytes = utf8Length(rendered);
+  }
+  return rendered;
 }
 
 type StoredBuildStatus =
@@ -670,10 +796,20 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     if (!checkRunId) {
       return;
     }
+    // Embed the stored log tail as the run's `output.text` — BEST-EFFORT: a
+    // SQLite read failure must not block the completion PATCH (the run
+    // completes without `text`, exactly the pre-tail body).
+    let text: string | undefined;
+    try {
+      text = this.readLogTailMarkdown() ?? undefined;
+    } catch (err) {
+      console.warn('finalizeCheckRun: log tail read failed (best-effort)', err);
+    }
     try {
       await completeCheckRun(this.env, config.installationId, config.repoFullName, checkRunId, {
         conclusion,
         ...opts,
+        ...(text ? { text } : {}),
       });
     } catch (err) {
       console.warn('finalizeCheckRun: best-effort PATCH failed', err);
@@ -1145,6 +1281,27 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       status: cfg?.status ?? null,
       terminal: cfg ? isTerminalBuildStatus(cfg.status) : false,
     });
+  }
+
+  /**
+   * Assemble the check-run `output.text` log tail from the stored `logs` table:
+   * the newest CHECK_RUN_LOG_TAIL_LINES rows (read newest-first, rendered
+   * chronologically) plus the total captured count, so the omission marker can
+   * say when earlier lines exist. Null when nothing was captured — the
+   * completion PATCH then omits `text` (body identical to the pre-tail one).
+   */
+  private readLogTailMarkdown(): string | null {
+    this.ensureLogTable();
+    const rows = this.ctx.storage.sql
+      .exec<{ line: string }>(
+        'SELECT line FROM logs ORDER BY seq DESC LIMIT ?',
+        CHECK_RUN_LOG_TAIL_LINES,
+      )
+      .toArray();
+    const countRow = this.ctx.storage.sql
+      .exec<{ count: number }>('SELECT COUNT(*) AS count FROM logs')
+      .toArray()[0];
+    return formatLogTailMarkdown(rows.map((r) => r.line).reverse(), countRow?.count ?? rows.length);
   }
 
   /**

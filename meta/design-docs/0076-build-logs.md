@@ -1,10 +1,17 @@
 ---
-title: `void build logs` — CLI Command to Stream/Tail/Download Container Build Logs (SDD Plan)
-status: planned
+title: Build Logs
+status: implemented
 created: 2026-07-02
 ---
 
-# Plan 0076 — `void build logs`
+# Plan 0076 — Build Logs
+
+This doc covers the two build-log surfaces for Deploy-on-GitHub **container** builds, both fronting the same BuildManager DO SQLite `logs` store:
+
+- **Part A — `void build logs` CLI** (shipped via void-platform#211 + void#244)
+- **Part B — build-log tail in the "Void Build" check run** (shipped via void-platform#224)
+
+## Part A — `void build logs`
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -1304,3 +1311,83 @@ git commit -m "docs: note user-facing container build logs via void build logs"
 
 1. **Submodule pointer:** left unbumped per memory `feedback_framework_pointer.md`. If the user wants the platform repo to reference the new framework CLI commit, that's a separate, explicit step.
 2. **Default line rendering:** plain passthrough (stdout), no per-stream coloring. (Design left this open; plain was chosen for simplicity/testability.)
+
+---
+
+## Part B — Build-Log Tail in the "Void Build" Check Run
+
+> Implemented via void-platform#224.
+
+**Goal:** When a Deploy-on-GitHub **container** build's check run completes, embed the tail of the build log (last 100 captured lines) in the check run's `output.text` so users see the log directly on the GitHub check page — for every terminal outcome (success, failure, timeout, cancel). Approved in brainstorming: show **always**, **last ~100 lines**, assembled at the single chokepoint `BuildManager.finalizeCheckRun`.
+
+**Architecture:** Two small changes, both in `packages/api`. (1) `completeCheckRun` (`src/github/check-run.ts`) gains an optional `text` option forwarded as GitHub's `output.text`. (2) `BuildManager` (`src/build-manager.ts`) gains a pure exported formatter `formatLogTailMarkdown` plus a private reader `readLogTailMarkdown()` over the DO's SQLite `logs` table; `finalizeCheckRun` calls the reader (best-effort) and passes `text` to `completeCheckRun`. All six container terminal paths route through `finalizeCheckRun`, so they all inherit the tail. The GitHub Actions executor path (`routes/webhooks.ts`, `routes/auth-oidc.ts`) is **unchanged** — no logs exist on our side; its check keeps linking to the Actions run.
+
+**Tech Stack:** Cloudflare Durable Objects (SQLite storage), Hono, Vitest via Vite+ (`vp`), oxfmt/oxlint.
+
+## Global Constraints
+
+These bind **every** task. Exact values, copied verbatim from the approved design.
+
+- `output.text` hard cap on GitHub is **65535 UTF-8 bytes** — GitHub validates **bytesize** (its 422 reads "maximum bytesize of 65535"), not UTF-16 length, so CJK/emoji content must be measured in bytes. Our formatter caps the joined log content at **`CHECK_RUN_LOG_TAIL_MAX_BYTES = 60000`** UTF-8 bytes (headroom for header + fence + marker), and the tail is **`CHECK_RUN_LOG_TAIL_LINES = 100`** lines. Both are named module-level constants in `build-manager.ts`.
+- Fence is **dynamic**: `max(6, longest consecutive-backtick run in the rendered content + 1)` backticks, with info string `text` on the opener — so log content can NEVER close the fence (a fixed six-backtick fence was escapable by a log line of ≥6 backticks; found in the whole-branch review). The **whole returned string** must additionally stay ≤ `CHECK_RUN_OUTPUT_TEXT_MAX_BYTES = 65535` UTF-8 bytes (GitHub's hard bytesize cap — an oversized string makes GitHub reject the PATCH): enforce with a converging loop that drops the oldest line (or further tail-truncates a lone line, never splitting a surrogate pair at the cut) and recomputes the fence until it fits.
+- Exact output.text format (blank line between blocks; marker line present **only when** more lines were captured than rendered, i.e. `totalCaptured > lines.length`):
+
+  ```````
+  **Last {M} log lines:**
+
+  _…earlier lines omitted._
+
+  ``````text
+  {lines joined with \n}
+  ```````
+
+  ```
+
+  where `{M}` is the number of rendered lines. No timestamps, no stream markers — raw `line` text only.
+  ```
+
+- Char-cap algorithm: start from the last 100 lines in chronological order; while the joined content exceeds 60000 chars and more than one line remains, drop the **oldest** remaining line (and the marker rule above applies since dropped lines count as not rendered). If a single line still exceeds the cap, keep its **last** 60000 chars.
+- Empty log table (or zero rows) → formatter returns `null` → `output.text` is **omitted entirely** (PATCH body identical to today).
+- Tail assembly is **best-effort and must never block or fail check-run completion**: the read in `finalizeCheckRun` is wrapped in try/catch; on throw, `console.warn` and finalize without `text`. Never throw out of `finalizeCheckRun` (existing invariant — callers rely on `finally { pokeScheduler() }`).
+- `createCheckRun` (the in-progress create) is untouched. The `github_actions` completion path (`routes/webhooks.ts`) is untouched and continues to send **no** `text`.
+- Do not modify the `logs` table schema, `ingestLines`, `pollLogs`, or `handleReadLogs`. Known accepted limitation (pre-existing, do not attempt to fix): the DO pull-loop may miss the final ~1s of container output.
+- Repo hygiene: single-quote strings (oxfmt), run `vp fmt` + `vp lint` before finishing a task; typecheck via `vp run check`. Tests run from the **repo root** with root-relative globs, e.g. `vp test run packages/api/test/unit/check-run.test.ts`.
+- No framework/submodule changes. `packages/api` only (plus README doc touch-up in T2).
+
+## Task 1 — `completeCheckRun`: optional `output.text`
+
+**Files:** `packages/api/src/github/check-run.ts`, `packages/api/test/unit/check-run.test.ts`
+
+- [ ] Add `text?: string` to the `opts` parameter type of `completeCheckRun` (after `summary`).
+- [ ] Include it in the PATCH body only when present:
+      `output: { title: opts.title, summary: opts.summary, ...(opts.text ? { text: opts.text } : {}) }`.
+      Nothing else in the function changes (retry/token/logging behavior identical).
+- [ ] Update the function's JSDoc to mention the optional markdown `text` (GitHub cap 65535 chars; callers are responsible for staying under it).
+- [ ] Tests (follow the existing fetch-mock idioms in `check-run.test.ts`):
+  - `completeCheckRun` with `text` provided → PATCH body's `output.text` equals the given string, `title`/`summary` unchanged.
+  - `completeCheckRun` without `text` → PATCH body's `output` has **no** `text` key (assert `'text' in output === false`, not just undefined).
+- [ ] Run: `vp test run packages/api/test/unit/check-run.test.ts` (all pass), `vp run check`, `vp fmt`, `vp lint`.
+
+## Task 2 — `BuildManager`: log-tail assembly in `finalizeCheckRun` (+ docs)
+
+**Files:** `packages/api/src/build-manager.ts`, `packages/api/test/unit/build-manager.test.ts`, `README.md` (root)
+
+- [ ] Add module-level exported constants `CHECK_RUN_LOG_TAIL_LINES = 100` and `CHECK_RUN_LOG_TAIL_MAX_CHARS = 60000` near `MAX_STORED_LOG_LINES`, with a short comment stating GitHub's 65535 cap and the headroom rationale.
+- [ ] Add a **pure exported** function `formatLogTailMarkdown(lines: string[], totalCaptured: number): string | null` implementing the exact format and char-cap algorithm from Global Constraints (`lines` already chronological). Export it for unit tests (mirror how `MAX_STORED_LOG_LINES` is exported).
+- [ ] Add `private readLogTailMarkdown(): string | null` on `BuildManager`: call `this.ensureLogTable()` (mirror the other `logs` readers), read the last `CHECK_RUN_LOG_TAIL_LINES` rows (`SELECT line FROM logs ORDER BY seq DESC LIMIT ?` — reverse to chronological; use the same `ctx.storage.sql` idiom as `handleReadLogs`) and the total row count (`SELECT COUNT(*)`), and delegate to `formatLogTailMarkdown`.
+- [ ] In `finalizeCheckRun` (currently ~line 647), after the check-run id resolution succeeds and before the `completeCheckRun` call: assemble `text` via `this.readLogTailMarkdown()` inside its own try/catch (`console.warn('finalizeCheckRun: log tail read failed (best-effort)', err)` on throw, `text` stays `undefined`). Pass `...(text ? { text } : {})` into the existing `completeCheckRun` opts. Do not reorder or change anything else in the function.
+- [ ] Tests (follow existing DO-harness idioms in `build-manager.test.ts`; `formatLogTailMarkdown` tests are pure — no harness):
+  - `formatLogTailMarkdown([], 0)` → `null`.
+  - A few lines, `totalCaptured === lines.length` → header says `**Last {M} log lines:**`, **no** omission marker, six-backtick fence with info string `text`, lines in given order.
+  - `totalCaptured > lines.length` → omission marker line present.
+  - Char cap: lines whose join exceeds 60000 chars → oldest dropped until it fits, marker present, result length of the whole returned string < 65535.
+  - Single line longer than 60000 chars → its **last** 60000 chars kept.
+  - Integration through the DO (reuse whatever harness the file already has for `finalizeCheckRun`/`onStop`/check-run assertions): with rows ingested into `logs`, the completion PATCH body contains `output.text` containing the ingested tail; with an empty `logs` table, the PATCH body's `output` has no `text` key; when the log read throws (e.g. stub `readLogTailMarkdown`/sql to throw), the PATCH still happens without `text`.
+- [ ] Docs: in root `README.md` (source of truth; `CLAUDE.md`/`AGENTS.md` are symlinks — edit `README.md` only), append one sentence to the "Container→DO live-log transport" pitfall bullet: container-build check runs now embed the last 100 captured log lines in the check-run `output.text` at completion (all terminal outcomes; `github_actions` checks unchanged — they link to the Actions run).
+- [ ] Run: `vp test run packages/api/test/unit/build-manager.test.ts` and `vp test run packages/api/test/unit/check-run.test.ts` (all pass), `vp run check`, `vp fmt`, `vp lint`.
+
+## Final Verification
+
+- [ ] Full api suite: `vp test run packages/api` (all pass).
+- [ ] `vp run check` exit 0, `vp fmt --check` clean, `vp lint` clean.
+- [ ] Whole-branch `/codex:adversarial-review` (foreground) — converge to approve.

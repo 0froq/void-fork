@@ -5,9 +5,10 @@ import { GITHUB_API_BASE, GITHUB_API_VERSION, getInstallationToken } from './ins
  * GitHub Check Run helper. Both functions are BEST-EFFORT and NEVER throw: a
  * failed check-run write must not fail (or even perturb) the build it reports
  * on. They catch network errors, retry only transient failures (5xx / network /
- * token-mint), do NOT retry definitive 4xx, log every failure via the shared
- * `area:'github'` warn shape, and return `null` (create) / `false` (complete)
- * on permanent failure.
+ * token-mint), do NOT retry definitive 4xx (sole exception: a complete PATCH
+ * 422-rejected over its `output.text` is retried once without the text — see
+ * `completeCheckRun`), log every failure via the shared `area:'github'` warn
+ * shape, and return `null` (create) / `false` (complete) on permanent failure.
  *
  * Uses the App's existing `Checks: Write` permission — the only GitHub calls are
  * POST/PATCH `/repos/{repoFullName}/check-runs[/{id}]`. The module is
@@ -31,7 +32,13 @@ const CHECK_RUN_RETRY_DELAY_MS = 250;
 
 type CheckRunCreateResponse = Readonly<{ id?: number | string }>;
 
-type FailureReason = 'token-mint-failed' | 'network-error' | 'http-4xx' | 'http-5xx' | 'exhausted';
+type FailureReason =
+  | 'token-mint-failed'
+  | 'network-error'
+  | 'http-4xx'
+  | 'http-5xx'
+  | 'text-rejected-retry'
+  | 'exhausted';
 
 function errInfo(err: unknown): { name?: string; message: string } {
   if (err instanceof Error) {
@@ -186,8 +193,18 @@ export async function createCheckRun(
 
 /**
  * PATCH `/repos/{repoFullName}/check-runs/{checkRunId}` to mark a check run
- * `completed` with a terminal `conclusion`. Returns `true` on `res.ok`, or
- * `false` on permanent failure. Best-effort — never throws.
+ * `completed` with a terminal `conclusion`. An optional markdown `text` is
+ * sent as `output.text` when provided (GitHub validates it at 65535 UTF-8
+ * BYTES; callers are responsible for staying under that). Returns `true` on
+ * `res.ok`, or `false` on permanent failure. Best-effort — never throws.
+ *
+ * One exception to "4xx is definitive": a 422 on a body that included
+ * `output.text` is retried ONCE with the identical body minus the text.
+ * GitHub validates `text` server-side (bytesize, plus content checks beyond
+ * size that raw build logs can trip), and the complete PATCH is idempotent
+ * (unlike the single-shot create POST) — the tail is best-effort and must
+ * never cost the completion itself. The fallback attempt then follows the
+ * normal non-ok handling if it also fails.
  */
 export async function completeCheckRun(
   env: ApiEnv['Bindings'],
@@ -199,14 +216,24 @@ export async function completeCheckRun(
     detailsUrl?: string;
     title: string;
     summary: string;
+    text?: string;
   },
 ): Promise<boolean> {
-  const body = JSON.stringify({
-    status: 'completed',
-    conclusion: opts.conclusion,
-    ...(opts.detailsUrl ? { details_url: opts.detailsUrl } : {}),
-    output: { title: opts.title, summary: opts.summary },
-  });
+  // Cleared by the one-shot 422 fallback below, which rebuilds `body` without
+  // `output.text`.
+  let includeText = Boolean(opts.text);
+  const makeBody = (): string =>
+    JSON.stringify({
+      status: 'completed',
+      conclusion: opts.conclusion,
+      ...(opts.detailsUrl ? { details_url: opts.detailsUrl } : {}),
+      output: {
+        title: opts.title,
+        summary: opts.summary,
+        ...(includeText ? { text: opts.text } : {}),
+      },
+    });
+  let body = makeBody();
 
   for (let attempt = 0; attempt <= CHECK_RUN_RETRY_ATTEMPTS; attempt++) {
     let token: string;
@@ -246,6 +273,26 @@ export async function completeCheckRun(
       }
       const errBody = (await res.text().catch(() => '<unreadable>')).slice(0, 500);
       if (res.status < 500) {
+        if (res.status === 422 && includeText) {
+          // GitHub 422-rejected a body carrying `output.text` — see the
+          // function doc: strip the text and retry once. `includeText` gates
+          // this to a single fire, and `attempt` is rewound so the fallback
+          // body gets a full attempt even when the 422 landed on the last one.
+          logFailure('check-run-complete', 'text-rejected-retry', {
+            installationId,
+            repoFullName,
+            checkRunId,
+            conclusion: opts.conclusion,
+            attempt,
+            status: res.status,
+            statusText: res.statusText,
+            body: errBody,
+          });
+          includeText = false;
+          body = makeBody();
+          attempt -= 1;
+          continue;
+        }
         logFailure('check-run-complete', 'http-4xx', {
           installationId,
           repoFullName,

@@ -250,6 +250,11 @@ vi.mock('../../src/auth/deploy-token.ts', () => ({
   },
 }));
 vi.mock('../../src/github/installation-token.ts', () => ({
+  // Real constants (the module is mocked wholesale): the log-tail suite routes
+  // completeCheckRun to the REAL implementation, which builds its PATCH URL and
+  // version header from these.
+  GITHUB_API_BASE: 'https://api.github.com',
+  GITHUB_API_VERSION: '2026-03-10',
   getInstallationToken: vi.fn(async () => 'install-token'),
   generateSourceTarballUrl: vi.fn(
     (repo: string, sha: string) => `https://api.github.com/repos/${repo}/tarball/${sha}`,
@@ -294,7 +299,13 @@ import {
   sanitizeChildEnv,
 } from '../../container/build-agent.mjs';
 import { signDeployToken } from '../../src/auth/deploy-token.ts';
-import { BuildManager, MAX_STORED_LOG_LINES } from '../../src/build-manager.ts';
+import {
+  BuildManager,
+  CHECK_RUN_LOG_TAIL_MAX_BYTES,
+  CHECK_RUN_OUTPUT_TEXT_MAX_BYTES,
+  formatLogTailMarkdown,
+  MAX_STORED_LOG_LINES,
+} from '../../src/build-manager.ts';
 import type { BuildConfig } from '../../src/build-types.ts';
 import {
   getDeploymentByProjectAndCommit,
@@ -303,6 +314,7 @@ import {
   markBuildTerminalIfActive,
 } from '../../src/db.ts';
 import type { ApiEnv } from '../../src/env.ts';
+import { completeCheckRun } from '../../src/github/check-run.ts';
 import {
   getBranchHeadComparisonStatus,
   getInstallationToken,
@@ -354,6 +366,24 @@ function makeStubCtx() {
         // Mirror `SELECT MAX(seq) AS max FROM logs`: NULL (→ JS null) when empty.
         const max = logs.length > 0 ? logs.reduce((m, r) => (r.seq > m ? r.seq : m), 0) : null;
         return { toArray: () => [{ max }] };
+      }
+      if (query.startsWith('SELECT COUNT(*)')) {
+        // Mirror `SELECT COUNT(*) AS count FROM logs` (check-run log-tail total).
+        return { toArray: () => [{ count: logs.length }] };
+      }
+      if (query.startsWith('SELECT line FROM logs ORDER BY seq DESC')) {
+        // Mirror `SELECT line FROM logs ORDER BY seq DESC LIMIT ?` (check-run log
+        // tail): newest-first, bounded. Must be modeled BEFORE the generic branch,
+        // which would misread the LIMIT binding as a `seq > ?` bound.
+        const limit = bindings[0] as number;
+        return {
+          toArray: () =>
+            logs
+              .slice()
+              .sort((a, b) => b.seq - a.seq)
+              .slice(0, limit)
+              .map((r) => ({ line: r.line })),
+        };
       }
       if (query.startsWith('SELECT')) {
         // Honor a `WHERE seq > ?` bound when present (the GET /logs poll read);
@@ -2314,6 +2344,294 @@ describe('BuildManager.ingestLines (the pull-loop sink)', () => {
     const sent = server.sent.map((s) => JSON.parse(s));
     expect(sent).toContainEqual({ type: 'log', line: 'a', stream: 'stdout', ts: 1 });
     expect(sent).toContainEqual({ type: 'log', line: 'b', stream: 'stderr', ts: 2 });
+  });
+});
+
+// Six backticks: the MINIMUM fence — survives log lines that themselves
+// contain ``` (build tools echo markdown). Content with runs of ≥6 backticks
+// grows the fence past the longest run (see the fence-sizing tests below).
+const SIX_BACKTICKS = '``````';
+
+// GitHub validates output.text in UTF-8 BYTES ("maximum bytesize of 65535"),
+// so the byte-cap tests below measure results the way GitHub does.
+const utf8 = new TextEncoder();
+
+// Manual `String.prototype.isWellFormed()` (typing it needs lib es2024, which
+// this package's tsconfig doesn't enable): true when the string contains an
+// UNPAIRED surrogate — a high (0xD800–0xDBFF) not followed by a low
+// (0xDC00–0xDFFF), or a low not preceded by a high. A byte-truncation cut that
+// splits an emoji pair leaves exactly such a lone half.
+function hasLoneSurrogate(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        return true;
+      }
+      i++; // complete pair — skip its low half
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Longest run of consecutive backticks in a string (0 when none).
+function longestBacktickRun(text: string): number {
+  return Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+}
+
+// Fence delimiters are dynamic (max(6, longest content run + 1)) — parse them
+// from the rendered output instead of assuming six, and assert the format
+// contract on the way: `<backticks>text` opener, matching bare-backtick closer
+// as the final line.
+function parseFence(out: string): { fenceLen: number; content: Array<string> } {
+  const rendered = out.split('\n');
+  const openIdx = rendered.findIndex((line) => /^`+text$/.test(line));
+  expect(openIdx).toBeGreaterThan(-1);
+  const fenceLen = rendered[openIdx].length - 'text'.length;
+  expect(rendered[rendered.length - 1]).toBe('`'.repeat(fenceLen));
+  return { fenceLen, content: rendered.slice(openIdx + 1, rendered.length - 1) };
+}
+
+describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
+  it('returns null when nothing was captured (PATCH omits text)', () => {
+    expect(formatLogTailMarkdown([], 0)).toBe(null);
+  });
+
+  it('renders header + six-backtick text fence, lines in given order, no marker when all captured lines are shown', () => {
+    expect(formatLogTailMarkdown(['a', 'b', 'c'], 3)).toBe(
+      `**Last 3 log lines:**\n\n${SIX_BACKTICKS}text\na\nb\nc\n${SIX_BACKTICKS}`,
+    );
+  });
+
+  it('adds the omission marker when more lines were captured than are rendered', () => {
+    expect(formatLogTailMarkdown(['b', 'c'], 5)).toBe(
+      `**Last 2 log lines:**\n\n_…earlier lines omitted._\n\n${SIX_BACKTICKS}text\nb\nc\n${SIX_BACKTICKS}`,
+    );
+  });
+
+  it('drops the OLDEST lines until the joined content fits the char cap (result under GitHub 65535)', () => {
+    // 100 lines of exactly 1000 chars: joined = 100*1000 + 99 separators > 60000.
+    // Kept-count k satisfies 1000k + (k-1) <= 60000 → k = 59 (59058 chars).
+    const lines = Array.from(
+      { length: 100 },
+      (_, i) => `${String(i).padStart(4, '0')}${'x'.repeat(996)}`,
+    );
+    const out = formatLogTailMarkdown(lines, 100);
+    expect(out).not.toBe(null);
+    expect(out).toContain('**Last 59 log lines:**');
+    expect(out).toContain('_…earlier lines omitted._');
+    // The newest survives; the newest DROPPED line (index 40) does not.
+    expect(out).toContain(lines[99]);
+    expect(out).toContain(lines[41]);
+    expect(out).not.toContain(lines[40]);
+    expect((out as string).length).toBeLessThan(65535);
+  });
+
+  it('keeps the LAST 60000 chars of a single over-cap line', () => {
+    const big = 'h'.repeat(5000) + 't'.repeat(CHECK_RUN_LOG_TAIL_MAX_BYTES);
+    expect(formatLogTailMarkdown([big], 1)).toBe(
+      `**Last 1 log lines:**\n\n${SIX_BACKTICKS}text\n${'t'.repeat(CHECK_RUN_LOG_TAIL_MAX_BYTES)}\n${SIX_BACKTICKS}`,
+    );
+    // Exactly AT the cap is kept whole — the cap only drops what EXCEEDS it.
+    const atCap = 'e'.repeat(CHECK_RUN_LOG_TAIL_MAX_BYTES);
+    expect(formatLogTailMarkdown([atCap], 1)).toContain(`\n${atCap}\n`);
+  });
+
+  it('grows the fence to 7 backticks when a content line contains a 6-backtick run (no breakout)', () => {
+    const line = `fence bait: ${SIX_BACKTICKS} tail`;
+    const out = formatLogTailMarkdown([line], 1) as string;
+    const { fenceLen, content } = parseFence(out);
+    expect(fenceLen).toBe(7);
+    // The line is preserved verbatim — sizing the fence, not mangling content.
+    expect(content).toEqual([line]);
+    // General invariant: no content backtick run can reach the fence length.
+    expect(Math.max(...content.map(longestBacktickRun))).toBeLessThan(fenceLen);
+  });
+
+  it('grows the fence to 13 backticks for a 12-backtick content run', () => {
+    const out = formatLogTailMarkdown(['a', `x${'`'.repeat(12)}y`, 'b'], 3) as string;
+    const { fenceLen, content } = parseFence(out);
+    expect(fenceLen).toBe(13);
+    expect(content).toEqual(['a', `x${'`'.repeat(12)}y`, 'b']);
+  });
+
+  it('keeps the fence at exactly six backticks when the content has no backticks', () => {
+    const { fenceLen } = parseFence(formatLogTailMarkdown(['plain', 'lines'], 2) as string);
+    expect(fenceLen).toBe(6);
+  });
+
+  it('holds the WHOLE string under GitHub’s 65535 cap for a pathological all-backtick line', () => {
+    const out = formatLogTailMarkdown(['`'.repeat(61000)], 1) as string;
+    expect(out.length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
+    // Format still parses: header first, then fence lines matching
+    // ^`+text$ / ^`+$, and the fence still beats every content run.
+    expect(out.split('\n')[0]).toBe('**Last 1 log lines:**');
+    const { fenceLen, content } = parseFence(out);
+    expect(content.length).toBeGreaterThan(0);
+    expect(fenceLen).toBeGreaterThan(Math.max(...content.map(longestBacktickRun)));
+  });
+
+  // ——— UTF-8 byte caps: GitHub validates output.text in BYTES, not UTF-16
+  // code units (its 422 reads "maximum bytesize of 65535"). CJK is 3 bytes
+  // per code unit and emoji 4 bytes per 2 units, so unit-measured caps let
+  // such content sail past GitHub's real limit. ———
+
+  it('drops oldest lines by UTF-8 BYTE measure, not code units (CJK content)', () => {
+    // 40 lines of 4 ASCII + 998 CJK chars: 1002 units / 2998 bytes each.
+    // Joined: 40119 units (fits a 60000 UNIT cap — the wrong measure) but
+    // 119959 bytes. The byte cap keeps k lines where 2998k + (k-1) <= 60000,
+    // i.e. the newest 20.
+    const lines = Array.from(
+      { length: 40 },
+      (_, i) => `${String(i).padStart(4, '0')}${'语'.repeat(998)}`,
+    );
+    const out = formatLogTailMarkdown(lines, 40) as string;
+    expect(out).toContain('**Last 20 log lines:**');
+    expect(out).toContain('_…earlier lines omitted._');
+    expect(out).toContain(lines[39]);
+    expect(out).toContain(lines[20]);
+    expect(out).not.toContain(lines[19]);
+    expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
+  });
+
+  it('tail-truncates a lone CJK line to its LAST ~60000 UTF-8 bytes (under 65535 total)', () => {
+    // 30000 units (would fit a unit cap untouched) but 90000 bytes.
+    const out = formatLogTailMarkdown(['好'.repeat(30000)], 1) as string;
+    expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
+    const { content } = parseFence(out);
+    expect(content).toHaveLength(1);
+    // Still a pure '好' tail, and NEAR the 60000-byte content cap — proves
+    // byte-capping keeps the tail rather than over-truncating it.
+    expect(/^好+$/.test(content[0])).toBe(true);
+    const contentBytes = utf8.encode(content[0]).length;
+    expect(contentBytes).toBeLessThanOrEqual(60000);
+    expect(contentBytes).toBeGreaterThanOrEqual(59990);
+  });
+
+  it('never leaves a split surrogate pair at a truncation cut (emoji at the boundary)', () => {
+    // '🚀' = 2 UTF-16 units / 4 UTF-8 bytes: 20000 emoji = 80000 bytes, so the
+    // byte cap must cut inside the emoji run. A cut landing mid-pair would
+    // strand a lone surrogate (re-encoded as a 3-byte U+FFFD — garbage).
+    const out = formatLogTailMarkdown(['🚀'.repeat(20000)], 1) as string;
+    expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
+    expect(hasLoneSurrogate(out)).toBe(false);
+  });
+
+  it('converges the WHOLE string under 65535 BYTES when the dynamic fence eats the byte headroom (emoji + backtick run)', () => {
+    // Content: 13500 emoji (54000 bytes) + a 6000-backtick run = 60000 bytes
+    // exactly — passes the content cap untouched. The 6001-backtick fence
+    // delimiters then push the rendered BYTE length past 65535 while its
+    // UTF-16 length stays far under (the unit measure never fires). The
+    // converging loop must cut the lone line by bytes without splitting an
+    // emoji pair.
+    const out = formatLogTailMarkdown(['🚀'.repeat(13500) + '`'.repeat(6000)], 1) as string;
+    expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
+    expect(hasLoneSurrogate(out)).toBe(false);
+    const { fenceLen, content } = parseFence(out);
+    expect(fenceLen).toBeGreaterThan(Math.max(...content.map(longestBacktickRun)));
+  });
+});
+
+describe('BuildManager finalizeCheckRun log tail (output.text)', () => {
+  // These assert on the ACTUAL completion PATCH body: the file-level check-run
+  // mock is routed to the REAL completeCheckRun (importActual) and the global
+  // fetch is stubbed to capture the PATCH. `getInstallationToken` stays
+  // file-mocked, so the real module runs fully offline.
+  let patches: Array<{ url: string; body: { output: Record<string, unknown> } }>;
+
+  beforeEach(async () => {
+    const actual = await vi.importActual<typeof import('../../src/github/check-run.ts')>(
+      '../../src/github/check-run.ts',
+    );
+    vi.mocked(completeCheckRun).mockImplementation(actual.completeCheckRun);
+    patches = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        if (method === 'PATCH' && /\/check-runs\/[^/]+$/.test(url)) {
+          patches.push({ url, body: JSON.parse(String(init?.body)) });
+          return new Response('{}', { status: 200 });
+        }
+        throw new Error(`unexpected fetch: ${method} ${url}`);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    // Restore the file-level inert default so the other suites keep a no-op mock.
+    vi.mocked(completeCheckRun).mockImplementation(async () => false);
+  });
+
+  it('embeds the stored log tail as output.text in the completion PATCH', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    // Finalize resolves the run id from DO storage (create is inert in this file).
+    ctx._kv.set('checkRunId', '99001');
+    await (m as unknown as { ingestLines: (lines: Array<LogRow>) => Promise<void> }).ingestLines([
+      { line: 'installing deps', stream: 'stdout', ts: 1 } as unknown as LogRow,
+      { line: 'building app', stream: 'stdout', ts: 2 } as unknown as LogRow,
+      { line: 'deploy complete', stream: 'stdout', ts: 3 } as unknown as LogRow,
+    ]);
+
+    await m.onStop({ exitCode: 0, reason: 'exit' });
+
+    expect(patches).toHaveLength(1);
+    expect(patches[0].url).toMatch(/\/check-runs\/99001$/);
+    expect(patches[0].body).toMatchObject({ status: 'completed', conclusion: 'success' });
+    expect(patches[0].body.output.text).toBe(
+      `**Last 3 log lines:**\n\n${SIX_BACKTICKS}text\ninstalling deps\nbuilding app\ndeploy complete\n${SIX_BACKTICKS}`,
+    );
+  });
+
+  it('omits output.text entirely when no log lines were captured', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._kv.set('checkRunId', '99001');
+
+    await m.onStop({ exitCode: 0, reason: 'exit' });
+
+    expect(patches).toHaveLength(1);
+    // The PATCH body is byte-identical to the pre-tail contract: no `text` key.
+    expect('text' in patches[0].body.output).toBe(false);
+  });
+
+  it('still PATCHes (without text) when the log-tail read throws (best-effort)', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._kv.set('checkRunId', '99001');
+    await (m as unknown as { ingestLines: (lines: Array<LogRow>) => Promise<void> }).ingestLines([
+      { line: 'installing deps', stream: 'stdout', ts: 1 } as unknown as LogRow,
+    ]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(
+      m as unknown as { readLogTailMarkdown: () => string | null },
+      'readLogTailMarkdown',
+    ).mockImplementation(() => {
+      throw new Error('sqlite read failed');
+    });
+
+    await m.onStop({ exitCode: 0, reason: 'exit' });
+
+    expect(patches).toHaveLength(1);
+    expect(patches[0].body).toMatchObject({ status: 'completed', conclusion: 'success' });
+    expect('text' in patches[0].body.output).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      'finalizeCheckRun: log tail read failed (best-effort)',
+      expect.any(Error),
+    );
+    warn.mockRestore();
   });
 });
 
