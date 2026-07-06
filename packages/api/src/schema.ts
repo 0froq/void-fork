@@ -436,6 +436,138 @@ export const githubConnections = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// github_installation_members — cached org co-membership for the org-shared
+// GitHub App installation flow.
+//
+// Each row records that a Void user (`user_id`) was verified as a member of the
+// GitHub account behind a numeric installation (`installation_id`). It is a TTL
+// cache (`expires_at`): NO GitHub token is stored — access is re-verified
+// per-repo, and this table only short-circuits the org-membership check while
+// the cache is fresh. `installation_id` is keyed on GitHub's NUMERIC
+// installation id as text with NO `.references()`, deliberately mirroring
+// `github_connections.installation_id` (every call site has the numeric id in
+// hand). `user_id` cascades on user delete (mirrors `oauth_accounts`).
+// `github_account_id` is NULLABLE because the backstop/JOIN paths may not carry
+// a caller account id.
+// ---------------------------------------------------------------------------
+export const githubInstallationMembers = pgTable(
+  'github_installation_members',
+  {
+    id: text('id').primaryKey(),
+    installation_id: text('installation_id').notNull(),
+    user_id: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    github_account_id: text('github_account_id'),
+    verified_at: timestamp('verified_at', { mode: 'string' }).notNull().defaultNow(),
+    expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Serves the UNIQUE constraint + the onConflict target + the
+    // find-members-of-install leading-column scan + composite delete.
+    uniqueIndex('idx_github_installation_members_install_user').on(
+      table.installation_id,
+      table.user_id,
+    ),
+    // list-for-user + revocation.
+    index('idx_github_installation_members_user_id').on(table.user_id),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// github_installation_revocations — durable per-(installation, github_account) tombstone
+//
+// Membership rows are a TTL cache that `member_removed` HARD-DELETES, so on their
+// own they cannot make revocation MONOTONIC: a removed org member who pre-minted
+// a stateless HMAC `join_code`/`connect_grant` could replay it (within its 5-min
+// TTL) to recreate a membership/connection that then auto-deploys forever. This
+// table records the high-water mark `revoked_at` for
+// `(installation_id, github_account_id)`; `member_removed` upserts
+// `revoked_at = now()` (always advances). At redemption, the join/complete +
+// connect gate compare an artifact's `iat` (mint time) to `revoked_at`: an
+// artifact with `iat <= revoked_at` predates the revocation and is rejected, while
+// a legit re-join AFTER re-add mints a fresh artifact with `iat > revoked_at` and
+// is allowed.
+//
+// The tombstone keys on the GitHub ACCOUNT id (X), NOT a Void user id: X is the
+// durable identity the stateless artifacts carry, and it is the ONLY identity
+// `member_removed` reliably knows from the webhook payload (`membership.user.id`).
+// A soon-to-be-removed member can pre-mint a join_code + connect_grant while still
+// in the org WITHOUT any Void user / membership / oauth-link, so a user-keyed
+// tombstone would find no user to key on and write nothing — leaving a
+// post-removal replay path. Keying by X closes that hole. `installation_id` keys
+// on GitHub's NUMERIC installation id as text with NO FK (mirrors
+// `github_installation_members`); `github_account_id` is the NUMERIC GitHub
+// account id as text with NO FK — it is not a Void user id and the tombstone must
+// outlive Void user deletion.
+// ---------------------------------------------------------------------------
+export const githubInstallationRevocations = pgTable(
+  'github_installation_revocations',
+  {
+    id: text('id').primaryKey(),
+    installation_id: text('installation_id').notNull(),
+    github_account_id: text('github_account_id').notNull(),
+    // `withTimezone` (timestamptz) is LOAD-BEARING here, UNLIKE the rest of the
+    // schema's tz-naive `created_at`/`expires_at`. This is the one timestamp the
+    // app reads back as an absolute epoch (`extract(epoch from ...) * 1000`) to
+    // compare against an artifact's JS `iat` (`Date.now()`). A tz-naive
+    // `timestamp` stores `now()` as a session-local WALL CLOCK, and
+    // `extract(epoch ...)` then treats those components as UTC — so on any non-UTC
+    // session (PGlite in tests picks up the host tz) the extracted epoch is skewed
+    // by the offset and the comparison breaks. `timestamptz` stores the true
+    // instant, so `extract(epoch ...)` is correct on prod pg (UTC) AND PGlite
+    // (host tz) alike. Membership TTLs avoid this only because they compare
+    // in-SQL (`expires_at > now()`), never crossing into a JS epoch.
+    revoked_at: timestamp('revoked_at', { withTimezone: true, mode: 'string' })
+      .notNull()
+      .defaultNow(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Serves the UNIQUE constraint + the onConflict target + the single-row
+    // (installation_id, github_account_id) lookup at redemption.
+    uniqueIndex('idx_github_installation_revocations_install_account').on(
+      table.installation_id,
+      table.github_account_id,
+    ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// github_webhook_redeliveries — ledger of GitHub webhook deliveries we asked
+// GitHub to REDELIVER (catch-up for missed/failed webhooks, design 0074).
+//
+// GitHub's own delivery log is the source of truth for what we failed to ack;
+// the hourly replay job lists `status=failure` deliveries and re-sends each one
+// we have not already retried. The dedup key is GitHub's `guid`, which is stable
+// across an event's original delivery AND all of its redeliveries — so keying on
+// it retries each failed event at most once, bounding permanently-failing events.
+// The remaining columns are audit-only.
+// ---------------------------------------------------------------------------
+export const githubWebhookRedeliveries = pgTable(
+  'github_webhook_redeliveries',
+  {
+    id: text('id').primaryKey(),
+    // GitHub delivery guid — shared across an event's original + redeliveries;
+    // the dedup key (unique index below).
+    guid: text('guid').notNull(),
+    // The numeric GitHub delivery id (as text) we POSTed the attempt for (audit).
+    delivery_id: text('delivery_id').notNull(),
+    // Event type at time of failure (audit; nullable).
+    event: text('event'),
+    // The failed delivery's HTTP status (audit; nullable).
+    status_code: integer('status_code'),
+    redelivered_at: timestamp('redelivered_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [
+    // UNIQUE on guid — serves the onConflictDoNothing target and the
+    // already-redelivered lookup, so concurrent runs never double-redeliver.
+    uniqueIndex('idx_github_webhook_redeliveries_guid').on(table.guid),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // builds — server-side build runs (one per push that triggers a build).
 //
 // A build runs the real `void deploy` CLI in a build environment (CF Container

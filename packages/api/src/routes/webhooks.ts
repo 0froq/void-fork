@@ -1,14 +1,22 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import {
   ACTIVE_BUILD_STATUSES,
+  clearGitHubInstallationOwnerForUser,
+  deleteGitHubConnection,
+  deleteGitHubInstallationMembers,
+  deleteGitHubInstallationMembersByGithubAccount,
   getBuildByProjectRunIdAndAttempt,
   getDeploymentByProjectAndCommit,
   getGitHubConnectionsByRepo,
   getGitHubInstallation,
+  getGitHubInstallationsByAccount,
+  getProjectsByUserId,
   getUser,
+  getUserByOAuthAccount,
   markBuildTerminalIfActive,
   markGitHubInstallationStatus,
+  recordInstallationRevocations,
   setGitHubInstallationRepositories,
   supersedeAndCreateContainerBuild,
   suspendGitHubInstallation,
@@ -60,6 +68,12 @@ type InstallationPayload = {
     repository_selection?: string;
   };
   repositories?: ReadonlyArray<{ full_name?: string; id?: number }>;
+};
+
+type OrganizationPayload = {
+  action?: string;
+  organization?: { id?: number | string };
+  membership?: { user?: { id?: number | string } };
 };
 
 type InstallationRepositoriesPayload = {
@@ -497,13 +511,26 @@ app.post('/github', async (context) => {
       // an in-flight build keeps a live deploy token (the middleware guard
       // revokes a token only once its bound build is no longer active), so
       // terminalize ALL the installation's in-flight builds atomically with the
-      // status flip — under a FOR UPDATE lock on the connection rows so an
-      // in-flight OIDC exchange (which re-reads + locks the same rows before
-      // inserting its build) is serialized. The DO cancel runs AFTER commit.
+      // status flip — under a FOR UPDATE lock on the install row (taken first)
+      // and then the connection rows, so an in-flight OIDC exchange (which
+      // re-reads + locks the same connection rows before inserting its build) is
+      // serialized. The DO cancel runs AFTER commit.
       if (action === 'deleted' || action === 'suspend') {
         const reason = action === 'deleted' ? 'github app uninstalled' : 'github app suspended';
         const cancelled = await db.transaction(async (tx) => {
           const txDb = tx as unknown as Db;
+          // Lock the install row FIRST, then the connection rows — the global
+          // install-first order (member_removed + the connect gate also lock the
+          // install row first) so a concurrent organization/member_removed and
+          // this uninstall/suspend for the same install can't deadlock (AB-BA).
+          // The connection-row FOR UPDATE below still serializes the in-flight
+          // OIDC exchange (which locks the same rows before inserting its build);
+          // the DO cancel runs AFTER commit.
+          await tx
+            .select({ id: githubInstallations.id })
+            .from(githubInstallations)
+            .where(eq(githubInstallations.installation_id, String(installationId)))
+            .for('update');
           const connections = await tx
             .select({ project_id: githubConnections.project_id })
             .from(githubConnections)
@@ -666,19 +693,15 @@ app.post('/github', async (context) => {
       const removedRepositoryIds = new Set(removed.map((r) => String(r.id)));
       const cancelled = await db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;
-        const connections = await tx
-          .select({
-            project_id: githubConnections.project_id,
-            repo_full_name: githubConnections.repo_full_name,
-            repository_id: githubConnections.repository_id,
-          })
-          .from(githubConnections)
-          .where(eq(githubConnections.installation_id, String(installationId)))
-          .for('update');
-        // Lock + re-read the install row AFTER the connection rows — the same
-        // order as the deleted/suspend branch — so a concurrent suspend/delete
-        // can't deadlock, and the repositories write below is serialized against
-        // concurrent installation_repositories deliveries (no lost update).
+        // Lock + re-read the install row FIRST, then the connection rows —
+        // matching member_removed, the connect gate, and the (now install-first)
+        // deleted/suspend branch, so a concurrent suspend/delete or
+        // organization/member_removed for the same install can't deadlock
+        // (AB-BA). The install-row lock also serializes the repositories write
+        // below against concurrent installation_repositories deliveries (no lost
+        // update); the connection-row FOR UPDATE that follows still serializes an
+        // in-flight OIDC exchange (which locks the same rows before inserting its
+        // build).
         const [locked] = await tx
           .select({
             repositories: githubInstallations.repositories,
@@ -688,6 +711,15 @@ app.post('/github', async (context) => {
           .where(eq(githubInstallations.installation_id, String(installationId)))
           .for('update')
           .limit(1);
+        const connections = await tx
+          .select({
+            project_id: githubConnections.project_id,
+            repo_full_name: githubConnections.repo_full_name,
+            repository_id: githubConnections.repository_id,
+          })
+          .from(githubConnections)
+          .where(eq(githubConnections.installation_id, String(installationId)))
+          .for('update');
         // Use the LOCKED selection: a stale `selected` delivery that missed a
         // concurrent widen to `all` must NOT downgrade the row OR revoke builds —
         // `all` still covers every "removed" repo, so revocation would be wrong.
@@ -909,6 +941,182 @@ app.post('/github', async (context) => {
       // Return both the plural list (the multi-project fan-out contract, mirrors
       // the push handler) and the singular alias for backward compatibility.
       return context.json({ ok: true, buildId: buildIds[0], buildIds });
+    }
+
+    case 'organization': {
+      const data = payload as OrganizationPayload;
+      // Only membership removal severs access. Everything else (member_added,
+      // renamed, etc.) is accepted-and-ignored — a re-added member re-JOINs via
+      // the authorize round-trip when they want back in.
+      if (data.action !== 'member_removed') {
+        return context.json({ ok: true, ignored: `organization:${data.action ?? 'unknown'}` });
+      }
+      const orgId = data.organization?.id;
+      const removedGithubUserId = data.membership?.user?.id;
+      if (orgId == null || removedGithubUserId == null) {
+        return context.json({ ok: true, ignored: 'organization: missing ids' });
+      }
+
+      // Every installation under THIS org, scoped by account_id + 'Organization'.
+      // Resolved FIRST because the membership-by-proof-id query below is scoped to
+      // these installs.
+      //
+      // This early-return records NO tombstone when the org has no persisted
+      // install row yet (a removal racing ahead of installation.created / the
+      // install callback). That gap is bounded by the same accepted live-proof
+      // residual: a fresh ORG owner-adopt requires a live `authorizeInstallViaUserToken`
+      // proof that FAILS once GitHub propagates the removal (the personal-install
+      // `account.id === stateGitHubAccountId` fallback cannot fire — account.id is
+      // the ORG's id, never the initiator's). So no account-level tombstone is added
+      // (it would only reject inside the window the live proof already governs).
+      const orgInstalls = await getGitHubInstallationsByAccount(db, String(orgId), 'Organization');
+      if (orgInstalls.length === 0) {
+        return context.json({ ok: true, ignored: 'organization: no org installs' });
+      }
+      const orgInstallIds = orgInstalls.map((i) => i.installation_id);
+
+      // Sever + tombstone atomically. FOR UPDATE on the affected users' connection
+      // rows serializes an in-flight OIDC exchange for the same rows (mirror
+      // installation/uninstall). terminate = revoke in-flight build tokens
+      // (build-row status is the token authority); delete = remove the future
+      // auto-deploy trigger. Membership cache + owner pointer are cleared
+      // regardless of connection count. The revocation tombstone is stamped ONCE,
+      // keyed by the removed GitHub account id (durable, known from the payload
+      // regardless of Void state) — user resolution drives only the sever. DO
+      // cancel is AWAITED after commit. Idempotent in the steady state: a plain
+      // redelivery finds the connections already gone and harmlessly re-advances
+      // the tombstone high-water mark. NOT idempotent across a re-add interleaving
+      // (X removed -> re-added -> legitimately re-joins + reconnects -> a STALE
+      // redelivery of the OLD member_removed lands): the redelivery re-runs the
+      // sever against CURRENT state and cuts the fresh connection, and its
+      // clock_timestamp() tombstone over-advances past the fresh artifact's iat.
+      // This is a bounded, FAIL-SAFE (over-revoke, never under-revoke),
+      // self-recovering (X simply re-joins) best-effort residual — matching the
+      // container/OIDC best-effort boundaries. It is deliberately NOT closed with a
+      // live GET /orgs/:org/memberships/:user recheck gating the sever: that would
+      // trade this safe over-revocation for an UNSAFE under-revocation whenever
+      // GitHub's membership API lags a genuine removal (we return 2xx, so no
+      // redelivery would ever re-sever). Always-sever is the security-correct
+      // default. (Reachability: GitHub only auto-retries a FAILED delivery, or an
+      // admin manually redelivers.)
+      //
+      // Connections + install owner pointers are OAUTH-backed, so the affected
+      // user for SEVERING is exactly `getUserByOAuthAccount('github', X)` — the
+      // sole driver of connection-severing + owner-clearing. Browser-proof-X
+      // LISTING memberships (whose `github_account_id` is decoupled from the
+      // bearer's oauth id) never back a connection, so X's removal only DELETES
+      // them. That resolution is deliberately NOT done out here: it runs INSIDE the
+      // tx, AFTER the install-row lock + tombstone write, so a redemption that
+      // committed while we waited for the lock is visible and severed (R4-1). The
+      // pre-tx step above resolves only the org install set (needed for the lock
+      // scope).
+      const reason = 'org membership removed';
+      const cancelled = await db.transaction(async (tx) => {
+        const txDb = tx as unknown as Db;
+        // Lock each org install row FIRST, in a deterministic (sorted) order to
+        // avoid deadlock. This is the SAME row the connect gate locks, so a
+        // concurrent member connect and this revocation are serialized — closing
+        // the phantom-INSERT race (Task 14). The lock is taken before the
+        // connection scan so a connect that commits first is seen and severed.
+        for (const installId of [...orgInstallIds].sort()) {
+          await tx
+            .select({ id: githubInstallations.id })
+            .from(githubInstallations)
+            .where(eq(githubInstallations.installation_id, installId))
+            .for('update');
+        }
+        // Stamp the durable revocation tombstone FIRST and UNCONDITIONALLY, keyed
+        // by the removed GitHub account id X (Task 19) — the durable identity the
+        // stateless join_code/connect_grant artifacts carry, always known from the
+        // payload even when there is NO Void user to sever (the pre-mint hole).
+        // The membership hard-delete below is a TTL cache and cannot make
+        // revocation MONOTONIC on its own. `revoked_at = clock_timestamp()` per
+        // install so a later replay of a pre-removal artifact (iat <= revoked_at)
+        // is rejected; the upsert advances the high-water mark on redelivery,
+        // while a legit re-join after re-add mints a fresh artifact
+        // (iat > revoked_at) honored.
+        // Written under the install-row lock (F5-serialized against a concurrent
+        // join/complete) EVEN when the affected-user set is empty.
+        await recordInstallationRevocations(txDb, orgInstallIds, String(removedGithubUserId));
+        // Resolve the affected Void user for connection/owner severing UNDER the
+        // lock (post-tombstone) so an R4-1 redemption that committed while we
+        // waited for the install-row lock is now visible and severed. Either
+        // member_removed locks first (the tombstone above then blocks the
+        // redemption) or the redemption commits first (this post-lock re-read sees
+        // its freshly-inserted connection and severs it).
+        //
+        // CONNECTIONS + install OWNER pointers are OAUTH-backed: every
+        // `github_connections` row has exactly ONE insert site
+        // (`createGitHubConnection`), reached only through the connect gate after
+        // the connecting user's IMMUTABLE oauth GitHub id is proven — the OWNER
+        // branch adopts the install under the owner's own proven oauth id, the
+        // MEMBER branch requires (Threat-L1) `grant.githubAccountId === the
+        // caller's own linked GitHub id`. So a connection is "X-backed" — and must
+        // be severed when GitHub id X leaves the org — IFF the connecting user's
+        // oauth id is X IFF `getUserByOAuthAccount('github', X)` returns that user.
+        // That single user is therefore the SOLE driver of connection-severing +
+        // owner-clearing: its oauth is X, so ALL its org connections and
+        // owned-installs are X-backed → severing across every orgInstallId is
+        // correct with no residual. When it is null there is simply no X-backed
+        // connection to sever (the pre-mint hole) — the tombstone written above
+        // already fail-closes any later X-keyed artifact redemption.
+        const removedUser = await getUserByOAuthAccount(
+          txDb,
+          'github',
+          String(removedGithubUserId),
+        );
+        const acc: Array<{
+          id: string;
+          executor: Build['executor'];
+          status: Build['status'];
+          instance_type: string | null;
+        }> = [];
+        if (removedUser) {
+          const projectIds = (await getProjectsByUserId(txDb, removedUser.id)).map((p) => p.id);
+          if (projectIds.length > 0) {
+            // Single-table FOR UPDATE on githubConnections (NOT joined to
+            // projects) keeps the lock scope identical to the installation path;
+            // owner scoping is applied via `project_id IN (projectIds)`.
+            const conns = await tx
+              .select({ project_id: githubConnections.project_id })
+              .from(githubConnections)
+              .where(
+                and(
+                  inArray(githubConnections.installation_id, orgInstallIds),
+                  inArray(githubConnections.project_id, projectIds),
+                ),
+              )
+              .for('update');
+            for (const conn of conns) {
+              // terminate BEFORE delete: revoke the token, then remove the trigger.
+              acc.push(...(await terminateBuildsForProject(txDb, conn.project_id, { reason })));
+              await deleteGitHubConnection(txDb, conn.project_id);
+            }
+          }
+          // Clear the removed user's membership cache + owner pointer across every
+          // org install (both guard on the user id, so a different owner/bearer is
+          // never clobbered).
+          await deleteGitHubInstallationMembers(txDb, orgInstallIds, removedUser.id);
+          await clearGitHubInstallationOwnerForUser(txDb, orgInstallIds, removedUser.id);
+        }
+        // Void the BROWSER-PROOF-X LISTING memberships across every org install,
+        // keyed by the GitHub id X (NOT a Void user id) so any bearer's X-keyed
+        // row is removed. A membership's `github_account_id` is the browser proof
+        // captured at JOIN, DECOUPLED from the bearer's oauth identity, so it never
+        // backs a connection or an owner pointer (proven oauth-backed above). This
+        // therefore deletes exactly the stale X listing entries and touches NO
+        // connection, NO owner pointer, and NO Z-keyed membership. The durable
+        // tombstone is written once above (keyed by X), so a pre-mint replay is
+        // caught even for a user that does not exist yet at removal time.
+        await deleteGitHubInstallationMembersByGithubAccount(
+          txDb,
+          orgInstallIds,
+          String(removedGithubUserId),
+        );
+        return acc;
+      });
+      await cancelContainerBuildDos(context.env, cancelled, reason);
+      return context.json({ ok: true });
     }
 
     case 'pull_request':

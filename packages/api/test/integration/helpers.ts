@@ -24,6 +24,9 @@ import {
   builds,
   githubConnections,
   githubInstallations,
+  githubInstallationMembers,
+  githubInstallationRevocations,
+  githubWebhookRedeliveries,
 } from '../../src/schema.ts';
 import type { PlanId } from '../../src/tiers.ts';
 import { loadPGliteTemplateBundle } from './db-template.ts';
@@ -456,7 +459,13 @@ export async function clearTables(db: Db): Promise<void> {
   // across files, so this must mirror `clearBuildTables` in the build-creating tests.
   await db.delete(builds);
   await db.delete(githubConnections);
+  // FK to users (cascade) — clear before the users delete below.
+  await db.delete(githubInstallationMembers);
+  await db.delete(githubInstallationRevocations);
   await db.delete(githubInstallations);
+  // Isolated ledger (no FK to any other table) — clear it so replay tests start
+  // from an empty redelivery ledger.
+  await db.delete(githubWebhookRedeliveries);
   await db.delete(deployments);
   await db.delete(projects);
   await db.delete(invitations);

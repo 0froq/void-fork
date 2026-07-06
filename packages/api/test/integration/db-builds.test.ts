@@ -44,6 +44,7 @@ import {
   deployments,
   githubConnections,
   githubInstallations,
+  githubInstallationMembers,
   projects,
   resources,
 } from '../../src/schema.ts';
@@ -74,6 +75,7 @@ afterAll(async () => {
 async function clearBuildTables(db: Db): Promise<void> {
   await db.delete(builds);
   await db.delete(githubConnections);
+  await db.delete(githubInstallationMembers);
   await db.delete(githubInstallations);
 }
 

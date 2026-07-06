@@ -38,6 +38,9 @@ import {
   builds,
   githubConnections,
   githubInstallations,
+  githubInstallationMembers,
+  githubInstallationRevocations,
+  githubWebhookRedeliveries,
 } from './schema.ts';
 import type { DomainVerificationData, GitHubInstallationRepository } from './schema.ts';
 import type { AllowlistEntry } from './signup-allowlist.ts';
@@ -49,6 +52,7 @@ import type {
   Domain,
   GitHubConnection,
   GitHubInstallation,
+  GitHubInstallationMember,
   Invitation,
   OAuthAccount,
   PlatformEvent,
@@ -3993,10 +3997,24 @@ export async function getGitHubInstallationsByUser(
   db: Db,
   userId: string,
 ): Promise<ReadonlyArray<GitHubInstallation>> {
+  // Owner OR active member. The EXISTS correlates on the NUMERIC
+  // `installation_id` (githubInstallations.installation_id) — the key the
+  // membership cache is stored under — NOT the surrogate `.id`. The membership
+  // arm honors the TTL (`expires_at > now()`, DB clock). owner-OR-EXISTS yields
+  // each installation at most once (the row is from githubInstallations, deduped
+  // by its own PK), so a caller who is both owner and member still sees one row.
   return db
     .select()
     .from(githubInstallations)
-    .where(eq(githubInstallations.user_id, userId))
+    .where(
+      or(
+        eq(githubInstallations.user_id, userId),
+        sql`EXISTS (SELECT 1 FROM ${githubInstallationMembers} m
+             WHERE m.installation_id = ${githubInstallations.installation_id}
+               AND m.user_id = ${userId}
+               AND m.expires_at > now())`,
+      ),
+    )
     .orderBy(desc(githubInstallations.created_at));
 }
 
@@ -4095,4 +4113,440 @@ export async function linkGitHubInstallationToUser(
     .update(githubInstallations)
     .set({ user_id: userId, updated_at: sql`now()` })
     .where(and(eq(githubInstallations.account_id, accountId), isNull(githubInstallations.user_id)));
+}
+
+/**
+ * All installations under a GitHub account, scoped by type. Revocation resolves
+ * an org's installs via (account_id, 'Organization').
+ */
+export async function getGitHubInstallationsByAccount(
+  db: Db,
+  accountId: string,
+  accountType: GitHubInstallation['account_type'],
+): Promise<ReadonlyArray<GitHubInstallation>> {
+  return db
+    .select()
+    .from(githubInstallations)
+    .where(
+      and(
+        eq(githubInstallations.account_id, accountId),
+        eq(githubInstallations.account_type, accountType),
+      ),
+    );
+}
+
+/**
+ * Guarded clear of the installer/owner pointer for a removed user. The
+ * `user_id = userId` guard means a concurrent re-own or a different owner is
+ * never clobbered. Membership rows are removed separately
+ * (`deleteGitHubInstallationMembers`); this only nulls the single owner pointer.
+ * No-op returning 0 on an empty id list so we never emit a `WHERE ... IN ()`.
+ * The count is read through `updatedRowCount` so it is correct on both the
+ * production pg driver (`rowCount`) and the PGlite test driver (`affectedRows`).
+ */
+export async function clearGitHubInstallationOwnerForUser(
+  db: Db,
+  installationIds: ReadonlyArray<string>,
+  userId: string,
+): Promise<number> {
+  if (installationIds.length === 0) {
+    return 0;
+  }
+  const result = await db
+    .update(githubInstallations)
+    .set({ user_id: null, updated_at: sql`now()` })
+    .where(
+      and(
+        inArray(githubInstallations.installation_id, installationIds),
+        eq(githubInstallations.user_id, userId),
+      ),
+    );
+  return updatedRowCount(result);
+}
+
+// ---------------------------------------------------------------------------
+// github_installation_members — cached org co-membership (TTL, no stored token)
+//
+// Canonical helper surface for the org-shared GitHub App flow. A row records
+// that a Void user was verified as a member of the GitHub account behind a
+// numeric installation. It is a TTL cache: access is re-verified per-repo, and
+// these helpers only short-circuit the org-membership check while fresh.
+// ---------------------------------------------------------------------------
+
+/**
+ * Insert (or refresh) a cached membership for `(installationId, userId)`.
+ *
+ * `expires_at` is computed from the DB clock (`now() + ttlSeconds`), never the
+ * app clock, so a skewed worker cannot mint a longer- or shorter-lived
+ * membership than intended. A re-join hits the unique `(installation_id,
+ * user_id)` index and refreshes `github_account_id`/`verified_at`/`expires_at`
+ * in place (count stays 1). Tolerates a null `githubAccountId` (the
+ * backstop/JOIN callers may not carry a caller account id).
+ */
+export async function upsertGitHubInstallationMember(
+  db: Db,
+  args: {
+    installationId: string;
+    userId: string;
+    githubAccountId: string | null;
+    ttlSeconds: number;
+  },
+): Promise<GitHubInstallationMember> {
+  const id = generateId('ghm');
+  const [row] = await db
+    .insert(githubInstallationMembers)
+    .values({
+      id,
+      installation_id: args.installationId,
+      user_id: args.userId,
+      github_account_id: args.githubAccountId,
+      expires_at: sql`now() + (${args.ttlSeconds} * interval '1 second')`,
+    })
+    .onConflictDoUpdate({
+      target: [githubInstallationMembers.installation_id, githubInstallationMembers.user_id],
+      set: {
+        github_account_id: args.githubAccountId,
+        verified_at: sql`now()`,
+        expires_at: sql`now() + (${args.ttlSeconds} * interval '1 second')`,
+      },
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * TTL-checked membership predicate used by the connect gate: true iff a
+ * non-expired row exists for `(installationId, userId)`.
+ */
+export async function hasActiveInstallationMembership(
+  db: Db,
+  installationId: string,
+  userId: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ one: sql`1` })
+    .from(githubInstallationMembers)
+    .where(
+      and(
+        eq(githubInstallationMembers.installation_id, installationId),
+        eq(githubInstallationMembers.user_id, userId),
+        sql`${githubInstallationMembers.expires_at} > now()`,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** All cached memberships for a user, newest verification first. */
+export async function getGitHubInstallationMembersByUser(
+  db: Db,
+  userId: string,
+): Promise<ReadonlyArray<GitHubInstallationMember>> {
+  return db
+    .select()
+    .from(githubInstallationMembers)
+    .where(eq(githubInstallationMembers.user_id, userId))
+    .orderBy(desc(githubInstallationMembers.verified_at));
+}
+
+/** All cached members of an installation, newest verification first. */
+export async function getGitHubInstallationMembers(
+  db: Db,
+  installationId: string,
+): Promise<ReadonlyArray<GitHubInstallationMember>> {
+  return db
+    .select()
+    .from(githubInstallationMembers)
+    .where(eq(githubInstallationMembers.installation_id, installationId))
+    .orderBy(desc(githubInstallationMembers.verified_at));
+}
+
+/** Remove one cached membership. Silent no-op when the row is absent. */
+export async function deleteGitHubInstallationMember(
+  db: Db,
+  installationId: string,
+  userId: string,
+): Promise<void> {
+  await db
+    .delete(githubInstallationMembers)
+    .where(
+      and(
+        eq(githubInstallationMembers.installation_id, installationId),
+        eq(githubInstallationMembers.user_id, userId),
+      ),
+    );
+}
+
+/**
+ * Bulk-remove a user's cached memberships across several installations (used by
+ * revocation). No-op on an empty id list so we never emit a `WHERE ... IN ()`.
+ */
+export async function deleteGitHubInstallationMembers(
+  db: Db,
+  installationIds: ReadonlyArray<string>,
+  userId: string,
+): Promise<void> {
+  if (installationIds.length === 0) {
+    return;
+  }
+  await db
+    .delete(githubInstallationMembers)
+    .where(
+      and(
+        inArray(githubInstallationMembers.installation_id, installationIds),
+        eq(githubInstallationMembers.user_id, userId),
+      ),
+    );
+}
+
+/**
+ * Bulk-remove the cached memberships across `installationIds` whose captured
+ * browser proof (`github_account_id`) equals `githubAccountId`, regardless of
+ * which Void user bears them. member_removed uses this to void the LISTING
+ * memberships keyed by a removed GitHub identity X: these rows are TTL cache
+ * metadata that NEVER back a `github_connections` row or an installation owner
+ * pointer (those are backed by the connecting user's IMMUTABLE oauth GitHub id
+ * and are severed via `getUserByOAuthAccount('github', X)` — the single insert
+ * site `createGitHubConnection` is only ever reached after that oauth id is
+ * proven). Deleting only the X-keyed rows therefore leaves every Z-keyed
+ * membership and every connection untouched. No-op on an empty id list so we
+ * never emit a `WHERE ... IN ()`.
+ */
+export async function deleteGitHubInstallationMembersByGithubAccount(
+  db: Db,
+  installationIds: ReadonlyArray<string>,
+  githubAccountId: string,
+): Promise<void> {
+  if (installationIds.length === 0) {
+    return;
+  }
+  await db
+    .delete(githubInstallationMembers)
+    .where(
+      and(
+        inArray(githubInstallationMembers.installation_id, installationIds),
+        eq(githubInstallationMembers.github_account_id, githubAccountId),
+      ),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// github_installation_revocations — durable monotonic revocation tombstone
+//
+// A row records the high-water mark `revoked_at` for `(installation_id,
+// user_id)`. `member_removed` upserts `revoked_at = greatest(existing, now())`
+// (never regresses); join/complete + the connect gate compare an artifact's
+// `iat` (mint time, DB-clock ms via `getDbNowMs`) against this to reject any
+// artifact minted AT OR BEFORE the last revocation. A legit re-join AFTER re-add
+// mints a fresh artifact (iat > revoked_at) → kept.
+// ---------------------------------------------------------------------------
+
+/**
+ * Current DB time as EPOCH MILLISECONDS. Used to stamp an artifact's `iat` from
+ * the SAME clock as the revocation tombstone's `revoked_at` (also DB `now()`),
+ * so the `iat <= revoked_at` revocation check never crosses clock domains (a
+ * Worker/DB skew could otherwise let a pre-removal artifact slip the check).
+ *
+ * Uses `db.execute` rather than the query builder: a from-less `db.select(...)`
+ * returns a non-executable builder in drizzle, so `execute` is the driver-safe
+ * way to run a from-less scalar select on BOTH the pg and PGlite drivers
+ * (mirrors the `select now()` fence in routes/webhooks.ts). `extract(epoch from
+ * now()) * 1000` returns numeric — a string over the wire on both drivers — so
+ * `Number(...)` normalizes it to a JS millisecond number. A row is always
+ * returned; the `?? 0` is a defensive fail-closed fallback (a 0 `iat` can only
+ * ever be rejected by an existing tombstone, never let a stale artifact pass).
+ */
+export async function getDbNowMs(db: Db): Promise<number> {
+  const result = (await db.execute(sql`select extract(epoch from now()) * 1000 as now_ms`)) as {
+    rows: ReadonlyArray<{ now_ms: number | string }>;
+  };
+  const value = result.rows[0]?.now_ms;
+  return value == null ? 0 : Number(value);
+}
+
+/**
+ * Record (or advance) the revocation tombstone for a removed GitHub ACCOUNT id
+ * across a set of installations. Upserts one row per install; the inserted
+ * `revoked_at` is `clock_timestamp()` — the ACTUAL write moment, NOT Postgres
+ * `now()` (which freezes at TRANSACTION-START). `member_removed` writes this
+ * AFTER a possibly lock-waiting `FOR UPDATE` on the org install rows, so an
+ * artifact (join_code/connect_grant) minted DURING that tx window has
+ * `iat < revoked_at` and is rejected — closing the R5-2 contention-amplified
+ * replay window that a tx-start `now()` would leave open. onConflict sets
+ * `revoked_at` to `greatest(existing, excluded)`: a reordered/redelivered webhook
+ * still carries a `clock_timestamp()` >= the earlier one, and `greatest(...)`
+ * pins the high-water mark so it can only move forward. No-op on an empty id list
+ * so we never emit a values-less insert. Id via `generateId('ghr')` (mirrors
+ * `ghm` for members).
+ *
+ * Keyed by `githubAccountId` — the durable identity the stateless artifacts
+ * carry — NOT a Void user id (which may not exist when a soon-to-be-removed member
+ * pre-mints artifacts). `member_removed` calls this ONCE with the removed GitHub
+ * id, always known from the webhook payload.
+ */
+export async function recordInstallationRevocations(
+  db: Db,
+  installationIds: ReadonlyArray<string>,
+  githubAccountId: string,
+): Promise<void> {
+  if (installationIds.length === 0) {
+    return;
+  }
+  await db
+    .insert(githubInstallationRevocations)
+    .values(
+      installationIds.map((installationId) => ({
+        id: generateId('ghr'),
+        installation_id: installationId,
+        github_account_id: githubAccountId,
+        revoked_at: sql`clock_timestamp()`,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [
+        githubInstallationRevocations.installation_id,
+        githubInstallationRevocations.github_account_id,
+      ],
+      set: {
+        revoked_at: sql`greatest(${githubInstallationRevocations.revoked_at}, excluded.revoked_at)`,
+      },
+    });
+}
+
+/**
+ * The subset of `guids` we have already redelivered (i.e. already recorded in
+ * the `github_webhook_redeliveries` ledger). Returns an empty Set for an empty
+ * input WITHOUT issuing a query — a bare `inArray(col, [])` would emit `IN ()`.
+ */
+export async function getRedeliveredGuids(
+  db: Db,
+  guids: ReadonlyArray<string>,
+): Promise<Set<string>> {
+  if (guids.length === 0) {
+    return new Set();
+  }
+  const rows = await db
+    .select({ guid: githubWebhookRedeliveries.guid })
+    .from(githubWebhookRedeliveries)
+    .where(inArray(githubWebhookRedeliveries.guid, [...guids]));
+  return new Set(rows.map((r) => r.guid));
+}
+
+/**
+ * Record a redelivered webhook in the ledger. Idempotent: `onConflictDoNothing`
+ * on the `guid` unique index, so a concurrent run / re-scan that races on the
+ * same guid never double-inserts (and the caller never double-redelivers).
+ */
+export async function recordWebhookRedelivery(
+  db: Db,
+  entry: {
+    guid: string;
+    deliveryId: string;
+    event: string | null;
+    statusCode: number | null;
+  },
+): Promise<void> {
+  await db
+    .insert(githubWebhookRedeliveries)
+    .values({
+      id: generateId('ghwr'),
+      guid: entry.guid,
+      delivery_id: entry.deliveryId,
+      event: entry.event,
+      status_code: entry.statusCode,
+    })
+    .onConflictDoNothing({ target: githubWebhookRedeliveries.guid });
+}
+
+/**
+ * The revocation tombstone's `revoked_at` for `(installationId, githubAccountId)`
+ * as EPOCH MILLISECONDS (so the caller can compare it directly to an artifact
+ * `iat`, itself DB-clock ms via `getDbNowMs`), or null when no tombstone exists.
+ * `extract(epoch from ...) * 1000` keeps the PGlite test driver and the pg
+ * production driver in agreement on the millisecond value.
+ */
+export async function getInstallationRevocationAt(
+  db: Db,
+  installationId: string,
+  githubAccountId: string,
+): Promise<number | null> {
+  const rows = await db
+    .select({
+      revokedAtMs: sql<number>`extract(epoch from ${githubInstallationRevocations.revoked_at}) * 1000`,
+    })
+    .from(githubInstallationRevocations)
+    .where(
+      and(
+        eq(githubInstallationRevocations.installation_id, installationId),
+        eq(githubInstallationRevocations.github_account_id, githubAccountId),
+      ),
+    )
+    .limit(1);
+  const value = rows[0]?.revokedAtMs;
+  return value == null ? null : Number(value);
+}
+
+/**
+ * True iff ANY revocation tombstone exists for this installation (any github account).
+ * Used to tell a CLEARED-owner org install (member_removed wrote a tombstone atomically
+ * with the owner-clear) apart from a FRESH webhook-precreated null-owner org install
+ * (no tombstone), so the install callback never re-owns a cleared install (R15-1).
+ */
+export async function hasInstallationRevocation(db: Db, installationId: string): Promise<boolean> {
+  const rows = await db
+    .select({ one: sql`1` })
+    .from(githubInstallationRevocations)
+    .where(eq(githubInstallationRevocations.installation_id, installationId))
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
+ * Batch revocation tombstones for `(installationIds, githubAccountId)` as a Map
+ * installation_id → revoked_at-epoch-ms. Installs with no tombstone are simply
+ * absent from the Map. Empty id list → empty Map (never emits `WHERE ... IN ()`).
+ * A null/empty `githubAccountId` (a null-github artifact — e.g. a join_code with
+ * no proven account id) also yields an empty Map: no tombstone can apply, and such
+ * an artifact is deploy-inert anyway.
+ */
+export async function getInstallationRevocationsForAccount(
+  db: Db,
+  installationIds: ReadonlyArray<string>,
+  githubAccountId: string | null,
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (installationIds.length === 0 || !githubAccountId) {
+    return result;
+  }
+  const rows = await db
+    .select({
+      installationId: githubInstallationRevocations.installation_id,
+      revokedAtMs: sql<number>`extract(epoch from ${githubInstallationRevocations.revoked_at}) * 1000`,
+    })
+    .from(githubInstallationRevocations)
+    .where(
+      and(
+        inArray(githubInstallationRevocations.installation_id, installationIds),
+        eq(githubInstallationRevocations.github_account_id, githubAccountId),
+      ),
+    );
+  for (const row of rows) {
+    result.set(row.installationId, Number(row.revokedAtMs));
+  }
+  return result;
+}
+
+/**
+ * Resolve a Void user's linked GitHub account id (the numeric provider id, as
+ * text), or null when the user has no linked GitHub identity. Exported reverse
+ * lookup mirroring the inline query in `linkGitHubIdentity`; used for the audit
+ * column on membership rows and the connect-authz caller-identity bind.
+ */
+export async function getGitHubAccountIdForUser(db: Db, userId: string): Promise<string | null> {
+  const existing = await db
+    .select({ providerId: oauthAccounts.provider_id })
+    .from(oauthAccounts)
+    .where(and(eq(oauthAccounts.user_id, userId), eq(oauthAccounts.provider, 'github')))
+    .limit(1);
+  return existing[0]?.providerId ?? null;
 }

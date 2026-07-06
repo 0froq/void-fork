@@ -17,10 +17,13 @@ import {
   getBuild,
   getGitHubConnection,
   getGitHubInstallation,
+  getGitHubInstallationMembers,
+  getInstallationRevocationAt,
   getProjectBuilds,
   markGitHubInstallationStatus,
   setBuildCheckRunId,
   upsertGitHubInstallation,
+  upsertGitHubInstallationMember,
 } from '../../src/db.ts';
 import type { Db } from '../../src/db.ts';
 // Namespace import so a test can spy the pre-tx `getGitHubInstallation` snapshot
@@ -3966,5 +3969,646 @@ describe('POST /webhooks/github — revoke builds on branch delete', () => {
     expect(cancelledIds).toContain(orphan.id);
     expect((await getBuild(env.db, recreated.id))!.status).toBe('building');
     expect(cancelledIds).not.toContain(recreated.id);
+  });
+});
+
+describe('POST /webhooks/github — organization member_removed revocation', () => {
+  // Build an app whose env carries a recording BUILD_MANAGER so the post-commit
+  // DO-cancel RPCs can be asserted (mirrors the App-removal suite).
+  function recordingApp(): {
+    app: Hono<ApiEnv>;
+    appEnv: TestEnv;
+    cancelledIds: ReadonlyArray<string>;
+  } {
+    const { namespace, cancelledIds } = recordingBuildManager();
+    const overrideEnv: TestEnv = { ...env, BUILD_MANAGER: namespace };
+    const { app, appEnv } = makeApp(overrideEnv);
+    return { app, appEnv, cancelledIds };
+  }
+
+  // Seed an Organization installation (account_id = orgId, 'Organization'),
+  // optionally owned by `ownerId`.
+  async function seedOrgInstall(
+    installationId: string,
+    orgId: string,
+    ownerId: string | null,
+  ): Promise<void> {
+    await upsertGitHubInstallation(env.db, {
+      installationId,
+      userId: ownerId,
+      accountLogin: `org-${orgId}`,
+      accountId: orgId,
+      accountType: 'Organization',
+      repositories: [],
+      repositorySelection: 'all',
+    });
+  }
+
+  const ORG = '9100';
+  const ORG2 = '9200';
+  const G = '7777'; // removed user's linked GitHub id
+
+  it('severs the removed member: deletes connection, membership, owner pointer, and terminates the in-flight build', async () => {
+    const user = await createTestUser(env.db, 'org-removed', 'github', G);
+    // U owns this org install (installer/owner pointer set to U).
+    await seedOrgInstall('8100', ORG, user.id);
+    const project = await createTestProject(env.db, user.id, 'org-sever');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '8100',
+      repoFullName: 'org/repo',
+      repositoryId: '81001',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8100',
+      userId: user.id,
+      githubAccountId: G,
+      ttlSeconds: 3600,
+    });
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      status: 'building',
+      commitSha: 'sha-org',
+      branch: 'main',
+    });
+
+    const { app, appEnv, cancelledIds } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(G) } },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    // Connection severed (future auto-deploy trigger removed).
+    expect(await getGitHubConnection(env.db, project.id)).toBeNull();
+    // Membership cache cleared.
+    const members = await getGitHubInstallationMembers(env.db, '8100');
+    expect(members.some((m) => m.user_id === user.id)).toBe(false);
+    // Owner pointer cleared (U owned the install).
+    expect((await getGitHubInstallation(env.db, '8100'))!.user_id).toBeNull();
+    // In-flight build token revoked (build-row terminalized) + DO cancelled.
+    const updated = await getBuild(env.db, build.id);
+    expect(updated!.status).toBe('cancelled');
+    expect(updated!.error).toBe('org membership removed');
+    expect(cancelledIds).toContain(build.id);
+  });
+
+  // EXACT-HOLE regression (Task 19): a member_removed(X) whose affected-user set
+  // is EMPTY (X has no oauth link and no membership proof-id row) must STILL write
+  // a tombstone for (each org install, github_account_id=X). This is the pre-mint
+  // hole: a soon-to-be-removed member pre-mints a join_code + connect_grant
+  // carrying X while still in the org, WITHOUT any Void user/membership/oauth-link,
+  // so there is nobody to sever — but the durable tombstone must be recorded or the
+  // post-removal replay of those artifacts creates an auto-deploying connection.
+  // The old code early-returned here and wrote ZERO tombstones.
+  it('EXACT HOLE: writes a tombstone for (each org install, X) even when NO Void user is affected', async () => {
+    const X = '99999'; // removed GitHub id: NO oauth link, NO membership proof-id
+    // Two installs under ORG so we can assert the tombstone lands on EACH.
+    const owner = await createTestUser(env.db, 'org-hole-owner', 'github', G);
+    await seedOrgInstall('8110', ORG, owner.id);
+    await seedOrgInstall('8111', ORG, owner.id);
+    // A DIFFERENT org's install must NOT be tombstoned.
+    await seedOrgInstall('8112', ORG2, owner.id);
+    // An unrelated connection (owned by owner, not X) must survive — nothing to sever.
+    const project = await createTestProject(env.db, owner.id, 'org-hole-survives');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '8110',
+      repoFullName: 'org/survives',
+      repositoryId: '81101',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+
+    // Pre-condition: no tombstone exists yet.
+    expect(await getInstallationRevocationAt(env.db, '8110', X)).toBeNull();
+
+    const { app, appEnv } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(X) } },
+    });
+
+    expect(res.status).toBe(200);
+    // No early-return: the tx ran and stamped the tombstone.
+    expect(await res.json()).toEqual({ ok: true });
+    // The hole is closed: a tombstone for (each ORG install, X) now exists.
+    expect(await getInstallationRevocationAt(env.db, '8110', X)).not.toBeNull();
+    expect(await getInstallationRevocationAt(env.db, '8111', X)).not.toBeNull();
+    // Scope: the other org's install is NOT tombstoned.
+    expect(await getInstallationRevocationAt(env.db, '8112', X)).toBeNull();
+    // Nothing severed (no affected Void user) — the unrelated connection survives.
+    expect(await getGitHubConnection(env.db, project.id)).not.toBeNull();
+  });
+
+  // R8-1 corrected model (was "F1: severs a deferred-bind member resolved by
+  // membership PROOF-ID"). A browser-proof-X membership does NOT back a connection,
+  // so X's removal must NOT sever a connection reached only via that membership —
+  // it only voids the listing membership. The old union code severed it; that was
+  // an over-reach on an UNREACHABLE state (the connect gate can never mint a
+  // connection for a user whose OWN linked GitHub id is not the grant id).
+  it('does NOT sever a connection for a member pulled in ONLY by a browser-proof-X membership; voids only the X membership + writes the tombstone', async () => {
+    // X is the removed GitHub id with NO oauth link — getUserByOAuthAccount('github',
+    // X) resolves nobody. V is a google-only Void account (NOT oauth-linked to X)
+    // holding an X-keyed browser-proof membership on the org install. The seeded
+    // connection for V is an unreachable state (Threat-L1: the member connect gate
+    // requires the caller's OWN linked GitHub id to equal the grant id, and V has
+    // no github oauth id), included here to prove it is NOT severed.
+    const X = '6551234';
+    const v = await createTestUser(env.db, 'org-f1-v', 'google', 'google-f1-v');
+    await seedOrgInstall('8190', ORG, null);
+    const project = await createTestProject(env.db, v.id, 'org-f1-proj');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '8190',
+      repoFullName: 'org/f1',
+      repositoryId: '81901',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8190',
+      userId: v.id,
+      githubAccountId: X,
+      ttlSeconds: 3600,
+    });
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: v.id,
+      executor: 'container',
+      status: 'building',
+      commitSha: 'sha-f1',
+      branch: 'main',
+    });
+
+    const { app, appEnv, cancelledIds } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(X) } },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    // V's X-keyed membership cache is DELETED (arm b, keyed by the github id).
+    expect(
+      (await getGitHubInstallationMembers(env.db, '8190')).some((m) => m.user_id === v.id),
+    ).toBe(false);
+    // The durable tombstone for (install, X) — keyed by the removed GitHub id — is
+    // still written, closing a later pre-removal connect_grant replay even after V
+    // oauth-links X.
+    expect(await getInstallationRevocationAt(env.db, '8190', X)).not.toBeNull();
+    // Connection is NOT severed and the build is NOT terminated: the connection is
+    // oauth-backed (never by a browser-proof membership), and X owns no oauth Void
+    // account, so there is nothing X-backed to sever.
+    expect(await getGitHubConnection(env.db, project.id)).not.toBeNull();
+    const updated = await getBuild(env.db, build.id);
+    expect(updated!.status).toBe('building');
+    expect(cancelledIds).not.toContain(build.id);
+  });
+
+  // Corrected model (was "F1 UNION: severs BOTH ..."). Only the OAUTH-X user's
+  // connection is severed; a distinct browser-proof-X membership only gets its
+  // listing row voided — its owner's connection (oauth-backed, not by the
+  // membership) is spared. The old union code severed both; V's connection is
+  // unreachable via the connect gate anyway (Threat-L1).
+  it('severs the oauth-X user AND voids a distinct browser-proof-X membership, but spares that member’s oauth-backed connection', async () => {
+    // X is the removed GitHub id. U is oauth-linked to X (arm a) AND holds an
+    // X-keyed membership. V is a google-only account with an X-keyed browser-proof
+    // membership but NOT oauth-linked to X.
+    const X = '7551234';
+    const u = await createTestUser(env.db, 'org-union-u', 'github', X);
+    const v = await createTestUser(env.db, 'org-union-v', 'google', 'google-union-v');
+    await seedOrgInstall('8200', ORG, null);
+    const uProj = await createTestProject(env.db, u.id, 'org-union-u-proj');
+    const vProj = await createTestProject(env.db, v.id, 'org-union-v-proj');
+    await createGitHubConnection(env.db, {
+      projectId: uProj.id,
+      installationId: '8200',
+      repoFullName: 'org/u',
+      repositoryId: '82001',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await createGitHubConnection(env.db, {
+      projectId: vProj.id,
+      installationId: '8200',
+      repoFullName: 'org/v',
+      repositoryId: '82002',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8200',
+      userId: u.id,
+      githubAccountId: X,
+      ttlSeconds: 3600,
+    });
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8200',
+      userId: v.id,
+      githubAccountId: X,
+      ttlSeconds: 3600,
+    });
+
+    const { app, appEnv } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(X) } },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    // U's connection (oauth-backed by X, arm a) is severed…
+    expect(await getGitHubConnection(env.db, uProj.id)).toBeNull();
+    // …but V's connection SURVIVES: a browser-proof membership never backs it, and
+    // V's oauth id is not X.
+    expect(await getGitHubConnection(env.db, vProj.id)).not.toBeNull();
+    // Both X-keyed memberships are voided (U's via arm a, V's via arm b).
+    const members = await getGitHubInstallationMembers(env.db, '8200');
+    expect(members.some((m) => m.user_id === u.id)).toBe(false);
+    expect(members.some((m) => m.user_id === v.id)).toBe(false);
+    // Tombstoned ONCE, keyed by the removed GitHub id X — a single row covers X.
+    expect(await getInstallationRevocationAt(env.db, '8200', X)).not.toBeNull();
+  });
+
+  // R8-1 regression: the same Void user holds an X-keyed membership on one org
+  // install AND a legit Z-backed connection on a DIFFERENT org install (X != its
+  // oauth id Z). member_removed(X) must void only the X membership and leave the
+  // Z-backed connection + its in-flight build fully intact. The old union code
+  // pulled the user in via the browser-proof membership and cut its valid Z-backed
+  // connection.
+  it('R8-1: spares a Z-backed connection when the SAME user’s X-keyed membership is voided (browser-proof ≠ oauth id)', async () => {
+    const X = '3330001';
+    const Z = '3330002';
+    const v = await createTestUser(env.db, 'org-r8-v', 'github', Z);
+    // I1: historical/uninstalled org install; I2: the reinstalled active one, owned
+    // by V. Same org account → BOTH resolve into orgInstallIds
+    // (getGitHubInstallationsByAccount has NO status filter).
+    await seedOrgInstall('8210', ORG, null); // I1
+    await seedOrgInstall('8211', ORG, v.id); // I2 (owned by V)
+    // Mark I1 deleted to mirror uninstall→reinstall history. installation.deleted
+    // does NOT remove membership rows, so V's stale X-membership persists on I1.
+    await markGitHubInstallationStatus(env.db, '8210', 'deleted');
+    const vProj = await createTestProject(env.db, v.id, 'org-r8-v-proj');
+    // V's legit Z-backed connection lives on the ACTIVE install I2.
+    await createGitHubConnection(env.db, {
+      projectId: vProj.id,
+      installationId: '8211',
+      repoFullName: 'org/v-legit',
+      repositoryId: '82111',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    // V's stale X-keyed browser-proof membership on I1.
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8210',
+      userId: v.id,
+      githubAccountId: X,
+      ttlSeconds: 3600,
+    });
+    // V's current Z-keyed membership on I2.
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8211',
+      userId: v.id,
+      githubAccountId: Z,
+      ttlSeconds: 3600,
+    });
+    const build = await createBuild(env.db, {
+      projectId: vProj.id,
+      userId: v.id,
+      executor: 'container',
+      status: 'building',
+      commitSha: 'sha-r8',
+      branch: 'main',
+    });
+
+    const { app, appEnv, cancelledIds } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(X) } },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    // V's Z-backed I2 connection SURVIVES (X is not V's oauth id — V is still an
+    // org member via Z).
+    expect(await getGitHubConnection(env.db, vProj.id)).not.toBeNull();
+    // Its in-flight build is NOT terminated.
+    expect((await getBuild(env.db, build.id))!.status).toBe('building');
+    expect(cancelledIds).not.toContain(build.id);
+    // V's stale (I1, X) browser-proof membership IS deleted (arm b).
+    expect(
+      (await getGitHubInstallationMembers(env.db, '8210')).some((m) => m.user_id === v.id),
+    ).toBe(false);
+    // V's current (I2, Z) membership SURVIVES (not X-keyed).
+    expect(
+      (await getGitHubInstallationMembers(env.db, '8211')).some(
+        (m) => m.user_id === v.id && m.github_account_id === Z,
+      ),
+    ).toBe(true);
+    // Tombstone stamped for BOTH org installs, keyed by X.
+    expect(await getInstallationRevocationAt(env.db, '8210', X)).not.toBeNull();
+    expect(await getInstallationRevocationAt(env.db, '8211', X)).not.toBeNull();
+  });
+
+  it('ignores member_removed when the org has no installs', async () => {
+    const user = await createTestUser(env.db, 'org-noinstall', 'github', G);
+    // A connection under a DIFFERENT org — must survive since ORG2 has no installs.
+    await seedOrgInstall('8120', ORG, user.id);
+    const project = await createTestProject(env.db, user.id, 'org-other');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '8120',
+      repoFullName: 'org/other',
+      repositoryId: '81201',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+
+    const { app, appEnv } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG2) }, // no installs under ORG2
+      membership: { user: { id: Number(G) } },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, ignored: 'organization: no org installs' });
+    expect(await getGitHubConnection(env.db, project.id)).not.toBeNull();
+  });
+
+  it('ignores a non-removal action (member_added) — connection + membership survive', async () => {
+    const user = await createTestUser(env.db, 'org-added', 'github', G);
+    await seedOrgInstall('8130', ORG, user.id);
+    const project = await createTestProject(env.db, user.id, 'org-added-proj');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '8130',
+      repoFullName: 'org/added',
+      repositoryId: '81301',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8130',
+      userId: user.id,
+      githubAccountId: G,
+      ttlSeconds: 3600,
+    });
+
+    const { app, appEnv } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_added',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(G) } },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, ignored: 'organization:member_added' });
+    expect(await getGitHubConnection(env.db, project.id)).not.toBeNull();
+    const members = await getGitHubInstallationMembers(env.db, '8130');
+    expect(members.some((m) => m.user_id === user.id)).toBe(true);
+  });
+
+  it('SCOPE: does not sever the removed user’s connection under a DIFFERENT org', async () => {
+    const user = await createTestUser(env.db, 'org-scope-org', 'github', G);
+    await seedOrgInstall('8140', ORG, user.id);
+    await seedOrgInstall('8141', ORG2, user.id);
+    const inOrg = await createTestProject(env.db, user.id, 'org-scope-in');
+    const inOrg2 = await createTestProject(env.db, user.id, 'org-scope-out');
+    await createGitHubConnection(env.db, {
+      projectId: inOrg.id,
+      installationId: '8140',
+      repoFullName: 'org/in',
+      repositoryId: '81401',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await createGitHubConnection(env.db, {
+      projectId: inOrg2.id,
+      installationId: '8141',
+      repoFullName: 'org2/out',
+      repositoryId: '81411',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+
+    const { app, appEnv } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(G) } },
+    });
+
+    expect(res.status).toBe(200);
+    // The ORG connection is severed…
+    expect(await getGitHubConnection(env.db, inOrg.id)).toBeNull();
+    // …but the ORG2 connection (different org's install) is untouched.
+    expect(await getGitHubConnection(env.db, inOrg2.id)).not.toBeNull();
+  });
+
+  it('SCOPE: leaves another user’s connection + membership under the same org intact', async () => {
+    const removed = await createTestUser(env.db, 'org-scope-u', 'github', G);
+    const other = await createTestUser(env.db, 'org-scope-v', 'github', '8888');
+    await seedOrgInstall('8150', ORG, removed.id);
+    const removedProj = await createTestProject(env.db, removed.id, 'org-u-proj');
+    const otherProj = await createTestProject(env.db, other.id, 'org-v-proj');
+    await createGitHubConnection(env.db, {
+      projectId: removedProj.id,
+      installationId: '8150',
+      repoFullName: 'org/u',
+      repositoryId: '81501',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await createGitHubConnection(env.db, {
+      projectId: otherProj.id,
+      installationId: '8150',
+      repoFullName: 'org/v',
+      repositoryId: '81502',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8150',
+      userId: removed.id,
+      githubAccountId: G,
+      ttlSeconds: 3600,
+    });
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8150',
+      userId: other.id,
+      githubAccountId: '8888',
+      ttlSeconds: 3600,
+    });
+
+    const { app, appEnv } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(G) } },
+    });
+
+    expect(res.status).toBe(200);
+    // Removed user's connection is gone…
+    expect(await getGitHubConnection(env.db, removedProj.id)).toBeNull();
+    // …but V's connection under the SAME org install stays.
+    expect(await getGitHubConnection(env.db, otherProj.id)).not.toBeNull();
+    // V's membership stays; only U's is deleted.
+    const members = await getGitHubInstallationMembers(env.db, '8150');
+    expect(members.some((m) => m.user_id === removed.id)).toBe(false);
+    expect(members.some((m) => m.user_id === other.id)).toBe(true);
+  });
+
+  it('OWNER-CLEAR SCOPE: does not clear an install under the org owned by a DIFFERENT user', async () => {
+    const removed = await createTestUser(env.db, 'org-own-u', 'github', G);
+    const other = await createTestUser(env.db, 'org-own-v', 'github', '8888');
+    // Two installs under ORG: one owned by U (cleared), one owned by V (kept).
+    await seedOrgInstall('8160', ORG, removed.id);
+    await seedOrgInstall('8161', ORG, other.id);
+
+    const { app, appEnv } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(G) } },
+    });
+
+    expect(res.status).toBe(200);
+    // U's install owner pointer cleared…
+    expect((await getGitHubInstallation(env.db, '8160'))!.user_id).toBeNull();
+    // …but V's install (same org, different owner) keeps its owner pointer.
+    expect((await getGitHubInstallation(env.db, '8161'))!.user_id).toBe(other.id);
+  });
+
+  it('is idempotent on redelivery: two deliveries both 200, single net effect', async () => {
+    const user = await createTestUser(env.db, 'org-idem', 'github', G);
+    await seedOrgInstall('8170', ORG, user.id);
+    const project = await createTestProject(env.db, user.id, 'org-idem-proj');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '8170',
+      repoFullName: 'org/idem',
+      repositoryId: '81701',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await upsertGitHubInstallationMember(env.db, {
+      installationId: '8170',
+      userId: user.id,
+      githubAccountId: G,
+      ttlSeconds: 3600,
+    });
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      status: 'building',
+      commitSha: 'sha-idem',
+      branch: 'main',
+    });
+
+    const { app, appEnv } = recordingApp();
+    const payload = {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(G) } },
+    };
+    const res1 = await post(app, appEnv, 'organization', payload);
+    const res2 = await post(app, appEnv, 'organization', payload);
+
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+    expect(await res2.json()).toEqual({ ok: true });
+    // Still exactly one net effect: connection gone, membership gone, build terminal.
+    expect(await getGitHubConnection(env.db, project.id)).toBeNull();
+    const members = await getGitHubInstallationMembers(env.db, '8170');
+    expect(members.some((m) => m.user_id === user.id)).toBe(false);
+    expect((await getBuild(env.db, build.id))!.status).toBe('cancelled');
+    expect((await getGitHubInstallation(env.db, '8170'))!.user_id).toBeNull();
+  });
+
+  it('ignores payloads missing organization.id or membership.user.id', async () => {
+    const user = await createTestUser(env.db, 'org-missing', 'github', G);
+    await seedOrgInstall('8180', ORG, user.id);
+
+    const { app, appEnv } = recordingApp();
+
+    const resNoOrg = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      membership: { user: { id: Number(G) } },
+    });
+    expect(resNoOrg.status).toBe(200);
+    expect(await resNoOrg.json()).toEqual({ ok: true, ignored: 'organization: missing ids' });
+
+    const resNoUser = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: {},
+    });
+    expect(resNoUser.status).toBe(200);
+    expect(await resNoUser.json()).toEqual({ ok: true, ignored: 'organization: missing ids' });
+  });
+
+  // Monotonic revocation (Task 14): member_removed writes a durable tombstone for
+  // (each org install, removed user), so a later replay of a pre-removal
+  // join_code/connect_grant (iat <= revoked_at) is rejected forever after.
+  it('records a revocation tombstone for every org install of the removed user', async () => {
+    const user = await createTestUser(env.db, 'org-tomb', 'github', G);
+    // Two installs under ORG (both should get a tombstone); one under ORG2 (must NOT).
+    await seedOrgInstall('8190', ORG, user.id);
+    await seedOrgInstall('8191', ORG, user.id);
+    await seedOrgInstall('8192', ORG2, user.id);
+
+    const before = Date.now();
+    const { app, appEnv } = recordingApp();
+    const res = await post(app, appEnv, 'organization', {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(G) } },
+    });
+    expect(res.status).toBe(200);
+
+    // Both ORG installs carry a tombstone (keyed by the removed GitHub id G,
+    // Task 19) stamped at (≈) the removal moment.
+    const t8190 = await getInstallationRevocationAt(env.db, '8190', G);
+    const t8191 = await getInstallationRevocationAt(env.db, '8191', G);
+    expect(t8190).not.toBeNull();
+    expect(t8191).not.toBeNull();
+    expect(t8190!).toBeGreaterThan(before - 60_000);
+    // The ORG2 install (different org, not in scope) gets NO tombstone.
+    expect(await getInstallationRevocationAt(env.db, '8192', G)).toBeNull();
+  });
+
+  it('redelivery keeps a single tombstone and never regresses revoked_at (monotonic)', async () => {
+    const user = await createTestUser(env.db, 'org-tomb-idem', 'github', G);
+    await seedOrgInstall('8195', ORG, user.id);
+
+    const { app, appEnv } = recordingApp();
+    const payload = {
+      action: 'member_removed',
+      organization: { id: Number(ORG) },
+      membership: { user: { id: Number(G) } },
+    };
+
+    await post(app, appEnv, 'organization', payload);
+    const first = await getInstallationRevocationAt(env.db, '8195', G);
+    expect(first).not.toBeNull();
+
+    await post(app, appEnv, 'organization', payload);
+    const second = await getInstallationRevocationAt(env.db, '8195', G);
+    expect(second).not.toBeNull();
+    // High-water mark: the redelivery advances or holds, never regresses.
+    expect(second!).toBeGreaterThanOrEqual(first!);
   });
 });

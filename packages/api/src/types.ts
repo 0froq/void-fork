@@ -14,6 +14,8 @@ import type {
   builds,
   githubConnections,
   githubInstallations,
+  githubInstallationMembers,
+  githubInstallationRevocations,
 } from './schema.ts';
 
 export type InvitationStatus = 'pending' | 'accepted' | 'revoked';
@@ -33,6 +35,8 @@ export type ProjectDatabaseCredentials = InferSelectModel<typeof projectDatabase
 export type Build = InferSelectModel<typeof builds>;
 export type GitHubConnection = InferSelectModel<typeof githubConnections>;
 export type GitHubInstallation = InferSelectModel<typeof githubInstallations>;
+export type GitHubInstallationMember = InferSelectModel<typeof githubInstallationMembers>;
+export type GitHubInstallationRevocation = InferSelectModel<typeof githubInstallationRevocations>;
 
 export type MigrationMeta = Readonly<{
   name: string;

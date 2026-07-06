@@ -67,6 +67,7 @@ import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
 import type { Domain, Project } from './types.ts';
 import { UsageCounter } from './usage-counter.ts';
 import { processUsageEventBatch } from './usage-queue.ts';
+import { replayFailedWebhookDeliveries } from './webhook-replay.ts';
 
 const app = new Hono<ApiEnv>()
 
@@ -301,6 +302,22 @@ async function scheduled(
   await purgeExpiredAuthCodes(db).catch((err) =>
     console.error('[scheduled] failed to purge expired auth codes:', err),
   );
+
+  // Catch up on missed GitHub webhooks (design-doc 0074): list GitHub's own
+  // `status=failure` delivery log and redeliver any failed event we haven't
+  // already redelivered. Redelivered events re-enter the idempotent webhook
+  // handler, so this is safe. App-secret gated, bounded per run, and isolated
+  // like the steps around it — one failure must not block the rest.
+  try {
+    const r = await replayFailedWebhookDeliveries(env, db);
+    if (r.redelivered > 0) {
+      console.log(
+        `[scheduled] webhook-replay redelivered ${r.redelivered}/${r.scanned} failed deliveries`,
+      );
+    }
+  } catch (err) {
+    console.warn('[scheduled] webhook-replay failed', err);
+  }
 
   // Reconcile ALL pending domains BEFORE the stale-cleanup janitor, so a domain
   // that only just finished validating (even one near the 7-day cutoff) gets

@@ -206,20 +206,139 @@ async function listUserInstallationIds(userToken: string): Promise<Set<string>> 
  * (OAuth) during installation" on the GitHub App (an ops/config item) AND
  * setting the App's `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET`. Without
  * that, GitHub never sends a `code` and this returns `{ authorized: false }`.
+ *
+ * When `redirectUri` is provided it is forwarded on the token-exchange POST and
+ * MUST be byte-identical to the `redirect_uri` sent on the authorize redirect.
+ * The install `/callback` sends none (backward compatible); the JOIN and
+ * connect-authorize callbacks send one, so they must thread it through here.
  */
 export async function authorizeInstallViaUserToken(
   env: ApiEnv['Bindings'],
   code: string,
   installationId: string,
+  redirectUri?: string,
 ): Promise<{ authorized: boolean; callerAccountId: string | null }> {
   if (!isAppUserOAuthConfigured(env)) {
     return { authorized: false, callerAccountId: null };
   }
-  const userToken = await exchangeInstallCodeForUserToken(env, code);
+  const userToken = await exchangeInstallCodeForUserToken(env, code, redirectUri);
   if (!userToken) {
     return { authorized: false, callerAccountId: null };
   }
   const callerAccountId = await fetchUserAccountId(userToken);
   const ids = await listUserInstallationIds(userToken);
   return { authorized: ids.has(installationId), callerAccountId };
+}
+
+/**
+ * Discover the installation ids the holder of the OAuth `code` can manage,
+ * together with their numeric GitHub account id. Consumed by the JOIN flow
+ * (Task 6), which unions the caller's accessible installations against the ones
+ * Void already tracks to decide which connections the caller may join.
+ *
+ * Fails closed:
+ *   - App not configured for user-auth-on-install → `{ installationIds: empty,
+ *     callerAccountId: null }` with NO network call.
+ *   - Token exchange error (bad/expired code) → same empty result.
+ *
+ * The user token is transient — it is used only for the two reads below and is
+ * never persisted. When `redirectUri` is provided it is forwarded on the
+ * token-exchange POST (must be byte-identical to the authorize `redirect_uri`).
+ */
+export async function listAuthorizedInstallationIds(
+  env: ApiEnv['Bindings'],
+  code: string,
+  redirectUri?: string,
+): Promise<{ installationIds: Set<string>; callerAccountId: string | null }> {
+  if (!isAppUserOAuthConfigured(env)) {
+    return { installationIds: new Set<string>(), callerAccountId: null };
+  }
+  const userToken = await exchangeInstallCodeForUserToken(env, code, redirectUri);
+  if (!userToken) {
+    return { installationIds: new Set<string>(), callerAccountId: null };
+  }
+  return {
+    installationIds: await listUserInstallationIds(userToken),
+    callerAccountId: await fetchUserAccountId(userToken),
+  };
+}
+
+// Shape of `GET /user/installations/:id/repositories` we care about.
+type InstallationRepositoriesResponse = Readonly<{
+  repositories?: ReadonlyArray<{ id?: number; full_name?: string }>;
+}>;
+
+/**
+ * Verify — per repo — that the holder of the OAuth `code` can actually see
+ * `repoFullName` through installation `installationId`, using ONLY the caller's
+ * user token. Consumed by the connect-authorize flow (Task 7) as the per-repo
+ * trust boundary that closes the confused-deputy hole: possessing a shared org
+ * installation id is not enough; the caller must independently prove they can
+ * reach the specific repo.
+ *
+ * Fails closed:
+ *   - App not configured for user-auth-on-install → `{ repositoryId: null,
+ *     callerAccountId: null }` with NO network call.
+ *   - Token exchange error (bad/expired code) → same null result.
+ *
+ * Otherwise paginates `GET /user/installations/:id/repositories` with the user
+ * token. When a repository whose `full_name` matches `repoFullName` is found,
+ * `repositoryId` is that repo's numeric id. A `repositoryId` of `null` after
+ * exhausting the pages is the confused-deputy REJECT signal (the caller cannot
+ * reach that repo through this installation). A non-ok response THROWS so the
+ * caller never mistakes a transient GitHub failure for a definitive reject.
+ *
+ * When `redirectUri` is provided it is forwarded on the token-exchange POST
+ * (must be byte-identical to the authorize `redirect_uri`). The token is
+ * transient and never persisted.
+ */
+export async function verifyUserRepoAccess(
+  env: ApiEnv['Bindings'],
+  code: string,
+  installationId: string,
+  repoFullName: string,
+  redirectUri?: string,
+): Promise<{ repositoryId: number | null; callerAccountId: string | null }> {
+  if (!isAppUserOAuthConfigured(env)) {
+    return { repositoryId: null, callerAccountId: null };
+  }
+  const userToken = await exchangeInstallCodeForUserToken(env, code, redirectUri);
+  if (!userToken) {
+    return { repositoryId: null, callerAccountId: null };
+  }
+
+  let repositoryId: number | null = null;
+  for (let page = 1; ; page += 1) {
+    const res = await fetch(
+      `${GITHUB_API_BASE}/user/installations/${installationId}/repositories?per_page=100&page=${page}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${userToken}`,
+          'User-Agent': 'void-api',
+          'X-GitHub-Api-Version': GITHUB_API_VERSION,
+        },
+      },
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => '<unreadable>');
+      throw new Error(
+        `Failed to list installation repositories: ${res.status} ${body.trim() || '<empty>'}`,
+      );
+    }
+    const data = (await res.json()) as InstallationRepositoriesResponse;
+    const repositories = data.repositories ?? [];
+    for (const repo of repositories) {
+      if (repo.full_name === repoFullName && typeof repo.id === 'number') {
+        repositoryId = repo.id;
+        break;
+      }
+    }
+    // Stop once found, or on a short page (GitHub returns up to `per_page`).
+    if (repositoryId !== null || repositories.length < 100) {
+      break;
+    }
+  }
+
+  return { repositoryId, callerAccountId: await fetchUserAccountId(userToken) };
 }
