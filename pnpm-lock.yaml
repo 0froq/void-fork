@@ -22,7 +22,7 @@ catalogs:
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.2
   vitest: 4.1.9
-  hono: 4.12.27
+  hono: 4.12.18
   void: link:framework/packages/void
   '@void/react': link:framework/packages/react
   '@void/vue': link:framework/packages/vue
@@ -68,8 +68,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@5.20260705.1)(@electric-sql/pglite@0.5.4)(@types/pg@8.20.0)(pg@8.22.0)
       hono:
-        specifier: 4.12.27
-        version: 4.12.27
+        specifier: 4.12.18
+        version: 4.12.18
       jose:
         specifier: 6.2.3
         version: 6.2.3
@@ -118,8 +118,8 @@ importers:
         specifier: workspace:*
         version: link:../ui
       hono:
-        specifier: 4.12.27
-        version: 4.12.27
+        specifier: 4.12.18
+        version: 4.12.18
       react:
         specifier: ^19.2.6
         version: 19.2.7
@@ -204,8 +204,8 @@ importers:
         specifier: workspace:*
         version: link:../api
       hono:
-        specifier: 4.12.27
-        version: 4.12.27
+        specifier: 4.12.18
+        version: 4.12.18
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
@@ -2197,8 +2197,8 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  hono@4.12.27:
-    resolution: {integrity: sha512-1yrb/+w6HWQJrUCLkJ2IF5jNIPvvFkblV5RNOYl6bV+OA6p9GLcMpHFFGTosSvHvcAUibuUukRqhlYI4z32C7Q==}
+  hono@4.12.18:
+    resolution: {integrity: sha512-RWzP96k/yv0PQfyXnWjs6zot20TqfpfsNXhOnev8d1InAxubW93L11/oNUc3tQqn2G0bSdAOBpX+2uDFHV7kdQ==}
     engines: {node: '>=16.9.0'}
 
   jiti@2.7.0:
@@ -2775,7 +2775,7 @@ snapshots:
       '@cloudflare/containers': 0.3.7
       aws4fetch: 1.0.20
       capnweb: 0.8.0
-      hono: 4.12.27
+      hono: 4.12.18
 
   '@cloudflare/unenv-preset@2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260701.1)':
     dependencies:
@@ -4015,7 +4015,7 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  hono@4.12.27: {}
+  hono@4.12.18: {}
 
   jiti@2.7.0: {}
 

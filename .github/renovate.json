@@ -1,4 +1,11 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>Boshen/renovate"]
+  "extends": ["github>Boshen/renovate"],
+  "packageRules": [
+    {
+      "description": "hono is pinned in the catalog to match the framework submodule (framework/packages/void: ^4.12.18). A newer catalog hono breaks the dashboard typecheck (regressed in #200, re-regressed in #218). Bump it manually only when the submodule bumps hono.",
+      "matchPackageNames": ["hono"],
+      "enabled": false
+    }
+  ]
 }
