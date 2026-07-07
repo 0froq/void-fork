@@ -18,6 +18,15 @@ vi.mock('node:child_process', () => ({
   execFile: (...args: Array<unknown>) => mockExecFile(...args),
 }));
 
+// Partial mock of @clack/prompts: only `text` is replaced (for the repo
+// prompt); everything else — including `log`, which the spies below target —
+// passes through from the actual module.
+const mockText = vi.fn();
+vi.mock('@clack/prompts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@clack/prompts')>();
+  return { ...actual, text: (...args: Array<unknown>) => mockText(...args) };
+});
+
 const originalFetch = globalThis.fetch.bind(globalThis);
 
 const projectId = 'proj_test';
@@ -94,11 +103,18 @@ function driveConnect(opts: {
   connectGithub: ReturnType<typeof vi.fn>;
   getGithubConnectAuthorizeUrl?: ReturnType<typeof vi.fn>;
   callbackQuery?: (callbackUrl: URL) => URL;
+  listGithubInstallations?: ReturnType<typeof vi.fn>;
+  getGithubJoinUrl?: ReturnType<typeof vi.fn>;
+  completeGithubJoin?: ReturnType<typeof vi.fn>;
+  joinCallbackQuery?: (callbackUrl: URL) => URL;
   args?: Partial<Extract<GithubArgs, { subcommand: 'connect' }>>;
 }): {
   promise: Promise<void>;
   connectGithub: ReturnType<typeof vi.fn>;
   getGithubConnectAuthorizeUrl: ReturnType<typeof vi.fn>;
+  listGithubInstallations: ReturnType<typeof vi.fn>;
+  getGithubJoinUrl: ReturnType<typeof vi.fn>;
+  completeGithubJoin: ReturnType<typeof vi.fn>;
 } {
   let resolveCallback: ((url: URL) => void) | undefined;
   const callbackReady = new Promise<URL>((resolve) => {
@@ -113,11 +129,30 @@ function driveConnect(opts: {
       return { url: 'https://github.com/login/oauth/authorize?client_id=x' };
     });
 
+  let resolveJoinCallback: ((url: URL) => void) | undefined;
+  const joinCallbackReady = new Promise<URL>((resolve) => {
+    resolveJoinCallback = resolve;
+  });
+
+  const getGithubJoinUrl =
+    opts.getGithubJoinUrl ??
+    vi.fn(async (redirect: string) => {
+      resolveJoinCallback?.(new URL(redirect));
+      return { url: 'https://github.com/login/oauth/authorize?client_id=x' };
+    });
+  const completeGithubJoin =
+    opts.completeGithubJoin ?? vi.fn(async () => ({ status: 'joined', count: 0 }));
+
+  const listGithubInstallations =
+    opts.listGithubInstallations ?? vi.fn(async () => [makeInstallation()]);
+
   const client = {
     listProjects: vi.fn(async () => [makeProject()]),
-    listGithubInstallations: vi.fn(async () => [makeInstallation()]),
+    listGithubInstallations,
     connectGithub: opts.connectGithub,
     getGithubConnectAuthorizeUrl,
+    getGithubJoinUrl,
+    completeGithubJoin,
   } as unknown as PlatformClient;
 
   const run = runConnect('/project', client, { ...baseArgs, ...opts.args });
@@ -132,10 +167,20 @@ function driveConnect(opts: {
       })
     : Promise.resolve();
 
+  const joinFired = opts.joinCallbackQuery
+    ? joinCallbackReady.then(async (callbackUrl) => {
+        const hit = opts.joinCallbackQuery!(callbackUrl);
+        await originalFetch(hit).catch(() => {});
+      })
+    : Promise.resolve();
+
   return {
-    promise: run.finally(() => fired.catch(() => {})),
+    promise: run.finally(() => fired.catch(() => {})).finally(() => joinFired.catch(() => {})),
     connectGithub: opts.connectGithub,
     getGithubConnectAuthorizeUrl,
+    listGithubInstallations,
+    getGithubJoinUrl,
+    completeGithubJoin,
   };
 }
 
@@ -143,10 +188,12 @@ let exitSpy: ReturnType<typeof vi.spyOn>;
 let successSpy: ReturnType<typeof vi.spyOn>;
 let errorSpy: ReturnType<typeof vi.spyOn>;
 let messageSpy: ReturnType<typeof vi.spyOn>;
+let infoSpy: ReturnType<typeof vi.spyOn>;
 const originalIsTTY = process.stdin.isTTY;
 
 beforeEach(() => {
   mockExecFile.mockReset();
+  mockText.mockReset();
   // Force the non-interactive (non-TTY) path so tests never hit clack prompts.
   (process.stdin as { isTTY?: boolean }).isTTY = false;
   exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -155,6 +202,7 @@ beforeEach(() => {
   successSpy = vi.spyOn(log, 'success').mockImplementation(() => {});
   errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
   messageSpy = vi.spyOn(log, 'message').mockImplementation(() => {});
+  infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -163,6 +211,7 @@ afterEach(() => {
   successSpy.mockRestore();
   errorSpy.mockRestore();
   messageSpy.mockRestore();
+  infoSpy.mockRestore();
   vi.unstubAllGlobals();
 });
 
@@ -341,5 +390,189 @@ describe('runConnect — non-owner member connect-authorization round-trip', () 
       'connect: this installation requires per-repo authorization, which needs an interactive browser sign-in. Run `void github connect` locally to authorize, then retry.',
     );
     expect(successSpy).not.toHaveBeenCalled();
+  });
+});
+
+const joinCallback = (cb: URL) => {
+  const hit = new URL(cb); // already carries the command's state
+  hit.searchParams.set('join_code', 'jc-1');
+  return hit;
+};
+
+describe('runConnect — auto-join fallback', () => {
+  it('auto-joins and continues when the caller has no installations yet', async () => {
+    (process.stdin as { isTTY?: boolean }).isTTY = true;
+    const listGithubInstallations = vi
+      .fn()
+      .mockResolvedValueOnce([]) // before join
+      .mockResolvedValueOnce([makeInstallation()]); // after join
+    const completeGithubJoin = vi.fn(async () => ({ status: 'joined', count: 1 }));
+    const connectGithub = vi.fn().mockResolvedValueOnce(makeConnection());
+
+    const { promise, getGithubJoinUrl } = driveConnect({
+      connectGithub,
+      listGithubInstallations,
+      completeGithubJoin,
+      joinCallbackQuery: joinCallback,
+      args: { executor: 'container' },
+    });
+    await promise;
+
+    expect(getGithubJoinUrl).toHaveBeenCalledTimes(1);
+    expect(completeGithubJoin).toHaveBeenCalledWith('jc-1', expect.any(String));
+    expect(listGithubInstallations).toHaveBeenCalledTimes(2);
+    expect(connectGithub).toHaveBeenCalledTimes(1);
+  });
+
+  it('errors with install-first guidance when auto-join finds nothing', async () => {
+    (process.stdin as { isTTY?: boolean }).isTTY = true;
+    const listGithubInstallations = vi.fn(async () => []);
+    const completeGithubJoin = vi.fn(async () => ({ status: 'joined', count: 0 }));
+    const connectGithub = vi.fn();
+
+    const { promise } = driveConnect({
+      connectGithub,
+      listGithubInstallations,
+      completeGithubJoin,
+      joinCallbackQuery: joinCallback,
+      args: { executor: 'container' },
+    });
+    await expect(promise).rejects.toThrow('process.exit(1)');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'No GitHub App installation found for your account or your organizations. Run `void github install` first.',
+    );
+    expect(listGithubInstallations).toHaveBeenCalledTimes(1); // zero joined → no re-list
+    expect(connectGithub).not.toHaveBeenCalled();
+  });
+
+  it('falls through to the install-first error when join OAuth is not configured (503)', async () => {
+    (process.stdin as { isTTY?: boolean }).isTTY = true;
+    const listGithubInstallations = vi.fn(async () => []);
+    const getGithubJoinUrl = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new PlatformApiError(
+          'Failed to get GitHub join URL',
+          503,
+          JSON.stringify({ error: 'github_oauth_not_configured' }),
+        ),
+      );
+    const connectGithub = vi.fn();
+
+    const { promise } = driveConnect({
+      connectGithub,
+      listGithubInstallations,
+      getGithubJoinUrl,
+      args: { executor: 'container' },
+    });
+    await expect(promise).rejects.toThrow('process.exit(1)');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'No GitHub App installation found for your account or your organizations. Run `void github install` first.',
+    );
+    // The join-command-only copy must not leak into connect:
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      'Organization installation sharing is not enabled on this Void instance.',
+    );
+  });
+
+  it('never starts the join round-trip without a TTY', async () => {
+    // beforeEach already forces isTTY = false
+    const listGithubInstallations = vi.fn(async () => []);
+    const getGithubJoinUrl = vi.fn();
+    const connectGithub = vi.fn();
+
+    const { promise } = driveConnect({
+      connectGithub,
+      listGithubInstallations,
+      getGithubJoinUrl,
+    });
+    await expect(promise).rejects.toThrow('process.exit(1)');
+
+    expect(getGithubJoinUrl).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      'No active GitHub App installation. Run `void github install` first, or `void github join` if your organization already installed the Void GitHub App.',
+    );
+  });
+
+  it('recovers a missing --installation id via auto-join', async () => {
+    (process.stdin as { isTTY?: boolean }).isTTY = true;
+    const other: GithubInstallation = {
+      ...makeInstallation(),
+      id: 'install_2',
+      installation_id: '999999',
+      account_login: 'someone-else',
+    };
+    const listGithubInstallations = vi
+      .fn()
+      .mockResolvedValueOnce([other]) // target missing
+      .mockResolvedValueOnce([other, makeInstallation()]); // joined
+    const completeGithubJoin = vi.fn(async () => ({ status: 'joined', count: 1 }));
+    const connectGithub = vi.fn().mockResolvedValueOnce(makeConnection());
+
+    const { promise, getGithubJoinUrl } = driveConnect({
+      connectGithub,
+      listGithubInstallations,
+      completeGithubJoin,
+      joinCallbackQuery: joinCallback,
+      args: { executor: 'container' }, // baseArgs pins installationId = '123456'
+    });
+    await promise;
+
+    expect(getGithubJoinUrl).toHaveBeenCalledTimes(1);
+    expect(listGithubInstallations).toHaveBeenCalledTimes(2);
+    expect(connectGithub).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runConnect — member repo prompt (redacted repository list)', () => {
+  const memberInstallation = (): GithubInstallation => ({
+    ...makeInstallation(),
+    repositories: [], // server redacts the list for non-owner (member) rows
+    repository_selection: 'selected',
+  });
+
+  it('prompts for owner/repo on a TTY instead of dead-ending', async () => {
+    (process.stdin as { isTTY?: boolean }).isTTY = true;
+    mockText.mockResolvedValueOnce(repoFullName); // user types octocat/hello-world
+    const connectGithub = vi.fn().mockResolvedValueOnce(makeConnection());
+
+    const { promise } = driveConnect({
+      connectGithub,
+      listGithubInstallations: vi.fn(async () => [memberInstallation()]),
+      args: { executor: 'container', repo: undefined }, // no --repo
+    });
+    await promise;
+
+    expect(mockText).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Repository (owner/repo):' }),
+    );
+    // The prompt's validate callback rejects anything that isn't owner/repo.
+    const textOptions = mockText.mock.calls[0]![0] as {
+      validate: (value?: string) => string | undefined;
+    };
+    expect(textOptions.validate('not-a-repo')).toBe('Enter the repository as owner/repo.');
+    expect(textOptions.validate('')).toBe('Enter the repository as owner/repo.');
+    expect(textOptions.validate('octocat/hello-world')).toBeUndefined();
+    expect(textOptions.validate(' octocat/hello-world ')).toBeUndefined();
+    expect(connectGithub).toHaveBeenCalledTimes(1);
+    // client.connectGithub(projectId, body) — body.repoFullName carries the typed repo
+    const body = connectGithub.mock.calls[0]![1] as { repoFullName: string };
+    expect(body.repoFullName).toBe(repoFullName);
+  });
+
+  it('fails closed without a TTY, naming --repo', async () => {
+    const connectGithub = vi.fn();
+    const { promise } = driveConnect({
+      connectGithub,
+      listGithubInstallations: vi.fn(async () => [memberInstallation()]),
+      args: { repo: undefined },
+    });
+    await expect(promise).rejects.toThrow('process.exit(1)');
+    expect(errorSpy).toHaveBeenCalledWith(
+      'connect: --repo <owner/repo> is required — this installation does not expose a repository list to your account.',
+    );
+    expect(mockText).not.toHaveBeenCalled();
   });
 });

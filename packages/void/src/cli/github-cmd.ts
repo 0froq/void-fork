@@ -311,45 +311,49 @@ export async function runGithubLink(root: string, client: PlatformClient): Promi
 // ---------------------------------------------------------------------------
 
 /**
- * Discover and join the shared GitHub App installations owned by the
- * organizations the logged-in GitHub identity belongs to. Drives the same
- * 3-endpoint localhost + PKCE handshake as {@link runGithubLink}, but against
- * the platform's JOIN routes: membership upsert is idempotent, so unlike link
- * there is no 409/already-linked conflict to map. The only special error is the
- * fail-closed 503 raised when org-installation sharing is not configured on the
- * instance.
+ * Browser round-trip (localhost + PKCE) that joins the caller to their
+ * organization's shared GitHub App installations. Returns the number of
+ * installations joined. Throws PlatformApiError — including the 503
+ * `github_oauth_not_configured` — so callers own the user-facing handling
+ * (`runGithubJoin` prints and exits; the connect auto-join fallback falls
+ * through to its install-first error).
  */
-export async function runGithubJoin(root: string, client: PlatformClient): Promise<void> {
-  void root; // Signature parity with runGithubLink; routing uses `client`.
-
+export async function performGithubJoin(client: PlatformClient): Promise<number> {
   const verifier = createCodeVerifier();
   const challenge = createCodeChallenge(verifier);
   const state = randomBytes(32).toString('hex');
 
   // completeGithubJoin runs INSIDE the request handler (via finalize), so the
   // browser only shows the success page after the join actually succeeds.
+  const { count } = await awaitBrowserCallback<{ status: 'joined'; count: number }>({
+    state,
+    buildAuthUrl: async (callback) => {
+      callback.searchParams.set('state', state);
+      const { url } = await client.getGithubJoinUrl(callback.href, challenge);
+      return url;
+    },
+    describeError: (p) => (p.get('error') ? 'GitHub authorization failed.' : null),
+    onUrl: (url) =>
+      log.message(
+        `Open this URL to join your organization's shared GitHub App installations:\n${pc.cyan(url)}`,
+      ),
+    finalize: async (params) => {
+      const joinCode = params.get('join_code');
+      if (!joinCode) {
+        throw new Error('github: join callback did not return a join code.');
+      }
+      return client.completeGithubJoin(joinCode, verifier);
+    },
+  });
+  return count;
+}
+
+export async function runGithubJoin(root: string, client: PlatformClient): Promise<void> {
+  void root; // Signature parity with runGithubLink; routing uses `client`.
+
   let count: number;
   try {
-    ({ count } = await awaitBrowserCallback<{ status: 'joined'; count: number }>({
-      state,
-      buildAuthUrl: async (callback) => {
-        callback.searchParams.set('state', state);
-        const { url } = await client.getGithubJoinUrl(callback.href, challenge);
-        return url;
-      },
-      describeError: (p) => (p.get('error') ? 'GitHub authorization failed.' : null),
-      onUrl: (url) =>
-        log.message(
-          `Open this URL to join your organization's shared GitHub App installations:\n${pc.cyan(url)}`,
-        ),
-      finalize: async (params) => {
-        const joinCode = params.get('join_code');
-        if (!joinCode) {
-          throw new Error('github: join callback did not return a join code.');
-        }
-        return client.completeGithubJoin(joinCode, verifier);
-      },
-    }));
+    count = await performGithubJoin(client);
   } catch (err) {
     // Fail closed: org-installation sharing OAuth is not configured on this
     // instance. The membership flow has no already-joined conflict to map.
@@ -447,6 +451,30 @@ async function runGithubConnectAuthorize(
   return { connectGrant, codeVerifier: verifier };
 }
 
+/**
+ * Free-text repository prompt used when the installation's repository list is
+ * not enumerable client-side: `repository_selection === 'all'`, or a shared
+ * org installation whose list the server redacts for non-owner members. The
+ * server re-verifies actual access on connect, so this is DX, not security.
+ */
+async function promptRepoFullName(root: string): Promise<string> {
+  const gitDefault = parseGithubRepoFullName(collectGitDeployMetadata(root, null).repositoryUrl);
+  const input = await text({
+    message: 'Repository (owner/repo):',
+    placeholder: gitDefault ?? 'owner/repo',
+    initialValue: gitDefault ?? '',
+    validate: (value) =>
+      /^[^/\s]+\/[^/\s]+$/.test((value ?? '').trim())
+        ? undefined
+        : 'Enter the repository as owner/repo.',
+  });
+  if (isCancel(input)) {
+    cancel('Cancelled.');
+    process.exit(0);
+  }
+  return (input as string).trim();
+}
+
 export async function runConnect(
   root: string,
   client: PlatformClient,
@@ -500,19 +528,65 @@ export async function runConnect(
   // -------------------------------------------------------------------------
   // 2. Resolve installation
   // -------------------------------------------------------------------------
-  const installations = (await client.listGithubInstallations()).filter(
-    (i) => i.status === 'active',
-  );
+  const listActiveInstallations = async () =>
+    (await client.listGithubInstallations()).filter((i) => i.status === 'active');
+
+  // Auto-join fallback: an org member whose org already installed the App has
+  // no membership row until a join round-trip records one, so their list is
+  // empty (or missing the shared installation) even though the App is
+  // installed. Run the join flow once instead of telling them to re-install.
+  // Browser round-trips are TTY-only, mirroring every other prompt here. A 503
+  // (sharing not configured) falls through to the install-first error.
+  let autoJoinAttempted = false;
+  const attemptAutoJoin = async (): Promise<number> => {
+    autoJoinAttempted = true;
+    try {
+      return await performGithubJoin(client);
+    } catch (err) {
+      if (
+        err instanceof PlatformApiError &&
+        err.status === 503 &&
+        err.code === 'github_oauth_not_configured'
+      ) {
+        return 0;
+      }
+      throw err;
+    }
+  };
+
+  let installations = await listActiveInstallations();
+
+  if (installations.length === 0 && isTTY) {
+    log.info(
+      'No GitHub App installation is linked to your account yet — checking whether your organization already installed the Void GitHub App…',
+    );
+    if ((await attemptAutoJoin()) > 0) {
+      installations = await listActiveInstallations();
+    }
+  }
 
   if (installations.length === 0) {
-    log.error('No active GitHub App installation. Run `void github install` first.');
+    log.error(
+      isTTY
+        ? 'No GitHub App installation found for your account or your organizations. Run `void github install` first.'
+        : 'No active GitHub App installation. Run `void github install` first, or `void github join` if your organization already installed the Void GitHub App.',
+    );
     process.exit(1);
   }
 
   let installation: GithubInstallation;
 
   if (args.installationId) {
-    const found = installations.find((i) => i.installation_id === args.installationId);
+    let found = installations.find((i) => i.installation_id === args.installationId);
+    if (!found && isTTY && !autoJoinAttempted) {
+      log.info(
+        `Installation '${args.installationId}' is not linked to your account yet — checking whether your organization shares it…`,
+      );
+      if ((await attemptAutoJoin()) > 0) {
+        installations = await listActiveInstallations();
+        found = installations.find((i) => i.installation_id === args.installationId);
+      }
+    }
     if (!found) {
       log.error(`connect: No active installation found with id '${args.installationId}'.`);
       process.exit(1);
@@ -547,10 +621,17 @@ export async function runConnect(
     repoFullName = args.repo;
   } else if (installation.repository_selection === 'selected') {
     if (installation.repositories.length === 0) {
-      log.error(
-        'connect: The installation has no accessible repositories. Update the GitHub App install to grant access.',
-      );
-      process.exit(1);
+      // The server redacts `repositories` to [] for non-owner (member) rows of
+      // shared org installations, and an owner install can genuinely have zero
+      // grants. Either way the list is not enumerable here — take free text
+      // and let the server's access check decide.
+      if (!isTTY) {
+        log.error(
+          'connect: --repo <owner/repo> is required — this installation does not expose a repository list to your account.',
+        );
+        process.exit(1);
+      }
+      repoFullName = await promptRepoFullName(root);
     } else if (installation.repositories.length === 1) {
       repoFullName = installation.repositories[0]!.full_name;
     } else if (!isTTY) {
@@ -578,21 +659,7 @@ export async function runConnect(
       );
       process.exit(1);
     }
-    const gitDefault = parseGithubRepoFullName(collectGitDeployMetadata(root, null).repositoryUrl);
-    const input = await text({
-      message: 'Repository (owner/repo):',
-      placeholder: gitDefault ?? 'owner/repo',
-      initialValue: gitDefault ?? '',
-    });
-    if (isCancel(input)) {
-      cancel('Cancelled.');
-      process.exit(0);
-    }
-    repoFullName = (input as string).trim();
-    if (!repoFullName) {
-      log.error('connect: Repository is required.');
-      process.exit(1);
-    }
+    repoFullName = await promptRepoFullName(root);
   }
 
   // -------------------------------------------------------------------------
