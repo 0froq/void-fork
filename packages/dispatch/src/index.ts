@@ -18,7 +18,7 @@ import {
 } from './isr.ts';
 import { recordRequest, sendUsageEvent, type RequestType } from './metering.ts';
 import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules.ts';
-import { resolveStaticPath, resolveAssetContentType } from './static.ts';
+import { resolveStaticPath, resolveAssetContentType, safeDecodePathname } from './static.ts';
 import type { AssetConfig } from './static.ts';
 import { buildVariantOriginalUrl, type QueryAllowlist } from './variant-key.ts';
 
@@ -539,9 +539,20 @@ export default {
             cacheTtl: 86400,
           });
           const assetManifest: Record<string, string> = manifestRaw ? JSON.parse(manifestRaw) : {};
-          const hash = assetManifest[pathname];
+          // Manifest keys are decoded on-disk paths, but `pathname` stays
+          // percent-encoded. Try the raw key, then the decoded key (e.g. a
+          // hashed file named `oxc masthead.riv` requested as `oxc%20masthead.riv`).
+          let assetPath = pathname;
+          let hash = assetManifest[pathname];
+          if (!hash) {
+            const decoded = safeDecodePathname(pathname);
+            if (decoded !== pathname && assetManifest[decoded]) {
+              assetPath = decoded;
+              hash = assetManifest[decoded];
+            }
+          }
           const response = hash
-            ? ((await fetchStaticAsset(env, hash, pathname, routing.projectId)) ??
+            ? ((await fetchStaticAsset(env, hash, assetPath, routing.projectId)) ??
               createErrorResponse(request, 404, 'Not Found'))
             : createErrorResponse(request, 404, 'Not Found');
           if (response.ok && !isEventStreamResponse(response)) {

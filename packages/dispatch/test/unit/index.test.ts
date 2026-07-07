@@ -2925,6 +2925,33 @@ describe('static deployment caching (KV/R2)', () => {
       'public, s-maxage=31536000, max-age=0, must-revalidate',
     );
   });
+
+  it('serves a hashed asset whose filename contains a space (%20-encoded request)', async () => {
+    // Regression: the oxc.rs hero `.riv` 404'd. The manifest key is the decoded
+    // on-disk path (literal space), but the browser requests it `%20`-encoded and
+    // `url.pathname` never decodes. Routing carries `hashedAssetsPrefix`, so the
+    // request hits the hashed-asset fast path — which must decode before the
+    // manifest lookup.
+    const { env } = createStaticDeployEnv({
+      routing: {
+        workerName: '',
+        projectId: 'proj-1',
+        staticDeploymentId: 'deploy-abc',
+        version: 'deploy-abc',
+        hashedAssetsPrefix: 'assets',
+      },
+      manifest: { '/assets/640_x_630_oxc masthead_.B7dLtkJB.riv': 'hash_riv' },
+      assets: { hash_riv: { body: 'RIVE-BYTES', contentType: 'application/octet-stream' } },
+    });
+
+    const res = await app.fetch(
+      new Request('https://test.void.app/assets/640_x_630_oxc%20masthead_.B7dLtkJB.riv'),
+      env,
+      createCtx(),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('RIVE-BYTES');
+  });
 });
 
 describe('static asset content-type normalization', () => {
