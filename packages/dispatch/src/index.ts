@@ -17,10 +17,12 @@ import {
   normalizePageDataForJsonCache,
 } from './isr.ts';
 import { recordRequest, sendUsageEvent, type RequestType } from './metering.ts';
+import { classifyDynamicRequestType, hasExtension } from './request-type.ts';
 import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules.ts';
 import { resolveStaticPath, resolveAssetContentType, safeDecodePathname } from './static.ts';
 import type { AssetConfig } from './static.ts';
 import { buildVariantOriginalUrl, type QueryAllowlist } from './variant-key.ts';
+import { DispatchTimeoutError, resolveTimeoutMs, withTimeout } from './with-timeout.ts';
 
 type RoutingEntry = Readonly<{
   workerName: string;
@@ -64,6 +66,19 @@ function clientRevalidateResponse(response: Response): Response {
   const res = new Response(response.body, response);
   res.headers.set('Cache-Control', CLIENT_REVALIDATE_CACHE_CONTROL);
   return res;
+}
+
+// Fast body-less response for an operation bounded by `withTimeout` that
+// stalled past the budget. `X-Void-Timeout` names the stalled operation for
+// observability; 503s advertise a short `Retry-After` so clients back off.
+function timeoutResponse(status: number, label: string): Response {
+  return new Response(null, {
+    status,
+    headers: {
+      'X-Void-Timeout': label,
+      ...(status === 503 ? { 'Retry-After': '5' } : {}),
+    },
+  });
 }
 
 export function isEventStreamResponse(response: Response): boolean {
@@ -334,6 +349,12 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const startTime = Date.now();
     const url = new URL(request.url);
+    // Budget for the bounded hot paths (static-asset reads, primary dispatch).
+    // Unset → the 10s default. An explicit `0`/negative/non-finite override is
+    // passed through verbatim, disabling the timers via `withTimeout`'s escape
+    // hatch (any non-positive/non-finite value = "no timer") — an operator kill
+    // switch that works WITHOUT a redeploy.
+    const timeoutMs = resolveTimeoutMs(env.DISPATCH_TIMEOUT_MS);
 
     // Block Void-internal routes from external HTTP access.
     // Only /__void/* is reserved by the platform — other __ prefixes
@@ -551,10 +572,26 @@ export default {
               hash = assetManifest[decoded];
             }
           }
-          const response = hash
-            ? ((await fetchStaticAsset(env, hash, assetPath, routing.projectId)) ??
-              createErrorResponse(request, 404, 'Not Found'))
-            : createErrorResponse(request, 404, 'Not Found');
+          let response: Response;
+          if (hash) {
+            try {
+              response =
+                (await withTimeout(
+                  fetchStaticAsset(env, hash, assetPath, routing.projectId),
+                  timeoutMs,
+                  'static-asset',
+                )) ?? createErrorResponse(request, 404, 'Not Found');
+            } catch (err) {
+              // No `resolved.notFound` in scope on this hashed-asset branch — a
+              // stalled read is always a real asset read, so fast 503.
+              if (err instanceof DispatchTimeoutError) {
+                return meter(timeoutResponse(503, 'static-asset'));
+              }
+              throw err;
+            }
+          } else {
+            response = createErrorResponse(request, 404, 'Not Found');
+          }
           if (response.ok && !isEventStreamResponse(response)) {
             const res = new Response(response.body, response);
             res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
@@ -822,12 +859,22 @@ export default {
         );
       }
 
-      const assetResponse = await fetchStaticAsset(
-        env,
-        resolved.hash,
-        resolved.path,
-        routing.projectId,
-      );
+      let assetResponse: Response | null;
+      try {
+        assetResponse = await withTimeout(
+          fetchStaticAsset(env, resolved.hash, resolved.path, routing.projectId),
+          timeoutMs,
+          'static-asset',
+        );
+      } catch (err) {
+        // A stalled read of the not-found asset was always going to 404, so
+        // return a fast 404 (must not trip the 5xx alert); a real asset read
+        // that stalled → fast 503.
+        if (err instanceof DispatchTimeoutError) {
+          return meter(timeoutResponse(resolved.notFound ? 404 : 503, 'static-asset'));
+        }
+        throw err;
+      }
       if (!assetResponse) {
         return meter(createErrorResponse(request, 404, 'Not Found'));
       }
@@ -876,7 +923,7 @@ export default {
       const hasBodyMethod = dispatchReq.method !== 'GET' && dispatchReq.method !== 'HEAD';
       const dispatchReqForFallback =
         hasBodyMethod && routing.fallbackRules?.length ? dispatchReq.clone() : dispatchReq;
-      let response = await worker.fetch(dispatchReq);
+      let response = await withTimeout(worker.fetch(dispatchReq), timeoutMs, 'dispatch');
       let isEventStream = isEventStreamResponse(response);
 
       // Safety net for CF asset dedupe poisoning (WC-4511). See
@@ -943,10 +990,9 @@ export default {
       }
 
       // Classify for metering
-      if (pathname.startsWith('/api/') || pathname === '/api') {
-        requestType = 'api';
-      } else if (routing.ssr && !hasExtension(pathname)) {
-        requestType = 'ssr';
+      const dynamicType = classifyDynamicRequestType(pathname, routing.ssr);
+      if (dynamicType) {
+        requestType = dynamicType;
       }
 
       // Write ISR cache on miss — skip pages protocol responses (JSON, not HTML)
@@ -994,6 +1040,13 @@ export default {
       }
       return meter(applyHeaderRules(response, pathname, routing.headerRules));
     } catch (err) {
+      if (err instanceof DispatchTimeoutError) {
+        const dynamicType = classifyDynamicRequestType(pathname, routing.ssr);
+        if (dynamicType) {
+          requestType = dynamicType;
+        }
+        return meter(timeoutResponse(503, 'dispatch'));
+      }
       if (err instanceof Error && err.message.includes('Worker exceeded')) {
         return meter(Response.json({ error: 'CPU limit exceeded' }, { status: 429 }));
       }
@@ -1292,10 +1345,6 @@ async function revalidateInBackground(
   } catch (err) {
     console.error('ISR revalidation failed:', err);
   }
-}
-
-function hasExtension(pathname: string): boolean {
-  return pathname.slice(pathname.lastIndexOf('/') + 1).includes('.');
 }
 
 function hasCacheOptOut(response: Response): boolean {
