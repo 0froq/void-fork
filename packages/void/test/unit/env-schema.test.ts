@@ -10,7 +10,7 @@ import {
   _hasRegisteredSchema,
   _validateEnvOnce,
 } from '../../src/runtime/env-public.ts';
-import { withRuntimeEnv } from '../../src/runtime/env.ts';
+import { getRuntimeBinding, requireRuntimeBinding, withRuntimeEnv } from '../../src/runtime/env.ts';
 
 // Reset schema between tests so order doesn't leak state.
 function resetSchema() {
@@ -421,6 +421,83 @@ describe('_validateEnvOnce (boot-time worker check)', () => {
     await expect(_validateEnvOnce({ TOKEN: 'anything' })).rejects.toBeInstanceOf(
       EnvValidationError,
     );
+  });
+});
+
+// FIX C + FIX D: internal framework bindings (e.g. ISR_CACHE) must never be
+// exposed through void/env WHILE ISR IS ACTIVE — not even when a user's
+// defineEnv schema declares one and boot validation resolved and seeded its RAW
+// value into the sync cache. When ISR is inactive, a schema-declared ISR_CACHE
+// is an ordinary user binding and IS exposed.
+describe('_validateEnvOnce — internal bindings stay hidden from void/env', () => {
+  beforeEach(() => {
+    resetSchema();
+  });
+
+  // A passthrough validator so the RAW binding value (a KV-like object) passes
+  // boot validation and would otherwise be seeded into the sync cache — this is
+  // exactly the leak path FIX C closes (while ISR is active).
+  const passthrough = {
+    '~standard': {
+      version: 1 as const,
+      vendor: 'test',
+      validate: (v: unknown) => ({ value: v }),
+    },
+  };
+
+  it('never exposes a schema-declared ISR_CACHE while ISR is active, even after boot validation seeds its raw value', async () => {
+    defineEnv({ ISR_CACHE: passthrough, API_KEY: string() });
+
+    const fakeIsrKv = { __brand: 'isr-kv' };
+    // `__VOID_ISR_DEPLOYMENT_ID` present ⇒ ISR active ⇒ ISR_CACHE is internal.
+    const rawEnv = { ISR_CACHE: fakeIsrKv, API_KEY: 'sk_live', __VOID_ISR_DEPLOYMENT_ID: 'dep_1' };
+
+    await withRuntimeEnv(rawEnv, async () => {
+      // Boot validation runs FIRST — as it does at worker boot, before any
+      // request reads env.X. It succeeds (raw ISR_CACHE passes the passthrough
+      // validator) and, without FIX C, seeds the raw KV binding into the sync
+      // cache. Reading env.ISR_CACHE only AFTER this is what exposes the leak: a
+      // pre-validation read would mask it by caching `undefined` (the filtered
+      // value) so the `if (!cache.has(key))` seed guard would skip re-seeding.
+      await _validateEnvOnce(rawEnv);
+
+      // Hidden after boot validation — the seeded raw KV binding must not
+      // leak through env.ISR_CACHE / `in` / enumeration.
+      expect((env as Record<string, unknown>).ISR_CACHE).toBeUndefined();
+      expect('ISR_CACHE' in env).toBe(false);
+      expect(Object.keys(env)).not.toContain('ISR_CACHE');
+
+      // Lower-level binding accessors keep hiding it too.
+      expect(getRuntimeBinding('ISR_CACHE')).toBeUndefined();
+      expect(() => requireRuntimeBinding('ISR_CACHE')).toThrow(
+        "env: Missing Cloudflare binding 'ISR_CACHE'.",
+      );
+
+      // A normal declared key remains readable (the fix does not over-filter).
+      expect(env.API_KEY).toBe('sk_live');
+    });
+  });
+
+  it('exposes a schema-declared ISR_CACHE when ISR is inactive (no __VOID_ISR_DEPLOYMENT_ID)', async () => {
+    defineEnv({ ISR_CACHE: passthrough, API_KEY: string() });
+
+    const fakeIsrKv = { __brand: 'user-kv' };
+    // No `__VOID_ISR_DEPLOYMENT_ID` ⇒ ISR inactive ⇒ ISR_CACHE is a user binding.
+    const rawEnv = { ISR_CACHE: fakeIsrKv, API_KEY: 'sk_live' };
+
+    await withRuntimeEnv(rawEnv, async () => {
+      await _validateEnvOnce(rawEnv);
+
+      // ISR_CACHE is a normal declared binding here — visible everywhere.
+      expect((env as Record<string, unknown>).ISR_CACHE).toEqual(fakeIsrKv);
+      expect('ISR_CACHE' in env).toBe(true);
+      expect(Object.keys(env)).toContain('ISR_CACHE');
+
+      expect(getRuntimeBinding('ISR_CACHE')).toEqual(fakeIsrKv);
+      expect(requireRuntimeBinding('ISR_CACHE')).toEqual(fakeIsrKv);
+
+      expect(env.API_KEY).toBe('sk_live');
+    });
   });
 });
 

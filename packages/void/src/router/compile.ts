@@ -2,7 +2,7 @@ import type { VoidAuthProvider } from '../auth/providers.ts';
 import type { DevRedirectRule, HeaderRule } from '../cli/types.ts';
 import type { MigrationPlanBundle } from '../migrations/plan.ts';
 import { resolveLayoutIds } from '../pages/layout-resolution.ts';
-import { INTERNAL_BINDING_PREFIXES } from '../runtime/env-raw.ts';
+import { INTERNAL_BINDING_EXACT_NAMES, INTERNAL_BINDING_PREFIXES } from '../runtime/env-raw.ts';
 import type { ScanResult } from './scan.ts';
 
 /**
@@ -740,6 +740,13 @@ export function compileRouteTable(
   ssr: SsrCompileOptions | null,
   options: CompileOptions,
   pages: PagesCompileOptions | null = null,
+  /**
+   * Merged ISR revalidate config (number | Record<string, number>) baked into
+   * the route table as `__VOID_ISR_REVALIDATE`. Task 8 supplies the real value;
+   * `undefined` (the default) emits `= undefined;` so non-ISR builds are
+   * unaffected — the const is only imported/used when the entry wires ISR.
+   */
+  mergedRevalidate?: number | Record<string, number>,
 ): string {
   const lines: Array<string> = [];
   const auth = options.auth;
@@ -1706,6 +1713,14 @@ window.__vite_plugin_react_preamble_installed__ = true;
   lines.push(
     `export const __VOID_DEV_TRIGGER_TOKEN = ${JSON.stringify(options.devTriggerToken ?? crypto.randomUUID())};`,
   );
+  // Baked ISR config. `__VOID_ISR_REVALIDATE` is the merged revalidate map/number
+  // (or `undefined`). `__VOID_ISR_DEPLOYMENT_ID` MUST be a COMPILE-TIME LITERAL —
+  // stringified here at build time exactly like `__VOID_BUILD_KEY` above — so every
+  // isolate of a deployment shares one id (edge-cache keys, KV keys, and the
+  // `revalidate()` purge path must all agree). A runtime `crypto.randomUUID()` in the
+  // emitted source would mint a fresh id per isolate and break cache reads + purge.
+  lines.push(`export const __VOID_ISR_REVALIDATE = ${JSON.stringify(mergedRevalidate)};`);
+  lines.push(`export const __VOID_ISR_DEPLOYMENT_ID = ${JSON.stringify(crypto.randomUUID())};`);
   lines.push('');
   lines.push(`export default app;`);
 
@@ -2415,6 +2430,15 @@ export function compileWorkerEntry(
   sandbox?: boolean | { bindingName?: string; className?: string; runtimePath?: string },
   serveSpaFallback = false,
   live?: boolean | { bindingName?: string; className?: string },
+  /**
+   * When present, wraps the render path with the self-host ISR cache ladder.
+   * `runtimePath` is the import specifier for `handleIsr` (Task 10 export). The
+   * deployment id is NOT passed here — the single source of truth is the
+   * compile-time `__VOID_ISR_DEPLOYMENT_ID` const imported from the route table.
+   * When absent, the render path is emitted byte-identical to today (zero
+   * behavioral change for managed/dev/no-ISR builds).
+   */
+  isr?: { runtimePath: string },
 ): string {
   const remotePath = remote?.remotePath;
   const remoteBindingNames = JSON.stringify(remote?.bindingNames);
@@ -2465,12 +2489,20 @@ export function compileWorkerEntry(
   // Filter internal platform bindings so user code cannot access them via c.env.
   // The original env is preserved for framework internals (withRuntimeEnv, etc.).
   // Prefixes derived from INTERNAL_BINDING_PREFIXES (shared with env.ts).
-  const prefixCheck = INTERNAL_BINDING_PREFIXES.map(
-    (p) => `prop.startsWith(${JSON.stringify(p)})`,
-  ).join(' || ');
-  const prefixCheckNeg = INTERNAL_BINDING_PREFIXES.map(
-    (p) => `!key.startsWith(${JSON.stringify(p)})`,
-  ).join(' && ');
+  // ISR_CACHE (the self-host ISR KV binding) is hidden by exact name ONLY when
+  // ISR is emitted — it exists only then (the emitIsr gate). When ISR is absent
+  // the filter stays prefix-only, byte-identical to the pre-ISR base entry, and
+  // a user's own binding named ISR_CACHE (if any) is preserved. `handleIsr`
+  // reads the raw env, so hiding ISR_CACHE from userEnv is safe.
+  const exactNames = isr ? INTERNAL_BINDING_EXACT_NAMES : [];
+  const prefixCheck = [
+    ...INTERNAL_BINDING_PREFIXES.map((p) => `prop.startsWith(${JSON.stringify(p)})`),
+    ...exactNames.map((n) => `prop === ${JSON.stringify(n)}`),
+  ].join(' || ');
+  const prefixCheckNeg = [
+    ...INTERNAL_BINDING_PREFIXES.map((p) => `!key.startsWith(${JSON.stringify(p)})`),
+    ...exactNames.map((n) => `key !== ${JSON.stringify(n)}`),
+  ].join(' && ');
   const filterBindingsHelper = `
 function __filterInternalBindings(env) {
   return new Proxy(env, {
@@ -2497,29 +2529,63 @@ function __filterInternalBindings(env) {
 
   const assetHelper = compileAssetFallbackHelper(assetsDir, serveSpaFallback);
 
+  // ISR wiring (self-host only; injected by Task 8 for non-managed builds). When
+  // `isr` is absent every fragment below is an empty string, so the generated
+  // fetch handler is byte-identical to the pre-ISR output.
+  const isrImport = isr
+    ? `import { handleIsr } from ${JSON.stringify(isr.runtimePath)};\nimport { __VOID_ISR_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes';\n`
+    : '';
+  // Capture deployment id + host on the raw env at the top of fetch(), before
+  // dispatch — always, so `revalidate()` (which reads the raw env) can see them
+  // even on requests that never hit the ISR render ladder. The deployment id is
+  // invariant (`??=`), but the host MUST track the CURRENT request: a warm env
+  // object can be reused across hostnames, so `??=` would freeze it to the first
+  // host ever seen and make `revalidate()` from a second custom domain read the
+  // wrong host. Assign it every fetch.
+  const isrEnvCapture = isr
+    ? `  env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;\n  env.__VOID_ISR_HOST = new URL(request.url).hostname;\n`
+    : '';
+  // Scheduled/queue handlers have no request, so there is no host to stamp — but
+  // they still need the deployment id on the raw env so an on-demand
+  // `revalidate()` called from a cron or queue consumer can find it and purge KV
+  // (edge-cache deletes are skipped when host is undefined, per runtime/isr.ts).
+  const isrDeploymentStamp = isr
+    ? `  env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;\n`
+    : '';
+  // Render site: unchanged single line when ISR is off; otherwise the render
+  // closure is threaded through the ISR cache ladder (only when ISR_CACHE binds).
+  const renderBlock = isr
+    ? `      const __render = async (req) => serveWithAssets(req, env, await app.fetch(req, userEnv, ctx));
+      if (env.ISR_CACHE) {
+        const __isr = await handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID }, __render);
+        if (__isr) return __isr;
+      }
+      return __render(request);`
+    : `      return serveWithAssets(request, env, await app.fetch(request, userEnv, ctx));`;
+
   const fetchHandler = remotePath
     ? `async (request, env, ctx) => {
 ${envValidateCall}  const ws = await __voidHandleWebSocket(request, env);
   if (ws) return ws;
   if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};
-  return __withRawEnv(env, () => {
+${isrEnvCapture}  return __withRawEnv(env, () => {
     const userEnv = __filterInternalBindings(env);
     return withRuntimeEnv(env, async () => {
       const internal = await __handleInternal(request, env, ctx);
       if (internal) return internal;
-      return serveWithAssets(request, env, await app.fetch(request, userEnv, ctx));
+${renderBlock}
     });
   });
 }`
     : `async (request, env, ctx) => {
 ${envValidateCall}  const ws = await __voidHandleWebSocket(request, env);
   if (ws) return ws;
-  return __withRawEnv(env, () => {
+${isrEnvCapture}  return __withRawEnv(env, () => {
     const userEnv = __filterInternalBindings(env);
     return withRuntimeEnv(env, async () => {
       const internal = await __handleInternal(request, env, ctx);
       if (internal) return internal;
-      return serveWithAssets(request, env, await app.fetch(request, userEnv, ctx));
+${renderBlock}
     });
   });
 }`;
@@ -2548,21 +2614,21 @@ ${envValidateCall}  const ws = await __voidHandleWebSocket(request, env);
   const scheduledHandler = remotePath
     ? `async function handleScheduled(controller, env, ctx) {
 ${envValidateCall}  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};
-  const userEnv = __filterInternalBindings(env);
+${isrDeploymentStamp}  const userEnv = __filterInternalBindings(env);
   return withRuntimeEnv(env, () => scheduled(controller, userEnv, ctx));
 }`
     : `async function handleScheduled(controller, env, ctx) {
-${envValidateCall}  const userEnv = __filterInternalBindings(env);
+${envValidateCall}${isrDeploymentStamp}  const userEnv = __filterInternalBindings(env);
   return withRuntimeEnv(env, () => scheduled(controller, userEnv, ctx));
 }`;
 
   if (hasQueues) {
     return `${sandboxImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __voidHandleWebSocket, __withRawEnv, __processQueue${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
-${runtimeEnvImport}${envSchemaImport}${remoteImport}${filterBindingsHelper}${assetHelper}
+${runtimeEnvImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}
 async function queue(batch, env, ctx) {
-${envValidateCall}${remotePath ? `  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};\n` : ''}  const userEnv = __filterInternalBindings(env);
+${envValidateCall}${remotePath ? `  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};\n` : ''}${isrDeploymentStamp}  const userEnv = __filterInternalBindings(env);
   const messages = [...batch.messages].map(m => ({
     id: m.id, timestamp: m.timestamp.toISOString(),
     body: m.body, attempts: m.attempts,
@@ -2588,7 +2654,7 @@ ${sandboxExport}
 export default { fetch: ${fetchHandler}, scheduled: handleScheduled, queue };`;
   }
   return `${sandboxImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __voidHandleWebSocket, __withRawEnv${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
-${runtimeEnvImport}${envSchemaImport}${remoteImport}${filterBindingsHelper}${assetHelper}
+${runtimeEnvImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}
 ${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}

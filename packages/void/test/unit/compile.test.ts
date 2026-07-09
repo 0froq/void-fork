@@ -2829,3 +2829,196 @@ describe('emitted __compilePattern / __matchPattern runtime', () => {
     }
   });
 });
+
+describe('compileWorkerEntry — ISR wiring', () => {
+  it('is unchanged without the isr param (single render line, no handleIsr)', () => {
+    const code = compileWorkerEntry();
+    expect(code).toContain(
+      'return serveWithAssets(request, env, await app.fetch(request, userEnv, ctx));',
+    );
+    expect(code).not.toContain('handleIsr');
+    // The `if (env.ISR_CACHE)` render guard is only emitted when ISR is wired.
+    expect(code).not.toContain('if (env.ISR_CACHE)');
+    expect(code).not.toContain('__VOID_ISR_REVALIDATE');
+    // The c.env internal-binding filter is prefix-only when ISR is absent —
+    // byte-identical to the pre-ISR base entry. The ISR_CACHE exact-name checks
+    // must NOT appear (ISR_CACHE the internal binding only exists when ISR is
+    // emitted; a user's own binding named ISR_CACHE must not be hidden here).
+    expect(code).not.toContain('prop === "ISR_CACHE"');
+    expect(code).not.toContain('key !== "ISR_CACHE"');
+  });
+
+  it('wires the ISR cache ladder with the two baked imports when the isr param is present', () => {
+    const code = compileWorkerEntry(
+      false, // hasQueues
+      undefined, // remote
+      'assets', // assetsDir
+      [], // webSocketClasses
+      'void/_env', // runtimeEnvPath
+      undefined, // envSchemaModule
+      undefined, // sandbox
+      false, // serveSpaFallback
+      undefined, // live
+      { runtimePath: 'void/isr' },
+    );
+
+    // Baked import #1: handleIsr from the supplied runtime path.
+    expect(code).toContain('import { handleIsr } from "void/isr"');
+    // Baked import #2: the two consts from the compiled route table (single source of truth).
+    expect(code).toContain(
+      "import { __VOID_ISR_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes'",
+    );
+    // Render path threaded through handleIsr, guarded on the ISR_CACHE binding.
+    expect(code).toContain('if (env.ISR_CACHE)');
+    expect(code).toContain(
+      'handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID }, __render)',
+    );
+    // Deployment id + host captured on the raw env so revalidate() can purge even
+    // on requests that never enter the render ladder.
+    expect(code).toContain('env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;');
+    // Host is assigned every fetch (NOT `??=`) so a warm env reused across
+    // hostnames does not freeze it to the first host; the id stays `??=`.
+    expect(code).toContain('env.__VOID_ISR_HOST = new URL(request.url).hostname;');
+    expect(code).not.toContain('env.__VOID_ISR_HOST ??= new URL(request.url).hostname;');
+    expect(code).toContain('env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;');
+    // When ISR is emitted the c.env internal-binding filter gains the ISR_CACHE
+    // exact-name checks so the self-host ISR KV binding cannot leak into route
+    // handlers' c.env (matches the managed platform; handleIsr reads raw env).
+    expect(code).toContain('prop === "ISR_CACHE"');
+    expect(code).toContain('key !== "ISR_CACHE"');
+  });
+
+  // FIX 1: cron/queue handlers must stamp the deployment id (only — no host,
+  // there is no request) so a self-host `revalidate()` from a scheduled or queue
+  // handler can find it and purge KV instead of no-oping.
+  it('stamps the deployment id at the top of the scheduled + queue handlers when isr is set', () => {
+    const code = compileWorkerEntry(
+      true, // hasQueues — emits the queue() handler too
+      undefined, // remote
+      'assets', // assetsDir
+      [], // webSocketClasses
+      'void/_env', // runtimeEnvPath
+      undefined, // envSchemaModule
+      undefined, // sandbox
+      false, // serveSpaFallback
+      undefined, // live
+      { runtimePath: 'void/isr' },
+    );
+
+    // Scheduled handler stamps the id (deployment id only — no __VOID_ISR_HOST).
+    expect(code).toContain(
+      'async function handleScheduled(controller, env, ctx) {\n' +
+        '  env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;\n' +
+        '  const userEnv = __filterInternalBindings(env);',
+    );
+    // Queue handler stamps the id (deployment id only — no __VOID_ISR_HOST).
+    expect(code).toContain(
+      'async function queue(batch, env, ctx) {\n' +
+        '  env.__VOID_ISR_DEPLOYMENT_ID ??= __VOID_ISR_DEPLOYMENT_ID;\n' +
+        '  const userEnv = __filterInternalBindings(env);',
+    );
+    // No host stamp in cron/queue (there is no request).
+    expect(code).not.toContain('env.__VOID_ISR_HOST ??= new URL(controller');
+  });
+
+  it('does NOT stamp the deployment id in scheduled/queue handlers when isr is absent', () => {
+    const code = compileWorkerEntry(true); // hasQueues, no isr
+    // Byte-identical to today: no deployment-id stamp anywhere.
+    expect(code).not.toContain('__VOID_ISR_DEPLOYMENT_ID ??=');
+    expect(code).toContain(
+      'async function handleScheduled(controller, env, ctx) {\n' +
+        '  const userEnv = __filterInternalBindings(env);',
+    );
+    expect(code).toContain(
+      'async function queue(batch, env, ctx) {\n  const userEnv = __filterInternalBindings(env);',
+    );
+  });
+});
+
+describe('compileRouteTable — baked ISR consts', () => {
+  const scan: ScanResult = {
+    routes: [],
+    middleware: [],
+    jobs: [],
+    queues: [],
+    pages: { pages: [], layouts: [], namedLayouts: [] },
+  };
+
+  it('emits __VOID_ISR_DEPLOYMENT_ID as a compile-time string literal (never crypto.randomUUID())', () => {
+    const code = compileRouteTable(
+      scan,
+      '/routes',
+      '/middleware',
+      '/crons',
+      '/queues',
+      null,
+      testOptions,
+    );
+    // A quoted UUID literal — baked at build time, not a runtime call.
+    expect(code).toMatch(/export const __VOID_ISR_DEPLOYMENT_ID = "[0-9a-f-]{36}";/);
+    expect(code).not.toContain('__VOID_ISR_DEPLOYMENT_ID = crypto.randomUUID()');
+  });
+
+  it('bakes a fresh deployment id per compilation (one shared id per deploy)', () => {
+    const a = compileRouteTable(
+      scan,
+      '/routes',
+      '/middleware',
+      '/crons',
+      '/queues',
+      null,
+      testOptions,
+    );
+    const b = compileRouteTable(
+      scan,
+      '/routes',
+      '/middleware',
+      '/crons',
+      '/queues',
+      null,
+      testOptions,
+    );
+    const idA = a.match(/__VOID_ISR_DEPLOYMENT_ID = "([^"]+)"/)![1];
+    const idB = b.match(/__VOID_ISR_DEPLOYMENT_ID = "([^"]+)"/)![1];
+    expect(idA).not.toBe(idB);
+  });
+
+  it('emits the merged revalidate config verbatim (undefined | number | path map)', () => {
+    const none = compileRouteTable(
+      scan,
+      '/routes',
+      '/middleware',
+      '/crons',
+      '/queues',
+      null,
+      testOptions,
+    );
+    expect(none).toContain('export const __VOID_ISR_REVALIDATE = undefined;');
+
+    const num = compileRouteTable(
+      scan,
+      '/routes',
+      '/middleware',
+      '/crons',
+      '/queues',
+      null,
+      testOptions,
+      null,
+      60,
+    );
+    expect(num).toContain('export const __VOID_ISR_REVALIDATE = 60;');
+
+    const map = compileRouteTable(
+      scan,
+      '/routes',
+      '/middleware',
+      '/crons',
+      '/queues',
+      null,
+      testOptions,
+      null,
+      { '/blog/*': 30 },
+    );
+    expect(map).toContain('export const __VOID_ISR_REVALIDATE = {"/blog/*":30};');
+  });
+});

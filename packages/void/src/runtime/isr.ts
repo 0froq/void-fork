@@ -1,4 +1,5 @@
 import { getRawRuntimeEnv } from './env-raw.ts';
+import { denormalizeIsrPath, htmlEdgeKey, isrKey, jsonEdgeKey, listIsrHosts } from './isr-cache.ts';
 
 export type RevalidateOptions = {
   paths?: Array<string>;
@@ -8,9 +9,10 @@ export type RevalidateOptions = {
 /**
  * Revalidate ISR-cached pages on demand.
  *
- * In production, calls the platform proxy via service binding which forwards
- * to the API for R2 deletion + edge cache purge. In local dev, this is a
- * no-op (no ISR cache to purge).
+ * On managed Void, calls the platform proxy via service binding which forwards
+ * to the API for R2 deletion + edge cache purge. On self-host, purges this
+ * worker's own ISR_CACHE (KV) entries plus the caches.default edge variants.
+ * When neither is configured (e.g. local dev with no ISR), this is a no-op.
  *
  * @example
  * ```ts
@@ -27,7 +29,72 @@ export async function revalidate(options: RevalidateOptions): Promise<void> {
   const rawEnv = getRawRuntimeEnv();
   const proxy = rawEnv.__VOID_PROXY as Fetcher | undefined;
   if (!proxy) {
-    // Local dev — no ISR cache to purge, no-op
+    // Self-host — no platform proxy. Purge this worker's own ISR cache: KV
+    // entries (global, authoritative) plus the caches.default edge variants.
+    // When ISR_CACHE / deployment id are absent (e.g. local dev with no ISR
+    // binding), this stays a silent no-op — matching the previous behavior.
+    const kv = rawEnv.ISR_CACHE as KVNamespace | undefined;
+    const id = rawEnv.__VOID_ISR_DEPLOYMENT_ID as string | undefined;
+    if (!kv || !id) {
+      return;
+    }
+    const requestHost = rawEnv.__VOID_ISR_HOST as string | undefined;
+    // Cache keys are host-scoped (`void-isr/<id>/<host>/<path>`), so a purge must
+    // target a concrete (host, path). Delete KV first and unconditionally — the
+    // authoritative purge must never depend on the Cache API — then best-effort
+    // purge the per-host edge variants, guarded so a degraded `caches.default`
+    // (scheduled/queue handlers, or no Cache API) cannot fail the KV delete.
+    const purge = async (host: string, path: string): Promise<void> => {
+      await kv.delete(isrKey(id, host, path));
+      try {
+        // Cast because this package has both @types/node and @cloudflare/workers-types
+        // in scope, and Node's ambient CacheStorage (which lacks `.default`)
+        // otherwise shadows the Workers one — same pattern as isr-cache.ts.
+        const cache = (caches as unknown as { default: Cache }).default;
+        await cache.delete(htmlEdgeKey(host, path, id));
+        await cache.delete(jsonEdgeKey(host, path, id));
+      } catch {
+        // Fail open — a degraded Cache API must not fail the authoritative KV purge.
+      }
+    };
+    if (options.all) {
+      // Enumerate the actual host-scoped cache keys (registry-independent, so it
+      // is complete even for a host that was never registered). Split the host
+      // off the key tail BEFORE denormalizing: `void-isr/<id>/<host>/<path>`.
+      const prefix = `void-isr/${id}/`;
+      let cursor: string | undefined;
+      do {
+        const list = await kv.list({ prefix, cursor });
+        for (const key of list.keys) {
+          const tail = key.name.slice(prefix.length);
+          const slash = tail.indexOf('/');
+          if (slash < 0) {
+            continue;
+          }
+          const host = tail.slice(0, slash);
+          const path = denormalizeIsrPath(tail.slice(slash + 1));
+          await purge(host, path);
+        }
+        cursor = list.list_complete ? undefined : list.cursor;
+      } while (cursor);
+    } else {
+      const paths = options.paths ?? [];
+      if (paths.length === 0) {
+        return;
+      }
+      // No request host is guaranteed here (cron / queue handlers stamp the id
+      // WITHOUT a host — the F1 fix), so enumerate every registered host, union
+      // the request host when present. An empty host set is a silent no-op.
+      const hosts = new Set(await listIsrHosts(kv, id));
+      if (requestHost) {
+        hosts.add(requestHost);
+      }
+      for (const host of hosts) {
+        for (const path of paths) {
+          await purge(host, path);
+        }
+      }
+    }
     return;
   }
 

@@ -9,7 +9,9 @@ import {
   envContext,
   asEnv,
   getRawRuntimeEnv,
+  INTERNAL_BINDING_EXACT_NAMES,
   INTERNAL_BINDING_PREFIXES,
+  isIsrActive,
   type RuntimeEnv,
 } from './env-raw.ts';
 
@@ -23,31 +25,50 @@ export function withRuntimeEnv<T>(env: unknown, fn: () => T): T {
   return envContext.run(resolved, fn);
 }
 
-function isInternalBinding(name: string): boolean {
-  return INTERNAL_BINDING_PREFIXES.some((p) => name.startsWith(p));
+/**
+ * Shared internal-binding predicate. A binding is framework-internal — and must
+ * never be exposed to user code — when it carries an internal prefix
+ * (`__VOID_`, `__PROJECT_`; always hidden) or is an exact-name internal (e.g.
+ * `ISR_CACHE`; hidden ONLY while ISR is active for the isolate). `rawEnv` is the
+ * unfiltered runtime env, consulted via {@link isIsrActive} to gate the
+ * exact-name check so a non-ISR app's own `ISR_CACHE` binding stays visible —
+ * matching the build-time `isr` gate on the generated `c.env` filter.
+ *
+ * Single source of truth for the runtime `env` filter here and the public
+ * `void/env` proxy (`env-public.ts`).
+ */
+export function isInternalBinding(name: string, rawEnv: RuntimeEnv): boolean {
+  if (INTERNAL_BINDING_PREFIXES.some((p) => name.startsWith(p))) {
+    return true;
+  }
+  return (
+    isIsrActive(rawEnv) && (INTERNAL_BINDING_EXACT_NAMES as ReadonlyArray<string>).includes(name)
+  );
 }
 
 function filterEnvProxy(env: RuntimeEnv): RuntimeEnv {
+  // The proxy target IS the raw env, so each trap consults `target` for the
+  // ISR-active gate — no extra `getRawRuntimeEnv()` call needed.
   return new Proxy(env, {
     get(target, prop, receiver) {
-      if (typeof prop === 'string' && isInternalBinding(prop)) {
+      if (typeof prop === 'string' && isInternalBinding(prop, target)) {
         return undefined;
       }
       return Reflect.get(target, prop, receiver);
     },
     has(target, prop) {
-      if (typeof prop === 'string' && isInternalBinding(prop)) {
+      if (typeof prop === 'string' && isInternalBinding(prop, target)) {
         return false;
       }
       return Reflect.has(target, prop);
     },
     ownKeys(target) {
       return Reflect.ownKeys(target).filter(
-        (key) => typeof key !== 'string' || !isInternalBinding(key),
+        (key) => typeof key !== 'string' || !isInternalBinding(key, target),
       );
     },
     getOwnPropertyDescriptor(target, prop) {
-      if (typeof prop === 'string' && isInternalBinding(prop)) {
+      if (typeof prop === 'string' && isInternalBinding(prop, target)) {
         return undefined;
       }
       return Reflect.getOwnPropertyDescriptor(target, prop);
@@ -61,10 +82,11 @@ export function getRuntimeEnv(): RuntimeEnv {
 }
 
 export function getRuntimeBinding<T = unknown>(name: string): T | undefined {
-  if (isInternalBinding(name)) {
+  const raw = getRawRuntimeEnv();
+  if (isInternalBinding(name, raw)) {
     return undefined;
   }
-  return getRawRuntimeEnv()[name] as T | undefined;
+  return raw[name] as T | undefined;
 }
 
 export function requireRuntimeBinding<T = unknown>(name: string): T {
