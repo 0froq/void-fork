@@ -9,15 +9,15 @@ allowBuilds:
 
 catalog:
   '@cloudflare/workers-types': ^5.0.0
-  '@typescript/native-preview': 7.0.0-dev.20260702.3
+  '@typescript/native-preview': 7.0.0-dev.20260707.2
   # Keep in lockstep with the framework submodule's hono (framework/packages/void: ^4.12.27).
   # A newer catalog hono breaks the dashboard vue-tsc Context<…> typecheck (regressed in #200,
   # re-regressed in #218). Renovate is disabled for hono in .github/renovate.json so it stays
   # manually pinned to the submodule; only bump this when the framework submodule bumps hono.
   hono: 4.12.27
   wrangler: ^4.90.0
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.2
-  vitest: 4.1.9
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.4
+  vitest: 4.1.10
   vite-plus: ^0.2.0
 
 onlyBuiltDependencies:
