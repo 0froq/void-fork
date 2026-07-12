@@ -1,6 +1,6 @@
 ---
 title: Route-Aware ISR TTL Resolution (Design + SDD Plan)
-status: draft
+status: implemented
 created: 2026-07-10
 ---
 
