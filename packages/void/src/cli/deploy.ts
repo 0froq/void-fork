@@ -33,11 +33,12 @@ import {
 import { scanJobsSync } from '../crons/scan.ts';
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { discoverSchema } from '../drizzle/discover.ts';
-import { collectRevalidate } from '../isr-config.ts';
+import { collectRevalidate, collectPages } from '../isr-config.ts';
 import { voidWarn } from '../log.ts';
 import { collectMigrations } from '../migrations/collect.ts';
 import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
 import { scanPages } from '../pages/scan.ts';
+import type { PageScanResult } from '../pages/types.ts';
 import {
   inferProjectBindings,
   FRAMEWORK_SCAN_DIRS,
@@ -1034,6 +1035,40 @@ function formatKnownAssetSummary(result: DeployDoneEvent, skipped: number): stri
     : `${result.assets} static asset(s)`;
 }
 
+/**
+ * Assemble the Void deploy manifest, deriving the route-aware ISR `pages` table
+ * from the page scan. This is the single production seam that forwards
+ * `pageScan` → `manifest.pages`; `runFullDeploy` calls it so the wiring is
+ * exercised (and regression-guarded) by a unit test.
+ *
+ * `pages` is a Void pages-mode concept. In framework mode (Class-A frameworks
+ * routed through `runFullDeploy`) we must NOT emit it — the framework owns its
+ * own routing/ISR — so `isFrameworkMode` suppresses the table. (plan 0077
+ * Global Constraint: "`pages` is Void-pages-mode only; leave frameworks alone".)
+ */
+export function assembleVoidManifest(
+  pageScan: PageScanResult | null,
+  isFrameworkMode: boolean,
+  opts: Parameters<typeof buildVoidManifest>[0],
+  revalidateConfig?: number | Record<string, number> | undefined,
+): DeployManifest {
+  return buildVoidManifest({
+    ...opts,
+    // Bake each page's BUILD-time ISR TTL (3-state) from its own `export const
+    // revalidate` first, then a global-NUMBER `routing.revalidate`. A page under
+    // an OBJECT config bakes NO TTL (inherit-eligible) — see `collectPages`.
+    pages: isFrameworkMode ? undefined : collectPages(pageScan, revalidateConfig),
+    // Ship the RAW per-path OBJECT config alongside so dispatch can resolve those
+    // inherit-eligible pages against the ACTUAL request path (honoring per-path
+    // `0` opt-outs a dynamic pattern straddles). Object form only: a number
+    // config is already baked into every `pages` entry, so it is never consulted.
+    pathRevalidate:
+      isFrameworkMode || revalidateConfig == null || typeof revalidateConfig !== 'object'
+        ? undefined
+        : revalidateConfig,
+  });
+}
+
 export async function runStaticDeploy(
   root: string,
   config: ProjectConfig,
@@ -1874,25 +1909,30 @@ async function runFullDeploy(
     console.warn(`[void] ${fallbackWarning}`);
   }
 
-  const manifest = buildVoidManifest({
-    bindings: liveConfig ? { ...effectiveBindings, needsLive: true } : effectiveBindings,
-    migrations: validatedMigrations,
-    schedules,
-    ssr: isSsr || hasRoutes || hasMiddleware || hasWebSockets || authEnabled,
-    framework: isFrameworkMode ? detected!.name : undefined,
-    revalidate,
-    vars: envVars,
-    queues,
-    prerender: uniquePrerenderPaths,
-    assetConfig,
-    options: voidPackageOptions,
-    hashedAssetsPrefix: assetsPrefix,
-    headerRules,
-    redirectRules,
-    fallbackRules,
-    dialect,
-    webSockets,
-  });
+  const manifest = assembleVoidManifest(
+    pageScan,
+    isFrameworkMode,
+    {
+      bindings: liveConfig ? { ...effectiveBindings, needsLive: true } : effectiveBindings,
+      migrations: validatedMigrations,
+      schedules,
+      ssr: isSsr || hasRoutes || hasMiddleware || hasWebSockets || authEnabled,
+      framework: isFrameworkMode ? detected!.name : undefined,
+      revalidate,
+      vars: envVars,
+      queues,
+      prerender: uniquePrerenderPaths,
+      assetConfig,
+      options: voidPackageOptions,
+      hashedAssetsPrefix: assetsPrefix,
+      headerRules,
+      redirectRules,
+      fallbackRules,
+      dialect,
+      webSockets,
+    },
+    deployConfig.routing?.revalidate,
+  );
   const workerDir = join(distDir, workerDirName);
   if (isFrameworkMode) {
     const wrapperFeatures: WrapperFeatures = {
