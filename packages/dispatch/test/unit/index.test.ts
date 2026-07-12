@@ -1,6 +1,8 @@
+import { isrEdgeCacheUrl } from '@voidcloud/isr-shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Env } from '../../src/env.ts';
 import app, { rebuildRequest } from '../../src/index.ts';
+import { isrCacheKey, unpackIsrValue } from '../../src/isr.ts';
 
 // Mock caches.default (CF edge cache) with a Map-backed store.
 // Uses full URL as key — callers (isrEdgeCacheKey, hashed asset code) already normalize.
@@ -29,8 +31,11 @@ type RoutingEntry = {
   workerName: string;
   projectId: string;
   userId?: string;
+  type?: 'void' | 'spa' | 'static' | 'framework';
   ssr?: boolean;
   revalidate?: number | Record<string, number>;
+  pages?: ReadonlyArray<{ pattern: string; revalidate?: number }>;
+  pathRevalidate?: Record<string, number>;
   version?: string;
   limits?: Record<string, number>;
   suspended?: string;
@@ -38,11 +43,19 @@ type RoutingEntry = {
   staticDeploymentId?: string;
   headerRules?: Array<{ pattern: string; headers: Array<[string, string]> }>;
   redirectRules?: Array<{ source: string; destination: string; status: number; host?: string }>;
+  fallbackRules?: Array<{ source: string; destination: string; status: number; host?: string }>;
   queryAllowlist?: Record<string, Array<string>>;
 };
 
 function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
+}
+
+// `Headers.getSetCookie()` exists on the Workers runtime but is missing from
+// `@cloudflare/workers-types` — reach it through a narrow cast (mirrors the
+// `readSetCookies` helper in src/index.ts).
+function getSetCookies(headers: Headers): Array<string> {
+  return (headers as Headers & { getSetCookie(): Array<string> }).getSetCookie();
 }
 
 type MockIsrEntry = {
@@ -406,7 +419,232 @@ describe('ISR (stale-while-revalidate)', () => {
 
     // Wait for background write
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
-    expect(kvStore.has('proj_1/isr/v2/legacy/dashboard')).toBe(true);
+    expect(kvStore.has('proj_1/isr/v3/legacy/my-app.void.app/dashboard')).toBe(true);
+  });
+
+  it('does NOT cache a specific non-ISR page shadowed by a catch-all (route-aware)', async () => {
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        // catch-all has a TTL; the specific page opts out (present, no revalidate)
+        revalidate: { '/docs/*': 3600 },
+        pages: [
+          { pattern: '/docs/setup/install' },
+          { pattern: '/docs/:path{.+}', revalidate: 3600 },
+        ],
+      },
+      workerResponse: new Response('<html>specific</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+    const ctx = createCtx();
+    await app.fetch(new Request('https://my-app.void.app/docs/setup/install'), env, ctx);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    // no ISR entry written for the shadowed specific page
+    expect([...kvStore.keys()].some((k) => k.includes('/docs/setup/install'))).toBe(false);
+  });
+
+  it("DOES cache the catch-all's own nested path", async () => {
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: { '/docs/*': 3600 },
+        pages: [
+          { pattern: '/docs/setup/install' },
+          { pattern: '/docs/:path{.+}', revalidate: 3600 },
+        ],
+      },
+      workerResponse: new Response('<html>catch-all</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+    const ctx = createCtx();
+    await app.fetch(new Request('https://my-app.void.app/docs/a/b'), env, ctx);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect([...kvStore.keys()].some((k) => k.includes('/docs/a/b'))).toBe(true);
+  });
+
+  it('does NOT ISR-cache /api/* even under a root catch-all page with a TTL', async () => {
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        pages: [{ pattern: '/:path{.+}', revalidate: 3600 }], // root catch-all
+      },
+      workerResponse: new Response('{"ok":true}', {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    });
+    const ctx = createCtx();
+    await app.fetch(new Request('https://my-app.void.app/api/thing'), env, ctx);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect([...kvStore.keys()].some((k) => k.includes('/api/thing'))).toBe(false);
+  });
+
+  it('does NOT ISR-cache an extension path under a root catch-all', async () => {
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        pages: [{ pattern: '/:path{.+}', revalidate: 3600 }],
+      },
+      workerResponse: new Response('data', {
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    });
+    const ctx = createCtx();
+    await app.fetch(new Request('https://my-app.void.app/robots.txt'), env, ctx);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect([...kvStore.keys()].some((k) => k.includes('robots.txt'))).toBe(false);
+  });
+
+  it('ISR-caches an EXPLICITLY-configured extension page (not a 1-year static edge entry)', async () => {
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        version: 'v1',
+        pages: [{ pattern: '/feed.xml', revalidate: 60 }],
+      },
+      workerResponse: new Response('<rss>feed</rss>', {
+        headers: { 'Content-Type': 'application/xml' },
+      }),
+    });
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/feed.xml'), env, ctx);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Genuine ISR miss render — NOT the static 1-year edge cache path.
+    expect(response.headers.get('x-isr-cache')).toBe('MISS');
+    // ISR KV entry written for the explicit extension page.
+    expect([...kvStore.keys()].some((k) => k.includes('feed.xml'))).toBe(true);
+    // Never stored under the `?_v=<version>` static edge key (s-maxage=31536000).
+    expect([...edgeCacheStore.keys()].some((k) => k.includes('?_v='))).toBe(false);
+    // Edge copy is the ISR edge key (deployment-scoped, TTL-bounded), not static.
+    expect([...edgeCacheStore.keys()].some((k) => k.includes('__void_isr='))).toBe(true);
+  });
+
+  it('ISR-caches a dotted dynamic param VALUE under a single-segment page route', async () => {
+    // Finding 2 [medium]: `/blog/:slug` compiles to `^/blog/[^/]+$`, so a param
+    // VALUE that happens to carry a dot (`/blog/release.v2`) matches the page and
+    // is genuine ISR page content — NOT a static asset. It must enter the ISR
+    // ladder (miss render + KV entry), not be diverted to the 1-year static edge.
+    // Previously the "pattern must LITERALLY declare the extension" gate wrongly
+    // denied it; eligibility now keys on "matches a non-broad-catch-all page".
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        version: 'v1',
+        pages: [{ pattern: '/blog/:slug', revalidate: 60 }],
+      },
+      workerResponse: new Response('<html>post</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    // Request 1: MISS → render + cache in KV (not the static 1-year edge entry).
+    const ctx1 = createCtx();
+    const first = await app.fetch(
+      new Request('https://my-app.void.app/blog/release.v2'),
+      env,
+      ctx1,
+    );
+    await Promise.all((ctx1.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(first.headers.get('x-isr-cache')).toBe('MISS');
+    expect([...kvStore.keys()].some((k) => k.includes('/blog/release.v2'))).toBe(true);
+    // Never diverted to the `?_v=<version>` 1-year static edge key.
+    expect([...edgeCacheStore.keys()].some((k) => k.includes('?_v='))).toBe(false);
+
+    // Request 2 within TTL: served from the ISR KV entry (HIT), worker not re-invoked.
+    edgeCacheStore.clear();
+    const ctx2 = createCtx();
+    const second = await app.fetch(
+      new Request('https://my-app.void.app/blog/release.v2'),
+      env,
+      ctx2,
+    );
+    expect(second.headers.get('x-isr-cache')).toBe('HIT');
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(await second.text()).toBe('<html>post</html>');
+  });
+
+  it('resolves an inherit-eligible page against routing.pathRevalidate per-path (object config)', async () => {
+    // An object `routing.revalidate` ships as pages=[{ pattern: '/blog/:slug' }]
+    // (inherit-eligible, NO baked TTL) plus the RAW config in `pathRevalidate`.
+    // Dispatch resolves it per-path: `/blog/other` → 3600 (ISR), `/blog/private`
+    // → 0 (per-path opt-out, rendered live, never cached). This proves the
+    // pathRevalidate field is threaded through the ISR ladder end-to-end — the
+    // per-path fidelity that build-time baking (one TTL per page) cannot give.
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        version: 'v1',
+        pages: [{ pattern: '/blog/:slug' }],
+        pathRevalidate: { '/blog/private': 0, '/blog/*': 3600 },
+      },
+      workerResponse: new Response('<html>post</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    // `/blog/other` → per-path 3600 → ISR MISS render + KV write.
+    const ctx1 = createCtx();
+    const other = await app.fetch(new Request('https://my-app.void.app/blog/other'), env, ctx1);
+    await Promise.all((ctx1.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(other.headers.get('x-isr-cache')).toBe('MISS');
+    expect([...kvStore.keys()].some((k) => k.includes('/blog/other'))).toBe(true);
+
+    // `/blog/private` → per-path 0 opt-out → rendered live, NOT ISR-cached.
+    const ctx2 = createCtx();
+    const priv = await app.fetch(new Request('https://my-app.void.app/blog/private'), env, ctx2);
+    await Promise.all((ctx2.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(priv.headers.get('x-isr-cache')).toBeNull();
+    expect([...kvStore.keys()].some((k) => k.includes('/blog/private'))).toBe(false);
+  });
+
+  it('serves a configured extension page from the ISR KV entry on a second request (TTL honored)', async () => {
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        version: 'v1',
+        pages: [{ pattern: '/feed.xml', revalidate: 60 }],
+      },
+      workerResponse: new Response('<rss>feed</rss>', {
+        headers: { 'Content-Type': 'application/xml' },
+      }),
+    });
+
+    // Request 1: MISS → render + cache in KV.
+    const ctx1 = createCtx();
+    const first = await app.fetch(new Request('https://my-app.void.app/feed.xml'), env, ctx1);
+    await Promise.all((ctx1.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(first.headers.get('x-isr-cache')).toBe('MISS');
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect([...kvStore.keys()].some((k) => k.includes('feed.xml'))).toBe(true);
+
+    // Drop the per-colo edge cache so request 2 exercises the L2 KV/TTL path
+    // (simulates edge eviction / a different colo) rather than the ephemeral edge.
+    edgeCacheStore.clear();
+
+    // Request 2 (within the 60s TTL): served from the ISR KV entry, worker NOT re-invoked.
+    const ctx2 = createCtx();
+    const second = await app.fetch(new Request('https://my-app.void.app/feed.xml'), env, ctx2);
+    expect(second.headers.get('x-isr-cache')).toBe('HIT');
+    expect(workerFetch).toHaveBeenCalledOnce(); // still once — no re-render
+    expect(await second.text()).toBe('<rss>feed</rss>');
   });
 
   it('serves from ISR cache on second request (no worker call)', async () => {
@@ -418,7 +656,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/v2/legacy/dashboard': {
+        'proj_1/isr/v3/legacy/my-app.void.app/dashboard': {
           body: '<html>cached</html>',
           createdAt: Date.now(),
           ttl: 60,
@@ -448,7 +686,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/v2/legacy/dashboard': {
+        'proj_1/isr/v3/legacy/my-app.void.app/dashboard': {
           body: '<html>cached</html>',
           createdAt: Date.now(),
           ttl: 60,
@@ -471,6 +709,121 @@ describe('ISR (stale-while-revalidate)', () => {
     expect(await response.text()).toBe('<html>personalized</html>');
   });
 
+  // Range bypass + full-200-only cache gate (parity with the framework ISR fix).
+  // A Range GET on an ISR path must render LIVE so the origin emits a correct
+  // `206 Partial Content`; it must never read the shared (host,path) entry (a full
+  // body for a partial request) nor write it (a truncated 206 a later full request
+  // would then be served). The write gate is also tightened from `.ok` (200–299,
+  // INCLUDING 206) to `status === 200` as defense-in-depth.
+  describe('Range bypass + full-200-only cache gate', () => {
+    it('bypasses ISR for a Range request: renders live, never reads or overwrites the cache', async () => {
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+        },
+        // A full-body entry is already cached; a Range request must NOT read it.
+        assets: {
+          'proj_1/isr/v3/legacy/my-app.void.app/dashboard': {
+            body: '<html>cached-full</html>',
+            createdAt: Date.now(),
+            ttl: 60,
+            headers: { 'Content-Type': 'text/html' },
+          },
+        },
+        // The origin renders a partial response for the requested byte range.
+        workerResponse: new Response('partial-bytes', {
+          status: 206,
+          headers: { 'Content-Type': 'text/html', 'Content-Range': 'bytes 0-12/100' },
+        }),
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(
+        new Request('https://my-app.void.app/dashboard', {
+          headers: { Range: 'bytes=0-12' },
+        }),
+        env,
+        ctx,
+      );
+
+      // Live render: the worker was invoked and the 206 flows through untouched
+      // (not served the cached full body, not stamped as an ISR hit).
+      expect(workerFetch).toHaveBeenCalledOnce();
+      expect(response.status).toBe(206);
+      expect(response.headers.get('x-isr-cache')).toBeNull();
+      expect(await response.text()).toBe('partial-bytes');
+
+      // No ISR write ran, and the seeded full-body entry is untouched — the 206
+      // never poisoned the shared slot.
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      const seeded = kvStore.get('proj_1/isr/v3/legacy/my-app.void.app/dashboard');
+      expect(seeded).toBeDefined();
+      const unpacked = unpackIsrValue(seeded!.value);
+      expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>cached-full</html>');
+    });
+
+    it('does not write a 206 worker response to the ISR cache (only a full 200 is cached)', async () => {
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+        },
+        // No Range header on the request, yet the worker returns 206 — the write
+        // gate (status === 200, not `.ok`) must still refuse to persist it.
+        workerResponse: new Response('<html>partial</html>', {
+          status: 206,
+          headers: { 'Content-Type': 'text/html', 'Content-Range': 'bytes 0-9/100' },
+        }),
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+
+      expect(workerFetch).toHaveBeenCalledOnce();
+      expect(response.status).toBe(206);
+      expect(await response.text()).toBe('<html>partial</html>');
+
+      // A 206 partial body must never enter the shared full-response cache.
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(kvStore.has('proj_1/isr/v3/legacy/my-app.void.app/dashboard')).toBe(false);
+    });
+
+    it('still caches a full 200 worker response (the tightened gate does not block 200)', async () => {
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+        },
+        workerResponse: new Response('<html>full-200</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+
+      expect(workerFetch).toHaveBeenCalledOnce();
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-isr-cache')).toBe('MISS');
+      expect(await response.text()).toBe('<html>full-200</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      const cached = kvStore.get('proj_1/isr/v3/legacy/my-app.void.app/dashboard');
+      expect(cached).toBeDefined();
+      expect(cached!.metadata.s).toBe(200);
+      const unpacked = unpackIsrValue(cached!.value);
+      expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>full-200</html>');
+    });
+  });
+
   it('does not cache when x-revalidate: 0 opt-out', async () => {
     const { env, workerFetch, kvStore } = createEnv({
       routing: {
@@ -491,7 +844,7 @@ describe('ISR (stale-while-revalidate)', () => {
     expect(await response.text()).toBe('<html>no-cache</html>');
     // No waitUntil calls — analytics is sync, no userId for queue, no ISR cache write
     expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
-    expect(kvStore.has('proj_1/isr/v2/legacy/dashboard')).toBe(false);
+    expect(kvStore.has('proj_1/isr/v3/legacy/my-app.void.app/dashboard')).toBe(false);
   });
 
   it('SSR without revalidate works unchanged', async () => {
@@ -526,7 +879,11 @@ describe('ISR (stale-while-revalidate)', () => {
       workerResponse: new Response('<html>rendered</html>', {
         headers: {
           'Content-Type': 'text/html',
-          'Cache-Control': 'private, no-store', // Worker's raw header should be overridden
+          // Worker's raw Cache-Control is overridden by ISR-managed headers.
+          // (A non-opt-out value: an opt-out like `no-store` would correctly
+          // prevent ISR caching — see the `ISR respects response Cache-Control
+          // opt-out` suite — so this must stay cacheable to exercise the override.)
+          'Cache-Control': 'public, max-age=30',
         },
       }),
     });
@@ -545,6 +902,54 @@ describe('ISR (stale-while-revalidate)', () => {
     );
   });
 
+  it('MISS whose render sets Set-Cookie → client keeps EVERY cookie; KV + edge copies stay stripped', async () => {
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+      },
+      // The live worker render emits TWO DISTINCT Set-Cookie headers (session +
+      // CSRF). A `Headers` folds duplicates, so an array init seeds both.
+      workerResponse: new Response('<html>rendered</html>', {
+        headers: [
+          ['Content-Type', 'text/html'],
+          ['set-cookie', 'sid=secret; Path=/; HttpOnly'],
+          ['set-cookie', 'csrf=tok; Path=/'],
+        ],
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-isr-cache')).toBe('MISS');
+    // (1) The CLIENT response carries BOTH Set-Cookie headers verbatim. Without
+    // the fix the client headers clone the already-stripped cache copy, so this
+    // would be [] and the assertion would fail.
+    expect(getSetCookies(response.headers)).toEqual([
+      'sid=secret; Path=/; HttpOnly',
+      'csrf=tok; Path=/',
+    ]);
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // (2) The shared KV copy is stripped — a shared cache must never store cookies.
+    const packed = kvStore.get('proj_1/isr/v3/legacy/my-app.void.app/dashboard');
+    expect(packed).toBeDefined();
+    const unpacked = unpackIsrValue(packed!.value);
+    expect(unpacked).not.toBeNull();
+    expect(unpacked!.headers['set-cookie']).toBeUndefined();
+
+    // (3) The edge (caches.default) copy is stripped too.
+    const edgeCached = edgeCacheStore.get('https://my-app.void.app/dashboard?__void_isr=legacy');
+    expect(edgeCached).toBeDefined();
+    expect(getSetCookies(edgeCached!.headers)).toEqual([]);
+    expect(edgeCached!.headers.has('set-cookie')).toBe(false);
+  });
+
   it('deletes KV entry when background revalidation gets x-revalidate: 0', async () => {
     const { env, workerFetch, kvStore } = createEnv({
       routing: {
@@ -554,7 +959,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/v2/legacy/dashboard': {
+        'proj_1/isr/v3/legacy/my-app.void.app/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000,
           ttl: 60,
@@ -575,7 +980,7 @@ describe('ISR (stale-while-revalidate)', () => {
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
     expect(workerFetch).toHaveBeenCalledOnce();
     // KV entry should be deleted after x-revalidate: 0
-    expect(kvStore.has('proj_1/isr/v2/legacy/dashboard')).toBe(false);
+    expect(kvStore.has('proj_1/isr/v3/legacy/my-app.void.app/dashboard')).toBe(false);
   });
 
   it('revalidates stale entry in background and returns stale content', async () => {
@@ -587,7 +992,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/v2/legacy/dashboard': {
+        'proj_1/isr/v3/legacy/my-app.void.app/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000, // 2 minutes ago, TTL is 60s
           ttl: 60,
@@ -694,7 +1099,7 @@ describe('ISR (stale-while-revalidate)', () => {
     expect(await response.text()).toBe('<html>fresh</html>');
 
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
-    expect(kvStore.has('proj_1/isr/v2/dpl_new/dashboard')).toBe(true);
+    expect(kvStore.has('proj_1/isr/v3/dpl_new/my-app.void.app/dashboard')).toBe(true);
     expect(edgeCacheStore.has('https://my-app.void.app/dashboard?__void_isr=dpl_new')).toBe(true);
   });
 
@@ -707,7 +1112,7 @@ describe('ISR (stale-while-revalidate)', () => {
         revalidate: 60,
       },
       assets: {
-        'proj_1/isr/v2/legacy/dashboard': {
+        'proj_1/isr/v3/legacy/my-app.void.app/dashboard': {
           body: '<html>r2-cached</html>',
           createdAt: Date.now(),
           ttl: 60,
@@ -870,8 +1275,1582 @@ describe('ISR (stale-while-revalidate)', () => {
 
     const keys = [...kvStore.keys()].sort();
     expect(keys).toHaveLength(2);
-    expect(keys[0]).toBe('proj_1/isr/v2/legacy/en/docs');
-    expect(keys[1]!.startsWith('proj_1/isr/v2/legacy/en/docs#rw=')).toBe(true);
+    expect(keys[0]).toBe('proj_1/isr/v3/legacy/my-app.void.app/en/docs');
+    expect(keys[1]!.startsWith('proj_1/isr/v3/legacy/my-app.void.app/en/docs#rw=')).toBe(true);
+  });
+
+  // Fallback-write ISR hole: on an ISR miss a fallback rule can rewrite a page
+  // 404 into a 200 from `/api/*`. An `/api` body is per-request dynamic, so it
+  // must be served live but NEVER cached under the original page URL. The
+  // miss-write and background-revalidation sites now gate on `!isApiPath(...)`
+  // of the POST-fallback pathname. Only the WINNING EXACT declared literal ISR
+  // page (rendered as HTML) may enter the shared page key — a dotted HTML target
+  // (a SPA `/index.html` shell, a `/account.html` endpoint) is served live but
+  // NOT ISR-cached, because path shape cannot distinguish a static shell from a
+  // dynamic per-user endpoint (see `isFallbackTargetCacheable`).
+  describe('fallback rewrite never poisons the ISR cache', () => {
+    it('does NOT ISR-cache a page 404 that a fallback rewrites to /api/*', async () => {
+      let n = 0;
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          // Catch-all fallback rewrites any unmatched page to an API route.
+          fallbackRules: [{ source: '/*', destination: '/api/data', status: 200 }],
+        },
+        // Call 1 (original /dashboard) 404s; call 2 (fallback /api/data) returns
+        // the API body. Two worker calls per request (original + fallback).
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('{"secret":"api-only"}', {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+
+      // The API fallback body is served LIVE to the client on the miss...
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('{"secret":"api-only"}');
+      expect(response.headers.get('x-isr-cache')).toBeNull();
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+      // ...but is never written into the ISR cache under the page URL.
+      expect(kvStore.has('proj_1/isr/v3/legacy/my-app.void.app/dashboard')).toBe(false);
+      expect([...kvStore.keys()]).toHaveLength(0);
+
+      // A repeat request re-renders live (worker hit again) — no cached API body
+      // was left to serve.
+      const callsBefore = workerFetch.mock.calls.length;
+      const ctx2 = createCtx();
+      const repeat = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx2);
+      expect(repeat.headers.get('x-isr-cache')).not.toBe('HIT');
+      expect(await repeat.text()).toBe('{"secret":"api-only"}');
+      expect(workerFetch.mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    it('does NOT ISR-cache a page 404 rewritten to a SPA /index.html shell (served live)', async () => {
+      // Shell fallbacks are served live, not ISR-cached: a dotted HTML target
+      // (`/index.html`) is INDISTINGUISHABLE here from a dynamic per-user endpoint,
+      // so path shape is NOT trusted as a "static shell" signal. The shell is still
+      // SERVED (200 + body); its cache home is the static-asset path, not the shared
+      // page key. See `isFallbackTargetCacheable`.
+      let n = 0;
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          fallbackRules: [{ source: '/*', destination: '/index.html', status: 200 }],
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('<html>spa shell</html>', {
+                status: 200,
+                headers: { 'Content-Type': 'text/html' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      // The shell is served LIVE to the client on the miss...
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('<html>spa shell</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      // ...but is never written into the ISR cache under the page URL (any variant).
+      const written = [...kvStore.keys()].filter((k) =>
+        k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+      );
+      expect(written).toHaveLength(0);
+
+      // A repeat request re-renders live (worker hit again) — no cached shell to serve.
+      const callsBefore = workerFetch.mock.calls.length;
+      const ctx2 = createCtx();
+      const repeat = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx2);
+      expect(repeat.headers.get('x-isr-cache')).not.toBe('HIT');
+      expect(await repeat.text()).toBe('<html>spa shell</html>');
+      expect(workerFetch.mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    it('does NOT ISR-cache a fallback to a DOTTED DYNAMIC endpoint returning JSON (no Cache-Control)', async () => {
+      // C10 [high] cross-user leak: a dotted path is NOT proof of a static shell. A
+      // fallback `/* → /session.json` turns a page 404 into a per-user 200 with NO
+      // Cache-Control. `/session.json` has an extension but its RENDER is JSON — a
+      // DYNAMIC endpoint, not a page shell. The old `hasExtension`-only gate trusted
+      // ANY dotted target and shared-cached this body under `/dashboard`, leaking one
+      // caller's session to later callers. The `isHtmlResponse` conjunct closes it.
+      let n = 0;
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          fallbackRules: [{ source: '/*', destination: '/session.json', status: 200 }],
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('{"user":"per-caller-session"}', {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      // The per-user JSON body is served LIVE to the client on the miss...
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('{"user":"per-caller-session"}');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      // ...but is NEVER written into the ISR cache under any /dashboard key.
+      const written = [...kvStore.keys()].filter((k) =>
+        k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+      );
+      expect(written).toHaveLength(0);
+    });
+
+    it('does NOT ISR-cache a dotted HTML fallback target (dynamic per-user /account.html)', async () => {
+      // Finding 1 [high] cross-user leak: a dot + `text/html` are BOTH controlled by
+      // a dynamic handler — no static-asset provenance. A fallback `/* → /account.html`
+      // returning caller-specific HTML with NO Cache-Control must NOT enter the shared
+      // page key. The old `hasExtension` arm trusted ANY dotted HTML target and cached
+      // this per-user body under `/dashboard`, leaking one caller's account to later
+      // callers. `pages` does NOT declare `/account.html` as a literal ISR page, so it
+      // is served live but never shared-cached. See `isFallbackTargetCacheable`.
+      let n = 0;
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          fallbackRules: [{ source: '/*', destination: '/account.html', status: 200 }],
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('<html>account of caller-A</html>', {
+                status: 200,
+                headers: { 'Content-Type': 'text/html' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      // The per-user HTML body is served LIVE to the client on the miss...
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('<html>account of caller-A</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      // ...but is NEVER written into the ISR cache under any /dashboard key.
+      const written = [...kvStore.keys()].filter((k) =>
+        k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+      );
+      expect(written).toHaveLength(0);
+    });
+
+    it('background revalidation does NOT overwrite or evict a page entry when the re-render falls back to a dotted HTML /account.html target', async () => {
+      // Finding 1 [high], background path: a stale-serve triggers a background
+      // re-render that 404s and falls back to `/account.html` (200 text/html, no
+      // Cache-Control, per-user body). A dotted HTML target is not positively
+      // identifiable as page content, so the re-render must NOT overwrite the good
+      // `/dashboard` entry — nor evict it.
+      let n = 0;
+      // A fallback rule matches the path, so the ISR read/write key carries the
+      // rewrite-variant suffix. Seed the stale entry under that exact variant key.
+      const variantSeedKey = isrCacheKey(
+        'proj_1',
+        'legacy',
+        'my-app.void.app',
+        '/dashboard',
+        'https://my-app.void.app/dashboard',
+      );
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          fallbackRules: [{ source: '/*', destination: '/account.html', status: 200 }],
+        },
+        assets: {
+          [variantSeedKey]: {
+            body: '<html>stale-page</html>',
+            createdAt: Date.now() - 120 * 1000, // 2 min ago, TTL 60s → stale
+            ttl: 60,
+            headers: { 'Content-Type': 'text/html' },
+          },
+        },
+        // Background re-render: worker 404s, fallback rewrites to /account.html (200).
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('<html>account of caller-A</html>', {
+                status: 200,
+                headers: { 'Content-Type': 'text/html' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      // Stale page body served immediately from the seeded entry.
+      expect(response.headers.get('x-isr-cache')).toBe('STALE');
+      expect(await response.text()).toBe('<html>stale-page</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      // The /account.html body must NOT overwrite the page entry, and the entry must
+      // NOT be evicted — the seeded good body remains in place under the same key.
+      const cached = kvStore.get(variantSeedKey);
+      expect(cached).toBeDefined();
+      const unpacked = unpackIsrValue(cached!.value);
+      expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>stale-page</html>');
+    });
+
+    it('does NOT ISR-cache a fallback to an UNDECLARED extensionless page', async () => {
+      // Security tightening (C9): a fallback whose target is extensionless AND not a
+      // declared `pages` entry is INDISTINGUISHABLE from a per-user dynamic endpoint
+      // (e.g. `/graphql`), so it must NOT enter the shared page cache — positive
+      // identification (the WINNING EXACT declared literal ISR page, rendered as HTML)
+      // is required, never the mere absence of an opt-out header. (Previously this WAS
+      // cached; the change closes a cross-user data-exposure hole.) A DECLARED
+      // literal-page fallback still caches — see the `/catch` positive case below.
+      let n = 0;
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          // Fallback to an UNDECLARED extensionless target (not /api, no extension,
+          // no matching `pages` entry) — not positively identifiable as page content.
+          fallbackRules: [{ source: '/*', destination: '/index', status: 200 }],
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('<html>fallback page</html>', {
+                status: 200,
+                headers: { 'Content-Type': 'text/html' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      // The fallback body is served LIVE to the client on the miss...
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('<html>fallback page</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      // ...but is never written into the ISR cache under the page URL (any variant).
+      const written = [...kvStore.keys()].filter((k) =>
+        k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+      );
+      expect(written).toHaveLength(0);
+
+      // A repeat request re-renders live (worker hit again) — no cached body left.
+      const callsBefore = workerFetch.mock.calls.length;
+      const ctx2 = createCtx();
+      const repeat = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx2);
+      expect(repeat.headers.get('x-isr-cache')).not.toBe('HIT');
+      expect(await repeat.text()).toBe('<html>fallback page</html>');
+      expect(workerFetch.mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    it('background revalidation does NOT overwrite a page entry when the re-render falls back to /api', async () => {
+      let n = 0;
+      // A fallback rule matches the path, so both the ISR read key and the
+      // background-revalidation write key carry the rewrite-variant suffix. Seed
+      // the stale entry under that exact variant key (no query → the variant URL
+      // is the request URL itself) so the read HITs it and revalidation runs.
+      const variantSeedKey = isrCacheKey(
+        'proj_1',
+        'legacy',
+        'my-app.void.app',
+        '/dashboard',
+        'https://my-app.void.app/dashboard',
+      );
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          fallbackRules: [{ source: '/*', destination: '/api/data', status: 200 }],
+        },
+        // A stale page entry is served; background revalidation re-renders.
+        assets: {
+          [variantSeedKey]: {
+            body: '<html>stale-page</html>',
+            createdAt: Date.now() - 120 * 1000, // 2 min ago, TTL 60s → stale
+            ttl: 60,
+            headers: { 'Content-Type': 'text/html' },
+          },
+        },
+        // Background re-render: worker 404s, fallback rewrites to /api/data (200).
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('{"secret":"api-only"}', {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      // Stale page body served immediately from the seeded entry.
+      expect(response.headers.get('x-isr-cache')).toBe('STALE');
+      expect(await response.text()).toBe('<html>stale-page</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      // The API fallback body must NOT overwrite the page's ISR entry — the stale
+      // page body is left in place (ttl !== 0, so it is not deleted either).
+      const cached = kvStore.get(variantSeedKey);
+      expect(cached).toBeDefined();
+      const unpacked = unpackIsrValue(cached!.value);
+      expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>stale-page</html>');
+    });
+
+    it('does NOT ISR-cache a fallback rewrite to an undeclared dynamic /graphql target (no Cache-Control)', async () => {
+      // C9 [critical] cross-user leak: a user fallback `/* → /graphql` turns a page
+      // 404 into a 200 with NO Cache-Control. `/graphql` is not `/api`, has no
+      // extension, and matches no declared `pages` entry — positively-unidentifiable
+      // as page content — so it must NOT be shared-cached under the `/dashboard` key
+      // (its body may be cookie-derived / tenant-private). The `isApiPath` and
+      // `hasCacheOptOut` gates cannot see this; the positive-ID gate closes it.
+      let n = 0;
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          // Per-pattern `pages` that does NOT include /graphql; /dashboard IS a
+          // declared page so the request enters the ISR ladder (keying under it).
+          pages: [{ pattern: '/dashboard', revalidate: 60 }],
+          fallbackRules: [{ source: '/*', destination: '/graphql', status: 200 }],
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('{"data":"per-user"}', {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      // The dynamic body is served LIVE to the client on the miss...
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('{"data":"per-user"}');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      // ...but is NEVER written into the ISR cache under any /dashboard key.
+      const written = [...kvStore.keys()].filter((k) =>
+        k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+      );
+      expect(written).toHaveLength(0);
+    });
+
+    it('background revalidation does NOT overwrite or evict a page entry when the re-render falls back to an undeclared /graphql target', async () => {
+      // C9: a stale-serve triggers a background re-render that 404s and falls back to
+      // `/graphql` (200, no Cache-Control). `/graphql` is not positively identifiable
+      // as page content, so the re-render must NOT overwrite the good `/dashboard`
+      // entry — nor evict it (a fallback firing means the origin 404'd, often
+      // transiently; the last-known-good page must survive).
+      let n = 0;
+      // A fallback rule matches the path, so the ISR read/write key carries the
+      // rewrite-variant suffix. Seed the stale entry under that exact variant key.
+      const variantSeedKey = isrCacheKey(
+        'proj_1',
+        'legacy',
+        'my-app.void.app',
+        '/dashboard',
+        'https://my-app.void.app/dashboard',
+      );
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          fallbackRules: [{ source: '/*', destination: '/graphql', status: 200 }],
+        },
+        assets: {
+          [variantSeedKey]: {
+            body: '<html>stale-page</html>',
+            createdAt: Date.now() - 120 * 1000, // 2 min ago, TTL 60s → stale
+            ttl: 60,
+            headers: { 'Content-Type': 'text/html' },
+          },
+        },
+        // Background re-render: worker 404s, fallback rewrites to /graphql (200).
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('{"data":"per-user"}', {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      // Stale page body served immediately from the seeded entry.
+      expect(response.headers.get('x-isr-cache')).toBe('STALE');
+      expect(await response.text()).toBe('<html>stale-page</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      // The /graphql body must NOT overwrite the page entry, and the entry must NOT
+      // be evicted — the seeded good body remains in place under the same key.
+      const cached = kvStore.get(variantSeedKey);
+      expect(cached).toBeDefined();
+      const unpacked = unpackIsrValue(cached!.value);
+      expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>stale-page</html>');
+    });
+
+    it('DOES ISR-cache a page 404 that falls back to a DECLARED page route', async () => {
+      // Positive control for the C9 gate: when the fallback TARGET matches a declared
+      // `pages` entry (`/catch`), it IS positively identifiable as cacheable page
+      // content, so the render is cached under the ORIGINAL `/dashboard` page key —
+      // the framework "rewrite an unmatched request to a real page" feature keeps
+      // working. (`/dashboard` enters the ISR ladder via the flat `revalidate`, so
+      // the write keys under it; `/catch` is the positively-identified target.)
+      let n = 0;
+      const { env, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          revalidate: 60,
+          pages: [{ pattern: '/catch', revalidate: 60 }],
+          fallbackRules: [{ source: '/*', destination: '/catch', status: 200 }],
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('<html>catch page</html>', {
+                status: 200,
+                headers: { 'Content-Type': 'text/html' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('<html>catch page</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      // The declared-page fallback IS cached under the ORIGINAL /dashboard page URL
+      // (a fallback rule matches, so the key carries a `#rw=` variant suffix).
+      const pageKey = [...kvStore.keys()].find((k) =>
+        k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+      );
+      expect(pageKey).toBeDefined();
+      const unpacked = unpackIsrValue(kvStore.get(pageKey!)!.value);
+      expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>catch page</html>');
+    });
+
+    it('does NOT ISR-cache a fallback to /graphql when a CATCH-ALL page vouches for it (JSON)', async () => {
+      // C11 [critical]: a catch-all page `/:path{.+}` first-matches ANY path, so the
+      // old `resolvePageTtl(pages, undefined, '/graphql') > 0` "declared page" branch
+      // returned 60 for `/graphql` — the catch-all vouched for an arbitrary fallback
+      // target. With `/* → /graphql` this cached a per-user body under `/dashboard`
+      // (cross-user leak). A catch-all match is NOT an exact literal-page match, so
+      // it must not vouch. (JSON is also blocked by the HTML gate — see the HTML
+      // variant below for the case only the LITERAL-match requirement catches.)
+      let n = 0;
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          // Root catch-all page: `/dashboard` enters the ISR ladder (keys under it),
+          // and — pre-fix — it also "vouched" for the `/graphql` fallback target.
+          pages: [{ pattern: '/:path{.+}', revalidate: 60 }],
+          fallbackRules: [{ source: '/*', destination: '/graphql', status: 200 }],
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('{"data":"per-user"}', {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('{"data":"per-user"}');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      const written = [...kvStore.keys()].filter((k) =>
+        k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+      );
+      expect(written).toHaveLength(0);
+    });
+
+    it('does NOT ISR-cache a fallback to /graphql when a CATCH-ALL page vouches for it (HTML)', async () => {
+      // C11 [critical], the case the HTML gate ALONE would miss: the SAME catch-all
+      // page + `/* → /graphql`, but `/graphql` renders `text/html`. The response
+      // passes `isHtmlResponse`, so ONLY the exact-literal-page requirement keeps it
+      // out — a catch-all page (`/:path{.+}`) is not literal, so it never positively
+      // identifies `/graphql` as a specific declared page. A dynamic HTML endpoint
+      // with no Cache-Control must NOT be shared-cached under `/dashboard`.
+      let n = 0;
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          pages: [{ pattern: '/:path{.+}', revalidate: 60 }],
+          fallbackRules: [{ source: '/*', destination: '/graphql', status: 200 }],
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('<html>per-user graphql</html>', {
+                status: 200,
+                headers: { 'Content-Type': 'text/html' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('<html>per-user graphql</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      const written = [...kvStore.keys()].filter((k) =>
+        k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+      );
+      expect(written).toHaveLength(0);
+    });
+
+    it('does NOT ISR-cache a fallback to /graphql when a catch-all is FIRST-MATCH ahead of a later literal /graphql page (HTML)', async () => {
+      // C13 [high] route-precedence leak: `pages` is declared catch-all FIRST,
+      // literal `/graphql` SECOND (ingest validates shape, not ordering). The
+      // framework's matchRoute renders `/graphql` via its FIRST-match winner — the
+      // catch-all — i.e. dynamically. Pre-fix, `matchesLiteralPage` scanned the whole
+      // table and returned true on the LATER literal `/graphql`, so a `/* → /graphql`
+      // fallback returning a per-user HTML 200 got shared-cached under `/dashboard`
+      // (cross-user leak). Honoring first-match precedence, the catch-all is the
+      // winning route → NOT literal → the render must NOT be cached.
+      let n = 0;
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          // Catch-all FIRST, literal /graphql SECOND — the precedence the fix addresses.
+          pages: [
+            { pattern: '/:path{.+}', revalidate: 60 },
+            { pattern: '/graphql', revalidate: 60 },
+          ],
+          fallbackRules: [{ source: '/*', destination: '/graphql', status: 200 }],
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('<html>per-user graphql</html>', {
+                status: 200,
+                headers: { 'Content-Type': 'text/html' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('<html>per-user graphql</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      const written = [...kvStore.keys()].filter((k) =>
+        k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+      );
+      expect(written).toHaveLength(0);
+    });
+
+    it('background revalidation does NOT overwrite or evict a page entry when a CATCH-ALL page vouches for the /graphql fallback target', async () => {
+      // C11 [critical], background path: a stale-serve triggers a re-render that 404s
+      // and falls back to `/graphql` (200 JSON, no Cache-Control) under a root
+      // catch-all page. Pre-fix, `resolvePageTtl` vouched via the catch-all and the
+      // per-user body overwrote the good `/dashboard` entry. The exact-literal-page
+      // requirement blocks it — the seeded good body must survive, un-evicted.
+      let n = 0;
+      const variantSeedKey = isrCacheKey(
+        'proj_1',
+        'legacy',
+        'my-app.void.app',
+        '/dashboard',
+        'https://my-app.void.app/dashboard',
+      );
+      const { env, workerFetch, kvStore } = createEnv({
+        routing: {
+          workerName: 'user-app',
+          projectId: 'proj_1',
+          ssr: true,
+          pages: [{ pattern: '/:path{.+}', revalidate: 60 }],
+          fallbackRules: [{ source: '/*', destination: '/graphql', status: 200 }],
+        },
+        assets: {
+          [variantSeedKey]: {
+            body: '<html>stale-page</html>',
+            createdAt: Date.now() - 120 * 1000, // 2 min ago, TTL 60s → stale
+            ttl: 60,
+            headers: { 'Content-Type': 'text/html' },
+          },
+        },
+        workerFetchImpl: async () => {
+          n++;
+          return n % 2 === 1
+            ? new Response('missing', { status: 404 })
+            : new Response('{"data":"per-user"}', {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              });
+        },
+      });
+
+      const ctx = createCtx();
+      const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+      expect(response.headers.get('x-isr-cache')).toBe('STALE');
+      expect(await response.text()).toBe('<html>stale-page</html>');
+
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(workerFetch).toHaveBeenCalled();
+
+      // The /graphql body must NOT overwrite the page entry, and the entry must NOT
+      // be evicted — the seeded good body remains in place under the same key.
+      const cached = kvStore.get(variantSeedKey);
+      expect(cached).toBeDefined();
+      const unpacked = unpackIsrValue(cached!.value);
+      expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>stale-page</html>');
+    });
+  });
+});
+
+// ISR must never cache a response that declares itself uncacheable via
+// Cache-Control (private/no-store/no-cache). Every ISR write site gates on
+// `!hasCacheOptOut(<response>)`. This is defense-in-depth beyond the `/api`
+// path guard: a fallback whose target is a non-`/api`, non-extension DYNAMIC
+// endpoint (e.g. `/graphql`) declares its own uncacheability via Cache-Control,
+// and the write must respect that even though the path gate cannot see it.
+describe('ISR respects response Cache-Control opt-out', () => {
+  // Normal write-back site (post-fallback SSR path, requestType === 'ssr').
+  // Reached when the ORIGINAL path bypasses the ISR ladder (here: `/api/*`, so
+  // not ladder-eligible and not a static candidate), the worker 404s, and a
+  // fallback rule rewrites to a clean SSR page returning 200. That render is
+  // requestType 'ssr' with a positive config TTL, so it hits the normal
+  // write-back gate — NOT the ISR-ladder miss-write.
+  it('normal write-back does NOT cache a fallback-rewritten SSR 200 that sets Cache-Control: no-store', async () => {
+    let n = 0;
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        // Original `/api/*` request bypasses the ISR ladder; on the worker 404
+        // it rewrites to a clean SSR page path.
+        fallbackRules: [{ source: '/api/*', destination: '/dashboard', status: 200 }],
+      },
+      workerFetchImpl: async () => {
+        n++;
+        return n % 2 === 1
+          ? new Response('missing', { status: 404 })
+          : new Response('<html>rendered</html>', {
+              status: 200,
+              headers: { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' },
+            });
+      },
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/api/miss'), env, ctx);
+    // The page is served live to the client...
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('<html>rendered</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalled();
+
+    // ...but a `no-store` response must never be written into the ISR cache
+    // under the page URL. No ISR entry for `/dashboard` (any variant suffix).
+    const written = [...kvStore.keys()].filter((k) =>
+      k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+    );
+    expect(written).toHaveLength(0);
+  });
+
+  // Site 3 now mirrors the miss-write's positive-ID policy: a fallback render is
+  // shared-cached under the TARGET key ONLY when the target is a positively
+  // identified declared literal ISR page rendering HTML. `/dashboard` reached via
+  // `/api/* → /dashboard` is NOT a declared page here (routing has a flat
+  // `revalidate`, no `pages` entry that literally matches `/dashboard`), so under
+  // the fallback positive-ID gate it is NO LONGER cached — even though the 200
+  // carries no Cache-Control opt-out. (This write was already ORPHANED before the
+  // gate: it keyed under `/dashboard#rw=hash(/api/miss)`, and no later request
+  // recomputes that pair — `/api/miss` never enters the ISR read ladder, and a
+  // direct `/dashboard` request reads the suffix-less direct key. The gate removes
+  // the wasted write and makes all three ISR write sites consistent.)
+  it('normal write-back does NOT cache a fallback-rewritten SSR 200 to an UNDECLARED target, even without a Cache-Control opt-out', async () => {
+    let n = 0;
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        fallbackRules: [{ source: '/api/*', destination: '/dashboard', status: 200 }],
+      },
+      workerFetchImpl: async () => {
+        n++;
+        return n % 2 === 1
+          ? new Response('missing', { status: 404 })
+          : new Response('<html>rendered</html>', {
+              status: 200,
+              headers: { 'Content-Type': 'text/html' },
+            });
+      },
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/api/miss'), env, ctx);
+    // Served LIVE to the client...
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('<html>rendered</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    // ...but NEVER written into the ISR cache under any `/dashboard` key — the
+    // fallback target is not a positively identified declared literal page.
+    const written = [...kvStore.keys()].filter((k) =>
+      k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+    );
+    expect(written).toHaveLength(0);
+  });
+
+  // Codex [high] regression (site 3 = normal write-back): the ORIGINAL `/api/*`
+  // request bypasses the ISR ladder, 404s, and a fallback rewrites to an
+  // extensionless DYNAMIC target (`/graphql`) that returns a 200 HTML body with NO
+  // Cache-Control. `isApiPath` does not catch `/graphql`; the opt-out guard does
+  // not fire (no Cache-Control); `isHtmlResponse` passes. ONLY the fallback
+  // positive-ID gate (`!fallbackResult.applied || isFallbackTargetCacheable(...)`)
+  // stops this per-request body from being written under the fallback TARGET key.
+  it('normal write-back does NOT ISR-cache a fallback to an undeclared dynamic /graphql target (HTML 200, no Cache-Control)', async () => {
+    let n = 0;
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        // `/graphql` is not `/api`, has no extension, and is NOT a declared page.
+        fallbackRules: [{ source: '/api/*', destination: '/graphql', status: 200 }],
+      },
+      workerFetchImpl: async () => {
+        n++;
+        return n % 2 === 1
+          ? new Response('missing', { status: 404 })
+          : new Response('<html>dynamic-per-request</html>', {
+              status: 200,
+              headers: { 'Content-Type': 'text/html' },
+            });
+      },
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/api/miss'), env, ctx);
+    // The dynamic body is served LIVE to the client...
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('<html>dynamic-per-request</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalled();
+
+    // ...but is NEVER written into the ISR cache under any `/graphql` key.
+    const written = [...kvStore.keys()].filter((k) =>
+      k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/graphql'),
+    );
+    expect(written).toHaveLength(0);
+  });
+
+  // Positive control: the SAME normal write-back path to a DECLARED literal page
+  // (`pages: [{ pattern: '/catch', revalidate: 60 }]`, `/api/* → /catch`, HTML
+  // 200). The positive-ID gate ADMITS a positively identified declared literal
+  // page — proving site 3 still caches legitimate fallback-rewritten pages, exactly
+  // like the miss-write and background-revalidation sites.
+  it('normal write-back DOES cache a fallback-rewritten SSR 200 to a DECLARED literal page', async () => {
+    let n = 0;
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        pages: [{ pattern: '/catch', revalidate: 60 }],
+        fallbackRules: [{ source: '/api/*', destination: '/catch', status: 200 }],
+      },
+      workerFetchImpl: async () => {
+        n++;
+        return n % 2 === 1
+          ? new Response('missing', { status: 404 })
+          : new Response('<html>rendered</html>', {
+              status: 200,
+              headers: { 'Content-Type': 'text/html' },
+            });
+      },
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/api/miss'), env, ctx);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('<html>rendered</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    const pageKey = [...kvStore.keys()].find((k) =>
+      k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/catch'),
+    );
+    expect(pageKey).toBeDefined();
+    const unpacked = unpackIsrValue(kvStore.get(pageKey!)!.value);
+    expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>rendered</html>');
+  });
+
+  // Miss-write site (ISR ladder): an ISR-eligible page 404s and a fallback
+  // rewrites to a non-`/api`, non-extension DYNAMIC target (`/graphql`) that
+  // returns 200 with `Cache-Control: private`. The `isApiPath` guard does NOT
+  // catch `/graphql`; the Cache-Control opt-out guard does.
+  it('miss-write does NOT cache a fallback rewrite to a dynamic /graphql target that sets Cache-Control: private', async () => {
+    let n = 0;
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        // Fallback to a dynamic endpoint that is neither `/api` nor an extension.
+        fallbackRules: [{ source: '/*', destination: '/graphql', status: 200 }],
+      },
+      workerFetchImpl: async () => {
+        n++;
+        return n % 2 === 1
+          ? new Response('missing', { status: 404 })
+          : new Response('{"data":"per-request"}', {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private' },
+            });
+      },
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    // The dynamic body is served LIVE to the client on the miss...
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('{"data":"per-request"}');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalled();
+
+    // ...but a `private` response must never enter the ISR cache under the page
+    // URL, even though `/graphql` passes the `isApiPath` guard.
+    const written = [...kvStore.keys()].filter((k) =>
+      k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+    );
+    expect(written).toHaveLength(0);
+  });
+
+  // Cache-Control directive names are case-insensitive (RFC 9111 §5.2). A
+  // MIXED-CASE opt-out (`No-Store`, `PRIVATE`) must be honored exactly like its
+  // lowercase form — a case-sensitive matcher would silently cache it.
+  it('miss-write does NOT cache an SSR 200 whose opt-out is mixed-case (Cache-Control: No-Store)', async () => {
+    const { env, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+      },
+      workerResponse: new Response('<html>rendered</html>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html', 'Cache-Control': 'No-Store' },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    expect(response.status).toBe(200);
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    const written = [...kvStore.keys()].filter((k) =>
+      k.startsWith('proj_1/isr/v3/legacy/my-app.void.app/dashboard'),
+    );
+    expect(written).toHaveLength(0);
+  });
+
+  // Background-revalidation EVICTION: a stale shared entry is served while a
+  // background re-render runs. If that fresh render is a 200 that now declares a
+  // Cache-Control opt-out (the page became user-specific / withdrew its public
+  // representation), the write is correctly skipped — but the EXISTING stale
+  // copy must ALSO be evicted, or anonymous requests keep being served the old
+  // public HTML of a now-private page (a staleness / data-exposure risk). Uses a
+  // MIXED-CASE `No-Store` to also exercise the case-insensitive opt-out match.
+  // The HTML edge entry is auto-populated by the stale serve itself (so it cannot
+  // be pre-seeded without short-circuiting the L1 edge hit and skipping
+  // revalidation); the JSON edge entry is seeded explicitly. All three go away.
+  it('background revalidation evicts the stale entry when the fresh 200 declares a Cache-Control opt-out', async () => {
+    const kvKey = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const htmlEdgeKey = 'https://my-app.void.app/dashboard?__void_isr=legacy';
+    const jsonEdgeKey = 'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy';
+
+    edgeCacheStore.set(
+      jsonEdgeKey,
+      new Response('{"component":"Dashboard","props":{"count":42},"url":"/dashboard"}', {
+        headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
+      }),
+    );
+
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale-public</html>',
+          createdAt: Date.now() - 120 * 1000, // 2 min ago, TTL 60s → stale
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      // Background re-render: 200 that has become uncacheable (page went private).
+      // No `x-revalidate` header, so ttl resolves to the default 60 (> 0) — proving
+      // eviction is driven by the opt-out, not by a `ttl === 0` opt-out.
+      workerFetchImpl: async () =>
+        new Response('<html>now-private</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html', 'Cache-Control': 'No-Store' },
+        }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+
+    // Stale public copy is served immediately; background revalidation is queued.
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    expect(await response.text()).toBe('<html>stale-public</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // Every cached representation of the now-private page is gone: R2/KV, the
+    // HTML edge entry (populated by the stale serve, then evicted), JSON edge.
+    expect([...kvStore.keys()].filter((k) => k.startsWith(kvKey))).toHaveLength(0);
+    expect(edgeCacheStore.has(htmlEdgeKey)).toBe(false);
+    expect(edgeCacheStore.has(jsonEdgeKey)).toBe(false);
+
+    // A subsequent request no longer serves a cached HIT/STALE — it re-renders live.
+    const ctx2 = createCtx();
+    const live = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx2);
+    expect(live.headers.get('x-isr-cache')).not.toBe('HIT');
+    expect(live.headers.get('x-isr-cache')).not.toBe('STALE');
+    expect(await live.text()).toBe('<html>now-private</html>');
+  });
+
+  // Positive control: eviction is SPECIFIC to the opt-out. A stale entry whose
+  // background re-render returns a CACHEABLE 200 (no Cache-Control opt-out) is
+  // REFRESHED in place — the entry stays present, now carrying the fresh body.
+  // Contrast with the eviction above: background revalidation itself does not
+  // delete; only the opt-out does.
+  it('background revalidation refreshes (does NOT evict) a stale entry when the fresh 200 is cacheable', async () => {
+    const kvKey = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale</html>',
+          createdAt: Date.now() - 120 * 1000,
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      workerResponse: new Response('<html>fresh</html>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // Entry is REFRESHED in place — still present, now with the fresh body.
+    const packed = kvStore.get(kvKey);
+    expect(packed).toBeDefined();
+    const unpacked = unpackIsrValue(packed!.value);
+    expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>fresh</html>');
+  });
+
+  // Eviction requires an AUTHORITATIVE opt-out render (200, not an `/api/*`
+  // fallback). A TRANSIENT non-200 background re-render that happens to carry
+  // `x-revalidate: 0` must NOT be treated as an opt-out — evicting on it would
+  // turn a blip (a 500 from a flaky origin) into a user-visible outage, defeating
+  // stale-while-revalidate. The last known-good entry must survive so a
+  // subsequent request keeps serving it.
+  it('background revalidation does NOT evict when the fresh re-render is a transient 500 (even with x-revalidate: 0)', async () => {
+    const kvKey = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const htmlEdgeKey = 'https://my-app.void.app/dashboard?__void_isr=legacy';
+    const jsonEdgeKey = 'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy';
+
+    edgeCacheStore.set(
+      jsonEdgeKey,
+      new Response('{"component":"Dashboard","props":{"count":42},"url":"/dashboard"}', {
+        headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
+      }),
+    );
+
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale</html>',
+          createdAt: Date.now() - 120 * 1000, // 2 min ago, TTL 60s → stale
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      // Transient failure: a 500 that still carries `x-revalidate: 0`. The write
+      // gate skips it (non-200), and eviction MUST also skip it (not authoritative).
+      workerFetchImpl: async () =>
+        new Response('origin exploded', {
+          status: 500,
+          headers: { 'x-revalidate': '0' },
+        }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+
+    // Stale copy is served immediately; background revalidation is queued.
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    expect(await response.text()).toBe('<html>stale</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // All three cached representations REMAIN: R2/KV, HTML edge (populated by the
+    // stale serve), JSON edge (seeded). The transient 500 evicted nothing.
+    expect([...kvStore.keys()].filter((k) => k.startsWith(kvKey))).toHaveLength(1);
+    expect(edgeCacheStore.has(htmlEdgeKey)).toBe(true);
+    expect(edgeCacheStore.has(jsonEdgeKey)).toBe(true);
+
+    // A subsequent request still serves the cached (STALE) representation — no
+    // outage, exactly the stale-while-revalidate resilience this guards.
+    const ctx2 = createCtx();
+    const again = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx2);
+    expect(again.headers.get('x-isr-cache')).toBe('STALE');
+    expect(await again.text()).toBe('<html>stale</html>');
+  });
+
+  // A background re-render that 404s and falls back to an `/api/*` route
+  // returning 200 (with `x-revalidate: 0`) is NOT an authoritative page render —
+  // the effective post-fallback path is `/api/*`, whose body is per-request
+  // dynamic. Eviction must mirror the write gate (which refuses to cache an
+  // `/api/*` fallback under the page URL): keep the last known-good page entry.
+  it('background revalidation does NOT evict when a 404 falls back to /api/* (200, x-revalidate: 0)', async () => {
+    // A `fallbackRules` rule that can handle `/dashboard` makes the ISR read
+    // (and edge) keys carry the rewrite-variant suffix, since a later fallback
+    // dispatch would expose that variant. Seed under the SAME variant keys the
+    // read path computes (variant = the query-stripped original URL) using the
+    // shared key builders — hardcoding the `#rw=` hash would be brittle.
+    const variant = 'https://my-app.void.app/dashboard';
+    const kvKey = isrCacheKey('proj_1', 'legacy', 'my-app.void.app', '/dashboard', variant);
+    const htmlEdgeKey = isrEdgeCacheUrl('my-app.void.app', '/dashboard', 'legacy', 'html', variant);
+    const jsonEdgeKey = isrEdgeCacheUrl('my-app.void.app', '/dashboard', 'legacy', 'json', variant);
+
+    edgeCacheStore.set(
+      jsonEdgeKey,
+      new Response('{"component":"Dashboard","props":{"count":42},"url":"/dashboard"}', {
+        headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
+      }),
+    );
+
+    let n = 0;
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        // The page 404s in the background; a fallback rewrites to an `/api/*` route.
+        fallbackRules: [{ source: '/*', destination: '/api/data', status: 200 }],
+      },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale</html>',
+          createdAt: Date.now() - 120 * 1000, // stale
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      workerFetchImpl: async () => {
+        n++;
+        // 1st: page render 404s. 2nd: fallback `/api/data` returns a dynamic 200
+        // that opts out via `x-revalidate: 0`.
+        return n % 2 === 1
+          ? new Response('missing', { status: 404 })
+          : new Response('{"api":"per-request"}', {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'x-revalidate': '0' },
+            });
+      },
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    expect(await response.text()).toBe('<html>stale</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    // Worker called twice: original page (404) + fallback `/api/data` (200).
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+
+    // The `/api/*` fallback is not an authoritative page render — all three page
+    // representations REMAIN (parity with the miss-write /api guard).
+    expect([...kvStore.keys()].filter((k) => k.startsWith(kvKey))).toHaveLength(1);
+    expect(edgeCacheStore.has(htmlEdgeKey)).toBe(true);
+    expect(edgeCacheStore.has(jsonEdgeKey)).toBe(true);
+  });
+
+  // Positive control for the unified `ttl === 0` arm: a stale entry whose
+  // background re-render is an AUTHORITATIVE page render (200, not `/api/*`) that
+  // opts out via `x-revalidate: 0` DOES evict all three representations. (The
+  // existing bg tests at "deletes KV entry…" and "opt-out (ttl=0) deletes JSON
+  // edge cache too" cover the KV and JSON edges individually; this asserts all
+  // three go away together, symmetric with the Cache-Control eviction control.)
+  it('background revalidation evicts all three representations on an authoritative 200 + x-revalidate: 0', async () => {
+    const kvKey = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const htmlEdgeKey = 'https://my-app.void.app/dashboard?__void_isr=legacy';
+    const jsonEdgeKey = 'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy';
+
+    edgeCacheStore.set(
+      jsonEdgeKey,
+      new Response('{"component":"Dashboard","props":{"count":42},"url":"/dashboard"}', {
+        headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
+      }),
+    );
+
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale-public</html>',
+          createdAt: Date.now() - 120 * 1000, // stale
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      // Authoritative page render (200, not /api) that permanently opts out.
+      workerFetchImpl: async () =>
+        new Response('<html>opt-out</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html', 'x-revalidate': '0' },
+        }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // Every cached representation is gone: R2/KV, HTML edge, JSON edge.
+    expect([...kvStore.keys()].filter((k) => k.startsWith(kvKey))).toHaveLength(0);
+    expect(edgeCacheStore.has(htmlEdgeKey)).toBe(false);
+    expect(edgeCacheStore.has(jsonEdgeKey)).toBe(false);
+  });
+
+  // C15 regression: the grace is measured from STALE-onset (`createdAt + ttl`), NOT
+  // from creation. A long-TTL entry (TTL > the grace) that has only JUST become stale
+  // must NOT be evicted by its first failed revalidation — otherwise a single transient
+  // origin failure right after expiry wipes the last-known-good copy, defeating
+  // stale-while-revalidate for exactly the entry the grace is meant to protect. With a
+  // creation-based grace `Date.now() - createdAt` is already > 24h at stale-onset for
+  // such an entry, so it would evict immediately; the stale-onset basis keeps it.
+  it('background revalidation does NOT evict a long-TTL entry that just became stale when the re-render is a transient 500', async () => {
+    const kvKey = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const htmlEdgeKey = 'https://my-app.void.app/dashboard?__void_isr=legacy';
+    const jsonEdgeKey = 'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy';
+
+    edgeCacheStore.set(
+      jsonEdgeKey,
+      new Response('{"component":"Dashboard","props":{"count":42},"url":"/dashboard"}', {
+        headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
+      }),
+    );
+
+    // TTL of 25h (> the 24h grace); created (ttl + 60s) ago so it became STALE only
+    // ~60s ago. Creation is ~25h in the past — a creation-based grace would evict.
+    const ttl = 25 * 60 * 60;
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: ttl },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale</html>',
+          createdAt: Date.now() - (ttl + 60) * 1000,
+          ttl,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      // Transient origin failure on the background re-render.
+      workerFetchImpl: async () =>
+        new Response('origin exploded', {
+          status: 500,
+          headers: { 'x-revalidate': '0' },
+        }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+
+    // Stale copy is served immediately; background revalidation is queued.
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    expect(await response.text()).toBe('<html>stale</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // Only ~60s STALE — well within the grace measured from stale-onset. All three
+    // cached representations REMAIN: R2/KV, HTML edge (populated by the stale serve),
+    // JSON edge (seeded). The transient failure evicted nothing.
+    expect([...kvStore.keys()].filter((k) => k.startsWith(kvKey))).toHaveLength(1);
+    expect(edgeCacheStore.has(htmlEdgeKey)).toBe(true);
+    expect(edgeCacheStore.has(jsonEdgeKey)).toBe(true);
+    const packed = kvStore.get(kvKey);
+    const unpacked = unpackIsrValue(packed!.value);
+    expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>stale</html>');
+  });
+
+  // Convergence (C14): a permanently-removed page whose origin now 404s and falls
+  // back to a non-declared shell can NEITHER refresh (C12 refuses to cache the
+  // shell) NOR authoritatively opt-out-evict (a fallback fired, so that branch is
+  // gated off). Without a bound it would serve its last cached body forever (ISR KV
+  // puts set no expirationTtl). Once the entry has been STALE (since `createdAt + ttl`)
+  // past the bounded grace (24h) — far beyond any transient deploy-race 404 — a
+  // background re-render evicts it so the removal finally converges.
+  it('background revalidation evicts an entry stale past the grace when the re-render can neither refresh nor opt-out-evict', async () => {
+    // A fallback rule matches `/dashboard`, so the ISR read/write + edge keys carry
+    // the rewrite-variant suffix. Build them with the shared key builders (variant =
+    // the query-stripped original URL) rather than hardcoding the hash.
+    const variant = 'https://my-app.void.app/dashboard';
+    const kvKey = isrCacheKey('proj_1', 'legacy', 'my-app.void.app', '/dashboard', variant);
+    const htmlEdgeKey = isrEdgeCacheUrl('my-app.void.app', '/dashboard', 'legacy', 'html', variant);
+    const jsonEdgeKey = isrEdgeCacheUrl('my-app.void.app', '/dashboard', 'legacy', 'json', variant);
+
+    edgeCacheStore.set(
+      jsonEdgeKey,
+      new Response('{"component":"Dashboard","props":{"count":42},"url":"/dashboard"}', {
+        headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
+      }),
+    );
+
+    let n = 0;
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        // The page 404s in the background; a fallback rewrites to a non-declared,
+        // dotted HTML shell (`/account.html`) — served live, never ISR-cached.
+        fallbackRules: [{ source: '/*', destination: '/account.html', status: 200 }],
+      },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale-removed</html>',
+          // STALE-onset (`createdAt + ttl`) is 25h ago — past the 24h grace measured
+          // from stale-onset, so eviction fires.
+          createdAt: Date.now() - (60 + 25 * 60 * 60) * 1000,
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      // 1st: page render 404s. 2nd: fallback `/account.html` returns 200 (non-cacheable).
+      workerFetchImpl: async () => {
+        n++;
+        return n % 2 === 1
+          ? new Response('missing', { status: 404 })
+          : new Response('<html>account of caller-A</html>', {
+              status: 200,
+              headers: { 'Content-Type': 'text/html' },
+            });
+      },
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    // Stale body served immediately from the seeded entry.
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    expect(await response.text()).toBe('<html>stale-removed</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalled();
+
+    // Past the grace with no way to refresh → all three representations evicted.
+    expect([...kvStore.keys()].filter((k) => k.startsWith(kvKey))).toHaveLength(0);
+    expect(edgeCacheStore.has(htmlEdgeKey)).toBe(false);
+    expect(edgeCacheStore.has(jsonEdgeKey)).toBe(false);
+  });
+
+  // C16: grace-eviction requires POSITIVE removal evidence — the ORIGIN page's OWN
+  // pre-fallback render returned 404/410 (gone). A TRANSIENT origin failure (5xx / 429 /
+  // timeout) is a DEGRADED DEPENDENCY, not a removal, and is exactly what stale-while-
+  // revalidate protects: even PAST the grace it must PRESERVE the stale entry. Wiping the
+  // last-known-good copy on a 500 would turn a transient dependency outage into a hard
+  // cache loss (and during a prolonged outage the first request for every old stale entry
+  // would progressively delete the fallback cache). Contrast with the origin-404 eviction
+  // test above: same beyond-grace age — the 404 converges, the 500 preserves.
+  it('background revalidation does NOT evict an entry stale past the grace when the re-render is a transient 500', async () => {
+    const kvKey = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const htmlEdgeKey = 'https://my-app.void.app/dashboard?__void_isr=legacy';
+    const jsonEdgeKey = 'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy';
+
+    edgeCacheStore.set(
+      jsonEdgeKey,
+      new Response('{"component":"Dashboard","props":{"count":42},"url":"/dashboard"}', {
+        headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
+      }),
+    );
+
+    const ttl = 60;
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: ttl },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale</html>',
+          // STALE-onset (`createdAt + ttl`) is 25h ago — PAST the 24h grace. Age alone
+          // would evict; the origin-status gate keeps it because the failure is transient.
+          createdAt: Date.now() - (ttl + 25 * 60 * 60) * 1000,
+          ttl,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      // Transient origin failure — a degraded dependency, NOT a removal. The `x-revalidate: 0`
+      // proves even that header on a non-200 does not force eviction.
+      workerFetchImpl: async () =>
+        new Response('origin exploded', {
+          status: 500,
+          headers: { 'x-revalidate': '0' },
+        }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+
+    // Stale copy is served immediately; background revalidation is queued.
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    expect(await response.text()).toBe('<html>stale</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // Past the grace, but the origin returned 500 (not 404/410) → the stale entry is
+    // PRESERVED. All three representations remain: R2/KV, HTML edge (populated by the
+    // stale serve), JSON edge (seeded). The transient failure evicted nothing.
+    expect([...kvStore.keys()].filter((k) => k.startsWith(kvKey))).toHaveLength(1);
+    expect(edgeCacheStore.has(htmlEdgeKey)).toBe(true);
+    expect(edgeCacheStore.has(jsonEdgeKey)).toBe(true);
+    const packed = kvStore.get(kvKey);
+    const unpacked = unpackIsrValue(packed!.value);
+    expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>stale</html>');
+  });
+
+  // C16 (429 variant): a rate-limited origin is likewise a transient degraded dependency,
+  // not a removal — beyond the grace it must still preserve the stale entry.
+  it('background revalidation does NOT evict an entry stale past the grace when the re-render is a transient 429', async () => {
+    const kvKey = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale</html>',
+          // STALE-onset 25h ago — past the grace.
+          createdAt: Date.now() - (60 + 25 * 60 * 60) * 1000,
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      workerFetchImpl: async () => new Response('too many requests', { status: 429 }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    expect(await response.text()).toBe('<html>stale</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // Past the grace but a transient 429 (not 404/410) → entry preserved.
+    const packed = kvStore.get(kvKey);
+    expect(packed).toBeDefined();
+    expect(new TextDecoder().decode(unpackIsrValue(packed!.value)!.body)).toBe(
+      '<html>stale</html>',
+    );
+  });
+
+  // Bounded: WITHIN the grace, the same unrefreshable re-render must NOT evict — a
+  // transient origin 404 (a deploy race) keeps serving stale (stale-while-revalidate
+  // resilience). Identical to the eviction test above but the entry is freshly stale.
+  it('background revalidation does NOT evict an unrefreshable entry that is still within the grace', async () => {
+    const variant = 'https://my-app.void.app/dashboard';
+    const kvKey = isrCacheKey('proj_1', 'legacy', 'my-app.void.app', '/dashboard', variant);
+    const htmlEdgeKey = isrEdgeCacheUrl('my-app.void.app', '/dashboard', 'legacy', 'html', variant);
+    const jsonEdgeKey = isrEdgeCacheUrl('my-app.void.app', '/dashboard', 'legacy', 'json', variant);
+
+    edgeCacheStore.set(
+      jsonEdgeKey,
+      new Response('{"component":"Dashboard","props":{"count":42},"url":"/dashboard"}', {
+        headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
+      }),
+    );
+
+    let n = 0;
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        revalidate: 60,
+        fallbackRules: [{ source: '/*', destination: '/account.html', status: 200 }],
+      },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale-transient</html>',
+          // 2 min ago — stale (TTL 60s) but well within the 24h grace.
+          createdAt: Date.now() - 120 * 1000,
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      workerFetchImpl: async () => {
+        n++;
+        return n % 2 === 1
+          ? new Response('missing', { status: 404 })
+          : new Response('<html>account of caller-A</html>', {
+              status: 200,
+              headers: { 'Content-Type': 'text/html' },
+            });
+      },
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    expect(await response.text()).toBe('<html>stale-transient</html>');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalled();
+
+    // Within the grace → nothing evicted; all three representations remain.
+    expect([...kvStore.keys()].filter((k) => k.startsWith(kvKey))).toHaveLength(1);
+    expect(edgeCacheStore.has(htmlEdgeKey)).toBe(true);
+    expect(edgeCacheStore.has(jsonEdgeKey)).toBe(true);
+    const packed = kvStore.get(kvKey);
+    const unpacked = unpackIsrValue(packed!.value);
+    expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>stale-transient</html>');
+  });
+
+  // The grace branch is the LAST else-if: a healthy re-render hits the write branch
+  // FIRST and refreshes in place — age never matters. An entry stale past the grace
+  // whose re-render is a normal cacheable 200 is REFRESHED, NOT evicted.
+  it('background revalidation refreshes (does NOT evict) a healthy entry even when it is stale past the grace', async () => {
+    const kvKey = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale</html>',
+          // STALE-onset (`createdAt + ttl`) is 25h ago — past the grace, yet a
+          // cacheable refresh must still win (write branch fires before the grace).
+          createdAt: Date.now() - (60 + 25 * 60 * 60) * 1000,
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      workerResponse: new Response('<html>fresh</html>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(workerFetch).toHaveBeenCalledOnce();
+
+    // Entry is REFRESHED in place — still present, now with the fresh body (the write
+    // branch fired before the grace branch could evict).
+    const packed = kvStore.get(kvKey);
+    expect(packed).toBeDefined();
+    const unpacked = unpackIsrValue(packed!.value);
+    expect(new TextDecoder().decode(unpacked!.body)).toBe('<html>fresh</html>');
   });
 });
 
@@ -979,7 +2958,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     const { env, workerFetch } = createEnv({
       routing: isrRouting,
       assets: {
-        'proj_1/isr/v2/legacy/dashboard': {
+        'proj_1/isr/v3/legacy/my-app.void.app/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000,
           ttl: 60,
@@ -1014,7 +2993,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     const { env, workerFetch } = createEnv({
       routing: isrRouting,
       assets: {
-        'proj_1/isr/v2/legacy/dashboard': {
+        'proj_1/isr/v3/legacy/my-app.void.app/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000,
           ttl: 60,
@@ -1050,7 +3029,7 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     const { env, workerFetch } = createEnv({
       routing: isrRouting,
       assets: {
-        'proj_1/isr/v2/legacy/dashboard': {
+        'proj_1/isr/v3/legacy/my-app.void.app/dashboard': {
           body: '<html>stale</html>',
           createdAt: Date.now() - 120 * 1000,
           ttl: 60,
@@ -2643,6 +4622,69 @@ describe('static asset caching', () => {
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
 
     const cacheEntry = edgeCacheStore.get('https://test.void.app/favicon.ico?_v=deploy-1');
+    expect(cacheEntry).toBeDefined();
+    expect(cacheEntry!.headers.get('Cache-Control')).toBe(
+      'public, s-maxage=31536000, max-age=0, must-revalidate',
+    );
+  });
+
+  it('does not write a 206 (Range) worker response to the static edge cache', async () => {
+    // A Range GET on a dotted SSR path bails out of the ISR ladder (Range excluded)
+    // and falls through to the static-candidate write. The origin emits a `206
+    // Partial Content`; the write gate (`status === 200`, not `.ok` which is
+    // 200–299) must refuse it — a partial body persisted under the shared
+    // `<path>?_v=<version>` key would later be served whole to a full request.
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+      ssr: true,
+    };
+    const { env, workerFetch } = createEnv({
+      routing,
+      workerResponse: new Response('partial-bytes', {
+        status: 206,
+        headers: { 'Content-Type': 'application/xml', 'Content-Range': 'bytes 0-11/100' },
+      }),
+    });
+    const ctx = createCtx();
+
+    const res = await app.fetch(
+      new Request('https://test.void.app/feed.xml', { headers: { Range: 'bytes=0-11' } }),
+      env,
+      ctx,
+    );
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // The 206 flows through to the client untouched — live render, not cached.
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(res.status).toBe(206);
+    expect(await res.text()).toBe('partial-bytes');
+    // Never persisted under the 1-year `?_v=<version>` static edge key.
+    expect(edgeCacheStore.get('https://test.void.app/feed.xml?_v=deploy-1')).toBeUndefined();
+    expect([...edgeCacheStore.keys()].some((k) => k.includes('?_v='))).toBe(false);
+  });
+
+  it('still writes a full 200 worker response to the static edge cache (gate does not over-block)', async () => {
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+      ssr: true,
+    };
+    const { env } = createEnv({
+      routing,
+      workerResponse: new Response('<rss>feed</rss>', {
+        status: 200,
+        headers: { 'Content-Type': 'application/xml' },
+      }),
+    });
+    const ctx = createCtx();
+
+    await app.fetch(new Request('https://test.void.app/feed.xml'), env, ctx);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const cacheEntry = edgeCacheStore.get('https://test.void.app/feed.xml?_v=deploy-1');
     expect(cacheEntry).toBeDefined();
     expect(cacheEntry!.headers.get('Cache-Control')).toBe(
       'public, s-maxage=31536000, max-age=0, must-revalidate',

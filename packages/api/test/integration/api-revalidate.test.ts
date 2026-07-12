@@ -25,7 +25,24 @@ import {
 
 let env: TestEnv;
 
-function isrKey(projectId: string, deploymentId: string, normalizedPath: string): string {
+// Current (`v3`) host-scoped key: `<proj>/isr/v3/<D>/<host>/<normalizedPath>`.
+function isrKey(
+  projectId: string,
+  deploymentId: string,
+  host: string,
+  normalizedPath: string,
+): string {
+  return `${projectId}/isr/v3/${deploymentId}/${host}/${normalizedPath}`;
+}
+
+// A pre-host-scoping legacy (`v2`) key: no `<host>` segment between the
+// deployment id and the normalized path, and a DIFFERENT key version. These
+// entries were written before ISR keys were host-scoped and still persist (ISR
+// puts set no `expirationTtl`), so revalidation must sweep the `v2` namespace
+// during the rollout. The version segment (`v2` vs `v3`) keeps the legacy sweep
+// disjoint from the host-scoped one — no runtime heuristic on the first
+// segment. See isr-shared `ISR_LEGACY_CACHE_KEY_VERSION`.
+function legacyIsrKey(projectId: string, deploymentId: string, normalizedPath: string): string {
   return `${projectId}/isr/v2/${deploymentId}/${normalizedPath}`;
 }
 
@@ -119,7 +136,7 @@ describe('POST /projects/:id/revalidate', () => {
     const fetchMock = mockCfApi();
 
     // Direct-hit and rewrite-variant entries for the same pathname.
-    const directKey = isrKey(project.id, deployment.id, 'en/docs');
+    const directKey = isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'en/docs');
     // Token computed with the same hash dispatch uses (FNV-1a 64-bit hex).
     // Purger only knows the hashed token; original URL is not recoverable.
     const originalUrl = `https://${project.slug}.void.app/docs`;
@@ -168,6 +185,217 @@ describe('POST /projects/:id/revalidate', () => {
     ).toBe(true);
   });
 
+  it('purges a legacy hostless rewrite-variant KV entry and edge URL for the requested path', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // Pre-host-scoping rewrite variant: `<proj>/isr/v2/<D>/en/docs#rw=<token>`
+    // (NO `<host>` segment). Written before ISR keys were host-scoped; still
+    // persists (ISR puts set no expirationTtl). The host-scoped variant scan
+    // cannot see it, so before the fix its token was never recovered and the
+    // stale edge entry was never purged.
+    const originalUrl = `https://${project.slug}.void.app/docs`;
+    const token = hashOriginalUrl(originalUrl);
+    const legacyVariantKey = `${legacyIsrKey(project.id, deployment.id, 'en/docs')}#rw=${token}`;
+    await env.ISR_CACHE.put(legacyVariantKey, 'legacy-rewritten');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ paths: ['/en/docs'] }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    // The orphaned legacy KV key must be deleted (dead-weight cleanup).
+    expect(await env.ISR_CACHE.get(legacyVariantKey)).toBeNull();
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    // The stale edge variant URL must be purged for the hostname carrying this
+    // deployment, reconstructed from the recovered token (html + json).
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/en/docs?__void_isr=${deployment.id}&__void_orig=${token}`,
+    );
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/en/docs?__void=json&__void_isr=${deployment.id}&__void_orig=${token}`,
+    );
+  });
+
+  it('does not mistake a host-scoped rewrite-variant key for a legacy one', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // Only a HOST-SCOPED (v3) variant key exists:
+    // `<proj>/isr/v3/<D>/<slug>.void.app/en/docs#rw=<token>`. The v3 scan must
+    // delete + purge it (behavior unchanged). The legacy hostless scan (prefix
+    // `<proj>/isr/v2/<D>/en/docs#rw=`) must NOT match it — the v2/v3 version
+    // segment keeps the two namespaces disjoint — so no phantom duplicate purge
+    // is emitted.
+    const originalUrl = `https://${project.slug}.void.app/docs`;
+    const token = hashOriginalUrl(originalUrl);
+    const directKey = isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'en/docs');
+    const hostScopedVariantKey = `${directKey}#rw=${token}`;
+    await env.ISR_CACHE.put(hostScopedVariantKey, 'host-scoped-rewritten');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ paths: ['/en/docs'] }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    // Host-scoped variant is still purged (regression guard).
+    expect(await env.ISR_CACHE.get(hostScopedVariantKey)).toBeNull();
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    const variantUrls = purgedFiles.filter((u) => u.includes('__void_orig='));
+    // Exactly the html + json variant URLs for the single host-scoped key —
+    // the legacy scan found nothing, so there is no phantom third URL.
+    expect(variantUrls).toContain(
+      `https://${project.slug}.void.app/en/docs?__void_isr=${deployment.id}&__void_orig=${token}`,
+    );
+    expect(variantUrls).toContain(
+      `https://${project.slug}.void.app/en/docs?__void=json&__void_isr=${deployment.id}&__void_orig=${token}`,
+    );
+    expect(variantUrls).toHaveLength(2);
+  });
+
+  it('purges a legacy hostless direct key (v2) for the requested path', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // Pre-host-scoping direct-hit key: `<proj>/isr/v2/<D>/about` (no host
+    // segment, prior key version). The v3 scan can't see it; the transition-only
+    // v2 legacy sweep must reap it. Its edge URL is the same host+path+id URL the
+    // v3 direct-hit purge already queues for the resolved hostname.
+    const legacyDirectKey = legacyIsrKey(project.id, deployment.id, 'about');
+    await env.ISR_CACHE.put(legacyDirectKey, 'legacy-about');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ paths: ['/about'] }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    // The orphaned legacy direct key must be deleted (dead-weight cleanup).
+    expect(await env.ISR_CACHE.get(legacyDirectKey)).toBeNull();
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    // The edge URL for the resolved hostname (html + json) — covered by the v3
+    // direct-hit purge (the edge URL carries no key version).
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/about?__void_isr=${deployment.id}`,
+    );
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/about?__void=json&__void_isr=${deployment.id}`,
+    );
+  });
+
+  it('paths: a v3 host-scoped key and a v2 legacy dotted-path key are handled independently', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // example.com is a resolved (attached) hostname.
+    await env.db.insert(domains).values({
+      id: 'dom_collision_paths',
+      project_id: project.id,
+      hostname: 'example.com',
+      cf_hostname_id: 'ch-collision-paths',
+      status: 'active',
+    });
+
+    // Two keys that would ALIAS under a single key version (the exact bug the v3
+    // bump fixes):
+    //   v3 host-scoped: (host=example.com, /about) -> `<proj>/isr/v3/<D>/example.com/about`
+    //   v2 legacy page /example.com/about          -> `<proj>/isr/v2/<D>/example.com/about`
+    const v3Key = isrKey(project.id, deployment.id, 'example.com', 'about');
+    const v2Key = legacyIsrKey(project.id, deployment.id, 'example.com/about');
+    await env.ISR_CACHE.put(v3Key, 'v3-host-scoped');
+    await env.ISR_CACHE.put(v2Key, 'v2-legacy-dotted');
+
+    // Request ONLY the legacy path. The v2 sweep must reap the v2 key but must
+    // NOT touch the v3 key — proving the two are handled independently.
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ paths: ['/example.com/about'] }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    // v2 legacy key deleted...
+    expect(await env.ISR_CACHE.get(v2Key)).toBeNull();
+    // ...and the v3 host-scoped key SURVIVES (not caught by the legacy scan).
+    expect(await env.ISR_CACHE.get(v3Key)).toBe('v3-host-scoped');
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    // The legacy key's edge purge targets `https://<host>/example.com/about?...`
+    // (the real path under each resolved hostname) — NOT the mis-parsed
+    // `https://example.com/about?...` that would treat the leading segment as a host.
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/example.com/about?__void_isr=${deployment.id}`,
+    );
+    expect(purgedFiles).toContain(
+      `https://example.com/example.com/about?__void_isr=${deployment.id}`,
+    );
+    expect(purgedFiles).not.toContain(`https://example.com/about?__void_isr=${deployment.id}`);
+  });
+
   it('purges specific paths from KV and edge cache', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
@@ -175,9 +403,18 @@ describe('POST /projects/:id/revalidate', () => {
     const fetchMock = mockCfApi();
 
     // Seed ISR cache entries
-    await env.ISR_CACHE.put(isrKey(project.id, deployment.id, '__index__'), 'home');
-    await env.ISR_CACHE.put(isrKey(project.id, deployment.id, 'about'), 'about');
-    await env.ISR_CACHE.put(isrKey(project.id, deployment.id, 'blog/hello'), 'blog post');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, '__index__'),
+      'home',
+    );
+    await env.ISR_CACHE.put(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'about'),
+      'about',
+    );
+    await env.ISR_CACHE.put(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'blog/hello'),
+      'blog post',
+    );
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -196,12 +433,18 @@ describe('POST /projects/:id/revalidate', () => {
     expect(body.purged).toBe(2);
 
     // Verify purged entries are gone
-    const home = await env.ISR_CACHE.get(isrKey(project.id, deployment.id, '__index__'));
+    const home = await env.ISR_CACHE.get(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, '__index__'),
+    );
     expect(home).toBeNull();
-    const about = await env.ISR_CACHE.get(isrKey(project.id, deployment.id, 'about'));
+    const about = await env.ISR_CACHE.get(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'about'),
+    );
     expect(about).toBeNull();
     // blog/hello should still exist
-    const blog = await env.ISR_CACHE.get(isrKey(project.id, deployment.id, 'blog/hello'));
+    const blog = await env.ISR_CACHE.get(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'blog/hello'),
+    );
     expect(blog).not.toBeNull();
 
     // Verify edge cache purge was called with correct URLs
@@ -233,8 +476,14 @@ describe('POST /projects/:id/revalidate', () => {
     const fetchMock = mockCfApi();
 
     await env.ROUTING.put(project.slug, JSON.stringify({ version: previousDeployment.id }));
-    await env.ISR_CACHE.put(isrKey(project.id, previousDeployment.id, 'about'), 'previous');
-    await env.ISR_CACHE.put(isrKey(project.id, activeDeployment.id, 'about'), 'active');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, previousDeployment.id, `${project.slug}.void.app`, 'about'),
+      'previous',
+    );
+    await env.ISR_CACHE.put(
+      isrKey(project.id, activeDeployment.id, `${project.slug}.void.app`, 'about'),
+      'active',
+    );
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -253,8 +502,16 @@ describe('POST /projects/:id/revalidate', () => {
     // KV keys deleted across drift-hedge namespaces.
     const driftBody = (await res.json()) as { purged: number };
     expect(driftBody.purged).toBe(1);
-    expect(await env.ISR_CACHE.get(isrKey(project.id, activeDeployment.id, 'about'))).toBeNull();
-    expect(await env.ISR_CACHE.get(isrKey(project.id, previousDeployment.id, 'about'))).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(
+        isrKey(project.id, activeDeployment.id, `${project.slug}.void.app`, 'about'),
+      ),
+    ).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(
+        isrKey(project.id, previousDeployment.id, `${project.slug}.void.app`, 'about'),
+      ),
+    ).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: Array<unknown>) =>
@@ -287,8 +544,14 @@ describe('POST /projects/:id/revalidate', () => {
     const fetchMock = mockCfApi();
 
     await env.ROUTING.put(project.slug, JSON.stringify({ version: routingDeployment.id }));
-    await env.ISR_CACHE.put(isrKey(project.id, databaseActiveDeployment.id, 'about'), 'database');
-    await env.ISR_CACHE.put(isrKey(project.id, routingDeployment.id, 'about'), 'routing');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, databaseActiveDeployment.id, `${project.slug}.void.app`, 'about'),
+      'database',
+    );
+    await env.ISR_CACHE.put(
+      isrKey(project.id, routingDeployment.id, `${project.slug}.void.app`, 'about'),
+      'routing',
+    );
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -306,9 +569,15 @@ describe('POST /projects/:id/revalidate', () => {
     const driftBody = (await res.json()) as { purged: number };
     expect(driftBody.purged).toBe(1);
     expect(
-      await env.ISR_CACHE.get(isrKey(project.id, databaseActiveDeployment.id, 'about')),
+      await env.ISR_CACHE.get(
+        isrKey(project.id, databaseActiveDeployment.id, `${project.slug}.void.app`, 'about'),
+      ),
     ).toBeNull();
-    expect(await env.ISR_CACHE.get(isrKey(project.id, routingDeployment.id, 'about'))).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(
+        isrKey(project.id, routingDeployment.id, `${project.slug}.void.app`, 'about'),
+      ),
+    ).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: Array<unknown>) =>
@@ -332,8 +601,14 @@ describe('POST /projects/:id/revalidate', () => {
     const fetchMock = mockCfApi();
 
     // Seed ISR cache entries
-    await env.ISR_CACHE.put(isrKey(project.id, deployment.id, '__index__'), 'home');
-    await env.ISR_CACHE.put(isrKey(project.id, deployment.id, 'about'), 'about');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, '__index__'),
+      'home',
+    );
+    await env.ISR_CACHE.put(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'about'),
+      'about',
+    );
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -352,9 +627,13 @@ describe('POST /projects/:id/revalidate', () => {
     expect(body.purged).toBe(2);
 
     // Verify all ISR entries are gone
-    const home = await env.ISR_CACHE.get(isrKey(project.id, deployment.id, '__index__'));
+    const home = await env.ISR_CACHE.get(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, '__index__'),
+    );
     expect(home).toBeNull();
-    const about = await env.ISR_CACHE.get(isrKey(project.id, deployment.id, 'about'));
+    const about = await env.ISR_CACHE.get(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'about'),
+    );
     expect(about).toBeNull();
 
     // Verify edge cache purge with correct pathnames derived from KV keys
@@ -377,6 +656,263 @@ describe('POST /projects/:id/revalidate', () => {
     );
   });
 
+  it('purges a single-segment legacy (hostless) key on all: true', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // Genuine pre-host-scoping key: `<proj>/isr/v2/<D>/about` (no host segment).
+    const key = legacyIsrKey(project.id, deployment.id, 'about');
+    await env.ISR_CACHE.put(key, 'legacy-about');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ all: true }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { purged: number };
+    expect(body.purged).toBe(1);
+
+    // The legacy KV key must be deleted.
+    expect(await env.ISR_CACHE.get(key)).toBeNull();
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    // Edge purge must be issued for the resolved hostname carrying this
+    // deployment (html + json), reconstructed from the bare path.
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/about?__void_isr=${deployment.id}`,
+    );
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/about?__void=json&__void_isr=${deployment.id}`,
+    );
+  });
+
+  it('purges a nested legacy (hostless) key on all: true without mis-parsing the host', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // Genuine nested pre-host-scoping key: `<proj>/isr/v2/<D>/blog/post`.
+    // The old code split on the first slash and mis-parsed host=`blog`,
+    // path=`/post`, purging garbage `https://blog/post?...`.
+    const key = legacyIsrKey(project.id, deployment.id, 'blog/post');
+    await env.ISR_CACHE.put(key, 'legacy-blog-post');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ all: true }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { purged: number };
+    expect(body.purged).toBe(1);
+
+    expect(await env.ISR_CACHE.get(key)).toBeNull();
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    // The real path is purged under the resolved hostname...
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/blog/post?__void_isr=${deployment.id}`,
+    );
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/blog/post?__void=json&__void_isr=${deployment.id}`,
+    );
+    // ...and the garbage host-as-`blog` URL is NOT purged.
+    expect(purgedFiles.some((u) => u.includes('://blog/'))).toBe(false);
+  });
+
+  it('still parses a host-scoped key whose first segment is a resolved hostname on all: true', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // First segment IS the resolved slug hostname — must be treated as
+    // host-scoped, not mistaken for a legacy nested path.
+    await env.ISR_CACHE.put(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'blog/post'),
+      'host-scoped',
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ all: true }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { purged: number };
+    expect(body.purged).toBe(1);
+
+    expect(
+      await env.ISR_CACHE.get(
+        isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'blog/post'),
+      ),
+    ).toBeNull();
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/blog/post?__void_isr=${deployment.id}`,
+    );
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/blog/post?__void=json&__void_isr=${deployment.id}`,
+    );
+  });
+
+  it('purges a legacy hostless rewrite-variant key (v2) on all: true', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // Pre-host-scoping rewrite variant: `<proj>/isr/v2/<D>/en/docs#rw=<token>`
+    // (hostless, prior key version). The transition-only v2 legacy scan must
+    // recover the token and edge-purge the stale `__void_orig` URL.
+    const originalUrl = `https://${project.slug}.void.app/docs`;
+    const token = hashOriginalUrl(originalUrl);
+    const legacyVariantKey = `${legacyIsrKey(project.id, deployment.id, 'en/docs')}#rw=${token}`;
+    await env.ISR_CACHE.put(legacyVariantKey, 'legacy-rewritten');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ all: true }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { purged: number };
+    expect(body.purged).toBe(1);
+    // The orphaned legacy variant key must be deleted.
+    expect(await env.ISR_CACHE.get(legacyVariantKey)).toBeNull();
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    // The stale edge variant URL, reconstructed from the recovered token, is
+    // purged for the resolved hostname (html + json).
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/en/docs?__void_isr=${deployment.id}&__void_orig=${token}`,
+    );
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/en/docs?__void=json&__void_isr=${deployment.id}&__void_orig=${token}`,
+    );
+  });
+
+  it('all: a v3 host-scoped key and a v2 legacy dotted-path key are purged independently', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    await env.db.insert(domains).values({
+      id: 'dom_collision_all',
+      project_id: project.id,
+      hostname: 'example.com',
+      cf_hostname_id: 'ch-collision-all',
+      status: 'active',
+    });
+
+    // Same aliasing pair as the paths collision test:
+    //   v3 host-scoped: (host=example.com, /about) -> `<proj>/isr/v3/<D>/example.com/about`
+    //   v2 legacy page /example.com/about          -> `<proj>/isr/v2/<D>/example.com/about`
+    const v3Key = isrKey(project.id, deployment.id, 'example.com', 'about');
+    const v2Key = legacyIsrKey(project.id, deployment.id, 'example.com/about');
+    await env.ISR_CACHE.put(v3Key, 'v3-host-scoped');
+    await env.ISR_CACHE.put(v2Key, 'v2-legacy-dotted');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ all: true }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    // Two DISTINCT pathnames counted independently: /about (from the v3 key) and
+    // /example.com/about (from the v2 key).
+    const body = (await res.json()) as { purged: number };
+    expect(body.purged).toBe(2);
+
+    // Each key is deleted by its own version's scan (disjoint prefixes).
+    expect(await env.ISR_CACHE.get(v3Key)).toBeNull();
+    expect(await env.ISR_CACHE.get(v2Key)).toBeNull();
+
+    // The v3 and v2 scans flush separately (per-page), so aggregate across calls.
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    const purgedFiles = purgeCalls.flatMap(
+      (call) => JSON.parse(call[1]!.body as string).files as Array<string>,
+    );
+    // v3 key -> host=example.com, path=/about.
+    expect(purgedFiles).toContain(`https://example.com/about?__void_isr=${deployment.id}`);
+    // v2 legacy key -> path=/example.com/about, fanned across resolved hostnames.
+    expect(purgedFiles).toContain(
+      `https://${project.slug}.void.app/example.com/about?__void_isr=${deployment.id}`,
+    );
+    expect(purgedFiles).toContain(
+      `https://example.com/example.com/about?__void_isr=${deployment.id}`,
+    );
+  });
+
   it('includes custom domain URLs in edge cache purge', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
@@ -392,7 +928,10 @@ describe('POST /projects/:id/revalidate', () => {
       status: 'active',
     });
 
-    await env.ISR_CACHE.put(isrKey(project.id, deployment.id, 'about'), 'about');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'about'),
+      'about',
+    );
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -440,7 +979,10 @@ describe('POST /projects/:id/revalidate', () => {
     for (let i = 0; i < 51; i++) {
       const path = `/page-${i}`;
       paths.push(path);
-      await env.ISR_CACHE.put(isrKey(project.id, deployment.id, `page-${i}`), `content-${i}`);
+      await env.ISR_CACHE.put(
+        isrKey(project.id, deployment.id, `${project.slug}.void.app`, `page-${i}`),
+        `content-${i}`,
+      );
     }
 
     const res = await app.fetch(
@@ -480,7 +1022,10 @@ describe('POST /projects/:id/revalidate', () => {
         Response.json({ success: false, errors: [{ code: 1000, message: 'fail' }] }),
     });
 
-    await env.ISR_CACHE.put(isrKey(project.id, deployment.id, 'about'), 'about');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'about'),
+      'about',
+    );
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -500,7 +1045,9 @@ describe('POST /projects/:id/revalidate', () => {
     expect(body.purged).toBe(1);
 
     // KV entry should still be deleted
-    const about = await env.ISR_CACHE.get(isrKey(project.id, deployment.id, 'about'));
+    const about = await env.ISR_CACHE.get(
+      isrKey(project.id, deployment.id, `${project.slug}.void.app`, 'about'),
+    );
     expect(about).toBeNull();
   });
 
@@ -526,8 +1073,11 @@ describe('POST /projects/:id/revalidate', () => {
       status: 'active',
     });
 
-    await env.ISR_CACHE.put(isrKey(project.id, newDeployment.id, 'about'), 'new');
-    await env.ISR_CACHE.put(isrKey(project.id, oldDeployment.id, 'about'), 'old');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, newDeployment.id, `${project.slug}.void.app`, 'about'),
+      'new',
+    );
+    await env.ISR_CACHE.put(isrKey(project.id, oldDeployment.id, 'example.com', 'about'), 'old');
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -546,8 +1096,14 @@ describe('POST /projects/:id/revalidate', () => {
     expect(driftBody.purged).toBe(1);
 
     // Both deployment namespaces are scanned and deleted in KV
-    expect(await env.ISR_CACHE.get(isrKey(project.id, newDeployment.id, 'about'))).toBeNull();
-    expect(await env.ISR_CACHE.get(isrKey(project.id, oldDeployment.id, 'about'))).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(
+        isrKey(project.id, newDeployment.id, `${project.slug}.void.app`, 'about'),
+      ),
+    ).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(isrKey(project.id, oldDeployment.id, 'example.com', 'about')),
+    ).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: Array<unknown>) =>
@@ -576,6 +1132,65 @@ describe('POST /projects/:id/revalidate', () => {
     );
   });
 
+  it('purges a routed but still-pending custom domain (activation crash window)', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const fetchMock = mockCfApi();
+
+    // Activation writes the `domain:<host>` KV route BEFORE flipping the DB row
+    // to `active` (`activate-domain.ts` — `ROUTING.put` then
+    // `updateDomainStatus`). A crash in that window strands a `pending` row that
+    // dispatch already serves — and ISR-caches — under its own host-scoped keys.
+    // The targeted purge must still reach it; an active-only target filter would
+    // miss the pending host entirely (the exact regression this guards).
+    await env.ROUTING.put(project.slug, JSON.stringify({ version: deployment.id }));
+    await env.ROUTING.put('domain:pending.example.com', JSON.stringify({ version: deployment.id }));
+    await env.db.insert(domains).values({
+      id: 'dom_pending_routed',
+      project_id: project.id,
+      hostname: 'pending.example.com',
+      cf_hostname_id: 'ch-pending-routed',
+      status: 'pending',
+    });
+
+    await env.ISR_CACHE.put(
+      isrKey(project.id, deployment.id, 'pending.example.com', 'about'),
+      'pending-host',
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/revalidate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ paths: ['/about'] }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    // The pending host's host-scoped ISR key must be deleted.
+    expect(
+      await env.ISR_CACHE.get(isrKey(project.id, deployment.id, 'pending.example.com', 'about')),
+    ).toBeNull();
+
+    const purgeCalls = fetchMock.mock.calls.filter(
+      (call: Array<unknown>) =>
+        (call[1] as RequestInit | undefined)?.method === 'POST' &&
+        (call[0] as string).includes('/purge_cache'),
+    );
+    expect(purgeCalls.length).toBe(1);
+    const purgedFiles = JSON.parse(purgeCalls[0][1]!.body as string).files as Array<string>;
+    // The pending host's edge URL must be purged (html + json).
+    expect(purgedFiles).toContain(`https://pending.example.com/about?__void_isr=${deployment.id}`);
+    expect(purgedFiles).toContain(
+      `https://pending.example.com/about?__void=json&__void_isr=${deployment.id}`,
+    );
+  });
+
   it('falls back to the legacy namespace for versionless routing entries', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id);
@@ -584,8 +1199,14 @@ describe('POST /projects/:id/revalidate', () => {
 
     // Versionless routing entry (pre-v2 legacy shape).
     await env.ROUTING.put(project.slug, JSON.stringify({ projectId: project.id }));
-    await env.ISR_CACHE.put(isrKey(project.id, 'legacy', 'about'), 'legacy-hit');
-    await env.ISR_CACHE.put(isrKey(project.id, activeDeployment.id, 'about'), 'active');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, 'legacy', `${project.slug}.void.app`, 'about'),
+      'legacy-hit',
+    );
+    await env.ISR_CACHE.put(
+      isrKey(project.id, activeDeployment.id, `${project.slug}.void.app`, 'about'),
+      'active',
+    );
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -602,8 +1223,14 @@ describe('POST /projects/:id/revalidate', () => {
     expect(res.status).toBe(200);
     // Both the 'legacy' namespace (matching dispatch's `?? 'legacy'`)
     // and the active_deployment_id hedge are purged from KV.
-    expect(await env.ISR_CACHE.get(isrKey(project.id, 'legacy', 'about'))).toBeNull();
-    expect(await env.ISR_CACHE.get(isrKey(project.id, activeDeployment.id, 'about'))).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(isrKey(project.id, 'legacy', `${project.slug}.void.app`, 'about')),
+    ).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(
+        isrKey(project.id, activeDeployment.id, `${project.slug}.void.app`, 'about'),
+      ),
+    ).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: Array<unknown>) =>
@@ -625,10 +1252,14 @@ describe('POST /projects/:id/revalidate', () => {
 
     // Dispatch's `routing.version ?? 'legacy'` yields `''` (not `'legacy'`)
     // when `version` is the empty string — nullish coalescing only catches
-    // null/undefined. Dispatch would write ISR under `<projectId>/isr/v2//<path>`
-    // (the double slash is intentional — empty deployment-id segment).
+    // null/undefined. Dispatch would write ISR under
+    // `<projectId>/isr/v3//<host>/<path>` (the empty deployment-id segment yields
+    // the `v3//` double slash).
     await env.ROUTING.put(project.slug, JSON.stringify({ version: '' }));
-    await env.ISR_CACHE.put(isrKey(project.id, '', 'about'), 'stored-under-empty-id');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, '', `${project.slug}.void.app`, 'about'),
+      'stored-under-empty-id',
+    );
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/revalidate`, {
@@ -647,7 +1278,9 @@ describe('POST /projects/:id/revalidate', () => {
     expect(body.purged).toBe(1);
     // The empty-deployment-id key must be deleted — this is the key dispatch
     // actually wrote, so the resolver + prefix logic must target it exactly.
-    expect(await env.ISR_CACHE.get(isrKey(project.id, '', 'about'))).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(isrKey(project.id, '', `${project.slug}.void.app`, 'about')),
+    ).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: Array<unknown>) =>
@@ -681,8 +1314,11 @@ describe('POST /internal/revalidate/:id', () => {
       status: 'active',
     });
 
-    await env.ISR_CACHE.put(isrKey(project.id, newDeployment.id, 'about'), 'new');
-    await env.ISR_CACHE.put(isrKey(project.id, oldDeployment.id, 'about'), 'old');
+    await env.ISR_CACHE.put(
+      isrKey(project.id, newDeployment.id, `${project.slug}.void.app`, 'about'),
+      'new',
+    );
+    await env.ISR_CACHE.put(isrKey(project.id, oldDeployment.id, 'example.com', 'about'), 'old');
 
     const token = await hmacSignState(project.id, env.JWT_SECRET);
     const res = await app.fetch(
@@ -700,8 +1336,14 @@ describe('POST /internal/revalidate/:id', () => {
     expect(res.status).toBe(200);
     const hmacBody = (await res.json()) as { purged: number };
     expect(hmacBody.purged).toBe(1);
-    expect(await env.ISR_CACHE.get(isrKey(project.id, newDeployment.id, 'about'))).toBeNull();
-    expect(await env.ISR_CACHE.get(isrKey(project.id, oldDeployment.id, 'about'))).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(
+        isrKey(project.id, newDeployment.id, `${project.slug}.void.app`, 'about'),
+      ),
+    ).toBeNull();
+    expect(
+      await env.ISR_CACHE.get(isrKey(project.id, oldDeployment.id, 'example.com', 'about')),
+    ).toBeNull();
 
     const purgeCalls = fetchMock.mock.calls.filter(
       (call: Array<unknown>) =>

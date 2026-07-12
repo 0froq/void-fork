@@ -9,7 +9,48 @@
  * preserve that shape so the API can compute the exact same key for purge.
  */
 
-const ISR_CACHE_KEY_VERSION = 'v2';
+const ISR_CACHE_KEY_VERSION = 'v3';
+
+/**
+ * Previous key version. `v3` keys are ALWAYS host-scoped
+ * (`<proj>/isr/v3/<D>/<host>/<path>`); `v2` keys are ALWAYS hostless
+ * (`<proj>/isr/v2/<D>/<path>`) — the `<host>` segment did not exist yet.
+ *
+ * The bump to `v3` was forced by a real aliasing hazard: under a single
+ * version, a host-scoped key `<D>/<host>/<path>` and a legacy hostless key
+ * `<D>/<host>/<path>` are byte-identical whenever the legacy path's leading
+ * segment happens to look like a hostname. Dotted leading path segments are
+ * legal (`[domain]` → `:domain`, `[...slug]` → `(.+)`), so a hostless key for
+ * the page `/example.com/about` collides exactly with the host-scoped key for
+ * `(host=example.com, /about)`. The stored metadata is only `{s,c,t}` (no
+ * path/host), so a reader cannot tell them apart and could serve one page's
+ * body for the other. Encoding the shape in the version removes the ambiguity:
+ * the version alone determines whether a `<host>` segment is present, so no
+ * runtime heuristic (e.g. "is the first segment an attached hostname?") is
+ * needed to classify a key. Package-internal, like `ISR_CACHE_KEY_VERSION`.
+ */
+const ISR_LEGACY_CACHE_KEY_VERSION = 'v2';
+
+/**
+ * KV metadata stored alongside every ISR cache entry. This is the single
+ * canonical shape shared by the dispatch worker (which writes it on a live
+ * miss and reads it back on a hit — see `dispatch/src/isr.ts`) AND the API
+ * prerender-warm path (`api/src/routes/deploy.ts`), which pre-populates the
+ * same KV keys during deploy. Both writers MUST use these exact field names:
+ * the reader requires `c` (createdAt) and `t` (ttl) and returns null without
+ * them, so a writer that drifts (e.g. writes `context` instead of `c`) produces
+ * a permanent cold miss that no typecheck would catch unless it is annotated
+ * `satisfies IsrCacheMetadata`. Keep the fields terse — this is stored on every
+ * KV entry.
+ */
+export type IsrCacheMetadata = Readonly<{
+  /** HTTP status code */
+  s: number;
+  /** createdAt (ms) */
+  c: number;
+  /** TTL (seconds) */
+  t: number;
+}>;
 
 /**
  * Build the normalized path segment for an ISR-cached page.
@@ -49,24 +90,51 @@ function canonicalIsrPathname(pathname: string): string {
 
 /**
  * Prefix shared by every ISR key for a project at the current version —
- * `<projectId>/isr/v2/`. Used internally by `isrCachePrefix`.
+ * `<projectId>/isr/v3/`. Used internally by `isrCachePrefix`.
  */
 function isrCacheVersionPrefix(projectId: string): string {
   return `${projectId}/isr/${ISR_CACHE_KEY_VERSION}/`;
 }
 
 /**
+ * Prefix shared by every LEGACY (hostless) ISR key for a project —
+ * `<projectId>/isr/v2/`. Used internally by `isrLegacyCachePrefix`.
+ */
+function isrLegacyCacheVersionPrefix(projectId: string): string {
+  return `${projectId}/isr/${ISR_LEGACY_CACHE_KEY_VERSION}/`;
+}
+
+/**
  * Prefix for listing/purging ISR keys.
  *
  * `deploymentId === ''` must still produce the versioned prefix with an
- * empty segment (`<projectId>/isr/v2//`) because dispatch uses
+ * empty segment (`<projectId>/isr/v3//`) because dispatch uses
  * `routing.version ?? 'legacy'`, which allows empty strings and writes
- * keys at `<projectId>/isr/v2//<path>`. Only `undefined` selects the
+ * keys at `<projectId>/isr/v3//<path>`. Only `undefined` selects the
  * legacy scan-all prefix (`<projectId>/isr/`).
  */
 export function isrCachePrefix(projectId: string, deploymentId?: string): string {
   if (deploymentId !== undefined) {
     return `${isrCacheVersionPrefix(projectId)}${deploymentId}/`;
+  }
+  return `${projectId}/isr/`;
+}
+
+/**
+ * Prefix for listing/purging LEGACY (pre-host-scoping) ISR keys — the `v2`
+ * namespace `<projectId>/isr/v2/<deploymentId>/`. Mirrors `isrCachePrefix`'s
+ * optional-`deploymentId` behavior exactly (empty string yields the versioned
+ * prefix with an empty segment; only `undefined` selects the scan-all
+ * `<projectId>/isr/` prefix).
+ *
+ * Exists SOLELY for the host-scoping rollout: the purger sweeps this namespace
+ * to reap orphaned `v2` KV keys and purge their edge URLs. Current dispatch
+ * neither reads nor writes `v2` keys. Transition-only — remove once `v2`
+ * entries have aged out.
+ */
+export function isrLegacyCachePrefix(projectId: string, deploymentId?: string): string {
+  if (deploymentId !== undefined) {
+    return `${isrLegacyCacheVersionPrefix(projectId)}${deploymentId}/`;
   }
   return `${projectId}/isr/`;
 }
@@ -83,7 +151,20 @@ const ISR_VARIANT_SEPARATOR = '#rw=';
 /**
  * Build the cache key for an ISR-cached page.
  * ISR is deployment-scoped so cached HTML cannot outlive the hashed assets
- * referenced by the deployment that produced it.
+ * referenced by the deployment that produced it, and host-scoped (`<host>`
+ * segment after the deployment id) so the same path served under different
+ * hostnames — e.g. a project slug and a custom domain, or two custom
+ * domains — never share a cache slot. `host` is the request hostname the
+ * dispatch worker saw (`new URL(request.url).hostname`).
+ *
+ * Host-scoping is a `v3` key format: `<proj>/isr/v3/<D>/<host>/<path>`. The
+ * version bump is load-bearing, not cosmetic — see `ISR_LEGACY_CACHE_KEY_VERSION`.
+ * Under a single version, this key would be byte-identical to a legacy hostless
+ * key for a page whose leading path segment looks like a hostname (e.g.
+ * `(host=example.com, /about)` vs the hostless page `/example.com/about`, both
+ * `<D>/example.com/about`). Dotted leading segments are legal, so the collision
+ * is reachable. `v3` keys are ALWAYS host-scoped and `v2` keys ALWAYS hostless,
+ * so the version segment alone disambiguates the two shapes.
  *
  * When `originalUrl` is provided, the request was served via a dispatch-side
  * rewrite (`redirectRules`/`fallbackRules` with status 200). The original
@@ -97,10 +178,11 @@ const ISR_VARIANT_SEPARATOR = '#rw=';
 export function isrCacheKey(
   projectId: string,
   deploymentId: string,
+  host: string,
   pathname: string,
   originalUrl?: string | null,
 ): string {
-  const base = `${isrCachePrefix(projectId, deploymentId)}${normalizeIsrPath(pathname)}`;
+  const base = `${isrCachePrefix(projectId, deploymentId)}${host}/${normalizeIsrPath(pathname)}`;
   if (!originalUrl) {
     return base;
   }
@@ -114,9 +196,53 @@ export function isrCacheKey(
 export function isrCacheVariantPrefix(
   projectId: string,
   deploymentId: string,
+  host: string,
   pathname: string,
 ): string {
-  return `${isrCachePrefix(projectId, deploymentId)}${normalizeIsrPath(pathname)}${ISR_VARIANT_SEPARATOR}`;
+  return `${isrCachePrefix(projectId, deploymentId)}${host}/${normalizeIsrPath(pathname)}${ISR_VARIANT_SEPARATOR}`;
+}
+
+/**
+ * Build the exact LEGACY (pre-host-scoping) direct-hit key for a pathname under
+ * a deployment: `<projectId>/isr/v2/<deploymentId>/<normalizedPath>` — the
+ * hostless counterpart of `isrCacheKey` with no `<host>/` segment and no
+ * rewrite-variant suffix. Used by the purger to reap the orphaned `v2`
+ * direct-hit KV key for a requested path.
+ *
+ * Exists SOLELY for the host-scoping rollout — current dispatch neither writes
+ * nor reads hostless keys. Transition-only. Do not use it on the hot path.
+ */
+export function isrLegacyCacheKey(
+  projectId: string,
+  deploymentId: string,
+  pathname: string,
+): string {
+  return `${isrLegacyCachePrefix(projectId, deploymentId)}${normalizeIsrPath(pathname)}`;
+}
+
+/**
+ * Prefix used to list/purge the pre-host-scoped ("legacy") rewrite variants of
+ * a given pathname under a deployment. Before ISR keys grew a `<host>` segment,
+ * variant keys were written as
+ * `<projectId>/isr/v2/<deploymentId>/<normalizedPath>#rw=<token>` — identical to
+ * `isrCacheVariantPrefix` but with NO `<host>/` segment. Those entries still
+ * persist during the host-scoping rollout (ISR puts set no `expirationTtl`),
+ * so the purger must scan this hostless `v2` prefix in addition to the
+ * host-scoped `v3` one to recover their variant tokens and purge the matching
+ * edge URLs.
+ *
+ * Built off `isrLegacyCachePrefix` (the `v2` namespace), NOT `isrCachePrefix`
+ * (now `v3`), so it targets the legacy hostless keys it is meant to sweep.
+ *
+ * Exists SOLELY for that rollout cleanup — current dispatch neither writes nor
+ * reads hostless keys. Transition-only. Do not use it on the hot path.
+ */
+export function isrLegacyCacheVariantPrefix(
+  projectId: string,
+  deploymentId: string,
+  pathname: string,
+): string {
+  return `${isrLegacyCachePrefix(projectId, deploymentId)}${normalizeIsrPath(pathname)}${ISR_VARIANT_SEPARATOR}`;
 }
 
 /**

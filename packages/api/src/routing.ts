@@ -188,6 +188,10 @@ export function buildRoutingJson(opts: {
     type: manifest?.type ?? (manifest?.framework ? 'framework' : 'void'),
     ...(manifest?.ssr ? { ssr: true } : {}),
     ...(manifest?.revalidate ? { revalidate: manifest.revalidate } : {}),
+    ...(manifest?.pages?.length ? { pages: manifest.pages } : {}),
+    ...(manifest?.pathRevalidate && Object.keys(manifest.pathRevalidate).length > 0
+      ? { pathRevalidate: manifest.pathRevalidate }
+      : {}),
     ...(manifest?.hashedAssetsPrefix ? { hashedAssetsPrefix: manifest.hashedAssetsPrefix } : {}),
     ...(manifest?.headerRules?.length ? { headerRules: manifest.headerRules } : {}),
     ...(manifest?.redirectRules?.length ? { redirectRules: manifest.redirectRules } : {}),

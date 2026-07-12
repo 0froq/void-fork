@@ -12,6 +12,7 @@ import {
 import { computeAssetHash } from '../../src/assets.ts';
 import { updateDeploymentStatus } from '../../src/db.ts';
 import app from '../../src/index.ts';
+import { validateManifestShape } from '../../src/routes/deploy.ts';
 import {
   builds,
   deployments,
@@ -2707,7 +2708,7 @@ describe('Deploy with prerendering', () => {
       s: number;
       c: number;
       t: number;
-    }>(`${project.id}/isr/v2/${deployment!.id}/__index__`, 'arrayBuffer');
+    }>(`${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/__index__`, 'arrayBuffer');
     expect(homeValue).not.toBeNull();
     // Unpack: [4-byte header len][headers JSON][body]
     const homeView = new DataView(homeValue!);
@@ -2718,7 +2719,7 @@ describe('Deploy with prerendering', () => {
     expect(homeMeta?.t).toBe(3600);
 
     const { value: aboutValue } = await env.ISR_CACHE.getWithMetadata(
-      `${project.id}/isr/v2/${deployment!.id}/about`,
+      `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/about`,
       'arrayBuffer',
     );
     expect(aboutValue).not.toBeNull();
@@ -2769,7 +2770,11 @@ describe('Deploy with prerendering', () => {
     // A new deploy clears only its own deployment-scoped namespace; other
     // deployments' v2 entries remain intact.
     expect(await env.ISR_CACHE.get(`${project.id}/isr/v2/previous/about`)).toBe('previous-v2');
-    expect(await env.ISR_CACHE.get(`${project.id}/isr/v2/${deployment!.id}/about`)).not.toBeNull();
+    expect(
+      await env.ISR_CACHE.get(
+        `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/about`,
+      ),
+    ).not.toBeNull();
   });
 
   it('skips prerender paths with TTL <= 0', async () => {
@@ -2813,17 +2818,287 @@ describe('Deploy with prerendering', () => {
 
     // /about should have ISR entry
     const { value: aboutValue } = await env.ISR_CACHE.getWithMetadata(
-      `${project.id}/isr/v2/${deployment!.id}/about`,
+      `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/about`,
       'arrayBuffer',
     );
     expect(aboutValue).not.toBeNull();
 
     // /private should NOT have ISR entry
     const { value: privateValue } = await env.ISR_CACHE.getWithMetadata(
-      `${project.id}/isr/v2/${deployment!.id}/private`,
+      `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/private`,
       'arrayBuffer',
     );
     expect(privateValue).toBeNull();
+  });
+
+  it('skips prerender paths whose render opts out (x-revalidate:0 / Cache-Control:private)', async () => {
+    // Parity with dispatch's live-miss/background write gate: a render that opts
+    // out at request time — `x-revalidate: 0` or `Cache-Control: private/no-store/
+    // no-cache` — must NOT be warmed, even though its path carries a positive
+    // MANIFEST TTL. Otherwise an anonymous request would be served the opted-out
+    // body as an ISR HIT: dispatch serves warmed entries without re-checking, and
+    // `serializePrerenderHeaders` strips `Cache-Control`, so the opt-out is only
+    // visible at write time. A normal 200 render is still warmed.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'prerender-optout');
+
+    const dispatchFetch = vi.fn().mockImplementation((req: Request) => {
+      const { pathname } = new URL(req.url);
+      if (pathname === '/optout-header') {
+        return new Response('<html>x-revalidate opt-out</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html', 'x-revalidate': '0' },
+        });
+      }
+      if (pathname === '/optout-cc') {
+        return new Response('<html>private</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html', 'cache-control': 'private' },
+        });
+      }
+      return new Response('<html>warm</html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    });
+    const dispatchGet = vi.fn().mockReturnValue({ fetch: dispatchFetch });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: {
+          version: 3,
+          bindings: {},
+          revalidate: 3600, // positive TTL for every path — the render decides opt-out
+          prerender: ['/warm', '/optout-header', '/optout-cc'],
+        },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    // All three cleared the manifest-TTL gate, so all three were fetched.
+    expect(dispatchFetch).toHaveBeenCalledTimes(3);
+
+    const [deployment] = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    expect(deployment).toBeDefined();
+    const base = `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app`;
+
+    // The normal 200 render is warmed.
+    const { value: warmValue } = await env.ISR_CACHE.getWithMetadata(`${base}/warm`, 'arrayBuffer');
+    expect(warmValue).not.toBeNull();
+
+    // Neither opt-out render is warmed.
+    const { value: headerOptOut } = await env.ISR_CACHE.getWithMetadata(
+      `${base}/optout-header`,
+      'arrayBuffer',
+    );
+    expect(headerOptOut).toBeNull();
+    const { value: ccOptOut } = await env.ISR_CACHE.getWithMetadata(
+      `${base}/optout-cc`,
+      'arrayBuffer',
+    );
+    expect(ccOptOut).toBeNull();
+  });
+
+  it('resolves an inherit-eligible page against pathRevalidate per-path (object config)', async () => {
+    // An OBJECT `routing.revalidate` bakes NO per-page TTL — the page ships
+    // inherit-eligible (`{ pattern }`, no revalidate) plus the RAW config as
+    // `manifest.pathRevalidate`. Prewarm's resolvePageTtl must resolve the config
+    // against the ACTUAL path: `/blog/private` → 0 (per-path opt-out, NOT warmed),
+    // `/blog/other` → 3600 (warmed). This is the per-path fidelity build-time
+    // baking cannot give — the whole point of shipping pathRevalidate.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'prewarm-pathrevalidate');
+
+    const dispatchFetch = vi.fn().mockImplementation(
+      () =>
+        new Response('<html>post</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+    );
+    const dispatchGet = vi.fn().mockReturnValue({ fetch: dispatchFetch });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: {
+          version: 3,
+          bindings: {},
+          // Inherit-eligible page (no baked TTL) + the raw per-path object config.
+          pages: [{ pattern: '/blog/:slug' }],
+          pathRevalidate: { '/blog/private': 0, '/blog/*': 3600 },
+          prerender: ['/blog/other', '/blog/private'],
+        },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    // Only `/blog/other` (resolves 3600) is fetched + warmed; `/blog/private`
+    // (resolves 0 via the per-path opt-out) is skipped before any fetch.
+    expect(dispatchFetch).toHaveBeenCalledTimes(1);
+
+    const [deployment] = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    expect(deployment).toBeDefined();
+    const base = `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app`;
+
+    const { value: otherValue } = await env.ISR_CACHE.getWithMetadata(
+      `${base}/blog/other`,
+      'arrayBuffer',
+    );
+    expect(otherValue).not.toBeNull();
+    const { value: privateValue } = await env.ISR_CACHE.getWithMetadata(
+      `${base}/blog/private`,
+      'arrayBuffer',
+    );
+    expect(privateValue).toBeNull();
+  });
+
+  it('warms prerender paths matched by a hyphenated whole-segment revalidate key', async () => {
+    // Write-side parity for the segment-anchored matcher: a route param key with
+    // a `-` (`pages/blog/[post-id].vue` → `/blog/:post-id`) must resolve a
+    // positive TTL so prerender warming runs — the old `[A-Za-z0-9_]+` param
+    // class failed to anchor `:post-id`, so `resolvePathTtl` returned 0 and
+    // warming was silently skipped. It must still anchor to ONE segment
+    // (`/blog/a/b` must NOT match).
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'prerender-hyphen');
+
+    const dispatchFetch = vi.fn().mockImplementation(
+      () =>
+        new Response('<html>Prerendered</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+    );
+    const dispatchGet = vi.fn().mockReturnValue({ fetch: dispatchFetch });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: {
+          version: 3,
+          bindings: {},
+          revalidate: { '/blog/:post-id': 3600 },
+          prerender: ['/blog/hello', '/blog/a/b'],
+        },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    // Only /blog/hello matches `/blog/:post-id` (single segment). /blog/a/b
+    // crosses a slash, so its TTL resolves to 0 and it is skipped.
+    expect(dispatchFetch).toHaveBeenCalledTimes(1);
+
+    const [deployment] = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    expect(deployment).toBeDefined();
+
+    // /blog/hello should have an ISR entry (the fix).
+    const { value: helloValue } = await env.ISR_CACHE.getWithMetadata(
+      `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/blog/hello`,
+      'arrayBuffer',
+    );
+    expect(helloValue).not.toBeNull();
+
+    // /blog/a/b must NOT have an ISR entry (single-segment anchor).
+    const { value: nestedValue } = await env.ISR_CACHE.getWithMetadata(
+      `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/blog/a/b`,
+      'arrayBuffer',
+    );
+    expect(nestedValue).toBeNull();
+  });
+
+  it('warms nested prerender paths matched by a named catch-all revalidate key', async () => {
+    // Write-side parity for the segment-anchored matcher's NAMED CATCH-ALL rule:
+    // a named catch-all page (`pages/docs/[...path].vue`) serializes to the
+    // revalidate key `/docs/:path{.+}`. NESTED paths under it (`/docs/guide/setup`)
+    // must resolve a positive TTL so prerender warming runs — before the `{.+}`
+    // rule the `:[^/]+` param class swallowed `path{.+}` whole, compiling to
+    // `^/docs/[^/]+$`, so nested paths got TTL 0 and warming was silently skipped.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'prerender-catchall');
+
+    const dispatchFetch = vi.fn().mockImplementation(
+      () =>
+        new Response('<html>Prerendered</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+    );
+    const dispatchGet = vi.fn().mockReturnValue({ fetch: dispatchFetch });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: {
+          version: 3,
+          bindings: {},
+          revalidate: { '/docs/:path{.+}': 3600 },
+          prerender: ['/docs/intro', '/docs/guide/setup'],
+        },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    // Both the single-segment path and the NESTED path match `/docs/:path{.+}`
+    // (a cross-slash catch-all), so both resolve TTL 3600 and are warmed.
+    expect(dispatchFetch).toHaveBeenCalledTimes(2);
+
+    const [deployment] = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    expect(deployment).toBeDefined();
+
+    // /docs/intro should have an ISR entry that dispatch can actually READ.
+    // A warmed entry with the wrong metadata shape (e.g. `context` instead of
+    // `c`) exists as bytes but is a permanent cold miss — dispatch's
+    // `readIsrCache` returns null without `c`/`t`. Assert the readable shape,
+    // not just presence.
+    const { value: introValue, metadata: introMeta } = await env.ISR_CACHE.getWithMetadata<{
+      s: number;
+      c: number;
+      t: number;
+    }>(`${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/docs/intro`, 'arrayBuffer');
+    expect(introValue).not.toBeNull();
+    expect(introMeta).toMatchObject({ s: 200, t: 3600 });
+    expect(typeof introMeta?.c).toBe('number');
+    expect(introMeta!.c).toBeGreaterThan(0);
+
+    // The NESTED path /docs/guide/setup must ALSO have a readable ISR entry.
+    const { value: nestedCatchAllValue, metadata: nestedMeta } =
+      await env.ISR_CACHE.getWithMetadata<{ s: number; c: number; t: number }>(
+        `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/docs/guide/setup`,
+        'arrayBuffer',
+      );
+    expect(nestedCatchAllValue).not.toBeNull();
+    expect(nestedMeta).toMatchObject({ s: 200, t: 3600 });
+    expect(typeof nestedMeta?.c).toBe('number');
   });
 
   it('does not block deploy when prerender fails', async () => {
@@ -2893,6 +3168,124 @@ describe('Deploy with prerendering', () => {
     expect(res.status).toBe(200);
     await res.text();
     expect(statusDuringPrerender).toBe('prerendering');
+  });
+
+  it('prewarms a pages-only manifest (ISR TTLs live only in manifest.pages, no flat revalidate)', async () => {
+    // Route-awareness parity: a manifest whose ISR config lives ONLY in the
+    // ordered `pages` table (no flat `manifest.revalidate` map) must still
+    // prewarm. Before the fix the gate required `manifest.revalidate`, so a
+    // pages-only manifest skipped prerender warming entirely.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'prewarm-pages-only');
+
+    const dispatchFetch = vi.fn().mockImplementation(
+      () =>
+        new Response('<html>Prerendered</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+    );
+    const dispatchGet = vi.fn().mockReturnValue({ fetch: dispatchFetch });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: {
+          version: 3,
+          bindings: {},
+          // NO flat `revalidate` — the TTL lives only in the pages table.
+          pages: [{ pattern: '/p', revalidate: 60 }],
+          prerender: ['/p'],
+        },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    // The page-route TTL (60) drove a real prewarm fetch + ISR write.
+    expect(dispatchFetch).toHaveBeenCalledTimes(1);
+
+    const [deployment] = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    expect(deployment).toBeDefined();
+
+    const { value: pValue, metadata: pMeta } = await env.ISR_CACHE.getWithMetadata<{
+      s: number;
+      c: number;
+      t: number;
+    }>(`${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/p`, 'arrayBuffer');
+    expect(pValue).not.toBeNull();
+    expect(pMeta).toMatchObject({ s: 200, t: 60 });
+    expect(typeof pMeta?.c).toBe('number');
+  });
+
+  it('does not prewarm a specific non-ISR page shadowed under a flat catch-all (first-match)', async () => {
+    // First-match parity: `/specific` (a page with NO per-page TTL) must WIN
+    // over the later catch-all `/:path{.+}` (revalidate 3600) — mirroring
+    // dispatch's `resolvePageTtl`. Before the fix, prewarm used the flat
+    // `resolvePathTtl(manifest.revalidate, …)` which never saw the pages table,
+    // so `/specific` fell through to the catch-all and was warmed with TTL 3600
+    // — a misleading cache entry for a page the framework renders dynamically.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'prewarm-shadow');
+
+    const dispatchFetch = vi.fn().mockImplementation(
+      () =>
+        new Response('<html>Prerendered</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+    );
+    const dispatchGet = vi.fn().mockReturnValue({ fetch: dispatchFetch });
+    env.DISPATCH = { get: dispatchGet } as unknown as DispatchNamespace;
+
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: {
+          version: 3,
+          bindings: {},
+          // A flat catch-all in `revalidate` PLUS an ordered pages table where
+          // `/specific` first-matches with no TTL (opts out of ISR).
+          revalidate: { '/:path{.+}': 3600 },
+          pages: [{ pattern: '/specific' }, { pattern: '/:path{.+}', revalidate: 3600 }],
+          prerender: ['/specific', '/other'],
+        },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+
+    // Only `/other` (catch-all winner, TTL 3600) is warmed. `/specific`
+    // first-matches the literal page with no TTL → resolves to 0 → skipped.
+    expect(dispatchFetch).toHaveBeenCalledTimes(1);
+
+    const [deployment] = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    expect(deployment).toBeDefined();
+
+    const { value: specificValue } = await env.ISR_CACHE.getWithMetadata(
+      `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/specific`,
+      'arrayBuffer',
+    );
+    expect(specificValue).toBeNull();
+
+    const { value: otherValue, metadata: otherMeta } = await env.ISR_CACHE.getWithMetadata<{
+      s: number;
+      c: number;
+      t: number;
+    }>(`${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app/other`, 'arrayBuffer');
+    expect(otherValue).not.toBeNull();
+    expect(otherMeta).toMatchObject({ s: 200, t: 3600 });
   });
 });
 
@@ -3496,5 +3889,63 @@ describe('POST /projects/:id/deploy/preflight', () => {
       );
       expect(error).toBeUndefined();
     });
+  });
+});
+
+describe('validateManifestShape — pages', () => {
+  const base = { version: 3, bindings: {} };
+  it('accepts a valid pages array', () => {
+    expect(
+      validateManifestShape({
+        ...base,
+        pages: [{ pattern: '/a' }, { pattern: '/b/:x', revalidate: 60 }],
+      }),
+    ).toBeNull();
+  });
+  it('accepts absence of pages', () => {
+    expect(validateManifestShape(base)).toBeNull();
+  });
+  it('rejects non-array pages', () => {
+    expect(validateManifestShape({ ...base, pages: {} })).toMatch(/pages must be an array/);
+  });
+  it('rejects an entry with a non-string pattern', () => {
+    expect(validateManifestShape({ ...base, pages: [{ pattern: 5 }] })).toMatch(
+      /pattern must be a string/,
+    );
+  });
+  it('rejects an entry with a non-number revalidate', () => {
+    expect(validateManifestShape({ ...base, pages: [{ pattern: '/a', revalidate: 'x' }] })).toMatch(
+      /revalidate must be a number/,
+    );
+  });
+  it('accepts an explicit revalidate:0 opt-out marker on a pages entry', () => {
+    expect(
+      validateManifestShape({ ...base, pages: [{ pattern: '/a', revalidate: 0 }] }),
+    ).toBeNull();
+  });
+});
+
+describe('validateManifestShape — pathRevalidate', () => {
+  const base = { version: 3, bindings: {} };
+  it('accepts a valid pathRevalidate object', () => {
+    expect(
+      validateManifestShape({ ...base, pathRevalidate: { '/blog/private': 0, '/blog/*': 3600 } }),
+    ).toBeNull();
+  });
+  it('accepts absence of pathRevalidate', () => {
+    expect(validateManifestShape(base)).toBeNull();
+  });
+  it('rejects a non-object pathRevalidate', () => {
+    expect(validateManifestShape({ ...base, pathRevalidate: [] })).toMatch(
+      /pathRevalidate must be an object/,
+    );
+    expect(validateManifestShape({ ...base, pathRevalidate: 60 })).toMatch(
+      /pathRevalidate must be an object/,
+    );
+  });
+  it('rejects a non-number pathRevalidate value', () => {
+    expect(validateManifestShape({ ...base, pathRevalidate: { '/a': 'x' } })).toMatch(
+      /pathRevalidate\.\/a must be a number/,
+    );
   });
 });

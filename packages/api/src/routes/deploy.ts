@@ -1,4 +1,5 @@
-import { isrCacheKey, isrCachePrefix } from '@voidcloud/isr-shared';
+import { isrCacheKey, isrCachePrefix, isrLegacyCachePrefix } from '@voidcloud/isr-shared';
+import type { IsrCacheMetadata } from '@voidcloud/isr-shared';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import {
@@ -439,6 +440,7 @@ function sortUnique(values: ReadonlyArray<string> | undefined): ReadonlyArray<st
 // and validated at deploy ingest so dispatch never sees an oversized list.
 export const MAX_ROUTING_RULES = 2000;
 export const MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES = MAX_ROUTING_RULES;
+const MAX_PAGES = 5000;
 
 /**
  * Strict literal-hostname regex used to validate `redirectRules[].host` /
@@ -807,6 +809,52 @@ export function validateManifestShape(parsed: unknown): string | null {
         if (typeof param !== 'string') {
           return `invalid manifest shape: revalidateQueryAllowlist entry ${JSON.stringify(pattern)} must contain only strings`;
         }
+      }
+    }
+  }
+
+  // pages is the ordered route table (`[{ pattern, revalidate? }]`) the
+  // framework emits so dispatch can resolve a per-route ISR TTL by segment
+  // pattern. Validator only enforces shape; the framework owns the ordering
+  // and pattern semantics.
+  if (manifest.pages !== undefined) {
+    if (!Array.isArray(manifest.pages)) {
+      return 'invalid manifest shape: pages must be an array';
+    }
+    if (manifest.pages.length > MAX_PAGES) {
+      return `invalid manifest shape: pages has ${manifest.pages.length} entries, exceeds the ${MAX_PAGES} entry limit`;
+    }
+    for (const entry of manifest.pages as Array<unknown>) {
+      if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) {
+        return 'invalid manifest shape: each pages entry must be an object';
+      }
+      const e = entry as Record<string, unknown>;
+      if (typeof e.pattern !== 'string' || e.pattern === '') {
+        return 'invalid manifest shape: pages entry pattern must be a string';
+      }
+      if (e.revalidate !== undefined && typeof e.revalidate !== 'number') {
+        return 'invalid manifest shape: pages entry revalidate must be a number';
+      }
+    }
+  }
+
+  // pathRevalidate is the RAW per-path OBJECT config shipped alongside `pages`
+  // so dispatch can resolve an inherit-eligible page (a pages entry with no
+  // baked revalidate) against the real request path. Same shape as the object
+  // form of `revalidate`: a map of pattern → number.
+  if (manifest.pathRevalidate !== undefined) {
+    if (
+      manifest.pathRevalidate == null ||
+      typeof manifest.pathRevalidate !== 'object' ||
+      Array.isArray(manifest.pathRevalidate)
+    ) {
+      return 'invalid manifest shape: pathRevalidate must be an object';
+    }
+    for (const [pathname, value] of Object.entries(
+      manifest.pathRevalidate as Record<string, unknown>,
+    )) {
+      if (typeof value !== 'number') {
+        return `invalid manifest shape: pathRevalidate.${pathname} must be a number`;
       }
     }
   }
@@ -3754,7 +3802,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         await assertProjectNotDeleting(context.get('db'), projectId);
 
         currentStep = 'prerender';
-        if (manifest.prerender && manifest.prerender.length > 0 && manifest.revalidate) {
+        if (
+          manifest.prerender &&
+          manifest.prerender.length > 0 &&
+          (manifest.revalidate || (manifest.pages && manifest.pages.length > 0))
+        ) {
           markPhase('prerender');
           emit({ event: 'prerender', pages: manifest.prerender.length });
           logger.info('status_transition', 'status_change', {
@@ -3768,21 +3820,50 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
 
           await uploadPool(manifest.prerender, 3, async (pathname) => {
-            const ttl = resolvePathTtl(manifest.revalidate, pathname);
+            const ttl = resolvePageTtl(
+              manifest.pages,
+              manifest.revalidate,
+              manifest.pathRevalidate,
+              pathname,
+            );
             if (ttl <= 0) {
               return;
             }
             try {
               const userWorker = context.env.DISPATCH.get(workerName);
-              const url = `https://${project.slug}.${siteDomain}${pathname}`;
+              const slugHost = `${project.slug}.${siteDomain}`;
+              const url = `https://${slugHost}${pathname}`;
               const response = await userWorker.fetch(new Request(url));
-              if (response.ok) {
-                const key = isrCacheKey(projectId, deployment.id, pathname);
+              // Mirror dispatch's live-miss / background write gate so prewarm
+              // cannot seed an entry the edge would refuse. A render that opts
+              // out — `x-revalidate: 0` (→ effectiveTtl 0) or `Cache-Control:
+              // private/no-store/no-cache` — must NOT be warmed: dispatch serves
+              // a HIT without re-checking opt-out, and `serializePrerenderHeaders`
+              // strips `Cache-Control`, so the opt-out is only visible HERE,
+              // before the write. `x-revalidate` overrides the TTL exactly as
+              // dispatch's `resolveRevalidateTtl` does; a full 200 is required
+              // (parity with the dispatch write sites — no partial/redirect body).
+              const effectiveTtl = resolveRevalidateTtl(response, ttl);
+              if (response.status === 200 && effectiveTtl > 0 && !hasCacheOptOut(response)) {
+                // Host-scope the warmed key to the slug host implied by the
+                // fetch URL — dispatch reads `<pid>/isr/v3/<did>/<host>/<path>`
+                // keyed on the request hostname, so without this the warmed
+                // bytes are a permanent cold miss (see isr-shared `isrCacheKey`).
+                const key = isrCacheKey(projectId, deployment.id, slugHost, pathname);
                 const headers = serializePrerenderHeaders(response);
                 const body = await response.arrayBuffer();
                 const packed = packIsrValue(headers, body);
                 await context.env.ISR_CACHE.put(key, packed, {
-                  metadata: { s: response.status, context: Date.now(), t: ttl },
+                  // `c` (createdAt) + `t` (ttl) are REQUIRED by dispatch's
+                  // `readIsrCache` — it returns null (permanent cold miss)
+                  // without them. `satisfies IsrCacheMetadata` makes any field
+                  // drift a typecheck error (this once wrote `context`, silently
+                  // making every warmed entry unreadable).
+                  metadata: {
+                    s: response.status,
+                    c: Date.now(),
+                    t: effectiveTtl,
+                  } satisfies IsrCacheMetadata,
                 });
               }
             } catch {
@@ -4490,7 +4571,21 @@ export async function clearIsrCache(
 ): Promise<void> {
   // `deploymentId` is required so a bare call cannot fall through to the
   // project-wide prefix and wipe every deployment's ISR namespace.
-  const prefix = isrCachePrefix(projectId, deploymentId);
+  //
+  // Sweep BOTH the current v3 (host-scoped) namespace AND the legacy v2
+  // (hostless) namespace. A deployment created before the v3 rollout can still
+  // hold orphaned v2 ISR entries, and ISR KV puts set no `expirationTtl`; once
+  // this deployment id is evicted (retention / failed-deploy cleanup), no later
+  // active-route revalidation ever names it again, so `clearIsrCache` is the
+  // last path that can reap them. Mirrors the legacy-aware purge in
+  // `revalidate-core.ts`. The two prefixes are disjoint (`…/isr/v3/…` vs
+  // `…/isr/v2/…`), so nothing is listed or deleted twice. Transition-only:
+  // drop the v2 sweep once no v2 entries remain in production.
+  await deleteIsrKeysByPrefix(kv, isrCachePrefix(projectId, deploymentId));
+  await deleteIsrKeysByPrefix(kv, isrLegacyCachePrefix(projectId, deploymentId));
+}
+
+async function deleteIsrKeysByPrefix(kv: KVNamespace, prefix: string): Promise<void> {
   let cursor: string | undefined;
 
   do {
@@ -4540,18 +4635,112 @@ function resolvePathTtl(
   return 0;
 }
 
+/**
+ * Route-aware ISR TTL resolution for prewarming — a mirror of dispatch's
+ * `resolvePageTtl` (`packages/dispatch/src/isr.ts`). First-match over the ordered
+ * `pages` table (do NOT re-sort — it is already the framework's authoritative
+ * `matchRoute` order), where the winning route's TTL is authoritative (0 when it
+ * opts out); only when NO page route matches do we fall back to the flat
+ * `revalidate` map. When `pages` is absent, behavior is identical to
+ * `resolvePathTtl`. Keep in sync with dispatch so prewarm resolves the SAME TTL
+ * dispatch will serve — otherwise a specific non-ISR page beneath a flat
+ * catch-all would be warmed with the catch-all's TTL and become a misleading
+ * cache entry. (Uses the api's `matchLiteralPattern`, the mirror of dispatch's
+ * `matchSegmentPattern`.)
+ */
+function resolvePageTtl(
+  pages: ReadonlyArray<{ pattern: string; revalidate?: number }> | undefined,
+  revalidate: number | Record<string, number> | undefined,
+  pathRevalidate: Record<string, number> | undefined,
+  pathname: string,
+): number {
+  if (pages && pages.length > 0) {
+    for (const page of pages) {
+      if (matchLiteralPattern(page.pattern, pathname)) {
+        return matchedPageTtl(page, pathRevalidate, pathname);
+      }
+    }
+    return resolvePathTtl(revalidate, pathname);
+  }
+  return resolvePathTtl(revalidate, pathname);
+}
+
+/**
+ * Effective ISR TTL for a `pages` entry that ALREADY matched `pathname`,
+ * decoding the framework's 3-state table — a mirror of dispatch's
+ * `matchedPageTtl` (`packages/dispatch/src/isr.ts`). A baked number is
+ * authoritative (`> 0` on, `0` explicit opt-out); an ABSENT `revalidate` is
+ * inherit-eligible and resolves the RAW per-path `pathRevalidate` object config
+ * against the actual path (honoring per-path `0` opt-outs). Keep in sync with
+ * dispatch and the framework's `collectPages`.
+ */
+function matchedPageTtl(
+  page: { pattern: string; revalidate?: number },
+  pathRevalidate: Record<string, number> | undefined,
+  pathname: string,
+): number {
+  if (page.revalidate === undefined) {
+    return resolvePathTtl(pathRevalidate, pathname);
+  }
+  return page.revalidate > 0 ? page.revalidate : 0;
+}
+
+/**
+ * Resolve the effective ISR TTL honoring a worker `x-revalidate` header — a
+ * mirror of dispatch's `resolveRevalidateTtl` (`packages/dispatch/src/isr.ts`).
+ * A valid non-negative `x-revalidate` overrides `defaultTtl` (so `0` opts the
+ * render OUT of caching); an absent/invalid header keeps `defaultTtl`. Kept in
+ * sync with dispatch so prewarm applies the SAME opt-out the edge write sites do.
+ */
+function resolveRevalidateTtl(response: Response, defaultTtl: number): number {
+  const header = response.headers.get('x-revalidate');
+  if (header === null) {
+    return defaultTtl;
+  }
+  const value = parseInt(header, 10);
+  if (isNaN(value) || value < 0) {
+    return defaultTtl;
+  }
+  return value;
+}
+
+/**
+ * True when a response carries a `Cache-Control` opt-out — a mirror of
+ * dispatch's `hasCacheOptOut` (`packages/dispatch/src/index.ts`). Directive
+ * names are case-insensitive (RFC 9111 §5.2). Kept in sync so a `private` /
+ * `no-store` / `no-cache` render is never warmed into ISR KV (dispatch strips
+ * `Cache-Control` at write and serves HITs without re-checking, so this gate is
+ * the only place the opt-out can be honored for a prewarmed entry).
+ */
+function hasCacheOptOut(response: Response): boolean {
+  const cacheControl = response.headers.get('Cache-Control');
+  if (!cacheControl) {
+    return false;
+  }
+  return /\b(private|no-store|no-cache)\b/i.test(cacheControl);
+}
+
 const MAX_CACHE = 256;
 const regexCache = new Map<string, RegExp>();
 
 /**
- * Match a pattern against a pathname using LITERAL semantics —
- * only `*` is special (matches any characters including `/`); every other
- * character (including `:`) is treated as a literal.
+ * Match a `routing.revalidate` pattern against a pathname using SEGMENT-ANCHORED
+ * semantics. `*` is special (matches any characters including `/`); a
+ * WHOLE-SEGMENT `:name` (a `:` right after `/` or at the start of the pattern,
+ * whose name is any non-empty run of non-`/` characters — NOT just JS-identifier
+ * chars, so `:post-id`, `:post.id`, etc. all anchor — up to the next `/` or end
+ * of string) matches exactly ONE non-empty path segment (`[^/]+`). A
+ * whole-segment NAMED CATCH-ALL `:name{.+}` (a named catch-all page `[...path]`
+ * → `/docs/:path{.+}`) matches ONE-OR-MORE characters that MAY cross `/` (`.+`,
+ * so `/docs/a` and `/docs/a/b` both match, but bare `/docs` / `/docs/` do NOT).
+ * Only the exact `{.+}` constraint widens — a regex-constrained param like
+ * `:path{[0-9]+}` keeps its single-segment `[^/]+` meaning. A mid-segment `:`
+ * (e.g. `/api/v1:health`) stays a LITERAL; every other character is literal.
  *
- * Mirrors `matchLiteralPattern` in `packages/dispatch/src/pattern.ts`. Keep
- * the two implementations in sync — `routing.revalidate` keys are written
- * here (during deploy/prerender) and read by dispatch, so both sides must
- * agree on what each pattern matches.
+ * Mirrors `matchSegmentPattern` in `packages/dispatch/src/pattern.ts` (despite
+ * the local name). Keep the two implementations in sync — `routing.revalidate`
+ * keys are written here (during deploy/prerender) and read by dispatch, so both
+ * sides must agree on what each pattern matches.
  */
 function matchLiteralPattern(pattern: string, pathname: string): boolean {
   let regex = regexCache.get(pattern);
@@ -4559,7 +4748,21 @@ function matchLiteralPattern(pattern: string, pathname: string): boolean {
     regexCache.delete(pattern);
     regexCache.set(pattern, regex);
   } else {
-    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*');
+    // Two private-use sentinels stand in for route params so the regex-special
+    // escape step below can't touch the classes we swap in last:
+    //   \uE000 - a whole-segment `:name`       -> one path segment (`[^/]+`)
+    //   \uE001 - a named catch-all `:name{.+}`  -> >=1 char, crosses `/` (`.+`)
+    // The named-catch-all rule runs FIRST so `:name{.+}` is consumed as a unit
+    // before the plain `:name` rule can grab `:name` and strand the `{.+}`. The
+    // `{.+}` name class is `[^/{}]+` (excludes braces) so a REGEX-constrained
+    // param like `:path{[0-9]+}` does NOT match and stays a single segment.
+    const escaped = pattern
+      .replace(/(^|\/):[^/{}]+\{\.\+\}(?=\/|$)/g, '$1\uE001') // named catch-all :name{.+} -> catch-all sentinel
+      .replace(/(^|\/):[^/]+(?=\/|$)/g, '$1\uE000') // whole-segment :name -> segment sentinel
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // escape regex specials
+      .replaceAll('*', '.*') // legacy `*` crosses '/'
+      .replaceAll('\uE000', '[^/]+') // segment sentinel -> one segment
+      .replaceAll('\uE001', '.+'); // catch-all sentinel -> >=1 char, crosses '/'
     regex = new RegExp(`^${escaped}$`);
     if (regexCache.size >= MAX_CACHE) {
       regexCache.delete(regexCache.keys().next().value!);

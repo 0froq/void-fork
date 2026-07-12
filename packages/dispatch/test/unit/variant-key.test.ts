@@ -74,4 +74,24 @@ describe('buildVariantOriginalUrl — query normalization for ISR variant key', 
     const out = buildVariantOriginalUrl('https://h.example/x', '/x', undefined);
     expect(out).toBe('https://h.example/x');
   });
+
+  it('treats a whole-segment `:name` allowlist key as a literal — no cross-path leak (regression)', () => {
+    // REGRESSION (3282937e): the shared matcher briefly anchored a whole-segment
+    // `:name`, so a `revalidateQueryAllowlist` key `/:token` leaked its
+    // allowlisted params onto EVERY single-segment path — defeating the
+    // cache-fan-out defense this function exists for. The allowlist is
+    // user-authored and `:` must stay literal, so `/:token` must match ONLY the
+    // literal `/:token`, never `/foo`.
+    const allowlist = { '/:token': ['q'] };
+    // `/foo` does NOT match `/:token` literally → ALL params stripped.
+    const leaked = buildVariantOriginalUrl('https://h.example/foo?q=1&utm=x', '/foo', allowlist);
+    expect(leaked).toBe('https://h.example/foo');
+    // The literal path still preserves the allowlisted param.
+    const kept = buildVariantOriginalUrl(
+      'https://h.example/:token?q=1&utm=x',
+      '/:token',
+      allowlist,
+    );
+    expect(kept).toBe('https://h.example/:token?q=1');
+  });
 });

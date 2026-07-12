@@ -204,6 +204,14 @@ export type DeployManifest = Readonly<{
    * catch-all default.
    */
   revalidateQueryAllowlist?: Record<string, ReadonlyArray<string>>;
+  pages?: ReadonlyArray<{ pattern: string; revalidate?: number }>;
+  /**
+   * RAW per-path `void.json` `routing.revalidate` OBJECT config (pages mode),
+   * shipped alongside `pages` so dispatch can resolve an inherit-eligible page
+   * (a `pages` entry with no baked `revalidate`) against the actual request
+   * path — honoring per-path rules and `0` opt-outs a dynamic pattern straddles.
+   */
+  pathRevalidate?: Record<string, number>;
   prerender?: ReadonlyArray<string>;
   assetConfig?: AssetConfig;
   vars?: Record<string, string>;

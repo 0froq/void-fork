@@ -21,7 +21,7 @@ export type IsrDeploymentResolution = Readonly<{
  * Resolve the set of deployment ids that dispatch may be serving ISR content
  * from, per hostname, plus a union of every id.
  *
- * Dispatch keys ISR KV under `<projectId>/isr/v2/<deploymentId>/<path>` where
+ * Dispatch keys ISR KV under `<projectId>/isr/v3/<deploymentId>/<host>/<path>` where
  * `deploymentId = routing.version ?? 'legacy'` for the routing entry of the
  * hostname being served. Slug routing and `domain:*` routing entries can
  * drift apart (e.g., when the domain-routing loop in deploy fails after the

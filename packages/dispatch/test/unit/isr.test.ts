@@ -6,6 +6,10 @@ import {
   isStale,
   resolveRevalidateTtl,
   resolvePathTtl,
+  resolvePageTtl,
+  matchesLiteralPage,
+  isBroadCatchAll,
+  isDottedPathIsrEligible,
   shouldBypassIsr,
   isrCacheResponse,
   isrEdgeCacheKey,
@@ -21,46 +25,74 @@ import {
 
 describe('isrCacheKey', () => {
   it('maps root path to __index__', () => {
-    expect(isrCacheKey('proj_1', 'dpl_1', '/')).toBe('proj_1/isr/v2/dpl_1/__index__');
+    expect(isrCacheKey('proj_1', 'dpl_1', 'my-app.void.app', '/')).toBe(
+      'proj_1/isr/v3/dpl_1/my-app.void.app/__index__',
+    );
   });
 
   it('strips leading slash', () => {
-    expect(isrCacheKey('proj_1', 'dpl_1', '/about')).toBe('proj_1/isr/v2/dpl_1/about');
+    expect(isrCacheKey('proj_1', 'dpl_1', 'my-app.void.app', '/about')).toBe(
+      'proj_1/isr/v3/dpl_1/my-app.void.app/about',
+    );
   });
 
   it('strips trailing slash', () => {
-    expect(isrCacheKey('proj_1', 'dpl_1', '/about/')).toBe('proj_1/isr/v2/dpl_1/about');
+    expect(isrCacheKey('proj_1', 'dpl_1', 'my-app.void.app', '/about/')).toBe(
+      'proj_1/isr/v3/dpl_1/my-app.void.app/about',
+    );
   });
 
   it('handles nested paths', () => {
-    expect(isrCacheKey('proj_1', 'dpl_1', '/blog/hello-world')).toBe(
-      'proj_1/isr/v2/dpl_1/blog/hello-world',
+    expect(isrCacheKey('proj_1', 'dpl_1', 'my-app.void.app', '/blog/hello-world')).toBe(
+      'proj_1/isr/v3/dpl_1/my-app.void.app/blog/hello-world',
     );
   });
 
   it('handles path without leading slash', () => {
-    expect(isrCacheKey('proj_1', 'dpl_1', 'about')).toBe('proj_1/isr/v2/dpl_1/about');
+    expect(isrCacheKey('proj_1', 'dpl_1', 'my-app.void.app', 'about')).toBe(
+      'proj_1/isr/v3/dpl_1/my-app.void.app/about',
+    );
+  });
+
+  // Host-scoping (FIX #4): the same path under two hostnames never shares a
+  // cache slot.
+  it('scopes the key to the host segment', () => {
+    const a = isrCacheKey('proj_1', 'dpl_1', 'a.example.com', '/about');
+    const b = isrCacheKey('proj_1', 'dpl_1', 'b.example.com', '/about');
+    expect(a).toBe('proj_1/isr/v3/dpl_1/a.example.com/about');
+    expect(b).toBe('proj_1/isr/v3/dpl_1/b.example.com/about');
+    expect(a).not.toBe(b);
   });
 
   // User code can branch on `c.isRewritten()` / `c.originalUrl()`; a direct
   // hit to /en/docs and a rewrite from /docs → /en/docs must not share a slot.
   it('appends a rewrite-variant token when originalUrl is provided', () => {
-    const direct = isrCacheKey('proj_1', 'dpl_1', '/en/docs');
-    const rewritten = isrCacheKey('proj_1', 'dpl_1', '/en/docs', 'https://host/docs');
-    expect(direct).toBe('proj_1/isr/v2/dpl_1/en/docs');
+    const direct = isrCacheKey('proj_1', 'dpl_1', 'host.void.app', '/en/docs');
+    const rewritten = isrCacheKey(
+      'proj_1',
+      'dpl_1',
+      'host.void.app',
+      '/en/docs',
+      'https://host/docs',
+    );
+    expect(direct).toBe('proj_1/isr/v3/dpl_1/host.void.app/en/docs');
     expect(rewritten).not.toBe(direct);
-    expect(rewritten.startsWith('proj_1/isr/v2/dpl_1/en/docs#rw=')).toBe(true);
+    expect(rewritten.startsWith('proj_1/isr/v3/dpl_1/host.void.app/en/docs#rw=')).toBe(true);
   });
 
   it('produces distinct keys for different originalUrl values', () => {
-    const a = isrCacheKey('proj_1', 'dpl_1', '/en/docs', 'https://host/docs');
-    const b = isrCacheKey('proj_1', 'dpl_1', '/en/docs', 'https://host/other');
+    const a = isrCacheKey('proj_1', 'dpl_1', 'host.void.app', '/en/docs', 'https://host/docs');
+    const b = isrCacheKey('proj_1', 'dpl_1', 'host.void.app', '/en/docs', 'https://host/other');
     expect(a).not.toBe(b);
   });
 
   it('treats null originalUrl as a direct hit (backward-compatible key)', () => {
-    expect(isrCacheKey('proj_1', 'dpl_1', '/x', null)).toBe('proj_1/isr/v2/dpl_1/x');
-    expect(isrCacheKey('proj_1', 'dpl_1', '/x', undefined)).toBe('proj_1/isr/v2/dpl_1/x');
+    expect(isrCacheKey('proj_1', 'dpl_1', 'host.void.app', '/x', null)).toBe(
+      'proj_1/isr/v3/dpl_1/host.void.app/x',
+    );
+    expect(isrCacheKey('proj_1', 'dpl_1', 'host.void.app', '/x', undefined)).toBe(
+      'proj_1/isr/v3/dpl_1/host.void.app/x',
+    );
   });
 });
 
@@ -207,6 +239,286 @@ describe('resolvePathTtl', () => {
 
   it('supports zero TTL for specific paths', () => {
     expect(resolvePathTtl({ '/user/*': 0, '*': 60 }, '/user/profile')).toBe(0);
+  });
+
+  // Segment-aware manifest keys (FIX #3): `:slug` anchors to ONE segment,
+  // `*` still crosses `/`. Mirrors the matcher tests in pattern.test.ts.
+  it('anchors a `:slug` manifest key to a single path segment', () => {
+    expect(resolvePathTtl({ '/blog/:slug': 90 }, '/blog/hello')).toBe(90);
+    expect(resolvePathTtl({ '/blog/:slug': 90 }, '/blog/a/b')).toBe(0);
+    expect(resolvePathTtl({ '/blog/:slug': 90, '/blog/*': 30 }, '/blog/a/b')).toBe(30);
+  });
+});
+
+describe('resolvePageTtl', () => {
+  // Emitted in framework scan order: static → dynamic → catch-all last.
+  const pages = [
+    { pattern: '/docs/setup/install' }, // specific, no TTL (opts out of ISR)
+    { pattern: '/blog/:slug', revalidate: 120 }, // single-segment dynamic
+    { pattern: '/docs/:path{.+}', revalidate: 3600 }, // named catch-all (crosses '/')
+  ];
+
+  it('a specific page without a TTL wins over a catch-all and opts OUT (0)', () => {
+    expect(resolvePageTtl(pages, undefined, undefined, '/docs/setup/install')).toBe(0);
+  });
+  it("a catch-all's own nested path gets the catch-all TTL", () => {
+    expect(resolvePageTtl(pages, undefined, undefined, '/docs/a/b')).toBe(3600);
+  });
+  it('a single-segment dynamic page gets its own TTL, anchored to one segment', () => {
+    expect(resolvePageTtl(pages, undefined, undefined, '/blog/hello')).toBe(120);
+    // /blog/a/b does not match :slug; it also matches no other page → flat-map fallback (none) → 0
+    expect(resolvePageTtl(pages, undefined, undefined, '/blog/a/b')).toBe(0);
+  });
+  it('a path matching NO page route falls back to the flat revalidate map', () => {
+    expect(resolvePageTtl(pages, { '/legacy/*': 90 }, undefined, '/legacy/x')).toBe(90);
+  });
+  it('when pages is undefined it is exactly the flat-map behavior', () => {
+    expect(resolvePageTtl(undefined, { '/docs/*': 300 }, undefined, '/docs/a')).toBe(300);
+    expect(resolvePageTtl(undefined, undefined, undefined, '/docs/a')).toBe(0);
+  });
+
+  // 3-STATE: an inherit-eligible page (absent `revalidate`) resolves the raw
+  // per-path `pathRevalidate` object config against the ACTUAL path (first-match).
+  it('an inherit-eligible page (absent revalidate) resolves the per-path config; honors a per-path 0', () => {
+    expect(
+      resolvePageTtl(
+        [{ pattern: '/blog/:slug' }],
+        undefined,
+        { '/blog/private': 0, '/blog/*': 3600 },
+        '/blog/private',
+      ),
+    ).toBe(0);
+    expect(
+      resolvePageTtl(
+        [{ pattern: '/blog/:slug' }],
+        undefined,
+        { '/blog/private': 0, '/blog/*': 3600 },
+        '/blog/other',
+      ),
+    ).toBe(3600);
+  });
+  // An EXPLICIT `revalidate: 0` opt-out is authoritative and never consults pathRevalidate.
+  it('an explicit revalidate: 0 opt-out wins over any pathRevalidate rule', () => {
+    expect(
+      resolvePageTtl(
+        [{ pattern: '/secret', revalidate: 0 }],
+        undefined,
+        { '/secret': 3600 },
+        '/secret',
+      ),
+    ).toBe(0);
+  });
+  // A baked positive TTL is authoritative and never consults pathRevalidate.
+  it('a baked positive TTL wins over pathRevalidate', () => {
+    expect(
+      resolvePageTtl([{ pattern: '/p', revalidate: 120 }], undefined, { '/p': 3600 }, '/p'),
+    ).toBe(120);
+  });
+  // Inherit-eligible page with NO pathRevalidate → resolvePathTtl(undefined) → 0.
+  it('an inherit-eligible page with NO pathRevalidate resolves 0', () => {
+    expect(resolvePageTtl([{ pattern: '/x' }], undefined, undefined, '/x')).toBe(0);
+  });
+});
+
+describe('isBroadCatchAll', () => {
+  it('a named catch-all `:name{.+}` is broad (crosses segment boundaries)', () => {
+    expect(isBroadCatchAll('/:path{.+}')).toBe(true);
+    expect(isBroadCatchAll('/docs/:path{.+}')).toBe(true);
+  });
+  it('a `*` wildcard is broad', () => {
+    expect(isBroadCatchAll('*')).toBe(true);
+    expect(isBroadCatchAll('/docs/*')).toBe(true);
+  });
+  it('a single-segment param is NOT broad', () => {
+    expect(isBroadCatchAll('/blog/:slug')).toBe(false);
+  });
+  it('a literal is NOT broad', () => {
+    expect(isBroadCatchAll('/feed.xml')).toBe(false);
+    expect(isBroadCatchAll('/about')).toBe(false);
+  });
+});
+
+describe('isDottedPathIsrEligible', () => {
+  it('a dotted dynamic param VALUE under a single-segment page IS eligible', () => {
+    // `/blog/:slug` compiles to `^/blog/[^/]+$` and matches `/blog/release.v2` — the
+    // framework serves it as that page, so it gets ISR even though it has a dot.
+    expect(
+      isDottedPathIsrEligible(
+        [{ pattern: '/blog/:slug', revalidate: 60 }],
+        undefined,
+        undefined,
+        '/blog/release.v2',
+      ),
+    ).toBe(true);
+  });
+  it('a literal extension page with a positive TTL IS eligible', () => {
+    expect(
+      isDottedPathIsrEligible(
+        [{ pattern: '/feed.xml', revalidate: 60 }],
+        undefined,
+        undefined,
+        '/feed.xml',
+      ),
+    ).toBe(true);
+  });
+  it('a broad named catch-all matching a static asset is NOT eligible', () => {
+    // `/:path{.+}` matches everything, including genuine static assets like
+    // `/robots.txt` — it does NOT make a dotted path ISR page content.
+    expect(
+      isDottedPathIsrEligible(
+        [{ pattern: '/:path{.+}', revalidate: 3600 }],
+        undefined,
+        undefined,
+        '/robots.txt',
+      ),
+    ).toBe(false);
+  });
+  it('a `*` wildcard page matching a dotted asset is NOT eligible', () => {
+    expect(
+      isDottedPathIsrEligible(
+        [{ pattern: '/docs/*', revalidate: 3600 }],
+        undefined,
+        undefined,
+        '/docs/x.js',
+      ),
+    ).toBe(false);
+  });
+  it('a matching page with a zero/absent TTL is not eligible', () => {
+    expect(
+      isDottedPathIsrEligible([{ pattern: '/feed.xml' }], undefined, undefined, '/feed.xml'),
+    ).toBe(false);
+  });
+  it('falls through to the flat map when no page matches', () => {
+    expect(
+      isDottedPathIsrEligible(
+        [{ pattern: '/blog/:slug', revalidate: 120 }],
+        { '/feed.xml': 60 },
+        undefined,
+        '/feed.xml',
+      ),
+    ).toBe(true);
+  });
+  it('a broad catch-all key in the flat map is NOT eligible', () => {
+    expect(
+      isDottedPathIsrEligible(undefined, { '/:path{.+}': 3600 }, undefined, '/robots.txt'),
+    ).toBe(false);
+  });
+  it('a bare global-number revalidate declares no pattern → not eligible', () => {
+    expect(isDottedPathIsrEligible(undefined, 60, undefined, '/feed.xml')).toBe(false);
+  });
+  it('an unmatched path is not eligible', () => {
+    expect(
+      isDottedPathIsrEligible(
+        [{ pattern: '/feed.xml', revalidate: 60 }],
+        undefined,
+        undefined,
+        '/about',
+      ),
+    ).toBe(false);
+  });
+  // 3-STATE: an inherit-eligible LITERAL dotted page resolves the per-path config.
+  it('an inherit-eligible literal dotted page resolves the per-path config (positive → true, 0 → false)', () => {
+    expect(
+      isDottedPathIsrEligible(
+        [{ pattern: '/feed.xml' }],
+        undefined,
+        { '/feed.xml': 60 },
+        '/feed.xml',
+      ),
+    ).toBe(true);
+    expect(
+      isDottedPathIsrEligible(
+        [{ pattern: '/feed.xml' }],
+        undefined,
+        { '/feed.xml': 0 },
+        '/feed.xml',
+      ),
+    ).toBe(false);
+  });
+  // An inherit-eligible BROAD catch-all is never eligible even when pathRevalidate
+  // resolves > 0 — a catch-all also matches genuine static assets.
+  it('an inherit-eligible broad catch-all is never eligible even when pathRevalidate resolves > 0', () => {
+    expect(
+      isDottedPathIsrEligible(
+        [{ pattern: '/:path{.+}' }],
+        undefined,
+        { '/docs/x.txt': 3600 },
+        '/docs/x.txt',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('matchesLiteralPage', () => {
+  it('a LITERAL page pattern that exactly matches the target vouches for it', () => {
+    expect(matchesLiteralPage([{ pattern: '/catch', revalidate: 60 }], '/catch', undefined)).toBe(
+      true,
+    );
+  });
+  it('a catch-all page does NOT vouch for an arbitrary target', () => {
+    // `resolvePageTtl` would return 60 for `/graphql` here (the catch-all
+    // first-matches ANY path) — that is exactly the bypass this closes. A
+    // catch-all is not literal, so it must NOT positively identify the target.
+    expect(
+      matchesLiteralPage([{ pattern: '/:path{.+}', revalidate: 60 }], '/graphql', undefined),
+    ).toBe(false);
+  });
+  it('a single-segment param page does NOT vouch for an arbitrary target', () => {
+    expect(matchesLiteralPage([{ pattern: '/:slug', revalidate: 60 }], '/x', undefined)).toBe(
+      false,
+    );
+  });
+  it('a wildcard page does NOT vouch for an arbitrary target', () => {
+    expect(matchesLiteralPage([{ pattern: '/a/*', revalidate: 60 }], '/a/b', undefined)).toBe(
+      false,
+    );
+  });
+  it('a literal page with a zero/absent TTL does not vouch', () => {
+    expect(matchesLiteralPage([{ pattern: '/catch', revalidate: 0 }], '/catch', undefined)).toBe(
+      false,
+    );
+  });
+  it('a later literal does NOT vouch when an earlier catch-all is the first-match winner', () => {
+    // First-match precedence: the catch-all `/:path{.+}` is declared FIRST, so it
+    // is the winning route the framework's matchRoute resolves — it renders
+    // `/graphql` dynamically. The later literal `/graphql` must NOT bypass that
+    // and authorize shared-caching (pre-fix, the any-literal-match scan skipped
+    // the catch-all and returned true on the later literal → cross-user leak).
+    expect(
+      matchesLiteralPage(
+        [
+          { pattern: '/:path{.+}', revalidate: 60 },
+          { pattern: '/graphql', revalidate: 60 },
+        ],
+        '/graphql',
+        undefined,
+      ),
+    ).toBe(false);
+  });
+  it('a literal vouches when it is the first-match winner ahead of a catch-all', () => {
+    // Reverse ordering: the literal `/graphql` is declared FIRST, so it is the
+    // winning route → an exact declared literal page, which legitimately vouches.
+    expect(
+      matchesLiteralPage(
+        [
+          { pattern: '/graphql', revalidate: 60 },
+          { pattern: '/:path{.+}', revalidate: 60 },
+        ],
+        '/graphql',
+        undefined,
+      ),
+    ).toBe(true);
+  });
+  it('undefined pages never vouch', () => {
+    expect(matchesLiteralPage(undefined, '/catch', undefined)).toBe(false);
+  });
+  // 3-STATE: an inherit-eligible LITERAL page with a positive per-path rule vouches.
+  it('an inherit-eligible literal page with a positive per-path rule vouches', () => {
+    expect(matchesLiteralPage([{ pattern: '/catch' }], '/catch', { '/catch': 60 })).toBe(true);
+  });
+  // An inherit-eligible literal page whose per-path rule resolves 0 does NOT vouch.
+  it('an inherit-eligible literal page whose per-path rule is 0 does NOT vouch', () => {
+    expect(matchesLiteralPage([{ pattern: '/catch' }], '/catch', { '/catch': 0 })).toBe(false);
   });
 });
 
@@ -437,7 +749,7 @@ describe('writeIsrCache — variant cap', () => {
 
   function seedVariants(kv: Map<string, ArrayBuffer>, count: number): void {
     for (let i = 0; i < count; i++) {
-      const key = isrCacheKey('p', 'd', '/search', `https://h/search?q=${i}`);
+      const key = isrCacheKey('p', 'd', 'h', '/search', `https://h/search?q=${i}`);
       kv.set(key, new ArrayBuffer(4));
     }
   }
@@ -451,6 +763,7 @@ describe('writeIsrCache — variant cap', () => {
       env,
       'p',
       'd',
+      'h',
       '/search',
       new Response('<html>x</html>', { headers: { 'Content-Type': 'text/html' } }),
       60,
@@ -458,7 +771,7 @@ describe('writeIsrCache — variant cap', () => {
     );
 
     expect(kvStore.size).toBe(before + 1);
-    expect(kvStore.has(isrCacheKey('p', 'd', '/search', 'https://h/search?q=NEW'))).toBe(true);
+    expect(kvStore.has(isrCacheKey('p', 'd', 'h', '/search', 'https://h/search?q=NEW'))).toBe(true);
   });
 
   it('refuses to write a brand-new variant once the cap is reached', async () => {
@@ -470,6 +783,7 @@ describe('writeIsrCache — variant cap', () => {
       env,
       'p',
       'd',
+      'h',
       '/search',
       new Response('<html>x</html>', { headers: { 'Content-Type': 'text/html' } }),
       60,
@@ -478,7 +792,7 @@ describe('writeIsrCache — variant cap', () => {
 
     // No new key written; existing kv state is untouched.
     expect(kvStore.size).toBe(before);
-    expect(kvStore.has(isrCacheKey('p', 'd', '/search', 'https://h/search?q=OVERFLOW'))).toBe(
+    expect(kvStore.has(isrCacheKey('p', 'd', 'h', '/search', 'https://h/search?q=OVERFLOW'))).toBe(
       false,
     );
   });
@@ -488,7 +802,7 @@ describe('writeIsrCache — variant cap', () => {
     seedVariants(kvStore, MAX_ISR_VARIANTS_PER_PATH);
     // Pick one of the seeded URLs to update.
     const updateUrl = 'https://h/search?q=5';
-    const updateKey = isrCacheKey('p', 'd', '/search', updateUrl);
+    const updateKey = isrCacheKey('p', 'd', 'h', '/search', updateUrl);
     expect(kvStore.has(updateKey)).toBe(true);
     const before = kvStore.size;
     const beforeBytes = kvStore.get(updateKey)!.byteLength;
@@ -497,6 +811,7 @@ describe('writeIsrCache — variant cap', () => {
       env,
       'p',
       'd',
+      'h',
       '/search',
       new Response('<html>fresh</html>', { headers: { 'Content-Type': 'text/html' } }),
       60,
@@ -520,6 +835,7 @@ describe('writeIsrCache — variant cap', () => {
       env,
       'p',
       'd',
+      'h',
       '/search',
       new Response('<html>x</html>', { headers: { 'Content-Type': 'text/html' } }),
       60,
@@ -527,7 +843,7 @@ describe('writeIsrCache — variant cap', () => {
     );
 
     expect(kvStore.size).toBe(before + 1);
-    expect(kvStore.has(isrCacheKey('p', 'd', '/search'))).toBe(true);
+    expect(kvStore.has(isrCacheKey('p', 'd', 'h', '/search'))).toBe(true);
   });
 });
 

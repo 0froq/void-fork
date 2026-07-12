@@ -1,9 +1,11 @@
 import { isrCacheKey, isrCacheVariantPrefix, isrEdgeCacheUrl } from '@voidcloud/isr-shared';
+import type { IsrCacheMetadata } from '@voidcloud/isr-shared';
 import type { Env } from './env.ts';
-import { matchLiteralPattern } from './pattern.ts';
+import { matchSegmentPattern } from './pattern.ts';
 
 // Re-export so callers that import from `./isr` (tests, index.ts) still work.
 export { isrCacheKey };
+export type { IsrCacheMetadata };
 
 /**
  * Hard cap on rewrite-variant ISR entries per (project, deployment, pathname).
@@ -26,15 +28,6 @@ export type IsrCacheEntry = Readonly<{
   headers: Record<string, string>;
   createdAt: number;
   ttl: number;
-}>;
-
-export type IsrCacheMetadata = Readonly<{
-  /** HTTP status code */
-  s: number;
-  /** createdAt (ms) */
-  c: number;
-  /** TTL (seconds) */
-  t: number;
 }>;
 
 const PAGE_DATA_SCRIPT_RE =
@@ -87,10 +80,11 @@ export async function readIsrCache(
   env: Env,
   projectId: string,
   deploymentId: string,
+  host: string,
   pathname: string,
   originalUrl?: string | null,
 ): Promise<IsrCacheEntry | null> {
-  const key = isrCacheKey(projectId, deploymentId, pathname, originalUrl);
+  const key = isrCacheKey(projectId, deploymentId, host, pathname, originalUrl);
   const { value, metadata } = await env.ISR_CACHE.getWithMetadata<IsrCacheMetadata>(
     key,
     'arrayBuffer',
@@ -130,10 +124,11 @@ export async function deleteIsrCache(
   env: Env,
   projectId: string,
   deploymentId: string,
+  host: string,
   pathname: string,
   originalUrl?: string | null,
 ): Promise<void> {
-  const key = isrCacheKey(projectId, deploymentId, pathname, originalUrl);
+  const key = isrCacheKey(projectId, deploymentId, host, pathname, originalUrl);
   await env.ISR_CACHE.delete(key);
 }
 
@@ -147,12 +142,13 @@ export async function writeIsrCache(
   env: Env,
   projectId: string,
   deploymentId: string,
+  host: string,
   pathname: string,
   response: Response,
   ttl: number,
   originalUrl?: string | null,
 ): Promise<void> {
-  const key = isrCacheKey(projectId, deploymentId, pathname, originalUrl);
+  const key = isrCacheKey(projectId, deploymentId, host, pathname, originalUrl);
   // Clone synchronously so the cap-check `await` below cannot race with
   // callers (in `index.ts`) that consume `response.body` for the client
   // response after kicking us off via `ctx.waitUntil`. The clone has its
@@ -161,7 +157,10 @@ export async function writeIsrCache(
   const headers = serializeHeaders(responseClone);
   const status = responseClone.status;
 
-  if (originalUrl && !(await isVariantWriteAllowed(env, projectId, deploymentId, pathname, key))) {
+  if (
+    originalUrl &&
+    !(await isVariantWriteAllowed(env, projectId, deploymentId, host, pathname, key))
+  ) {
     return;
   }
 
@@ -191,10 +190,11 @@ async function isVariantWriteAllowed(
   env: Env,
   projectId: string,
   deploymentId: string,
+  host: string,
   pathname: string,
   key: string,
 ): Promise<boolean> {
-  const prefix = isrCacheVariantPrefix(projectId, deploymentId, pathname);
+  const prefix = isrCacheVariantPrefix(projectId, deploymentId, host, pathname);
   const listed = await env.ISR_CACHE.list({ prefix, limit: 1000 });
   if (listed.keys.length < MAX_ISR_VARIANTS_PER_PATH) {
     return true;
@@ -286,6 +286,16 @@ export function shouldBypassIsr(request: Request): boolean {
  * Resolve the ISR TTL for a given pathname.
  * Accepts the `revalidate` config from the routing entry (number, object, or undefined).
  * For object form, first matching pattern wins.
+ *
+ * Uses `matchSegmentPattern` (not literal) because the folded flat `revalidate`
+ * map also carries GENERATED page-pattern keys (`:slug`, `:path{.+}`) that must
+ * param-match. Bounded known limitation (plan 0077): a user-authored key whose
+ * segment STARTS with a literal colon (`/:batchGet`) is therefore matched as a
+ * param (`^/[^/]+$`) and over-matches unrelated single-segment paths. Near-zero
+ * reachability — a real colon-in-URL is MID-segment (`/v1/users:batchGet`) and
+ * stays literal; a leading-`:` segment is not a real URL shape and is
+ * undocumented (docs sanction literal paths + `*` globs only). Bounded by
+ * `shouldBypassIsr`.
  */
 export function resolvePathTtl(
   revalidate: number | Record<string, number> | undefined,
@@ -298,11 +308,153 @@ export function resolvePathTtl(
     return revalidate;
   }
   for (const [pattern, ttl] of Object.entries(revalidate)) {
-    if (matchLiteralPattern(pattern, pathname)) {
+    if (matchSegmentPattern(pattern, pathname)) {
       return ttl;
     }
   }
   return 0;
+}
+
+/**
+ * Effective ISR TTL for a `pages` entry that ALREADY matched `pathname`,
+ * decoding the 3-STATE table the framework's `collectPages` emits:
+ *   - a baked number is authoritative — `> 0` = ISR on, `0` = an EXPLICIT
+ *     opt-out (a per-page `export const revalidate = 0`, or a global-0 config);
+ *   - an ABSENT `revalidate` is INHERIT-eligible — resolve the RAW per-path
+ *     `pathRevalidate` OBJECT config against the ACTUAL path, so a per-path `0`
+ *     opt-out (or a wildcard / exact rule) that a dynamic page pattern straddles
+ *     is honored at the edge (build-time baking cannot — hence the split).
+ * Keep in sync with `collectPages` (`framework/.../isr-config.ts`) and the api
+ * prewarm mirror (`packages/api/src/routes/deploy.ts`).
+ */
+function matchedPageTtl(
+  page: { pattern: string; revalidate?: number },
+  pathRevalidate: Record<string, number> | undefined,
+  pathname: string,
+): number {
+  if (page.revalidate === undefined) {
+    return resolvePathTtl(pathRevalidate, pathname);
+  }
+  return page.revalidate > 0 ? page.revalidate : 0;
+}
+
+/**
+ * Route-aware ISR TTL resolution. Iterates `pages` in the framework's
+ * authoritative order (do NOT re-sort — it is already the order the worker's
+ * own matchRoute resolves in) and first-matches via `matchSegmentPattern`, so
+ * dispatch picks the SAME winning route the worker renders. The winner's TTL is
+ * authoritative via `matchedPageTtl` (0 when it opts out; an inherit-eligible
+ * winner resolves the per-path `pathRevalidate` object config). Only when NO
+ * page route matches do we fall back to the flat `revalidate` map (user
+ * void.json patterns). When `pages` is absent, behavior is identical to
+ * `resolvePathTtl`.
+ */
+export function resolvePageTtl(
+  pages: ReadonlyArray<{ pattern: string; revalidate?: number }> | undefined,
+  revalidate: number | Record<string, number> | undefined,
+  pathRevalidate: Record<string, number> | undefined,
+  pathname: string,
+): number {
+  if (pages && pages.length > 0) {
+    for (const page of pages) {
+      if (matchSegmentPattern(page.pattern, pathname)) {
+        return matchedPageTtl(page, pathRevalidate, pathname);
+      }
+    }
+    return resolvePathTtl(revalidate, pathname);
+  }
+  return resolvePathTtl(revalidate, pathname);
+}
+
+/**
+ * A pattern is LITERAL when it has no param (`:name`), regex (`{...}`), or
+ * wildcard (`*`) marker — so `matchSegmentPattern` matches ONLY the exact path,
+ * never an arbitrary one. Used by `matchesLiteralPage` (applied to the whole
+ * pattern).
+ */
+export function isLiteralPattern(pattern: string): boolean {
+  return !/[:{*]/.test(pattern);
+}
+
+/**
+ * True iff `target` EXACTLY matches a declared LITERAL ISR page (positive TTL).
+ * A literal page pattern matches exactly one path, so a match POSITIVELY
+ * identifies the fallback target as that specific author-declared ISR page.
+ * A catch-all (`/:path{.+}`) or param page (`/:slug`) is NOT literal and never
+ * vouches — it matches arbitrary paths, so it cannot certify an arbitrary
+ * fallback target as public page content.
+ */
+export function matchesLiteralPage(
+  pages: ReadonlyArray<{ pattern: string; revalidate?: number }> | undefined,
+  target: string,
+  pathRevalidate: Record<string, number> | undefined,
+): boolean {
+  if (!pages) {
+    return false;
+  }
+  for (const page of pages) {
+    if (matchSegmentPattern(page.pattern, target)) {
+      // First matching route WINS — mirror resolvePageTtl / the framework's
+      // matchRoute order (0077's invariant: never re-order, never skip a matching
+      // route). Authorize shared-caching of a fallback render only when that WINNING
+      // route is an exact literal page with a positive effective TTL; a catch-all/param
+      // winner means the framework renders this path dynamically, so it must NOT be
+      // cached. `matchedPageTtl` resolves an inherit-eligible literal page against the
+      // per-path config (a literal page maps to exactly one path — no straddle).
+      return isLiteralPattern(page.pattern) && matchedPageTtl(page, pathRevalidate, target) > 0;
+    }
+  }
+  return false;
+}
+
+/**
+ * A pattern is a BROAD catch-all when it crosses segment boundaries — a named
+ * catch-all `:name{.+}` (compiles to `.+`) or a `*` wildcard (compiles to `.*`).
+ * Such a pattern matches ANY path, including genuine static assets, so it cannot
+ * certify a dotted path as page ISR content. A single-segment param (`/blog/:slug`
+ * → `[^/]+`) or a literal (`/feed.xml`) is NOT broad. See `pattern.ts`'s
+ * catch-all syntax (`:[^/{}]+\{\.\+\}` and `*`).
+ */
+export function isBroadCatchAll(pattern: string): boolean {
+  return pattern.includes('*') || pattern.includes('{.+}');
+}
+
+/**
+ * A dotted request path is ISR page content (not a static asset) when it matches a
+ * declared page route that is NOT a broad catch-all: a literal (`/feed.xml`) or a
+ * single-segment param (`/blog/:slug`) that matches means the framework serves it
+ * as that page, so `/blog/release.v2` gets ISR even though it has a dot. A broad
+ * catch-all (`/:path{.+}`, `*`) matches everything including genuine static assets
+ * (`/robots.txt`), so it does NOT make a dotted path ISR content. Mirrors
+ * `resolvePageTtl`'s match order: pages first-match, then the flat map. A bare
+ * global-NUMBER `revalidate` declares no pattern, so dotted paths under it are NOT
+ * treated as ISR-eligible page content (documented narrow residual).
+ */
+export function isDottedPathIsrEligible(
+  pages: ReadonlyArray<{ pattern: string; revalidate?: number }> | undefined,
+  revalidate: number | Record<string, number> | undefined,
+  pathRevalidate: Record<string, number> | undefined,
+  pathname: string,
+): boolean {
+  if (pages && pages.length > 0) {
+    for (const page of pages) {
+      if (matchSegmentPattern(page.pattern, pathname)) {
+        // `matchedPageTtl` resolves an inherit-eligible page against the per-path
+        // config; a broad catch-all winner never certifies a dotted path as page
+        // content (it also matches genuine static assets like `/robots.txt`).
+        return matchedPageTtl(page, pathRevalidate, pathname) > 0 && !isBroadCatchAll(page.pattern);
+      }
+    }
+    // no page matched → fall through to the flat map (mirror resolvePageTtl)
+  }
+  if (revalidate && typeof revalidate === 'object') {
+    for (const [pattern, ttl] of Object.entries(revalidate)) {
+      if (matchSegmentPattern(pattern, pathname)) {
+        return ttl > 0 && !isBroadCatchAll(pattern);
+      }
+    }
+  }
+  return false;
 }
 
 export function normalizePageDataForJsonCache(raw: string): string | null {

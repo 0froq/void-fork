@@ -210,6 +210,23 @@ describe('applyHeaderRules', () => {
     expect(result.headers.get('Set-Cookie')).toBeNull();
     expect(result.headers.get('Cache-Control')).toBe('no-cache');
   });
+
+  it('treats a whole-segment `:name` header rule as a literal — does NOT over-match (regression)', () => {
+    // REGRESSION (3282937e): the shared matcher briefly anchored a whole-segment
+    // `:name` to a single-segment wildcard, so a user header rule `/:batchGet`
+    // applied its headers to EVERY single-segment path (`/foo`, `/about`, …).
+    // Header rules are user-authored and `:` must stay literal, so `/:batchGet`
+    // must match ONLY the literal `/:batchGet`, never `/foo`.
+    const rules: Array<HeaderRule> = [{ pattern: '/:batchGet', headers: [['X-Leak', 'yes']] }];
+    const unrelated = new Response('body');
+    // `/foo` must NOT receive the rule's headers (response returned unchanged).
+    const missed = applyHeaderRules(unrelated, '/foo', rules);
+    expect(missed).toBe(unrelated);
+    expect(missed.headers.get('X-Leak')).toBeNull();
+    // The literal path still matches.
+    const hit = applyHeaderRules(new Response('body'), '/:batchGet', rules);
+    expect(hit.headers.get('X-Leak')).toBe('yes');
+  });
 });
 
 describe('parseClearSiteData', () => {

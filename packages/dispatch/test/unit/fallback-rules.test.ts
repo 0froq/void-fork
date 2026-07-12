@@ -658,25 +658,31 @@ describe('fallbackRules rewrite — WfP/framework branch', () => {
     expect(new URL((workerFetch.mock.calls[1]![0] as Request).url).pathname).toBe('/index.html');
 
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
-    expect(kvStore.has('proj_1/isr/v2/dep_1/app/settings')).toBe(false);
+    // Shell fallbacks are served live, not ISR-cached: a dotted HTML target
+    // (`/index.html`) is indistinguishable here from a dynamic per-user endpoint,
+    // so NO ISR entry — base key or `#rw=` variant — is written (see
+    // `isFallbackTargetCacheable`). The shell is still SERVED (200 + body above).
     expect(
-      [...kvStore.keys()].some((key) => key.startsWith('proj_1/isr/v2/dep_1/app/settings#rw=')),
-    ).toBe(true);
+      [...kvStore.keys()].some((key) =>
+        key.startsWith('proj_1/isr/v3/dep_1/test.void.app/app/settings'),
+      ),
+    ).toBe(false);
 
     edgeCacheStore.clear();
-    const cached = await app.fetch(
+    // The shell is re-rendered live on every request — never a cache HIT.
+    const second = await app.fetch(
       new Request('https://test.void.app/app/settings'),
       env,
       createCtx(),
     );
 
-    expect(cached.status).toBe(200);
-    expect(cached.headers.get('x-isr-cache')).toBe('HIT');
-    expect(await cached.text()).toBe('<html>spa</html>');
-    expect(workerFetch).toHaveBeenCalledTimes(2);
+    expect(second.status).toBe(200);
+    expect(second.headers.get('x-isr-cache')).not.toBe('HIT');
+    expect(await second.text()).toBe('<html>spa</html>');
+    expect(workerFetch).toHaveBeenCalledTimes(4);
   });
 
-  it('keeps allowlisted query params distinct for fallback ISR variants', async () => {
+  it('serves the correct per-query shell live for fallback renders (no ISR variants cached)', async () => {
     const { env, workerFetch, kvStore } = createWorkerEnv({
       routing: {
         workerName: 'spa-worker',
@@ -718,11 +724,15 @@ describe('fallbackRules rewrite — WfP/framework branch', () => {
       '<html>a</html>',
     );
 
-    expect(workerFetch).toHaveBeenCalledTimes(4);
-    expect(kvStore.has('proj_1/isr/v2/dep_1/app/settings')).toBe(false);
-    const variantKeys = [...kvStore.keys()].filter((key) =>
-      key.startsWith('proj_1/isr/v2/dep_1/app/settings#rw='),
-    );
-    expect(variantKeys).toHaveLength(2);
+    // Shell fallbacks are served live, not ISR-cached (see
+    // `isFallbackTargetCacheable`): each send re-renders — no cache HIT saves a
+    // fetch (3 sends × 2 fetches = 6) — and NO ISR variant keys are written. The
+    // per-query bodies above still prove the allowlisted `q` reaches the render.
+    expect(workerFetch).toHaveBeenCalledTimes(6);
+    expect(
+      [...kvStore.keys()].some((key) =>
+        key.startsWith('proj_1/isr/v3/dep_1/test.void.app/app/settings'),
+      ),
+    ).toBe(false);
   });
 });
