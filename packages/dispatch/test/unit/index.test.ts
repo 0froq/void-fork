@@ -4855,6 +4855,88 @@ describe('static asset caching', () => {
     expect(workerFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('keys per-variant when the path has a queryAllowlist (dynamic extensioned route)', async () => {
+    // A worker-rendered image whose body depends on the query (e.g. a badge).
+    // With an allowlist, distinct allowlisted values must NOT collapse into one
+    // static-edge slot — otherwise the first render is served for every query.
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+      queryAllowlist: { '/badge.png': ['theme'] },
+    };
+    // A fresh Response per worker call — this route renders more than once, so a
+    // single shared Response body would be consumed by the first cache write.
+    const { env, workerFetch } = createEnv({
+      routing,
+      workerFetchImpl: () => Promise.resolve(new Response('img')),
+    });
+
+    const ctx1 = createCtx();
+    await app.fetch(new Request('https://test.void.app/badge.png?theme=light'), env, ctx1);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+    await Promise.all((ctx1.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Different allowlisted value → distinct key → the worker renders again.
+    const ctx2 = createCtx();
+    await app.fetch(new Request('https://test.void.app/badge.png?theme=dark'), env, ctx2);
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    await Promise.all((ctx2.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // The first variant is still cached (not clobbered) — re-request light → HIT.
+    const ctx3 = createCtx();
+    await app.fetch(new Request('https://test.void.app/badge.png?theme=light'), env, ctx3);
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+
+    // Two distinct edge entries, each carrying its allowlisted param + `_v`.
+    const keys = [...edgeCacheStore.keys()];
+    expect(keys.some((k) => k.includes('theme=light') && k.includes('_v=deploy-1'))).toBe(true);
+    expect(keys.some((k) => k.includes('theme=dark') && k.includes('_v=deploy-1'))).toBe(true);
+  });
+
+  it('drops non-allowlisted params from the key (still collapses on those)', async () => {
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+      queryAllowlist: { '/badge.png': ['theme'] },
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response('img') });
+
+    const ctx1 = createCtx();
+    await app.fetch(new Request('https://test.void.app/badge.png?theme=light&utm=a'), env, ctx1);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+    await Promise.all((ctx1.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Same allowlisted value, different NON-allowlisted param → same key → HIT.
+    const ctx2 = createCtx();
+    await app.fetch(new Request('https://test.void.app/badge.png?theme=light&utm=b'), env, ctx2);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a wildcard allowlist entry so static candidates cannot fan out', async () => {
+    // A broad `*` allowlist stays ISR-only (bounded there by the variant cap). The
+    // uncapped static-candidate cache must NOT honor it — otherwise a cache-buster
+    // `?theme=<random>` would fan out true static assets. Only an exact path opts in.
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+      queryAllowlist: { '*': ['theme'] },
+    };
+    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response('img') });
+
+    const ctx1 = createCtx();
+    await app.fetch(new Request('https://test.void.app/logo.png?theme=light'), env, ctx1);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+    await Promise.all((ctx1.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    // Different value under the `*` allowlist → still one collapsed slot → HIT.
+    const ctx2 = createCtx();
+    await app.fetch(new Request('https://test.void.app/logo.png?theme=dark'), env, ctx2);
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('skips cache for non-GET requests', async () => {
     const routing: RoutingEntry = {
       workerName: 'test-worker',

@@ -55,6 +55,25 @@ export function buildVariantOriginalUrl(
   return url.toString();
 }
 
+/**
+ * Keep only EXACT (wildcard-free) allowlist patterns. The uncapped
+ * static-candidate edge cache uses this so a broad `*` / prefix-wildcard entry —
+ * safe on the capped ISR variant path — cannot fan its params out across true
+ * static assets. Returns undefined when nothing exact remains, so the caller
+ * strips the query entirely (its pathname-only default).
+ */
+export function exactQueryAllowlist(
+  allowlist: QueryAllowlist | undefined,
+): QueryAllowlist | undefined {
+  if (!allowlist) {
+    return undefined;
+  }
+  const exact = Object.fromEntries(
+    Object.entries(allowlist).filter(([pattern]) => !pattern.includes('*')),
+  );
+  return Object.keys(exact).length > 0 ? exact : undefined;
+}
+
 function resolveAllowlist(allowlist: QueryAllowlist | undefined, pathname: string): Set<string> {
   if (!allowlist) {
     return new Set();

@@ -24,7 +24,11 @@ import { classifyDynamicRequestType, hasExtension } from './request-type.ts';
 import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules.ts';
 import { resolveStaticPath, resolveAssetContentType, safeDecodePathname } from './static.ts';
 import type { AssetConfig } from './static.ts';
-import { buildVariantOriginalUrl, type QueryAllowlist } from './variant-key.ts';
+import {
+  buildVariantOriginalUrl,
+  exactQueryAllowlist,
+  type QueryAllowlist,
+} from './variant-key.ts';
 import { DispatchTimeoutError, resolveTimeoutMs, withTimeout } from './with-timeout.ts';
 
 type RoutingEntry = Readonly<{
@@ -907,8 +911,25 @@ export default {
 
     let staticCacheKey: Request | undefined;
     if (isStaticCandidate) {
-      const cacheUrl = new URL(request.url);
-      cacheUrl.search = `?_v=${routing.version}`;
+      // Project allowlisted query params into the key so a dynamic extensioned
+      // route whose body depends on the query (e.g. an image/badge endpoint that
+      // declares `queryAllowlist`) caches per-variant instead of collapsing to the
+      // first render. Only EXACT (wildcard-free) allowlist patterns opt in: this
+      // static-candidate cache has no per-path variant cap (unlike ISR), so a broad
+      // `*` / prefix-wildcard entry here could let a cache-buster query fan out
+      // true static assets. `buildVariantOriginalUrl` drops the query entirely when
+      // no pattern matches, so a route with no exact match keeps its pathname-only
+      // key — unchanged behavior. The allowlist is authored against the user-facing
+      // path, so match on the original request pathname (a rewrite above may have
+      // reassigned `pathname` to a destination).
+      const cacheUrl = new URL(
+        buildVariantOriginalUrl(
+          request.url,
+          new URL(request.url).pathname,
+          exactQueryAllowlist(routing.queryAllowlist),
+        ),
+      );
+      cacheUrl.searchParams.set('_v', String(routing.version));
       staticCacheKey = new Request(cacheUrl.toString());
       const cached = await caches.default.match(staticCacheKey);
       if (cached) {

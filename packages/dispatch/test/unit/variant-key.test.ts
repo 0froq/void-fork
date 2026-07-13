@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { buildVariantOriginalUrl } from '../../src/variant-key.ts';
+import { buildVariantOriginalUrl, exactQueryAllowlist } from '../../src/variant-key.ts';
 
 /**
  * The variant key for ISR is derived from the original request URL on a
@@ -93,5 +93,30 @@ describe('buildVariantOriginalUrl — query normalization for ISR variant key', 
       allowlist,
     );
     expect(kept).toBe('https://h.example/:token?q=1');
+  });
+});
+
+describe('exactQueryAllowlist — wildcard-free entries only', () => {
+  it('keeps exact literal path entries', () => {
+    expect(exactQueryAllowlist({ '/badge.png': ['theme'] })).toEqual({
+      '/badge.png': ['theme'],
+    });
+  });
+
+  it('drops the global `*` catch-all and prefix wildcards', () => {
+    expect(exactQueryAllowlist({ '*': ['theme'] })).toBeUndefined();
+    expect(exactQueryAllowlist({ '/docs/*': ['q'] })).toBeUndefined();
+    expect(exactQueryAllowlist({ '*.png': ['w'] })).toBeUndefined();
+  });
+
+  it('keeps exact entries while dropping wildcard ones', () => {
+    expect(exactQueryAllowlist({ '/badge.png': ['theme'], '*': ['utm'] })).toEqual({
+      '/badge.png': ['theme'],
+    });
+  });
+
+  it('returns undefined for an absent or empty allowlist', () => {
+    expect(exactQueryAllowlist(undefined)).toBeUndefined();
+    expect(exactQueryAllowlist({})).toBeUndefined();
   });
 });
