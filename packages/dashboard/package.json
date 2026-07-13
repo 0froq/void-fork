@@ -27,7 +27,7 @@
     "@void/react": "link:../../framework/packages/react",
     "@voidcloud/api": "workspace:*",
     "tailwindcss": "^4.2.4",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.0",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "void": "link:../../framework/packages/void",
