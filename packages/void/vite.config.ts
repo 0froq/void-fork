@@ -130,6 +130,10 @@ export default defineConfig({
       'src/pages/serialize.ts',
       'src/pages/islands-plugin.ts',
       'src/cli/cli.ts',
+      // Standalone entry so `void deploy --backend cloudflare` can self-spawn it as an isolated
+      // child (via import.meta.url) to derive the env-insensitive schema facts (required-secret
+      // names + `.secret()` flags) under a scrubbed env — a stable dist filename for the spawn.
+      'src/cli/env-schema-probe.ts',
     ],
     format: 'esm',
     dts: true,

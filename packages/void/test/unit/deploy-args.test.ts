@@ -92,4 +92,93 @@ describe('parseDeployArgs', () => {
   it('throws for unexpected positional arguments', () => {
     expect(() => parseDeployArgs(['my-app'])).toThrow("deploy: Unexpected argument 'my-app'.");
   });
+
+  it('parses --backend cloudflare', () => {
+    const result = parseDeployArgs(['--backend', 'cloudflare']);
+    expect(result.backend).toBe('cloudflare');
+    expect(result.provision).toBeUndefined();
+  });
+
+  it('parses --backend cloudflare --provision', () => {
+    const result = parseDeployArgs(['--backend', 'cloudflare', '--provision']);
+    expect(result.backend).toBe('cloudflare');
+    expect(result.provision).toBe(true);
+  });
+
+  it('throws when --provision is used without --backend cloudflare', () => {
+    expect(() => parseDeployArgs(['--provision'])).toThrow(
+      'deploy: --provision requires --backend cloudflare.',
+    );
+  });
+
+  it('throws for an invalid --backend value', () => {
+    expect(() => parseDeployArgs(['--backend', 'node'])).toThrow(
+      "deploy: --backend must be 'cloudflare'.",
+    );
+  });
+
+  it('throws when --backend is repeated even if the final value is cloudflare', () => {
+    expect(() => parseDeployArgs(['--backend', 'node', '--backend', 'cloudflare'])).toThrow(
+      'deploy: --backend can only be specified once.',
+    );
+  });
+
+  it('throws for duplicate --backend cloudflare flags', () => {
+    expect(() => parseDeployArgs(['--backend', 'cloudflare', '--backend', 'cloudflare'])).toThrow(
+      'deploy: --backend can only be specified once.',
+    );
+  });
+
+  it('throws a backend-specific message when --backend has no value', () => {
+    expect(() => parseDeployArgs(['--backend'])).toThrow(
+      "deploy: --backend requires a value ('cloudflare').",
+    );
+  });
+
+  it('parses --backend cloudflare together with --skip-build (rejected later, in deploy)', () => {
+    const result = parseDeployArgs(['--backend', 'cloudflare', '--skip-build']);
+    expect(result.backend).toBe('cloudflare');
+    expect(result.skipBuild).toBe(true);
+  });
+
+  // The Cloudflare backend deploys to the user's own account via wrangler — it resolves no
+  // Void project and takes no static-site path, so these flags cannot be honored. Accepting
+  // and ignoring `--project` in particular looked like it chose a destination.
+  it('throws when --project is used with --backend cloudflare', () => {
+    expect(() => parseDeployArgs(['--backend', 'cloudflare', '--project', 'foo'])).toThrow(
+      /--project is not supported with --backend cloudflare/,
+    );
+  });
+
+  it('explains that no Void project is involved when rejecting --project', () => {
+    expect(() => parseDeployArgs(['--backend', 'cloudflare', '--project', 'foo'])).toThrow(
+      /no Void project is involved/,
+    );
+  });
+
+  it('throws when --dir is used with --backend cloudflare', () => {
+    expect(() => parseDeployArgs(['--backend', 'cloudflare', '--dir', 'dist'])).toThrow(
+      /--dir is not supported with --backend cloudflare/,
+    );
+  });
+
+  it('throws when --spa is used with --backend cloudflare', () => {
+    expect(() => parseDeployArgs(['--backend', 'cloudflare', '--spa'])).toThrow(
+      /--spa is not supported with --backend cloudflare/,
+    );
+  });
+
+  it('still parses --project, --dir and --spa without --backend (managed path unaffected)', () => {
+    const result = parseDeployArgs(['--project', 'foo', '--dir', 'dist', '--spa']);
+    expect(result.backend).toBeUndefined();
+    expect(result.projectSlug).toBe('foo');
+    expect(result.dir).toBe('dist');
+    expect(result.spa).toBe(true);
+  });
+
+  it('leaves backend undefined when no --backend is given (managed path)', () => {
+    const result = parseDeployArgs([]);
+    expect(result.backend).toBeUndefined();
+    expect(result.provision).toBeUndefined();
+  });
 });

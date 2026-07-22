@@ -1,4 +1,5 @@
 import { execSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   cpSync,
   existsSync,
@@ -9,7 +10,8 @@ import {
   rmSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { join, relative, resolve } from 'pathe';
+import { parse as parseJsoncConfig, type ParseError } from 'jsonc-parser';
+import { basename, dirname, join, relative, resolve } from 'pathe';
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
 const deployDriftCheckDir = join('.void', 'deploy-drift-check');
@@ -20,6 +22,7 @@ import {
   resolveAssetConfig,
 } from '../asset-routing.ts';
 import { findVoidAuthConfig } from '../auth/config.ts';
+import type { VoidAuthMigrationSchema } from '../auth/drizzle.ts';
 import { findEnvFile } from '../codegen/env-types.ts';
 import {
   readConfig,
@@ -33,7 +36,7 @@ import {
 import { scanJobsSync } from '../crons/scan.ts';
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { discoverSchema } from '../drizzle/discover.ts';
-import { collectRevalidate, collectPages } from '../isr-config.ts';
+import { collectRevalidate, collectPages, hasRevalidate } from '../isr-config.ts';
 import { voidWarn } from '../log.ts';
 import { collectMigrations } from '../migrations/collect.ts';
 import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
@@ -46,7 +49,11 @@ import {
   type DetectedFramework,
 } from '../plugin-inference.ts';
 import { collectPrerenderPaths, collectPrerenderPathsNode } from '../prerender.ts';
-import { readProjectPaths, resolveProjectPaths } from '../project-paths.ts';
+import {
+  assertNoRootSourceConventionConflicts,
+  readProjectPaths,
+  resolveProjectPaths,
+} from '../project-paths.ts';
 import { scanQueuesSync } from '../queues/scan.ts';
 import { scanRoutes } from '../router/scan.ts';
 import { scanWebSocketRoutesSync } from '../router/websocket.ts';
@@ -55,7 +62,7 @@ import {
   requiresSandboxPlatformImage,
   resolveSandboxConfig,
 } from '../sandbox/config.ts';
-import { mergeAndExpand, parseDotenvFile } from '../shared/dotenv.ts';
+import { mergeAndExpand, parseDotenvFile, scanWranglerDotenvKeys } from '../shared/dotenv.ts';
 import { resolveRemoteMode, stripInternalEnvKeys } from '../shared/env.ts';
 import { validateSsrEntry } from '../ssr/entry.ts';
 import { getApiUrl, getToken, getTokenSource } from './auth.ts';
@@ -72,11 +79,28 @@ import {
   formatStreamDeployError,
 } from './deploy-errors.ts';
 import { uploadAssetsToR2, type DirectR2PutItem } from './direct-r2-upload.ts';
+import type {
+  EnvSchemaProbeInput,
+  EnvSchemaProbeResult,
+  EnvSchemaValidateResult,
+} from './env-schema-probe.ts';
+import type { PlaintextVarWarning } from './env-validation.ts';
 import {
+  collectPlaintextVarWarningsFromVars,
+  deriveSelfHostEnvContextFromVars,
+  dischargeSelfHostEnvContext,
   fetchRemoteSecretNames,
   formatEnvReport,
   getDeployEnvDefaults,
+  readEmittedWorkerVars,
+  selfHostSchemaFailureMessage,
+  SelfHostEnvValidationError,
+  SelfHostFirstDeployError,
+  SelfHostSchemaError,
+  SelfHostSecretListError,
   validateProdEnv,
+  type EmittedWorkerVarsResult,
+  type SelfHostSchemaFacts,
 } from './env-validation.ts';
 import { collectGitDeployMetadata, type GitDeployMetadata } from './git-metadata.ts';
 import {
@@ -100,14 +124,56 @@ import {
 } from './package.ts';
 import {
   detectPreset,
+  hasBackendFiles,
   FRAMEWORK_PRESETS,
   formatProjectCommand,
   resolveProjectCommand,
+  resolveWranglerArgv,
   type StaticPreset,
   type FrameworkPreset,
 } from './preset.ts';
 import { readProjectConfig, writeProjectConfig, type ProjectConfig } from './project.ts';
 import { promptProjectSelection, promptProjectSetupAction } from './prompt.ts';
+// The provision module pulls in the whole-provision cross-process lock
+// (`proper-lockfile` → `signal-exit`), which patches `process.emit` /
+// `process.reallyExit` and installs exit handlers the moment it is imported. An
+// ordinary MANAGED `void deploy` never enters the Cloudflare-backend fork, so it
+// must not pay that side effect. Keep ONLY erasable `import type` at module scope
+// and load the runtime values with a DYNAMIC `import()` inside the fork
+// (`loadProvisionModule`), so importing this file (which `cli.ts` does for every
+// deploy) never evaluates the provision lifecycle.
+import type {
+  DesiredResourceSet,
+  ProvisionDriftEntry,
+  provisionCloudflareResources,
+} from './provision.ts';
+
+/** The provision module, loaded lazily inside the Cloudflare fork only. */
+type ProvisionModule = typeof import('./provision.ts');
+let loadedProvisionModule: ProvisionModule | undefined;
+
+/**
+ * Dynamically load the provision module (memoized). Called only from the async
+ * Cloudflare fork (`runCloudflareDeploy` / `computeDesiredCloudflareResources`)
+ * so a managed deploy never imports it — and thus never loads `proper-lockfile`.
+ */
+async function loadProvisionModule(): Promise<ProvisionModule> {
+  loadedProvisionModule ??= await import('./provision.ts');
+  return loadedProvisionModule;
+}
+
+/**
+ * The provision module after it has been loaded by the fork, for the SYNC helpers
+ * (`resolveDeployTransport` / `deployChildEnv` / `createDeployWranglerRunner`)
+ * that cannot await. They only ever run after {@link loadProvisionModule} has
+ * resolved inside {@link runCloudflareDeploy}, so this never throws in practice.
+ */
+function requireProvisionModule(): ProvisionModule {
+  if (!loadedProvisionModule) {
+    throw new Error('internal: provision module accessed before it was loaded');
+  }
+  return loadedProvisionModule;
+}
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
 import type {
   AssetConfig,
@@ -122,6 +188,9 @@ import {
   ensureWranglerCompat,
   resolveLiveBindingConfig,
   syncWranglerBindings,
+  writeProvisionedWranglerConfig,
+  bindingEntriesForField,
+  FRIENDLY_BINDING_NAMES,
   type LiveBindingConfig,
   type WranglerCompat,
 } from './wrangler.ts';
@@ -136,6 +205,8 @@ export type RunDeployOptions = {
   spa?: boolean;
   skipBuild?: boolean;
   debug?: boolean;
+  backend?: 'cloudflare';
+  provision?: boolean;
 };
 
 type DeployDoneEvent = Extract<DeployEvent, { event: 'done' }>;
@@ -382,11 +453,4113 @@ export function buildEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   return env;
 }
 
+/**
+ * Deploy-time env selectors that pin the WRONG worker/config out from under the
+ * top-level config this flow provisions + preflights. Scrubbed from every child env
+ * and fenced in the project dotenv (see below), on top of the provisioner's transport
+ * scrub/fence which owns the endpoint-redirect + `CLOUDFLARE_ENV` vars:
+ *   - `WRANGLER_CI_OVERRIDE_NAME` — wrangler 4.107 applies it AFTER config load
+ *     (`mergeSharedConfigArgs` → `getCIOverrideName()`), REPLACING the upload name, so a
+ *     bare `wrangler deploy` uploads a worker whose name the generated-config check never
+ *     validated.
+ *   - `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH` — the CF Vite plugin points the build at an
+ *     ALTERNATE wrangler config, flattening a different binding set into
+ *     `dist/ssr/wrangler.json`.
+ */
+const DEPLOY_CONFIG_OVERRIDE_ENV_VARS = [
+  'WRANGLER_CI_OVERRIDE_NAME',
+  'CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH',
+] as const;
+
+/**
+ * The dotenv files wrangler 4.107 reloads into `process.env` (`override: true`) for
+ * the orchestrator's `--env=` calls (`getDefaultEnvFiles("")`), so a repo dotenv here
+ * would resurrect `WRANGLER_CI_OVERRIDE_NAME` at the DEPLOY step after the child-env
+ * scrub removed it.
+ */
+const DEPLOY_WRANGLER_DOTENV_FILES = ['.env', '.env.local', '.env.', '.env..local'];
+
+/**
+ * The dotenv files Vite's `loadEnv(mode, …)` reads for a production `vite build`
+ * (`.env`, `.env.local`, `.env.production`, `.env.production.local`), where the CF Vite
+ * plugin picks up `CLOUDFLARE_ENV` / `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH` — a set
+ * DISJOINT from wrangler's `--env=` files, so it is fenced separately for the build.
+ */
+const DEPLOY_VITE_DOTENV_FILES = ['.env', '.env.local', '.env.production', '.env.production.local'];
+
+/**
+ * FAIL CLOSED when the AMBIENT env selects a non-top-level worker/config for the
+ * Cloudflare backend, which deploys the top-level environment of the canonical root
+ * config ONLY. `CLOUDFLARE_ENV` picks a named env block (different account/name/bindings);
+ * `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH` points the build at a different config. We refuse
+ * rather than silently deploy a target the drift-check / provision never reasoned about.
+ */
+function assertNoAmbientConfigOverride(): void {
+  const cloudflareEnv = process.env.CLOUDFLARE_ENV;
+  if (typeof cloudflareEnv === 'string' && cloudflareEnv.trim().length > 0) {
+    throw new Error(
+      'CLOUDFLARE_ENV is set. --backend cloudflare deploys the TOP-LEVEL environment of ' +
+        'your root wrangler config only (a named environment can carry a different account, ' +
+        'worker name, or binding set). Unset CLOUDFLARE_ENV and retry.',
+    );
+  }
+  const configPathOverride = process.env.CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH;
+  if (typeof configPathOverride === 'string' && configPathOverride.trim().length > 0) {
+    throw new Error(
+      'CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH is set. --backend cloudflare builds from the ' +
+        'canonical root wrangler config only. Unset it and retry.',
+    );
+  }
+}
+
+/**
+ * FAIL CLOSED when the project's dotenv files declare a deploy-time config-override
+ * selector. wrangler / Vite reload dotenv on every command, so a repo dotenv would
+ * reintroduce a scrubbed var AFTER the child-env scrub — reselecting the upload worker
+ * name (wrangler `--env=` files) or the build's wrangler config (Vite production files).
+ * The provisioner's transport fence ({@link assertNoTransportRedirectInProjectDotenv})
+ * owns `CLOUDFLARE_ENV` + the endpoint-redirect vars; this closes the deploy-specific
+ * name/config-path selectors it does not cover, across BOTH consumers' file sets.
+ * Exported for direct unit testing of the file-set + win32 case rule.
+ */
+export function assertNoConfigOverrideInProjectDotenv(
+  root: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  const caseInsensitive = platform === 'win32';
+  const declaresAny = (file: string, names: ReadonlyArray<string>): string | undefined => {
+    const rawKeys = scanWranglerDotenvKeys(join(root, file));
+    const keys = caseInsensitive ? new Set([...rawKeys].map((key) => key.toLowerCase())) : rawKeys;
+    return names.find((name) => keys.has(caseInsensitive ? name.toLowerCase() : name));
+  };
+  // WRANGLER_CI_OVERRIDE_NAME reaches the DEPLOY step via wrangler's `--env=` dotenv reload.
+  for (const file of DEPLOY_WRANGLER_DOTENV_FILES) {
+    if (declaresAny(file, ['WRANGLER_CI_OVERRIDE_NAME'])) {
+      throw new Error(
+        `the project file "${file}" sets WRANGLER_CI_OVERRIDE_NAME, which wrangler reloads on ` +
+          `every command and applies AFTER config load to REPLACE the deployed worker name — so ` +
+          `\`wrangler deploy\` would upload a worker whose name was never validated. Remove it from ` +
+          `"${file}" (set it in your shell/CI only if you truly need a CI name override).`,
+      );
+    }
+  }
+  // CLOUDFLARE_ENV / CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH reach the BUILD via Vite's
+  // production `loadEnv`, whose file set is disjoint from wrangler's `--env=` files.
+  for (const file of DEPLOY_VITE_DOTENV_FILES) {
+    const offender = declaresAny(file, ['CLOUDFLARE_ENV', 'CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH']);
+    if (offender) {
+      throw new Error(
+        `the project file "${file}" sets ${offender}, which the Cloudflare Vite plugin reads at ` +
+          `build time to select a named environment or an ALTERNATE wrangler config — flattening a ` +
+          `different binding set into dist/ssr/wrangler.json than this deploy provisioned. Remove ` +
+          `${offender} from "${file}".`,
+      );
+    }
+  }
+}
+
+/**
+ * Resolve + validate the ONE pinned transport for the whole deploy, and FAIL CLOSED
+ * on any ambient/dotenv redirect that would move the target out from under the pinned
+ * top-level config. Reuses the provisioner's resolver + dotenv fence so provision AND
+ * the deploy tail (build / whoami / migrate / deploy) share one source of truth.
+ * Returns the single resolved API base URL to pin into every child env.
+ */
+function resolveDeployTransport(root: string, rootConfig: Record<string, unknown>): string {
+  const provision = requireProvisionModule();
+  assertNoAmbientConfigOverride();
+  provision.assertNoTransportRedirectInProjectDotenv(root);
+  assertNoConfigOverrideInProjectDotenv(root);
+  return provision.resolvePinnedApiBaseUrl(
+    process.env,
+    readWranglerTopLevelString(rootConfig, 'compliance_region'),
+  );
+}
+
+/**
+ * Build a child env for an orchestrator-owned wrangler / build invocation. Reuses the
+ * provisioner's {@link provisionEnv} (scrubs the CF Access pair + EVERY transport
+ * selector incl. `CLOUDFLARE_ENV` + win32 case variants, pins ONE account + API base),
+ * then scrubs the deploy-specific config-override selectors on top.
+ *
+ * This is the env {@link createDeployWranglerRunner} spawns `whoami` / `d1 migrations apply`
+ * / `deploy` with, so it deliberately KEEPS the wrangler-auth credentials — only the
+ * untrusted-code children layer {@link scrubWranglerAuthCredentials} on top. Exported so a
+ * test can assert that directly.
+ */
+export function deployChildEnv(accountId: string, apiBaseUrl: string): NodeJS.ProcessEnv {
+  const provision = requireProvisionModule();
+  const env = provision.provisionEnv({ accountId, apiBaseUrl });
+  for (const name of DEPLOY_CONFIG_OVERRIDE_ENV_VARS) {
+    provision.deleteEnvVarCaseAware(env, name);
+  }
+  // Pin WRANGLER_LOG=log for the whole deploy so wrangler's `d1 migrations list` sentinels
+  // ('No migrations to apply!' / 'Migrations to be applied:'), emitted at logger level
+  // `log`, are NEVER suppressed by an ambient WRANGLER_LOG=none|error|warn|info — otherwise
+  // a declined/partial apply prints no marker and the pending-check would pass open. The
+  // canonical spelling is scrubbed case-aware FIRST so no mixed-case ambient value shadows
+  // the pin on win32; `log` is wrangler's own default level, so normal output is unchanged.
+  provision.deleteEnvVarCaseAware(env, 'WRANGLER_LOG');
+  env.WRANGLER_LOG = 'log';
+  return env;
+}
+
+/** The id-bearing binding fields whose identity must survive the build unchanged. */
+const DEPLOY_BINDING_IDENTITY_FIELDS: Record<
+  ProvisionDriftEntry['kind'],
+  { field: string; idField: string }
+> = {
+  d1: { field: 'd1_databases', idField: 'database_id' },
+  kv: { field: 'kv_namespaces', idField: 'id' },
+  r2: { field: 'r2_buckets', idField: 'bucket_name' },
+  hyperdrive: { field: 'hyperdrive', idField: 'id' },
+};
+
+/** Every id-bearing binding in the desired set, as `{ kind, binding }` pairs. */
+function desiredIdentityBindings(
+  desired: DesiredResourceSet,
+): Array<{ kind: ProvisionDriftEntry['kind']; binding: string }> {
+  const out: Array<{ kind: ProvisionDriftEntry['kind']; binding: string }> = [];
+  if (desired.d1) {
+    out.push({ kind: 'd1', binding: desired.d1.binding });
+  }
+  for (const kv of desired.kvNamespaces) {
+    out.push({ kind: 'kv', binding: kv.binding });
+  }
+  if (desired.r2) {
+    out.push({ kind: 'r2', binding: desired.r2.binding });
+  }
+  if (desired.hyperdrive) {
+    out.push({ kind: 'hyperdrive', binding: desired.hyperdrive.binding });
+  }
+  return out;
+}
+
+/**
+ * A pin of every desired id-bearing binding's IDENTITY, keyed `<field>:<binding>` (the config
+ * section joined to the binding — both fixed/identifier-shaped, so the pair never collides),
+ * captured from the root config AFTER provision/drift resolves every real id and BEFORE the
+ * untrusted `vite build` runs. The remote-migrate assert and the emitted-config check both
+ * compare against THIS map, so the id defense is symmetric with the pinned `account_id` — see
+ * {@link snapshotBindingIdentities}.
+ */
+export type BindingIdentitySnapshot = Map<string, string>;
+
+/**
+ * The snapshot/lookup key for one binding identity. `field` is one of a fixed set of wrangler
+ * config sections (`d1_databases` / `kv_namespaces` / `r2_buckets` / `hyperdrive`) and `binding`
+ * is a wrangler binding name (an identifier — no `:`), so the joined key is collision-free.
+ */
+function bindingIdentityKey(field: string, binding: string): string {
+  return `${field}:${binding}`;
+}
+
+/**
+ * Enumerate EVERY id-bearing binding DECLARED in `config` across the four id-bearing sections
+ * (`d1_databases` / `kv_namespaces` / `r2_buckets` / `hyperdrive`), as `{ field, binding, id }`.
+ * `id` is `undefined` when the entry omits it or leaves it empty (never pinned, never asserted —
+ * the same "absent or empty → undefined" collapse as {@link readStoredResourceName}). Reads each
+ * entry on its OWN terms (never a first-match re-scan) so a duplicated / appended entry is seen as
+ * itself. Section + id-field names come from {@link DEPLOY_BINDING_IDENTITY_FIELDS} — no per-kind
+ * branching. Unlike {@link desiredIdentityBindings} this is NOT restricted to the desired set: it
+ * captures a user's hand-declared extra binding too, which is exactly what lets the completeness
+ * check tell a pre-existing binding apart from one the build injected.
+ */
+function collectConfigBindingIdentities(
+  config: Record<string, unknown>,
+): Array<{ field: string; binding: string; id: string | undefined }> {
+  const out: Array<{ field: string; binding: string; id: string | undefined }> = [];
+  for (const { field, idField } of Object.values(DEPLOY_BINDING_IDENTITY_FIELDS)) {
+    const list = config[field];
+    if (!Array.isArray(list)) {
+      continue;
+    }
+    for (const entry of list) {
+      const binding = readD1EntryString(entry, 'binding');
+      if (binding === undefined) {
+        continue;
+      }
+      out.push({ field, binding, id: readD1EntryString(entry, idField) });
+    }
+  }
+  return out;
+}
+
+/**
+ * Snapshot the real, id-bearing identity of EVERY binding declared in the root `config` into an
+ * in-memory map — the id defense's ground truth, mirroring the pinned in-memory `accountId`.
+ *
+ * Taken AFTER provision (which writes each real id into the root config via
+ * `wrangler <res> create --update-config`) and the `name`/`account_id` reconcile, and BEFORE
+ * the build. `vite build` runs untrusted project code with its Cloudflare credentials scrubbed,
+ * so a compromised build dependency can only edit FILES — it could rewrite
+ * `wrangler.jsonc`'s `d1_databases[<binding>].database_id` (keeping the binding + database_name)
+ * to redirect the privileged remote D1 migrate or the deploy to a DIFFERENT same-account
+ * resource, OR ADD a wholly new id-bearing binding (`EXTRA_DB`/`EXTRA_KV`/…) that the CF plugin
+ * would then merge verbatim into `dist/ssr/wrangler.json`. Snapshotting EVERY declared id here —
+ * not only the desired ones — and asserting the post-build config + emitted artifact carry
+ * exactly this set closes both gaps for D1/KV/R2/Hyperdrive alike. A binding whose id is absent
+ * post-drift (which the drift check already rejects for desired bindings) is simply not pinned —
+ * never asserted.
+ */
+export function snapshotBindingIdentities(
+  config: Record<string, unknown>,
+): BindingIdentitySnapshot {
+  const snapshot: BindingIdentitySnapshot = new Map();
+  for (const { field, binding, id } of collectConfigBindingIdentities(config)) {
+    if (id !== undefined) {
+      snapshot.set(bindingIdentityKey(field, binding), id);
+    }
+  }
+  return snapshot;
+}
+
+/**
+ * Resource fields Void's OWN build legitimately emits into `dist/ssr/wrangler.json` — either
+ * merged by `mergeBindings` (index.ts) or default-filled by the wrangler normalizer — so an entry
+ * the artifact declares in one of THESE is NOT an injection and must not be asserted against the
+ * pre-build root. Audited against `mergeBindings` (index.ts) + 13 real playground
+ * `dist/ssr/wrangler.json` artifacts: the only {@link FRIENDLY_BINDING_NAMES} fields ever emitted
+ * non-empty are these. The four id-bearing fields are excluded here because the id-pin
+ * ({@link DEPLOY_BINDING_IDENTITY_FIELDS}) already pins them precisely.
+ */
+export const DEPLOY_PASSTHROUGH_EXCLUDE_FIELDS: ReadonlySet<string> = new Set<string>([
+  // id-pinned elsewhere (DEPLOY_BINDING_IDENTITY_FIELDS)
+  'd1_databases',
+  'kv_namespaces',
+  'r2_buckets',
+  'hyperdrive',
+  // Void-emitted / merged by mergeBindings
+  'ai',
+  'durable_objects',
+  'assets',
+  'vars',
+  // bundled content / worker self-metadata — no external-resource grant, and worker code is
+  // already fully controlled by a malicious build, so pinning these adds nothing
+  'data_blobs',
+  'text_blobs',
+  'wasm_modules',
+  'version_metadata',
+]);
+
+/**
+ * The pass-through assert-set: every binding field wrangler knows about
+ * ({@link FRIENDLY_BINDING_NAMES}, Void's authoritative transcription of wrangler's binding
+ * registry) that Void does NOT itself emit. An entry the EMITTED artifact declares in one of
+ * these is either a verbatim pass-through of the user's OWN root config (captured in the pre-build
+ * snapshot) or a build-time INJECTION — the latter would grant the deployed worker a same-account
+ * capability the source never asked for (a `services` binding to another worker, a
+ * `secrets_store_secrets` handle, a `dispatch_namespaces` entry, an `unsafe` binding of an
+ * arbitrary type, …), which the CF plugin passes through into the emitted config and the
+ * credentialed `wrangler deploy` then binds.
+ *
+ * Complete-by-construction against the known registry: it auto-covers every capability field
+ * (browser/images/stream/media/websearch/unsafe included) and any FUTURE field added to the
+ * registry fails CLOSED — a new registry field is asserted until explicitly excluded here. Fields
+ * wrangler does not yet know about are absent from the registry and still fail OPEN — the same
+ * residual the id-pin has, so a future resource field can never false-positive a legitimate build.
+ */
+export const DEPLOY_PASSTHROUGH_ASSERT_FIELDS: ReadonlyArray<string> = Object.keys(
+  FRIENDLY_BINDING_NAMES,
+).filter((field) => !DEPLOY_PASSTHROUGH_EXCLUDE_FIELDS.has(field));
+
+/**
+ * Fields the CF plugin passes through VERBATIM that the per-binding ENTRY pin cannot cover, so
+ * each is compared WHOLE against the raw pre-build root value instead:
+ *   - `unsafe` — is in {@link DEPLOY_PASSTHROUGH_ASSERT_FIELDS} (so it stays in the drift
+ *     invariant) but its `.metadata`/`.capnp` are never entry-iterated, and wrangler applies
+ *     `unsafe.metadata` LAST at upload, OVERWRITING the whole uploaded bindings array — so an
+ *     entry-level pin is blind to it. Routed OUT of the entry loop into the whole-object pin.
+ *   - `tail_consumers` / `streaming_tail_consumers` — are NOT "bindings" (absent from
+ *     {@link FRIENDLY_BINDING_NAMES}), so the assert-set structurally can't see them, yet wrangler
+ *     uploads them and they forward every log/request to the named worker (exfil).
+ *   - `routes` / `route` / `workers_dev` / `preview_urls` — the worker's TRAFFIC attachment. A
+ *     build that injects a `routes`/`route` entry attaches the deployed worker to a production
+ *     hostname/path the account controls (traffic interception), and flipping `workers_dev` /
+ *     `preview_urls` changes its public exposure. None is a "binding" either, so the assert-set
+ *     can't see them, yet wrangler uploads them.
+ * Void's own build emits NONE of them: a clean `vite build` (root declaring none) leaves every one
+ * ABSENT from the emitted artifact (verified against a real build), so an emptiness check
+ * ({@link isEmptyPassthroughValue}) keeps the normalizer's default-fill from false-positiving.
+ */
+export const DEPLOY_WHOLE_OBJECT_PINNED_FIELDS: ReadonlyArray<string> = [
+  'unsafe',
+  'tail_consumers',
+  'streaming_tail_consumers',
+  'routes',
+  'route',
+  'workers_dev',
+  'preview_urls',
+];
+
+/**
+ * Fields whose RAW pre-build root value {@link snapshotPassthroughRawFields} captures for
+ * {@link verifyGeneratedDeployConfig}'s whole-object + targeted checks: the
+ * {@link DEPLOY_WHOLE_OBJECT_PINNED_FIELDS} plus `durable_objects` (external-DO check), `ai`
+ * (binding pin), and `migrations` (destructive-DO-migration check). The last three are Void-emitted
+ * (excluded from the assert-set) yet still need a pin because a build can add an EXTERNAL DO handle
+ * (`script_name`), a rewritten/removed `ai` binding, or a DESTRUCTIVE Durable Object migration.
+ */
+const DEPLOY_RAW_SNAPSHOT_FIELDS: ReadonlyArray<string> = [
+  ...DEPLOY_WHOLE_OBJECT_PINNED_FIELDS,
+  'durable_objects',
+  'ai',
+  'migrations',
+];
+
+/** Void's own injected Workers AI binding shape (`mergeBindings` in index.ts). */
+const VOID_EMITTED_AI_BINDING = { binding: 'AI' };
+
+/**
+ * Sub-fields on a `durable_objects` binding that make it target ANOTHER worker's Durable Objects.
+ * `script_name` is the one wrangler binds a cross-script DO through; `environment` narrows a
+ * cross-script binding to a named environment — either marks a binding Void's own build never
+ * emits (its DOs are always LOCAL `{name, class_name}`).
+ */
+const DURABLE_OBJECT_EXTERNAL_FIELDS = ['script_name', 'environment'];
+
+/**
+ * Keys on a wrangler `migrations` entry that DELETE or MOVE existing Durable Object classes (and
+ * their stored data): `deleted_classes` drops them, `renamed_classes` renames them, and the two
+ * `transferred_classes*` keys move them from another script. Void's own emitted migrations only
+ * ever carry the CREATION keys (`new_classes` / `new_sqlite_classes`), never one of these — so an
+ * emitted entry carrying one is a build injection that `wrangler deploy` would run against
+ * production Durable Object data.
+ */
+const DESTRUCTIVE_MIGRATION_KEYS = [
+  'deleted_classes',
+  'renamed_classes',
+  'transferred_classes',
+  'transferred_classes_from_script',
+];
+
+/**
+ * A pin of every pass-through binding's ENTRY per {@link DEPLOY_PASSTHROUGH_ASSERT_FIELDS} field —
+ * field → (bindingName → the root entry object) — captured from the root config at the SAME
+ * pre-build point as {@link snapshotBindingIdentities} (after provision/drift resolves ids, before
+ * the untrusted build). Lets a user's LEGITIMATELY hand-declared pass-through binding (e.g. a
+ * `services` entry present before the build) survive, while an entry the build ADDED — absent from
+ * this pin — OR one whose TARGET the build rewrote (same name, different service/namespace/type)
+ * fails closed at {@link verifyGeneratedDeployConfig}. Entries come from each field's wrangler
+ * shape via {@link bindingEntriesForField} (the SAME shapes the build's uniqueness check uses), so
+ * `send_email` / `ratelimits` key on `.name` and `logfwdr` on its nested `.bindings[].name`. A
+ * present field whose shape the strict reader cannot parse is recorded as an EMPTY inner map, so
+ * any emitted entry in it fails closed on the symmetric read.
+ */
+export function snapshotPassthroughIdentities(
+  config: Record<string, unknown>,
+): Map<string, Map<string, Record<string, unknown>>> {
+  const snapshot = new Map<string, Map<string, Record<string, unknown>>>();
+  for (const field of DEPLOY_PASSTHROUGH_ASSERT_FIELDS) {
+    if (config[field] === undefined) {
+      continue;
+    }
+    const entries = new Map<string, Record<string, unknown>>();
+    try {
+      for (const { name, entry } of bindingEntriesForField(field, config[field])) {
+        entries.set(name, entry);
+      }
+    } catch {
+      // A malformed field records an EMPTY pin, so any emitted entry in it fails closed below.
+      entries.clear();
+    }
+    snapshot.set(field, entries);
+  }
+  return snapshot;
+}
+
+/**
+ * Companion of {@link snapshotPassthroughIdentities} for the fields the per-binding ENTRY pin
+ * cannot cover ({@link DEPLOY_RAW_SNAPSHOT_FIELDS}): capture the RAW pre-build root value for each
+ * of `unsafe` / `tail_consumers` / `streaming_tail_consumers` (whole-object-pinned),
+ * `durable_objects` (external-DO check), and `ai` (binding pin). Taken at the SAME pre-build point
+ * as the other snapshots, so a build that INJECTS or REWRITES one of these into the emitted
+ * artifact is caught at {@link verifyGeneratedDeployConfig}, while a user's own hand-declared value
+ * (present here, unchanged) passes.
+ */
+export function snapshotPassthroughRawFields(
+  config: Record<string, unknown>,
+): Map<string, unknown> {
+  const snapshot = new Map<string, unknown>();
+  for (const field of DEPLOY_RAW_SNAPSHOT_FIELDS) {
+    snapshot.set(field, config[field]);
+  }
+  return snapshot;
+}
+
+/**
+ * Reconstruct the exact `containers` set Void's build emits into `dist/ssr/wrangler.json`, computed
+ * PRE-BUILD from the SAME inputs `mergeBindings` (index.ts) uses so a legitimate build's emitted
+ * entry deepEquals one reconstructed here:
+ *   1. every root-declared container passes through VERBATIM (mergeBindings spreads
+ *      `resolved.containers` unchanged), and
+ *   2. PLUS — only when the source needs the sandbox (`needsSandbox`, the SAME
+ *      `isSandboxEnabled(config) || inferProjectBindings(...).needsSandbox` signal index.ts gates
+ *      emission on) AND no root-declared container already declares the sandbox class — the single
+ *      Void sandbox container, built field-for-field from {@link resolveSandboxConfig} (the SAME
+ *      pure function the build calls, so the reconstructed entry is byte-identical to the emitted
+ *      one, absent optionals omitted).
+ * A bare `wrangler deploy` PROVISIONS a container application from this array (billable, and it runs
+ * the image's code), so pinning it lets {@link verifyGeneratedDeployConfig} reject a container the
+ * build injected, dropped, or retargeted.
+ */
+export function reconstructExpectedContainers(
+  config: VoidConfig,
+  root: string,
+  rootConfig: Record<string, unknown>,
+  needsSandbox: boolean,
+): Array<Record<string, unknown>> {
+  const rootContainers: Array<Record<string, unknown>> = Array.isArray(rootConfig.containers)
+    ? (rootConfig.containers as Array<Record<string, unknown>>)
+    : [];
+  const expected: Array<Record<string, unknown>> = [...rootContainers];
+  if (needsSandbox) {
+    const sandbox = resolveSandboxConfig(config, root);
+    const alreadyDeclared = rootContainers.some(
+      (container) => readD1EntryString(container, 'class_name') === sandbox.className,
+    );
+    if (!alreadyDeclared) {
+      expected.push({
+        name: sandbox.containerName,
+        class_name: sandbox.className,
+        image: sandbox.image,
+        ...(sandbox.imageBuildContext && { image_build_context: sandbox.imageBuildContext }),
+        ...(sandbox.instanceType && { instance_type: sandbox.instanceType }),
+        ...(sandbox.maxInstances != null && { max_instances: sandbox.maxInstances }),
+      });
+    }
+  }
+  return expected;
+}
+
+/**
+ * Deterministic sha256 over the wrangler uploader BUNDLE the credentialed deploy executes — the
+ * resolved `wrangler-dist/cli.js` PLUS every sibling file in its directory. `cli.js` loads sibling
+ * chunks from its own `__dirname` (the proxy workers, the experimental-config module), so the
+ * whole directory is the trust surface, not just the entry file. Content hash of the bytes, NOT
+ * mtime. Resolves the SAME entry {@link createDeployWranglerRunner} spawns (via
+ * {@link resolveWranglerArgv}, whose launcher's LAST argv element is the JS entry). Returns
+ * `undefined` when the entry cannot be resolved or a file cannot be read, so the caller FAILS
+ * CLOSED — it never deploys a binary it could not verify. The resolver is injectable for tests.
+ */
+export function hashWranglerUploader(
+  root: string,
+  resolveArgv: (root: string) => Array<string> = resolveWranglerArgv,
+): string | undefined {
+  let entry: string | undefined;
+  try {
+    const argv = resolveArgv(root);
+    entry = argv[argv.length - 1];
+  } catch {
+    return undefined;
+  }
+  if (typeof entry !== 'string' || entry.length === 0 || !existsSync(entry)) {
+    return undefined;
+  }
+  return hashDirectoryContents(dirname(entry));
+}
+
+/**
+ * sha256 over every file under `dir`, walked in a STABLE (name-sorted, depth-first) order with
+ * each file's relative path folded into the digest, so the hash depends only on the directory's
+ * contents — never on filesystem enumeration order. Returns `undefined` on any read error.
+ */
+function hashDirectoryContents(dir: string): string | undefined {
+  try {
+    const hash = createHash('sha256');
+    const walk = (rel: string): void => {
+      const entries = readdirSync(join(dir, rel), { withFileTypes: true }).sort((a, b) =>
+        a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+      );
+      for (const entry of entries) {
+        const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          walk(childRel);
+        } else {
+          hash.update(childRel);
+          hash.update('\0');
+          hash.update(readFileSync(join(dir, childRel)));
+          hash.update('\0');
+        }
+      }
+    };
+    walk('');
+    return hash.digest('hex');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Assert the wrangler uploader bundle was NOT modified between the pre-build snapshot and now.
+ * A legitimate `vite build` never touches `node_modules/wrangler`, so the hash is stable across
+ * the build. A build that overwrote the uploader — to run attacker code WITH the Cloudflare token
+ * at the post-build remote migrate / deploy — changes it, and an unresolvable/unreadable binary
+ * (either snapshot `undefined`) is a binary that cannot be verified: both FAIL CLOSED.
+ */
+export function assertWranglerUploaderUnchanged(
+  before: string | undefined,
+  after: string | undefined,
+): { ok: boolean; reason?: string } {
+  if (before === undefined || after === undefined) {
+    return {
+      ok: false,
+      reason: `could not resolve or hash the wrangler uploader to verify it across the build — refusing to run a deploy binary that cannot be verified.`,
+    };
+  }
+  if (before !== after) {
+    return {
+      ok: false,
+      reason: `the build modified the wrangler uploader (its bundle hash changed across the build) — refusing to run it with your Cloudflare credentials.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * True when a resource field's emitted value carries NO capability: `undefined`/`null`, an empty
+ * array, an empty object, or a `{ bindings: [] }`. A clean `vite build` (root declaring none of
+ * the whole-object-pinned fields) emits `unsafe` / `tail_consumers` / `streaming_tail_consumers`
+ * ABSENT (verified against a real build); this also absorbs any normalizer default-fill
+ * (`[]` / `{}` / `{ bindings: [] }`) so the whole-object pin never false-positives on an empty
+ * shape while still catching a value that actually grants a capability.
+ */
+function isEmptyPassthroughValue(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  if (typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>);
+    if (keys.length === 0) {
+      return true;
+    }
+    if (keys.length === 1 && keys[0] === 'bindings') {
+      const bindings = (value as Record<string, unknown>).bindings;
+      return Array.isArray(bindings) && bindings.length === 0;
+    }
+  }
+  return false;
+}
+
+/**
+ * Reject an emitted `durable_objects` binding that targets ANOTHER worker (carrying a
+ * {@link DURABLE_OBJECT_EXTERNAL_FIELDS} sub-field) unless the pre-build root declared the SAME
+ * binding byte-for-byte. Void's own build only ever emits LOCAL DO bindings (`{name, class_name}`;
+ * index.ts), so an external DO in the artifact is a build injection — a handle to a same-account
+ * worker's Durable Objects the source never asked for. Emitted LOCAL DOs (no cross-script field)
+ * always pass. A malformed emitted `durable_objects` fails closed (Void never emits one).
+ */
+function verifyNoInjectedExternalDurableObject(
+  emitted: unknown,
+  root: unknown,
+): { ok: boolean; reason?: string } {
+  let emittedEntries: Array<{ name: string; entry: Record<string, unknown> }>;
+  try {
+    emittedEntries = bindingEntriesForField('durable_objects', emitted);
+  } catch {
+    return {
+      ok: false,
+      reason: `generated config declares a malformed durable_objects binding — refusing to deploy a binding set that cannot be verified.`,
+    };
+  }
+  const rootByName = new Map<string, Record<string, unknown>>();
+  try {
+    for (const { name, entry } of bindingEntriesForField('durable_objects', root)) {
+      rootByName.set(name, entry);
+    }
+  } catch {
+    // A malformed root records no pins, so any emitted EXTERNAL DO fails closed below.
+    rootByName.clear();
+  }
+  for (const { name, entry } of emittedEntries) {
+    if (!DURABLE_OBJECT_EXTERNAL_FIELDS.some((key) => entry[key] !== undefined)) {
+      continue;
+    }
+    const rootEntry = rootByName.get(name);
+    if (rootEntry === undefined || !deepEqual(entry, rootEntry)) {
+      return {
+        ok: false,
+        reason: `generated config declares a durable_objects binding ${JSON.stringify(name)} bound to another worker's script that was not present before the build — refusing to deploy an external Durable Object the build injected.`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Reject an emitted `migrations` entry that carries a {@link DESTRUCTIVE_MIGRATION_KEYS} key unless
+ * the pre-build root declared the SAME entry byte-for-byte. Void's build only ever emits migrations
+ * with CREATION keys (its own DOs), so a destructive entry in the artifact is a build injection —
+ * `wrangler deploy` runs the emitted migrations and would DELETE or MOVE production Durable Object
+ * data. Emitted entries with only creation keys are NEVER inspected (Void's own migrations pass
+ * untouched), and a user's own root-declared destructive migration (e.g. a legit rename) is pinned
+ * and passes. This is the destructive-injection guard only — deriving Void's complete desired
+ * migration set (full array pinning) is out of scope.
+ */
+function verifyNoInjectedDestructiveMigration(
+  emitted: unknown,
+  root: unknown,
+): { ok: boolean; reason?: string } {
+  if (!Array.isArray(emitted)) {
+    // Void emits `migrations` as an array; a non-array (or absent) value carries no destructive
+    // entry to check here, and full migration-array pinning is out of scope.
+    return { ok: true };
+  }
+  const rootEntries = Array.isArray(root) ? root : [];
+  for (const entry of emitted) {
+    if (entry === null || typeof entry !== 'object') {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (!DESTRUCTIVE_MIGRATION_KEYS.some((key) => record[key] !== undefined)) {
+      continue;
+    }
+    if (!rootEntries.some((rootEntry) => deepEqual(record, rootEntry))) {
+      const tag = typeof record.tag === 'string' ? ` ${JSON.stringify(record.tag)}` : '';
+      return {
+        ok: false,
+        reason: `generated config declares a destructive Durable Object migration${tag} (deleting, renaming, or transferring classes) that was not present before the build — refusing to deploy a migration the build added that would delete or move Durable Object data.`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Minimal JSON-safe structural equality: primitives by `===`, arrays element-wise, plain objects
+ * key-for-key (order-insensitive). Used to compare a pinned pre-build pass-through binding entry's
+ * values against the emitted artifact's, so a build that RETARGETS a binding (rewrites a
+ * service/namespace/type the user wrote in root) is caught while a normalizer-added default
+ * sub-field is ignored. No cyclic/`undefined`/class support needed — wrangler config is JSON.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((item, i) => deepEqual(item, b[i]));
+  }
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+  return aKeys.every(
+    (key) => Object.prototype.hasOwnProperty.call(bObj, key) && deepEqual(aObj[key], bObj[key]),
+  );
+}
+
+/**
+ * Recursively normalize every `Map` (at any depth) to a plain object keyed by its entries, so a
+ * Map-shaped value can be compared with {@link deepEqual} — which is JSON-shaped and does NOT
+ * handle `Map`. Handles the nested `Map<string, Map<…>>` {@link snapshotPassthroughIdentities}
+ * returns, as well as the flat `Map<string, string>` / `Map<string, unknown>` the other snapshots
+ * return. Arrays and plain objects pass through with their elements normalized.
+ */
+function normalizeMapsForCompare(value: unknown): unknown {
+  if (value instanceof Map) {
+    const obj: Record<string, unknown> = {};
+    for (const [key, val] of value) {
+      obj[String(key)] = normalizeMapsForCompare(val);
+    }
+    return obj;
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeMapsForCompare);
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = normalizeMapsForCompare(val);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Structural equality for the possibly-`Map`-shaped pre-build snapshots — normalizes every Map to
+ * a plain object first (see {@link normalizeMapsForCompare}), then compares with the key-order-
+ * independent {@link deepEqual}. Used to assert the step-6 binding/pass-through snapshots match the
+ * pre-probe ones captured before any project code ran.
+ */
+function snapshotsDeepEqual(a: unknown, b: unknown): boolean {
+  return deepEqual(normalizeMapsForCompare(a), normalizeMapsForCompare(b));
+}
+
+/**
+ * The reject shown when a PostgreSQL app ships checked-in `db/migrations/*.sql` through the
+ * self-host Cloudflare backend. This backend applies ONLY remote D1 (SQLite) migrations; a pg
+ * app desires Hyperdrive (never `desired.d1`), so its migrations would never run here and the
+ * worker would hit an unmigrated database. Shared by the pre-build fail-fast guard and the
+ * post-build re-check (a build plugin can write these files during `vite build`).
+ */
+const PG_CHECKED_IN_MIGRATIONS_REJECT_MESSAGE = [
+  'deploy: --backend cloudflare will not run a PostgreSQL app’s checked-in migrations.',
+  'This backend applies only remote D1 (SQLite) migrations. A PostgreSQL app’s',
+  'db/migrations/*.sql are applied over Hyperdrive by the managed platform (`void deploy`);',
+  'this self-host backend does not run them, so your database would be left unmigrated.',
+  'Deploy this app with `void deploy`, or apply the migrations yourself against your',
+  'Postgres and remove them from db/migrations/, then rerun.',
+].join('\n');
+
+/**
+ * Every queue NAME the emitted artifact binds — `queues.producers[].queue` +
+ * `queues.consumers[].queue`. Non-throwing: a wrong-shaped `queues` field or an entry with no
+ * readable `queue` string contributes no name (an unnamed queue binds nothing), so only real,
+ * NAMED queue bindings are asserted against the desired set.
+ */
+function collectEmittedQueueNames(value: unknown): Array<string> {
+  const names: Array<string> = [];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return names;
+  }
+  for (const group of ['producers', 'consumers'] as const) {
+    const list = (value as Record<string, unknown>)[group];
+    if (!Array.isArray(list)) {
+      continue;
+    }
+    for (const entry of list) {
+      const name = readD1EntryString(entry, 'queue');
+      if (name !== undefined) {
+        names.push(name);
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * The queue NAMES the emitted artifact binds in ONE group (`producers` or `consumers`), as a Set.
+ * Read defensively — a wrong-shaped `queues` field, a missing group, or an entry with no readable
+ * `queue` string contributes no name — so a missing/empty group yields an EMPTY set. Used to assert
+ * every DESIRED queue survives in BOTH groups: `mergeBindings` (index.ts) emits each desired queue as
+ * both a producer AND a consumer, so per-group presence is required — {@link collectEmittedQueueNames}
+ * merges the two groups and cannot tell that a queue lost one of its two sides.
+ */
+function collectEmittedQueueGroupNames(
+  value: unknown,
+  group: 'producers' | 'consumers',
+): Set<string> {
+  const names = new Set<string>();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return names;
+  }
+  const list = (value as Record<string, unknown>)[group];
+  if (!Array.isArray(list)) {
+    return names;
+  }
+  for (const entry of list) {
+    const name = readD1EntryString(entry, 'queue');
+    if (name !== undefined) {
+      names.add(name);
+    }
+  }
+  return names;
+}
+
+/** The CF Vite plugin's deploy-config redirect that a bare `wrangler deploy` follows. */
+function deployPointerPath(root: string): string {
+  return join(root, '.wrangler', 'deploy', 'config.json');
+}
+
+/**
+ * Wrangler 4.107's FULL credential env-var set, verified against
+ * `wrangler-dist/cli.js`. It covers every env var wrangler reads to authenticate —
+ * the API-client auth inputs (`apiToken`/`apiKey`/`apiEmail`/`userServiceKey`) plus
+ * the `getEnvironmentVariableFactory` auth tokens — each canonical name AND its
+ * deprecated `CF_*` alias:
+ *   - API token:            `CLOUDFLARE_API_TOKEN` / `CF_API_TOKEN`
+ *   - global auth key:      `CLOUDFLARE_API_KEY` / `CF_API_KEY`
+ *   - global auth email:    `CLOUDFLARE_EMAIL` / `CF_EMAIL`
+ *   - user service key:     `CLOUDFLARE_API_USER_SERVICE_KEY`
+ *   - CF authorization tok: `WRANGLER_CF_AUTHORIZATION_TOKEN`
+ *   - R2 SQL auth token:    `WRANGLER_R2_SQL_AUTH_TOKEN` (a Bearer credential wrangler
+ *     reads via `getEnvironmentVariableFactory`, falling back to `CLOUDFLARE_API_TOKEN`)
+ *   - Access service token: `CLOUDFLARE_ACCESS_CLIENT_ID` / `CLOUDFLARE_ACCESS_CLIENT_SECRET`
+ * Scrubbed from EVERY child that runs untrusted project code — the env-schema probes, the
+ * `vite build`, and `drizzle-kit generate` (which loads the user's schema). None of them
+ * authenticates against Cloudflare, so a leaking `env.ts` / build plugin / schema module can
+ * never read a real credential the parent holds. NOT scrubbed from the wrangler runner's env
+ * (`createDeployWranglerRunner`), where `whoami` / `d1 migrations apply` / `deploy` need them.
+ * (`provisionEnv` already scrubs Void's own `CF_ACCESS_CLIENT_ID/SECRET` pair + the
+ * account-id selector; this adds the wrangler-account credentials it does not.)
+ */
+const WRANGLER_AUTH_CREDENTIAL_ENV_VARS = [
+  'CLOUDFLARE_API_TOKEN',
+  'CF_API_TOKEN',
+  'CLOUDFLARE_API_KEY',
+  'CF_API_KEY',
+  'CLOUDFLARE_EMAIL',
+  'CF_EMAIL',
+  'CLOUDFLARE_API_USER_SERVICE_KEY',
+  'WRANGLER_CF_AUTHORIZATION_TOKEN',
+  'WRANGLER_R2_SQL_AUTH_TOKEN',
+  'CLOUDFLARE_ACCESS_CLIENT_ID',
+  'CLOUDFLARE_ACCESS_CLIENT_SECRET',
+];
+
+/**
+ * Delete every {@link WRANGLER_AUTH_CREDENTIAL_ENV_VARS} entry from `env` IN PLACE and
+ * return it, for a child that executes UNTRUSTED project code and needs no Cloudflare
+ * credential of its own.
+ *
+ * The case-aware delete lives in the provision module, which ONLY the Cloudflare fork
+ * loads (a managed deploy must not pay `proper-lockfile`'s import-time side effects). One
+ * caller — `runDrizzleKitGenerate`, via the shared schema-drift check — also runs on the
+ * MANAGED path, where that module is legitimately absent, so read the memoized handle
+ * directly instead of {@link requireProvisionModule} (which throws when the fork never ran)
+ * and fall back to the exact-case delete. That fallback IS the whole rule off win32 (POSIX
+ * env keys are case-sensitive); the case-insensitive win32 sweep only matters for the
+ * Cloudflare fork, and by the time either call site runs there the module is always loaded.
+ */
+function scrubWranglerAuthCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const deleteVar =
+    loadedProvisionModule?.deleteEnvVarCaseAware ??
+    ((target: NodeJS.ProcessEnv, name: string): void => {
+      delete target[name];
+    });
+  for (const name of WRANGLER_AUTH_CREDENTIAL_ENV_VARS) {
+    deleteVar(env, name);
+  }
+  return env;
+}
+
+/**
+ * Build the child env for the isolated env-schema probe. Starts from
+ * {@link deployChildEnv} (CF Access + every transport selector scrubbed, one account +
+ * API base pinned), then (1) scrubs the FULL wrangler-auth credential set case-aware —
+ * the probe needs no credentials — and (2) pins `NODE_ENV=production` so the child
+ * evaluates env.ts under the SAME environment the build uses (`vite build` sets
+ * `NODE_ENV=production`), keeping the required-key set the probe derives identical to
+ * the built worker's. Used by BOTH the pre-build facts probe and the post-build
+ * `validate-emitted` probe.
+ */
+function buildSchemaProbeEnv(accountId: string, apiBaseUrl: string): NodeJS.ProcessEnv {
+  const env = scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl));
+  // Scrub any ambient spelling first (case-aware on win32) so it cannot shadow the pin.
+  requireProvisionModule().deleteEnvVarCaseAware(env, 'NODE_ENV');
+  env.NODE_ENV = 'production';
+  return env;
+}
+
+/**
+ * Default {@link CloudflareDeployDeps.resolveSchemaFacts} seam: derive the
+ * env-INSENSITIVE schema facts (required-secret NAMES + `.secret()` flags) — and the
+ * v1 envDir/mode narrowing — in an ISOLATED SUBPROCESS ({@link
+ * resolveEnvSchemaFactsViaSubprocess}) under the scrubbed `env`. The parent runs NO
+ * project code: importing the user's env.ts (and resolving the Vite config) happens in
+ * the child, so a deferred handler can never read the parent's credentials. Loaded
+ * lazily so a managed deploy never pulls the probe in.
+ */
+async function resolveEnvSchemaFactsDefault(
+  input: EnvSchemaProbeInput,
+  env: NodeJS.ProcessEnv,
+): Promise<EnvSchemaProbeResult> {
+  const { resolveEnvSchemaFactsViaSubprocess } = await import('./env-schema-probe.ts');
+  return resolveEnvSchemaFactsViaSubprocess(input, env);
+}
+
+/**
+ * Default {@link CloudflareDeployDeps.validateEmittedVars} seam: validate the REAL
+ * emitted worker `vars` (post-build ground truth) against the schema validators in the
+ * SAME isolated subprocess ({@link validateEmittedVarsViaSubprocess}) under the scrubbed
+ * `env`, returning the FAILING key NAMES only. Runs the user's validators (project
+ * code) off the credentialed parent; loaded lazily so a managed deploy never pulls it in.
+ */
+async function validateEmittedVarsDefault(
+  input: EnvSchemaProbeInput,
+  env: NodeJS.ProcessEnv,
+): Promise<EnvSchemaValidateResult> {
+  const { validateEmittedVarsViaSubprocess } = await import('./env-schema-probe.ts');
+  return validateEmittedVarsViaSubprocess(input, env);
+}
+
+/**
+ * Clear, values-free guidance for the v1 envDir/mode rejection the facts probe raised
+ * (a custom Vite `envDir` or a non-`production` build mode). Rendered from the fixed
+ * reason CODE alone — the raw resolved envDir/mode strings never crossed the probe
+ * boundary, so nothing here can echo a Vite-config-derived value.
+ */
+function cloudflareEnvDirModeRejectMessage(
+  reject: Extract<EnvSchemaProbeResult, { kind: 'reject' }>,
+): string {
+  if (reject.reason === 'custom-envdir') {
+    return [
+      'deploy: --backend cloudflare does not support a custom Vite `envDir` (including `envDir: false`).',
+      'v1 loads env from the project root only. The build reads `.env*` from your envDir but',
+      'generates the auth schema from the project root, so a custom envDir could validate a',
+      'different table set than the worker actually ships. Remove `envDir` from your Vite config',
+      '(or point it back at the project root), then rerun — or deploy this app with `void deploy`',
+      '(the managed platform).',
+    ].join('\n');
+  }
+  return [
+    'deploy: --backend cloudflare builds in production mode only (your build resolves to a non-production mode).',
+    'A non-production build mode selects a different `.env.<mode>` set than this backend validates.',
+    'Remove the custom `mode` from your Vite config / build command so the build runs in production,',
+    'then rerun — or deploy this app with `void deploy` (the managed platform).',
+  ].join('\n');
+}
+
+/** Re-export so existing importers (and tests) keep reading the type from deploy.ts. */
+export type { EmittedWorkerVarsResult };
+
+/**
+ * Default {@link CloudflareDeployDeps.readEmittedWorkerVars} seam: read the REAL
+ * `vars` map the build baked into `dist/ssr/wrangler.json` (ground truth — the exact
+ * plaintext the worker ships). Delegates to the shared {@link readEmittedWorkerVars}
+ * reader (also used by the isolated `validate-emitted` probe child), so the parent
+ * and the child resolve the SAME artifact.
+ */
+function readEmittedWorkerVarsDefault(root: string): EmittedWorkerVarsResult {
+  return readEmittedWorkerVars(root);
+}
+
+/**
+ * Remove the CF plugin's deploy pointer before building so the post-build
+ * verification can only pass on a pointer THIS build re-created. The CF plugin
+ * overwrites (never deletes) it, and only when the CF Vite plugin runs — a build
+ * that emits no worker artifact would otherwise leave a stale pointer from a prior
+ * run, which a bare `wrangler deploy` would follow to old code.
+ */
+function removeDeployPointer(root: string): void {
+  rmSync(deployPointerPath(root), { force: true });
+}
+
+/**
+ * Confirm the deploy config the CF Vite plugin emitted targets the pinned account, the
+ * expected worker name, AND the exact resources this deploy provisioned — at the
+ * TOP-LEVEL environment, BEFORE a bare `wrangler deploy` uploads anything.
+ * `wrangler deploy` (no `-c`) follows `.wrangler/deploy/config.json` → the generated
+ * `dist/.../wrangler.json`. A `CLOUDFLARE_ENV` / `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH`
+ * in the ambient env or a production `.env` can make the build FLATTEN a named env or an
+ * alternate config into that artifact — keeping the same `account_id`/`name` while
+ * swapping the binding set, so `wrangler deploy --env=` ships it as top-level with no
+ * mismatch. When a `bindingIdentitySnapshot` is given we therefore assert, in TWO directions,
+ * that the generated artifact's id-bearing bindings (D1 database_id / KV id / R2 bucket_name /
+ * Hyperdrive id) equal the identities PINNED before the build (the in-memory snapshot the
+ * drift-check / provision resolved) — NOT a post-build re-read of the root config, so a build
+ * that consistently rewrote BOTH the root config and this artifact is still caught:
+ *   (a) with `desired`, every DESIRED binding must still be present with its pinned id — catches a
+ *       binding the build DROPPED or whose id it rewrote; and
+ *   (b) COMPLETENESS — every id-bearing binding the artifact declares must be one the snapshot
+ *       pinned, with the pinned id — catches a binding the build ADDED (absent from the snapshot)
+ *       or a pre-existing NON-desired binding whose id it rewrote, either of which the CF plugin
+ *       would otherwise merge verbatim into the artifact and `wrangler deploy` would bind.
+ * Only these four id-bearing kinds are inspected; every other binding the build legitimately
+ * emits (ai / queues / durable_objects / vars / …) passes through untouched. This makes the id
+ * defense symmetric with the `account_id` check above, which already compares against the
+ * in-memory pinned account. Returns `{ ok:false, reason }` on any mismatch — or when the config
+ * is missing/unreadable — so the caller fails closed.
+ */
+export function verifyGeneratedDeployConfig(
+  root: string,
+  expected: {
+    accountId: string;
+    workerName: string;
+    desired?: DesiredResourceSet;
+    bindingIdentitySnapshot?: BindingIdentitySnapshot;
+    /**
+     * Per-assert-field binding ENTRY pin taken pre-build ({@link snapshotPassthroughIdentities}) —
+     * field → (bindingName → root entry). Drives the pass-through assertion: an emitted entry in a
+     * field Void never emits whose binding was not pinned pre-build is a build-injected binding,
+     * and one whose pinned target keys were rewritten is a build-retargeted binding.
+     */
+    passthroughIdentitySnapshot?: Map<string, Map<string, Record<string, unknown>>>;
+    /**
+     * Raw pre-build root values ({@link snapshotPassthroughRawFields}) for the fields the ENTRY
+     * pin cannot cover: `unsafe` / `tail_consumers` / `streaming_tail_consumers`
+     * (whole-object-pinned), `durable_objects` (external-DO check), and `ai` (binding pin). An
+     * emitted value that diverges from its root pin — a whole-object field added/removed/rewritten,
+     * an external DO absent from root, or an `ai` binding that is neither the root's nor Void's own
+     * (and only when the source uses AI) — fails closed.
+     */
+    passthroughRawFields?: Map<string, unknown>;
+    /**
+     * Whether the pre-build inference found Workers AI use in the source (the SAME `needsAI`
+     * signal `shouldBindWorkersAi` gates on in index.ts). Authorizes an emitted `{binding:'AI'}`
+     * ai binding when the root config declares no ai binding: only an AI-using app legitimately
+     * receives Void's injected Workers AI binding, so a build that injects one into a non-AI app
+     * (billable inference the source never asked for) fails closed.
+     */
+    needsAI?: boolean;
+    /**
+     * The exact `containers` set Void's build emits, reconstructed PRE-BUILD
+     * ({@link reconstructExpectedContainers}) from the root-declared containers plus — when the
+     * source needs the sandbox — Void's own sandbox container. A bare `wrangler deploy` PROVISIONS a
+     * container application from the emitted array (billable, runs the image), so an emitted
+     * container absent from this set is one the build INJECTED, an expected container missing from
+     * the emitted array is one it DROPPED, and one present but not byte-identical is one it
+     * RETARGETED (e.g. a rewritten `image` pointing at an attacker's).
+     */
+    expectedContainers?: Array<Record<string, unknown>>;
+    /**
+     * The exact cron trigger schedules Void's build emits into `triggers.crons`, reconstructed
+     * PRE-BUILD from the SAME `scanJobsSync` scan index.ts derives them from
+     * ({@link computeDesiredCloudflareResources}). A bare `wrangler deploy` reading
+     * `dist/ssr/wrangler.json` INSTALLS the worker's Cron Triggers from `triggers.crons`, so an
+     * emitted schedule absent from this multiset is one the build INJECTED (attacker code runs on a
+     * billable schedule) and an expected schedule missing from the emitted array is one it DROPPED
+     * (or, paired with an injected replacement, RETARGETED).
+     */
+    expectedCrons?: Array<string>;
+  },
+): { ok: boolean; reason?: string } {
+  const deployConfigPath = deployPointerPath(root);
+  if (!existsSync(deployConfigPath)) {
+    return {
+      ok: false,
+      reason: `expected the CF plugin's deploy config at ${deployConfigPath}, but it was not written by the build (a stale pointer is removed before building, so only a fresh one from this build is trusted).`,
+    };
+  }
+  let redirectedPath: string;
+  try {
+    const parsed = JSON.parse(readFileSync(deployConfigPath, 'utf-8')) as { configPath?: unknown };
+    if (typeof parsed.configPath !== 'string' || parsed.configPath.length === 0) {
+      return { ok: false, reason: `${deployConfigPath} has no "configPath" pointer.` };
+    }
+    redirectedPath = resolve(dirname(deployConfigPath), parsed.configPath);
+  } catch {
+    return { ok: false, reason: `${deployConfigPath} is not valid JSON.` };
+  }
+  if (!existsSync(redirectedPath)) {
+    return { ok: false, reason: `generated wrangler config ${redirectedPath} does not exist.` };
+  }
+  let generated: Record<string, unknown>;
+  try {
+    generated = JSON.parse(readFileSync(redirectedPath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return { ok: false, reason: `generated wrangler config ${redirectedPath} is not valid JSON.` };
+  }
+  if (generated.account_id !== expected.accountId) {
+    return {
+      ok: false,
+      reason: `generated config account_id ${JSON.stringify(generated.account_id)} does not match the pinned account ${JSON.stringify(expected.accountId)}.`,
+    };
+  }
+  if (generated.name !== expected.workerName) {
+    return {
+      ok: false,
+      reason: `generated config worker name ${JSON.stringify(generated.name)} does not match the expected worker ${JSON.stringify(expected.workerName)}.`,
+    };
+  }
+  // Binding-identity check: the generated artifact's id-bearing bindings must be the SAME ones
+  // (by id) as were PINNED before the build (the in-memory snapshot). A flattened named-env /
+  // alternate config — or a build that rewrote/added an id in BOTH the root config and this
+  // artifact — keeps account+name but swaps the binding set, caught here against the snapshot.
+  if (expected.bindingIdentitySnapshot) {
+    const snapshot = expected.bindingIdentitySnapshot;
+    // (a) Every DESIRED binding must still be present with its pinned id — catches a binding the
+    // build DROPPED (the completeness loop below, which only walks what the artifact DECLARES,
+    // cannot see an omission) or whose id it rewrote.
+    if (expected.desired) {
+      for (const { kind, binding } of desiredIdentityBindings(expected.desired)) {
+        const { field, idField } = DEPLOY_BINDING_IDENTITY_FIELDS[kind];
+        const pinnedId = snapshot.get(bindingIdentityKey(field, binding));
+        // A binding with no pinned id was never provisioned with a real one (the drift check's
+        // job); here we only assert the generated artifact did not DIVERGE from the pre-build pin.
+        if (pinnedId === undefined) {
+          continue;
+        }
+        const generatedId = readStoredResourceName(generated, field, binding, idField);
+        if (generatedId === undefined) {
+          return {
+            ok: false,
+            reason: `generated config is missing the ${field} binding ${JSON.stringify(binding)} (pinned identity ${JSON.stringify(pinnedId)}) — a named environment or alternate config flattened a different binding set.`,
+          };
+        }
+        if (generatedId !== pinnedId) {
+          return {
+            ok: false,
+            reason: `generated config ${field} binding ${JSON.stringify(binding)} has identity ${JSON.stringify(generatedId)} but the pinned pre-build identity is ${JSON.stringify(pinnedId)} — refusing to deploy a flattened/alternate or tampered binding set.`,
+          };
+        }
+      }
+    }
+    // (b) COMPLETENESS — every id-bearing binding the artifact DECLARES must be one the snapshot
+    // pinned (by binding name) AND carry the pinned id. The desired loop above only inspects the
+    // desired set, so a binding the build ADDED to the root config (absent from the snapshot) or a
+    // pre-existing NON-desired binding whose id it rewrote would otherwise flow into the artifact
+    // and get bound by `wrangler deploy`. Scoped to the four id-bearing kinds only — every other
+    // binding the build emits (ai / queues / durable_objects / vars / …) is neither inspected nor
+    // rejected. The pin is the pre-build snapshot of the SAME root config the CF plugin merges, so
+    // a legitimately emitted binding's id equals what was captured; only an added / rewritten one
+    // diverges.
+    for (const { field, binding, id } of collectConfigBindingIdentities(generated)) {
+      const pinnedId = snapshot.get(bindingIdentityKey(field, binding));
+      if (pinnedId === undefined) {
+        return {
+          ok: false,
+          reason: `generated config declares a ${field} binding ${JSON.stringify(binding)} that was not present before the build — refusing to deploy an id-bearing binding the build injected.`,
+        };
+      }
+      if (id !== pinnedId) {
+        return {
+          ok: false,
+          reason: `generated config ${field} binding ${JSON.stringify(binding)} has identity ${JSON.stringify(id)} but the pinned pre-build identity is ${JSON.stringify(pinnedId)} — refusing to deploy a rewritten binding set.`,
+        };
+      }
+    }
+    // (c) Reverse-presence — the desired loop (a) inspects only the DESIRED bindings and the
+    // completeness loop (b) walks only what the artifact DECLARES, so neither sees a NON-desired,
+    // manually-declared root id-bearing binding (e.g. a hand-added `EXTRA_DB`) the build DROPPED: it
+    // is absent from `desired`, and (b) cannot iterate an omission. Walk the PINNED snapshot instead —
+    // every pinned `<field>:<binding>` must still appear among the emitted id-bearing bindings (read
+    // the SAME way (b) reads them). A field the build removed entirely leaves every pinned binding in
+    // it missing. This is the exact mirror of the pass-through reverse-presence loop (A1) below and is
+    // FP-safe on the same reasoning: a legitimate CF-plugin build spreads the root config, so no
+    // pinned id-binding is ever dropped; `bindingIdentitySnapshot` holds only bindings that had a real
+    // id pre-build, so a placeholder/absent id is never asserted here.
+    const emittedIdentityKeys = new Set<string>();
+    for (const { field, binding } of collectConfigBindingIdentities(generated)) {
+      emittedIdentityKeys.add(bindingIdentityKey(field, binding));
+    }
+    for (const key of snapshot.keys()) {
+      if (!emittedIdentityKeys.has(key)) {
+        const separator = key.indexOf(':');
+        const field = key.slice(0, separator);
+        const binding = key.slice(separator + 1);
+        return {
+          ok: false,
+          reason: `generated config no longer declares the ${field} binding ${JSON.stringify(binding)} that was present before the build — refusing to deploy a build that dropped an id-bearing binding the root config declared.`,
+        };
+      }
+    }
+  }
+  // (A) Pass-through assert-set — every entry the artifact declares in a resource field Void's own
+  // build never emits ({@link DEPLOY_PASSTHROUGH_ASSERT_FIELDS}, derived from the wrangler binding
+  // registry) must have been present in the pre-build root snapshot, matched by its wrangler-shape
+  // identity key, AND be byte-identical to the pinned root entry. Two failures fail closed:
+  //   • the binding name was NOT pinned pre-build → a binding the build INJECTED; and
+  //   • the emitted entry differs from the pinned root entry → a binding the build REWROTE
+  //     (kept the name but changed the service/namespace/type it points at, or added a sub-field).
+  // Compare the WHOLE entry (exact equality): a real `vite build` adds NOTHING to a PRESENT
+  // pass-through entry — services/vectorize/workflows/mtls_certificates/send_email/ratelimits/
+  // dispatch_namespaces all emit byte-identical to root — so any added/removed/rewritten sub-field
+  // is the build tampering with the binding's target. Fields NOT in the assert-set are deliberately
+  // NOT asserted here (fail OPEN): a resource field wrangler does not yet know about must never
+  // false-positive a legitimate build. `unsafe` stays in the assert-set (for the drift invariant)
+  // but is routed to the whole-object pin below — its `.metadata`/`.capnp` are never entry-iterated.
+  if (expected.passthroughIdentitySnapshot) {
+    const passthrough = expected.passthroughIdentitySnapshot;
+    for (const field of DEPLOY_PASSTHROUGH_ASSERT_FIELDS) {
+      if (DEPLOY_WHOLE_OBJECT_PINNED_FIELDS.includes(field) || generated[field] === undefined) {
+        continue;
+      }
+      let emittedEntries: Array<{ name: string; entry: Record<string, unknown> }>;
+      try {
+        emittedEntries = bindingEntriesForField(field, generated[field]);
+      } catch {
+        return {
+          ok: false,
+          reason: `generated config declares a malformed ${field} binding — refusing to deploy a binding set that cannot be verified.`,
+        };
+      }
+      const pinned = passthrough.get(field) ?? new Map<string, Record<string, unknown>>();
+      for (const { name, entry } of emittedEntries) {
+        const pinnedEntry = pinned.get(name);
+        if (pinnedEntry === undefined) {
+          return {
+            ok: false,
+            reason: `generated config declares a ${field} binding ${JSON.stringify(name)} that was not present before the build — refusing to deploy a ${field} binding the build injected.`,
+          };
+        }
+        if (!deepEqual(entry, pinnedEntry)) {
+          return {
+            ok: false,
+            reason: `generated config ${field} binding ${JSON.stringify(name)} differs from the pre-build config — refusing to deploy a ${field} binding the build rewrote.`,
+          };
+        }
+      }
+    }
+    // (A1) Reverse-presence — the forward loop above only walks EMITTED entries, so it cannot see a
+    // root-declared pass-through binding the build DROPPED (removing a `services` / `mtls_certificates`
+    // / … binding the source declared silently strips a capability). Walk the PINNED entries instead:
+    // every pinned binding NAME must still appear in the emitted entries for its field. A field
+    // ABSENT from the emitted config means every pinned name in it is missing. Whole-object-pinned
+    // fields are skipped — their SYMMETRIC raw pin already rejects a removed value. FP-safe: a
+    // legitimate CF-plugin build spreads the root config, so no pinned pass-through binding is ever
+    // dropped; only a build that omits one to strip what the source declared is caught here.
+    for (const [field, pinnedEntries] of passthrough) {
+      if (DEPLOY_WHOLE_OBJECT_PINNED_FIELDS.includes(field) || pinnedEntries.size === 0) {
+        continue;
+      }
+      const emittedNames = new Set<string>();
+      if (generated[field] !== undefined) {
+        try {
+          for (const { name } of bindingEntriesForField(field, generated[field])) {
+            emittedNames.add(name);
+          }
+        } catch {
+          // A malformed emitted field is already rejected by the forward loop; treat it as carrying
+          // no names so any pinned name is reported missing here too (fail closed).
+        }
+      }
+      for (const name of pinnedEntries.keys()) {
+        if (!emittedNames.has(name)) {
+          return {
+            ok: false,
+            reason: `generated config no longer declares the ${field} binding ${JSON.stringify(name)} that was present before the build — refusing to deploy a build that dropped a ${field} binding the source declared.`,
+          };
+        }
+      }
+    }
+  }
+  // (A2) Whole-object + targeted pins for the fields the per-binding ENTRY pin cannot cover, each
+  // compared against the raw pre-build root value ({@link snapshotPassthroughRawFields}):
+  //   • `unsafe` / `tail_consumers` / `streaming_tail_consumers` — the emitted value must be
+  //     byte-identical to the root's. The empty check is SYMMETRIC: an emitted empty value passes
+  //     ONLY when the root value is ALSO empty (the clean-build shape / a normalizer default-fill).
+  //     A root that DECLARED a non-empty value emitted back EMPTY is a REMOVAL — clearing
+  //     `tail_consumers` silently disables the source's audit/log forwarding — so it is rejected
+  //     like any other rewrite. `unsafe.metadata` overwrites the WHOLE uploaded bindings array at
+  //     upload, and `tail_consumers`/`streaming_tail_consumers` forward every log/request — so a
+  //     build injecting, rewriting, OR removing one changes exfil/audit the source declared.
+  //   • `routes` / `route` / `workers_dev` / `preview_urls` — the worker's traffic attachment.
+  //     Void emits none, so undeclared → absent → both-empty → pass; a build-injected `routes`
+  //     entry (attaching the worker to a hostname the account controls) or a flipped
+  //     `workers_dev`/`preview_urls` fails the deepEqual against the absent/declared root value.
+  //   • `durable_objects` — an emitted binding carrying a cross-script field targets ANOTHER
+  //     worker's DOs; Void's own DOs are always LOCAL, so it must match a root binding.
+  //   • `ai` — when the root declared its own ai binding it must SURVIVE byte-identical (a build
+  //     that REMOVED or rewrote it is rejected); otherwise the emitted binding must be ABSENT or —
+  //     ONLY when the source's pre-build inference says the app uses Workers AI — Void's own
+  //     `{binding:'AI'}`. An injected `{binding:'AI'}` on an app that does not use AI would incur
+  //     account-billed inference from build-injected worker code.
+  //   • `migrations` — an emitted Durable Object migration carrying a DESTRUCTIVE key (deleting,
+  //     renaming, or transferring classes) must match a root-declared migration byte-for-byte;
+  //     Void emits only creation-key migrations, so a destructive one is a build injection that
+  //     `wrangler deploy` would run against production Durable Object data.
+  if (expected.passthroughRawFields) {
+    const raw = expected.passthroughRawFields;
+    for (const field of DEPLOY_WHOLE_OBJECT_PINNED_FIELDS) {
+      const emitted = generated[field];
+      const rootValue = raw.get(field);
+      // Both-empty is the only case an empty emitted value passes: a root that declared a
+      // non-empty value emitted back empty REMOVES a control the source configured.
+      if (isEmptyPassthroughValue(emitted) && isEmptyPassthroughValue(rootValue)) {
+        continue;
+      }
+      if (!deepEqual(emitted, rootValue)) {
+        return {
+          ok: false,
+          reason: `generated config ${field} value does not match the pre-build config — refusing to deploy a ${field} value the build added, removed, or rewrote.`,
+        };
+      }
+    }
+    const externalDo = verifyNoInjectedExternalDurableObject(
+      generated.durable_objects,
+      raw.get('durable_objects'),
+    );
+    if (!externalDo.ok) {
+      return externalDo;
+    }
+    // Read `rootAi` FIRST (not gated on `emittedAi !== undefined`) so a root ai binding the build
+    // REMOVED — emitted ai absent — is rejected too, not only a rewrite.
+    const emittedAi = generated.ai;
+    const rootAi = raw.get('ai');
+    if (rootAi !== undefined) {
+      // The root declared its own `ai` binding — the emitted one must equal it EXACTLY, so a build
+      // can neither rewrite a custom root ai binding down to the default `{binding:'AI'}` nor drop
+      // it (`deepEqual(undefined, rootAi)` is false → a removed root ai fails closed here).
+      if (!deepEqual(emittedAi, rootAi)) {
+        return {
+          ok: false,
+          reason: `generated config ai binding does not match the pre-build root ai binding — refusing to deploy an ai binding the build removed or rewrote.`,
+        };
+      }
+    } else if (emittedAi !== undefined) {
+      // No root ai binding: the only ai binding Void's own build emits is `{binding:'AI'}`, and
+      // ONLY when the pre-build inference says the source uses Workers AI (the SAME signal
+      // `shouldBindWorkersAi` gates on). Anything else here is a build-injected billable binding.
+      if (!(expected.needsAI === true && deepEqual(emittedAi, VOID_EMITTED_AI_BINDING))) {
+        return {
+          ok: false,
+          reason: `generated config declares an ai binding the build injected — the pre-build inference found no Workers AI use in the source and the root config declares no ai binding.`,
+        };
+      }
+    }
+    // Reject a build-injected DESTRUCTIVE Durable Object migration. Only emitted migration entries
+    // carrying a destructive key are checked, and each must match a root-declared migration
+    // byte-for-byte, so Void's creation-only migrations and a user's own root-declared destructive
+    // migration both pass — only an injected one absent from root is rejected.
+    const destructiveMigration = verifyNoInjectedDestructiveMigration(
+      generated.migrations,
+      raw.get('migrations'),
+    );
+    if (!destructiveMigration.ok) {
+      return destructiveMigration;
+    }
+  }
+  // (C) Containers — pin the emitted `containers` array against the set Void's build emits,
+  // reconstructed PRE-BUILD ({@link reconstructExpectedContainers}): root-declared containers pass
+  // through verbatim, plus Void's own sandbox container when the source needs it. A bare `wrangler
+  // deploy` PROVISIONS a container application from this array — billable, and it runs the image's
+  // code — so a build that INJECTS a container (an attacker image on an app that declared none),
+  // DROPS the sandbox container, or RETARGETS one (rewrites its `image`/`instance_type`/… to an
+  // attacker's) must fail closed. Compared as a set keyed by `class_name` — the identity
+  // `mergeBindings` itself dedups on: every emitted container's class must be expected AND
+  // byte-identical, and every expected class must still be emitted. `generated.containers` is read
+  // defensively (absent/non-array → none), and absent-vs-`[]` is treated as both-empty so a clean
+  // no-sandbox build (no root containers, Void adds none, emitted none) passes. Containers with no
+  // `class_name` are not a shape Void or a buildable root config produce; they are compared as a
+  // deepEqual multiset so a verbatim root passthrough still passes while an injected/dropped one
+  // fails closed.
+  if (expected.expectedContainers) {
+    const emittedContainers: Array<unknown> = Array.isArray(generated.containers)
+      ? generated.containers
+      : [];
+    const expectedContainers = expected.expectedContainers;
+    if (emittedContainers.length !== 0 || expectedContainers.length !== 0) {
+      const expectedByClass = new Map<string, Record<string, unknown>>();
+      const expectedNoClass: Array<unknown> = [];
+      for (const container of expectedContainers) {
+        const className = readD1EntryString(container, 'class_name');
+        if (className === undefined) {
+          expectedNoClass.push(container);
+        } else {
+          expectedByClass.set(className, container);
+        }
+      }
+      const emittedByClass = new Map<string, unknown>();
+      const emittedNoClass: Array<unknown> = [];
+      for (const container of emittedContainers) {
+        const className = readD1EntryString(container, 'class_name');
+        if (className === undefined) {
+          emittedNoClass.push(container);
+        } else {
+          emittedByClass.set(className, container);
+        }
+      }
+      // Injected / retargeted — every emitted container must be expected AND byte-identical.
+      for (const [className, container] of emittedByClass) {
+        const expectedContainer = expectedByClass.get(className);
+        if (expectedContainer === undefined) {
+          return {
+            ok: false,
+            reason: `generated config declares a container application ${JSON.stringify(className)} that Void did not derive from source — refusing to deploy a container application the build injected.`,
+          };
+        }
+        if (!deepEqual(container, expectedContainer)) {
+          return {
+            ok: false,
+            reason: `generated config container application ${JSON.stringify(className)} does not match the pre-build config — refusing to deploy a container application the build retargeted.`,
+          };
+        }
+      }
+      // Dropped — every expected container must still be emitted.
+      for (const className of expectedByClass.keys()) {
+        if (!emittedByClass.has(className)) {
+          return {
+            ok: false,
+            reason: `generated config no longer declares the container application ${JSON.stringify(className)} that Void derived from source — refusing to deploy a build that dropped a container application.`,
+          };
+        }
+      }
+      // Class-less containers — deepEqual multiset (never a Void-emitted shape).
+      for (const emitted of emittedNoClass) {
+        const matchIndex = expectedNoClass.findIndex((candidate) => deepEqual(emitted, candidate));
+        if (matchIndex === -1) {
+          return {
+            ok: false,
+            reason: `generated config declares a container application that Void did not derive from source — refusing to deploy a container application the build injected.`,
+          };
+        }
+        expectedNoClass.splice(matchIndex, 1);
+      }
+      if (expectedNoClass.length > 0) {
+        return {
+          ok: false,
+          reason: `generated config no longer declares a container application that was present before the build — refusing to deploy a build that dropped a container application.`,
+        };
+      }
+    }
+  }
+  // (B) Queues ⊆ desired — every queue the artifact binds (producers/consumers) must be one Void
+  // desired from source (`scanQueuesSync`, the SAME scan the build binds from), so a legitimate
+  // build always satisfies emitted ⊆ desired. A queue NAME the artifact binds that is not in the
+  // desired set is a queue binding the build injected — fail closed.
+  if (expected.desired) {
+    const desiredQueues = new Set(expected.desired.queues);
+    for (const name of collectEmittedQueueNames(generated.queues)) {
+      if (!desiredQueues.has(name)) {
+        return {
+          ok: false,
+          reason: `generated config declares a queue binding ${JSON.stringify(name)} that Void did not derive from source — refusing to deploy a queue binding the build injected.`,
+        };
+      }
+    }
+    // (B1) desired ⊆ emitted, PER GROUP — the emitted ⊆ desired check above rejects an INJECTED
+    // queue but waves through a DROPPED one: an absent/empty `queues` field, or one retaining only
+    // the producer OR only the consumer, would deploy a worker that loses message processing or
+    // leaves a `QUEUE_*` binding undefined. `mergeBindings` (index.ts) emits EVERY desired queue as
+    // BOTH a producer and a consumer (both groups mapped from the SAME scanned array), so requiring
+    // each desired queue name in both emitted groups is FP-safe. Read each group defensively (a
+    // missing/empty/wrong-shaped `queues` field yields empty sets → any desired queue is reported
+    // missing → reject); per-group presence is why this cannot reuse the merged reader above.
+    const emittedProducers = collectEmittedQueueGroupNames(generated.queues, 'producers');
+    const emittedConsumers = collectEmittedQueueGroupNames(generated.queues, 'consumers');
+    for (const name of expected.desired.queues) {
+      if (!emittedProducers.has(name) || !emittedConsumers.has(name)) {
+        return {
+          ok: false,
+          reason: `generated config no longer binds the queue ${JSON.stringify(name)} as both a producer and a consumer that Void derived from source — refusing to deploy a build that dropped a queue binding the source declared.`,
+        };
+      }
+    }
+  }
+  // (D) Cron Triggers — pin the emitted `triggers.crons` schedules against the set Void's build
+  // emits, reconstructed PRE-BUILD from the SAME `scanJobsSync` scan index.ts derives them from
+  // (`scanJobsSync(root, paths.cronsDir).flatMap((job) => job.crons)`). A bare `wrangler deploy`
+  // reading `dist/ssr/wrangler.json` INSTALLS the worker's Cron Triggers from this array — a
+  // schedule the build INJECTED runs attacker code on a billable schedule, and one it DROPPED (or
+  // RETARGETED, caught as a drop of the old string plus an injection of the new one) silently
+  // changes the worker's scheduled behavior. Compared as an order-independent, count-aware multiset
+  // of schedule strings. `generated.triggers` is read DEFENSIVELY: only an object with an array
+  // `crons` yields emitted schedules — anything else (absent, a bare `{}` the CF plugin
+  // materializes for a no-cron app, a non-array `crons`) yields none, so a no-cron app (expected
+  // empty, emitted none) passes symmetric-empty. A non-string emitted element is never a shape Void
+  // derives, so it fails the expected lookup and is rejected as injected.
+  if (expected.expectedCrons) {
+    const triggers = generated.triggers;
+    const emittedCrons: Array<unknown> =
+      typeof triggers === 'object' &&
+      triggers !== null &&
+      Array.isArray((triggers as Record<string, unknown>).crons)
+        ? ((triggers as Record<string, unknown>).crons as Array<unknown>)
+        : [];
+    const expectedCronCounts = new Map<string, number>();
+    for (const schedule of expected.expectedCrons) {
+      expectedCronCounts.set(schedule, (expectedCronCounts.get(schedule) ?? 0) + 1);
+    }
+    // Injected / retargeted — every emitted schedule must be one the source derived, with a
+    // remaining count; anything else is a schedule the build injected.
+    for (const schedule of emittedCrons) {
+      const remaining = typeof schedule === 'string' ? (expectedCronCounts.get(schedule) ?? 0) : 0;
+      if (typeof schedule !== 'string' || remaining <= 0) {
+        return {
+          ok: false,
+          reason: `generated config declares a cron trigger schedule ${JSON.stringify(schedule)} that Void did not derive from source — refusing to deploy a schedule the build injected.`,
+        };
+      }
+      expectedCronCounts.set(schedule, remaining - 1);
+    }
+    // Dropped — every expected schedule must still be emitted; any leftover count is a schedule the
+    // build dropped (e.g. the old side of a retarget).
+    for (const [schedule, remaining] of expectedCronCounts) {
+      if (remaining > 0) {
+        return {
+          ok: false,
+          reason: `generated config no longer installs the cron trigger schedule ${JSON.stringify(schedule)} that Void derived from source — refusing to deploy a build that dropped a cron trigger.`,
+        };
+      }
+    }
+  }
+  return { ok: true };
+}
+
+/** Result of one orchestrator-owned wrangler invocation (whoami/migrate/deploy). */
+export type DeployWranglerRunResult = {
+  status: number;
+  stdout: string;
+  stderr: string;
+  /** Non-null ONLY when the child was killed by a signal — a HARD failure. */
+  signal?: NodeJS.Signals | null;
+  /** Spawn-error message when the child could not start — a HARD failure. */
+  error?: string | null;
+};
+
+/**
+ * Injectable seam over the orchestrator's OWN wrangler calls (`whoami`,
+ * `d1 migrations apply`, `deploy`). `capture:true` pipes stdout/stderr (so
+ * `whoami --json` can be classified); `capture:false` inherits the terminal
+ * (migrate/deploy stream their own progress + URL). Unit tests inject a stub so
+ * no real wrangler runs. Mirrors the provisioner's `RunWrangler` structured
+ * provenance so a signal-killed / unspawnable child is never read as success.
+ */
+export type DeployWranglerRun = (
+  args: Array<string>,
+  opts: { capture: boolean },
+) => DeployWranglerRunResult | Promise<DeployWranglerRunResult>;
+
+/**
+ * Injectable seams for {@link runCloudflareDeploy}, so the whole orchestration
+ * is unit-testable with NO real wrangler / network / Cloudflare account — the
+ * same pattern the provisioner (`cli/provision.ts`) and the self-host secret
+ * units (`cli/env-validation.ts`) use.
+ */
+export interface CloudflareDeployDeps {
+  /** wrangler runner for the orchestrator's own whoami/migrate/deploy calls. */
+  runWrangler?: DeployWranglerRun;
+  /** Run the project's `vite build` (inherited stdio). Throws on a nonzero build. */
+  runBuild?: (env: NodeJS.ProcessEnv) => void;
+  /**
+   * Wrangler-uploader content-hash seam (default: {@link hashWranglerUploader}). Snapshotted
+   * BEFORE the build and re-checked AFTER, so a build that overwrote the wrangler bundle the
+   * credentialed remote migrate / deploy execute fails closed before either runs.
+   */
+  hashWranglerUploader?: (root: string) => string | undefined;
+  /** Provisioner seam (default: `provisionCloudflareResources`, loaded dynamically). */
+  provision?: typeof provisionCloudflareResources;
+  /** Parent-side secret-gate discharge seam (default: {@link dischargeSelfHostEnvContext}). */
+  dischargeSelfHostEnv?: typeof dischargeSelfHostEnvContext;
+  /** Generated-deploy-config verification seam (default: {@link verifyGeneratedDeployConfig}). */
+  verifyDeployConfig?: typeof verifyGeneratedDeployConfig;
+  /** Pre-remote-migrate gate seam (default: {@link assertRemoteMigrationsDeployable}). */
+  assertMigrationsDeployable?: typeof assertRemoteMigrationsDeployable;
+  /** Migration apply-set equality gate seam (default: {@link checkWranglerMigrationApplySet}). */
+  checkMigrationApplySet?: typeof checkWranglerMigrationApplySet;
+  /**
+   * Auth-schema validation seam (default: {@link validateAuthMigrationSchema}).
+   * Runs POST-build: reads the generated auth schema the build emitted
+   * (`.void/better-auth-schema.ts`) and asserts the checked-in migrations produce it.
+   */
+  validateAuthMigrations?: typeof validateAuthMigrationSchema;
+  /**
+   * Isolated env-schema probe seam (default: the {@link EnvSchemaProbeInput}
+   * subprocess). Receives a scrubbed env and returns the env-INSENSITIVE schema facts
+   * (required-secret NAMES + `.secret()` flags), derived by importing env.ts in the
+   * child, so the parent runs no project code. A `schema-error` (env.ts failed to
+   * evaluate, or a validator threw) fails the deploy closed.
+   */
+  resolveSchemaFacts?: (
+    input: EnvSchemaProbeInput,
+    env: NodeJS.ProcessEnv,
+  ) => EnvSchemaProbeResult | Promise<EnvSchemaProbeResult>;
+  /**
+   * Isolated emitted-var validation seam (default: the {@link EnvSchemaProbeInput}
+   * subprocess in `validate-emitted` mode). Runs POST-build: validates the REAL emitted
+   * worker `vars` against the schema's validators in the child and returns the FAILING
+   * key NAMES only, which fold into the secret-gate context so a malformed required
+   * value fails the deploy closed before any remote mutation.
+   */
+  validateEmittedVars?: (
+    input: EnvSchemaProbeInput,
+    env: NodeJS.ProcessEnv,
+  ) => EnvSchemaValidateResult | Promise<EnvSchemaValidateResult>;
+  /**
+   * Emitted-worker-vars read seam (default: {@link readEmittedWorkerVarsDefault}).
+   * Runs POST-build: reads the REAL `vars` map the build baked into
+   * `dist/ssr/wrangler.json` — the ground truth the plaintext warnings + secret gate
+   * validate.
+   */
+  readEmittedWorkerVars?: (root: string) => EmittedWorkerVarsResult;
+  /** Override CI / non-interactive detection (default: `!stdin.isTTY || getTokenSource()==='ci'`). */
+  isCI?: boolean;
+  /** Override `process.exit` (tests assert the exit code without halting). */
+  exit?: (code: number) => never;
+}
+
+/** Human labels for a drifted resource kind, used in guidance messages. */
+const CLOUDFLARE_RESOURCE_LABELS: Record<ProvisionDriftEntry['kind'], string> = {
+  d1: 'D1 database',
+  kv: 'KV namespace',
+  r2: 'R2 bucket',
+  hyperdrive: 'Hyperdrive config',
+};
+
+/**
+ * Why a plaintext worker var was flagged, rendered next to its key name. These
+ * are VALUES-FREE by construction — the classifier inspects a value to pick the
+ * reason, but only ever returns the key, so nothing here can echo a secret.
+ */
+const PLAINTEXT_WARNING_REASONS: Record<PlaintextVarWarning['reason'], string> = {
+  'schema-secret': ' (env.ts .secret())',
+  heuristic: '',
+  'value-shape': ' (value looks like a connection URL with embedded credentials)',
+};
+
+/** True only for a wrangler child that ran to completion with a clean exit 0. */
+function isCleanWranglerExit(result: DeployWranglerRunResult): boolean {
+  return (
+    result.status === 0 && result.signal == null && (result.error == null || result.error === '')
+  );
+}
+
+/**
+ * Parse the root wrangler config (BOM-aware, trailing commas allowed), matching
+ * the provisioner's `readRootConfig`. Returns `{}` when the file is absent or
+ * unreadable — callers then treat every field as unset (safe: a genuinely broken
+ * config fails later in wrangler with a clear error).
+ */
+function parseRootWranglerConfig(configPath: string): Record<string, unknown> {
+  if (!existsSync(configPath)) {
+    return {};
+  }
+  let raw: string;
+  try {
+    raw = readFileSync(configPath, 'utf-8');
+  } catch {
+    return {};
+  }
+  const content = raw.startsWith('﻿') ? raw.slice(1) : raw;
+  const errors: Array<ParseError> = [];
+  const parsed = parseJsoncConfig(content, errors, { allowTrailingComma: true });
+  if (errors.length > 0 || typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return {};
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/** Read a non-empty top-level string field (`account_id` / `name`) from the config. */
+function readWranglerTopLevelString(
+  config: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  const value = config[field];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** Read the stored resource name (`database_name` / `bucket_name`) for a binding. */
+function readStoredResourceName(
+  config: Record<string, unknown>,
+  field: string,
+  binding: string,
+  nameField: string,
+): string | undefined {
+  const list = config[field];
+  if (!Array.isArray(list)) {
+    return undefined;
+  }
+  for (const entry of list) {
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      (entry as { binding?: unknown }).binding === binding
+    ) {
+      const name = (entry as Record<string, unknown>)[nameField];
+      return typeof name === 'string' && name.length > 0 ? name : undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Whether a resource binding DECLARES a field at all — present with ANY defined
+ * value, INCLUDING an empty string. Distinct from {@link readStoredResourceName}
+ * (which collapses both "absent" and "empty string" to `undefined`): a
+ * present-but-empty `migrations_pattern: ""` is still a CUSTOM pattern — wrangler
+ * 4.107 takes its non-default branch for any value that is not `undefined`
+ * (`rawPattern !== void 0`), so an empty pattern diverges from the default flat
+ * `*.sql` enumeration this backend validates against. v1 therefore rejects a
+ * custom pattern on PRESENCE, not on a non-empty length. Returns the raw value so
+ * the caller can name it (never a secret — a wrangler config field).
+ */
+function readBindingFieldPresence(
+  config: Record<string, unknown>,
+  field: string,
+  binding: string,
+  key: string,
+): { present: boolean; value: unknown } {
+  const list = config[field];
+  if (!Array.isArray(list)) {
+    return { present: false, value: undefined };
+  }
+  for (const entry of list) {
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      (entry as { binding?: unknown }).binding === binding
+    ) {
+      return Object.hasOwn(entry as object, key)
+        ? { present: true, value: (entry as Record<string, unknown>)[key] }
+        : { present: false, value: undefined };
+    }
+  }
+  return { present: false, value: undefined };
+}
+
+/** Read a `d1_databases` entry's string field. */
+function readD1EntryString(entry: unknown, field: string): string | undefined {
+  if (!entry || typeof entry !== 'object') {
+    return undefined;
+  }
+  const value = (entry as Record<string, unknown>)[field];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Resolve the token to pass to `wrangler d1 migrations apply` so wrangler's OWN
+ * resolution (`getDatabaseInfoFromConfig`, wrangler 4.107 src/d1/utils.ts) selects
+ * EXACTLY the `d1_databases` entry the gate validated (matched by `binding`). wrangler
+ * iterates the array and returns the FIRST entry where
+ * `token === database_name || token === binding`, then uses that entry's `migrations_dir`.
+ * We prefer the validated entry's own `database_name` as the token (falling back to the
+ * binding), and FAIL CLOSED when an EARLIER entry also matches it — because wrangler would
+ * then select the earlier entry (a different DB / an unrelated migrations folder) though
+ * the gate validated ours.
+ */
+function resolveD1MigrateTarget(
+  config: Record<string, unknown>,
+  binding: string,
+): { ok: true; token: string } | { ok: false; reason: string } {
+  const list = config.d1_databases;
+  if (!Array.isArray(list)) {
+    return { ok: false, reason: `the root config has no "d1_databases" array` };
+  }
+  const validatedIndex = list.findIndex((entry) => readD1EntryString(entry, 'binding') === binding);
+  if (validatedIndex === -1) {
+    return { ok: false, reason: `no d1_databases entry has binding ${JSON.stringify(binding)}` };
+  }
+  const validated = list[validatedIndex];
+  // wrangler matches by database_name OR binding; the validated entry always matches its
+  // own binding, so the binding is a safe fallback token when it has no database_name.
+  const token = readD1EntryString(validated, 'database_name') ?? binding;
+  for (let i = 0; i < validatedIndex; i++) {
+    const earlier = list[i];
+    if (
+      readD1EntryString(earlier, 'database_name') === token ||
+      readD1EntryString(earlier, 'binding') === token
+    ) {
+      return {
+        ok: false,
+        reason:
+          `an earlier d1_databases entry (binding ${JSON.stringify(readD1EntryString(earlier, 'binding'))}, ` +
+          `database_name ${JSON.stringify(readD1EntryString(earlier, 'database_name'))}) also matches the ` +
+          `token ${JSON.stringify(token)}, so wrangler would migrate it instead`,
+      };
+    }
+  }
+  return { ok: true, token };
+}
+
+/** The length cap {@link toValidWorkerName} applies (the CF plugin's own rule). */
+const MAX_WORKER_NAME_LENGTH = 63;
+
+/**
+ * Sanitize a raw name into a valid Cloudflare Worker name — the SAME rule
+ * `@cloudflare/vite-plugin`'s `toValidWorkerName` applies (lowercase, `_`→`-`,
+ * any non `[a-z0-9-]`→`-`, strip leading/trailing dashes, ≤63 chars, empty →
+ * `my-worker`). Deriving it identically means the name we pin in the config and
+ * the name the build emits into `dist/ssr/wrangler.json` agree, so
+ * `wrangler secret list -c <root>` and `wrangler deploy` target one worker.
+ */
+function toValidWorkerName(raw: string): string {
+  const name = raw
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, MAX_WORKER_NAME_LENGTH)
+    .replace(/-+$/g, '');
+  return name.length > 0 ? name : 'my-worker';
+}
+
+/**
+ * Derive a `<worker>-<suffix>` resource name, RESERVING the suffix's budget before
+ * the length cap applies.
+ *
+ * `toValidWorkerName` truncates whatever string it is handed, so
+ * `toValidWorkerName(`${workerName}-kv`)` cuts from the RIGHT — the end that carries
+ * the suffix. A worker name at or above the cap therefore loses the suffix entirely
+ * and every derivation collapses to the bare (truncated) worker name, so `KV` and
+ * `ISR_CACHE` would ask for ONE namespace title. Since KV titles are not
+ * account-unique and the provisioner matches remote namespaces BY TITLE (re-listing
+ * per binding), the second binding would adopt the namespace the first just created:
+ * two bindings sharing one namespace and one quota slot.
+ *
+ * The suffix is kept intact by trimming the BASE to `63 - suffix.length - 1` first.
+ * When the suffix survives the plain derivation (every worker name short enough to
+ * leave room — the normal case), the result is byte-identical to what it has always
+ * been, so no existing app's resource name churns.
+ */
+function suffixedResourceName(workerName: string, suffix: string): string {
+  const full = toValidWorkerName(`${workerName}-${suffix}`);
+  if (full.endsWith(`-${suffix}`)) {
+    return full;
+  }
+  const base = toValidWorkerName(workerName)
+    .slice(0, MAX_WORKER_NAME_LENGTH - suffix.length - 1)
+    .replace(/-+$/g, '');
+  return toValidWorkerName(`${base}-${suffix}`);
+}
+
+/**
+ * Derive the worker name the way the CF plugin's `getWorkerNameFromProject` does
+ * MINUS the `WRANGLER_CI_OVERRIDE_NAME` precedence: package.json `name` → directory
+ * basename → `my-worker`. The override is deliberately NOT consulted — this backend
+ * scrubs it from every child env and fences it in the project dotenv (see
+ * {@link deployChildEnv} / {@link assertNoConfigOverrideInProjectDotenv}), so the
+ * build emits (and the deploy uploads) the non-override name; deriving from the
+ * override here would pin a name the scrubbed build never produces.
+ */
+function deriveWorkerName(root: string): string {
+  let pkgName: string | undefined;
+  try {
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { name?: unknown };
+    if (typeof pkg.name === 'string' && pkg.name.length > 0) {
+      pkgName = pkg.name;
+    }
+  } catch {
+    // no package.json / unreadable — fall through to the directory basename.
+  }
+  return toValidWorkerName(pkgName ?? basename(root) ?? '');
+}
+
+/**
+ * Fail closed when two KV bindings of this deploy would end up on ONE namespace.
+ *
+ * KV is the only resource kind where a name collision silently WORKS: titles are not
+ * account-unique, the provisioner matches remote namespaces BY TITLE, and it re-lists
+ * per binding — so a second binding desiring an already-created title adopts that
+ * namespace and reports success. Both checks below are cheap and purely local:
+ *
+ *  1. DESIRED titles must be distinct — catches any future suffix collision at the
+ *     source, before a single namespace is created.
+ *  2. Already-RECORDED ids must be distinct — an app provisioned before the suffix
+ *     budget was reserved can carry two bindings pointing at the same namespace id.
+ *     Read-first is keyed by binding and both entries hold a real id, so the
+ *     provisioner would skip both forever and never surface it.
+ *
+ * Scoped to KV (and to the bindings THIS deploy manages): D1/R2/Hyperdrive names live
+ * in separate Cloudflare namespaces and are identity-checked against their stored
+ * values elsewhere.
+ */
+function assertDistinctKvNamespaces(
+  kvNamespaces: Array<{ binding: string; title: string }>,
+  config: Record<string, unknown>,
+  configPath: string,
+  isRealKvId: (value: unknown) => value is string,
+): void {
+  const bindingByTitle = new Map<string, string>();
+  for (const { binding, title } of kvNamespaces) {
+    const owner = bindingByTitle.get(title);
+    if (owner !== undefined) {
+      throw new Error(
+        `deploy: KV bindings ${JSON.stringify(owner)} and ${JSON.stringify(binding)} both resolve ` +
+          `to the namespace title ${JSON.stringify(title)}. KV titles are not account-unique, so ` +
+          `provisioning would put both bindings on ONE namespace. Give the worker a shorter ` +
+          `"name" in "${configPath}" so each binding derives its own title, then retry.`,
+      );
+    }
+    bindingByTitle.set(title, binding);
+  }
+
+  const managed = new Set(kvNamespaces.map((kv) => kv.binding));
+  const entries = config.kv_namespaces;
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  const bindingById = new Map<string, string>();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const { binding, id } = entry as { binding?: unknown; id?: unknown };
+    if (typeof binding !== 'string' || !managed.has(binding) || !isRealKvId(id)) {
+      continue;
+    }
+    const owner = bindingById.get(id);
+    if (owner !== undefined && owner !== binding) {
+      throw new Error(
+        `deploy: KV bindings ${JSON.stringify(owner)} and ${JSON.stringify(binding)} in ` +
+          `"${configPath}" both point at KV namespace id ${JSON.stringify(id)}. They resolved to a ` +
+          `single namespace when they were provisioned, so the two bindings share one namespace ` +
+          `and one quota slot. Give one of them a fresh namespace (create it, or drop its entry ` +
+          `from "${configPath}" and re-run with --provision), then retry.`,
+      );
+    }
+    bindingById.set(id, binding);
+  }
+}
+
+/**
+ * Compute the DESIRED id/name-bearing Cloudflare resources from SOURCE
+ * (pre-build, fail-fast) — the single set shared by the provision and drift
+ * paths. Reuses the deploy-time inference primitives directly
+ * (`inferProjectBindings` + the scanners + the pg-dialect / `hasRevalidate`
+ * signals) rather than `assembleVoidManifest`, which runs only inside the
+ * managed `runFullDeploy` branches that need a `PlatformClient`.
+ *
+ * Resource NAMES prefer the value already stored in the root wrangler config
+ * (so a re-provision reuses the same database/bucket and the provisioner's
+ * stored-name identity check passes); otherwise they default off the worker
+ * name. Returns a per-binding REASON map used to explain drift.
+ */
+export async function computeDesiredCloudflareResources(
+  root: string,
+  voidConfig: VoidConfig,
+  configPath: string,
+): Promise<{
+  desired: DesiredResourceSet;
+  reasons: Map<string, string>;
+  /** Whether Void-managed auth is enabled (drives the auth-migration gate). */
+  authEnabled: boolean;
+  /** Resolved database dialect (sqlite → D1, postgresql → Hyperdrive). */
+  dialect: DatabaseDialect;
+  /** Absolute migrations dir on disk (sourceDir-aware) — used by the migrate gates. */
+  migrationsDir: string;
+  /** Checked-in migrations (`db/migrations/*.sql`) collected pre-build. */
+  migrations: Array<{ name: string; sql: string }>;
+  /**
+   * Whether the pre-build inference found Workers AI use in the source — the SAME `needsAI`
+   * signal `shouldBindWorkersAi` (index.ts) gates the emitted `{binding:'AI'}` on. Threaded
+   * into {@link verifyGeneratedDeployConfig} to authorize that emitted ai binding.
+   */
+  needsAI: boolean;
+  /**
+   * Whether Void's build emits the sandbox container application — the SAME signal `mergeBindings`
+   * (index.ts) gates emission on: `isSandboxEnabled(config)` (a `sandbox` field in `void.json`) OR
+   * the import walk detecting a `void/sandbox` import (`inferProjectBindings(...).needsSandbox`).
+   * Threaded into {@link verifyGeneratedDeployConfig} (via {@link reconstructExpectedContainers})
+   * to pin the emitted `containers` array.
+   */
+  needsSandbox: boolean;
+  /**
+   * The exact cron trigger schedules Void's build emits into `dist/ssr/wrangler.json`
+   * `triggers.crons`, reconstructed PRE-BUILD from the SAME `scanJobsSync(root, paths.cronsDir)`
+   * scan index.ts derives them from (`scanJobsSync(...).flatMap((job) => job.crons)`). Threaded
+   * into {@link verifyGeneratedDeployConfig} to pin the emitted schedules against a build that
+   * injected, dropped, or retargeted a Cron Trigger.
+   */
+  expectedCrons: Array<string>;
+}> {
+  // The id predicates are resolved via the memoized dynamic import so this exported
+  // helper works when called directly in unit tests (outside the fork) without a
+  // static provision edge that would eagerly load the provision lifecycle.
+  const { isRealD1Id, isRealKvId } = await loadProvisionModule();
+  const paths = resolveProjectPaths(root, voidConfig);
+  const config = parseRootWranglerConfig(configPath);
+  const workerName = readWranglerTopLevelString(config, 'name') ?? deriveWorkerName(root);
+
+  // Match runFullDeploy's inference: framework (Class-A) apps expand the scan
+  // dirs so bindings used in framework-specific dirs are still discovered.
+  const isFrameworkMode = detectFramework(root) != null;
+  const scanDirs =
+    voidConfig.inference?.scanDirs ?? (isFrameworkMode ? FRAMEWORK_SCAN_DIRS : undefined);
+  // Mirror voidPlugin's inference options EXACTLY (index.ts): when `void.json`
+  // declares `inference.bindings`, those explicit overrides (forced `true`, a
+  // custom binding name, or disabled `false`) drive the build — so the desired set
+  // must consume the same overrides, or a `false` override would still provision a
+  // binding the build never emits (and a forced/custom one would be missed).
+  const inferenceOptions = voidConfig.inference?.bindings
+    ? { bindings: voidConfig.inference.bindings }
+    : undefined;
+  const bindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
+  const authEnabled =
+    bindings.needsAuth || findVoidAuthConfig(root, paths) !== null || voidConfig.auth !== undefined;
+  const dialect = getDatabaseDialect(voidConfig);
+  const bindingNames = resolveBindingNames(voidConfig.inference?.bindings);
+  // Checked-in migrations count toward the database gate, matching the managed
+  // manifest (`buildVoidManifest`: `needsD1 || needsAuth || hasMigrations`). Without
+  // this a migration-only SQLite app would provision no D1 and silently skip remote
+  // migrations. Collected ONCE pre-build from `db/migrations/` (sourceDir-aware) and
+  // carried through so the migrate step can skip when there are none and run the
+  // deploy gates on the exact same files.
+  const migrations = collectMigrations(paths.migrationsDir);
+  const hasMigrations = migrations.length > 0;
+  // Config-relative migrations dir wrangler will resolve from the config-file dir
+  // (the root). sourceDir moves the files to `<sourceDir>/db/migrations`, so the
+  // written `migrations_dir` must include it — a hardcoded `./db/migrations` would
+  // point wrangler at the wrong (or missing) folder for a sourceDir project.
+  const migrationsDirRelative = paths.sourceDir
+    ? `./${paths.sourceDir}/db/migrations`
+    : './db/migrations';
+
+  const desired: DesiredResourceSet = { kvNamespaces: [], queues: [] };
+  const reasons = new Map<string, string>();
+
+  // Database — desired on source-use OR auth OR checked-in migrations (the SAME
+  // predicate the managed manifest applies), with the dialect selecting D1 (sqlite)
+  // vs Hyperdrive (postgresql). This keeps provision/drift equivalent to the build:
+  // a migration-only SQLite app still provisions D1, and an unused pg config does
+  // not needlessly require Hyperdrive.
+  const needsDatabase = bindings.needsD1 || authEnabled || hasMigrations;
+  const databaseReason = bindings.needsD1
+    ? 'app uses env.DB (D1)'
+    : authEnabled
+      ? 'auth requires a D1 database'
+      : 'checked-in migrations need a D1 database';
+  if (needsDatabase && dialect !== 'postgresql') {
+    const binding = bindingNames?.d1 ?? 'DB';
+    // Trust a stored `database_name` ONLY when the paired `database_id` is a REAL
+    // (non-placeholder) id. A synced-but-unprovisioned entry carries the local
+    // placeholder id `"local"` (often alongside `database_name: "default"`); trusting
+    // that name would provision/adopt an account-wide DB literally named `default`.
+    const storedName = readStoredResourceName(config, 'd1_databases', binding, 'database_name');
+    const storedId = readStoredResourceName(config, 'd1_databases', binding, 'database_id');
+    const name =
+      storedName != null && isRealD1Id(storedId)
+        ? storedName
+        : suffixedResourceName(workerName, 'db');
+    // Carry the sourceDir-aware config-relative migrations dir so the provisioner
+    // writes the correct `migrations_dir` (it otherwise hardcodes `./db/migrations`).
+    desired.d1 = { binding, name, migrationsDir: migrationsDirRelative };
+    reasons.set(binding, databaseReason);
+  }
+
+  // KV
+  if (bindings.needsKV) {
+    const binding = bindingNames?.kv ?? 'KV';
+    desired.kvNamespaces.push({ binding, title: suffixedResourceName(workerName, 'kv') });
+    reasons.set(binding, 'app uses env.KV');
+  }
+
+  // R2
+  if (bindings.needsR2) {
+    const binding = bindingNames?.r2 ?? 'STORAGE';
+    const storedName = readStoredResourceName(config, 'r2_buckets', binding, 'bucket_name');
+    const bucketName =
+      storedName && storedName !== 'default'
+        ? storedName
+        : suffixedResourceName(workerName, 'storage');
+    desired.r2 = { binding, bucketName };
+    reasons.set(binding, 'app uses env.STORAGE (R2)');
+  }
+
+  // Queues (resource names — account-unique; the build binds them for native apps).
+  desired.queues = scanQueuesSync(root, paths.queuesDir).map((q) => q.name);
+
+  // Hyperdrive (PostgreSQL apps) — same database gate as D1, dialect-selected. The
+  // connection string is only consumed on a fresh create; a re-provision reads-first
+  // from the config id and never needs it.
+  if (needsDatabase && dialect === 'postgresql') {
+    const binding = 'HYPERDRIVE';
+    desired.hyperdrive = {
+      binding,
+      name: suffixedResourceName(workerName, 'hyperdrive'),
+      connectionString: process.env.DATABASE_URL ?? '',
+    };
+    reasons.set(binding, 'app uses PostgreSQL (needs a Hyperdrive config)');
+  }
+
+  // ISR_CACHE (a KV namespace) — self-host-only, not in the import walk. Desired
+  // when the merged revalidate config (void.json `routing.revalidate` + per-page
+  // `export const revalidate`) turns ISR on — the SAME gate the build's `emitIsr`
+  // uses (`plugin-routing.ts`).
+  const pageScan = existsSync(paths.pagesDir)
+    ? await scanPages(root, { output: voidConfig.output, paths })
+    : null;
+  if (hasRevalidate(collectRevalidate(voidConfig, pageScan))) {
+    const binding = 'ISR_CACHE';
+    desired.kvNamespaces.push({ binding, title: suffixedResourceName(workerName, 'isr-cache') });
+    reasons.set(binding, 'routes use `revalidate` (ISR) — needs an ISR_CACHE KV namespace');
+  }
+
+  // Every KV binding must own its namespace — both the titles this deploy would
+  // provision and the ids an earlier provision already recorded.
+  assertDistinctKvNamespaces(desired.kvNamespaces, config, configPath, isRealKvId);
+
+  // Cron trigger schedules — the EXACT expression index.ts emits into `triggers.crons`
+  // (`scanJobsSync(root, paths.cronsDir).flatMap((job) => job.crons)`), from the SAME scan and the
+  // SAME `paths` the build's emission sees, so a legitimate build's emitted schedules multiset-equal
+  // this reconstruction.
+  const expectedCrons = scanJobsSync(root, paths.cronsDir).flatMap((job) => job.crons);
+
+  return {
+    desired,
+    reasons,
+    authEnabled,
+    dialect,
+    migrationsDir: paths.migrationsDir,
+    migrations,
+    needsAI: bindings.needsAI,
+    expectedCrons,
+    // Mirror index.ts's emission signal EXACTLY (line 658): the sandbox container is emitted when
+    // `void.json` enables it OR the source imports `void/sandbox` (the import-walk signal). Using
+    // `isSandboxEnabled` alone would miss an import-only sandbox app (e.g. kitchen-sink) and the
+    // container pin would then FALSE-POSITIVE a legitimate build.
+    needsSandbox: isSandboxEnabled(voidConfig) || bindings.needsSandbox,
+  };
+}
+
+/** A column the emitted auth schema requires, with the constraints that carry correctness. */
+export type RequiredAuthColumn = {
+  column: string;
+  /** The emitted field is `unique: true` — a duplicate row here is a duplicate auth identity. */
+  unique: boolean;
+  /**
+   * The emitted field is `required: true` — the column must be NOT NULL. `PRAGMA
+   * table_info.notnull` answers this directly, with one exception: the `INTEGER PRIMARY KEY`
+   * rowid alias reports `notnull = 0` yet SQLite assigns a rowid on a NULL insert, so it can
+   * never hold NULL and must not be rejected. A true alias is identified by the ABSENCE of an
+   * `origin = 'pk'` row in `PRAGMA index_list`, not by its declared type — `INTEGER PRIMARY
+   * KEY DESC` declares the same type but is no alias and really does store NULL.
+   */
+  required?: boolean;
+  /**
+   * This is the table's implicit `id` — the row identity every auth foreign key points at.
+   * SQLite requires a PARENT KEY to be uniquely constrained (a PRIMARY KEY or a UNIQUE
+   * constraint/index), so an `id` that is an ordinary column cannot carry the auth schema's
+   * foreign keys. `PRAGMA foreign_key_check` is the authority on whether an EXISTING foreign
+   * key's parent key is usable, but it only validates foreign keys that were actually
+   * declared — a child table that declares none at all comes back clean. This flag is
+   * therefore asserted on its own, so a non-unique `id` is caught even before any child
+   * references it.
+   */
+  primaryKey?: boolean;
+  /** The emitted field carries `references` — the parent table + column it must point at. */
+  references?: { table: string; column: string };
+};
+
+/**
+ * One row of `PRAGMA table_info`. `type` is the type the migration DECLARED, echoed back — one
+ * of the conditions for recognizing the `INTEGER PRIMARY KEY` rowid alias, which no column of
+ * this PRAGMA distinguishes from an ordinary nullable primary key on its own (`PRAGMA
+ * index_list` supplies the discriminator).
+ */
+type TableInfoRow = { name: string; type: string | null; notnull: number; pk: number };
+
+/** One table of the emitted auth schema, reduced to what the migrations must reproduce. */
+export type RequiredAuthTable = {
+  table: string;
+  columns: Array<RequiredAuthColumn>;
+};
+
+/**
+ * Apply the checked-in migrations to an in-memory SQLite database (`node:sqlite`, a repo
+ * dependency — the same driver `auth/node.ts` uses) and assert the effective schema contains
+ * every REQUIRED auth table, its columns, AND the constraints that carry correctness. This
+ * replaces a raw `CREATE TABLE` token search (defeated by comments/strings/renames/plugin
+ * tables) with the real POST-migration schema — the identical thing wrangler will apply to
+ * remote D1 (SQLite).
+ *
+ * Names alone are not enough: Void ships no auth migration scaffolder, so users hand-write
+ * `db/schema.ts` and run `void db generate`, where Drizzle's `.unique()` and `.references()`
+ * are both opt-in. A migration set with every right NAME but no unique index on `user.email`
+ * and no `session.userId` foreign key is a materially weaker schema than the one the managed
+ * path builds (`applySqliteAuthMigrations`), and it used to sail through this gate.
+ *
+ * Asserted: column presence, the implicit `id`'s uniqueness (`primaryKey`), `required`
+ * (NOT NULL), `unique: true`, and `references` (parent table + column — including that an
+ * implicit `REFERENCES "parent"` resolves to the parent's actual PRIMARY KEY). Those
+ * reference checks answer only WHICH column a foreign key names; whether SQLite will ACCEPT
+ * that parent key is settled by `PRAGMA foreign_key_check` on the migrated (still empty)
+ * database, which applies SQLite's own rule rather than a local re-derivation of it.
+ * Deliberately NOT asserted — these would reject legitimate schemas:
+ *   - column TYPE — SQLite is dynamically typed, and Drizzle's output varies by mode.
+ *   - non-unique `index: true` — a performance property, not a correctness one.
+ *   - the exact `onDelete` action — over-tight; the reference itself is the invariant.
+ *
+ * Throws naming the exact offending `table.column` and what is missing (identifiers only,
+ * never values), or when a migration cannot even be applied. Exported for unit testing (the
+ * `required` set is passed in, so this needs no Better Auth resolution).
+ */
+export async function assertMigrationsProduceAuthSchema(
+  migrations: Array<{ name: string; sql: string }>,
+  required: Array<RequiredAuthTable>,
+): Promise<void> {
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  const quote = (identifier: string): string => `"${identifier.replace(/"/g, '""')}"`;
+  // SQLite resolves identifiers case-insensitively, but `sqlite_master.name` and every PRAGMA
+  // echo back the casing the migration DECLARED. So `CREATE TABLE "User" ("Email" TEXT UNIQUE)`
+  // is the same schema as the emitted `user.email` — lowercase SELECTs resolve against it and
+  // the UNIQUE constraint enforces — and must not read as missing here. Every identifier this
+  // function compares (table, column, unique index member, FK parent) is folded through this
+  // one notion of equality; only the PRAGMA arguments keep the caller's original spelling,
+  // since SQLite resolves those case-insensitively anyway.
+  const foldIdentifier = (identifier: string): string => identifier.toLowerCase();
+  const sameIdentifier = (a: string, b: string): boolean => foldIdentifier(a) === foldIdentifier(b);
+  // `PRAGMA table_info`, memoized. A foreign key is validated against the PARENT table's info,
+  // and the parent is not necessarily a table this loop has reached (or will ever reach), so
+  // this must be able to answer for an arbitrary table at any point. SQLite resolves the PRAGMA
+  // argument case-insensitively, so the cache is keyed on the FOLDED name while the query keeps
+  // the caller's spelling. A table no migration created yields `[]`, not an error.
+  const tableInfoCache = new Map<string, Array<TableInfoRow>>();
+  const tableInfoFor = (table: string): Array<TableInfoRow> => {
+    const key = foldIdentifier(table);
+    const cached = tableInfoCache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const rows = db.prepare(`PRAGMA table_info(${quote(table)})`).all() as Array<TableInfoRow>;
+    tableInfoCache.set(key, rows);
+    return rows;
+  };
+  // The table's single-column PRIMARY KEY, or null when it has none or a COMPOSITE one. This is
+  // the ONLY thing SQLite resolves an omitted foreign-key target column to.
+  const singleColumnPrimaryKey = (table: string): string | null => {
+    const primaryKey = tableInfoFor(table).filter((row) => Number(row.pk) > 0);
+    return primaryKey.length === 1 && primaryKey[0] ? primaryKey[0].name : null;
+  };
+  try {
+    for (const migration of migrations) {
+      try {
+        db.exec(migration.sql);
+      } catch (err) {
+        throw new Error(
+          `checked-in migration ${migration.name} could not be applied to a fresh SQLite database, ` +
+            `so the auth schema cannot be verified: ${getErrorMessage(err)}`,
+        );
+      }
+    }
+    const tables = new Set(
+      (
+        db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{
+          name: string;
+        }>
+      ).map((row) => foldIdentifier(row.name)),
+    );
+    const problems: Array<string> = [];
+    for (const req of required) {
+      if (!tables.has(foldIdentifier(req.table))) {
+        problems.push(`table "${req.table}" is not created by any checked-in migration`);
+        continue;
+      }
+      const tableInfo = tableInfoFor(req.table);
+      const columns = new Set(tableInfo.map((row) => foldIdentifier(row.name)));
+      const missing = req.columns
+        .filter((required) => !columns.has(foldIdentifier(required.column)))
+        .map((required) => required.column);
+      if (missing.length > 0) {
+        problems.push(`table "${req.table}" is missing column(s): ${missing.join(', ')}`);
+      }
+
+      // Uniqueness — collect every column SQLite actually enforces as unique, so BOTH
+      // spellings a real project produces are honored: a column-level `email TEXT UNIQUE`
+      // (SQLite materializes an implicit `sqlite_autoindex_*`) and a separate
+      // `CREATE UNIQUE INDEX ... ON user (email)` (what `applySqliteAuthMigrations` emits).
+      // Any single-column, non-partial unique index over the column counts — the index NAME
+      // is never required. A single-column PRIMARY KEY counts too, including the
+      // `INTEGER PRIMARY KEY` rowid alias, which materializes no `origin = 'pk'` index row.
+      const uniqueColumns = new Set<string>();
+      const primaryKey = tableInfo.filter((row) => Number(row.pk) > 0);
+      if (primaryKey.length === 1 && primaryKey[0]) {
+        uniqueColumns.add(foldIdentifier(primaryKey[0].name));
+      }
+      const indexes = db.prepare(`PRAGMA index_list(${quote(req.table)})`).all() as Array<{
+        name: string;
+        unique: number;
+        origin?: string | null;
+        partial?: number;
+      }>;
+      for (const index of indexes) {
+        // A PARTIAL unique index only constrains the rows matching its WHERE clause, so it
+        // does not make the column globally unique.
+        if (Number(index.unique) !== 1 || Number(index.partial ?? 0) !== 0) {
+          continue;
+        }
+        const indexColumns = db.prepare(`PRAGMA index_info(${quote(index.name)})`).all() as Array<{
+          name: string | null;
+        }>;
+        // A composite unique index constrains the TUPLE, not this column on its own.
+        if (indexColumns.length !== 1) {
+          continue;
+        }
+        const only = indexColumns[0]?.name;
+        if (typeof only === 'string') {
+          uniqueColumns.add(foldIdentifier(only));
+        }
+      }
+      // The implicit `id` — the parent key every auth foreign key resolves against. SQLite
+      // only accepts a parent key that is uniquely constrained, so a migration that creates
+      // `id` as an ordinary column produces a schema whose FKs are DEAD: `CREATE TABLE`
+      // succeeds, `PRAGMA foreign_key_list` still reports the constraint, and then every
+      // statement touching the child table fails at prepare time with `foreign key mismatch`
+      // under `foreign_keys=ON` (which D1 always enforces) — i.e. auth breaks in production
+      // AFTER a green deploy. PRIMARY KEY and UNIQUE are both valid parent keys, so reuse
+      // `uniqueColumns` (it already accepts the single-column PK, the `INTEGER PRIMARY KEY`
+      // rowid alias, and any single-column non-partial unique index) rather than demanding
+      // PRIMARY KEY specifically.
+      const notIdentity = req.columns
+        .filter(
+          (required) =>
+            required.primaryKey === true &&
+            columns.has(foldIdentifier(required.column)) &&
+            !uniqueColumns.has(foldIdentifier(required.column)),
+        )
+        .map((required) => required.column);
+      for (const column of notIdentity) {
+        problems.push(
+          `table "${req.table}" column "${column}" must be the PRIMARY KEY (or otherwise ` +
+            `uniquely constrained) — it is the row identity the auth foreign keys point at, and ` +
+            `SQLite rejects a foreign key whose parent key is not unique at runtime with ` +
+            `"foreign key mismatch"`,
+        );
+      }
+
+      // NOT NULL — `PRAGMA table_info.notnull` answers it directly, with ONE exception. The
+      // `INTEGER PRIMARY KEY` rowid alias reports `notnull = 0`, but SQLite assigns a rowid on
+      // a NULL insert, so the column can never actually hold NULL; rejecting it would false-
+      // reject a common, legitimate schema.
+      //
+      // The declared type CANNOT decide this on its own. `INTEGER PRIMARY KEY DESC` is not a
+      // rowid alias — a historical SQLite quirk — yet `PRAGMA table_info` reports it
+      // identically to the real alias (`type = INTEGER`, `pk = 1`, `notnull = 0`) while a NULL
+      // insert genuinely stores NULL. What separates them is that a true alias IS the rowid,
+      // so SQLite materializes no primary-key index for it: `PRAGMA index_list` carries an
+      // `origin = 'pk'` row for `DESC`, for `TEXT PRIMARY KEY`, for `INT`/`BIGINT PRIMARY KEY`
+      // and for a composite PK, but none for `INTEGER PRIMARY KEY` / `INTEGER PRIMARY KEY ASC`.
+      // That is the discriminator used here — the absence of the `origin = 'pk'` row, read off
+      // the `index_list` the uniqueness check above already fetched, with no SQL text parsing.
+      // Note the test is the ORIGIN, not the row count: a rowid-alias table may still carry
+      // unrelated `origin = 'u'` / `origin = 'c'` index rows from a column-level UNIQUE or a
+      // `CREATE INDEX`. The single-column-PK and exact-`INTEGER` conditions are kept alongside
+      // it, so nothing widens beyond the one shape SQLite actually aliases to the rowid.
+      const hasPrimaryKeyIndex = indexes.some(
+        (index) => String(index.origin ?? '').toLowerCase() === 'pk',
+      );
+      const isRowidAlias = (row: TableInfoRow): boolean =>
+        primaryKey.length === 1 &&
+        Number(row.pk) > 0 &&
+        !hasPrimaryKeyIndex &&
+        String(row.type ?? '')
+          .trim()
+          .toUpperCase() === 'INTEGER';
+      const notNullColumns = new Set(
+        tableInfo
+          .filter((row) => Number(row.notnull) === 1 || isRowidAlias(row))
+          .map((row) => foldIdentifier(row.name)),
+      );
+
+      // The identity's own NOT NULL. SQLite permits NULL in any PRIMARY KEY column that is not
+      // the rowid alias — a longstanding file-format compatibility quirk — so `id text primary
+      // key` accepts rows carrying NO identity, and more than one of them, because NULLs never
+      // collide under a unique constraint. Reported apart from the ordinary required columns
+      // below: the constraint reads as already satisfied in the migration, so the message has
+      // to name the quirk to be actionable.
+      const nullableIdentity = req.columns
+        .filter(
+          (required) =>
+            required.primaryKey === true &&
+            required.required === true &&
+            columns.has(foldIdentifier(required.column)) &&
+            !notNullColumns.has(foldIdentifier(required.column)),
+        )
+        .map((required) => required.column);
+      for (const column of nullableIdentity) {
+        problems.push(
+          `table "${req.table}" column "${column}" must be declared NOT NULL — SQLite permits ` +
+            `NULL in a PRIMARY KEY column unless it is the INTEGER rowid alias, so rows could ` +
+            `be inserted with no identity at all, and more than one of them (NULLs do not ` +
+            `collide under a unique constraint)`,
+        );
+      }
+
+      // Every other column the emitted schema marks `required`.
+      const nullableRequired = req.columns
+        .filter(
+          (required) =>
+            required.required === true &&
+            required.primaryKey !== true &&
+            columns.has(foldIdentifier(required.column)) &&
+            !notNullColumns.has(foldIdentifier(required.column)),
+        )
+        .map((required) => required.column);
+      if (nullableRequired.length > 0) {
+        problems.push(
+          `table "${req.table}" is missing a NOT NULL constraint on column(s): ` +
+            `${nullableRequired.join(', ')} (the emitted auth schema marks them required)`,
+        );
+      }
+
+      const notUnique = req.columns
+        .filter(
+          (required) =>
+            required.unique &&
+            columns.has(foldIdentifier(required.column)) &&
+            !uniqueColumns.has(foldIdentifier(required.column)),
+        )
+        .map((required) => required.column);
+      if (notUnique.length > 0) {
+        problems.push(
+          `table "${req.table}" is missing a UNIQUE constraint on column(s): ${notUnique.join(', ')} ` +
+            `(no column-level UNIQUE and no single-column unique index covers them)`,
+        );
+      }
+
+      // References — the emitted schema points these columns at a parent row, and without the
+      // foreign key the migrations permit orphaned auth rows (e.g. a session with no user).
+      // `PRAGMA foreign_key_list` returns ONE ROW PER COLUMN, not one per constraint: the rows
+      // of a single constraint share an `id` and are ordered by `seq`. Grouping by `id` is what
+      // makes the width of each constraint visible, and the width is load-bearing — see below.
+      const foreignKeys = db
+        .prepare(`PRAGMA foreign_key_list(${quote(req.table)})`)
+        .all() as Array<{
+        id: number;
+        table: string;
+        from: string;
+        to: string | null;
+      }>;
+      const foreignKeyConstraints = new Map<number, Array<(typeof foreignKeys)[number]>>();
+      for (const fk of foreignKeys) {
+        const group = foreignKeyConstraints.get(Number(fk.id));
+        if (group) {
+          group.push(fk);
+        } else {
+          foreignKeyConstraints.set(Number(fk.id), [fk]);
+        }
+      }
+      const constraints = Array.from(foreignKeyConstraints.values());
+      for (const required of req.columns) {
+        const reference = required.references;
+        if (!reference || !columns.has(foldIdentifier(required.column))) {
+          continue;
+        }
+        const namesReference = (fk: (typeof foreignKeys)[number]): boolean =>
+          typeof fk.from === 'string' &&
+          sameIdentifier(fk.from, required.column) &&
+          typeof fk.table === 'string' &&
+          sameIdentifier(fk.table, reference.table);
+        // ONLY a SINGLE-COLUMN foreign key satisfies an auth reference. SQLite applies
+        // MATCH SIMPLE, under which a COMPOSITE foreign key is skipped ENTIRELY whenever ANY
+        // of its child columns is NULL — so `FOREIGN KEY (userId, tenant) REFERENCES
+        // user(id, tenant)` with a nullable `tenant` lets a session naming a nonexistent user
+        // be inserted, exactly the orphan the `references` requirement exists to prevent.
+        // Matching per ROW would accept that constraint through its `userId` member alone.
+        // `PRAGMA foreign_key_check` cannot cover for this either: it reports orphaned DATA,
+        // and the freshly-migrated database it runs against holds no rows.
+        const matching = constraints.flatMap((group) =>
+          group.length === 1 && group[0] && namesReference(group[0]) ? [group[0]] : [],
+        );
+        const composite = constraints.some(
+          (group) => group.length > 1 && group.some(namesReference),
+        );
+        // WHICH COLUMN the foreign key points at — a question of NAMES, and the only
+        // question this block answers. Whether SQLite will ACCEPT that parent key at all is
+        // orthogonal and is settled below by `PRAGMA foreign_key_check`, so nothing here
+        // needs to model SQLite's parent-key rules.
+        //
+        // `to` is NULL when the migration omitted the target column (`REFERENCES "user"`).
+        // SQLite resolves an omitted target ONLY to the parent's single-column PRIMARY KEY,
+        // so the shorthand names the required column only when that column IS the parent's
+        // PRIMARY KEY. The answer lives only in the PARENT's own `table_info`, which is why
+        // this reaches outside the table being validated. This check is load-bearing beyond
+        // the pragma: a foreign key aimed at a perfectly valid parent key that is the WRONG
+        // column (`REFERENCES "user"` where the parent's PRIMARY KEY is `email`, not `id`)
+        // is structurally sound, so `foreign_key_check` passes it — only this comparison
+        // catches it. An EXPLICIT `to` matches by name directly.
+        const satisfied = matching.some((fk) => {
+          if (fk.to != null) {
+            return sameIdentifier(String(fk.to), reference.column);
+          }
+          const parentPrimaryKey = singleColumnPrimaryKey(fk.table);
+          return parentPrimaryKey !== null && sameIdentifier(parentPrimaryKey, reference.column);
+        });
+        if (!satisfied) {
+          problems.push(
+            matching.length === 0 && composite
+              ? `table "${req.table}" column "${required.column}" references ` +
+                  `"${reference.table}"."${reference.column}" only as part of a MULTI-COLUMN ` +
+                  `foreign key — SQLite skips a composite foreign key entirely when any of its ` +
+                  `child columns is NULL, so a row naming a "${reference.table}" that does not ` +
+                  `exist is still accepted. This reference needs its own single-column foreign ` +
+                  `key on "${required.column}"`
+              : matching.some((fk) => fk.to == null)
+                ? `table "${req.table}" column "${required.column}" references "${reference.table}" ` +
+                  `without naming a target column, but "${reference.table}"."${reference.column}" ` +
+                  `is not that table's single-column PRIMARY KEY — SQLite resolves an omitted ` +
+                  `target only to the parent's PRIMARY KEY (a UNIQUE constraint does not qualify, ` +
+                  `nor does a composite PRIMARY KEY) and rejects this at runtime with ` +
+                  `"foreign key mismatch"`
+                : `table "${req.table}" column "${required.column}" is missing a foreign key ` +
+                  `referencing "${reference.table}"."${reference.column}"`,
+          );
+        }
+      }
+
+      // AUTHORITATIVE structural gate for this table's foreign keys — ask SQLite instead of
+      // re-deriving its parent-key rules here. Those rules are subtler than they look: a
+      // parent key must be a PRIMARY KEY, or a UNIQUE index whose columns AND COLLATING
+      // SEQUENCES match the reference, and an omitted target column resolves only to the
+      // parent's PRIMARY KEY. Hand-modelling them has produced a green deploy on a schema
+      // SQLite rejects more than once (an ordinary parent column; a UNIQUE-only parent under
+      // the implicit shorthand; a unique index declared `COLLATE NOCASE` over a plainly
+      // declared column). `PRAGMA foreign_key_check` applies SQLite's own rule, so a case
+      // this file has not anticipated can no longer pass.
+      //
+      // It reports a STRUCTURAL mismatch by THROWING (`foreign key mismatch - "child"
+      // referencing "parent"`), not by returning rows; returned rows mean orphaned DATA,
+      // which a freshly-migrated database holding no rows cannot have, but are surfaced too
+      // so neither outcome is silently dropped. Scoped to this table (the CHILD side) so an
+      // unrelated application table with its own broken foreign key is not this gate's
+      // business. Any other error is a real fault and propagates untouched.
+      //
+      // Why this matters: `CREATE TABLE` accepts a dead foreign key, and `PRAGMA
+      // foreign_key_list` echoes it back as if valid. Only when a statement touches the
+      // child does SQLite fail at PREPARE time with `foreign key mismatch` — under
+      // `foreign_keys=ON`, which D1 always enforces. Without this gate that surfaces as auth
+      // breaking in production AFTER a green deploy.
+      try {
+        const violations = db
+          .prepare(`PRAGMA foreign_key_check(${quote(req.table)})`)
+          .all() as Array<{ parent?: string | null }>;
+        for (const violation of violations) {
+          const parent = typeof violation.parent === 'string' ? violation.parent : 'its parent';
+          problems.push(
+            `table "${req.table}" has rows violating its foreign key to "${parent}" ` +
+              `(PRAGMA foreign_key_check)`,
+          );
+        }
+      } catch (err) {
+        const message = getErrorMessage(err);
+        const mismatch = /foreign key mismatch\s*-\s*"(.+?)"\s+referencing\s+"(.+?)"/i.exec(
+          message,
+        );
+        if (!mismatch) {
+          throw err;
+        }
+        problems.push(
+          `table "${mismatch[1]}" has a foreign key referencing "${mismatch[2]}" whose parent ` +
+            `key is not a valid foreign-key target — SQLite requires the referenced column(s) ` +
+            `to be a PRIMARY KEY, or a UNIQUE index that MATCHES the reference (an index ` +
+            `declared with a different COLLATE does not match), and an omitted target column ` +
+            `resolves only to the parent's PRIMARY KEY. The table is created, but SQLite ` +
+            `rejects every statement touching it at runtime with "foreign key mismatch"`,
+        );
+      }
+    }
+    if (problems.length > 0) {
+      throw new Error(problems.join('; '));
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Read the REQUIRED Better Auth schema (tables + columns) from the schema the BUILD
+ * actually generated — ground truth, not a facsimile. `writeAuthDatabaseFiles`
+ * (plugin-routing.ts) emits `<root>/.void/better-auth-schema.ts` during the build,
+ * containing an `export const migrationSchema = { ... } as const;` literal —
+ * `JSON.stringify(resolveVoidAuthMigrationSchema(...), null, 2)` derived under the
+ * build's real mode, so it already reflects configured table/column RENAMES + PLUGIN
+ * tables. The literal's top-level object closes with `}` at column 0, so the
+ * `\n} as const;` terminator uniquely bounds the JSON (inner braces are indented).
+ * The `id` column is the implicit PRIMARY KEY, so it is prepended to each table's
+ * columns — matching `resolveVoidAuthMigrationSchema`'s field set exactly. Each field
+ * also carries its `required` (NOT NULL) and `unique` flags and its `references` target,
+ * so the check below can assert the CONSTRAINTS the schema requires and not merely the
+ * names. Throws a fail-closed error when the artifact is missing/malformed.
+ */
+function readEmittedAuthMigrationSchema(root: string): Array<RequiredAuthTable> {
+  const schemaPath = join(root, '.void', 'better-auth-schema.ts');
+  if (!existsSync(schemaPath)) {
+    throw new Error(
+      `the build did not emit ${schemaPath}, so the generated auth schema could not be read from the build output.`,
+    );
+  }
+  const content = readFileSync(schemaPath, 'utf-8');
+  const marker = 'export const migrationSchema = ';
+  const start = content.indexOf(marker);
+  if (start === -1) {
+    throw new Error(
+      `${schemaPath} has no migrationSchema literal — cannot verify the auth schema.`,
+    );
+  }
+  const jsonStart = start + marker.length;
+  const end = content.indexOf('\n} as const;', jsonStart);
+  if (end === -1) {
+    throw new Error(
+      `${schemaPath} migrationSchema literal is malformed — cannot verify the auth schema.`,
+    );
+  }
+  let migrationSchema: VoidAuthMigrationSchema;
+  try {
+    migrationSchema = JSON.parse(content.slice(jsonStart, end + 2)) as VoidAuthMigrationSchema;
+  } catch {
+    throw new Error(
+      `${schemaPath} migrationSchema is not valid JSON — cannot verify the auth schema.`,
+    );
+  }
+  return migrationSchema.tables.map((table) => ({
+    table: table.name,
+    columns: [
+      // `id` is the implicit PRIMARY KEY — never carries `unique`/`references` of its own,
+      // and is absent from `fields`, so this synthesized descriptor is the ONLY thing that
+      // represents it. `primaryKey` makes the check assert it is a usable FK parent key
+      // (see {@link RequiredAuthColumn.primaryKey}); `required` makes it assert the column
+      // cannot be NULL, which PRIMARY KEY alone does not guarantee in SQLite.
+      { column: 'id', unique: false, required: true, primaryKey: true },
+      ...Object.entries(table.fields).map(([column, field]) => ({
+        column,
+        unique: field.unique === true,
+        required: field.required === true,
+        references: field.references
+          ? { table: field.references.table, column: field.references.field }
+          : undefined,
+      })),
+    ],
+  }));
+}
+
+/**
+ * Default {@link CloudflareDeployDeps.validateAuthMigrations} seam: read the auth
+ * schema the BUILD generated ({@link readEmittedAuthMigrationSchema}) and assert the
+ * checked-in migrations produce it (applied to in-memory SQLite). Runs POST-build,
+ * against ground truth — no auth-config subprocess, no mode/envDir divergence.
+ * Throws on any missing table/column (or an unapplyable migration); the caller
+ * renders `.message` + fails closed.
+ */
+export async function validateAuthMigrationSchema(
+  root: string,
+  migrations: Array<{ name: string; sql: string }>,
+): Promise<void> {
+  const required = readEmittedAuthMigrationSchema(root);
+  await assertMigrationsProduceAuthSchema(migrations, required);
+}
+
+/** Format the drift / CI-gate guidance naming each un-provisioned resource. */
+function formatCloudflareDriftMessage(
+  missing: Array<ProvisionDriftEntry>,
+  reasons: Map<string, string>,
+  header: string,
+  footer: string,
+): string {
+  const lines = missing.map((entry) => {
+    const reason = reasons.get(entry.binding);
+    const label = CLOUDFLARE_RESOURCE_LABELS[entry.kind];
+    return `  • ${entry.binding} (${label})${reason ? ` — ${reason}` : ''}`;
+  });
+  return [header, ...lines, '', footer].join('\n');
+}
+
+/**
+ * Run the SAME migration validations the MANAGED deploy runs before applying
+ * migrations to remote D1 — schema drift (drizzle-kit), journal coherence, and
+ * destructive-op-without-pragma — reusing the managed building blocks
+ * ({@link hasDeploySchemaDrift} / {@link getDeploySchemaDriftMessage} /
+ * `assertJournalCoherence` / `validateMigrations`). Unlike the managed
+ * `assertDeploySchemaDriftFree` (which calls `process.exit` itself), this THROWS on
+ * any failure so the Cloudflare orchestrator routes the exit through its injectable
+ * seam. This is the default of the {@link CloudflareDeployDeps.assertMigrationsDeployable}
+ * seam; tests inject a stub to avoid spawning drizzle-kit.
+ */
+export function assertRemoteMigrationsDeployable(
+  root: string,
+  dialect: DatabaseDialect,
+  migrationsDir: string,
+  migrations: Array<{ name: string; sql: string }>,
+): void {
+  if (hasDeploySchemaDrift(root, dialect)) {
+    throw new Error(getDeploySchemaDriftMessage());
+  }
+  assertJournalCoherence(migrationsDir, migrations);
+  if (migrations.length > 0) {
+    validateMigrations(migrations);
+  }
+}
+
+/**
+ * wrangler 4.107's own migration-file order comparator, reproduced EXACTLY
+ * (`compareMigrationPaths` / `compareSegments` / `leadingMigrationNumber`,
+ * `wrangler-dist/cli.js` `src/d1/migrations/helpers.ts`): segment-by-segment, comparing each
+ * segment's LEADING NUMERIC PREFIX (`parseInt(segment.split('_')[0], 10)`) numerically first,
+ * so `2_x.sql` sorts BEFORE `10_x.sql` (lexicographic would invert them). A finite number
+ * sorts before a non-numeric segment; equal/both-NaN falls back to lexicographic. This is the
+ * exact order `d1 migrations apply` walks (`listFilesRelative(...).sort(compareMigrationPaths)`
+ * → `getMigrationNames`), so ordering the gated set the same way tells us what remote D1 will
+ * receive, in what order.
+ */
+function leadingWranglerMigrationNumber(relativePath: string): number {
+  const firstSegment = relativePath.split('/')[0] ?? '';
+  return parseInt(firstSegment.split('_')[0] ?? '', 10);
+}
+
+function compareWranglerMigrationSegments(a: string, b: string): number {
+  const aNum = leadingWranglerMigrationNumber(a);
+  const bNum = leadingWranglerMigrationNumber(b);
+  if (aNum !== bNum) {
+    if (Number.isFinite(aNum) && Number.isFinite(bNum)) {
+      return aNum - bNum;
+    }
+    if (Number.isFinite(aNum)) {
+      return -1;
+    }
+    if (Number.isFinite(bNum)) {
+      return 1;
+    }
+  }
+  if (a < b) {
+    return -1;
+  }
+  if (a > b) {
+    return 1;
+  }
+  return 0;
+}
+
+export function compareWranglerMigrationPaths(a: string, b: string): number {
+  const aSegments = a.split('/');
+  const bSegments = b.split('/');
+  const shared = Math.min(aSegments.length, bSegments.length);
+  for (let i = 0; i < shared; i++) {
+    const cmp = compareWranglerMigrationSegments(aSegments[i] as string, bSegments[i] as string);
+    if (cmp !== 0) {
+      return cmp;
+    }
+  }
+  return aSegments.length - bSegments.length;
+}
+
+/**
+ * Assert the migration files wrangler 4.107 will APPLY — in the ORDER it applies them — equal
+ * the gated source set. wrangler resolves its OWN files from the D1 entry's `migrations_dir`
+ * (relative to the config-file dir) with the DEFAULT pattern `<dir>/*.sql` (a custom
+ * `migrations_pattern` is rejected pre-account, so only the default flat `*.sql` enumeration —
+ * top-level, `{ dot:false }` — reaches here), tracks each by its `.sql` name, and applies them
+ * sorted by its numeric-prefix comparator ({@link compareWranglerMigrationPaths}) — the exact
+ * sequence `d1 migrations apply` runs against REMOTE D1. This backend VALIDATES the set
+ * `collectMigrations` reads (flat dir, `seed.sql` excluded, sorted lexicographically). Two
+ * things must hold: (1) SET equality by name AND content — a stray/extra file (e.g. `seed.sql`,
+ * which `collectMigrations` skips but wrangler's `*.sql` matches), a differing dir, or a
+ * divergent content would otherwise be applied UNVALIDATED; and (2) ORDER parity — the numeric
+ * order wrangler applies must equal Void's gated order position-for-position, so the local
+ * runner + deploy gates validate the exact order remote D1 receives (an unpadded prefix like
+ * `2_` vs `10_` sorts differently lexicographically-vs-numerically and diverges — reject). A
+ * defensive custom-pattern check fails closed if one slips past the pre-account guard. Exported
+ * for unit testing.
+ */
+export async function checkWranglerMigrationApplySet(
+  configPath: string,
+  config: Record<string, unknown>,
+  binding: string,
+  migrationsDirRaw: string,
+  gated: Array<{ name: string; sql: string }>,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const absDir = resolve(dirname(configPath), migrationsDirRaw);
+  if (!existsSync(absDir)) {
+    return {
+      ok: false,
+      reason:
+        `deploy: configured migrations_dir ${JSON.stringify(migrationsDirRaw)} resolves to ` +
+        `${absDir}, which does not exist — wrangler would have nothing to apply (or error). ` +
+        `Align "migrations_dir" with your db/migrations, then rerun.`,
+    };
+  }
+  // Defense in depth: a custom migrations_pattern is rejected pre-account (v1 = default
+  // convention only). If one reaches here, fail closed rather than assume the flat `*.sql`.
+  // Reject on PRESENCE (any defined value, incl. `""`): a present-but-empty pattern is
+  // still non-default to wrangler, and it would otherwise be indistinguishable from absent.
+  const migrationsPattern = readBindingFieldPresence(
+    config,
+    'd1_databases',
+    binding,
+    'migrations_pattern',
+  );
+  if (migrationsPattern.present) {
+    return {
+      ok: false,
+      reason:
+        `deploy: a custom migrations_pattern (${JSON.stringify(migrationsPattern.value)}) is not ` +
+        `supported — v1 deploys only the default db/migrations/*.sql convention. Remove it, then rerun.`,
+    };
+  }
+  // wrangler's DEFAULT enumeration: top-level `.sql` files, dotfiles excluded (Minimatch
+  // `*.sql` with `{ dot:false }` never crosses `/`, so `meta/` is not walked), APPLIED in
+  // wrangler's numeric-prefix order.
+  const wranglerNames = readdirSync(absDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.sql') && !entry.name.startsWith('.'))
+    .map((entry) => entry.name.replace(/\\/g, '/'))
+    .sort(compareWranglerMigrationPaths);
+  const wranglerContent = new Map(
+    wranglerNames.map((name) => [name, readFileSync(join(absDir, name), 'utf-8')]),
+  );
+  const gatedNames = gated.map((m) => m.name.replace(/\\/g, '/'));
+  const gatedContent = new Map(gatedNames.map((name, i) => [name, gated[i]!.sql]));
+
+  // 1) SET equality by name + content.
+  const wranglerSet = new Set(wranglerNames);
+  const extra = wranglerNames.filter((k) => !gatedContent.has(k));
+  const missing = gatedNames.filter((k) => !wranglerSet.has(k)).sort();
+  const changed = wranglerNames.filter(
+    (k) => gatedContent.has(k) && gatedContent.get(k) !== wranglerContent.get(k),
+  );
+  if (extra.length > 0 || missing.length > 0 || changed.length > 0) {
+    const lines = [
+      `deploy: the migrations wrangler would apply to remote D1 do not match Void's validated set (${absDir}).`,
+    ];
+    if (extra.length > 0) {
+      lines.push(`  • wrangler would ALSO apply (not validated by Void): ${extra.join(', ')}`);
+    }
+    if (missing.length > 0) {
+      lines.push(`  • validated by Void but NOT in wrangler's set: ${missing.join(', ')}`);
+    }
+    if (changed.length > 0) {
+      lines.push(`  • content differs between Void's copy and wrangler's: ${changed.join(', ')}`);
+    }
+    lines.push(
+      'Only Void-managed db/migrations/*.sql may be applied. Remove stray .sql (e.g. seed.sql) ' +
+        'from migrations_dir, then rerun.',
+    );
+    return { ok: false, reason: lines.join('\n') };
+  }
+
+  // 2) ORDER parity — wrangler's numeric apply order must equal Void's gated (collectMigrations)
+  // order position-for-position, so the order remote D1 receives is the order Void validated.
+  const orderDiffers =
+    gatedNames.length !== wranglerNames.length ||
+    gatedNames.some((name, i) => name !== wranglerNames[i]);
+  if (orderDiffers) {
+    return {
+      ok: false,
+      reason: [
+        `deploy: wrangler would apply your migrations in a DIFFERENT order than Void validated (${absDir}).`,
+        `  • wrangler (numeric-prefix) order: ${wranglerNames.join(', ')}`,
+        `  • Void's validated order:          ${gatedNames.join(', ')}`,
+        "This happens when a migration's numeric prefix is not zero-padded (e.g. `2_` vs `10_`),",
+        'so it sorts differently for wrangler (numeric) than for Void (lexicographic) — remote D1',
+        'would receive them out of the validated order. Zero-pad the prefixes (0001_, 0002_, …),',
+        'e.g. with `void db rename-migrations`, then rerun.',
+      ].join('\n'),
+    };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Default {@link DeployWranglerRun}: spawns the project-local wrangler REAL CLI
+ * (via {@link resolveWranglerArgv}, shell-free) with ONE pinned transport in the
+ * child env (via {@link deployChildEnv} — reused provisioner scrub/pin: CF Access +
+ * every transport selector incl. `CLOUDFLARE_ENV` + the deploy config-override vars
+ * scrubbed, one account + API base pinned), so `whoami`/`migrate`/`deploy` can never
+ * consult a different ambient account or endpoint. `capture` pipes or inherits stdio.
+ */
+function createDeployWranglerRunner(
+  root: string,
+  accountId: string,
+  apiBaseUrl: string,
+): DeployWranglerRun {
+  const launcher = resolveWranglerArgv(root);
+  const [command, ...prefix] = launcher;
+  return (args, opts) => {
+    const childEnv = deployChildEnv(accountId, apiBaseUrl);
+    const result = spawnSync(command as string, [...prefix, ...args], {
+      cwd: root,
+      stdio: opts.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      encoding: 'utf-8',
+      env: childEnv,
+      shell: false,
+      windowsHide: true,
+    });
+    return {
+      status: typeof result.status === 'number' ? result.status : 1,
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
+      signal: result.signal ?? null,
+      error: result.error ? result.error.message : null,
+    };
+  };
+}
+
+/**
+ * Deploy to the user's OWN Cloudflare account (no Void platform).
+ *
+ * Orchestrates the existing units — it does NOT re-implement provisioning
+ * (`cli/provision.ts`), the config writer (`cli/wrangler.ts`), or the self-host
+ * secret preflight (`cli/env-validation.ts`). Flow:
+ *
+ *   app-class guard → desired set (from source, pre-build) → preflight (auth +
+ *   account pin + CI gate) → provision OR drift-check → ensure worker name →
+ *   remote D1 migrate → secrets (warn + gate) → clean-env build → wrangler deploy
+ *
+ * ORDERING DECISION (documented): the secrets GATE runs AFTER provision + remote
+ * migrations resolve but BEFORE build + deploy — the brief's recommended default.
+ * Provision and D1 migrations are idempotent (read-first / tracked in wrangler's
+ * `d1_migrations` table), so re-running them after a gate failure is safe, while
+ * build + `wrangler deploy` (the non-idempotent worker upload) is what the gate
+ * protects. The warning is emitted first (non-fatal); a first-deploy secret-list
+ * failure (worker not yet created) renders actionable `wrangler secret put`
+ * bootstrap guidance rather than dead-ending.
+ *
+ * Every wrangler / provisioner / secret-unit call is an injected seam
+ * ({@link CloudflareDeployDeps}) so the whole orchestration is unit-testable with
+ * no real wrangler, network, or Cloudflare account.
+ */
+export async function runCloudflareDeploy(
+  root: string,
+  options: RunDeployOptions,
+  cliLog: CliLogger,
+  deps: CloudflareDeployDeps = {},
+): Promise<void> {
+  const exit = deps.exit ?? ((code: number): never => process.exit(code));
+  const voidConfig = readConfig(root);
+  cliLog.info('cloudflare_deploy_start', {
+    provision: options.provision === true ? true : undefined,
+  });
+
+  // 0. Flag guard — `--skip-build` cannot be honored by this backend, so REJECT the
+  // combination rather than silently ignore it. Every gate on this path reads the artifact
+  // `vite build` emits as ground truth: the plaintext-var warnings, the required-secret gate
+  // and the invalid-value gate all read the REAL `dist/ssr/wrangler.json`, and the auth check
+  // reads the generated `.void/better-auth-schema.ts`. Skipping the build would leave them
+  // validating a stale or absent artifact — i.e. reporting a worker that is not the one being
+  // uploaded. Rejected here, before any account op, so the flag can never cost a build hook.
+  if (options.skipBuild) {
+    log.error(
+      [
+        'deploy: --skip-build is not supported with --backend cloudflare.',
+        'This backend validates the artifact the build emits — the worker vars in',
+        'dist/ssr/wrangler.json and the generated auth schema — so a skipped build would',
+        'leave every check reading a stale or missing artifact instead of the worker you',
+        'are about to upload. Drop --skip-build, or deploy with `void deploy` (the managed',
+        'platform), which supports it.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  // Load the provision module ONCE, dynamically, so the sync deploy helpers can
+  // reach its transport/drift/scrub primitives without a static import that would
+  // make every managed `void deploy` eagerly load the provision lifecycle. Awaited
+  // here BEFORE any sync helper that calls `requireProvisionModule()`.
+  const provisionModule = await loadProvisionModule();
+
+  // 1. App-class narrowing — v1 of `--backend cloudflare` supports ONE well-understood
+  // shape: a FULL VOID APP (worker-bearing, running `routingPlugin`) on the Cloudflare
+  // Workers target, with D1/KV/R2/Queues/Hyperdrive and — on D1/SQLite — auth + ISR.
+  // Everything else FAILS CLOSED here, BEFORE any account / preflight / provision / build
+  // op, reusing the SAME classifiers the managed deploy path uses (`detectPreset` +
+  // `detectFramework`) so this fork can never disagree with the build about what the app is.
+
+  // 1a. Target guard — this backend deploys Cloudflare Workers ONLY. A node/bun/deno target
+  // builds a non-CF worker; reject before the desired set or any account operation.
+  if (isNodeTarget(voidConfig.target)) {
+    log.error(
+      [
+        `deploy: --backend cloudflare is not supported for the "${voidConfig.target}" target.`,
+        'This backend deploys Cloudflare Workers only. Deploy a node/bun/deno build with its',
+        'own host/runtime, or use the default Cloudflare target for --backend cloudflare.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  // 1b. Framework guard — v1 defers the ENTIRE framework SSR path (every class). Class A
+  // (tanstack-start / react-router / vinext) composes the Void CF stack but the framework
+  // owns its own entry + routing; Class B/C (sveltekit / nuxt / analog / astro) build
+  // through their own adapter with NO CF Vite plugin, so `vite build` emits no worker
+  // artifact here. Rejecting all of them leaves exactly one supported class — the full Void
+  // app that runs `routingPlugin` and emits ISR coherently — so this fork never has to
+  // reason about framework wiring. Checked before the static guard so a framework app with
+  // no Void backend dirs gets the framework message, not a misleading static one.
+  const framework = detectFramework(root);
+  if (framework) {
+    log.error(
+      [
+        `deploy: --backend cloudflare does not yet support framework SSR (${framework.name}).`,
+        'v1 deploys full Void apps only. Deploy this framework with `void deploy` (the managed',
+        'platform) or the framework’s own Cloudflare adapter. Framework SSR support for this',
+        'backend is a follow-up.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  // 1c. Static / SPA / SSG guard — reuse the MANAGED path's own classifier `detectPreset`
+  // (NOT `resolveStaticDeployPreset`, whose fallback fires only for an explicit `--dir` or a
+  // configured `inference.appType`, so an UNCONFIGURED static/SPA/SSG app slips past it).
+  // `detectPreset` structurally detects an SSG dep, a Vite-only SPA, and prebuilt html; the
+  // explicit `--dir` / `--spa` intents and a configured static appType are checked alongside
+  // it (a configured-but-not-yet-built static app has no structural marker for `detectPreset`).
+  // `voidConfig.output === 'static'` is the SSG signal the BUILD itself branches on
+  // (index.ts `void:env` skips worker minify + prerenders the SSR bundle for it, deploy.ts
+  // `deployConfig.output === 'static'` takes the static-asset path). A pages/ project with
+  // `output: "static"` satisfies `hasBackendFiles` and yields a `null` `detectPreset`, so
+  // without this signal it would slip past the guard and reach account/build as if it were a
+  // full worker app — include it in the reject.
+  const staticPreset = detectPreset(root, { dir: options.dir, spa: options.spa });
+  const configuredStatic =
+    voidConfig.inference?.appType === 'static' ||
+    voidConfig.inference?.appType === 'spa' ||
+    voidConfig.output === 'static';
+  if (staticPreset || configuredStatic || options.dir || options.spa) {
+    const appType = staticPreset?.appType ?? (options.spa ? 'spa' : 'static');
+    log.error(
+      [
+        `deploy: --backend cloudflare does not yet support ${appType} (static-asset) apps.`,
+        'The Cloudflare backend v1 deploys full Void apps (worker-bearing) on the Cloudflare',
+        'Workers target. Deploy this app with `void deploy` (the managed platform), or host',
+        'the built assets on Cloudflare Pages / any static host.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  // 1d. Positive full-Void assertion — the app must actually be worker-bearing. Mirrors the
+  // managed dispatch's `runFullDeploy` branch (a `null` preset with no framework) and rejects
+  // a bare project with no backend files (no routes/pages/middleware/crons/queues/SSR entry)
+  // that `detectPreset` also returns `null` for.
+  if (!hasBackendFiles(root)) {
+    log.error(
+      [
+        'deploy: --backend cloudflare found no Void backend to deploy.',
+        'A full Void app has at least one of: routes/, pages/, middleware, crons/, queues/,',
+        'or an SSR entry. Add your server code, or use `void deploy` for a static site.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  // 1e. voidPlugin structural rejects — mirror the deterministic throws voidPlugin itself
+  // hits during `vite build`, reusing voidPlugin's OWN validators (no re-derivation), so an
+  // app that cannot build never reaches account mutation first: a sourceDir convention
+  // duplicated at the root (`assertNoRootSourceConventionConflicts`), a broken SSR entry
+  // (`validateSsrEntry`), and a malformed cron file (`scanJobsSync`). (sandbox / void/live /
+  // AI / remote / websocket are wired fine by the full-Void self-host build — no guard.)
+  const paths = resolveProjectPaths(root, voidConfig);
+  try {
+    assertNoRootSourceConventionConflicts(paths);
+    validateSsrEntry(root, paths);
+    scanJobsSync(root, paths.cronsDir);
+  } catch (err) {
+    log.error(`deploy: ${getErrorMessage(err)}`);
+    return exit(1);
+  }
+
+  // 1f. WebSocket / Durable Object guard — FAIL CLOSED before any account op. For a `.ws.ts`
+  // route, the self-host `vite build` emits a `durable_objects` binding plus a DO migration
+  // block keyed `new_classes` (index.ts `mergeBindings`, via the SAME `scanWebSocketRoutesSync`
+  // scan; also cli/wrangler.ts for --provision) — i.e. a KEY-VALUE-backed Durable Object
+  // namespace. As of Cloudflare's 2026-07-09 change, a fresh account (every Workers Free
+  // account, and any account with no pre-existing KV-backed namespace) REJECTS a `new_classes`
+  // migration at `wrangler deploy` ("create a namespace using a new_sqlite_classes migration
+  // instead"). So a websocket app deployed to a fresh own-account hard-fails after the build.
+  // Emitting `new_sqlite_classes` is a build-side follow-up; until then reject those apps.
+  // (sandbox / void/live DOs already emit `new_sqlite_classes` — they stay supported.)
+  if (scanWebSocketRoutesSync(root, paths).length > 0) {
+    log.error(
+      [
+        'deploy: --backend cloudflare does not yet support WebSocket / Durable Object routes.',
+        'A `.ws.ts` route makes the build emit a key-value-backed Durable Object namespace',
+        '(a `new_classes` migration), which a fresh Cloudflare account (and every Workers Free',
+        'account) refuses to create. Deploy this app with `void deploy` (the managed platform).',
+        'SQLite-backed WebSocket support for this backend is a follow-up.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  // 2. Desired resource set — computed ONCE from SOURCE, pre-build (fail-fast),
+  // shared by the provision and drift paths. `authEnabled` / `migrationsDir` /
+  // `dialect` drive the auth + migration gates below. The checked-in migrations are
+  // deliberately NOT read here: the auth + migration gates re-collect them AFTER the
+  // build (see step 8), because `vite build` runs arbitrary project plugins that could
+  // add/rewrite migration SQL, and the remote apply reads the live post-build files.
+  const configPath = discoverRootWranglerConfig(root);
+  const {
+    desired,
+    reasons,
+    authEnabled,
+    dialect,
+    migrationsDir,
+    migrations: preBuildMigrations,
+    needsAI,
+    needsSandbox,
+    expectedCrons,
+  } = await computeDesiredCloudflareResources(root, voidConfig, configPath);
+
+  // 2a. Postgres + auth guard — reject before any account op. This backend applies only
+  // checked-in `db/migrations/*.sql` to REMOTE D1 (SQLite); a Postgres/Hyperdrive app runs
+  // no D1 migrate step here, so it can neither create NOR verify the Better Auth tables. v1
+  // supports Void-managed auth on D1/SQLite only. (A pg app WITHOUT auth is still supported.)
+  if (authEnabled && dialect === 'postgresql') {
+    log.error(
+      [
+        'deploy: --backend cloudflare does not yet support Void-managed auth on a PostgreSQL app.',
+        'This backend verifies + applies auth tables through remote D1 (SQLite) migrations',
+        'only; it cannot provision or verify the Better Auth schema on Postgres/Hyperdrive.',
+        'Deploy this app with `void deploy` (the managed platform), or switch the app to D1.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  // 2b. Postgres + checked-in migrations guard — reject before any account op. This backend
+  // applies ONLY remote D1 (SQLite) migrations; the remote-migrate step (8d/9) is gated on
+  // `desired.d1`, which a PostgreSQL app never has (it desires `hyperdrive` instead). The managed
+  // platform DOES apply a pg app's `db/migrations/*.sql` over Hyperdrive at deploy (its runtime
+  // migration handler), so shipping them through this self-host backend would silently deploy
+  // against an UNMIGRATED database → a 500 on the first query. Keyed on migration PRESENCE, not
+  // dialect alone: a pg app with an externally-managed schema and ZERO checked-in migrations is
+  // legitimately deployable and MUST still pass. `preBuildMigrations` is the SAME pre-build
+  // `collectMigrations` set the desired-database gate counts, so this guard and `desired.hyperdrive`
+  // agree. (A pg app WITH auth is already rejected at 2a.)
+  if (dialect === 'postgresql' && preBuildMigrations.length > 0) {
+    log.error(PG_CHECKED_IN_MIGRATIONS_REJECT_MESSAGE);
+    return exit(1);
+  }
+
+  // 2c. Custom migrations_pattern guard — FAIL CLOSED before any account op. v1 supports ONLY
+  // Void's default migration convention: `db/migrations/*.sql` with wrangler's default
+  // `migrations_pattern` (unset). An explicit `migrations_pattern` makes wrangler enumerate its
+  // remote-apply set through Minimatch over a custom glob, which can diverge from Void's
+  // `collectMigrations` (flat dir, `seed.sql` excluded) — so it would apply an unverifiable set
+  // to remote D1. Rejecting a custom pattern removes that divergence entirely; the default
+  // convention still gets ORDER-parity checked at 6b. (Only the DEPLOYED D1 entry matters.)
+  if (desired.d1) {
+    // Reject on PRESENCE (any defined value, incl. `""`) — a present-but-empty pattern is
+    // still non-default to wrangler, and readStoredResourceName can't tell absent from empty.
+    const migrationsPattern = readBindingFieldPresence(
+      parseRootWranglerConfig(configPath),
+      'd1_databases',
+      desired.d1.binding,
+      'migrations_pattern',
+    );
+    if (migrationsPattern.present) {
+      log.error(
+        [
+          `deploy: --backend cloudflare does not support a custom migrations_pattern (${JSON.stringify(migrationsPattern.value)}).`,
+          'v1 deploys only the default Void migration convention: db/migrations/*.sql with',
+          "wrangler's default pattern (leave `migrations_pattern` unset). A custom glob would",
+          'apply a set to remote D1 that Void cannot verify against its own db/migrations.',
+          `Remove "migrations_pattern" from the ${desired.d1.binding} D1 binding, then rerun.`,
+        ].join('\n'),
+      );
+      return exit(1);
+    }
+  }
+
+  // (The auth-migration guard runs at 3d below, AFTER the transport + account pin, so it can
+  // derive the Better Auth schema in an isolated subprocess under the build's EFFECTIVE mode +
+  // the SAME scrubbed env the build uses — still BEFORE whoami / provision / build / deploy.)
+
+  // 3. Preflight — pin ONE transport, pin the account, confirm wrangler auth.
+  const rootConfig = parseRootWranglerConfig(configPath);
+
+  // 3a. Resolve + pin the ONE transport for the WHOLE deploy (build + whoami + migrate +
+  // deploy), reusing the provisioner's resolver + dotenv fence. Fail closed on any
+  // ambient/dotenv redirect (endpoint, named env, worker-name override, alternate
+  // build config) BEFORE any wrangler call — so every child shares one account + API base.
+  let apiBaseUrl: string;
+  try {
+    apiBaseUrl = resolveDeployTransport(root, rootConfig);
+  } catch (err) {
+    log.error(`deploy: ${getErrorMessage(err)}`);
+    return exit(1);
+  }
+
+  // 3b. Pin the account (static check — no network) BEFORE spawning wrangler.
+  const accountId =
+    readWranglerTopLevelString(rootConfig, 'account_id') ??
+    (process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || undefined);
+  if (!accountId) {
+    log.error(
+      [
+        'deploy: no Cloudflare account is pinned.',
+        'Set `account_id` in your root wrangler.jsonc, or export CLOUDFLARE_ACCOUNT_ID.',
+        'A multi-account token makes wrangler prompt (or error in CI) on its own, which',
+        'void cannot intercept — so the account must be pinned before deploying.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  // 3b-i. Pin the wrangler UPLOADER bundle NOW — at the START of the credentialed sequence, BEFORE
+  // any project code runs and BEFORE any credentialed wrangler call. The env-schema probe (3c), the
+  // `whoami` auth check (3e), and — under `--provision` — the provisioner all run before the build,
+  // and the probe executes ARBITRARY project code (the user's Vite config + env.ts). That code runs
+  // with the parent's Cloudflare creds scrubbed so it can only edit FILES — but that INCLUDES the
+  // `wrangler-dist` bundle every credentialed wrangler run executes (whoami, the provisioner's own
+  // `wrangler <res> create`, and the post-build secret list / remote D1 migrate / deploy), so a
+  // probe/build that overwrites it would run attacker code WITH the CF token. Snapshot the bundle's
+  // content hash HERE; this pre-probe snapshot is the SINGLE baseline every later check compares
+  // against — it is never re-baselined (that would bless a mutation). Everything above only
+  // AST-parses source (`computeDesiredCloudflareResources`) or reads config files — no project code
+  // runs — so this is genuinely captured before the FIRST project-code execution. A legitimate
+  // probe/build never touches `node_modules/wrangler`, so the hash is stable from here through every
+  // credentialed run. (This closes the uploader-swap-before-a-credentialed-run vector only; a
+  // fully-compromised build dependency remains a trust boundary.)
+  const hashUploader = deps.hashWranglerUploader ?? hashWranglerUploader;
+  const wranglerUploaderHashBefore = hashUploader(root);
+  // Re-hash the wrangler uploader and assert it still matches the one baseline above. Invoked
+  // IMMEDIATELY BEFORE EACH credentialed run — the pre-build `whoami` and provision, and the
+  // post-build secret list, D1 migrate/list, and deploy — always against this same pre-probe
+  // baseline. Fails closed on any change or an unresolvable/unreadable binary (either hash
+  // `undefined`).
+  const assertUploaderStillPinned = (): boolean => {
+    const check = assertWranglerUploaderUnchanged(wranglerUploaderHashBefore, hashUploader(root));
+    if (check.ok) {
+      return true;
+    }
+    log.error(
+      [
+        'deploy: refusing to run the wrangler uploader with your Cloudflare credentials.',
+        check.reason,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+    return false;
+  };
+
+  // 3c. Derive the env-INSENSITIVE schema facts — the required-secret NAMES + the keys
+  // flagged `.secret()` — AND enforce the v1 envDir/mode narrowing, in an ISOLATED
+  // SUBPROCESS under a scrubbed env. Importing the user's env.ts + resolving the Vite
+  // config is arbitrary project code, so it must not run in this credential-bearing
+  // parent; the child does it safely (it `process.exit`s). The child resolves the config
+  // purely to read the effective `{ envDir, mode }` and REJECTS a custom envDir /
+  // non-production mode: the build generates the auth artifact under the project ROOT
+  // while the worker `vars` come from the build's envDir, so a custom envDir could
+  // validate a different table set than the worker ships. The REAL worker vars the gate
+  // validates come from the emitted `dist/ssr/wrangler.json` AFTER the build (ground
+  // truth), not from here. The child env scrubs the FULL wrangler-auth credential set and
+  // pins `NODE_ENV=production` (see {@link buildSchemaProbeEnv}). Run pre-build so a custom
+  // envDir / non-production mode / broken env.ts fails fast, before any account op
+  // (whoami / provision / build).
+  const schemaProbeEnv = buildSchemaProbeEnv(accountId, apiBaseUrl);
+  let schemaResult: EnvSchemaProbeResult;
+  try {
+    schemaResult = await (deps.resolveSchemaFacts ?? resolveEnvSchemaFactsDefault)(
+      { root },
+      schemaProbeEnv,
+    );
+  } catch (err) {
+    log.error(
+      `deploy: could not derive the env schema (required secrets / .secret() flags) — ${getErrorMessage(err)}`,
+    );
+    return exit(1);
+  }
+  if (schemaResult.kind === 'reject') {
+    log.error(cloudflareEnvDirModeRejectMessage(schemaResult));
+    return exit(1);
+  }
+  if (schemaResult.kind === 'schema-error') {
+    log.error(`deploy: ${selfHostSchemaFailureMessage(schemaResult.reason)}`);
+    return exit(1);
+  }
+  const schemaFacts: SelfHostSchemaFacts = schemaResult.facts;
+
+  // 3e. Confirm wrangler auth. `whoami` gets the SAME `-c`/`--env=`/pinned-transport
+  // context as migrate/deploy, so it authenticates against the exact endpoint they use.
+  const runWrangler = deps.runWrangler ?? createDeployWranglerRunner(root, accountId, apiBaseUrl);
+  // Re-verify the uploader immediately before this FIRST credentialed run — the env-schema probe
+  // above ran project code (env.ts) that could have overwritten the hashed bundle `whoami` executes.
+  if (!assertUploaderStillPinned()) {
+    return exit(1);
+  }
+  const whoami = await Promise.resolve(
+    runWrangler(['whoami', '--json', '-c', configPath, '--env='], { capture: true }),
+  );
+  if (!isCleanWranglerExit(whoami)) {
+    log.error(
+      [
+        'deploy: not authenticated with Cloudflare.',
+        'Run `wrangler login`, or set CLOUDFLARE_API_TOKEN (a token with',
+        'Workers Scripts:Edit + read on your bound resources; --provision also needs',
+        'per-product *:Edit for D1/KV/R2/Queues/Hyperdrive). Then rerun.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  // CI gate for --provision: fail closed in non-interactive shells unless the
+  // committed config already covers every desired resource (a provable no-op) —
+  // CI cannot commit back the ids a create would mint, so a re-run would dup.
+  const isCI = deps.isCI ?? (!process.stdin.isTTY || getTokenSource() === 'ci');
+  if (options.provision && isCI) {
+    const { missing } = provisionModule.checkCloudflareProvisionDrift(configPath, desired);
+    // Queues are name-bearing (no id in the committed config), so the id-drift check
+    // CANNOT prove a desired queue is already created — and `provisionCloudflareResources`
+    // would run `wrangler queues create` for it, mutating the account. That breaks the
+    // "CI --provision is a provable no-op" contract, so fail closed on ANY desired queue.
+    if (missing.length > 0 || desired.queues.length > 0) {
+      const lines = ['deploy: --provision is disabled in CI / non-interactive shells.'];
+      if (missing.length > 0) {
+        lines.push('', 'These id-bearing resources are not yet in your committed wrangler.jsonc:');
+        for (const entry of missing) {
+          const reason = reasons.get(entry.binding);
+          lines.push(
+            `  • ${entry.binding} (${CLOUDFLARE_RESOURCE_LABELS[entry.kind]})${reason ? ` — ${reason}` : ''}`,
+          );
+        }
+      }
+      if (desired.queues.length > 0) {
+        lines.push(
+          '',
+          'These queues cannot be proven already created (queues carry no id in the config):',
+        );
+        for (const name of desired.queues) {
+          lines.push(`  • ${name} (queue)`);
+        }
+      }
+      lines.push(
+        '',
+        'Provision them locally (`void deploy --backend cloudflare --provision`), commit the',
+        'updated wrangler.jsonc, then let CI run `void deploy --backend cloudflare`.',
+      );
+      log.error(lines.join('\n'));
+      return exit(1);
+    }
+  }
+
+  // 4. Provision (--provision) OR drift-check (no --provision).
+  if (options.provision) {
+    // Re-verify the uploader immediately before the credentialed provisioner, which runs
+    // `wrangler <res> create` with the CF token. Nothing between `whoami` and here runs project
+    // code, so this is defense-in-depth against the same probe-swap vector — against the one
+    // pre-probe baseline, never re-baselined.
+    if (!assertUploaderStillPinned()) {
+      return exit(1);
+    }
+    const provision = deps.provision ?? provisionModule.provisionCloudflareResources;
+    let result;
+    try {
+      result = await provision(root, configPath, desired, {
+        accountId,
+        log: { info: (msg) => log.info(msg), warn: (msg) => log.warn(msg) },
+      });
+      cliLog.info('cloudflare_provisioned', {
+        resources: result.resources.map((r) => `${r.kind}:${r.action}`),
+      });
+    } catch (err) {
+      log.error(`deploy: provisioning failed — ${getErrorMessage(err)}`);
+      return exit(1);
+    }
+    // A DESIRED resource the provisioner could not satisfy is FATAL, not success.
+    // Hyperdrive returns action "skipped" when there is no connection source and
+    // nothing adoptable — deploying past that would ship a worker with no HYPERDRIVE
+    // binding that fails on its first DB request. Fail closed with guidance.
+    const skipped = result.resources.filter((r) => r.action === 'skipped');
+    if (skipped.length > 0) {
+      log.error(
+        [
+          'deploy: these required resources were skipped during provisioning and are NOT available:',
+          ...skipped.map((r) => {
+            const label =
+              CLOUDFLARE_RESOURCE_LABELS[r.kind as ProvisionDriftEntry['kind']] ?? r.kind;
+            return `  • ${r.binding ?? r.name} (${label})${r.reason ? ` — ${r.reason}` : ''}`;
+          }),
+          'Resolve the connection source (e.g. set DATABASE_URL for Hyperdrive, or adopt an',
+          'existing config), then rerun. Nothing was built or deployed — but provisioning runs',
+          'before this check, so any resource listed as created above already exists in your',
+          'account (rerunning adopts it rather than duplicating it).',
+        ].join('\n'),
+      );
+      return exit(1);
+    }
+    // Re-run the id-drift predicate AFTER provisioning: any desired id-bearing
+    // resource the provisioner did not write a real id for still drifts and must
+    // block the build/deploy (the desired set is the single source of truth).
+    const { missing } = provisionModule.checkCloudflareProvisionDrift(configPath, desired);
+    if (missing.length > 0) {
+      log.error(
+        formatCloudflareDriftMessage(
+          missing,
+          reasons,
+          'deploy: provisioning did not satisfy every required resource:',
+          'Rerun `void deploy --backend cloudflare --provision`, or provision the listed resources manually.',
+        ),
+      );
+      return exit(1);
+    }
+  } else {
+    const { missing } = provisionModule.checkCloudflareProvisionDrift(configPath, desired);
+    if (missing.length > 0) {
+      log.error(
+        formatCloudflareDriftMessage(
+          missing,
+          reasons,
+          'Deploy blocked — resources not yet provisioned in your Cloudflare account:',
+          'Run:  void deploy --backend cloudflare --provision',
+        ),
+      );
+      return exit(1);
+    }
+    // Queue names are taken VERBATIM from filenames (`queues/<name>.ts` → `<name>`, see
+    // `queues/scan.ts`) with no sanitization, and the probe below passes each one to wrangler
+    // as an ARGV positional. Gate them on the SAME `assertValidResourceName('queue', …)` the
+    // `--provision` path already applies, BEFORE the probe runs: a name beginning with `-` is
+    // parsed by wrangler as a FLAG (`queues info --help` exits 0 printing usage), which the
+    // probe would classify as inconclusive and wave through — silently forfeiting the
+    // early-ordering guarantee this whole step exists to provide. Collect EVERY offending name
+    // (as the drift/absent-queue errors do) so one rename pass clears them all.
+    const invalidQueues = desired.queues.filter((name) => {
+      try {
+        provisionModule.assertValidResourceName('queue', name);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    if (invalidQueues.length > 0) {
+      log.error(
+        [
+          'Deploy blocked — these queue names are not valid Cloudflare queue names:',
+          ...invalidQueues.map((name) => `  • ${name} (queue)`),
+          '',
+          'A queue takes its name from its filename in queues/ (queues/<name>.ts → "<name>").',
+          'A queue name must be 1–63 characters, contain only letters, digits and "-", and',
+          'begin and end with a letter or digit.',
+          '',
+          'Rename the offending file(s) in queues/ and retry.',
+        ].join('\n'),
+      );
+      return exit(1);
+    }
+    // The drift check above is config-only, and queues carry NO id in the config — so a
+    // desired queue that was never created is invisible to it. `wrangler deploy` (step 11)
+    // does reject a missing queue before uploading, but only AFTER the build (step 7) and
+    // the remote D1 apply (step 9) have run. Probe each desired queue by name HERE so that
+    // failure lands before either. `--provision` needs no probe: it creates the queues.
+    //
+    // `queues list` is unusable (a human table with no `--json`, whose single un-looped
+    // page-1 request silently truncates on large accounts), so this is N `queues info`
+    // calls — one clean binary probe per desired queue. Only the provisioner's exact,
+    // name-aware not-found signal counts as absence: an inconclusive probe (auth or
+    // network error, signal-killed child, unexpected output) must NOT block, since
+    // `wrangler deploy`'s own pre-upload check still backstops it.
+    const absentQueues: Array<string> = [];
+    for (const name of desired.queues) {
+      const info = await Promise.resolve(
+        runWrangler(['queues', 'info', name, '-c', configPath, '--env='], { capture: true }),
+      );
+      if (provisionModule.isQueueConfirmedAbsent(info, name)) {
+        absentQueues.push(name);
+      }
+    }
+    if (absentQueues.length > 0) {
+      log.error(
+        [
+          'Deploy blocked — these queues do not exist in your Cloudflare account:',
+          ...absentQueues.map((name) => `  • ${name} (queue)`),
+          '',
+          'Create them by rerunning with --provision:',
+          '  void deploy --backend cloudflare --provision',
+          'Or create each one yourself:',
+          ...absentQueues.map((name) => `  wrangler queues create ${name}`),
+        ].join('\n'),
+      );
+      return exit(1);
+    }
+  }
+
+  // 5. Reconcile the worker `name` AND the pinned `account_id` into the root config
+  // BEFORE the build. `name` is only-when-absent (never clobber the user's); the build
+  // defaults a name into dist/ssr/wrangler.json, but `wrangler secret list -c <root>`
+  // (the secrets gate) resolves the worker from the ROOT config's `name`, so pinning it
+  // makes the gate and deploy agree. `account_id` is always overwritten with the
+  // reconciled account: the CF Vite plugin copies `account_id` ONLY from the root config
+  // file (never from CLOUDFLARE_ACCOUNT_ID) into dist/ssr/wrangler.json, so an env-only
+  // pin would otherwise emit an artifact with NO `account_id` and the identity check
+  // below could never confirm the pin. Persisting it makes the documented env-only pin
+  // deploy the verified account.
+  const workerName = readWranglerTopLevelString(rootConfig, 'name') ?? deriveWorkerName(root);
+  writeProvisionedWranglerConfig(root, { name: workerName, accountId }, { configPath });
+
+  // 6. Pin the id-bearing binding IDENTITIES across the build, mirroring the account_id pin.
+  // Provision (step 4) wrote each real id into the root config via `wrangler <res> create
+  // --update-config`, and the reconcile above only touches `name`/`account_id` — so RE-READING
+  // the config here captures exactly what every legitimate PRE-BUILD write persisted. The build
+  // (step 7) runs untrusted project code with its Cloudflare credentials scrubbed, so a
+  // compromised build dependency can only edit FILES: it could rewrite `wrangler.jsonc`'s
+  // `d1_databases[<binding>].database_id` (keeping the binding + database_name) to redirect the
+  // privileged remote D1 migrate (step 9) or the deploy (step 11) to a DIFFERENT same-account
+  // resource — OR ADD a brand-new id-bearing binding (`EXTRA_DB`/`EXTRA_KV`/…) the CF plugin then
+  // merges verbatim into the emitted artifact. So the snapshot captures EVERY id-bearing binding
+  // declared here, not only the desired ones: the emitted-config check (step 10) rejects any
+  // id-bearing binding in `dist/ssr/wrangler.json` absent from this pin, so a binding the build
+  // added is caught while a user's own extra binding (present here) passes. This snapshot is the
+  // ground truth the migrate assert (step 9) and the emitted-config check (step 10) compare
+  // against. No legitimate path rewrites a binding id in the ROOT config after this point — the
+  // CF plugin's only post-build id writes go to the emitted dist/ssr/wrangler.json, never back to
+  // the root — so equality here is safe to assert.
+  const preBuildRootConfig = parseRootWranglerConfig(configPath);
+  const bindingIdentitySnapshot = snapshotBindingIdentities(preBuildRootConfig);
+  // Companion pin taken from the SAME pre-build root config: the per-binding ENTRY per resource
+  // field Void's own build never emits (`DEPLOY_PASSTHROUGH_ASSERT_FIELDS`). The emitted-config
+  // check (step 10) rejects any such binding in `dist/ssr/wrangler.json` absent from this pin — or
+  // one whose target it rewrote — so a build that INJECTS or RETARGETS a `services` /
+  // `secrets_store_secrets` / `dispatch_namespaces` / `unsafe` / … binding is caught, while a
+  // user's own hand-declared pass-through binding (present here, unchanged) passes. Void never
+  // writes these fields, so no legitimate build adds one that was not already in the root.
+  const passthroughIdentitySnapshot = snapshotPassthroughIdentities(preBuildRootConfig);
+  // Companion RAW-value pin from the SAME pre-build root config for the fields the ENTRY pin cannot
+  // cover: `unsafe` / `tail_consumers` / `streaming_tail_consumers` (whole-object-pinned — wrangler
+  // applies `unsafe.metadata` LAST at upload and the tail consumers forward logs/requests; the pin
+  // is symmetric, so removing a root-declared value is caught too), plus `durable_objects` (reject a
+  // build-injected EXTERNAL DO `script_name`) and `ai` (pin the binding to the root's, or to Void's
+  // own `{binding:'AI'}` only when `needsAI`). Void's build emits none of the first three.
+  const passthroughRawFields = snapshotPassthroughRawFields(preBuildRootConfig);
+  // Companion pin: the exact `containers` set Void's build emits — the root-declared containers
+  // (spread verbatim) plus Void's own sandbox container when the source needs it (`needsSandbox`,
+  // the SAME `isSandboxEnabled(config) || import-walk` signal index.ts gates emission on). A bare
+  // `wrangler deploy` provisions a container application from this array, so the emitted-config
+  // check (step 10) rejects a container the build injected, dropped, or retargeted.
+  // `resolveSandboxConfig` is the SAME pure function the build uses, so the reconstructed sandbox
+  // container is byte-identical to the emitted one.
+  const expectedContainers = reconstructExpectedContainers(
+    voidConfig,
+    root,
+    preBuildRootConfig,
+    needsSandbox,
+  );
+
+  // 6a. Reject a PRE-BUILD PROBE that laundered the root bindings (NO-PROVISION path only). The
+  // step-3c env-schema probe runs project code BEFORE the step-6 snapshots above, so a probe that
+  // rewrote wrangler.jsonc — swapping a binding id, ADDING an id-bearing / pass-through binding, or
+  // changing unsafe / tail_consumers / routes / containers — would be captured HERE as the trusted
+  // baseline, emitted by the build, and waved through the step-10 verifier that pins against it.
+  // `rootConfig` was parsed at step 3, BEFORE any project code ran, so it is the pre-probe ground
+  // truth. Rebuild the same four snapshots from it and assert they deep-equal the step-6 ones.
+  //
+  // Only in the no-provision path: the ONLY config write between the pre-probe parse and step 6 is
+  // step 5's reconcile, which touches only top-level `name`/`account_id` — none of which any of
+  // these snapshots read (they cover d1/kv/r2/hyperdrive ids, pass-through binding entries,
+  // unsafe/tail/routes raw fields, and containers) — so absent laundering the two are identical and
+  // a clean deploy always passes. Under `--provision` the provisioner legitimately writes real ids
+  // into the config after the probe, so pre-probe ≠ step-6 by design; closing that path needs
+  // delta-authorization against a live-provision model and is a known residual tracked in #283.
+  if (!options.provision) {
+    const preProbeBindingIdentities = snapshotBindingIdentities(rootConfig);
+    const preProbePassthroughIdentities = snapshotPassthroughIdentities(rootConfig);
+    const preProbePassthroughRawFields = snapshotPassthroughRawFields(rootConfig);
+    const preProbeExpectedContainers = reconstructExpectedContainers(
+      voidConfig,
+      root,
+      rootConfig,
+      needsSandbox,
+    );
+    // `snapshotBindingIdentities` / `…PassthroughIdentities` / `…PassthroughRawFields` return Maps,
+    // which the JSON-shaped `deepEqual` cannot compare — use `snapshotsDeepEqual` (Map-aware).
+    // `expectedContainers` is a plain array, so `deepEqual` handles it directly.
+    const rootBindingsLaundered =
+      !snapshotsDeepEqual(preProbeBindingIdentities, bindingIdentitySnapshot) ||
+      !snapshotsDeepEqual(preProbePassthroughIdentities, passthroughIdentitySnapshot) ||
+      !snapshotsDeepEqual(preProbePassthroughRawFields, passthroughRawFields) ||
+      !deepEqual(preProbeExpectedContainers, expectedContainers);
+    if (rootBindingsLaundered) {
+      log.error(
+        [
+          'deploy: the root wrangler config’s bindings, pass-through entries, or containers changed',
+          'during the pre-build env-schema probe (the config differs from its state before any',
+          'project code ran). Refusing to deploy a config a pre-build step rewrote — the binding set',
+          'the deploy would ship no longer matches the one present before the probe. Rebuild from a',
+          'clean checkout, then rerun.',
+        ].join('\n'),
+      );
+      return exit(1);
+    }
+  }
+
+  // (The LOCAL migration gates run POST-build at step 8d, immediately before the remote
+  // apply — not here — so they validate the exact files on disk AFTER the build. See step 8d.)
+
+  // 7. Build with the pinned deploy transport — WITHOUT VOID_DEPLOY_PROJECT_ID — so
+  // self-host ISR emits and the CF plugin merges the wrangler.jsonc real ids into
+  // dist/ssr/wrangler.json. `deployChildEnv` scrubs CLOUDFLARE_ENV +
+  // CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH (and pins one account + API base), so the CF
+  // plugin generates the pinned TOP-LEVEL config from the CANONICAL root wrangler config,
+  // not a named-env / alternate-config one whose account/name/bindings could differ.
+  //
+  // The build runs BEFORE the secret / auth gates: the redesign validates the REAL artifact
+  // the build emits (`dist/ssr/wrangler.json` `vars` + the generated auth schema) rather than
+  // predicting it, so a missing secret / bad auth schema is caught AFTER the build — the
+  // accepted trade-off for reading ground truth. No REMOTE mutation has happened yet (provision
+  // ran earlier, but the remote D1 apply + deploy are still ahead), so a failed gate below
+  // never leaves a half-migrated / half-deployed account.
+  //
+  // DELETE the CF plugin's deploy pointer (`.wrangler/deploy/config.json`) FIRST. The
+  // plugin OVERWRITES it (never deletes) on each build, but ONLY when the CF Vite plugin
+  // participates — a build that emits no worker artifact leaves a STALE pointer from a
+  // previous run in place, and a bare `wrangler deploy` would follow it to an old
+  // `dist/ssr/wrangler.json`. Removing it now means the reads below (which require the
+  // pointer to exist) can only pass on a pointer THIS build re-created.
+  removeDeployPointer(root);
+  // `vite build` runs arbitrary project code — the user's config, every plugin, and env.ts
+  // — and needs NO Cloudflare credential of its own (the CF plugin makes no authenticated
+  // call from a build hook; Void's `remote: true` is a serve-only proxy to Void's own
+  // platform, and build-time prerender/ISR runs on local Miniflare). So the build child gets
+  // the same credential scrub as the probes, on the same rationale.
+  //
+  // Not a leak this can close: the CF plugin's `config` hook `loadEnv`s the project's own
+  // `CLOUDFLARE_*` dotenv keys back into the child's `process.env`. Those values are already
+  // on disk and readable by the build code either way — the scrub is about the credentials
+  // the PARENT holds, which the project never had.
+  const buildChildEnv = scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl));
+  delete buildChildEnv.VOID_DEPLOY_PROJECT_ID;
+  // Pin NODE_ENV=production for the build too, so the build and the env-schema probes evaluate
+  // env.ts under the SAME environment. `vite build` only DEFAULTS NODE_ENV to production when it
+  // is unset (`if (!isNodeEnvSet) process.env.NODE_ENV = defaultNodeEnv`), so an ambient
+  // NODE_ENV=development would otherwise build a development schema while the probes (pinned
+  // production) derive a production one — the exact divergence the probe pin exists to close.
+  // Scrub any ambient spelling first (case-aware on win32) so it cannot shadow the pin.
+  requireProvisionModule().deleteEnvVarCaseAware(buildChildEnv, 'NODE_ENV');
+  buildChildEnv.NODE_ENV = 'production';
+  const runBuild =
+    deps.runBuild ??
+    ((env: NodeJS.ProcessEnv) => {
+      execSync(resolveProjectCommand(root, 'vite build'), { cwd: root, stdio: 'inherit', env });
+    });
+  // The wrangler UPLOADER was pinned into `wranglerUploaderHashBefore` at the START of the deploy
+  // (before the env-schema probe and the pre-build credentialed runs), and `assertUploaderStillPinned`
+  // re-checks it against that ONE baseline before every credentialed spawn — never re-baselined. The
+  // build below runs untrusted project code with the parent's Cloudflare creds scrubbed, so it can
+  // only edit FILES — but that INCLUDES the `wrangler-dist` bundle every post-build credentialed
+  // wrangler run (the secret list, the remote D1 migrate, and the deploy) executes — so re-verify
+  // against the same baseline right after it, and again immediately before each spawn.
+  try {
+    runBuild(buildChildEnv);
+  } catch (err) {
+    log.error(`deploy: build failed — ${getErrorMessage(err)}`);
+    return exit(getExitCode(err));
+  }
+  // Early fail — re-check right after the build, before the ground-truth gates do any work. No
+  // remote mutation has happened since the baseline was pinned, so a changed/unverifiable uploader
+  // here leaves nothing half-done. Each credentialed spawn below re-checks again immediately.
+  if (!assertUploaderStillPinned()) {
+    return exit(1);
+  }
+
+  // Re-collect the checked-in migrations from disk AFTER the build. `vite build` runs
+  // arbitrary project plugins that could add or rewrite `db/migrations` SQL (or the
+  // `migrations_dir` presence), and step 9's `wrangler d1 migrations apply` reads the
+  // LIVE post-build files — so every migration that can reach remote D1 must be validated
+  // against exactly what is on disk now, not a pre-build snapshot. This one set feeds both
+  // the auth-schema check (8c) and the local migration gates (8d).
+  const migrations = collectMigrations(migrationsDir);
+
+  // Re-run the PostgreSQL checked-in-migrations reject on the POST-build set. The pre-build guard
+  // (step 2b) saw an empty set, but a build plugin can WRITE `db/migrations/*.sql` during
+  // `vite build`; the local migration apply/validate (step 8d) is gated on `desired.d1`, which a
+  // pg app never has, so those files would ship UNRUN and the worker would hit an unmigrated
+  // database. Re-checking here — before the remote migrate (step 9) and the deploy (step 11), the
+  // first remote mutations — fails closed without leaving a half-deployed account. A pg app with
+  // ZERO checked-in migrations still passes (an externally-managed schema is legitimately
+  // deployable — never reject on dialect alone).
+  if (dialect === 'postgresql' && migrations.length > 0) {
+    log.error(PG_CHECKED_IN_MIGRATIONS_REJECT_MESSAGE);
+    return exit(1);
+  }
+
+  // 8. Post-build GROUND-TRUTH gates — validate the REAL artifact the build emitted, not a
+  // facsimile. Read the actual `vars` the build baked into `dist/ssr/wrangler.json`, then
+  // WARN (plaintext secret-looking vars) + GATE (required secrets, incl. INVALID values) +
+  // auth-schema check + local migration gates, all against that ground truth. The only
+  // project code that runs does so in the isolated `validate-emitted` probe (8b).
+  const emitted = (deps.readEmittedWorkerVars ?? readEmittedWorkerVarsDefault)(root);
+  if (!emitted.ok) {
+    log.error(
+      [
+        'deploy: could not read the worker vars the build emitted — refusing to validate secrets.',
+        `  ${emitted.reason}`,
+        'The build must emit dist/ssr/wrangler.json for this backend. Rerun the build, or deploy',
+        'this app with `void deploy` (the managed platform).',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+  const emittedVars = emitted.vars;
+
+  // 8a. Plaintext-var warnings — classify the secret-looking keys among the REAL emitted vars
+  // (`.secret()`-flagged from the schema facts, OR the shared name heuristic). Ground truth —
+  // no `loadEnv`, no facsimile.
+  const warnings = collectPlaintextVarWarningsFromVars(
+    emittedVars,
+    schemaFacts.hasSchema ? schemaFacts.secretKeys : [],
+  );
+  if (warnings.secretKeys.length > 0) {
+    log.warn(
+      [
+        'deploy: these worker vars ship as PLAINTEXT in the deployed config:',
+        // Key names + why they were flagged only — never a value.
+        ...warnings.secretKeys.map((k) => `  • ${k.key}${PLAINTEXT_WARNING_REASONS[k.reason]}`),
+        'Move real secrets to `wrangler secret put <NAME>` so they are not baked into wrangler.json.',
+      ].join('\n'),
+    );
+  }
+
+  // 8b. Required-secret gate — build the values-free context from the REAL emitted vars + the
+  // env-insensitive required-key names (pure parent work, no project code): a required key
+  // shipped EMPTY (`K=""`) SHADOWS a same-named remote secret → fail closed always; a required
+  // key ABSENT from the emitted vars is discharged only by `wrangler secret list`.
+  const envContext = deriveSelfHostEnvContextFromVars(emittedVars, schemaFacts);
+  // Then VALUE-validate the REAL emitted vars against the schema's validators in the isolated
+  // `validate-emitted` probe (project code, off this credentialed parent) and fold the FAILING
+  // key NAMES into the context, so a required var shipped with a MALFORMED value (e.g. a
+  // non-number `PORT`, a bad JSON object) fails closed HERE — before any remote mutation —
+  // rather than only at worker boot. Values-free: only key names cross the process boundary.
+  if (schemaFacts.hasSchema) {
+    let validateResult: EnvSchemaValidateResult;
+    try {
+      validateResult = await (deps.validateEmittedVars ?? validateEmittedVarsDefault)(
+        { root },
+        buildSchemaProbeEnv(accountId, apiBaseUrl),
+      );
+    } catch (err) {
+      log.error(
+        `deploy: could not validate the emitted worker vars against the env schema — ${getErrorMessage(err)}`,
+      );
+      return exit(1);
+    }
+    if (validateResult.kind === 'schema-error') {
+      log.error(`deploy: ${selfHostSchemaFailureMessage(validateResult.reason)}`);
+      return exit(1);
+    }
+    envContext.invalidKeys = validateResult.invalidKeys;
+  }
+  // DISCHARGE the context. Reuses the same `dischargeSelfHostEnvContext` the unit tests
+  // exercise — now fed the ground-truth vars + the real invalid-value set. It may spawn a
+  // credentialed `wrangler secret list` (its own runner, via `createDefaultSecretListRunner`),
+  // which runs the hashed uploader bundle — and the emitted-var validation above just ran project
+  // code (env.ts) that could have overwritten it. Re-verify the uploader against the pre-build
+  // baseline immediately before the spawn.
+  if (!assertUploaderStillPinned()) {
+    return exit(1);
+  }
+  try {
+    await (deps.dischargeSelfHostEnv ?? dischargeSelfHostEnvContext)(envContext, {
+      root,
+      configPath,
+      accountId,
+      // Pin the worker NAME too: the secret list resolves the worker from the config's
+      // `name`, which the emitted-var probe above (project code) could have rewritten
+      // since step 5 pinned it. The gate reconciles the config against this and fails
+      // closed on a mismatch, mirroring the account pin.
+      workerName,
+    });
+  } catch (err) {
+    if (
+      err instanceof SelfHostFirstDeployError ||
+      err instanceof SelfHostSecretListError ||
+      err instanceof SelfHostEnvValidationError ||
+      err instanceof SelfHostSchemaError
+    ) {
+      log.error(err.message);
+      return exit(1);
+    }
+    throw err;
+  }
+
+  // 8c. Auth-schema check — the managed platform creates Void-managed Better Auth tables at
+  // RUNTIME (POST /__void/migrate/auth) after dispatch; this self-host backend never calls it,
+  // it only applies checked-in `db/migrations/*.sql`. So verify the checked-in migrations
+  // PRODUCE the required Better Auth schema (tables + columns, incl. configured renames + plugin
+  // tables) by reading the schema the BUILD generated (`.void/better-auth-schema.ts` — ground
+  // truth) and applying the migrations to in-memory SQLite. `dialect` is guaranteed `'sqlite'`
+  // here (pg+auth was rejected at 2a).
+  if (authEnabled) {
+    try {
+      await (deps.validateAuthMigrations ?? validateAuthMigrationSchema)(root, migrations);
+    } catch (err) {
+      log.error(
+        [
+          'deploy: --backend cloudflare cannot verify the Void-managed Better Auth schema.',
+          'The managed platform creates these tables at runtime (POST /__void/migrate/auth)',
+          'after deploy; this self-host backend only applies checked-in db/migrations/*.sql, so',
+          'they must already produce the Better Auth schema — tables, columns, and the primary',
+          'keys, unique constraints and foreign keys it declares:',
+          `  ${getErrorMessage(err)}`,
+          'Define the Better Auth tables in `db/schema.ts`, run `void db generate`, commit the',
+          'migration, then rerun — or deploy this app with `void deploy` (the managed platform).',
+          "Note that Drizzle opts out of constraints by default: every auth table's `id` needs",
+          '`.primaryKey()`, a field the schema marks unique needs `.unique()`, and one that',
+          'references another table needs `.references()`.',
+        ].join('\n'),
+      );
+      return exit(1);
+    }
+  }
+
+  // 8d. Local migration gates (D1/SQLite apps only; pg/Hyperdrive skip) — run POST-build,
+  // immediately before the remote apply, against the RE-COLLECTED post-build migrations. Moving
+  // them here (from pre-build) closes the window where a build plugin could add/rewrite migration
+  // SQL that step 9 would then apply to remote D1 ungated: `wrangler d1 migrations apply` reads
+  // the live post-build files, and these gates now validate exactly that set. Nothing between the
+  // build and here mutates remote state, so a failed gate never leaves a half-migrated account.
+  let d1MigrateToken: string | undefined;
+  if (desired.d1) {
+    // 8d-i. Run the SAME gates the managed deploy runs — schema drift, journal coherence,
+    // destructive-op-without-pragma — for EVERY D1 app REGARDLESS of migration count. A
+    // `db/schema.ts` with no generated migration is drift the old count-gated check silently
+    // skipped (shipping a schemaless remote DB); wrangler also auto-applies destructive SQL in CI
+    // (its confirmation defaults to "yes" non-interactively). `validateMigrations` self-guards on
+    // an empty set.
+    try {
+      (deps.assertMigrationsDeployable ?? assertRemoteMigrationsDeployable)(
+        root,
+        dialect,
+        migrationsDir,
+        migrations,
+      );
+    } catch (err) {
+      log.error(getErrorMessage(err));
+      return exit(1);
+    }
+
+    // Resolve + validate the migrate target ONLY when there ARE checked-in migrations: a D1
+    // desired purely from DB-use or auth can have no `db/migrations`, and wrangler 4.107
+    // HARD-FAILS `d1 migrations apply` on a missing/empty folder (it never no-ops).
+    if (migrations.length > 0) {
+      // `migrations_dir` must be present in the config: wrangler defaults a missing value to
+      // `./migrations` (relative to the config) and would apply an unrelated folder.
+      const migrateConfig = parseRootWranglerConfig(configPath);
+      const d1MigrationsDir = readStoredResourceName(
+        migrateConfig,
+        'd1_databases',
+        desired.d1.binding,
+        'migrations_dir',
+      );
+      if (!d1MigrationsDir) {
+        log.error(
+          [
+            `deploy: D1 binding ${desired.d1.binding} has no "migrations_dir" in ${configPath}.`,
+            'Refusing to run `wrangler d1 migrations apply` — wrangler would default to',
+            '`./migrations` (relative to the config) and apply an unrelated folder to your',
+            'remote database, or error. Run `void deploy --backend cloudflare --provision`',
+            'once to set `migrations_dir` (it writes `./db/migrations`), or add it yourself.',
+          ].join('\n'),
+        );
+        return exit(1);
+      }
+      // wrangler 4.107 resolves the migrate target by FIRST-matching the passed token
+      // against `database_name` OR `binding` (getDatabaseInfoFromConfig, src/d1/utils.ts)
+      // and reads THAT entry's `migrations_dir`. The gate validated the entry matched by
+      // BINDING, so migrate by a token that resolves to exactly that entry — fail closed
+      // when an earlier alias entry would shadow it (else wrangler could migrate the wrong
+      // DB / an unrelated folder though the gate passed).
+      const migrateTarget = resolveD1MigrateTarget(migrateConfig, desired.d1.binding);
+      if (!migrateTarget.ok) {
+        log.error(
+          [
+            `deploy: cannot safely run D1 migrations for binding ${desired.d1.binding} — ${migrateTarget.reason}`,
+            'wrangler resolves `d1 migrations apply <name>` by first-matching the name against',
+            "each entry's database_name OR binding, so an ambiguous token could migrate a",
+            'different database than the one validated. Give each D1 database a unique',
+            'database_name (and binding), then rerun.',
+          ].join('\n'),
+        );
+        return exit(1);
+      }
+
+      // 8d-iii. Pin check — the remote apply below resolves its target from THIS post-build
+      // `migrateConfig` (the root config wrangler re-reads to map the token → database_id), so
+      // assert that database_id still equals what was snapshotted at step 6 BEFORE the build.
+      // A tampered build that rewrote `d1_databases[<binding>].database_id` — keeping the binding
+      // + database_name so the token still resolves — would otherwise redirect this privileged
+      // `--remote` migration to a DIFFERENT same-account database. Fail closed, mirroring the
+      // account_id pin. A binding never pinned (no real id pre-build, which the drift check
+      // already rejects) is not asserted.
+      const { field: d1Field, idField: d1IdField } = DEPLOY_BINDING_IDENTITY_FIELDS.d1;
+      const pinnedD1Id = bindingIdentitySnapshot.get(
+        bindingIdentityKey(d1Field, desired.d1.binding),
+      );
+      const postBuildD1Id = readStoredResourceName(
+        migrateConfig,
+        d1Field,
+        desired.d1.binding,
+        d1IdField,
+      );
+      if (pinnedD1Id !== undefined && postBuildD1Id !== pinnedD1Id) {
+        log.error(
+          [
+            `deploy: the ${desired.d1.binding} D1 database identity changed between validation and the remote migrate.`,
+            `Refusing to run \`wrangler d1 migrations apply\` — the build rewrote ${d1IdField} in ${configPath}`,
+            `(validated ${JSON.stringify(pinnedD1Id)}, now ${JSON.stringify(postBuildD1Id)}), which would redirect this`,
+            'privileged remote migration to a different database. Rebuild from a clean checkout, then rerun.',
+          ].join('\n'),
+        );
+        return exit(1);
+      }
+
+      // 8d-ii. The EXACT files wrangler will apply (its own `migrations_dir` + `migrations_pattern`
+      // resolution) must EQUAL the gated source set by normalized name AND content. Otherwise
+      // a stray/extra `.sql` (e.g. `seed.sql`, which the gate's `collectMigrations` skips but
+      // wrangler's `*.sql` glob matches), a differing dir, or a divergent file would be applied
+      // to REMOTE D1 unvalidated. The gate above only checked `migrations`; this makes the
+      // applied set == the validated set.
+      const applyCheck = await (deps.checkMigrationApplySet ?? checkWranglerMigrationApplySet)(
+        configPath,
+        migrateConfig,
+        desired.d1.binding,
+        d1MigrationsDir,
+        migrations,
+      );
+      if (!applyCheck.ok) {
+        log.error(applyCheck.reason);
+        return exit(1);
+      }
+      d1MigrateToken = migrateTarget.token;
+    }
+  }
+
+  // 9. Apply pending migrations to remote D1 — AFTER all local + ground-truth gates pass, so a
+  // failed gate never mutates remote D1. Uses the token resolved + validated at step 8d, and the
+  // pinned root config (`-c`), which targets the account already verified by provision/drift.
+  if (d1MigrateToken) {
+    // The local migration gates above ran project code (drizzle-kit loaded db/schema.ts), which
+    // could have overwritten the hashed uploader bundle after the last check. Re-verify against the
+    // pre-build baseline immediately before this credentialed, remote-mutating apply.
+    if (!assertUploaderStillPinned()) {
+      return exit(1);
+    }
+    // 9a. Apply.
+    const migrate = await Promise.resolve(
+      runWrangler(
+        ['d1', 'migrations', 'apply', d1MigrateToken, '--remote', '-c', configPath, '--env='],
+        { capture: false },
+      ),
+    );
+    if (!isCleanWranglerExit(migrate)) {
+      log.error(
+        `deploy: remote D1 migrations failed for "${d1MigrateToken}" (exit ${String(migrate.status)}). ` +
+          'Fix the migration and rerun. Note: D1 always enforces foreign_keys=ON — a Drizzle ' +
+          'table-rebuild using PRAGMA foreign_keys=OFF must use PRAGMA defer_foreign_keys instead.',
+      );
+      return exit(1);
+    }
+
+    // 9b. Verify NO migrations remain pending on remote. `d1 migrations apply` EXITS 0 when
+    // its confirmation is DECLINED (interactive) — a no-op that reads as success — and prints
+    // no machine-readable applied set. `d1 migrations list --remote` queries the remote
+    // `d1_migrations` table and prints "Migrations to be applied:" when any remain, else the
+    // affirmative "No migrations to apply!". Both emit at wrangler's `log` level, which the
+    // child env PINS (`WRANGLER_LOG=log`), so an ambient reduced level can never suppress
+    // them. Reject on the pending marker, REQUIRE the affirmative sentinel, and reject any
+    // empty/unrecognized output rather than trust an absent marker.
+    // Re-verify the uploader before this distinct credentialed run too (defense in depth — the
+    // pre-build baseline is the constant reference for every spawn).
+    if (!assertUploaderStillPinned()) {
+      return exit(1);
+    }
+    const migrateList = await Promise.resolve(
+      runWrangler(
+        ['d1', 'migrations', 'list', d1MigrateToken, '--remote', '-c', configPath, '--env='],
+        { capture: true },
+      ),
+    );
+    if (!isCleanWranglerExit(migrateList)) {
+      log.error(
+        `deploy: could not verify the remote migration state for "${d1MigrateToken}" ` +
+          `(\`d1 migrations list\` exit ${String(migrateList.status)}). Refusing to deploy against ` +
+          'an unverified schema — rerun once wrangler can reach your account.',
+      );
+      return exit(1);
+    }
+    if (migrateList.stdout.includes('Migrations to be applied:')) {
+      log.error(
+        [
+          `deploy: remote D1 still has UNAPPLIED migrations for "${d1MigrateToken}" after apply.`,
+          '`wrangler d1 migrations apply` exits 0 even when its confirmation is declined, so',
+          'the schema may be un-migrated while the code that needs it is about to deploy.',
+          'Re-run and confirm the migration (or apply it non-interactively), then rerun.',
+        ].join('\n'),
+      );
+      return exit(1);
+    }
+    if (!migrateList.stdout.includes('No migrations to apply!')) {
+      log.error(
+        [
+          `deploy: could not confirm the remote migration state for "${d1MigrateToken}".`,
+          '`wrangler d1 migrations list` printed neither the "no migrations to apply" nor the',
+          '"migrations to be applied" marker (WRANGLER_LOG is pinned so they are never',
+          'suppressed) — refusing to deploy against an unverified schema. Rerun once wrangler',
+          'can reach your account.',
+        ].join('\n'),
+      );
+      return exit(1);
+    }
+  }
+
+  // 10. Verify the generated deploy config targets the pinned account + expected worker
+  // AND the exact provisioned binding IDENTITIES BEFORE uploading. A `CLOUDFLARE_ENV` /
+  // `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH` the CF plugin loaded could have baked a
+  // different account/name — or the SAME account/name with a flattened, DIFFERENT binding
+  // set — into dist/ssr/wrangler.json; passing `desired` + the step-6 snapshots lets the check
+  // reject a divergent binding set, not only an account/name mismatch. The comparison is against
+  // the in-memory `bindingIdentitySnapshot` (NOT a post-build root re-read), so a build that
+  // consistently rewrote both the root config and this artifact is still caught. The
+  // `passthroughIdentitySnapshot` extends the same defense to the resource fields Void never emits
+  // (`services` / `secrets_store_secrets` / …): an entry the build injected into one of them — or a
+  // queue not in `desired.queues` — fails closed here too, before the credentialed upload binds it.
+  const verification = (deps.verifyDeployConfig ?? verifyGeneratedDeployConfig)(root, {
+    accountId,
+    workerName,
+    desired,
+    bindingIdentitySnapshot,
+    passthroughIdentitySnapshot,
+    passthroughRawFields,
+    needsAI,
+    expectedContainers,
+    expectedCrons,
+  });
+  if (!verification.ok) {
+    log.error(
+      [
+        'deploy: the generated deploy config does not match the pinned target — refusing to deploy.',
+        verification.reason,
+        'This typically means CLOUDFLARE_ENV / CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH (in the',
+        'environment or a production `.env`) selected a different named environment or config',
+        'at build time. This backend always deploys the canonical top-level config — remove',
+        'them and rebuild.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+    return exit(1);
+  }
+
+  // 11. Deploy — bare `wrangler deploy` follows .wrangler/deploy/config.json →
+  // dist/ssr/wrangler.json (which carries the real ids + pinned account). `--env=` pins
+  // the top-level env so an ambient CLOUDFLARE_ENV cannot reselect a named one.
+  // `--experimental-provision=false` / `--experimental-auto-create=false` disable
+  // wrangler 4.107's OWN resource provisioning (both default true, deployCommand +
+  // globalFlags, wrangler-dist/cli.js), so ONLY `provisionCloudflareResources` may create
+  // resources — a bare deploy can never auto-create a missing binding (e.g. an R2 bucket
+  // absent remotely but passing the local drift predicate), even in CI.
+  // `--autoconfig=false` disables wrangler 4.107's framework detection + auto-config
+  // (`autoconfig` defaults true, deployCommand cli.js:292315). Without it, and because we
+  // pass no `-c`, a detected framework marker (e.g. OpenNext) makes wrangler DELEGATE the
+  // deploy to another tool (`maybeDelegateToOpenNextDeployCommand`, cli.js:292343) — which
+  // would upload something OTHER than the artifact Void just built and verified. Forcing it
+  // off guarantees wrangler uploads exactly the verified `dist/ssr/wrangler.json`.
+  //
+  // Final uploader re-verification immediately before the deploy — the last and most privileged
+  // credentialed run of the hashed bundle. Against the same pre-build baseline; fail closed.
+  if (!assertUploaderStillPinned()) {
+    return exit(1);
+  }
+  const deployResult = await Promise.resolve(
+    runWrangler(
+      [
+        'deploy',
+        '--env=',
+        '--experimental-provision=false',
+        '--experimental-auto-create=false',
+        '--autoconfig=false',
+      ],
+      { capture: false },
+    ),
+  );
+  if (!isCleanWranglerExit(deployResult)) {
+    log.error(`deploy: \`wrangler deploy\` failed (exit ${String(deployResult.status)}).`);
+    return exit(1);
+  }
+  cliLog.info('cloudflare_deploy_end', { ok: true, worker: workerName });
+  log.success(`Deployed "${workerName}" to your Cloudflare account.`);
+}
+
+/**
+ * Discover the root wrangler config path the same way the build / bindings
+ * writer do (wrangler.jsonc first, then wrangler.json). Falls back to the
+ * default wrangler.jsonc path when none exists yet — the provisioner creates it.
+ */
+function discoverRootWranglerConfig(root: string): string {
+  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
+    const candidate = join(root, name);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return join(root, 'wrangler.jsonc');
+}
+
 async function runDeployInner(
   root: string,
   options: RunDeployOptions | undefined,
   cliLog: CliLogger,
 ): Promise<void> {
+  // Fork to the self-hosted Cloudflare backend BEFORE any managed-platform work
+  // (auth token, PlatformClient, project resolution, config read, branch
+  // selection). Everything below stays byte-for-byte the managed `void` path.
+  if (options?.backend === 'cloudflare') {
+    return runCloudflareDeploy(root, options, cliLog);
+  }
+
   let reauthenticated = false;
   while (true) {
     try {
@@ -2107,8 +6280,9 @@ function runDrizzleKitGenerate(root: string, configPath: string): string {
     cwd: root,
     encoding: 'utf-8',
     // drizzle-kit loads the user's drizzle config + schema (user code); keep the
-    // CF Access service token out of it, matching the build spawns.
-    env: buildEnv(),
+    // CF Access service token AND every wrangler-auth credential out of it, matching the
+    // build spawns. Generating migrations needs no Cloudflare credential.
+    env: scrubWranglerAuthCredentials(buildEnv()),
   });
   const stderr = bufferToString(result.stderr);
   const stdout = bufferToString(result.stdout);

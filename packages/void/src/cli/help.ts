@@ -46,7 +46,19 @@ const HELP_TREE: HelpTree = {
       { command: '--project <name>', description: 'Deploy target project name' },
       { command: '--dir <path>', description: 'Deploy a static directory and skip build' },
       { command: '--spa', description: 'Use SPA mode for static deploys' },
-      { command: '--skip-build', description: 'Skip the build step and use existing output' },
+      {
+        command: '--skip-build',
+        description: 'Skip the build step and use existing output (not with --backend cloudflare)',
+      },
+      {
+        command: '--backend cloudflare',
+        description: 'Deploy to your own Cloudflare account instead of the Void platform',
+      },
+      {
+        command: '--provision',
+        description:
+          'Create missing D1/KV/R2/Queue/Hyperdrive resources (with --backend cloudflare)',
+      },
       {
         command: '--debug',
         description: 'Mirror the deploy log to stderr (always written to ~/.void/logs)',
@@ -56,6 +68,14 @@ const HELP_TREE: HelpTree = {
       { command: 'void deploy', description: 'Deploy the linked project' },
       { command: 'void deploy --project my-app', description: 'Deploy to a specific project' },
       { command: 'void deploy --dir dist --spa', description: 'Deploy a static SPA directory' },
+      {
+        command: 'void deploy --backend cloudflare',
+        description: 'Deploy to your own Cloudflare account',
+      },
+      {
+        command: 'void deploy --backend cloudflare --provision',
+        description: 'Provision missing resources, then deploy to Cloudflare',
+      },
     ],
   },
   auth: {

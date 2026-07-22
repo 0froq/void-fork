@@ -1,7 +1,14 @@
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { chmodSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'pathe';
 import { describe, expect, it, beforeEach, afterEach } from 'vite-plus/test';
-import { detectPreset, formatProjectCommand, resolveProjectCommand } from '../../src/cli/preset.ts';
+import {
+  detectPreset,
+  formatProjectCommand,
+  resolveProjectCommand,
+  resolveWranglerArgv,
+  resolveWranglerCommand,
+} from '../../src/cli/preset.ts';
 
 const TMP = join(import.meta.dirname, '.tmp-preset');
 
@@ -239,4 +246,207 @@ describe('project Vite commands', () => {
     expect(formatProjectCommand(root, 'vite dev')).toBe('vite dev');
     expect(resolveProjectCommand(root, 'vite build')).toBe('vite build');
   });
+});
+
+describe('resolveWranglerCommand', () => {
+  it('resolves to the local wrangler binary with the subcommand', () => {
+    const root = setupProject({
+      pkg: { dependencies: { wrangler: '^4.0.0' } },
+      files: { 'node_modules/.bin/wrangler': '' },
+    });
+
+    expect(resolveWranglerCommand(root, 'deploy')).toBe(
+      `${join(root, 'node_modules', '.bin', 'wrangler')} deploy`,
+    );
+  });
+
+  it('preserves multi-argument subcommands', () => {
+    const root = setupProject({
+      pkg: { dependencies: { wrangler: '^4.0.0' } },
+      files: { 'node_modules/.bin/wrangler': '' },
+    });
+
+    expect(resolveWranglerCommand(root, 'd1 create foo --binding DB --update-config')).toBe(
+      `${join(root, 'node_modules', '.bin', 'wrangler')} d1 create foo --binding DB --update-config`,
+    );
+  });
+
+  it('falls back to a bare wrangler command when no local binary exists', () => {
+    const root = setupProject({
+      pkg: { dependencies: { wrangler: '^4.0.0' } },
+    });
+
+    expect(resolveWranglerCommand(root, 'deploy')).toBe('wrangler deploy');
+  });
+});
+
+describe('resolveWranglerArgv (module-resolution launcher)', () => {
+  it('resolves wrangler via module resolution to [execPath, cli.js] even when the app root has no wrangler (strict pnpm)', () => {
+    // wrangler is a dependency of the `void` package, NOT the app root under strict
+    // pnpm. Module resolution (relative to preset.ts) still finds it.
+    const root = setupProject({ pkg: { name: 'app' } });
+    const argv = resolveWranglerArgv(root);
+    expect(argv).toHaveLength(2);
+    expect(argv[0]).toBe(process.execPath);
+    // The resolved entry is wrangler's REAL CLI (`wrangler-dist/cli.js`, its
+    // package `main`), NOT the signal-swallowing `bin/wrangler.js` wrapper.
+    expect(argv[1].replace(/\\/g, '/')).toMatch(/wrangler\/wrangler-dist\/cli\.js$/);
+    expect(argv[1].replace(/\\/g, '/')).not.toMatch(/bin\/wrangler\.js$/);
+  });
+
+  it("prefers void's own wrangler over an incompatible app-root wrangler, resolving its REAL cli.js", () => {
+    // The app root pins its OWN (potentially older/incompatible) wrangler, and a
+    // separate "void-nested" wrangler is resolvable via module resolution. The
+    // provisioner targets wrangler 4.107's exact flags/JSON/errors, so void's own
+    // wrangler MUST win — the app-root one must not shadow it. The resolved entry
+    // is the `main` CLI (`wrangler-dist/cli.js`), NOT the `bin.wrangler` wrapper.
+    const root = setupProject({
+      pkg: { dependencies: { wrangler: '^3.0.0' } },
+      files: {
+        'node_modules/wrangler/package.json': JSON.stringify({
+          main: './wrangler-dist/cli.js',
+          bin: { wrangler: './bin/wrangler.js' },
+        }),
+        'node_modules/wrangler/wrangler-dist/cli.js': "'use strict';\n",
+        'node_modules/wrangler/bin/wrangler.js': '#!/usr/bin/env node\n',
+        'void_modules/wrangler/package.json': JSON.stringify({
+          main: './wrangler-dist/cli.js',
+          bin: { wrangler: './bin/wrangler.js' },
+        }),
+        'void_modules/wrangler/wrangler-dist/cli.js': "'use strict';\n",
+        'void_modules/wrangler/bin/wrangler.js': '#!/usr/bin/env node\n',
+      },
+    });
+    const voidWranglerPkg = join(root, 'void_modules', 'wrangler', 'package.json');
+    const argv = resolveWranglerArgv(root, () => voidWranglerPkg);
+    // Resolved to void's nested wrangler's REAL CLI, NOT the app-root one, NOT the wrapper.
+    expect(argv).toEqual([
+      process.execPath,
+      join(root, 'void_modules', 'wrangler', 'wrangler-dist', 'cli.js'),
+    ]);
+  });
+
+  it('resolves the CLI via `exports["."].default` when `main` is absent', () => {
+    // A manifest that exposes its CLI only through the `.` export condition still
+    // resolves to the real cli.js (never the wrapper).
+    const root = setupProject({
+      pkg: { name: 'app' },
+      files: {
+        'void_modules/wrangler/package.json': JSON.stringify({
+          exports: { '.': { types: './cli.d.ts', default: './wrangler-dist/cli.js' } },
+          bin: { wrangler: './bin/wrangler.js' },
+        }),
+        'void_modules/wrangler/wrangler-dist/cli.js': "'use strict';\n",
+        'void_modules/wrangler/bin/wrangler.js': '#!/usr/bin/env node\n',
+      },
+    });
+    const voidWranglerPkg = join(root, 'void_modules', 'wrangler', 'package.json');
+    const argv = resolveWranglerArgv(root, () => voidWranglerPkg);
+    expect(argv).toEqual([
+      process.execPath,
+      join(root, 'void_modules', 'wrangler', 'wrangler-dist', 'cli.js'),
+    ]);
+  });
+
+  it('falls back to the app-root wrangler only when void resolution fails, resolving its real cli.js', () => {
+    const root = setupProject({
+      pkg: { dependencies: { wrangler: '^4.0.0' } },
+      files: {
+        'node_modules/wrangler/package.json': JSON.stringify({
+          main: './wrangler-dist/cli.js',
+          bin: { wrangler: './bin/wrangler.js' },
+        }),
+        'node_modules/wrangler/wrangler-dist/cli.js': "'use strict';\n",
+        'node_modules/wrangler/bin/wrangler.js': '#!/usr/bin/env node\n',
+      },
+    });
+    // void's own resolution returns undefined → fall back to the app-root probe.
+    const argv = resolveWranglerArgv(root, () => undefined);
+    expect(argv).toEqual([
+      process.execPath,
+      join(root, 'node_modules', 'wrangler', 'wrangler-dist', 'cli.js'),
+    ]);
+  });
+
+  it('never yields a .bin shim argv and throws clearly when wrangler cannot be resolved', () => {
+    // A shim/`.cmd`-only layout with module resolution failing must THROW — never
+    // degrade to a bare `wrangler` (ENOENT in CI) or a shim Node cannot spawn with
+    // shell:false.
+    const root = setupProject({
+      pkg: { name: 'app' },
+      files: { 'node_modules/.bin/wrangler': '#!/bin/sh\n' },
+    });
+    expect(() => resolveWranglerArgv(root, () => undefined)).toThrow(
+      /could not resolve the "wrangler" package/,
+    );
+  });
+});
+
+describe('resolveProjectCommand shell safety (project root with spaces)', () => {
+  // A dedicated root whose path contains a space + a single quote — both are
+  // shell-significant and must be quoted before the string reaches execSync.
+  const SPACED_TMP = join(import.meta.dirname, ".tmp preset o'space");
+
+  beforeEach(() => {
+    rmSync(SPACED_TMP, { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    rmSync(SPACED_TMP, { recursive: true, force: true });
+  });
+
+  function setupSpacedProject(binName: string): { root: string; binPath: string } {
+    mkdirSync(join(SPACED_TMP, 'node_modules', '.bin'), { recursive: true });
+    writeFileSync(join(SPACED_TMP, 'package.json'), JSON.stringify({ dependencies: {} }));
+    const binPath = join(SPACED_TMP, 'node_modules', '.bin', binName);
+    // Executable that prints a sentinel + its args so we can confirm the shell
+    // launched THIS binary (not a truncated `/…/.tmp` prefix from word-splitting).
+    writeFileSync(binPath, `#!/bin/sh\necho "VOID_BIN_OK args=$*"\n`);
+    chmodSync(binPath, 0o755);
+    return { root: SPACED_TMP, binPath };
+  }
+
+  it('quotes the resolved executable path so the shell does not word-split it', () => {
+    const { root, binPath } = setupSpacedProject('wrangler');
+    const cmd = resolveWranglerCommand(root, 'deploy');
+
+    // The bin path (which contains a space and a single quote) must be quoted
+    // as a single token, not left as a bare substring the shell would split.
+    expect(cmd).not.toBe(`${binPath} deploy`);
+    expect(cmd.endsWith(' deploy')).toBe(true);
+    if (process.platform === 'win32') {
+      expect(cmd).toBe(`"${binPath}" deploy`);
+    } else {
+      // POSIX single-quote wrap, embedded `'` escaped as '\''.
+      expect(cmd).toBe(`'${binPath.replace(/'/g, "'\\''")}' deploy`);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'executes the correct binary through a shell for a spaced root',
+    () => {
+      const { root } = setupSpacedProject('wrangler');
+      const cmd = resolveWranglerCommand(root, 'deploy --dry-run');
+      const out = execSync(cmd, { encoding: 'utf-8' });
+      expect(out).toContain('VOID_BIN_OK');
+      expect(out).toContain('args=deploy --dry-run');
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'shell-quotes the vite build path for a spaced root',
+    () => {
+      const { binPath } = setupSpacedProject('vp');
+      // vite-plus present → `vite build` resolves to the local `vp` binary.
+      writeFileSync(
+        join(SPACED_TMP, 'package.json'),
+        JSON.stringify({ devDependencies: { 'vite-plus': '^1.0.0' } }),
+      );
+      const cmd = resolveProjectCommand(SPACED_TMP, 'vite build');
+      expect(cmd).toBe(`'${binPath.replace(/'/g, "'\\''")}' build`);
+      const out = execSync(cmd, { encoding: 'utf-8' });
+      expect(out).toContain('VOID_BIN_OK');
+      expect(out).toContain('args=build');
+    },
+  );
 });

@@ -1,5 +1,7 @@
-import { existsSync } from 'node:fs';
-import { join, resolve } from 'pathe';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'pathe';
 import { readProjectPaths } from '../project-paths.ts';
 import {
   getPackageDependencies,
@@ -146,8 +148,205 @@ export type StaticPreset = {
  */
 export function resolveProjectCommand(root: string, command: string): string {
   const [bin, ...args] = command.trim().split(/\s+/);
-  const resolvedBin = localBin(root, resolveCommandBin(root, bin));
+  const resolvedBin = shellQuoteExecutable(localBin(root, resolveCommandBin(root, bin)));
   return args.length > 0 ? `${resolvedBin} ${args.join(' ')}` : resolvedBin;
+}
+
+/**
+ * Shell-quote a resolved executable path so it survives being concatenated into
+ * a command string. The deploy path runs these via `execSync`/`spawnSync`,
+ * which invoke a shell, so a bare absolute path containing a space (e.g. a
+ * project root like `/tmp/my app`) would be word-split by the shell and try to
+ * exec the wrong binary. Paths with no shell-significant characters are returned
+ * unchanged, so ordinary paths stay byte-identical and copy-pasteable; only the
+ * executable segment is quoted (the trailing subcommand args are known-safe
+ * tokens). Platform-aware: cmd.exe (Windows) uses double quotes, POSIX shells
+ * use single quotes.
+ */
+function shellQuoteExecutable(value: string): string {
+  if (process.platform === 'win32') {
+    // cmd.exe: wrap in double quotes when the path contains a space or a shell
+    // metacharacter. Windows filenames cannot contain `"`, so there is no
+    // embedded quote to escape.
+    return /[\s&|<>^()"]/.test(value) ? `"${value}"` : value;
+  }
+  // POSIX sh: characters in the safe set need no quoting; otherwise single-quote
+  // the path and escape any embedded single quote as '\''.
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Resolve a command that runs the project's local `wrangler` binary with the
+ * given subcommand, preferring `node_modules/.bin/wrangler` when available.
+ *
+ * Thin wrapper over {@link resolveProjectCommand}: `wrangler` is not a
+ * special-cased bin (unlike `vite` → `vp`), so delegating reuses the exact
+ * local-bin resolution without duplicating it. Returns a shell command string
+ * suitable for `execSync`/`spawnSync` in the deploy path.
+ */
+export function resolveWranglerCommand(root: string, subcommand: string): string {
+  return resolveProjectCommand(root, `wrangler ${subcommand}`);
+}
+
+/**
+ * Resolve the project-local `wrangler` as an ARGV LAUNCHER — an array of tokens
+ * `[executable, ...prefixArgs]` meant to be spawned with `shell: false` and the
+ * real wrangler subcommand appended as further DISCRETE argv elements.
+ *
+ * Unlike {@link resolveWranglerCommand} (which returns a shell-quoted STRING for
+ * `shell: true` callers), this never builds a shell command line, so untrusted
+ * values — resource names, a Postgres connection string riddled with `&`/`$`/`;`,
+ * a config path containing spaces — can be passed as their own argv elements and
+ * are IMMUNE to shell metacharacter injection/splitting.
+ *
+ * Resolution order — ALWAYS launches the resolved JS entry as
+ * `[process.execPath, <wrangler-dist/cli.js>]`, which is shell-free AND
+ * cross-platform (it sidesteps the Windows `.cmd`/`.ps1` shim that Node cannot
+ * spawn with `shell: false`):
+ *   1. MODULE RESOLUTION of `wrangler/package.json` relative to THIS module (the
+ *      `void` package). The provisioner targets wrangler 4.107's EXACT flags,
+ *      `--json` shapes, and error strings, so void's own pinned wrangler must be
+ *      PREFERRED — an app that hoists an older, incompatible wrangler at its root
+ *      must not shadow it. Under strict pnpm (void + consumers use pnpm) void's
+ *      wrangler is not at the app root anyway; module resolution finds it wherever
+ *      pnpm placed it.
+ *   2. FALLBACK: the app-root `node_modules/wrangler` probe, used only when void's
+ *      own wrangler cannot be resolved (e.g. a bundled/vendored layout).
+ *
+ * The resolved entry is wrangler's REAL CLI (`wrangler-dist/cli.js`, its
+ * package `main`/`exports["."]`), NOT the `bin.wrangler` WRAPPER. The wrapper
+ * (`bin/wrangler.js`) merely does a Node-version guard and then RE-SPAWNS
+ * `wrangler-dist/cli.js`, forwarding only SIGINT/SIGTERM to the grandchild (via a
+ * default `.kill()` = SIGTERM) and mapping a signal-killed grandchild (`code === null`)
+ * to `process.exit(0)`. Launching through it defeats the provisioner's hard command
+ * timeout: a `SIGKILL` sent to the wrapper cannot be relayed to the inner CLI, which
+ * survives holding the inherited stdio pipes so the parent's `close` never fires; and a
+ * killed inner CLI is masked as a clean exit 0. Launching `wrangler-dist/cli.js`
+ * DIRECTLY removes that layer entirely — the SIGKILL now hits the real process, and no
+ * wrapper can swallow the signal or rewrite the exit code. Bypassing the wrapper is
+ * safe: its only behaviors are the version guard (we spawn with the SAME `process.execPath`
+ * that already passed it) and an IPC-forwarding channel that is inert here (the runner
+ * spawns with `stdio: ['ignore','pipe','pipe']`, so the wrapper's `process.send` would be
+ * undefined and forward nothing).
+ *
+ * If wrangler cannot be resolved by EITHER avenue, throws a clear error — it never
+ * degrades to a bare `wrangler` (ENOENT in clean CI) or a `.cmd` shim.
+ */
+export function resolveWranglerArgv(
+  root: string,
+  resolveWranglerPackageJson: () => string | undefined = defaultResolveWranglerPackageJson,
+): Array<string> {
+  const jsBin = resolveLocalWranglerJsBin(root, resolveWranglerPackageJson);
+  if (jsBin) {
+    return [process.execPath, jsBin];
+  }
+  throw new Error(
+    `provision: could not resolve the "wrangler" package. wrangler ships as a dependency of "void"; ` +
+      `reinstall dependencies (e.g. \`pnpm install\`) so it is present, then retry.`,
+  );
+}
+
+/**
+ * Resolve `wrangler/package.json` via Node module resolution, relative to THIS
+ * module (the `void` package), so it is found wherever pnpm placed void's own
+ * wrangler dependency. wrangler explicitly exports `./package.json`, so both
+ * `import.meta.resolve` and `createRequire().resolve()` succeed. Returns the
+ * absolute manifest path, or `undefined` when unresolvable.
+ */
+function defaultResolveWranglerPackageJson(): string | undefined {
+  if (typeof import.meta.resolve === 'function') {
+    try {
+      return fileURLToPath(import.meta.resolve('wrangler/package.json'));
+    } catch {
+      // fall through to createRequire
+    }
+  }
+  try {
+    return createRequire(import.meta.url).resolve('wrangler/package.json');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Absolute path to wrangler's REAL CLI JS entry (its `package.json` `main` /
+ * `exports["."]` → `wrangler-dist/cli.js`, NOT the `bin.wrangler` wrapper — see
+ * {@link resolveWranglerArgv} for why we bypass the wrapper), trying the injected
+ * module resolver (void's OWN wrangler) FIRST, then falling back to the app-root
+ * probe. Returns `undefined` when wrangler cannot be located or its manifest is
+ * unreadable.
+ */
+function resolveLocalWranglerJsBin(
+  root: string,
+  resolveWranglerPackageJson: () => string | undefined,
+): string | undefined {
+  // Prefer void's own wrangler (module resolution relative to preset.ts): the
+  // provisioner targets its exact 4.107 flags/JSON/errors, so an older app-root
+  // wrangler must not win over it.
+  const fromVoid = wranglerCliEntryFromPackageJson(resolveWranglerPackageJson());
+  if (fromVoid) {
+    return fromVoid;
+  }
+  // Fallback: a consumer-hoisted wrangler at the project root, only when void's
+  // own resolution failed.
+  return wranglerCliEntryFromPackageJson(join(root, 'node_modules', 'wrangler', 'package.json'));
+}
+
+/**
+ * Resolve wrangler's REAL CLI entry from its `package.json` at `pkgPath`. Reads the
+ * `main` field (`wrangler-dist/cli.js`), falling back to `exports["."]` (its `default`
+ * condition, or a bare string), and resolves it to an absolute JS entry relative to the
+ * manifest's own directory (so it works for BOTH the app-root probe and module
+ * resolution). Deliberately does NOT read `bin.wrangler`: that is the signal-swallowing
+ * wrapper the provisioner must bypass. Returns `undefined` on any missing/unreadable/
+ * absent-entry case.
+ */
+function wranglerCliEntryFromPackageJson(pkgPath: string | undefined): string | undefined {
+  if (!pkgPath || !existsSync(pkgPath)) {
+    return undefined;
+  }
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
+      main?: string;
+      exports?: unknown;
+    };
+    const rel = wranglerCliRelativeEntry(pkg);
+    if (!rel) {
+      return undefined;
+    }
+    const jsEntry = join(dirname(pkgPath), rel);
+    return existsSync(jsEntry) ? jsEntry : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The relative CLI entry from a wrangler manifest: `main` first (wrangler 4.107 sets it
+ * to `wrangler-dist/cli.js`, which equals `exports["."].default`), then the `.` export
+ * (`{ default: string }` or a bare string). Returns `undefined` when neither is a string.
+ */
+function wranglerCliRelativeEntry(pkg: { main?: string; exports?: unknown }): string | undefined {
+  if (typeof pkg.main === 'string' && pkg.main.length > 0) {
+    return pkg.main;
+  }
+  const exports = pkg.exports;
+  if (exports && typeof exports === 'object' && !Array.isArray(exports)) {
+    const dot = (exports as Record<string, unknown>)['.'];
+    if (typeof dot === 'string' && dot.length > 0) {
+      return dot;
+    }
+    if (dot && typeof dot === 'object' && !Array.isArray(dot)) {
+      const dflt = (dot as Record<string, unknown>).default;
+      if (typeof dflt === 'string' && dflt.length > 0) {
+        return dflt;
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
