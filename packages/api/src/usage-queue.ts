@@ -22,7 +22,16 @@ export async function processUsageEventBatch(
   batch: MessageBatch<unknown>,
   env: ApiEnv['Bindings'],
 ): Promise<void> {
-  const events = batch.messages.map((message) => message.body as UsageEvent);
+  // Cloudflare stamps each message with its enqueue time — which is when
+  // dispatch metered the response at the edge. Keep it: the 5xx alert window
+  // must report when the errors happened, not when this consumer drained the
+  // batch (a backlog or a retried batch can put hours between the two).
+  // Defensive fallback because this is also the billing path.
+  const records = batch.messages.map((message) => ({
+    event: message.body as UsageEvent,
+    at: message.timestamp instanceof Date ? message.timestamp.getTime() : Date.now(),
+  }));
+  const events = records.map((record) => record.event);
 
   const grouped = groupEventsByUser(events);
   const db = createDb(env.HYPERDRIVE.connectionString);
@@ -64,39 +73,50 @@ export async function processUsageEventBatch(
     batch.retryAll();
   } else {
     // Best-effort: route 5xx events to ErrorAlertMonitor (failures don't block ack)
-    const errorEvents = events.filter((event) => event.status !== undefined && event.status >= 500);
-    if (errorEvents.length > 0) {
-      const errorsByProject = new Map<string, { count: number; userId: string; slug: string }>();
-      for (const event of errorEvents) {
+    const errorRecords = records.filter(
+      ({ event }) => event.status !== undefined && event.status >= 500,
+    );
+    if (errorRecords.length > 0) {
+      const errorsByProject = new Map<
+        string,
+        { count: number; userId: string; slug: string; firstAt: number; lastAt: number }
+      >();
+      for (const { event, at } of errorRecords) {
         const existing = errorsByProject.get(event.projectId);
         if (existing) {
           existing.count++;
+          existing.firstAt = Math.min(existing.firstAt, at);
+          existing.lastAt = Math.max(existing.lastAt, at);
         } else {
           errorsByProject.set(event.projectId, {
             count: 1,
             userId: event.userId,
             slug: event.slug,
+            firstAt: at,
+            lastAt: at,
           });
         }
       }
 
       await Promise.allSettled(
-        [...errorsByProject.entries()].map(async ([projectId, { count, userId, slug }]) => {
-          const doId = env.ERROR_ALERT_MONITOR.idFromName(projectId);
-          const stub = env.ERROR_ALERT_MONITOR.get(doId);
-          const res = await stub.fetch(
-            new Request('https://do/record', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ projectId, count, userId, slug }),
-            }),
-          );
-          if (!res.ok) {
-            console.error(
-              `[error-alert] DO /record failed for project ${projectId}: ${res.status}`,
+        [...errorsByProject.entries()].map(
+          async ([projectId, { count, userId, slug, firstAt, lastAt }]) => {
+            const doId = env.ERROR_ALERT_MONITOR.idFromName(projectId);
+            const stub = env.ERROR_ALERT_MONITOR.get(doId);
+            const res = await stub.fetch(
+              new Request('https://do/record', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectId, count, userId, slug, firstAt, lastAt }),
+              }),
             );
-          }
-        }),
+            if (!res.ok) {
+              console.error(
+                `[error-alert] DO /record failed for project ${projectId}: ${res.status}`,
+              );
+            }
+          },
+        ),
       );
     }
 

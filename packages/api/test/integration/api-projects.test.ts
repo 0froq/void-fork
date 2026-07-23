@@ -1590,8 +1590,10 @@ describe('GET /projects/:id/logs', () => {
       env,
     );
     expect(res.status).toBe(200);
+    // Also catches responses with a 5xx status (blob6) even when the worker
+    // neither threw nor logged at error level.
     expect(capturedBody).toContain(
-      `AND (blob1 != 'ok' OR blob3 != '[]' OR blob2 LIKE '%"level":"error"%')`,
+      `AND (blob1 != 'ok' OR blob3 != '[]' OR blob2 LIKE '%"level":"error"%' OR blob6 LIKE '5%')`,
     );
   });
 
@@ -1740,7 +1742,230 @@ describe('GET /projects/:id/logs', () => {
     expect(res.status).toBe(200);
     expect(capturedBody).toContain(`AND blob7 = '${deploymentId}'`);
     expect(capturedBody).toContain(
-      `AND (blob1 != 'ok' OR blob3 != '[]' OR blob2 LIKE '%"level":"error"%')`,
+      `AND (blob1 != 'ok' OR blob3 != '[]' OR blob2 LIKE '%"level":"error"%' OR blob6 LIKE '5%')`,
     );
+  });
+});
+
+describe('GET /projects/:id/requests', () => {
+  it('returns 401 without auth', async () => {
+    const res = await app.fetch(new Request('http://localhost/projects/fake-id/requests'), env);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 404 for an unknown project', async () => {
+    const user = await createTestUser(env.db);
+    const res = await app.fetch(
+      new Request('http://localhost/projects/proj_nope/requests', {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 403 for a non-owner', async () => {
+    const owner = await createTestUser(env.db);
+    const other = await createTestUser(env.db);
+    const project = await createTestProject(env.db, owner.id, 'req-owned');
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/requests`, {
+        headers: { Authorization: `Bearer ${other.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('returns request rows from analytics engine, keyed by project id', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'req-app');
+
+    let capturedBody = '';
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return Response.json({
+          data: [
+            {
+              type: 'ssr',
+              method: 'GET',
+              status: '503',
+              durationMs: 1200,
+              bytes: 0,
+              timestamp: '2026-07-16 16:52:00',
+            },
+          ],
+        });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/requests`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    // Keyed on blob1 to match the established requests-dataset convention used
+    // by the billing/top-traffic queries in routes/usage.ts (meta/lessons.md).
+    expect(capturedBody).toContain(`WHERE blob1 = '${project.id}'`);
+    const json = (await res.json()) as { data: Array<Record<string, unknown>> };
+    expect(json.data).toHaveLength(1);
+    expect(json.data[0]).toMatchObject({
+      type: 'ssr',
+      method: 'GET',
+      status: '503',
+      durationMs: 1200,
+    });
+  });
+
+  it('filters by status class (5xx) via a LIKE clause', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'req-5xx');
+
+    let capturedBody = '';
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/requests?status=5xx`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(capturedBody).toContain(`AND blob4 LIKE '5%'`);
+  });
+
+  it('filters by an exact status code via equality', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'req-500');
+
+    let capturedBody = '';
+    mockCfApi({
+      analyticsQuery: (_url, init) => {
+        capturedBody = typeof init?.body === 'string' ? init.body : '';
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/requests?status=500`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(capturedBody).toContain(`AND blob4 = '500'`);
+  });
+
+  it('rejects an invalid status filter with 400 and never queries analytics', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'req-badstatus');
+
+    let queried = false;
+    mockCfApi({
+      analyticsQuery: () => {
+        queried = true;
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/requests?status=abc`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(queried).toBe(false);
+  });
+
+  it('rejects an invalid since parameter', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'req-badsince');
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/requests?since=abc`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects exact status codes outside the 100-599 HTTP range', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'req-range');
+
+    let queried = false;
+    mockCfApi({
+      analyticsQuery: () => {
+        queried = true;
+        return Response.json({ data: [] });
+      },
+    });
+
+    for (const bad of ['000', '600', '999']) {
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/requests?status=${bad}`, {
+          headers: { Authorization: `Bearer ${user.jwt}` },
+        }),
+        env,
+      );
+      expect(res.status).toBe(400);
+    }
+    expect(queried).toBe(false);
+  });
+
+  it('rejects a non-positive limit with 400 instead of a misleading 502', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'req-badlimit');
+
+    let queried = false;
+    mockCfApi({
+      analyticsQuery: () => {
+        queried = true;
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/requests?limit=-1`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(queried).toBe(false);
+  });
+});
+
+describe('GET /projects/:id/logs limit validation', () => {
+  it('rejects a non-positive limit with 400 instead of a misleading 502', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'logs-badlimit');
+
+    let queried = false;
+    mockCfApi({
+      analyticsQuery: () => {
+        queried = true;
+        return Response.json({ data: [] });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/logs?limit=-1`, {
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(queried).toBe(false);
   });
 });

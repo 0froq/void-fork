@@ -14,6 +14,11 @@ type ErrorAlertState = {
   userId: string;
   slug: string;
   lastAlertAt: number | null;
+  // Bounds of the errors currently accumulated in `count`. `firstErrorAt`
+  // persists across the cooldown so a burst whose tail piled up while
+  // suppressed still reports its true start time in the alert email.
+  firstErrorAt: number | null;
+  lastErrorAt: number | null;
 };
 
 export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
@@ -23,13 +28,18 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
     if (this.state) {
       return this.state;
     }
-    const stored = await this.ctx.storage.get<ErrorAlertState>('state');
-    this.state = stored ?? {
+    const stored = await this.ctx.storage.get<Partial<ErrorAlertState>>('state');
+    // Spread over defaults so legacy state (no firstErrorAt/lastErrorAt) backfills
+    // to null rather than undefined.
+    this.state = {
       count: 0,
       projectId: '',
       userId: '',
       slug: '',
       lastAlertAt: null,
+      firstErrorAt: null,
+      lastErrorAt: null,
+      ...stored,
     };
     return this.state;
   }
@@ -53,16 +63,40 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
       count: number;
       userId: string;
       slug: string;
+      // Edge enqueue times of the errors in this batch, carried from the usage
+      // queue. Absent only on legacy in-flight calls — fall back to ingest time.
+      firstAt?: number;
+      lastAt?: number;
     };
 
     const state = await this.getState();
+    const now = Date.now();
+    const firstAt = body.firstAt ?? now;
+    const lastAt = body.lastAt ?? now;
+    if (state.count === 0) {
+      // Accumulation starts from empty — the batch defines the window.
+      state.firstErrorAt = firstAt;
+      state.lastErrorAt = lastAt;
+    } else {
+      // Widen with min/max rather than assigning: queue batches can arrive out
+      // of order, so a later batch may report errors older than what we hold.
+      // Legacy state (written before this field existed) leaves these null; keep
+      // them null so the email falls back to "recently" instead of claiming a
+      // window that excludes the errors already counted.
+      if (state.firstErrorAt !== null) {
+        state.firstErrorAt = Math.min(state.firstErrorAt, firstAt);
+      }
+      if (state.lastErrorAt !== null) {
+        state.lastErrorAt = Math.max(state.lastErrorAt, lastAt);
+      }
+    }
     state.count += body.count;
     state.projectId = body.projectId;
     state.userId = body.userId;
     state.slug = body.slug;
 
     // Within cooldown — accumulate but don't schedule alarm
-    if (state.lastAlertAt && Date.now() - state.lastAlertAt < COOLDOWN_MS) {
+    if (state.lastAlertAt && now - state.lastAlertAt < COOLDOWN_MS) {
       await this.saveState(state);
       return Response.json({ ok: true });
     }
@@ -74,7 +108,7 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
     }
 
     // Debounce — reset alarm to now + 2 minutes
-    await this.ctx.storage.setAlarm(Date.now() + DEBOUNCE_MS);
+    await this.ctx.storage.setAlarm(now + DEBOUNCE_MS);
     await this.saveState(state);
     return Response.json({ ok: true });
   }
@@ -83,7 +117,7 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
     const state = await this.getState();
 
     if (state.lastAlertAt && Date.now() - state.lastAlertAt < COOLDOWN_MS) {
-      state.count = 0;
+      this.resetWindow(state);
       await this.saveState(state);
       return;
     }
@@ -91,9 +125,15 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
     await this.fireAlert(state);
   }
 
+  private resetWindow(state: ErrorAlertState): void {
+    state.count = 0;
+    state.firstErrorAt = null;
+    state.lastErrorAt = null;
+  }
+
   private async fireAlert(state: ErrorAlertState): Promise<void> {
     if (!this.env.EMAIL) {
-      state.count = 0;
+      this.resetWindow(state);
       await this.ctx.storage.deleteAlarm();
       await this.saveState(state);
       return;
@@ -104,7 +144,7 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
       const user = await getUser(db, state.userId);
       if (!user?.email) {
         // No email on record — not transient, don't retry
-        state.count = 0;
+        this.resetWindow(state);
         await this.ctx.storage.deleteAlarm();
         await this.saveState(state);
         return;
@@ -113,10 +153,21 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
       const project = await getProject(db, state.projectId);
       const slug = project?.slug ?? state.slug;
       const dashboardUrl = this.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL;
-      await sendErrorAlertEmail(this.env.EMAIL, user.email, slug, state.count, dashboardUrl);
+      const errorWindow =
+        state.firstErrorAt !== null && state.lastErrorAt !== null
+          ? { start: state.firstErrorAt, end: state.lastErrorAt }
+          : null;
+      await sendErrorAlertEmail(
+        this.env.EMAIL,
+        user.email,
+        slug,
+        state.count,
+        dashboardUrl,
+        errorWindow,
+      );
       // Success — cooldown and reset
       state.lastAlertAt = Date.now();
-      state.count = 0;
+      this.resetWindow(state);
       await this.ctx.storage.deleteAlarm();
       await this.saveState(state);
     } catch (err) {

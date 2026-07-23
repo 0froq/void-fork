@@ -122,8 +122,7 @@ The default payload model is a discriminated JSON event union:
 
 ```ts
 type ClientEvent =
-  | { type: 'chat.message'; text: string }
-  | { type: 'chat.typing'; active: boolean };
+  { type: 'chat.message'; text: string } | { type: 'chat.typing'; active: boolean };
 
 type ServerEvent =
   | { type: 'chat.message'; id: string; userId: string; text: string }

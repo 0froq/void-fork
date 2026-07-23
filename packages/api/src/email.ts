@@ -94,25 +94,65 @@ export async function sendDeployFailedEmail(
   });
 }
 
+/** Format an epoch-ms instant as `YYYY-MM-DD HH:MM UTC`. */
+function utcStamp(ms: number): string {
+  return `${new Date(ms).toISOString().replace('T', ' ').slice(0, 16)} UTC`;
+}
+
+/** Insert thousands separators, e.g. 1252 -> "1,252". */
+function formatCount(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/**
+ * Suggest a `--range` value reaching from the moment the email is sent back to
+ * the first error in the window, matching the CLI's `^\d+(m|h|d)$` grammar and
+ * its 7-day retention cap. Anchoring on send time rather than the last error
+ * keeps the command valid when delivery failures retry the alert for hours.
+ */
+function suggestRange(start: number, sentAt: number): string {
+  const hours = Math.ceil((sentAt - start) / 3_600_000) + 1;
+  return hours <= 168 ? `${hours}h` : '7d';
+}
+
 export async function sendErrorAlertEmail(
   emailBinding: SendEmail,
   to: string,
   projectSlug: string,
   errorCount: number,
   dashboardUrl: string,
+  window: { start: number; end: number } | null,
+  sentAt: number = Date.now(),
 ): Promise<void> {
   const projectUrl = `${dashboardUrl}/projects/${encodeURIComponent(projectSlug)}`;
+  const count = formatCount(errorCount);
+  const when = window
+    ? `between ${utcStamp(window.start)} and ${utcStamp(window.end)}`
+    : 'recently';
+  const range = window ? suggestRange(window.start, sentAt) : '24h';
+  // `requests` leads: this alert counts every 5xx the edge returned, including
+  // ones the edge router generated itself and requests to static/SPA projects.
+  // Those never invoke a worker, so they produce no log rows at all — pointing
+  // only at `logs` would send users to a view that cannot show them.
+  const requestsHint = `void project requests --status 5xx --range ${range}`;
+  const logsHint = `void project logs --level error --range ${range}`;
+  const hintNote =
+    'The first lists every 5xx, including errors generated at the edge that never reach your worker; the second adds worker logs and exceptions.';
 
   await sendEmail(emailBinding, {
     to,
     subject: `5xx errors detected: ${projectSlug}`,
     html: emailHtml(
       `<h2 style="margin-bottom:8px">5xx errors detected: ${escapeHtml(projectSlug)}</h2>
-<p>Your project <strong>${escapeHtml(projectSlug)}</strong> has returned <strong>${errorCount}</strong> server error responses recently.</p>
+<p>Your project <strong>${escapeHtml(projectSlug)}</strong> returned <strong>${count}</strong> server error responses ${escapeHtml(when)}.</p>
+<p style="margin-bottom:4px;color:#444">Inspect them from the CLI:</p>
+<pre style="background:#f4f4f5;padding:12px 16px;border-radius:4px;font-family:ui-monospace,SFMono-Regular,monospace;font-size:0.85rem;overflow-x:auto;margin:0 0 8px"><code>${escapeHtml(requestsHint)}
+${escapeHtml(logsHint)}</code></pre>
+<p style="color:#666;font-size:0.85rem;margin:0 0 16px">${escapeHtml(hintNote)}</p>
 <p>${button(projectUrl, 'View Project')}</p>`,
       'You will not receive another alert for this project for 24 hours. You received this email because you own this project on Void.',
     ),
-    text: `5xx errors detected: ${projectSlug}\n\nYour project ${projectSlug} has returned ${errorCount} server error responses recently.\n\nView project: ${projectUrl}\n\nYou will not receive another alert for this project for 24 hours. You received this email because you own this project on Void.`,
+    text: `5xx errors detected: ${projectSlug}\n\nYour project ${projectSlug} returned ${count} server error responses ${when}.\n\nInspect them from the CLI:\n  ${requestsHint}\n  ${logsHint}\n\n${hintNote}\n\nView project: ${projectUrl}\n\nYou will not receive another alert for this project for 24 hours. You received this email because you own this project on Void.`,
   });
 }
 

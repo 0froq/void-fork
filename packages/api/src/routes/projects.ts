@@ -1661,7 +1661,18 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'invalid since parameter, use format like 15m, 2h, 3d' }, 400);
     }
 
-    const limit = Math.min(parseInt(context.req.query('limit') ?? '200', 10) || 200, 500);
+    // Validate before use: an unchecked negative reaches the SQL `LIMIT` and
+    // surfaces an Analytics Engine rejection as a misleading 502 rather than a
+    // client error.
+    const limitParam = context.req.query('limit');
+    let limit = 200;
+    if (limitParam !== undefined) {
+      const parsedLimit = Number(limitParam);
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return context.json({ error: 'invalid limit parameter, use a positive integer' }, 400);
+      }
+      limit = Math.min(parsedLimit, 500);
+    }
     const deploymentId = context.req.query('deploymentId');
     if (deploymentId && !/^dpl_[0-9a-z]+$/.test(deploymentId)) {
       return context.json({ error: 'invalid deploymentId format' }, 400);
@@ -1696,8 +1707,9 @@ const app = new Hono<ApiEnv>()
     let levelFilter = '';
     if (level === 'error') {
       // Catch non-ok outcomes (blob1), captured exceptions (blob3 non-empty
-      // array), and console.error logs (blob2 has level:"error").
-      levelFilter = `\n        AND (blob1 != 'ok' OR blob3 != '[]' OR blob2 LIKE '%"level":"error"%')`;
+      // array), console.error logs (blob2 has level:"error"), and 5xx responses
+      // (blob6 statusCode) even when the worker neither threw nor logged.
+      levelFilter = `\n        AND (blob1 != 'ok' OR blob3 != '[]' OR blob2 LIKE '%"level":"error"%' OR blob6 LIKE '5%')`;
     } else if (level !== null) {
       levelFilter = `\n        AND blob2 LIKE '%"level":"${level}"%'`;
     }
@@ -1784,6 +1796,145 @@ const app = new Hono<ApiEnv>()
       url: row.url,
       method: row.method,
       status: row.statusCode,
+    }));
+
+    return context.json({ data });
+  })
+  // Fetch request-level metering for a project. Unlike /logs (which only has
+  // user-worker tail rows), this reads the dispatch request-metering dataset,
+  // so it also surfaces 5xx that dispatch generated itself (missing manifest,
+  // static-asset/SSR timeouts) and requests to static/SPA projects that never
+  // invoke a worker.
+  .get('/:id/requests', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
+    if (!project) {
+      return context.json({ error: 'project not found' }, 404);
+    }
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
+    }
+
+    const since = context.req.query('since') ?? '1h';
+    const sinceMs = parseDuration(since);
+    if (sinceMs === null) {
+      return context.json({ error: 'invalid since parameter, use format like 15m, 2h, 3d' }, 400);
+    }
+
+    // Validate before use: an unchecked negative reaches the SQL `LIMIT` and
+    // surfaces an Analytics Engine rejection as a misleading 502 rather than a
+    // client error.
+    const limitParam = context.req.query('limit');
+    let limit = 200;
+    if (limitParam !== undefined) {
+      const parsedLimit = Number(limitParam);
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return context.json({ error: 'invalid limit parameter, use a positive integer' }, 400);
+      }
+      limit = Math.min(parsedLimit, 500);
+    }
+
+    // Optional status filter: a class like `5xx` (LIKE '5%') or an exact 3-digit
+    // code (equality). Validated so no tainted value reaches the SQL string.
+    const statusParam = context.req.query('status');
+    let statusFilter = '';
+    if (statusParam !== undefined && statusParam !== 'all') {
+      if (/^[1-5]xx$/.test(statusParam)) {
+        statusFilter = `\n        AND blob4 LIKE '${statusParam[0]}%'`;
+      } else if (/^[1-5]\d{2}$/.test(statusParam)) {
+        // Range-bounded so a typo like `600` errors instead of silently
+        // matching nothing.
+        statusFilter = `\n        AND blob4 = '${statusParam}'`;
+      } else {
+        return context.json(
+          { error: 'invalid status parameter, use a class like 5xx or an exact code like 500' },
+          400,
+        );
+      }
+    }
+
+    const sinceStr = new Date(Date.now() - sinceMs).toISOString().replace('T', ' ').slice(0, 19);
+    const dataset =
+      context.env.REQUESTS_DATASET ??
+      (context.env.PLATFORM_ENV === 'staging' ? 'void_requests_staging' : 'void_requests');
+
+    // void_requests columns (see dispatch recordRequest): blob2 type, blob3
+    // method, blob4 status, blob5 slug; double2 responseBytes, double3 durationMs.
+    const query = `
+      SELECT
+        blob2 as type,
+        blob3 as method,
+        blob4 as status,
+        double2 as bytes,
+        double3 as durationMs,
+        timestamp
+      FROM ${dataset}
+      WHERE blob1 = '${project.id}'
+        AND timestamp >= toDateTime('${sinceStr}')${statusFilter}
+      ORDER BY timestamp DESC
+      LIMIT ${limit}
+    `;
+
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${context.env.CF_ACCOUNT_ID}/analytics_engine/sql`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${context.env.CF_API_TOKEN}`,
+          'Content-Type': 'text/plain',
+        },
+        body: query,
+      },
+    );
+
+    const responseText = await response.text();
+    if (!response.ok) {
+      console.error(
+        `[requests] query failed for project ${project.id} (${response.status}): ${responseText.slice(0, 500)}`,
+      );
+      return context.json(
+        {
+          error: 'request query failed',
+          status: response.status,
+          detail: responseText.slice(0, 500),
+        },
+        502,
+      );
+    }
+
+    let result: {
+      data: ReadonlyArray<{
+        type: string;
+        method: string;
+        status: string;
+        bytes: number;
+        durationMs: number;
+        timestamp: string;
+      }>;
+    };
+    try {
+      result = JSON.parse(responseText) as typeof result;
+    } catch {
+      console.error(
+        `[requests] non-JSON response for project ${project.id} (${response.status} ${response.headers.get('content-type') ?? 'unknown'}): ${responseText.slice(0, 500)}`,
+      );
+      return context.json(
+        {
+          error: 'request query returned non-JSON response',
+          status: response.status,
+          detail: responseText.slice(0, 500),
+        },
+        502,
+      );
+    }
+
+    // Query newest-first (matches /logs), return chronological for readability.
+    const data = [...(result.data ?? [])].reverse().map((row) => ({
+      timestamp: row.timestamp,
+      type: row.type,
+      method: row.method,
+      status: row.status,
+      bytes: row.bytes,
+      durationMs: row.durationMs,
     }));
 
     return context.json({ data });

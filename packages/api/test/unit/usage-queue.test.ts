@@ -54,8 +54,12 @@ function fetchCalls(mock: ReturnType<typeof vi.fn>): Array<[Request, ...Array<un
   return (mock as unknown as { mock: { calls: Array<[Request, ...Array<unknown>]> } }).mock.calls;
 }
 
-function makeBatch(events: ReadonlyArray<UsageEvent>) {
-  const messages = events.map((event) => ({ body: event }));
+function makeBatch(events: ReadonlyArray<UsageEvent>, timestamps?: ReadonlyArray<number>) {
+  // Cloudflare stamps every queue message with its enqueue time.
+  const messages = events.map((event, i) => ({
+    body: event,
+    timestamp: new Date(timestamps?.[i] ?? Date.now()),
+  }));
   const calls = { retryAll: 0, ackAll: 0 };
   return {
     queue: 'void-usage-events',
@@ -70,8 +74,9 @@ function makeBatch(events: ReadonlyArray<UsageEvent>) {
   };
 }
 
-function makeEnv(stubFetch: FakeStubFetch) {
-  const errorStubFetch: FakeStubFetch = async () => new Response(null, { status: 200 });
+function makeEnv(stubFetch: FakeStubFetch, errorStub?: FakeStubFetch) {
+  const errorStubFetch: FakeStubFetch =
+    errorStub ?? (async () => new Response(null, { status: 200 }));
   return {
     HYPERDRIVE: { connectionString: 'postgres://mock' },
     USAGE_COUNTER: {
@@ -120,5 +125,71 @@ describe('processUsageEventBatch — sandbox events', () => {
     expect(payload.events).toHaveLength(1);
     expect(payload.events[0].sandboxRuntimeSeconds).toBe(30);
     expect(batch.calls.ackAll).toBe(1);
+  });
+});
+
+describe('processUsageEventBatch — 5xx alert window', () => {
+  beforeEach(() => {
+    getUserMock.mockReset();
+  });
+
+  function error5xx(projectId: string): UsageEvent {
+    return {
+      projectId,
+      userId: 'u1',
+      slug: projectId,
+      requests: 1,
+      responseBytes: 0,
+      status: 503,
+    };
+  }
+
+  it('carries the edge enqueue times through to the ErrorAlertMonitor', async () => {
+    const stubFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    const errorStubFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    getUserMock.mockResolvedValue({ id: 'u1', plan: 'solo' });
+
+    // A burst metered at the edge over ten minutes. Whenever this consumer
+    // drains the batch, the window must report the edge times — stamping the
+    // drain time is what makes the emailed `--range` miss the rows.
+    const t0 = Date.parse('2026-07-23T10:00:00Z');
+    const t1 = Date.parse('2026-07-23T10:05:00Z');
+    const t2 = Date.parse('2026-07-23T10:10:00Z');
+    // Deliberately out of order: queues do not guarantee ordering.
+    const batch = makeBatch([error5xx('p1'), error5xx('p1'), error5xx('p1')], [t1, t0, t2]);
+
+    await processUsageEventBatch(batch as never, makeEnv(stubFetch, errorStubFetch) as never);
+
+    expect(errorStubFetch).toHaveBeenCalledTimes(1);
+    const body = (await fetchCalls(errorStubFetch)[0][0].json()) as {
+      count: number;
+      firstAt: number;
+      lastAt: number;
+    };
+    expect(body.count).toBe(3);
+    expect(body.firstAt).toBe(t0);
+    expect(body.lastAt).toBe(t2);
+  });
+
+  it('keeps per-project windows separate', async () => {
+    const stubFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    const errorStubFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    getUserMock.mockResolvedValue({ id: 'u1', plan: 'solo' });
+
+    const early = Date.parse('2026-07-23T10:00:00Z');
+    const late = Date.parse('2026-07-23T10:30:00Z');
+    const batch = makeBatch([error5xx('p1'), error5xx('p2')], [early, late]);
+
+    await processUsageEventBatch(batch as never, makeEnv(stubFetch, errorStubFetch) as never);
+
+    const bodies = await Promise.all(
+      fetchCalls(errorStubFetch).map(
+        (call) => call[0].json() as Promise<{ projectId: string; firstAt: number; lastAt: number }>,
+      ),
+    );
+    const p1 = bodies.find((b) => b.projectId === 'p1');
+    const p2 = bodies.find((b) => b.projectId === 'p2');
+    expect(p1).toMatchObject({ firstAt: early, lastAt: early });
+    expect(p2).toMatchObject({ firstAt: late, lastAt: late });
   });
 });
