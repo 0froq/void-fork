@@ -16,7 +16,7 @@ catalog:
   # manually pinned to the submodule; only bump this when the framework submodule bumps hono.
   hono: 4.12.27
   wrangler: ^4.90.0
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.4
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.6
   vitest: 4.1.10
   vite-plus: ^0.2.0
 
