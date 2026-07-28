@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import spawn from 'cross-spawn';
-import { join, normalize } from 'pathe';
+import { join, normalize } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import {
   computeDesiredCloudflareResources,
@@ -169,7 +169,7 @@ describe('playground/kitchen-sink --backend cloudflare real-build deploy guard',
     ) as { configPath?: string };
     // The CF plugin writes this with node:path.relative, so the separator is PLATFORM-NATIVE
     // (`..\..\dist\ssr\wrangler.json` on Windows). The guard that consumes it resolves through
-    // pathe, which normalizes backslashes, so compare the normalized form rather than pinning
+    // pathslash, which normalizes backslashes, so compare the normalized form rather than pinning
     // a POSIX literal that only holds on one platform.
     expect(normalize(pointer.configPath ?? '')).toBe('../../dist/ssr/wrangler.json');
   });

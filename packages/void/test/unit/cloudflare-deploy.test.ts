@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { log } from '@clack/prompts';
-import { dirname, join } from 'pathe';
+import { dirname, join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
   assertMigrationsProduceAuthSchema,
@@ -106,7 +106,7 @@ function emittedVars(vars: Record<string, unknown> = {}): EmittedWorkerVarsResul
 
 /**
  * `file://` URLs for the runtime imports inside spawned-child env.ts fixtures. These are ESM
- * SPECIFIERS, not filesystem paths: an absolute Windows path (`D:/…`, as `pathe` spells it)
+ * SPECIFIERS, not filesystem paths: an absolute Windows path (`D:/…`, as `pathslash` spells it)
  * parses as a URL whose protocol is `d:`, so Node rejects it with
  * ERR_UNSUPPORTED_ESM_URL_SCHEME and the child's env.ts never evaluates — the probe then
  * reports `schema-error` for reasons that have nothing to do with the schema.
