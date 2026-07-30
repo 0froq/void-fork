@@ -61,7 +61,7 @@ src/
     views/                    # Hono JSX view layer (incl. build-table.tsx, build-logs.tsx)
     middleware/auth.ts
 container/
-  Dockerfile                  # node:24-slim + corepack + bun build image
+  Dockerfile                  # node:26-slim + pinned corepack + bun build image
   build-agent.mjs             # Downloads source tarball, installs deps, runs `npx void deploy`
 drizzle/
   0000_*.sql

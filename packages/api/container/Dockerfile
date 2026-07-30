@@ -11,7 +11,7 @@
 #   VOID_TOKEN, VOID_API_URL, VOID_PROJECT, DO_LOG_URL, AGENT_TOKEN
 FROM node:26-slim
 
-# node:24-slim ships `tar` + `gzip` but is otherwise minimal. We add:
+# node:26-slim ships `tar` + `gzip` but is otherwise minimal. We add:
 #   ca-certificates       HTTPS for the tarball fetch, npm/bun installs, deploy upload
 #   curl                  documented fallback download path + the bun install script
 #   unzip                 required by the bun install script
@@ -31,10 +31,14 @@ RUN apt-get update \
 RUN git config --system url."https://github.com/".insteadOf "ssh://git@github.com/" \
   && git config --system --add url."https://github.com/".insteadOf "git@github.com:"
 
-# pnpm + yarn are managed through corepack (bundled with Node). The agent
-# invokes them via `corepack pnpm` / `corepack yarn` so the repo's
-# packageManager pin (if any) is respected.
-RUN corepack enable
+# pnpm + yarn are managed through corepack. The agent invokes them via
+# `corepack pnpm` / `corepack yarn` so the repo's packageManager pin (if any) is
+# respected. Corepack is not bundled with Node 26, so install it explicitly.
+# Version-pinned so an upstream release cannot change production build images
+# without a repo diff.
+ARG COREPACK_VERSION=0.35.0
+RUN npm install -g "corepack@${COREPACK_VERSION}" \
+  && corepack enable
 
 # Bun for repos that pin bun.lock / bun.lockb. Installed to a stable global
 # path on PATH so the agent can shell out to `bun`. Version-pinned so the
@@ -55,7 +59,7 @@ RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}" \
 # unprivileged install has somewhere writable — build-agent.mjs points the child's
 # cache env vars (builderCacheEnv) at these paths. /tmp/build is the agent's
 # WORK_DIR parent; chowning it lets the builder own the extracted tree.
-# node:24-slim ships a built-in `node` user that already owns uid/gid 1000, so
+# node:26-slim ships a built-in `node` user that already owns uid/gid 1000, so
 # it must be removed first or the useradd fails with "UID 1000 is not unique"
 # and the image cannot build. Nothing here runs as `node`.
 RUN userdel node \

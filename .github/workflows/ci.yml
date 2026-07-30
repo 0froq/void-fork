@@ -9,6 +9,15 @@ on:
         required: true
 
 jobs:
+  build-api-container:
+    if: github.event_name == 'pull_request'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build API build container
+        run: docker build --pull --tag void-api-build-container:ci packages/api/container
+
   lint-and-check:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
