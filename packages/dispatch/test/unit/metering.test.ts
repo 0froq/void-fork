@@ -34,7 +34,7 @@ describe('recordRequest', () => {
     };
 
     expect(dp.indexes).toEqual(['proj_abc']);
-    expect(dp.blobs).toEqual(['proj_abc', 'api', 'POST', '200', 'my-app']);
+    expect(dp.blobs).toEqual(['proj_abc', 'api', 'POST', '200', 'my-app', '']);
     expect(dp.doubles).toEqual([1, 1234, 42]);
   });
 
@@ -70,6 +70,24 @@ describe('recordRequest', () => {
 
     const dp = writes[0] as { blobs: Array<string> };
     expect(dp.blobs[3]).toBe('500');
+  });
+
+  it('records platform failure attribution in blob6', () => {
+    const { env, writes } = createMockEnv();
+
+    recordRequest(env, {
+      projectId: 'proj_1',
+      type: 'static',
+      method: 'GET',
+      status: 503,
+      responseBytes: 0,
+      durationMs: 10000,
+      slug: 'docs',
+      failureKind: 'platform-static-asset-timeout',
+    });
+
+    const dp = writes[0] as { blobs: Array<string> };
+    expect(dp.blobs[5]).toBe('platform-static-asset-timeout');
   });
 
   it('always sets double1 to 1 for counting', () => {

@@ -192,4 +192,50 @@ describe('processUsageEventBatch — 5xx alert window', () => {
     expect(p1).toMatchObject({ firstAt: early, lastAt: early });
     expect(p2).toMatchObject({ firstAt: late, lastAt: late });
   });
+
+  it('bills platform static-asset failures without sending user error alerts', async () => {
+    const stubFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    const errorStubFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    getUserMock.mockResolvedValue({ id: 'u1', plan: 'solo' });
+
+    const platformFailures: Array<UsageEvent> = [
+      { ...error5xx('docs'), failureKind: 'platform-static-asset-timeout' },
+      { ...error5xx('docs'), failureKind: 'platform-static-asset-error' },
+      { ...error5xx('docs'), failureKind: 'platform-static-asset-missing' },
+    ];
+    const batch = makeBatch(platformFailures);
+
+    await processUsageEventBatch(batch as never, makeEnv(stubFetch, errorStubFetch) as never);
+
+    expect(stubFetch).toHaveBeenCalledOnce();
+    const counterBody = (await fetchCalls(stubFetch)[0][0].json()) as {
+      events: Array<UsageEvent>;
+    };
+    expect(counterBody.events).toEqual(platformFailures);
+    expect(errorStubFetch).not.toHaveBeenCalled();
+    expect(batch.calls.ackAll).toBe(1);
+  });
+
+  it('still alerts for application 5xx events mixed with a platform timeout', async () => {
+    const stubFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    const errorStubFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    getUserMock.mockResolvedValue({ id: 'u1', plan: 'solo' });
+
+    const platformTimeout: UsageEvent = {
+      ...error5xx('docs'),
+      failureKind: 'platform-static-asset-timeout',
+    };
+    const appFailure = error5xx('repl');
+    const batch = makeBatch([platformTimeout, appFailure]);
+
+    await processUsageEventBatch(batch as never, makeEnv(stubFetch, errorStubFetch) as never);
+
+    expect(errorStubFetch).toHaveBeenCalledOnce();
+    const alertBody = (await fetchCalls(errorStubFetch)[0][0].json()) as {
+      projectId: string;
+      count: number;
+    };
+    expect(alertBody).toMatchObject({ projectId: 'repl', count: 1 });
+    expect(batch.calls.ackAll).toBe(1);
+  });
 });

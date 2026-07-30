@@ -27,6 +27,10 @@ export type UsageEvent = Readonly<{
   requests: number;
   responseBytes: number;
   status?: number;
+  failureKind?:
+    | 'platform-static-asset-timeout'
+    | 'platform-static-asset-error'
+    | 'platform-static-asset-missing';
   sandboxRuntimeSeconds?: number;
   sandboxInstanceId?: string;
 }>;

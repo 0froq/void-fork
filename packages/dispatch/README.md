@@ -9,12 +9,12 @@ Edge router for deployed Void apps. It routes requests to user workers, serves s
 3. Reject suspended projects with `429`.
 4. Apply `redirectRules` (pre-asset) before any worker invocation. Redirects short-circuit with a `Location` header; status-200 entries are "force" rewrites that mutate `url.pathname` and continue.
 5. Serve hashed assets from edge cache when possible.
-6. For static/SPA projects, serve files from `STATIC_ASSETS` KV with `STATIC_ASSETS_R2` overflow for large assets, using `assetConfig` path resolution.
+6. For static/SPA projects, serve current direct-upload assets from `STATIC_ASSETS_R2`; preserve `STATIC_ASSETS` KV reads for assets carried forward from legacy deploys. Storage reads get one delayed hedge within the existing 10-second request budget, then use `assetConfig` path resolution.
 7. Apply `fallbackRules` (post-asset) only when static asset resolution misses — instead of returning 404, match the pathname against fallback rules (status=200 only) and rewrite. Intended for SPA shells (`/* → /index.html`) and default-locale catch-alls. On static deployments, a matched fallback serves the resolved asset directly without dispatching to a user worker, so `X-Void-Original-URL` is never set, `c.originalUrl()` is unavailable, and the response is not ISR-cached (see `packages/dispatch/test/unit/fallback-rules.test.ts`).
 8. For `/api/*`, forward to the user worker in the dispatch namespace with plan-specific CPU/subrequest limits.
 9. For SSR with ISR enabled, use `caches.default` plus `ISR_CACHE` KV for stale-while-revalidate behavior.
-10. For WfP deploys, inspect the worker response for the Cloudflare asset-dedupe-poisoning stub (`Assets have not yet been deployed to this script.`). On detection, if the routing entry has `assetManifestId`, re-serve from the platform-owned mirror (`STATIC_ASSETS`/`STATIC_ASSETS_R2`). See `meta/design-docs/0066` and `meta/design-docs/0065`.
-11. Apply header rules and record usage in Analytics Engine. If `userId` is present on the routing entry, enqueue usage events as well.
+10. For WfP deploys, inspect worker and cache responses for the Cloudflare asset-dedupe-poisoning stub (`Assets have not yet been deployed to this script.`). On detection, purge any poisoned cache entry and re-serve from the platform-owned mirror (`STATIC_ASSETS`/`STATIC_ASSETS_R2`). If the mirror is unavailable or incomplete, return an attributed `503` instead of passing through and caching the known-bad `200` stub. See `meta/design-docs/0066` and `meta/design-docs/0065`.
+11. Apply header rules and record usage in Analytics Engine. If `userId` is present on the routing entry, enqueue usage events as well. Platform-owned static storage failures carry a `failureKind`: they remain metered and queryable but are excluded from customer application-error emails.
 
 Two rule lists exist so dispatch never has to reason about per-rule phase flags at the edge:
 
@@ -23,8 +23,8 @@ Two rule lists exist so dispatch never has to reason about per-rule phase flags 
 
 ## Static and ISR Storage
 
-- **Static/SPA deploys**: manifest in `ROUTING`, assets in `STATIC_ASSETS` KV, overflow in `STATIC_ASSETS_R2`
-- **WfP deploys with asset mirror**: same stores as static (manifest at `manifest:{deploymentId}`, assets at `assets/{projectId}/{hash}`). `RoutingEntry.assetManifestId` points at the manifest. CF's `ASSETS` binding remains primary — this mirror is only consulted when the CF stub is detected.
+- **Static/SPA deploys**: manifest in `ROUTING`; current direct-upload assets in `STATIC_ASSETS_R2`. `STATIC_ASSETS` KV remains readable for small assets carried forward from legacy multipart deploys.
+- **WfP deploys with asset mirror**: same project-scoped storage and manifest format as static (manifest at `manifest:{deploymentId}`, assets at `assets/{projectId}/{hash}`). `RoutingEntry.assetManifestId` points at the manifest. CF's `ASSETS` binding remains primary — this mirror is only consulted when the CF stub is detected.
 - **ISR cache**: packed HTML/headers stored in `ISR_CACHE` KV, with edge-cache copies in `caches.default`. Keys are (project, deployment, pathname, optional rewrite-variant token) so a direct hit to `/en/docs` and a request rewritten from `/docs → /en/docs` live in distinct slots — user code can branch on `c.isRewritten()` / `c.originalUrl()` and the cache honors that. The variant suffix is derived from `X-Void-Original-URL` via the shared helpers in [`packages/isr-shared`](../isr-shared/README.md); direct hits (no rewrite, no header) use the unsuffixed key.
 - **ISR TTL resolution**: a request's TTL resolves route-aware — dispatch first-matches the path against the manifest's ordered `pages` table (`{ pattern, revalidate }`, in the framework's route order, **not** re-sorted) so a specific page shadows a broad catch-all, then falls back to the flat `revalidate` pattern→TTL map for deploys that predate `pages`. Only a positive-TTL, non-catch-all match is ISR-eligible; API routes and asset-extension paths that merely match a catch-all render live (`resolvePageTtl` / `isIsrEligiblePath` in `isr.ts`).
 - **Hashed assets**: immutable edge-cache entries keyed by URL path

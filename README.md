@@ -250,7 +250,7 @@ The edge router.
 
 - Reads slug/domain routing from KV.
 - Sends worker projects to Workers for Platforms.
-- Serves static/SPA deployments directly from `STATIC_ASSETS` KV with R2 overflow for large files.
+- Serves current static/SPA deployments directly from R2, while retaining KV reads for small assets carried forward from legacy deploys.
 - Handles ISR, edge caching, redirect/rewrite rules, header rules, and request metering.
 - Relays Cloudflare Queue batches to user workers.
 

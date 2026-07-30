@@ -4978,7 +4978,12 @@ describe('static deployment caching (KV/R2)', () => {
     routing: RoutingEntry;
     manifest: Record<string, string>;
     assets: Record<string, { body: string; contentType?: string }>;
-  }): { env: Env } {
+    r2Get?: (key: string) => Promise<R2ObjectBody | null>;
+  }): {
+    env: Env;
+    usageSend: ReturnType<typeof vi.fn>;
+  } {
+    const usageSend = vi.fn(async () => {});
     const env = {
       ROUTING: {
         get: async (key: string) => {
@@ -5003,11 +5008,12 @@ describe('static deployment caching (KV/R2)', () => {
           };
         },
       },
-      STATIC_ASSETS_R2: { get: async () => null },
+      STATIC_ASSETS_R2: { get: options.r2Get ?? (async () => null) },
       ANALYTICS: { writeDataPoint: () => {} },
+      USAGE_QUEUE: { send: usageSend },
     } as unknown as Env;
 
-    return { env };
+    return { env, usageSend };
   }
 
   it('client response omits s-maxage for static deployment', async () => {
@@ -5048,6 +5054,184 @@ describe('static deployment caching (KV/R2)', () => {
     expect(cacheEntry!.headers.get('Cache-Control')).toBe(
       'public, s-maxage=31536000, max-age=0, must-revalidate',
     );
+  });
+
+  it('hedges a stalled R2 read and serves the retry within the original deadline', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      let resolveSlow!: (value: R2ObjectBody) => void;
+      const slow = new Promise<R2ObjectBody>((resolve) => {
+        resolveSlow = resolve;
+      });
+      const winnerBytes = new TextEncoder().encode('<html>hedged</html>');
+      const winner = {
+        body: new Response(winnerBytes).body!,
+        size: winnerBytes.byteLength,
+        httpEtag: '"winner"',
+        httpMetadata: { contentType: 'text/html' },
+      } as unknown as R2ObjectBody;
+      const cancelLoser = vi.fn();
+      const loser = {
+        body: new ReadableStream({ cancel: cancelLoser }),
+        size: 1,
+        httpEtag: '"loser"',
+        httpMetadata: { contentType: 'text/html' },
+      } as unknown as R2ObjectBody;
+      const r2Get = vi
+        .fn<(key: string) => Promise<R2ObjectBody | null>>()
+        .mockReturnValueOnce(slow)
+        .mockResolvedValueOnce(winner);
+      const { env } = createStaticDeployEnv({
+        routing: {
+          workerName: '',
+          projectId: 'proj-1',
+          staticDeploymentId: 'deploy-abc',
+          version: 'deploy-abc',
+        },
+        manifest: { '/index.html': '!hash1' },
+        assets: {},
+        r2Get,
+      });
+      const ctx = createCtx();
+      const responsePromise = app.fetch(new Request('https://test.void.app/'), env, ctx);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(r2Get).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+      expect(response.headers.get('ETag')).toBe('"winner"');
+      expect(await response.text()).toBe('<html>hedged</html>');
+      expect(r2Get).toHaveBeenCalledTimes(2);
+      expect(r2Get).toHaveBeenNthCalledWith(2, 'assets/proj-1/hash1');
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+      resolveSlow(loser);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cancelLoser).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('attributes an exhausted R2 timeout to the platform without extending 10s', async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const r2Get = vi.fn(() => new Promise<R2ObjectBody | null>(() => {}));
+      const { env, usageSend } = createStaticDeployEnv({
+        routing: {
+          workerName: '',
+          projectId: 'proj-1',
+          userId: 'user-1',
+          staticDeploymentId: 'deploy-abc',
+          version: 'deploy-abc',
+        },
+        manifest: { '/index.html': '!hash1' },
+        assets: {},
+        r2Get,
+      });
+      const ctx = createCtx();
+      const responsePromise = app.fetch(new Request('https://test.void.app/'), env, ctx);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(r2Get).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(r2Get).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(9000);
+
+      const response = await responsePromise;
+      expect(response.status).toBe(503);
+      expect(response.headers.get('X-Void-Timeout')).toBe('static-asset');
+      expect(response.headers.get('Retry-After')).toBe('5');
+      expect(r2Get).toHaveBeenCalledTimes(2);
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(usageSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 503,
+          failureKind: 'platform-static-asset-timeout',
+        }),
+      );
+    } finally {
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('meters exhausted R2 binding errors as a platform 503', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const r2Get = vi.fn(async () => {
+        throw new Error('R2 service unavailable');
+      });
+      const { env, usageSend } = createStaticDeployEnv({
+        routing: {
+          workerName: '',
+          projectId: 'proj-1',
+          userId: 'user-1',
+          staticDeploymentId: 'deploy-abc',
+          version: 'deploy-abc',
+        },
+        manifest: { '/index.html': '!hash1' },
+        assets: {},
+        r2Get,
+      });
+      const ctx = createCtx();
+
+      const response = await app.fetch(new Request('https://test.void.app/'), env, ctx);
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get('X-Void-Storage-Error')).toBe('static-asset-read');
+      expect(r2Get).toHaveBeenCalledTimes(2);
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(usageSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 503,
+          failureKind: 'platform-static-asset-error',
+        }),
+      );
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('treats a missing manifest-referenced R2 object as a platform 503', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const r2Get = vi.fn(async () => null);
+      const { env, usageSend } = createStaticDeployEnv({
+        routing: {
+          workerName: '',
+          projectId: 'proj-1',
+          userId: 'user-1',
+          staticDeploymentId: 'deploy-abc',
+          version: 'deploy-abc',
+        },
+        manifest: { '/index.html': '!hash1' },
+        assets: {},
+        r2Get,
+      });
+      const ctx = createCtx();
+
+      const response = await app.fetch(new Request('https://test.void.app/'), env, ctx);
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get('X-Void-Storage-Error')).toBe('static-asset-missing');
+      expect(r2Get).toHaveBeenNthCalledWith(1, 'assets/proj-1/hash1');
+      expect(r2Get).toHaveBeenNthCalledWith(2, 'assets/hash1');
+      await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+      expect(usageSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 503,
+          failureKind: 'platform-static-asset-missing',
+        }),
+      );
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it('serves a hashed asset whose filename contains a space (%20-encoded request)', async () => {

@@ -3,6 +3,10 @@ import type { ApiEnv } from './env.ts';
 import { getPlanLimits } from './tiers.ts';
 import type { UsageEvent } from './usage-counter.ts';
 
+const PLATFORM_STATIC_ASSET_FAILURES: ReadonlySet<NonNullable<UsageEvent['failureKind']>> = new Set(
+  ['platform-static-asset-timeout', 'platform-static-asset-error', 'platform-static-asset-missing'],
+);
+
 export function groupEventsByUser(
   events: ReadonlyArray<UsageEvent>,
 ): Map<string, ReadonlyArray<UsageEvent>> {
@@ -72,9 +76,15 @@ export async function processUsageEventBatch(
   if (failures.length > 0) {
     batch.retryAll();
   } else {
-    // Best-effort: route 5xx events to ErrorAlertMonitor (failures don't block ack)
+    // Best-effort: route project 5xx events to ErrorAlertMonitor (failures
+    // don't block ack). Platform-owned static storage failures remain billed
+    // and visible in request analytics, but do not tell users that their
+    // application returned an error.
     const errorRecords = records.filter(
-      ({ event }) => event.status !== undefined && event.status >= 500,
+      ({ event }) =>
+        event.status !== undefined &&
+        event.status >= 500 &&
+        !(event.failureKind !== undefined && PLATFORM_STATIC_ASSET_FAILURES.has(event.failureKind)),
     );
     if (errorRecords.length > 0) {
       const errorsByProject = new Map<

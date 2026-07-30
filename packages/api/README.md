@@ -152,7 +152,7 @@ Dashboard auth uses the same JWT model, stored in the `void_token` cookie.
 ### Static/SPA deploys
 
 1. content-address assets by hash
-2. store small assets in `STATIC_ASSETS` KV and large assets in `STATIC_ASSETS_R2`
+2. issue presigned uploads that store every new asset directly in `STATIC_ASSETS_R2` (`STATIC_ASSETS` KV is retained for carry-forward assets from legacy multipart deploys)
 3. write a manifest to `ROUTING`
 4. point routing at `staticDeploymentId` instead of a worker
 
