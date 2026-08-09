@@ -266,10 +266,7 @@ function generateClassATriggerWrapper(
    * Resolved `assetConfig.not_found_handling`. A Class A app deploys through
    * `runFullDeploy`, which honors `routing.notFound`, so this wrapper's
    * `serveWithAssets` has to honor it too or the asset binding's 404 page is
-   * fetched and then thrown away. The reverse also holds — the wrapper's
-   * `404-page` branch is inert unless the BINDING is set to `404-page`, which
-   * is why `void:framework-build-wrapper` also writes it into the built
-   * wrangler config for anyone deploying that output themselves.
+   * fetched and then thrown away.
    */
   notFound?: NotFoundHandling,
 ): string {
@@ -991,20 +988,9 @@ export function voidPlugin(options?: {
     // wrangler settings instead of letting the Cloudflare plugin concatenate
     // them with generated rules. This preserves static-first behavior for
     // API-only apps while avoiding asset-served HTML bypassing middleware.
-    //
-    // Per FIELD, not per object: the default mode always generates both keys,
-    // but a Class A framework build generates ONLY `not_found_handling` (from
-    // an explicit `routing.notFound` — Void infers no asset policy for those
-    // apps). Deleting the whole pair there would silently drop a root
-    // wrangler `run_worker_first` that Void has no replacement for.
-    const generatedAssets = workerConfig.assets as Record<string, unknown> | undefined;
-    if (generatedAssets && resolved.assets) {
-      if (generatedAssets.not_found_handling !== undefined) {
-        delete (resolved.assets as Record<string, unknown>).not_found_handling;
-      }
-      if (generatedAssets.run_worker_first !== undefined) {
-        delete (resolved.assets as Record<string, unknown>).run_worker_first;
-      }
+    if (workerConfig.assets && resolved.assets) {
+      delete (resolved.assets as Record<string, unknown>).not_found_handling;
+      delete (resolved.assets as Record<string, unknown>).run_worker_first;
     }
 
     // D1 — auth requires the app DB only for sqlite apps
@@ -1519,39 +1505,47 @@ export function voidPlugin(options?: {
       devTriggerToken,
       config.routing?.notFound,
     );
+    // `routing.notFound` only reaches a Class A worker through the DEPLOYED
+    // script's `assets` config, and Void writes none for these frameworks: the
+    // Class A branch returns long before `applyAssetRoutingPolicy`, and writing
+    // `not_found_handling` on its own is worse than nothing — Cloudflare's asset
+    // layer would then answer unmatched requests itself and the framework worker
+    // would never run (only `run_worker_first` sends them to the worker first,
+    // and Void does not own `assets.binding`/`directory` here to complete that
+    // policy). Managed `void deploy` supplies the policy out-of-band
+    // (`runFullDeploy` → `resolveAssetConfig` → `manifest.assetConfig`), so it
+    // IS honored there.
+    //
+    // On a hand-rolled `vite build && wrangler deploy` it is NOT necessarily
+    // dropped, which is why this says "Void does not generate it" rather than
+    // "it does nothing": the generated wrapper consumes `routing.notFound` and
+    // serves through `env.ASSETS`, and `mergeBindings` leaves a Class A root
+    // wrangler config's `assets` untouched (its gate needs `workerConfig.assets`,
+    // which is never set here). So a user who declares a COMPLETE policy of their
+    // own — `binding`, `directory`, `not_found_handling`, `run_worker_first` —
+    // gets working behavior, and must not be told their config is inert. Warn
+    // once per build, and only when this build is not a managed deploy
+    // (`void deploy` sets `VOID_DEPLOY_BUILD` on the build child env).
+    let notFoundIgnoredWarned = false;
     const frameworkBuildWrapperPlugin: Plugin = {
       name: 'void:framework-build-wrapper',
-      // The wrapper's `404-page` branch only fires when the asset binding
-      // itself answers with an HTML 404 page, which needs
-      // `assets.not_found_handling: '404-page'` on the deployed worker.
-      // Managed `void deploy` supplies that out-of-band (`runFullDeploy`
-      // resolves `manifest.assetConfig`, which is what the platform applies),
-      // but the built `dist/ssr/wrangler.json` never carried it: the Class A
-      // branch returns before `applyAssetRoutingPolicy`. So a `wrangler
-      // deploy` of the same build read the root wrangler value — normally
-      // absent, i.e. CF's `none` — and the option was inert.
-      //
-      // Write only `not_found_handling`, and only when the user asked for it.
-      // `run_worker_first`, `binding` and `directory` stay whatever the
-      // framework/root config says: Void infers no asset policy for Class A
-      // apps, and `defu` merges our partial over the resolved config.
-      //
-      // Build-only, matching the wrapper: the dev wrapper has no
-      // `serveWithAssets`, and flipping the dev asset router would change
-      // which layer answers an unmatched navigation in `vite dev`.
-      config(_userConfig, env) {
-        const notFound = config.routing?.notFound;
-        if (env.command !== 'build' || notFound === undefined) {
-          return;
-        }
-        workerConfig.assets = {
-          ...(workerConfig.assets as Record<string, unknown> | undefined),
-          not_found_handling: notFound,
-        };
-      },
       configResolved(resolved) {
         if (resolved.command !== 'build') {
           return;
+        }
+        if (
+          config.routing?.notFound !== undefined &&
+          !process.env.VOID_DEPLOY_BUILD &&
+          !notFoundIgnoredWarned
+        ) {
+          notFoundIgnoredWarned = true;
+          voidWarn(
+            `Void generates no asset routing policy for a ${framework} build, so "routing.notFound" in ` +
+              'void.json is not written to the built worker config. On a self-hosted `vite build && ' +
+              'wrangler deploy` it takes effect only if your own wrangler config declares a complete ' +
+              '`assets` policy (`binding`, `directory`, `not_found_handling`, `run_worker_first`); ' +
+              "otherwise Cloudflare's default applies. Managed `void deploy` supplies the policy for you.",
+          );
         }
         generateClassATriggerWrapper(
           root,
