@@ -1,4 +1,5 @@
 import type { AssetConfig } from './cli/types.ts';
+import type { NotFoundHandling } from './config.ts';
 import type { RouteDefinition } from './router/parse-filename.ts';
 
 export type AssetRoutingInputs = {
@@ -11,6 +12,13 @@ export type AssetRoutingInputs = {
   hasWebSockets?: boolean;
   authEnabled?: boolean;
   liveEnabled?: boolean;
+  /**
+   * `routing.notFound` from void.json. Overrides the INFERRED
+   * `not_found_handling`. `run_worker_first`, `workerFirst` and
+   * `apiWorkerFirst` are untouched, so which layer sees a request first never
+   * changes. `workerSpaFallback` DOES follow it — see below.
+   */
+  notFound?: NotFoundHandling;
 };
 
 export type AssetRoutingPolicy = {
@@ -76,10 +84,35 @@ export function resolveAssetRoutingPolicy(inputs: AssetRoutingInputs): AssetRout
           not_found_handling: 'single-page-application',
           run_worker_first: [...VOID_INTERNAL_WORKER_FIRST],
         };
+  // Explicit `routing.notFound` wins over the inferred value. Applied here (on
+  // the inputs) rather than at the call sites so dev, build, and deploy can't
+  // drift apart. `run_worker_first` is deliberately left as inferred.
+  if (inputs.notFound !== undefined) {
+    assetConfig.not_found_handling = inputs.notFound;
+  }
   return {
     assetConfig,
     apiWorkerFirst,
     workerFirst,
-    workerSpaFallback: workerFirst && !inputs.isSsr && !inputs.hasPages,
+    // The worker-side SPA fallback exists to REPLACE the SPA behavior the
+    // INFERRED config gives up on this shape: `workerFirst` infers
+    // `not_found_handling: 'none'`, so `env.ASSETS.fetch()` hands back a bare
+    // 404 for an unmatched navigation and the worker has to hardcode
+    // `/index.html` at status 200 itself.
+    //
+    // `run_worker_first: ['/**']` is NOT what disables the platform switch — it
+    // only decides who sees the request FIRST. It skips the pre-worker asset
+    // layer, but `not_found_handling` still applies inside `env.ASSETS.fetch()`.
+    //
+    // So an explicit `notFound` that asks for anything else must turn the
+    // fallback off, or the generated helper answers the unmatched navigation
+    // with the shell before `not_found_handling` is ever consulted and the
+    // override is inert. `single-page-application` keeps it (that is what it
+    // asks for); `undefined` keeps the inferred behavior.
+    workerSpaFallback:
+      workerFirst &&
+      !inputs.isSsr &&
+      !inputs.hasPages &&
+      (inputs.notFound === undefined || inputs.notFound === 'single-page-application'),
   };
 }

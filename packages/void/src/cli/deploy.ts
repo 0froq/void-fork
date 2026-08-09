@@ -28,6 +28,7 @@ import {
   readConfig,
   resolveBindingNames,
   type DatabaseDialect,
+  type NotFoundHandling,
   type RoutingConfig,
   type VoidConfig,
   getDatabaseDialect,
@@ -445,11 +446,47 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
  * `cfAccessHeaders(process.env)` / the cloudflared pair-guard AFTER the build
  * step. Only the service-token pair is scrubbed; the cloudflared
  * `CF_ACCESS_TOKEN` JWT (dev path) is left untouched.
+ *
+ * `localBinRoot` is an explicit OPT-IN, not a default. Build commands are run
+ * through a shell (`execSync`) and a user-configured `inference.build` (e.g.
+ * `vitepress build && vite build`) names bare binaries that only exist in the
+ * project's own `node_modules/.bin`; under the build container's
+ * `npx --yes void deploy` that happens to work — npx prepends every ancestor
+ * `.bin` itself — but a directly invoked `node_modules/.bin/void deploy` or a
+ * globally installed `void` inherits no such PATH and the bare binary fails to
+ * resolve. Passing it makes the project's bin dir shadow the system one for
+ * that child, so it belongs ONLY on the three build execs. The other callers
+ * (`getGitCommit`, the drizzle-kit spawn) exec a system binary or an absolute
+ * path and must not hand a dependency-shipped `node_modules/.bin/git` a child
+ * process holding `VOID_TOKEN`.
  */
-export function buildEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
+export function buildEnv(
+  extra?: Record<string, string>,
+  options?: { localBinRoot?: string },
+): NodeJS.ProcessEnv {
   const env = { ...process.env, ...extra };
   delete env.CF_ACCESS_CLIENT_ID;
   delete env.CF_ACCESS_CLIENT_SECRET;
+  return options?.localBinRoot === undefined
+    ? env
+    : prependLocalBinToPath(env, options.localBinRoot);
+}
+
+/**
+ * Prepend `<root>/node_modules/.bin` to the child env's PATH, preserving
+ * whatever was already there.
+ *
+ * PATH is looked up case-insensitively and written back under the SAME key the
+ * env already used: Windows reports it as `Path`, and `{ ...process.env }`
+ * drops the case-insensitive lookup that `process.env` itself provides, so
+ * hardcoding `PATH` would leave the real variable untouched and add a dead one.
+ */
+function prependLocalBinToPath(env: NodeJS.ProcessEnv, root: string): NodeJS.ProcessEnv {
+  const binDir = join(root, 'node_modules', '.bin');
+  const delimiter = process.platform === 'win32' ? ';' : ':';
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+  const existing = env[pathKey];
+  env[pathKey] = existing ? `${binDir}${delimiter}${existing}` : binDir;
   return env;
 }
 
@@ -4693,6 +4730,10 @@ async function runDeployInner(
         const gitMetadata = collectGitDeployMetadata(
           root,
           options?.skipBuild ? null : getGitCommit(root),
+          process.env,
+          // Same scrub as `getGitCommit` right above: these git children can
+          // reach repo-configured hooks/credential helpers.
+          buildEnv(),
         );
         const fwPreset = FRAMEWORK_PRESETS[detected.name];
         if (detected.class === 'b' || detected.class === 'c') {
@@ -4717,6 +4758,7 @@ async function runDeployInner(
             root,
             config,
             client,
+            voidConfig,
             fwPreset,
             options?.skipBuild,
             gitMetadata,
@@ -4728,7 +4770,13 @@ async function runDeployInner(
       }
       if (!preset && !voidConfig.inference?.appType) {
         // No configured app type and no detected framework — detect from project structure.
-        preset = detectPreset(root, { spa: options?.spa });
+        // `strictBackend` only here: this is the branch where the user has said
+        // NOTHING about the app type, so an SSG project that also has a backend is
+        // genuinely ambiguous and must be refused rather than silently deployed as
+        // static. The explicit-intent paths (`--dir`, configured
+        // `inference.appType`) resolve through `resolveStaticDeployPreset` above
+        // and keep working without the guard.
+        preset = detectPreset(root, { spa: options?.spa, strictBackend: true });
       }
       // appType === "void" or "framework" without a detected framework → full deploy.
 
@@ -4736,6 +4784,8 @@ async function runDeployInner(
       const gitMetadata = collectGitDeployMetadata(
         root,
         options?.skipBuild ? null : getGitCommit(root),
+        process.env,
+        buildEnv(),
       );
 
       if (preset) {
@@ -4766,6 +4816,7 @@ async function runDeployInner(
           root,
           config,
           client,
+          voidConfig,
           undefined,
           options?.skipBuild,
           gitMetadata,
@@ -4834,6 +4885,70 @@ export function resolveStaticBuildCommand(
     return null;
   }
   return buildOverride ?? preset.buildCommand;
+}
+
+/**
+ * Resolve the build command for a FULL (Class A / Void app) deploy.
+ *
+ * `inference.build` wins when set, matching `runFrameworkDeploy` and the static
+ * path's `resolveStaticBuildCommand`. Without it the full path was the only
+ * deploy mode that ignored the config and hardcoded `vite build`, so an app that
+ * needs more than one build step — an SSG that emits the site, then Void's build
+ * packaging it via `publicDir` alongside the worker — had no way to express it
+ * and died on the missing `index.html` entry.
+ *
+ * The two returned strings are deliberately different for the FALLBACK: `label`
+ * goes to the user (`formatProjectCommand` rewrites `vite` → `vp` without
+ * expanding an absolute bin path), `command` is what actually runs
+ * (`resolveProjectCommand` expands to the local bin). A configured command is
+ * the user's own text and is used verbatim for both, so what is printed is
+ * exactly what is executed.
+ */
+export function resolveFullDeployBuildCommand(
+  root: string,
+  buildOverride?: string,
+): { label: string; command: string } {
+  if (buildOverride) {
+    return { label: buildOverride, command: buildOverride };
+  }
+  return {
+    label: formatProjectCommand(root, 'vite build'),
+    command: resolveProjectCommand(root, 'vite build'),
+  };
+}
+
+export type PrerenderSourceInputs = {
+  /** `pages/` exists — file-based pages contribute static + `getPrerenderPaths()` paths. */
+  hasPages: boolean;
+  /** A custom SSR entry exists — it may export a top-level `getPrerenderPaths()`. */
+  hasSsrEntry: boolean;
+  /** `routing.prerender` from void.json — compiled in as explicit paths. */
+  explicitPrerenderPaths: ReadonlyArray<string> | undefined;
+};
+
+/**
+ * Whether the built worker's `__voidCollectPrerenderPaths` can return anything
+ * at all. When it cannot, booting it is pure cost and the deploy skips it.
+ *
+ * These three are exactly — and only — the sources `compilePrerenderCollector`
+ * (`router/compile.ts`) emits a `paths.push(...)` for:
+ *   1. `scan.pages.pages` — static patterns + dynamic pages' `getPrerenderPaths()`
+ *   2. the custom SSR entry's top-level `getPrerenderPaths()` (`ssr` argument)
+ *   3. `options.explicitPrerenderPaths` — void.json `routing.prerender`
+ * With none of them present the collector is a generated function whose body
+ * returns `[...new Set([])]`, so skipping is result-identical.
+ *
+ * Skipping matters beyond speed. `collectPrerenderPaths` boots the worker in
+ * Miniflare with bindings from `wranglerVars + loadEnv('production', root, '')`
+ * only, and the generated fetch handler validates the `env.ts` schema at boot.
+ * An app whose secrets live on the platform (never in a committed `.env`) gets
+ * an HTTP 500 there and the deploy dies — for an app that had nothing to
+ * prerender in the first place. The only workaround was moving the secret into
+ * `.env.production`, which `loadDeployEnv` then publishes as a plaintext
+ * manifest var. So this guard also removes a real incentive to leak secrets.
+ */
+export function hasPrerenderSources(inputs: PrerenderSourceInputs): boolean {
+  return inputs.hasPages || inputs.hasSsrEntry || (inputs.explicitPrerenderPaths?.length ?? 0) > 0;
 }
 
 export function resolveStaticDeployPreset(
@@ -5255,6 +5370,13 @@ export async function runStaticDeploy(
   fallbackRules?: Array<DevRedirectRule>,
   routing?: RoutingConfig,
   cliLog?: CliLogger,
+  /**
+   * Explicit `routing.notFound`. Normally carried by `routing`, but the
+   * "all pages prerendered -> static" redirect in `runFullDeploy` passes
+   * `routing: undefined` (its rules were already merged upstream), so that
+   * call site hands the value over directly. Wins over `routing.notFound`.
+   */
+  notFound?: NotFoundHandling,
 ): Promise<void> {
   const typeLabel = preset.appType === 'spa' ? 'Static SPA' : 'Static Site';
   log.info(`${typeLabel} deploy`);
@@ -5265,7 +5387,11 @@ export async function runStaticDeploy(
     log.step('Building...');
     cliLog?.info('build_start', { command: preset.buildCommand });
     const buildStartedAt = Date.now();
-    execSync(preset.buildCommand, { cwd: root, stdio: 'inherit', env: buildEnv() });
+    execSync(preset.buildCommand, {
+      cwd: root,
+      stdio: 'inherit',
+      env: buildEnv(undefined, { localBinRoot: root }),
+    });
     cliLog?.info('build_end', { durationMs: Date.now() - buildStartedAt });
   } else if (skipBuild) {
     cliLog?.info('build_skipped', { reason: 'skipBuild' });
@@ -5321,6 +5447,7 @@ export async function runStaticDeploy(
     headerRules,
     redirectRules,
     fallbackRules,
+    notFound: notFound ?? routing?.notFound,
   });
   cliLog?.info('package_end', {
     mode: 'static',
@@ -5380,6 +5507,36 @@ export function warnRedundantForceOn3xx(count: number): void {
 }
 
 /**
+ * Class B/C framework deploys pin `not_found_handling: 'none'`, so
+ * `routing.notFound` does nothing there — say so instead of dropping it
+ * silently.
+ *
+ * These presets emit no `run_worker_first`, so Cloudflare's default applies and
+ * the asset layer answers before the framework worker: real prerendered files
+ * already win. `not_found_handling` only governs what the framework's own
+ * `env.ASSETS.fetch()` delegation returns, which is framework-internal
+ * plumbing. Honoring the override there would be a behavior change, not a fix —
+ * `single-page-application` makes an unmatched delegation return
+ * `dist/client/index.html` at **200** (Astro/SvelteKit hybrid builds commonly
+ * prerender the root, so real 404s silently become the home page), and
+ * `404-page` steals the 404 from the framework's own error route.
+ *
+ * Silenced when unset.
+ */
+export function warnIgnoredNotFoundForFramework(
+  notFound: NotFoundHandling | undefined,
+  frameworkName: string,
+): void {
+  if (notFound === undefined) {
+    return;
+  }
+  log.warn(
+    `"routing.notFound" in void.json is ignored for ${frameworkName} deploys ` +
+      `(not_found_handling is pinned to "none" — the framework's own worker owns unmatched HTML).`,
+  );
+}
+
+/**
  * Class B/C framework deploy: build with framework CLI, package with preset output paths.
  */
 async function runFrameworkDeploy(
@@ -5407,7 +5564,7 @@ async function runFrameworkDeploy(
     execSync(voidConfig.inference?.build ?? resolveProjectCommand(root, fwPreset.buildCommand), {
       cwd: root,
       stdio: 'inherit',
-      env: buildEnv(),
+      env: buildEnv(undefined, { localBinRoot: root }),
     });
     cliLog?.info('build_end', { durationMs: Date.now() - buildStartedAt });
   } else {
@@ -5431,6 +5588,11 @@ async function runFrameworkDeploy(
     routing: voidConfig.routing,
   });
   warnRedundantForceOn3xx(redundantForceOn3xx);
+
+  // `assetConfig` below is pinned to `not_found_handling: 'none'` on this path,
+  // so `routing.notFound` is inert. Warned here (outside the packaging spinner)
+  // rather than at the pin itself.
+  warnIgnoredNotFoundForFramework(voidConfig.routing?.notFound, detected.name);
 
   // Lint each phase independently: duplicates across phases (redirects vs
   // fallbacks) don't shadow each other, only duplicates within a phase do.
@@ -5639,6 +5801,9 @@ async function runFrameworkDeploy(
     revalidate,
     revalidateQueryAllowlist: voidConfig.routing?.revalidateQueryAllowlist,
     prerender,
+    // Pinned, NOT threaded from `routing.notFound` — see
+    // `warnIgnoredNotFoundForFramework` for why the override must not apply to
+    // Class B/C. The warning above tells the user when they set it anyway.
     assetConfig: { not_found_handling: 'none' },
     vars: envVars,
     packageOptions,
@@ -5708,6 +5873,14 @@ async function runFullDeploy(
   root: string,
   config: ProjectConfig,
   client: PlatformClient,
+  /**
+   * The already-read `void.json`, threaded from `runDeploy` the same way
+   * `runFrameworkDeploy` receives it. The build step reads
+   * `inference.build` from it, so it must be available BEFORE the build —
+   * this used to be read further down as `deployConfig`, after the build had
+   * already run with a hardcoded command.
+   */
+  voidConfig: VoidConfig,
   fwPreset?: FrameworkPreset,
   skipBuild?: boolean,
   gitMetadata?: GitDeployMetadata,
@@ -5721,7 +5894,10 @@ async function runFullDeploy(
 
   // 3. Build (child process to avoid Vite API side effects on bundle output)
   if (!skipBuild) {
-    const buildCmd = formatProjectCommand(root, 'vite build');
+    const { label: buildCmd, command: buildExec } = resolveFullDeployBuildCommand(
+      root,
+      voidConfig.inference?.build,
+    );
     log.step(`Building (${buildCmd})...`);
     cliLog?.info('build_start', { command: buildCmd });
     const buildStartedAt = Date.now();
@@ -5729,10 +5905,10 @@ async function runFullDeploy(
       // Pass VOID_DEPLOY_PROJECT_ID so plugin-prerender (running inside this
       // child vite build) can resolve the Void projectId without relying on
       // .void/project.json, which may be stale or absent under `--project <slug>`.
-      execSync(resolveProjectCommand(root, 'vite build'), {
+      execSync(buildExec, {
         cwd: root,
         stdio: 'inherit',
-        env: buildEnv({ VOID_DEPLOY_PROJECT_ID: config.projectId }),
+        env: buildEnv({ VOID_DEPLOY_PROJECT_ID: config.projectId }, { localBinRoot: root }),
       });
       cliLog?.info('build_end', { durationMs: Date.now() - buildStartedAt });
     } catch (err: unknown) {
@@ -5772,7 +5948,7 @@ async function runFullDeploy(
   const isFrameworkMode = detected != null;
 
   // 6. Infer bindings (expanded scan dirs in framework mode, or custom from config)
-  const deployConfig = readConfig(root);
+  const deployConfig = voidConfig;
   const paths = resolveProjectPaths(root, deployConfig);
   const dialect = getDatabaseDialect(deployConfig);
   const deployScanDirs =
@@ -5922,9 +6098,12 @@ async function runFullDeploy(
   const hasDocumentRoutes = routeScanHasDocumentRoutes(routeScan.routes);
   const hasMiddleware = routeScan.middleware.length > 0;
   const hasWebSockets = webSockets.length > 0;
+  // Kept lazy behind `isFrameworkMode` exactly as the inline call was: a Class-A
+  // framework app has no Void SSR entry to validate.
+  const ssrEntry = isFrameworkMode ? null : validateSsrEntry(root, paths);
   const isSsr = isFrameworkMode
     ? true
-    : Boolean(validateSsrEntry(root, paths)) || (hasPages && deployConfig.output !== 'static');
+    : Boolean(ssrEntry) || (hasPages && deployConfig.output !== 'static');
 
   // Resolve revalidate config from void.json + per-page .server.ts exports.
   // The page scan is also reused by the fully-static optimization below.
@@ -5962,20 +6141,31 @@ async function runFullDeploy(
         headerRules,
         redirectRules,
         fallbackRules,
+        // Rules were already merged above — pass only the notFound override.
         undefined,
         cliLog,
+        deployConfig.routing?.notFound,
       );
     }
   }
 
-  // Resolve prerender paths. Skip in two cases:
+  // Resolve prerender paths. Skip in three cases:
   //   - output: "static" — pages are already built as static assets.
   //   - framework mode (Class A) — the framework's own worker entry has no
   //     /__void/prerender-paths endpoint (only compileWorkerEntry /
   //     compileNodeApp emit it for Void apps). Class-A frameworks handle
   //     prerendering through their own build pipelines.
+  //   - the app has no prerender source at all (no `pages/`, no SSR entry, no
+  //     `routing.prerender`) — the collector provably returns `[]`, so booting
+  //     the worker in Miniflare can only fail, never contribute. See
+  //     `hasPrerenderSources` for why that failure mode matters.
+  const prerenderSourcesPresent = hasPrerenderSources({
+    hasPages,
+    hasSsrEntry: ssrEntry !== null,
+    explicitPrerenderPaths: deployConfig.routing?.prerender,
+  });
   const uniquePrerenderPaths =
-    deployConfig.output === 'static' || isFrameworkMode
+    deployConfig.output === 'static' || isFrameworkMode || !prerenderSourcesPresent
       ? []
       : isNodeTarget(deployConfig.target)
         ? await collectPrerenderPathsNode({
@@ -6033,6 +6223,7 @@ async function runFullDeploy(
     hasWebSockets: routeScanHasDocumentRoutes(webSockets),
     authEnabled,
     liveEnabled: liveConfig !== undefined,
+    notFound: deployConfig.routing?.notFound,
   });
 
   // Preflight: hash assets and check which ones changed.

@@ -16,7 +16,7 @@ import { findEnvFileForPaths } from './codegen/env-types.ts';
 import { generateQueueTypes } from './codegen/queue-types.ts';
 import { generateRouteTypes } from './codegen/route-types.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
-import { readConfig, getDatabaseDialect } from './config.ts';
+import { readConfig, getDatabaseDialect, type NotFoundHandling } from './config.ts';
 import { collectRevalidate, hasRevalidate } from './isr-config.ts';
 import { readProjectPaths } from './project-paths.ts';
 import {
@@ -370,6 +370,16 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     return resolveCurrentAssetRoutingPolicy().workerSpaFallback;
   }
 
+  /**
+   * The `not_found_handling` the generated worker entry must agree with. Read
+   * off the SAME resolved policy that produces the wrangler asset config, so
+   * the emitted `serveWithAssets` can never disagree with the platform switch
+   * it is standing in for.
+   */
+  function currentNotFoundHandling(): NotFoundHandling {
+    return resolveCurrentAssetRoutingPolicy().assetConfig.not_found_handling ?? 'none';
+  }
+
   function resolveCurrentAssetRoutingPolicy(): AssetRoutingPolicy {
     if (!scan) {
       return resolveAssetRoutingPolicy({
@@ -381,6 +391,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         hasWebSockets: false,
         authEnabled: compileOptions.auth !== null,
         liveEnabled: options.live !== undefined,
+        notFound: options.routing?.notFound,
       });
     }
     return resolveAssetRoutingPolicy({
@@ -395,6 +406,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       hasWebSockets: hasDocumentRoutes(scan.websockets ?? []),
       authEnabled: compileOptions.auth !== null,
       liveEnabled: options.live !== undefined,
+      notFound: options.routing?.notFound,
     });
   }
 
@@ -568,6 +580,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
             shouldServeSpaFallback(),
             options.live,
             isr,
+            currentNotFoundHandling(),
           ),
         );
       }
@@ -703,6 +716,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
                 : false,
               shouldServeSpaFallback(),
               options.live,
+              undefined,
+              currentNotFoundHandling(),
             ),
           );
         }
