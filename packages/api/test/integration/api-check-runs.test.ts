@@ -656,7 +656,7 @@ describe('BuildManager check-run lifecycle — finalize terminal sites', () => {
     expect(output.summary).toBe('project disconnected');
   });
 
-  it('cancelBuild on an already-terminal row → NO PATCH (no clobber)', async () => {
+  it('cancelBuild on an already-terminal row → re-PATCH original conclusion', async () => {
     const { patches } = installFetch();
     const ctx = makeStubCtx();
     const env = makeEnv();
@@ -666,9 +666,14 @@ describe('BuildManager check-run lifecycle — finalize terminal sites', () => {
     await m.onStop({ exitCode: 0, reason: 'exit' });
     expect(patches).toHaveLength(1);
 
-    // A late cancel against the already-terminal row must NOT re-PATCH.
+    // A late cancel may be recovering an invocation lost after the PostgreSQL
+    // commit but before its check PATCH. Re-PATCH the authoritative conclusion
+    // idempotently rather than replacing it with the cancellation reason.
     await m.cancelBuild('project disconnected');
-    expect(patches).toHaveLength(1);
+    expect(patches).toHaveLength(2);
+    expect(patches[1].body).toMatchObject({ conclusion: 'success' });
+    const output = patches[1].body?.output as { summary?: string };
+    expect(output.summary).toBe('Build complete.');
   });
 
   it('PATCH returns 500 in onStop → build still finalized, scheduler poked, no throw', async () => {

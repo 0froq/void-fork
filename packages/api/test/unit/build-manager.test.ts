@@ -35,10 +35,12 @@ vi.mock('@cloudflare/containers', () => ({
     // a post-launch onStart reject leaves a LIVE container — modeled by this flag
     // staying true after start() rejects.
     _containerRunning = false;
-    // Settable per-test: backs `container.getTcpPort(port).fetch(url)` (the
-    // non-starting port fetch pollLogs uses). Called as (url, port) to match the
-    // assertions in the pollLogs suite.
-    _portFetch: ((url: string, port: number) => Promise<Response>) | null = null;
+    // Settable per-test: backs `container.getTcpPort(port).fetch(url, init)` (the
+    // non-starting port fetch pollLogs uses). Called as (url, port, init) to match
+    // the assertions in the pollLogs suite. `init` is forwarded (not dropped) so a
+    // test can assert the abort signal that timeboxes every pull.
+    _portFetch: ((url: string, port: number, init?: RequestInit) => Promise<Response>) | null =
+      null;
     constructor(ctx: unknown, env: unknown) {
       this.ctx = ctx;
       this.env = env;
@@ -52,11 +54,11 @@ vi.mock('@cloudflare/containers', () => ({
       return {
         running: this._containerRunning,
         getTcpPort: (port: number) => ({
-          fetch: (url: string) => {
+          fetch: (url: string, init?: RequestInit) => {
             if (!this._portFetch) {
               throw new Error('container port fetch not stubbed');
             }
-            return this._portFetch(url, port);
+            return this._portFetch(url, port, init);
           },
         }),
       };
@@ -287,12 +289,20 @@ import {
   builderCacheEnv,
   childSpawnOptions,
   DEFAULT_VOID_CLI_VERSION,
+  clearBufferedLogLines,
   closeControlServer,
+  getAckedLogSeq,
   getBufferedLogLines,
   getPendingLogLineCount,
+  getServedLogSeq,
   installShutdownHandlers,
+  LOG_DRAIN_ABSOLUTE_TIMEOUT_MS,
+  LOG_DRAIN_IDLE_TIMEOUT_MS,
+  MAX_BUFFERED_LOG_BYTES,
   MAX_BUFFERED_LOG_LINES,
   MAX_PARTIAL_LINE_CHARS,
+  MAX_LOG_RESPONSE_BYTES,
+  MAX_LOG_RESPONSE_LINES,
   MAX_PENDING_LOG_LINES,
   nonInteractiveEnv,
   parseProcStatusUid,
@@ -301,6 +311,8 @@ import {
   runBuild,
   SCRUBBED_ENV_VARS,
   sanitizeChildEnv,
+  startControlServer,
+  waitForLogDrain,
 } from '../../container/build-agent.mjs';
 import { signDeployToken } from '../../src/auth/deploy-token.ts';
 import {
@@ -309,6 +321,13 @@ import {
   CHECK_RUN_LOG_TAIL_MAX_BYTES,
   CHECK_RUN_OUTPUT_TEXT_MAX_BYTES,
   formatLogTailMarkdown,
+  LOG_DRAIN_BUDGET_MS,
+  LOG_DRAIN_GRACE_SECONDS,
+  LOG_PULL_TIMEOUT_MS,
+  LOG_SINK_OP_PAYLOAD_BYTES,
+  LOG_TERMINAL_DRAIN_RETRY_WINDOW_MS,
+  MAX_LOG_PULL_PAGES,
+  MAX_LOG_SINK_OPS_PER_DRAIN,
   MAX_STORED_LOG_LINES,
   PINNED_VOID_CLI_VERSION,
   sanitizeLogLineForMarkdown,
@@ -317,9 +336,11 @@ import {
   TERMINAL_RENDER_MAX_PARAMETER_WORK,
   TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS,
   TERMINAL_TAIL_MAX_INPUT_CODE_UNITS,
+  TERMINAL_WRITE_TIMEOUT_MS,
 } from '../../src/build-manager.ts';
 import type { BuildConfig } from '../../src/build-types.ts';
 import {
+  getBuild,
   getDeploymentByProjectAndCommit,
   installationCoversRepo,
   markBuildBuildingIfStarting,
@@ -640,7 +661,7 @@ describe('BuildManager.startBuild', () => {
     // timeout (10 min = 600s); both go through the base scheduler, never setAlarm.
     expect(scheduledTasks(m)).toEqual([
       { whenSeconds: 1, callback: 'pollLogs' },
-      { whenSeconds: 10 * 60, callback: 'enforceTimeout' },
+      { whenSeconds: 10 * 60 + LOG_DRAIN_GRACE_SECONDS, callback: 'enforceTimeout' },
     ]);
     // The deploy token is bound to THIS build so the deploy endpoint can reject
     // it once the build is no longer active (superseded/cancelled by a newer push).
@@ -750,7 +771,10 @@ describe('BuildManager.startBuild', () => {
     // idle-stop never fires for a busy container, so an orphaned build could
     // otherwise run unbounded. Falls back to DEPLOY_TOKEN_HARD_MAX_MINUTES (60).
     expect(ctx.storage.setAlarm).not.toHaveBeenCalled();
-    expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 60 * 60, callback: 'enforceTimeout' });
+    expect(scheduledTasks(m)).toContainEqual({
+      whenSeconds: 60 * 60 + LOG_DRAIN_GRACE_SECONDS,
+      callback: 'enforceTimeout',
+    });
   });
 
   it('caps the timeout at the hard max when timeoutMinutes exceeds it', async () => {
@@ -759,7 +783,10 @@ describe('BuildManager.startBuild', () => {
     const m = makeManager(ctx, env);
     await m.startBuild(makeConfig({ timeoutMinutes: 120 }));
     // A plan timeout above the hard max (60) is clamped to it.
-    expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 60 * 60, callback: 'enforceTimeout' });
+    expect(scheduledTasks(m)).toContainEqual({
+      whenSeconds: 60 * 60 + LOG_DRAIN_GRACE_SECONDS,
+      callback: 'enforceTimeout',
+    });
   });
 
   // The deploy token is minted *before* download + install + deploy, so its
@@ -776,6 +803,71 @@ describe('BuildManager.startBuild', () => {
     expect(opts?.ttlSeconds).toBe(20 * 60 + 5 * 60); // 25 min
     // Strictly longer than the old fixed 15-min TTL.
     expect(opts?.ttlSeconds).toBeGreaterThan(15 * 60);
+  });
+
+  // The plan budget bounds build EXECUTION. The agent's exit-time drain barrier runs
+  // AFTER that, with the container still `running` and the DO status still
+  // `deploying` — the agent cannot report a terminal status by design. So an
+  // `enforceTimeout` coming due inside the barrier wins its CAS and overwrites a
+  // SUCCESSFUL, already-live deploy with 'build timed out'.
+  it('arms the wall-clock timeout PAST the build budget, so the agent drain cannot trip it', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+
+    await m.startBuild(makeConfig({ timeoutMinutes: 10 }));
+
+    // FAIL-WITHOUT-FIX: armed at exactly 10*60, so a build returning in the final
+    // seconds of its budget gets killed mid-drain and reported as a timeout.
+    // Asserts the SLACK rather than the literal, so the relation survives a retune
+    // of either constant.
+    const armed = scheduledTasks(m).find((t) => t.callback === 'enforceTimeout');
+    expect(armed?.whenSeconds).toBeGreaterThanOrEqual(
+      10 * 60 + LOG_DRAIN_ABSOLUTE_TIMEOUT_MS / 1000,
+    );
+  });
+
+  it('keeps the drain grace inside the deploy token TTL — a build still cannot outlive its token', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+
+    await m.startBuild(makeConfig({ timeoutMinutes: 10 }));
+
+    // Guard-rail against an over-large grace: read the TTL off the spy rather than
+    // importing DEPLOY_TOKEN_MARGIN_SECONDS, which the deploy-token mock does not
+    // re-export (it would be undefined).
+    const armed = scheduledTasks(m).find((t) => t.callback === 'enforceTimeout');
+    const ttlSeconds = vi.mocked(signDeployToken).mock.calls[0]?.[2]?.ttlSeconds;
+    expect(ttlSeconds).toBeGreaterThan(0);
+    expect(armed?.whenSeconds).toBeLessThan(ttlSeconds ?? 0);
+  });
+
+  it('grants enough grace to cover the agent drain barrier — two processes, one relation, so a test holds it', () => {
+    // `container/build-agent.mjs` is plain JS copied into the image and cannot
+    // import from `src/`, so the DO's grace and the agent's barrier deadline are two
+    // separate literals. PINNED_VOID_CLI_VERSION already proved a "keep in sync"
+    // comment does not hold. `>=` not `===`: the grace also has to cover the final
+    // closeControlServer that runs after the barrier. (The exit path deliberately
+    // does NOT flush — see `finishBuildLogging`; that push has no route to the DO
+    // and awaiting it could only spend this grace.)
+    expect(LOG_DRAIN_GRACE_SECONDS * 1000).toBeGreaterThanOrEqual(
+      LOG_DRAIN_ABSOLUTE_TIMEOUT_MS + 5_000,
+    );
+  });
+
+  it('keeps the agent alive past one full paginated drain and its acknowledgement tick', () => {
+    // Worst alignment starts just after a poll: one second until the next callback,
+    // up to LOG_DRAIN_BUDGET_MS inside it, then one second until a follow-up request
+    // can acknowledge the cursor if that callback exhausted its budget. Equality
+    // has no scheduling/ingest slack and lets the agent close on the boundary.
+    expect(LOG_DRAIN_IDLE_TIMEOUT_MS).toBeGreaterThan(LOG_DRAIN_BUDGET_MS + 2_000);
+    expect(LOG_DRAIN_ABSOLUTE_TIMEOUT_MS).toBeGreaterThan(
+      MAX_LOG_PULL_PAGES * (LOG_PULL_TIMEOUT_MS + 1_000),
+    );
+    expect(LOG_TERMINAL_DRAIN_RETRY_WINDOW_MS + 1_000).toBeLessThanOrEqual(
+      LOG_DRAIN_IDLE_TIMEOUT_MS,
+    );
   });
 
   it('caps the deploy token TTL at the hard max for unlimited (timeoutMinutes=0) builds', async () => {
@@ -893,6 +985,43 @@ describe('BuildManager.startBuild', () => {
       (env as unknown as { BUILD_SCHEDULER: { get: ReturnType<typeof vi.fn> } }).BUILD_SCHEDULER
         .get,
     ).toHaveBeenCalled();
+
+    scheduleSpy.mockRestore();
+  });
+
+  // Third teardown site, same invariant as enforceTimeout/cancelBuild: `builds.status`
+  // is the deploy token's authority, and the teardown now drains logs for up to
+  // 2x LOG_DRAIN_BUDGET_MS before it signals. While the row is still
+  // `starting`/`building`, a runner already at final publish passes both
+  // `middleware/auth.ts` and the go-live transaction's re-check and ships — even
+  // though this manager has already decided startup failed.
+  it('revokes the build row BEFORE draining logs in the startBuild catch', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+
+    const order: Array<string> = [];
+    vi.mocked(markBuildTerminalIfActive).mockImplementationOnce(async () => {
+      order.push('revoke');
+      return true;
+    });
+    // Enter the catch AFTER the container launched, so the teardown drains.
+    const scheduleSpy = vi
+      .spyOn(m as unknown as { schedule: () => Promise<void> }, 'schedule')
+      .mockRejectedValueOnce(new Error('schedule arming failed'));
+    const fetchFn = vi.fn(async () => {
+      order.push('drain');
+      return new RealResponse(JSON.stringify({ lines: [], lastSeq: 0 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    await expect(m.startBuild(makeConfig())).rejects.toThrow('schedule arming failed');
+
+    // FAIL-WITHOUT-FIX: ['drain', 'revoke'] — the token stays honored across the drain.
+    expect(order).toEqual(['revoke', 'drain']);
 
     scheduleSpy.mockRestore();
   });
@@ -1278,7 +1407,10 @@ describe('BuildManager.startBuild freshness recheck', () => {
 
     expect(vi.mocked(signDeployToken)).toHaveBeenCalledOnce();
     expect(containerCalls.started).toBe(1);
-    expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 10 * 60, callback: 'enforceTimeout' });
+    expect(scheduledTasks(m)).toContainEqual({
+      whenSeconds: 10 * 60 + LOG_DRAIN_GRACE_SECONDS,
+      callback: 'enforceTimeout',
+    });
   });
 });
 
@@ -1354,7 +1486,10 @@ describe('BuildManager.startBuild installation coverage recheck (TOCTOU)', () =>
     );
     expect(vi.mocked(signDeployToken)).toHaveBeenCalledOnce();
     expect(containerCalls.started).toBe(1);
-    expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 10 * 60, callback: 'enforceTimeout' });
+    expect(scheduledTasks(m)).toContainEqual({
+      whenSeconds: 10 * 60 + LOG_DRAIN_GRACE_SECONDS,
+      callback: 'enforceTimeout',
+    });
   });
 });
 
@@ -1520,11 +1655,256 @@ describe('BuildManager.onError', () => {
     const m = makeManager(ctx, env);
     await m.startBuild(makeConfig());
     dbState.writes = [];
+    // The container is still live here, so onError drains before it finalizes. An
+    // unstubbed port fetch would throw and burn the whole retry window on real
+    // timers; answer immediately with nothing to pull.
+    (m as unknown as { _portFetch: () => Promise<Response> })._portFetch = async () =>
+      new RealResponse(JSON.stringify({ lines: [], lastSeq: 0 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
 
     await m.onError(new Error('boom'));
 
     const failed = lastWrite('failed');
     expect(failed?.opts?.error).toBe('boom');
+  });
+
+  // `onError` is the ONE terminalizer that does not force-stop, so nothing else has
+  // drained when it finalizes. `pollLogs`' terminal branch does pull, but up to
+  // POLL_SECONDS later — after the check run is already completed — so its tail
+  // reaches the log APIs while being permanently absent from the check run a reader
+  // actually opens. That is the "check run that ends with no cause" this whole area
+  // exists to eliminate.
+  it('drains the log tail BEFORE completing the check run', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    dbState.status.set('b1', 'building');
+    // Finalize resolves the run id from DO storage (create is inert in this file).
+    ctx._kv.set('checkRunId', '99001');
+
+    const order: Array<string> = [];
+    const fetchFn = vi.fn(async () => {
+      order.push('drain');
+      return new RealResponse(
+        JSON.stringify({
+          lines: [{ seq: 4, line: 'FATAL: out of memory', stream: 'stderr', ts: 4 }],
+          lastSeq: 4,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+    vi.mocked(completeCheckRun).mockImplementationOnce(async () => {
+      order.push('finalize');
+      return false;
+    });
+
+    await m.onError(new Error('container crashed'));
+
+    // FAIL-WITHOUT-FIX: ['finalize'] only — the diagnostic never reaches the check run.
+    expect(order).toEqual(['drain', 'finalize']);
+    expect(ctx._logs.map((r) => r.line)).toContain('FATAL: out of memory');
+  });
+
+  it('retries a transient terminal pull before completing the check run', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    dbState.status.set('b1', 'building');
+    ctx._kv.set('checkRunId', '99001');
+
+    const order: Array<string> = [];
+    let fetchAttempt = 0;
+    const fetchFn = vi.fn(async (_url: string, _port: number, _init?: RequestInit) => {
+      fetchAttempt += 1;
+      const attempt = fetchAttempt;
+      if (attempt === 1) {
+        order.push('pull-failed');
+        throw new Error('agent port temporarily unavailable');
+      }
+      if (attempt === 2) {
+        order.push('pull-tail');
+        return new RealResponse(
+          JSON.stringify({
+            lines: [{ seq: 7, line: 'FATAL: recovered tail', stream: 'stderr', ts: 7 }],
+            lastSeq: 7,
+            hasMore: false,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      order.push('pull-ack');
+      return new RealResponse(JSON.stringify({ lines: [], lastSeq: 7, hasMore: false }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+    vi.mocked(completeCheckRun).mockImplementationOnce(async () => {
+      order.push('finalize');
+      return false;
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    vi.useFakeTimers();
+    try {
+      const run = m.onError(new Error('container crashed'));
+      await vi.advanceTimersByTimeAsync(LOG_TERMINAL_DRAIN_RETRY_WINDOW_MS);
+      await run;
+    } finally {
+      vi.useRealTimers();
+      warnSpy.mockRestore();
+    }
+
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(fetchFn.mock.calls.map(([url]) => url)).toEqual([
+      'http://manager/logs?since=0',
+      'http://manager/logs?since=0',
+      'http://manager/logs?since=7',
+    ]);
+    expect(ctx._logs.map((row) => row.line)).toContain('FATAL: recovered tail');
+    expect(order).toEqual(['pull-failed', 'pull-tail', 'pull-ack', 'finalize']);
+  });
+
+  it('does not start a fresh onError pull while a concurrent teardown owns the tail', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    dbState.status.set('b1', 'building');
+    ctx._kv.set('checkRunId', '99001');
+    vi.mocked(completeCheckRun).mockClear();
+
+    let releaseTerminalWrite!: () => void;
+    const terminalWriteGate = new Promise<void>((resolve) => {
+      releaseTerminalWrite = resolve;
+    });
+    let markTerminalWriteEntered!: () => void;
+    const terminalWriteEntered = new Promise<void>((resolve) => {
+      markTerminalWriteEntered = resolve;
+    });
+    vi.mocked(markBuildTerminalIfActive).mockImplementationOnce(async () => {
+      // The write has committed authoritatively, but onError has not resumed yet.
+      dbState.status.set('b1', 'failed');
+      markTerminalWriteEntered();
+      await terminalWriteGate;
+      return true;
+    });
+
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    let markStopEntered!: () => void;
+    const stopEntered = new Promise<void>((resolve) => {
+      markStopEntered = resolve;
+    });
+    (m as unknown as { stop: () => Promise<void> }).stop = vi.fn(async () => {
+      containerCalls.stopped += 1;
+      markStopEntered();
+      await stopGate;
+      (m as unknown as { _containerRunning: boolean })._containerRunning = false;
+    });
+
+    const fetchFn = vi.fn(
+      async () =>
+        new RealResponse(JSON.stringify({ lines: [], lastSeq: 0 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    const onError = m.onError(new Error('container crashed'));
+    await terminalWriteEntered;
+    const cancel = m.cancelBuild('build superseded');
+    await stopEntered;
+
+    releaseTerminalWrite();
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+
+    // The teardown already took the only final snapshot. onError joins it instead
+    // of opening a second request during stop(), and therefore cannot finalize yet.
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(vi.mocked(completeCheckRun)).not.toHaveBeenCalled();
+
+    releaseStop();
+    await Promise.all([onError, cancel]);
+
+    expect(fetchFn).toHaveBeenCalledOnce();
+    // Both surviving terminalizers may issue the same idempotent PATCH: cancel must
+    // recover when onError was lost, while onError still finalizes when it survives.
+    expect(vi.mocked(completeCheckRun)).toHaveBeenCalled();
+  });
+
+  it('joins a teardown that begins during a successful onError pull', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    dbState.status.set('b1', 'building');
+    ctx._kv.set('checkRunId', '99001');
+    vi.mocked(completeCheckRun).mockClear();
+
+    let releaseOnErrorPull!: () => void;
+    const onErrorPullGate = new Promise<void>((resolve) => {
+      releaseOnErrorPull = resolve;
+    });
+    let markOnErrorPullEntered!: () => void;
+    const onErrorPullEntered = new Promise<void>((resolve) => {
+      markOnErrorPullEntered = resolve;
+    });
+    let releaseTeardownPull!: () => void;
+    const teardownPullGate = new Promise<void>((resolve) => {
+      releaseTeardownPull = resolve;
+    });
+    let markTeardownPullEntered!: () => void;
+    const teardownPullEntered = new Promise<void>((resolve) => {
+      markTeardownPullEntered = resolve;
+    });
+
+    let fetchAttempt = 0;
+    const fetchFn = vi.fn(async (_url: string, _port: number, _init?: RequestInit) => {
+      fetchAttempt += 1;
+      if (fetchAttempt === 1) {
+        markOnErrorPullEntered();
+        await onErrorPullGate;
+      } else {
+        markTeardownPullEntered();
+        await teardownPullGate;
+      }
+      return new RealResponse(JSON.stringify({ lines: [], lastSeq: 0 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    const onError = m.onError(new Error('container crashed'));
+    await onErrorPullEntered;
+    const cancel = m.cancelBuild('build superseded');
+
+    // The cancel joins this already-frozen snapshot, then owns a fresh teardown
+    // pull. onError must notice that gate after its successful await and join it.
+    releaseOnErrorPull();
+    await teardownPullEntered;
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(completeCheckRun)).not.toHaveBeenCalled();
+
+    releaseTeardownPull();
+    await Promise.all([onError, cancel]);
+
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(completeCheckRun)).toHaveBeenCalled();
   });
 
   // 3382105553: onError's terminal write ran first, UNGUARDED — a transient
@@ -1759,6 +2139,46 @@ describe('BuildManager timeout integration (base-owned alarm + scheduled enforce
     // The local DO status is terminal so a subsequent onStop won't resurrect it.
     expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'failed' });
   });
+
+  // The throw above is only half the exposure, and the cheaper half. `createDb()`
+  // is a bare `drizzle(connectionString)` over a `pg.Pool` with no
+  // `connectionTimeoutMillis` and no `query_timeout`, so a revocation can PEND
+  // instead of rejecting — and then the catch never runs, `forceStopContainer()`
+  // is never reached, and the timed-out container keeps its still-honored deploy
+  // token and its fleet slot. Nothing cheap recovers it either: the retry after
+  // the runtime kills the invocation hits `enforceTimeout`'s own terminal guard
+  // (setStatus already wrote 'failed') and returns immediately, so teardown falls
+  // to the hourly stale reaper. A deadline collapses this into the throw path.
+  it('stops the container AND pokes the scheduler when the terminal DB write never settles', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    (
+      env as unknown as { BUILD_SCHEDULER: { get: ReturnType<typeof vi.fn> } }
+    ).BUILD_SCHEDULER.get.mockClear();
+
+    // Pends forever — the Hyperdrive-stall shape, not the Hyperdrive-throw shape.
+    vi.mocked(markBuildTerminalIfActive).mockReturnValueOnce(new Promise<boolean>(() => {}));
+
+    vi.useFakeTimers();
+    try {
+      const run = runDueSchedules(m);
+      const settled = expect(run).rejects.toThrow('did not settle');
+      await vi.advanceTimersByTimeAsync(TERMINAL_WRITE_TIMEOUT_MS);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(containerCalls.stopped).toBe(1);
+    expect(
+      (env as unknown as { BUILD_SCHEDULER: { get: ReturnType<typeof vi.fn> } }).BUILD_SCHEDULER
+        .get,
+    ).toHaveBeenCalled();
+    expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'failed' });
+  });
 });
 
 // cancelBuild RPC: the trusted DO→DO / API→DO cancel path the API (github.ts)
@@ -1766,6 +2186,40 @@ describe('BuildManager timeout integration (base-owned alarm + scheduled enforce
 // orphaning this build. No agent secret is required (unlike POST /cancel) — the
 // stub container's startBuild stored the row `starting`, so the CAS engages.
 describe('BuildManager.cancelBuild (internal RPC)', () => {
+  // The reaper's rescue path. Once a hung `enforceTimeout` has already written the
+  // DO-local 'failed', `cancelBuild` skips its own revocation entirely and goes
+  // straight to teardown — but a cancel that arrives FIRST owns the revocation, and
+  // must not inherit the same stall.
+  it('stops the container AND pokes the scheduler when its own terminal write never settles', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    (
+      env as unknown as { BUILD_SCHEDULER: { get: ReturnType<typeof vi.fn> } }
+    ).BUILD_SCHEDULER.get.mockClear();
+
+    vi.mocked(markBuildTerminalIfActive).mockReturnValueOnce(new Promise<boolean>(() => {}));
+
+    vi.useFakeTimers();
+    try {
+      const run = m.cancelBuild('project disconnected');
+      const settled = expect(run).rejects.toThrow('did not settle');
+      await vi.advanceTimersByTimeAsync(TERMINAL_WRITE_TIMEOUT_MS);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(containerCalls.stopped).toBe(1);
+    expect(
+      (env as unknown as { BUILD_SCHEDULER: { get: ReturnType<typeof vi.fn> } }).BUILD_SCHEDULER
+        .get,
+    ).toHaveBeenCalled();
+    expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'cancelled' });
+  });
+
   it('stops the container, records cancelled via the CAS, and pokes the scheduler', async () => {
     const ctx = makeStubCtx();
     const env = makeEnv();
@@ -1841,6 +2295,67 @@ describe('BuildManager.cancelBuild (internal RPC)', () => {
     expect(dbState.writes).toEqual([]);
   });
 
+  it('reconciles a check run when local terminal state still has an active DB row', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._kv.set('checkRunId', '99001');
+    vi.mocked(completeCheckRun).mockClear();
+
+    // Model an invocation lost after the durable local write but before its
+    // authoritative terminal write/check-run completion reached Postgres/GitHub.
+    await (m as unknown as { setStatus: (s: string) => Promise<void> }).setStatus('failed');
+    dbState.status.set('b1', 'building');
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    await m.cancelBuild('build superseded');
+
+    expect(vi.mocked(completeCheckRun)).not.toHaveBeenCalled();
+    expect(
+      scheduledTasks(m).filter((task) => task.callback === 'reconcileTerminalWrite'),
+    ).toHaveLength(1);
+
+    // The late write or stale reaper eventually terminalizes the authoritative row;
+    // the armed reconciliation must finish the otherwise-orphaned check run.
+    dbState.status.set('b1', 'failed');
+    await runDueSchedules(m);
+
+    expect(vi.mocked(completeCheckRun)).toHaveBeenCalledOnce();
+    expect(vi.mocked(completeCheckRun).mock.calls[0][4]).toMatchObject({ conclusion: 'failure' });
+    expect(scheduledTasks(m).some((task) => task.callback === 'reconcileTerminalWrite')).toBe(
+      false,
+    );
+  });
+
+  it('finalizes a terminal DB row found behind local terminal state', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._kv.set('checkRunId', '99001');
+    vi.mocked(completeCheckRun).mockClear();
+
+    // The earlier invocation committed Postgres but was lost before its check PATCH.
+    await (m as unknown as { setStatus: (s: string) => Promise<void> }).setStatus('failed');
+    dbState.status.set('b1', 'failed');
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    await m.cancelBuild('build superseded');
+
+    expect(vi.mocked(completeCheckRun)).toHaveBeenCalledOnce();
+    expect(vi.mocked(completeCheckRun).mock.calls[0][4]).toMatchObject({ conclusion: 'failure' });
+    expect(ctx._logs.map((row) => row.line)).toContain(
+      '[build-manager] container terminated: build terminated out of band',
+    );
+    expect(ctx._logs.map((row) => row.line)).not.toContain(
+      '[build-manager] container terminated: build superseded',
+    );
+    expect(scheduledTasks(m).some((task) => task.callback === 'reconcileTerminalWrite')).toBe(
+      false,
+    );
+  });
+
   it('stops the container AND pokes the scheduler even when the terminal DB write throws', async () => {
     // Same decoupling invariant as enforceTimeout: a Hyperdrive throw on the
     // terminal write must NOT skip container teardown (orphaned container) or the
@@ -1868,6 +2383,9 @@ describe('BuildManager.cancelBuild (internal RPC)', () => {
     ).toHaveBeenCalled();
     // The local DO status is terminal so a subsequent onStop won't resurrect it.
     expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'cancelled' });
+    expect(ctx._logs.map((row) => row.line)).toContain(
+      '[build-manager] container terminated: build terminated out of band',
+    );
   });
 });
 
@@ -2280,6 +2798,12 @@ describe('BuildManager.pollLogs (DO log pull-loop)', () => {
     dbState.status.set('b1', 'building');
     await m.onStop({ exitCode: 0, reason: 'exit' });
     expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'complete' });
+    // `onStop` fires BECAUSE the container exited, so the container is gone by
+    // definition here. The base stub only flips `_containerRunning` in
+    // stop()/destroy(), so state it explicitly — otherwise this "completed
+    // container" case would model a terminal build with a still-LIVE container,
+    // which is the cancel/timeout case covered by its own test below.
+    (m as unknown as { _containerRunning: boolean })._containerRunning = false;
 
     // Clear the schedule armed at startBuild so we observe ONLY pollLogs' decision.
     (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
@@ -2289,6 +2813,73 @@ describe('BuildManager.pollLogs (DO log pull-loop)', () => {
     // Self-terminated: no agent poll, no re-arm.
     expect(fetchFn).not.toHaveBeenCalled();
     expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(false);
+  });
+
+  it('issues ONE final pull (no re-arm) when the status went terminal while the container is still running', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // Drive a REAL production path into `terminal status + LIVE container` instead
+    // of poking setStatus. onError drains once before finalizing but does not stop;
+    // this terminal backstop catches a line produced after that snapshot.
+    dbState.writes = [];
+    stubPortFetch(m, [{ lines: [], lastSeq: 0 }]);
+    await m.onError(new Error('container runtime error'));
+    expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'failed' });
+    expect((m as unknown as { _containerRunning: boolean })._containerRunning).toBe(true);
+
+    const fetchFn = stubPortFetch(m, [
+      { lines: [{ seq: 7, line: 'vite build failed', stream: 'stderr', ts: 7 }], lastSeq: 7 },
+    ]);
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+
+    // FAIL-WITHOUT-FIX: the terminal branch used to `return` before any fetch.
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn.mock.calls[0][0]).toBe('http://manager/logs?since=0');
+    expect(ctx._logs.map((r) => r.line)).toContain('vite build failed');
+    expect(logCursor(m)).toBe(7);
+    // Still self-terminating: exactly ONE last pull, never a re-arm.
+    expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(false);
+  });
+
+  it('swallows a throw from the final terminal-status pull (must not escape the alarm)', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    await (m as unknown as { setStatus: (s: string) => Promise<void> }).setStatus('cancelled');
+
+    const fetchFn = stubPortFetch(m, [new Error('container gone mid-teardown')]);
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    await expect(
+      (m as unknown as { pollLogs: () => Promise<void> }).pollLogs(),
+    ).resolves.toBeUndefined();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(false);
+  });
+
+  it('never uses the auto-starting containerFetch for the final terminal-status pull', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    await (m as unknown as { setStatus: (s: string) => Promise<void> }).setStatus('cancelled');
+
+    const autoStart = vi.fn(async () => new RealResponse('{}', { status: 200 }));
+    (m as unknown as { containerFetch: typeof autoStart }).containerFetch = autoStart;
+    const portFetch = stubPortFetch(m, [{ lines: [], lastSeq: 0 }]);
+
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+
+    expect(portFetch).toHaveBeenCalledTimes(1);
+    expect(autoStart).not.toHaveBeenCalled();
   });
 
   it('does not pull (clean early-out) once the container has exited, even if status is not yet terminal', async () => {
@@ -2334,6 +2925,34 @@ describe('BuildManager.pollLogs (DO log pull-loop)', () => {
     expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(true);
   });
 
+  it('leaves the cursor UNADVANCED when a 200 body cannot be parsed — the agent reads this cursor as its drain ack', async () => {
+    // The agent's exit barrier treats a later `since=N` as proof the DO stored
+    // everything below N. That only holds because `logCursor` is written strictly
+    // AFTER `res.json()` and `ingestLines()` succeed. Pin the ordering: a 200 whose
+    // body is not JSON must ingest nothing and must NOT move the cursor, so the
+    // next poll re-requests the same lines instead of the agent exiting on a lie.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    const fetchFn = vi.fn(
+      async () => new RealResponse('not json at all', { status: 200 }),
+    ) as ReturnType<typeof vi.fn>;
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+    await expect(
+      (m as unknown as { pollLogs: () => Promise<void> }).pollLogs(),
+    ).resolves.toBeUndefined();
+
+    expect(ctx._logs).toHaveLength(0);
+    expect(logCursor(m)).toBe(0);
+    // Re-armed, and the retry asks from the SAME cursor — nothing is skipped.
+    expect(scheduledTasks(m).some((t) => t.callback === 'pollLogs')).toBe(true);
+    expect(fetchFn.mock.calls[0][0]).toBe('http://manager/logs?since=0');
+  });
+
   it('uses the non-starting port fetch (never the auto-starting containerFetch) so a poll cannot resurrect the container', async () => {
     const ctx = makeStubCtx();
     const env = makeEnv();
@@ -2362,6 +2981,1610 @@ describe('BuildManager.pollLogs (DO log pull-loop)', () => {
     // Both the timeout AND the log poll loop are armed via the base scheduler.
     expect(scheduledTasks(m)).toContainEqual({ whenSeconds: 1, callback: 'pollLogs' });
     expect(scheduledTasks(m).some((t) => t.callback === 'enforceTimeout')).toBe(true);
+  });
+
+  it('timeboxes every pull with an abort signal so a wedged agent cannot stall the alarm chain or a teardown', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // An agent that accepts the TCP connection but never answers would otherwise
+    // hang the pull forever: on the poll path that stalls the alarm chain, and on
+    // the teardown path it stalls the cancel/timeout SIGTERM+SIGKILL itself,
+    // pinning one of the fleet's global instance slots — the exact capacity
+    // starvation the destroy() escalation exists to prevent.
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    const fetchFn = stubPortFetch(m, [{ lines: [], lastSeq: 0 }]);
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+
+    const init = fetchFn.mock.calls[0][2] as RequestInit | undefined;
+    const signal = init?.signal as AbortSignal | undefined;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(false);
+    expect(timeoutSpy).toHaveBeenCalledWith(LOG_PULL_TIMEOUT_MS);
+    // A budget generous enough to be useless as a bound would defeat the point:
+    // a healthy in-container buffer read is sub-millisecond.
+    expect(LOG_PULL_TIMEOUT_MS).toBeLessThanOrEqual(5000);
+    timeoutSpy.mockRestore();
+  });
+
+  /**
+   * Stub the port fetch AND record how far the container teardown had progressed at
+   * the moment each pull was issued. Ordering is the assertion for the teardown
+   * drain, not merely "a fetch happened": a drain that runs after the signals is a
+   * drain that reaches a dead agent.
+   */
+  /** Serve a backlog as N capped pages, mimicking the agent's paged /logs. */
+  function stubPagedPortFetch(m: BuildManager, pages: Array<Array<LogRow>>) {
+    let call = 0;
+    const fetchFn = vi.fn(async (_url: string, _port?: number, _init?: RequestInit) => {
+      const page = pages[call] ?? [];
+      const more = call < pages.length - 1;
+      call++;
+      return new RealResponse(
+        JSON.stringify({
+          lines: page,
+          lastSeq: page[page.length - 1]?.seq ?? 0,
+          hasMore: more,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+    return fetchFn;
+  }
+
+  function stubOrderedPortFetch(m: BuildManager, lines: Array<LogRow>) {
+    const teardownAtPull: Array<{ stopped: number; destroyed: number }> = [];
+    const fetchFn = vi.fn(async (_url: string, _port?: number, _init?: RequestInit) => {
+      teardownAtPull.push({
+        stopped: containerCalls.stopped,
+        destroyed: containerCalls.destroyed,
+      });
+      return new RealResponse(
+        JSON.stringify({ lines, lastSeq: lines[lines.length - 1]?.seq ?? 0 }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+    return { fetchFn, teardownAtPull };
+  }
+
+  // `forceStopContainer` pulls ONCE before its SIGTERM, covering all three teardown
+  // sites (cancelBuild / enforceTimeout / the startBuild catch). It has to: the
+  // agent's exit-time `waitForLogDrain()` barrier never runs on this path, because
+  // SIGTERM lands in `onShutdownSignal`, which ends in `process.exit(1)` and so
+  // skips main()'s `finally` entirely. And pollLogs cannot cover for it — its next
+  // tick is up to POLL_SECONDS away (schedule() floors to a second boundary), by
+  // which point destroy() has resolved and the `running` guard early-outs without
+  // fetching. So without this pull, a cancelled or timed-out build silently loses
+  // everything the agent recorded since the previous tick — up to a full second of
+  // tail, and on a fast failure that is the entire error output.
+  //
+  // What the pull does NOT retain (and no pull could): the agent's own
+  // `[build-agent] received SIGTERM…` line. `onShutdownSignal` generates it only
+  // once our SIGTERM lands — i.e. strictly AFTER this pull — and `process.exit(1)`
+  // then takes it to the grave. The DO's own `[build-manager] container
+  // terminated: …` marker replaces it (asserted below).
+  it('cancelBuild drains the log tail BEFORE the SIGTERM/SIGKILL teardown', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    const { fetchFn, teardownAtPull } = stubOrderedPortFetch(m, [
+      { seq: 4, line: 'vp build failed: Unexpected token', stream: 'stderr', ts: 4 },
+    ]);
+
+    await m.cancelBuild('build superseded');
+
+    // FAIL-WITHOUT-FIX: drop the pull from forceStopContainer and this is 0 calls.
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn.mock.calls[0][0]).toBe('http://manager/logs?since=0');
+    expect(fetchFn.mock.calls[0][1]).toBe(4000);
+    // The pull reached a LIVE agent: neither signal had been sent yet.
+    expect(teardownAtPull).toEqual([{ stopped: 0, destroyed: 0 }]);
+    // ...and the teardown still ran in full afterwards (SIGTERM then SIGKILL).
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+    // The tail actually reached the sink.
+    expect(ctx._logs.map((r) => r.line)).toContain('vp build failed: Unexpected token');
+    expect(logCursor(m)).toBe(4);
+  });
+
+  it('enforceTimeout drains the log tail BEFORE the SIGTERM/SIGKILL teardown', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    dbState.status.set('b1', 'building');
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    const { fetchFn, teardownAtPull } = stubOrderedPortFetch(m, [
+      { seq: 9, line: 'still installing deps at the 10m mark', stream: 'stdout', ts: 9 },
+    ]);
+
+    await m.enforceTimeout();
+
+    // FAIL-WITHOUT-FIX: drop the pull from forceStopContainer and this is 0 calls.
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(teardownAtPull).toEqual([{ stopped: 0, destroyed: 0 }]);
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+    expect(ctx._logs.map((r) => r.line)).toContain('still installing deps at the 10m mark');
+    expect(logCursor(m)).toBe(9);
+  });
+
+  // `builds.status` is the deploy token's authority — `middleware/auth.ts` honors a
+  // build-bound token while the row is in ACTIVE_BUILD_STATUSES, and
+  // `routes/deploy.ts` re-checks the same set inside its go-live transaction. The
+  // drain pull put up to 2x LOG_DRAIN_BUDGET_MS in front of the SIGTERM, so leaving
+  // the row ACTIVE across it lets a `void deploy` at its go-live step write routing
+  // KV and commit the deployment 'live', to then be recorded 'build timed out'.
+  it('revokes the build row in Postgres BEFORE draining logs, so the deploy token cannot outlive the timeout', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    dbState.status.set('b1', 'building');
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    const order: Array<string> = [];
+    vi.mocked(markBuildTerminalIfActive).mockImplementationOnce(async () => {
+      order.push('revoke');
+      return true;
+    });
+    const fetchFn = vi.fn(async () => {
+      order.push('drain');
+      return new RealResponse(JSON.stringify({ lines: [], lastSeq: 0 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    await m.enforceTimeout();
+
+    // FAIL-WITHOUT-FIX: ['drain', 'revoke'] — the token stays honored for the whole
+    // drain. The drain must still happen (it is the only thing that saves the tail),
+    // just behind the revocation.
+    expect(order).toEqual(['revoke', 'drain']);
+    expect(containerCalls.stopped).toBe(1);
+  });
+
+  it('still tears the container down when the Postgres revocation throws', async () => {
+    // The revocation moved in FRONT of the teardown, so it must not be able to gate
+    // it: a Hyperdrive blip would otherwise leave a timed-out container alive on a
+    // pinned fleet slot — the failure the old ordering existed to prevent.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    dbState.status.set('b1', 'building');
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    vi.mocked(markBuildTerminalIfActive).mockRejectedValueOnce(new Error('hyperdrive blip'));
+    stubOrderedPortFetch(m, []);
+
+    // The throw still surfaces — it did before too — but only after teardown ran.
+    await expect(m.enforceTimeout()).rejects.toThrow('hyperdrive blip');
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+  });
+
+  it('does not pull during teardown when the container is already gone', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // A cancel that races an already-exited container: the agent is gone, its
+    // natural-exit `waitForLogDrain()` already handed the tail over, and a pull here
+    // would only be a doomed fetch in front of two no-op signals.
+    (m as unknown as { _containerRunning: boolean })._containerRunning = false;
+    const { fetchFn } = stubOrderedPortFetch(m, []);
+
+    await m.cancelBuild('build superseded');
+
+    expect(fetchFn).not.toHaveBeenCalled();
+    // ...and no terminated marker either: the log already ends where the agent
+    // ended it, so there is nothing to explain.
+    expect(ctx._logs).toHaveLength(0);
+  });
+
+  it('does not mark a natural exit that lands while the teardown drain is in progress', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    const fetchFn = vi.fn(async () => {
+      // The agent reaches natural exit while the manager is awaiting its final
+      // pull. Its own barrier owns this ending; later container controls would be
+      // successful no-ops and must not manufacture a cancellation marker.
+      (m as unknown as { _containerRunning: boolean })._containerRunning = false;
+      return new RealResponse(
+        JSON.stringify({
+          lines: [{ seq: 1, line: 'void deploy exited with code 0', stream: 'stdout', ts: 1 }],
+          lastSeq: 1,
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    await m.cancelBuild('build superseded');
+
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(containerCalls.stopped).toBe(0);
+    expect(containerCalls.destroyed).toBe(0);
+    expect(ctx._logs.map((row) => row.line)).toEqual(['void deploy exited with code 0']);
+  });
+
+  // The agent's own `[build-agent] received SIGTERM…` line is generated only once
+  // our SIGTERM lands — strictly AFTER the drain pull above — and `process.exit(1)`
+  // then takes it to the grave, so no pull can ever retain it. The DO writes its
+  // own marker instead: same information (why the output stops), no container
+  // dependency. It must land AFTER the drained tail so it reads as the last line.
+  it('appends a terminated marker after the drained tail, naming the cancel reason', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    stubOrderedPortFetch(m, [
+      { seq: 4, line: 'vp build failed: Unexpected token', stream: 'stderr', ts: 4 },
+    ]);
+
+    await m.cancelBuild('build superseded');
+
+    // FAIL-WITHOUT-FIX: drop the marker ingest and the second row is missing.
+    expect(ctx._logs.map((r) => r.line)).toEqual([
+      'vp build failed: Unexpected token',
+      '[build-manager] container terminated: build superseded',
+    ]);
+    // stderr, so a live tail renders it as the abnormal end it is.
+    expect(ctx._logs[1].stream).toBe('stderr');
+    // ...and it survives into the check-run tail (sanitize + fence) unchanged.
+    expect(
+      await (
+        m as unknown as { readLogTailMarkdown: () => Promise<string | null> }
+      ).readLogTailMarkdown(),
+    ).toContain('[build-manager] container terminated: build superseded');
+  });
+
+  it('does not claim the container terminated when both control signals fail', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    stubOrderedPortFetch(m, []);
+
+    const stop = vi
+      .spyOn(m as unknown as { stop: () => Promise<void> }, 'stop')
+      .mockRejectedValueOnce(new Error('SIGTERM control failed'));
+    const destroy = vi
+      .spyOn(m as unknown as { destroy: () => Promise<void> }, 'destroy')
+      .mockRejectedValueOnce(new Error('SIGKILL control failed'));
+
+    await m.cancelBuild('build superseded');
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect((m as unknown as { _containerRunning: boolean })._containerRunning).toBe(true);
+    expect(ctx._logs.map((row) => row.line)).not.toContain(
+      '[build-manager] container terminated: build superseded',
+    );
+    // The failed owner releases both its signal gate and marker claim, so a later
+    // successful retry can emit the first truthful marker instead of being
+    // silenced forever. `mockRejectedValueOnce` falls through to the real methods
+    // on this second call.
+    await m.cancelBuild('project deleted');
+    expect((m as unknown as { _containerRunning: boolean })._containerRunning).toBe(false);
+    expect(ctx._logs.map((row) => row.line)).toContain(
+      '[build-manager] container terminated: build terminated out of band',
+    );
+  });
+
+  // Each teardown site passes its OWN reason: a timeout is not a cancellation, and
+  // a marker that claimed otherwise would be exactly the kind of confidently false
+  // statement this marker exists to replace.
+  it('names the timeout (not a cancellation) in the terminated marker', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    dbState.status.set('b1', 'building');
+
+    stubOrderedPortFetch(m, [
+      { seq: 9, line: 'still installing deps at the 10m mark', stream: 'stdout', ts: 9 },
+    ]);
+
+    await m.enforceTimeout();
+
+    expect(ctx._logs.map((r) => r.line)).toEqual([
+      'still installing deps at the 10m mark',
+      '[build-manager] container terminated: build timed out',
+    ]);
+  });
+
+  // FINDING B. `pullLogsOnce` READS `logCursor` to build the URL and WRITES it
+  // three awaits later, and a `fetch()` is NOT storage I/O — only `ctx.storage`
+  // operations hold the DO input gate — so a `cancelBuild` RPC (push-supersede,
+  // disconnect, branch/executor change, project delete, the stale reaper) lands
+  // while a scheduled `pollLogs` sits mid-fetch. Both then request the SAME stale
+  // `since` and ingest the SAME lines: nothing downstream dedupes (the source
+  // `seq` is stripped at ingest and the `logs` table is keyed only by its own
+  // AUTOINCREMENT), so duplicates are stored, re-broadcast, and spend the
+  // MAX_STORED_LOG_LINES / check-run-tail budgets, evicting genuine history.
+  //
+  // The first attempt at this fixed the duplicate by having teardown JOIN the
+  // in-flight pull — which lost the tail instead, because the agent freezes a
+  // response body at receipt and there is no later poll on the teardown path. So
+  // teardown now AWAITS the in-flight pull and then takes a fresh snapshot: the
+  // await is what removes the duplicate (it advances the cursor first), and the
+  // fresh pull is what keeps the tail. The three tests below pin the three halves —
+  // no duplicate, no loss, and no unbounded chain of pulls.
+  it('sequences a teardown pull behind an already in-flight scheduled pull', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    // Hold the scheduled pull open AT the fetch await — the exact window the DO
+    // input gate does not cover — so the cancel path genuinely overlaps it.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markEntered!: () => void;
+    const firstPullEntered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
+    // Faithful model of the agent's handler: it snapshots AT RECEIPT
+    // (`lastSeq = logSeq`, `logBuffer.filter(e => e.seq > since)`), so the body
+    // depends on `since` and on when the request arrived. A stub that ignores
+    // `since` would hide both the duplicate and the staleness this pins.
+    const buffer: Array<{ seq: number; line: string; stream: string; ts: number }> = [
+      { seq: 3, line: 'ERR_MODULE_NOT_FOUND', stream: 'stderr', ts: 3 },
+    ];
+    let calls = 0;
+    const fetchFn = vi.fn(async (url: string, _port?: number, _init?: RequestInit) => {
+      const since = Number(new URL(url).searchParams.get('since') ?? '0');
+      const lines = buffer.filter((entry) => entry.seq > since);
+      const lastSeq = buffer[buffer.length - 1]?.seq ?? since;
+      calls += 1;
+      if (calls === 1) {
+        markEntered();
+        await gate;
+      }
+      return new RealResponse(JSON.stringify({ lines, lastSeq }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    const poll = (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+    await firstPullEntered;
+
+    const cancel = m.cancelBuild('build superseded');
+    // Give cancelBuild every chance to reach its own pull (getConfig + setStatus
+    // are awaits) BEFORE the in-flight fetch answers — that is the race.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    release();
+    await Promise.all([poll, cancel]);
+
+    // The teardown pull is SEQUENCED behind the in-flight one, never concurrent with
+    // it, so it asks from the ADVANCED cursor and cannot re-ingest what the first
+    // carried. What enforces that is `forceStopContainer`'s explicit
+    // `await this.pullInFlight` — NOT the `??=` gate, which by itself would have let
+    // teardown join the stale request and lose the tail instead (see the sibling
+    // FRESH-snapshot test). The gate's remaining job is bounding CONCURRENT
+    // teardowns; that is pinned separately below, and removing it fails that test,
+    // not this one.
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn.mock.calls[0][0]).toBe('http://manager/logs?since=0');
+    expect(fetchFn.mock.calls[1][0]).toBe('http://manager/logs?since=3');
+    expect(ctx._logs.filter((r) => r.line === 'ERR_MODULE_NOT_FOUND')).toHaveLength(1);
+    expect(logCursor(m)).toBe(3);
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+  });
+
+  it('joins an active pull even when terminal-write failure forbids a fresh drain', async () => {
+    const ctx = makeStubCtx();
+    const m = makeManager(ctx, makeEnv());
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    let releaseJson!: () => void;
+    const jsonGate = new Promise<void>((resolve) => {
+      releaseJson = resolve;
+    });
+    let markJsonEntered!: () => void;
+    const jsonEntered = new Promise<void>((resolve) => {
+      markJsonEntered = resolve;
+    });
+    const fetchFn = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => {
+          markJsonEntered();
+          await jsonGate;
+          return {
+            lines: [{ seq: 1, line: 'active tail', stream: 'stderr', ts: 1 }],
+            lastSeq: 1,
+          };
+        },
+      } as Response;
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    const container = (
+      m as unknown as {
+        rawContainer: () => { getTcpPort: (port: number) => { fetch: typeof fetchFn } };
+      }
+    ).rawContainer();
+    const activePull = (
+      m as unknown as {
+        pullLogsOnce: (target: {
+          getTcpPort: (port: number) => { fetch: typeof fetchFn };
+        }) => Promise<void>;
+      }
+    ).pullLogsOnce(container);
+    await jsonEntered;
+
+    const teardown = (
+      m as unknown as {
+        forceStopContainer: (
+          reason: string,
+          markerAuthoritative?: boolean,
+          drainFirst?: boolean,
+        ) => Promise<void>;
+      }
+    ).forceStopContainer('terminal write failed', true, false);
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+
+    // `drainFirst=false` forbids only a new request. The response already in the
+    // DO must finish parsing and ingesting before signals or the final marker.
+    expect(containerCalls.stopped).toBe(0);
+    expect(containerCalls.destroyed).toBe(0);
+    expect(ctx._logs).toHaveLength(0);
+
+    releaseJson();
+    await Promise.all([activePull, teardown]);
+
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(ctx._logs.map((row) => row.line)).toEqual([
+      'active tail',
+      '[build-manager] container terminated: terminal write failed',
+    ]);
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+  });
+
+  it('takes a FRESH snapshot after joining an in-flight pull, so lines written during it are not killed with the container', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markEntered!: () => void;
+    const firstPullEntered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
+
+    const buffer: Array<{ seq: number; line: string; stream: string; ts: number }> = [
+      { seq: 1, line: 'vite building for production', stream: 'stdout', ts: 1 },
+    ];
+    let calls = 0;
+    const stoppedAtPull: Array<number> = [];
+    const fetchFn = vi.fn(async (url: string, _port?: number, _init?: RequestInit) => {
+      const since = Number(new URL(url).searchParams.get('since') ?? '0');
+      // Snapshot at RECEIPT, like the agent — a line recorded while this request is
+      // open cannot appear in its body.
+      const lines = buffer.filter((entry) => entry.seq > since);
+      const lastSeq = buffer[buffer.length - 1]?.seq ?? since;
+      stoppedAtPull.push(containerCalls.stopped);
+      calls += 1;
+      if (calls === 1) {
+        markEntered();
+        await gate;
+      }
+      return new RealResponse(JSON.stringify({ lines, lastSeq }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    const poll = (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+    await firstPullEntered;
+
+    // The build's real diagnosis, written AFTER the in-flight pull froze its body.
+    buffer.push({
+      seq: 2,
+      line: 'ERROR: Unexpected token in vite.config.ts',
+      stream: 'stderr',
+      ts: 2,
+    });
+
+    const cancel = m.cancelBuild('build superseded');
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    release();
+    await Promise.all([poll, cancel]);
+
+    // FAIL-WITHOUT-FIX: joining the in-flight pull was treated as the teardown drain,
+    // so only one request ever went out (`since=0`), the ERROR line was never
+    // fetched, and `process.exit(1)` in the agent's SIGTERM handler took it to the
+    // grave — the agent's own exit-time barrier does not run on that path.
+    expect(ctx._logs.map((r) => r.line)).toEqual([
+      'vite building for production',
+      'ERROR: Unexpected token in vite.config.ts',
+      '[build-manager] container terminated: build superseded',
+    ]);
+    expect(fetchFn.mock.calls[1][0]).toBe('http://manager/logs?since=1');
+    expect(logCursor(m)).toBe(2);
+    // Both pulls reached a LIVE agent — the drain is entirely in front of the signals.
+    expect(stoppedAtPull).toEqual([0, 0]);
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+  });
+
+  it('coalesces two concurrent teardowns onto ONE fresh pull, so the bound stays per-teardown', async () => {
+    // Guards against "improving" the join into a serialized chain: N concurrent
+    // cancels (webhook supersede + the stale reaper + the agent's POST /cancel) would
+    // then cost N x LOG_PULL_TIMEOUT_MS before the SIGKILL — the unbounded teardown
+    // the timebox exists to prevent.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markEntered!: () => void;
+    const firstPullEntered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
+
+    let calls = 0;
+    const fetchFn = vi.fn(async (url: string, _port?: number, _init?: RequestInit) => {
+      const since = Number(new URL(url).searchParams.get('since') ?? '0');
+      calls += 1;
+      if (calls === 1) {
+        markEntered();
+        await gate;
+      }
+      return new RealResponse(JSON.stringify({ lines: [], lastSeq: since }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    const poll = (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+    await firstPullEntered;
+
+    const cancelA = m.cancelBuild('build superseded');
+    const cancelB = m.cancelBuild('project deleted');
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    release();
+    await Promise.all([poll, cancelA, cancelB]);
+
+    // One scheduled pull + exactly ONE fresh teardown pull, however many teardowns
+    // raced. Never three.
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+
+    // FAIL-WITHOUT-FIX: both reasons appear, so the reader and the check-run tail get
+    // two authoritative-looking, contradictory explanations for one termination. Only
+    // the caller that won the terminal CAS may claim it.
+    const markers = ctx._logs
+      .map((r) => r.line)
+      .filter((line) => line.startsWith('[build-manager] container terminated:'));
+    expect(markers).toHaveLength(1);
+  });
+
+  it('does not start a late drain after the shared teardown has entered container control', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    let markStopEntered!: () => void;
+    const stopEntered = new Promise<void>((resolve) => {
+      markStopEntered = resolve;
+    });
+    (m as unknown as { stop: () => Promise<void> }).stop = vi.fn(async () => {
+      containerCalls.stopped += 1;
+      markStopEntered();
+      await stopGate;
+    });
+
+    let releaseLatePull!: () => void;
+    const latePullGate = new Promise<void>((resolve) => {
+      releaseLatePull = resolve;
+    });
+    let fetches = 0;
+    const fetchFn = vi.fn(async (url: string) => {
+      fetches += 1;
+      if (fetches === 1) {
+        return new RealResponse(
+          JSON.stringify({
+            lines: [{ seq: 1, line: 'first tail', stream: 'stderr', ts: 1 }],
+            lastSeq: 1,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      await latePullGate;
+      return new RealResponse(
+        JSON.stringify({
+          lines: [{ seq: 2, line: 'late line', stream: 'stderr', ts: 2 }],
+          lastSeq: 2,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    const forceStop = (
+      m as unknown as {
+        forceStopContainer: (
+          reason: string,
+          markerAuthoritative?: boolean,
+          drainFirst?: boolean,
+        ) => Promise<void>;
+      }
+    ).forceStopContainer.bind(m);
+
+    const first = forceStop('build superseded', true, true);
+    await stopEntered;
+    const second = forceStop('peer teardown', false, true);
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+    const fetchesBeforeSignal = fetches;
+
+    releaseStop();
+    await first;
+    releaseLatePull();
+    await second;
+
+    // FAIL-WITHOUT-FIX: caller two starts fetch #2 after caller one has drained
+    // but while its stop/destroy calls are still pending. Its response can then
+    // ingest after the terminal marker and after check-run finalization.
+    expect(fetchesBeforeSignal).toBe(1);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(ctx._logs.map((row) => row.line)).toEqual([
+      'first tail',
+      '[build-manager] container terminated: build superseded',
+    ]);
+  });
+
+  it('does not let a scheduled terminal backstop pull escape an active teardown', async () => {
+    const ctx = makeStubCtx();
+    const m = makeManager(ctx, makeEnv());
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    let markStopEntered!: () => void;
+    const stopEntered = new Promise<void>((resolve) => {
+      markStopEntered = resolve;
+    });
+    (m as unknown as { stop: () => Promise<void> }).stop = vi.fn(async () => {
+      containerCalls.stopped += 1;
+      markStopEntered();
+      await stopGate;
+    });
+
+    let releaseLatePull!: () => void;
+    const latePullGate = new Promise<void>((resolve) => {
+      releaseLatePull = resolve;
+    });
+    let fetches = 0;
+    const fetchFn = vi.fn(async () => {
+      fetches += 1;
+      if (fetches === 1) {
+        return new RealResponse(
+          JSON.stringify({
+            lines: [{ seq: 1, line: 'first tail', stream: 'stderr', ts: 1 }],
+            lastSeq: 1,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      await latePullGate;
+      return new RealResponse(
+        JSON.stringify({
+          lines: [{ seq: 2, line: 'late line', stream: 'stderr', ts: 2 }],
+          lastSeq: 2,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    const cancel = m.cancelBuild('build superseded');
+    await stopEntered;
+    const poll = (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+    const fetchesDuringTeardown = fetches;
+
+    releaseStop();
+    await cancel;
+    releaseLatePull();
+    await poll;
+
+    // The fresh teardown drain is the sole final snapshot. A terminal scheduler
+    // tick during stop/destroy neither joins nor starts a second request.
+    expect(fetchesDuringTeardown).toBe(1);
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(ctx._logs.map((row) => row.line)).toEqual([
+      'first tail',
+      '[build-manager] container terminated: build superseded',
+    ]);
+  });
+
+  it('keeps the first caller drain policy for the entire shared teardown', async () => {
+    const ctx = makeStubCtx();
+    const m = makeManager(ctx, makeEnv());
+    await m.startBuild(makeConfig());
+
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    let markStopEntered!: () => void;
+    const stopEntered = new Promise<void>((resolve) => {
+      markStopEntered = resolve;
+    });
+    (m as unknown as { stop: () => Promise<void> }).stop = vi.fn(async () => {
+      markStopEntered();
+      await stopGate;
+    });
+    const fetchFn = vi.fn(
+      async () =>
+        new RealResponse(JSON.stringify({ lines: [], lastSeq: 0 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+    const forceStop = (
+      m as unknown as {
+        forceStopContainer: (
+          reason: string,
+          markerAuthoritative?: boolean,
+          drainFirst?: boolean,
+        ) => Promise<void>;
+      }
+    ).forceStopContainer.bind(m);
+
+    const first = forceStop('startup failed before revocation', false, false);
+    await stopEntered;
+    const second = forceStop('peer requested a drain', false, true);
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+
+    releaseStop();
+    await Promise.all([first, second]);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('emits no marker from a cancel whose peer teardown already claimed it', async () => {
+    // The other overlap shape: a startup-failure teardown has already driven the row
+    // terminal and is still draining a LIVE container when a cancel arrives. Having
+    // no CAS to lose must not read as authority, or both teardowns append a different
+    // authoritative-looking reason for the same termination.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+
+    // BOTH halves of what a startup-failure teardown leaves. It claims the marker
+    // synchronously at the TOP of the catch, before `setStatus` — modelling only the
+    // status half built a state no teardown can produce (terminal, live container,
+    // marker unclaimed) and then asserted silence for it, which is the `onError` hole
+    // covered by the test below. Exclusion here comes from the claim, not the status.
+    (m as unknown as { claimTerminationMarker: () => boolean }).claimTerminationMarker();
+    await (m as unknown as { setStatus: (s: string) => Promise<void> }).setStatus('failed');
+    stubOrderedPortFetch(m, []);
+
+    await m.cancelBuild('project deleted');
+
+    const markers = ctx._logs
+      .map((r) => r.line)
+      .filter((line) => line.startsWith('[build-manager] container terminated:'));
+    expect(markers).toEqual([]);
+    // The teardown itself still runs — suppressing the marker must not skip the kill.
+    expect(containerCalls.stopped).toBe(1);
+  });
+
+  it('emits the marker when a cancel kills the live container onError left behind', async () => {
+    // `onError` is a terminal transition that deliberately does NOT stop the container
+    // ("left to the base class") and never reserves the marker. A cancel arriving after
+    // it therefore sees `shouldTerminalize === false`. Gating the claim on that status
+    // meant this teardown SIGTERM+SIGKILLed a container that was still producing output
+    // and wrote no explanation — the reader sees the log simply stop.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+
+    // Real production path, not a poked status: terminal row, container still LIVE,
+    // marker unclaimed. Asserted, because the whole hole depends on that combination.
+    stubPortFetch(m, [{ lines: [], lastSeq: 0 }]);
+    await m.onError(new Error('container runtime error'));
+    expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'failed' });
+    expect((m as unknown as { _containerRunning: boolean })._containerRunning).toBe(true);
+    ctx._logs.length = 0;
+    const { fetchFn } = stubOrderedPortFetch(m, []);
+
+    await m.cancelBuild('project deleted');
+
+    // FAIL-WITHOUT-FIX: `shouldTerminalize && claim()` short-circuits, so the kill goes
+    // unexplained.
+    const markers = ctx._logs
+      .map((r) => r.line)
+      .filter((line) => line.startsWith('[build-manager] container terminated:'));
+    expect(markers).toEqual(['[build-manager] container terminated: build terminated out of band']);
+    // onError already committed the authoritative terminal row, so the bounded
+    // verification must preserve the teardown tail drain on this path.
+    expect(fetchFn).toHaveBeenCalled();
+    expect(containerCalls.stopped).toBe(1);
+  });
+
+  it('still emits the marker when an external caller pre-terminalized the row', async () => {
+    // The ORDINARY cancellation path, not an exotic race: `cancelContainerBuildDos`
+    // (push-supersede, disconnect, branch-delete, project-delete) commits the terminal
+    // row and only THEN calls this RPC — that DB-first ordering is what revokes the
+    // deploy token, and it is deliberate. So the CAS here always loses.
+    //
+    // Losing it must not be read as "someone else already explained the kill": no
+    // other teardown ran, and the agent's own post-SIGTERM line can never be pulled.
+    // Gating the marker on the CAS left every externally-cancelled build's log simply
+    // stopping, with nothing saying why.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+
+    // Row already terminal in Postgres -> CAS no-ops. LOCAL status stays active,
+    // because nothing inside this DO has torn the build down yet.
+    vi.mocked(markBuildTerminalIfActive).mockResolvedValueOnce(false);
+    stubOrderedPortFetch(m, []);
+
+    await m.cancelBuild('build superseded');
+
+    // FAIL-WITHOUT-FIX: gated on `terminal?.won === true`, this is `false` and the
+    // only marker these builds would ever get is suppressed.
+    //
+    // The REASON defers to the CAS even though ownership does not: losing it means the
+    // outcome was recorded elsewhere, so this site's `reason` would contradict the
+    // check run, which finalizes from that recorded outcome. Emitted, but honest about
+    // what it knows.
+    const markers = ctx._logs
+      .map((r) => r.line)
+      .filter((line) => line.startsWith('[build-manager] container terminated:'));
+    expect(markers).toEqual(['[build-manager] container terminated: build terminated out of band']);
+    expect(containerCalls.stopped).toBe(1);
+  });
+
+  it('does not assert a startup reason it lost the CAS for', async () => {
+    // Same rule as enforceTimeout/cancelBuild, and it reads worse here: this catch
+    // claims the marker SYNCHRONOUSLY, before any await, so an external cancel
+    // arriving afterwards finds the claim taken and stays silent. The local reason
+    // is then the ONLY explanation emitted — printed underneath a check run that
+    // finalized to the recorded cancellation.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+
+    // Row already terminal in Postgres -> the CAS in this catch loses.
+    vi.mocked(markBuildTerminalIfActive).mockResolvedValueOnce(false);
+    // Enter the catch AFTER the container launched, so the teardown runs.
+    const scheduleSpy = vi
+      .spyOn(m as unknown as { schedule: () => Promise<void> }, 'schedule')
+      .mockRejectedValueOnce(new Error('schedule arming failed'));
+    stubOrderedPortFetch(m, []);
+
+    await expect(m.startBuild(makeConfig())).rejects.toThrow('schedule arming failed');
+
+    // FAIL-WITHOUT-FIX: 'build failed: schedule arming failed' — a local reason
+    // contradicting the outcome the check run actually publishes.
+    const markers = ctx._logs
+      .map((r) => r.line)
+      .filter((line) => line.startsWith('[build-manager] container terminated:'));
+    expect(markers).toEqual(['[build-manager] container terminated: build terminated out of band']);
+
+    scheduleSpy.mockRestore();
+  });
+
+  it('skips the drain when the terminal write never settled, so the live token dies sooner', async () => {
+    // The drain sits in FRONT of the SIGTERM and costs up to 2x LOG_DRAIN_BUDGET_MS.
+    // That is only safe because the row was revoked first: `builds.status` is the
+    // deploy token's authority. When the revocation throws or times out the row stays
+    // ACTIVE, so `middleware/auth.ts` and the go-live re-check both keep honoring the
+    // token for the whole drain — long enough for a runner at final publish to ship
+    // work the manager has already decided to kill. No revocation, no drain.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+
+    vi.mocked(markBuildTerminalIfActive).mockRejectedValueOnce(new Error('hyperdrive blip'));
+    const { fetchFn } = stubOrderedPortFetch(m, []);
+
+    await expect(m.enforceTimeout()).rejects.toThrow('hyperdrive blip');
+
+    // FAIL-WITHOUT-FIX: the teardown pull runs anyway, holding a still-valid token
+    // open for the length of the drain.
+    expect(fetchFn).not.toHaveBeenCalled();
+    // The kill itself is unaffected — skipping the drain must not skip the SIGTERM.
+    expect(containerCalls.stopped).toBe(1);
+  });
+
+  it('uses a neutral marker when an unknown timeout revocation loses to cancellation', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._kv.set('checkRunId', '99001');
+    vi.mocked(completeCheckRun).mockClear();
+
+    // A deadline/transport error does not cancel the underlying CAS. Before its
+    // result is known, another terminal writer wins with the authoritative outcome.
+    vi.mocked(markBuildTerminalIfActive).mockRejectedValueOnce(
+      new Error('build b1: terminal status write did not settle within 5000ms'),
+    );
+    dbState.status.set('b1', 'cancelled');
+    stubOrderedPortFetch(m, []);
+
+    await expect(m.enforceTimeout()).rejects.toThrow('did not settle');
+
+    expect(ctx._logs.map((row) => row.line)).toContain(
+      '[build-manager] container terminated: build terminated out of band',
+    );
+    expect(vi.mocked(completeCheckRun)).toHaveBeenCalledOnce();
+    expect(vi.mocked(completeCheckRun).mock.calls[0][4]).toMatchObject({
+      conclusion: 'cancelled',
+    });
+  });
+
+  it('still explains the kill when a peer teardown destroyed the container first', async () => {
+    // Overlap shape: a cancel arrives while enforceTimeout is parked on Hyperdrive.
+    // The cancel sees the already-terminal LOCAL status, so it never claims, drains,
+    // and destroys. enforceTimeout then resumes holding the claim but finds
+    // `running === false`.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+
+    let releaseRevocation!: () => void;
+    const revocationParked = new Promise<void>((resolve) => {
+      releaseRevocation = resolve;
+    });
+    vi.mocked(markBuildTerminalIfActive).mockImplementationOnce(async () => {
+      await revocationParked;
+      return true;
+    });
+    const { fetchFn } = stubOrderedPortFetch(m, []);
+
+    const timeout = m.enforceTimeout();
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    // The peer runs to completion — container destroyed — while the owner is parked.
+    await m.cancelBuild('project deleted');
+    // The DO-local status is already failed, but the timeout CAS above is still
+    // parked and Postgres continues to authorize the deploy token. The peer must
+    // signal immediately, not drain during that publication window.
+    expect(fetchFn).not.toHaveBeenCalled();
+    releaseRevocation();
+    await timeout;
+
+    // FAIL-WITHOUT-FIX: the peer had no claim and the owner had no live container, so
+    // the marker was gated out on both sides and the log simply stopped. Exactly one,
+    // from the caller that owns the claim.
+    const markers = ctx._logs
+      .map((r) => r.line)
+      .filter((line) => line.startsWith('[build-manager] container terminated:'));
+    expect(markers).toEqual(['[build-manager] container terminated: build timed out']);
+  });
+
+  it('explains the kill on a startup-failure teardown, and skips its drain on failed revocation', async () => {
+    // The third teardown site, which a partial edit left behind twice over: it
+    // re-called the first-caller-wins claim (always false once the transition above
+    // took it, so the marker was suppressed for EVERY startup failure) and omitted
+    // the drain gate (so a failed revocation still drained with a live token).
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+
+    // Post-launch failure: the container is up, then timeout-scheduling throws.
+    vi.spyOn(m as unknown as { schedule: () => Promise<void> }, 'schedule').mockRejectedValueOnce(
+      new Error('schedule arming failed'),
+    );
+    vi.mocked(markBuildTerminalIfActive).mockRejectedValueOnce(new Error('hyperdrive blip'));
+    const { fetchFn } = stubOrderedPortFetch(m, []);
+
+    // The revocation failure is what surfaces here — the catch rethrows
+    // `terminalError` ahead of the original cause once teardown has run.
+    await expect(m.startBuild(makeConfig())).rejects.toThrow('hyperdrive blip');
+
+    // FAIL-WITHOUT-FIX #1: the second claim returns false, so nothing says why.
+    const markers = ctx._logs
+      .map((r) => r.line)
+      .filter((line) => line.startsWith('[build-manager] container terminated:'));
+    expect(markers).toEqual(['[build-manager] container terminated: build terminated out of band']);
+    // FAIL-WITHOUT-FIX #2: drainFirst defaulted to true, holding a still-valid token
+    // open for the length of the drain.
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('finalizes the check run when the terminal write commits after its deadline', async () => {
+    // `withDeadline` rejects at TERMINAL_WRITE_TIMEOUT_MS but cannot cancel the query,
+    // so a slow write can still commit afterwards. That rejection leaves `terminal`
+    // null, so nothing finalizes — and once the late write lands the row IS terminal,
+    // so retries and `onStop` early-out and the stale reaper (ACTIVE rows only) skips
+    // it. Without the re-read the check run sits `in_progress` forever.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    vi.mocked(completeCheckRun).mockClear();
+    // The check run must be resolvable, or the PATCH no-ops for want of an id and the
+    // test would pass for the wrong reason.
+    ctx._kv.set('checkRunId', '99001');
+
+    vi.mocked(markBuildTerminalIfActive).mockRejectedValueOnce(
+      new Error('build b1: terminal status write did not settle within 5000ms'),
+    );
+    // The write that missed its deadline DID commit — the authoritative row is
+    // terminal, which is precisely what makes the row invisible to the reaper.
+    dbState.status.set('b1', 'failed');
+    stubOrderedPortFetch(m, []);
+
+    await expect(m.enforceTimeout()).rejects.toThrow('did not settle');
+
+    // FAIL-WITHOUT-FIX: no PATCH at all, and nothing else will ever send one.
+    expect(vi.mocked(completeCheckRun)).toHaveBeenCalledTimes(1);
+  });
+
+  it('finalizes the check run when the terminal write commits AFTER the re-read', async () => {
+    // The test above covers the ordering where the late write beat the immediate
+    // re-read. This is the other one, and it is the likelier of the two: the read is
+    // taken within milliseconds of the 5s rejection, so a query that blew past that
+    // deadline usually has not committed yet. A single re-read sees an ACTIVE row,
+    // maps it to a null conclusion and returns — and by the time the write lands,
+    // every other actor has early-outed on the DO-local terminal status. Reconciling
+    // only once leaves the check `in_progress` permanently.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    vi.mocked(completeCheckRun).mockClear();
+    ctx._kv.set('checkRunId', '99001');
+
+    vi.mocked(markBuildTerminalIfActive).mockRejectedValueOnce(
+      new Error('build b1: terminal status write did not settle within 5000ms'),
+    );
+    // Row still ACTIVE at teardown: the UPDATE is in flight, not yet committed.
+    dbState.status.set('b1', 'building');
+    stubOrderedPortFetch(m, []);
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+
+    await expect(m.enforceTimeout()).rejects.toThrow('did not settle');
+
+    // Nothing to conclude yet — and crucially, the manager did not give up.
+    expect(vi.mocked(completeCheckRun)).not.toHaveBeenCalled();
+    expect(scheduledTasks(m).some((t) => t.callback === 'reconcileTerminalWrite')).toBe(true);
+
+    // The in-flight UPDATE now commits, exactly as `withDeadline` allows.
+    dbState.status.set('b1', 'failed');
+    await runDueSchedules(m);
+
+    // FAIL-WITHOUT-FIX: no reconcile is ever armed, so this PATCH never happens and
+    // the check run stays `in_progress` for the life of the repository.
+    expect(vi.mocked(completeCheckRun)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(completeCheckRun).mock.calls[0][4]).toMatchObject({
+      conclusion: 'failure',
+    });
+  });
+
+  it('keeps looking while the terminal write has still not landed', async () => {
+    // The re-arm must survive a pass that learns nothing, or a write that commits on
+    // the second minute is no better off than one that never commits. It self-limits
+    // in the other direction too: a write that genuinely died leaves the row ACTIVE
+    // until the hourly stale reaper marks it `failed`, and the next pass finalizes
+    // from that — so the loop always ends, either at the commit or at the reaper.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    vi.mocked(completeCheckRun).mockClear();
+    ctx._kv.set('checkRunId', '99001');
+    dbState.status.set('b1', 'building');
+
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+    await m.reconcileTerminalWrite();
+
+    expect(vi.mocked(completeCheckRun)).not.toHaveBeenCalled();
+    expect(scheduledTasks(m).filter((t) => t.callback === 'reconcileTerminalWrite')).toHaveLength(
+      1,
+    );
+
+    // Still nothing. Re-arm again rather than dropping the build on the floor.
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+    await m.reconcileTerminalWrite();
+    expect(scheduledTasks(m).filter((t) => t.callback === 'reconcileTerminalWrite')).toHaveLength(
+      1,
+    );
+
+    // The stale reaper terminalizes the row; the next pass concludes and stops.
+    dbState.status.set('b1', 'failed');
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+    await m.reconcileTerminalWrite();
+    expect(vi.mocked(completeCheckRun)).toHaveBeenCalledTimes(1);
+    expect(scheduledTasks(m).some((t) => t.callback === 'reconcileTerminalWrite')).toBe(false);
+  });
+
+  it('reuses the check-run id from the bounded reconciliation row', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // Simulate eviction/cache loss: only the authoritative row still has the id.
+    ctx._kv.delete('checkRunId');
+    (m as unknown as { activeCheckRunId: string | null }).activeCheckRunId = null;
+    vi.mocked(getBuild).mockClear();
+    vi.mocked(completeCheckRun).mockClear();
+    vi.mocked(getBuild).mockResolvedValueOnce({
+      id: 'b1',
+      created_at: dbState.createdAt,
+      status: 'failed',
+      check_run_id: '99001',
+    } as never);
+
+    await m.reconcileTerminalWrite();
+
+    expect(vi.mocked(getBuild)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(completeCheckRun)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(completeCheckRun).mock.calls[0][3]).toBe('99001');
+  });
+
+  it('does not re-read a bounded reconciliation row whose check-run id is null', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    ctx._kv.delete('checkRunId');
+    (m as unknown as { activeCheckRunId: string | null }).activeCheckRunId = null;
+    vi.mocked(getBuild).mockClear();
+    vi.mocked(completeCheckRun).mockClear();
+    vi.mocked(getBuild).mockResolvedValueOnce({
+      id: 'b1',
+      created_at: dbState.createdAt,
+      status: 'failed',
+      check_run_id: null,
+    } as never);
+
+    await m.reconcileTerminalWrite();
+
+    expect(vi.mocked(getBuild)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(completeCheckRun)).not.toHaveBeenCalled();
+  });
+
+  it('stops reconciling once the build row is gone', async () => {
+    // `deleteProjectCascade` DELETES build rows during project teardown, so an
+    // armed reconcile outlives its row. A missing row is not a pending one: no
+    // write will ever land and no reaper can terminalize a row that is gone, so
+    // re-arming here is an alarm every RECONCILE_RETRY_SECONDS forever.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    vi.mocked(completeCheckRun).mockClear();
+    dbState.status.delete('b1'); // getBuild now returns null, as after a cascade delete
+
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+    await m.reconcileTerminalWrite();
+
+    // FAIL-WITHOUT-FIX: an absent row was treated like an active one and re-armed.
+    expect(scheduledTasks(m).some((t) => t.callback === 'reconcileTerminalWrite')).toBe(false);
+    expect(vi.mocked(completeCheckRun)).not.toHaveBeenCalled();
+  });
+
+  it('re-arms when the reconciliation read itself never settles', async () => {
+    // This runs exactly when Postgres is already stalling — the same stall that
+    // made the terminal write miss its deadline. An unbounded SELECT that PENDS
+    // reaches neither `schedule()` call, so the invocation dies with no retry
+    // armed and the check run is orphaned permanently: the very failure this
+    // method exists to prevent, one layer up.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    vi.mocked(completeCheckRun).mockClear();
+    // Pends forever — the Hyperdrive-stall shape, not the throw shape.
+    vi.mocked(getBuild).mockReturnValueOnce(new Promise(() => {}) as never);
+
+    (m as unknown as { _schedules: Array<ScheduledTask> })._schedules = [];
+    vi.useFakeTimers();
+    try {
+      const pending = m.reconcileTerminalWrite();
+      await vi.advanceTimersByTimeAsync(TERMINAL_WRITE_TIMEOUT_MS + 10);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // FAIL-WITHOUT-FIX: the await never returns, so nothing is ever re-armed.
+    expect(scheduledTasks(m).some((t) => t.callback === 'reconcileTerminalWrite')).toBe(true);
+  });
+
+  it('drains every page of a backlog in one pull, not one page per tick', async () => {
+    // The agent caps a response so an oversized body cannot blow the per-request
+    // timeout. But at one page per POLL_SECONDS tick, acknowledgement progress is
+    // unnecessarily delayed and a deep backlog needs many scheduled callbacks.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._logs.length = 0;
+
+    const pages = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => [
+      { seq: n, line: `page-${n}`, stream: 'stdout' as const, ts: n },
+    ]);
+    const fetchFn = stubPagedPortFetch(m, pages);
+
+    await (m as unknown as { pullLogsOnce: (c: unknown) => Promise<void> }).pullLogsOnce({
+      getTcpPort: () => ({ fetch: fetchFn }),
+      running: true,
+    });
+
+    // FAIL-WITHOUT-FIX: one page per call, so seven pages wait for seven ticks.
+    // One final empty request carries `since=<last ingested seq>` back to the agent,
+    // acknowledging the last page without waiting for another scheduled callback.
+    expect(fetchFn).toHaveBeenCalledTimes(pages.length + 1);
+    expect(fetchFn.mock.calls.at(-1)?.[0]).toBe(`http://manager/logs?since=${pages.length}`);
+    expect(ctx._logs.map((r) => r.line)).toEqual(pages.map((_, i) => `page-${i + 1}`));
+  });
+
+  it('bounds the whole paginated drain by wall clock, not per page', async () => {
+    // The page cap bounds WORK; it does not bound LATENCY. A fresh
+    // `AbortSignal.timeout` per request lets MAX_LOG_PULL_PAGES pages that each
+    // answer just under LOG_PULL_TIMEOUT_MS hold one callback for 64s — and
+    // `forceStopContainer` runs two of them in front of a SIGTERM. `pollLogs` and
+    // `enforceTimeout` are both base-scheduler callbacks and run one at a time,
+    // so that also postpones the Postgres revocation ending the token's authority.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._logs.length = 0;
+
+    // A PRODUCTIVE but slow agent: every page delivers and reports more, so
+    // neither the `hasMore` nor the cursor-not-advancing guard ever fires. This
+    // is the only shape that reaches the ceiling — a wedged agent aborts at the
+    // per-request timeout and breaks the loop after one page.
+    const perPageMs = 1500;
+    let clock = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    let seq = 0;
+    const fetchFn = vi.fn(async (_url: string, _port?: number, _init?: RequestInit) => {
+      clock += perPageMs;
+      seq += 1;
+      return new RealResponse(
+        JSON.stringify({
+          lines: [{ seq, line: `page-${seq}`, stream: 'stdout', ts: seq }],
+          lastSeq: seq,
+          hasMore: true,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
+
+    try {
+      await (m as unknown as { pullLogsOnce: (c: unknown) => Promise<void> }).pullLogsOnce({
+        getTcpPort: () => ({ fetch: fetchFn }),
+        running: true,
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    // FAIL-WITHOUT-FIX: MAX_LOG_PULL_PAGES (32) calls, i.e. 48s in one callback.
+    const affordable = Math.ceil(LOG_DRAIN_BUDGET_MS / perPageMs);
+    expect(fetchFn.mock.calls.length).toBe(affordable);
+    expect(fetchFn.mock.calls.length).toBeLessThan(MAX_LOG_PULL_PAGES);
+    // Cut short, not abandoned: the cursor advanced, so the next tick resumes.
+    expect(fetchFn.mock.calls.at(-1)?.[0]).toBe(`http://manager/logs?since=${affordable - 1}`);
+  });
+
+  /**
+   * Freeze the Workers clock for the length of a drain. A deployed Worker's clock
+   * advances on I/O, NOT during CPU work, so every millisecond a callback spends
+   * parsing, inserting and fanning out between fetches is invisible to
+   * LOG_DRAIN_BUDGET_MS. Freezing `Date.now()` reproduces that exactly: the
+   * wall-clock deadline can never expire, so whatever stops the loop is a
+   * deterministic work bound and nothing else.
+   */
+  function withFrozenWorkerClock<T>(run: () => Promise<T>): Promise<T> {
+    const frozen = Date.now();
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => frozen);
+    return run().finally(() => spy.mockRestore());
+  }
+
+  /** Endless maximum-shape pages: every page delivers `rows` lines and claims more. */
+  function stubEndlessPages(
+    m: BuildManager,
+    rows: number,
+    line: (seq: number) => string = (seq) => `line-${seq}`,
+  ): ReturnType<typeof vi.fn> {
+    let seq = 0;
+    const fn = vi.fn(async (_url: string, _port?: number, _init?: RequestInit) => {
+      const lines = Array.from({ length: rows }, () => {
+        seq += 1;
+        return { seq, line: line(seq), stream: 'stdout', ts: seq };
+      });
+      return new RealResponse(JSON.stringify({ lines, lastSeq: seq, hasMore: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    (m as unknown as { _portFetch: typeof fn })._portFetch = fn;
+    return fn;
+  }
+
+  function pullOnce(m: BuildManager, fetchFn: unknown): Promise<boolean> {
+    return (m as unknown as { pullLogsOnce: (c: unknown) => Promise<boolean> }).pullLogsOnce({
+      getTcpPort: () => ({ fetch: fetchFn }),
+    });
+  }
+
+  it('bounds ingestion by a deterministic sink budget the frozen Workers clock cannot see', async () => {
+    // LOG_DRAIN_BUDGET_MS bounds LATENCY, not WORK, and cannot be made to bound
+    // work: it is read off a clock that stands still while the CPU runs. With the
+    // agent answering instantly, a maximum-shape backlog puts
+    // MAX_LOG_PULL_PAGES x MAX_LOG_RESPONSE_LINES rows through JSON.parse, the
+    // SQLite insert path and the WS fan-out inside ONE callback — all of it scored
+    // as free, all of it in front of a teardown's SIGTERM.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._logs.length = 0;
+
+    // No subscribers and short lines, so a row costs exactly one sink op and the
+    // expected page count is the budget divided by the agent's page cap.
+    const fetchFn = stubEndlessPages(m, MAX_LOG_RESPONSE_LINES);
+    const pages = MAX_LOG_SINK_OPS_PER_DRAIN / MAX_LOG_RESPONSE_LINES;
+
+    await withFrozenWorkerClock(() => pullOnce(m, fetchFn));
+
+    // FAIL-WITHOUT-FIX: MAX_LOG_PULL_PAGES (32) calls — 64000 rows inserted and
+    // broadcast in one callback, with the deadline never once observing a tick.
+    expect(fetchFn).toHaveBeenCalledTimes(pages);
+    expect(pages).toBeLessThan(MAX_LOG_PULL_PAGES);
+    // Whole pages only: the cursor covers exactly the rows that reached the sink.
+    expect(logCursor(m)).toBe(MAX_LOG_SINK_OPS_PER_DRAIN);
+    expect(ctx._logs.length).toBe(MAX_LOG_SINK_OPS_PER_DRAIN);
+
+    // Cut short, not abandoned. The next callback resumes at the advanced cursor,
+    // and that request is also the acknowledgement this one skipped.
+    await withFrozenWorkerClock(() => pullOnce(m, fetchFn));
+    expect(fetchFn.mock.calls[pages][0]).toBe(
+      `http://manager/logs?since=${MAX_LOG_SINK_OPS_PER_DRAIN}`,
+    );
+    const seqs = ctx._logs.map((row) => Number(row.line.slice('line-'.length)));
+    expect(new Set(seqs).size).toBe(seqs.length); // no duplicates
+    expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, i) => seqs[0] + i)); // no gaps
+  });
+
+  it('charges WebSocket fan-out against the sink budget', async () => {
+    // Every ingested row is one insert PLUS one send per live subscriber, so the
+    // CPU a page costs scales with the tail audience. A row-count-only budget
+    // would let N subscribers multiply the real work by (1 + N) for free.
+    const rowsPerPage = 1000;
+    const subscribers = 4;
+
+    const quiet = makeStubCtx();
+    const quietManager = makeManager(quiet, makeEnv());
+    await quietManager.startBuild(makeConfig());
+    const quietFetch = stubEndlessPages(quietManager, rowsPerPage);
+    await withFrozenWorkerClock(() => pullOnce(quietManager, quietFetch));
+
+    const watched = makeStubCtx();
+    const watchedManager = makeManager(watched, makeEnv());
+    await watchedManager.startBuild(makeConfig());
+    for (let i = 0; i < subscribers; i++) {
+      await watchedManager.fetch(
+        new Request('https://manager/', { headers: { Upgrade: 'websocket' } }),
+      );
+    }
+    expect(watched._sockets.length).toBe(subscribers);
+    const watchedFetch = stubEndlessPages(watchedManager, rowsPerPage);
+    await withFrozenWorkerClock(() => pullOnce(watchedManager, watchedFetch));
+
+    // FAIL-WITHOUT-FIX: both drain the same 10 pages, and the watched one does
+    // five times the sink work doing it.
+    expect(quietFetch).toHaveBeenCalledTimes(MAX_LOG_SINK_OPS_PER_DRAIN / rowsPerPage);
+    expect(watchedFetch).toHaveBeenCalledTimes(
+      MAX_LOG_SINK_OPS_PER_DRAIN / (rowsPerPage * (1 + subscribers)),
+    );
+  });
+
+  it('charges row payload bytes against the sink budget', async () => {
+    // Bounding the ROW COUNT does not bound the work either: the agent caps a page
+    // at MAX_LOG_RESPONSE_BYTES, not at a row count, so two 1 MiB lines are a full
+    // page that a per-row budget prices at 2. Thirty-two of those pages are 64 MiB
+    // copied into SQLite, into a JSON payload and into every send buffer.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._logs.length = 0;
+
+    const megabyteLine = 'x'.repeat(LOG_SINK_OP_PAYLOAD_BYTES * 1024);
+    const rowCost = megabyteLine.length / LOG_SINK_OP_PAYLOAD_BYTES;
+    const rowsPerPage = MAX_LOG_RESPONSE_BYTES / megabyteLine.length;
+    const fetchFn = stubEndlessPages(m, rowsPerPage, () => megabyteLine);
+
+    await withFrozenWorkerClock(() => pullOnce(m, fetchFn));
+
+    // FAIL-WITHOUT-FIX: MAX_LOG_PULL_PAGES (32) calls / 64 MiB in one callback.
+    const pages = Math.ceil(MAX_LOG_SINK_OPS_PER_DRAIN / (rowsPerPage * rowCost));
+    expect(fetchFn).toHaveBeenCalledTimes(pages);
+    expect(pages).toBeLessThan(MAX_LOG_PULL_PAGES);
+    expect(ctx._logs.length).toBe(pages * rowsPerPage);
+  });
+
+  it('caps the teardown drain so the SIGTERM is not held behind unbounded sink work', async () => {
+    // The reviewer's actual hazard: `forceStopContainer` drains in FRONT of the
+    // stop/destroy that frees a global fleet slot. On a frozen clock the drain has
+    // no deadline it can observe, so only the work budget can return control to the
+    // signals.
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._logs.length = 0;
+    containerCalls.stopped = 0;
+
+    const fetchFn = stubEndlessPages(m, MAX_LOG_RESPONSE_LINES);
+
+    await withFrozenWorkerClock(() => m.cancelBuild('user cancelled'));
+
+    // FAIL-WITHOUT-FIX: 32 pages of maximum-shape ingestion before the SIGTERM.
+    expect(fetchFn.mock.calls.length).toBe(MAX_LOG_SINK_OPS_PER_DRAIN / MAX_LOG_RESPONSE_LINES);
+    expect(containerCalls.stopped).toBe(1);
+    expect(ctx._logs.map((row) => row.line)).toContain(
+      '[build-manager] container terminated: user cancelled',
+    );
+  });
+
+  it('re-arms the single-flight gate so a later pull is not swallowed', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // Coalescing must not become a one-shot latch: the gate is released in a
+    // `finally`, so the next tick pulls again.
+    const fetchFn = stubPortFetch(m, [
+      { lines: [{ seq: 1, line: 'first', stream: 'stdout', ts: 1 }], lastSeq: 1 },
+      { lines: [{ seq: 2, line: 'second', stream: 'stdout', ts: 2 }], lastSeq: 2 },
+    ]);
+
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn.mock.calls[1][0]).toBe('http://manager/logs?since=1');
+    expect(ctx._logs.map((r) => r.line)).toEqual(['first', 'second']);
+  });
+
+  it('releases the single-flight gate even when the pull throws', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+
+    // A rejected pull must not leave `pullInFlight` pinned to a settled promise —
+    // that would silently mute the log loop for the rest of the build.
+    const fetchFn = stubPortFetch(m, [
+      new Error('agent unreachable'),
+      { lines: [{ seq: 1, line: 'back online', stream: 'stdout', ts: 1 }], lastSeq: 1 },
+    ]);
+
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+    await (m as unknown as { pollLogs: () => Promise<void> }).pollLogs();
+
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(ctx._logs.map((r) => r.line)).toEqual(['back online']);
+  });
+
+  it('tears the container down even when the teardown drain pull throws', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    // A wedged/unreachable agent must not cost the SIGKILL: an escaping throw here
+    // would skip stop()/destroy() and leave the container pinning a fleet slot.
+    const fetchFn = stubPortFetch(m, [new Error('agent unreachable')]);
+
+    await expect(m.cancelBuild('build superseded')).resolves.toBeUndefined();
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
   });
 });
 
@@ -2905,8 +5128,8 @@ describe('sanitizeLogLineForMarkdown (terminal-visible text for the check run)',
     // ICH at the content end inserts only trailing blanks and leaves the cursor
     // put. Materializing them grew the row on every command; spreading the insert
     // into `splice` also blew V8's argument limit for a count near the row bound.
-    // Long enough that `maxColumn` reaches MAX_RENDERED_ROW_CELLS, so each count
-    // clamps to ~130000 — past V8's argument limit for a spread call.
+    // Long enough to cross the deterministic controlled-input cap before xterm
+    // allocates a grid or executes any insertion.
     const hostile = `seed${`${ESC}[130000@`.repeat(2000)}END`;
     // FAIL-WITHOUT-FIX: RangeError from the spread, or minutes of quadratic copying.
     expect(await sanitizeLogLineForMarkdown(hostile)).toBe('');
@@ -3324,11 +5547,9 @@ describe('BuildManager finalizeCheckRun log tail (output.text)', () => {
     ]);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(
-      m as unknown as { readLogTailMarkdown: () => string | null },
+      m as unknown as { readLogTailMarkdown: () => Promise<string | null> },
       'readLogTailMarkdown',
-    ).mockImplementation(() => {
-      throw new Error('sqlite read failed');
-    });
+    ).mockRejectedValue(new Error('sqlite read failed'));
 
     await m.onStop({ exitCode: 0, reason: 'exit' });
 
@@ -4191,6 +6412,352 @@ describe('build-agent lifecycle (container must always exit)', () => {
   });
 });
 
+// The DO PULLS logs (`GET /logs?since=N`) on a ~1s cadence and cannot pull at all
+// once the container exits — `logBuffer` and the control server die with the
+// process, and the DO's own `container.running` guard early-outs before it ever
+// fetches. So every line between the last successful poll and exit was lost,
+// including the failing build's actual error output and the closing
+// `[build-agent] void deploy exited with code N`. `waitForLogDrain` is the fix:
+// the agent holds the control server open at exit until the DO has ACKNOWLEDGED
+// every recorded line. The ack is the `since` cursor on a subsequent
+// `GET /logs?since=N` — the DO advances that cursor only after a successful
+// `res.json()` + `ingestLines()`, so it proves storage. The served mark
+// (`servedLogSeq`) deliberately does NOT gate the barrier: `res.end`'s callback
+// fires even when the peer never read a byte, so releasing on it certifies the
+// wrong side of the transport.
+describe('build-agent exit-time log drain barrier', () => {
+  it('waits until the DO puller catches up, then resolves true', async () => {
+    // Model the puller: `served` trails `recorded` and only advances on a "poll",
+    // which here happens on each sleep tick.
+    let served = 0;
+    const recorded = 5;
+    const sleeps: Array<number> = [];
+
+    const drained = await waitForLogDrain({
+      timeoutMs: 4000,
+      pollMs: 100,
+      served: () => served,
+      recorded: () => recorded,
+      now: (() => {
+        let t = 0;
+        return () => (t += 10); // never reaches the deadline
+      })(),
+      sleep: async (ms) => {
+        sleeps.push(ms);
+        served += 2; // the DO polled: 0 -> 2 -> 4 -> 6 (>= 5)
+      },
+    });
+
+    expect(drained).toBe(true);
+    // It actually WAITED (it did not return on the first check with served < recorded).
+    expect(sleeps).toEqual([100, 100, 100]);
+  });
+
+  it('returns immediately when the puller is already caught up', async () => {
+    const sleep = vi.fn(async () => {});
+    await expect(waitForLogDrain({ served: () => 9, recorded: () => 9, sleep })).resolves.toBe(
+      true,
+    );
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('gives up at the deadline (bounded — a dead/absent DO must never hang the container)', async () => {
+    // `served` NEVER advances: the DO is gone, already terminal, or was never
+    // wired. An unbounded wait here would pin a global container slot per build.
+    const sleep = vi.fn(async () => {});
+    let clock = 0;
+
+    const drained = await waitForLogDrain({
+      timeoutMs: 4000,
+      pollMs: 100,
+      served: () => 0,
+      recorded: () => 1,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+        await sleep();
+      },
+    });
+
+    expect(drained).toBe(false);
+    // Bounded by timeoutMs/pollMs — 40 ticks of 100ms, not an infinite loop.
+    expect(sleep).toHaveBeenCalledTimes(40);
+    expect(clock).toBe(4000);
+  });
+
+  it('resets the idle deadline while acknowledged progress continues across slow callbacks', async () => {
+    let clock = 0;
+    const acknowledgedAt = [7_000, 14_000, 21_000];
+    const served = (): number => acknowledgedAt.filter((at) => at <= clock).length;
+
+    const drained = await waitForLogDrain({
+      timeoutMs: 30_000,
+      idleTimeoutMs: 8_000,
+      pollMs: 1_000,
+      served,
+      recorded: () => acknowledgedAt.length,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+
+    // The old fixed 8s deadline closed during the second/third productive pull.
+    expect(drained).toBe(true);
+    expect(clock).toBe(21_000);
+  });
+
+  it('still releases a dead DO at the short idle deadline, not the absolute cap', async () => {
+    let clock = 0;
+    const drained = await waitForLogDrain({
+      timeoutMs: LOG_DRAIN_ABSOLUTE_TIMEOUT_MS,
+      idleTimeoutMs: LOG_DRAIN_IDLE_TIMEOUT_MS,
+      pollMs: 1_000,
+      served: () => 0,
+      recorded: () => 1,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+
+    expect(drained).toBe(false);
+    expect(clock).toBe(LOG_DRAIN_IDLE_TIMEOUT_MS);
+  });
+
+  it('enforces the non-resettable absolute cap despite continual partial progress', async () => {
+    let clock = 0;
+    let acknowledged = 0;
+    let nextProgress = 7_000;
+    const drained = await waitForLogDrain({
+      timeoutMs: 20_000,
+      idleTimeoutMs: 8_000,
+      pollMs: 1_000,
+      served: () => acknowledged,
+      recorded: () => 100,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+        if (clock >= nextProgress) {
+          acknowledged += 1;
+          nextProgress += 7_000;
+        }
+      },
+    });
+
+    expect(drained).toBe(false);
+    expect(acknowledged).toBeGreaterThan(0);
+    expect(clock).toBe(20_000);
+  });
+
+  it('uses real timers by default without hanging when the deadline is short', async () => {
+    // Same starvation, but through the REAL setTimeout path used in main().
+    await expect(
+      waitForLogDrain({ timeoutMs: 30, pollMs: 5, served: () => 0, recorded: () => 1 }),
+    ).resolves.toBe(false);
+  });
+});
+
+// End-to-end over the agent's REAL HTTP control server: the lines recorded AFTER
+// the build child closes (the `void deploy exited with code N` line is emitted
+// after `child.on('close')` resolves) must still be retrievable while the server
+// is open — that is exactly what the drain barrier buys, and those lines were
+// missing from every real container build's check run.
+describe('build-agent GET /logs serves post-child-close lines', () => {
+  const REQUIRED_ENV = ['VOID_TOKEN', 'VOID_API_URL', 'VOID_PROJECT'] as const;
+  let savedEnv: Record<string, string | undefined>;
+  let server: import('node:http').Server | null = null;
+
+  beforeEach(() => {
+    savedEnv = {};
+    for (const key of REQUIRED_ENV) {
+      savedEnv[key] = process.env[key];
+    }
+    process.env.VOID_TOKEN = 'deploy-jwt';
+    process.env.VOID_API_URL = 'https://api.void.cloud';
+    process.env.VOID_PROJECT = 'my-app';
+  });
+
+  afterEach(async () => {
+    await closeControlServer(server);
+    server = null;
+    for (const key of REQUIRED_ENV) {
+      if (savedEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = savedEnv[key];
+      }
+    }
+  });
+
+  it('budgets a page by serialized bytes, not UTF-16 code units', async () => {
+    // `entry.line.length` is UTF-16 code units of the raw string, which is not
+    // what goes on the wire: JSON escaping turns one control character into six
+    // bytes, and each entry carries ~61 bytes of seq/stream/ts envelope. Counting
+    // code units under-counted the body by up to 6x — and the DO advances its
+    // cursor only after a SUCCESSFUL parse, so a body too large to read inside
+    // LOG_PULL_TIMEOUT_MS is a livelock, not a slow transfer.
+    const before = getBufferedLogLines();
+    const since = before.length > 0 ? before[before.length - 1].seq : 0;
+
+    // Under the OLD accounting these fit one page twice over (2000 x 1048 chars
+    // is just under the 2 MiB budget, and the line cap is 2000). Serialized, each
+    // NUL is `\u0000` — six bytes — so the real body is ~12.6 MB.
+    const control = '\u0000'.repeat(1048);
+    for (let i = 0; i < MAX_LOG_RESPONSE_LINES; i++) {
+      record(control, 'stdout');
+    }
+
+    server = await startControlServer(0);
+    const address = server.address();
+    if (typeof address === 'string' || address === null) {
+      throw new Error('expected a TCP address');
+    }
+    const res = await fetch(`http://127.0.0.1:${address.port}/logs?since=${since}`);
+    const text = await res.text();
+
+    // FAIL-WITHOUT-FIX: ~12.6 MB, six times the cap it claims to honour.
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(MAX_LOG_RESPONSE_BYTES);
+    const body = JSON.parse(text) as { lines: Array<{ seq: number }>; hasMore: boolean };
+    // Still makes progress, and still reports the remainder.
+    expect(body.lines.length).toBeGreaterThan(0);
+    expect(body.lines.length).toBeLessThan(MAX_LOG_RESPONSE_LINES);
+    expect(body.hasMore).toBe(true);
+  });
+
+  it('pages an oversized backlog so each pull advances the cursor', async () => {
+    // The response used to be every retained line above the cursor — up to
+    // MAX_BUFFERED_LOG_LINES x MAX_PARTIAL_LINE_CHARS in one body. The DO aborts
+    // at LOG_PULL_TIMEOUT_MS and only advances `logCursor` after a SUCCESSFUL
+    // parse, so an oversized body is a LIVELOCK, not a slow transfer: every retry
+    // asks for the same backlog and the cursor never moves, until the drain
+    // barrier expires and the tail is lost.
+    const before = getBufferedLogLines();
+    let since = before.length > 0 ? before[before.length - 1].seq : 0;
+    const start = since;
+
+    // Comfortably past the byte cap: 40 x 128KB.
+    const big = 'x'.repeat(128 * 1024);
+    for (let i = 0; i < 40; i++) {
+      record(big, 'stdout');
+    }
+    const finalSeq = getBufferedLogLines().slice(-1)[0].seq;
+
+    server = await startControlServer(0);
+    const address = server.address();
+    if (typeof address === 'string' || address === null) {
+      throw new Error('expected a TCP address');
+    }
+    const pull = async (
+      from: number,
+    ): Promise<{ lines: Array<{ seq: number }>; lastSeq: number }> =>
+      (await (await fetch(`http://127.0.0.1:${address.port}/logs?since=${from}`)).json()) as {
+        lines: Array<{ seq: number }>;
+        lastSeq: number;
+      };
+
+    // FAIL-WITHOUT-FIX: one body carries all 40 lines (~5MB) and `lastSeq` jumps
+    // straight to the end, so nothing bounds the transfer the DO must finish.
+    const first = await pull(since);
+    expect(JSON.stringify(first.lines).length).toBeLessThanOrEqual(MAX_LOG_RESPONSE_BYTES * 1.1);
+    expect(first.lastSeq).toBeLessThan(finalSeq);
+    expect(first.lastSeq).toBe(first.lines[first.lines.length - 1].seq);
+
+    // And repeated pulls converge — each batch strictly advances the cursor.
+    let rounds = 0;
+    since = first.lastSeq;
+    while (since < finalSeq && rounds < 50) {
+      const next = await pull(since);
+      expect(next.lastSeq).toBeGreaterThan(since);
+      since = next.lastSeq;
+      rounds++;
+    }
+    expect(since).toBe(finalSeq);
+    expect(start).toBeLessThan(finalSeq);
+  });
+
+  it("serves the post-close `void deploy exited with code N` line, and releases the barrier only on the DO's ACK, not on serving it", async () => {
+    // The module-level ring is shared across this file's suites, so poll from the
+    // current high-water mark rather than 0.
+    const before = getBufferedLogLines();
+    const since = before.length > 0 ? before[before.length - 1].seq : 0;
+
+    // Ephemeral port: the container's fixed 4000 could collide in CI.
+    server = await startControlServer(0);
+    const address = server.address();
+    if (typeof address === 'string' || address === null) {
+      throw new Error('expected a TCP address');
+    }
+
+    const code = await runBuild({
+      downloadSource: vi.fn(async () => {}),
+      resolveInstall: () => ({ manager: 'npm', cmd: 'npm', args: ['ci'] }),
+      // The child "closes" here; the agent's closing line is recorded AFTER it.
+      runChild: vi.fn(async () => 0),
+      reportStatus: vi.fn(async () => {}),
+      hasLocalVoid: () => true,
+    });
+    expect(code).toBe(0);
+
+    const res = await fetch(`http://127.0.0.1:${address.port}/logs?since=${since}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      lines: Array<{ seq: number; line: string }>;
+      lastSeq: number;
+    };
+
+    // FAIL-WITHOUT-FIX (in production): the container used to exit before the DO's
+    // next ~1s poll, so this line never reached the DO's store or the check run.
+    expect(body.lines.map((l) => l.line)).toContain('[build-agent] void deploy exited with code 0');
+    // The handler stamps the served high-water mark — diagnostic only.
+    expect(body.lastSeq).toBeGreaterThan(since);
+    expect(getServedLogSeq()).toBe(body.lastSeq);
+
+    // FAIL-WITHOUT-FIX: serving the tail must NOT release the barrier. The DO has
+    // received bytes but has not said it stored them, and if its `res.json()` or
+    // `ingestLines()` throws it leaves its cursor unadvanced and retries — against
+    // an agent that would already be gone.
+    expect(getAckedLogSeq()).toBe(since);
+    await expect(waitForLogDrain({ timeoutMs: 50, pollMs: 5 })).resolves.toBe(false);
+
+    // The DO's NEXT poll carries the advanced cursor. That is the acknowledgement,
+    // and only then may the container die. No off-by-one: the cursor the DO stores
+    // is `lastSeq` verbatim, so it comes back as `since=lastSeq`.
+    const ack = await fetch(`http://127.0.0.1:${address.port}/logs?since=${body.lastSeq}`);
+    expect(ack.status).toBe(200);
+    const ackBody = (await ack.json()) as { lines: Array<unknown>; lastSeq: number };
+    expect(ackBody.lines).toEqual([]);
+    expect(getAckedLogSeq()).toBe(body.lastSeq);
+    await expect(waitForLogDrain({ timeoutMs: 50, pollMs: 5 })).resolves.toBe(true);
+  });
+
+  it('clamps a forged /logs cursor to recorded lines — it cannot ack the future', async () => {
+    // This server is unauthenticated, binds all interfaces on a fixed port, and the
+    // untrusted build children share its network namespace, so `since` is
+    // attacker-reachable. Unclamped, ONE `?since=MAX_SAFE_INTEGER` would mark every
+    // FUTURE line acked and release the exit barrier for good.
+    server = await startControlServer(0);
+    const address = server.address();
+    if (typeof address === 'string' || address === null) {
+      throw new Error('expected a TCP address');
+    }
+
+    const forged = await fetch(
+      `http://127.0.0.1:${address.port}/logs?since=${Number.MAX_SAFE_INTEGER}`,
+    );
+    expect(forged.status).toBe(200);
+
+    // Recorded AFTER the forgery — exactly the line a suppressed tail would lose.
+    record('[build-agent] void deploy exited with code 1', 'stdout');
+
+    // FAIL-WITHOUT-FIX: resolves true, because the forged mark already covers this
+    // line's seq. The honest DO is unaffected — its cursor is always a previously
+    // served `lastSeq`, so the clamp is a no-op for it (asserted by the test above,
+    // which still reaches `true` on a genuine ack).
+    await expect(waitForLogDrain({ timeoutMs: 50, pollMs: 5 })).resolves.toBe(false);
+  });
+});
+
 // the build agent's REAL package-manager + deploy-command
 // resolution reads the repo files in WORK_DIR (`/tmp/build/src`). These tests
 // prepare that directory on disk, run `runBuild` WITHOUT injecting
@@ -4568,6 +7135,65 @@ describe('build-agent log buffer is bounded (3382226043)', () => {
     expect(buf[0].seq).toBeGreaterThan(1);
     // ...and seq is contiguous across the retained window (no gaps from eviction).
     expect(buf.at(-1)!.seq - buf[0].seq + 1).toBe(buf.length);
+  });
+
+  it('caps logBuffer by BYTES as well, so few huge lines cannot pin the heap', () => {
+    // The line cap bounds the COUNT only: at MAX_PARTIAL_LINE_CHARS each, 10000
+    // retained lines is ~1.22 GiB of live strings, and a puller draining
+    // MAX_LOG_PULL_PAGES x MAX_LOG_RESPONSE_BYTES per callback needs ~19
+    // callbacks to clear it. Capping bytes makes "one drain covers the ring"
+    // structural rather than average-case.
+    const huge = 'x'.repeat(128 * 1024);
+    const flood = Math.ceil((MAX_BUFFERED_LOG_BYTES / huge.length) * 2);
+    // Far below the LINE cap, so only the byte cap can evict here.
+    expect(flood).toBeLessThan(MAX_BUFFERED_LOG_LINES);
+    for (let i = 0; i < flood; i += 1) {
+      record(`${huge}${i}`, 'stdout');
+    }
+
+    const buf = getBufferedLogLines();
+    // FAIL-WITHOUT-FIX: nothing evicts, so this is ~2x the cap.
+    // Measured the way `/logs` budgets a page — serialized bytes, not UTF-16 code
+    // units. Counting code units here would let the ring hold up to 6x this on the
+    // wire, which no longer fits what one drain can fetch.
+    const retained = buf.reduce(
+      (sum, entry) => sum + Buffer.byteLength(JSON.stringify(entry)) + 1,
+      0,
+    );
+    expect(retained).toBeLessThanOrEqual(MAX_BUFFERED_LOG_BYTES);
+    // Oldest-first eviction: the newest line survives, and seq stays contiguous.
+    expect(buf.at(-1)?.line.endsWith(`${flood - 1}`)).toBe(true);
+    expect(buf.at(-1)!.seq - buf[0].seq + 1).toBe(buf.length);
+
+    // The ring is module state shared with every later test, and it is now at the
+    // cap — leaving it there makes the next big line evict from the front and
+    // shift the indices those tests slice from.
+    clearBufferedLogLines();
+  });
+
+  it('measures the ring in the same unit a page is budgeted in', () => {
+    // The whole point of the byte cap is that the ring fits inside what one drain
+    // can fetch, and a drain is budgeted in SERIALIZED bytes. Control characters
+    // JSON-escape to six bytes each, so a ring counted in UTF-16 code units holds
+    // up to 6x its nominal size on the wire — straight back past the
+    // MAX_LOG_PULL_PAGES x MAX_LOG_RESPONSE_BYTES the guarantee rests on.
+    const control = '\u0000'.repeat(64 * 1024);
+    const flood = Math.ceil((MAX_BUFFERED_LOG_BYTES / (control.length * 6)) * 2);
+    expect(flood).toBeLessThan(MAX_BUFFERED_LOG_LINES);
+    for (let i = 0; i < flood; i += 1) {
+      record(control, 'stdout');
+    }
+
+    const wire = getBufferedLogLines().reduce(
+      (sum, entry) => sum + Buffer.byteLength(JSON.stringify(entry)) + 1,
+      0,
+    );
+    // FAIL-WITHOUT-FIX: ~6x the cap, because only code units were counted.
+    expect(wire).toBeLessThanOrEqual(MAX_BUFFERED_LOG_BYTES);
+    // And still comfortably inside one full drain.
+    expect(wire).toBeLessThanOrEqual(MAX_LOG_PULL_PAGES * MAX_LOG_RESPONSE_BYTES);
+
+    clearBufferedLogLines();
   });
 
   // record() also mirrors every line to process.stderr (the last-resort log path).

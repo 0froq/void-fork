@@ -73,6 +73,189 @@ export const CHECK_RUN_OUTPUT_TEXT_MAX_BYTES = 65535;
 // (first tick at 1s) and re-armed by `pollLogs` until the build is terminal.
 const POLL_SECONDS = 1;
 
+// Hard ceiling on a single `GET /logs?since=N` pull. The pull runs from a
+// scheduled callback AND — since the teardown drain — from `forceStopContainer`,
+// i.e. directly in front of the SIGTERM/SIGKILL that a cancel/timeout depends on.
+// A wedged agent that accepts the TCP connection but never responds would
+// otherwise stall the alarm chain, or (far worse) stall cancellation itself and
+// pin one of the fleet's global `max_instances` slots — exactly the capacity
+// starvation the `destroy()` escalation exists to prevent. Bound it: 2s is far
+// more than a healthy in-container buffer read needs, and an abort just means one
+// tick's lines are lost instead of the whole teardown.
+export const LOG_PULL_TIMEOUT_MS = 2000;
+
+/**
+ * Requests per pull callback, including the final empty request that acknowledges
+ * the last ingested page back to the agent. Bounds the work one scheduled callback
+ * can do while still letting a deep backlog clear inside the exit barrier. The
+ * agent resets its idle deadline whenever this puller acknowledges progress, but
+ * still has a non-resettable absolute cap.
+ */
+export const MAX_LOG_PULL_PAGES = 32;
+
+/**
+ * Wall-clock ceiling on ONE pull callback, however many pages it drains. The
+ * page cap bounds WORK; this bounds LATENCY, and they are not the same bound —
+ * Without this deadline, MAX_LOG_PULL_PAGES pages that each answer just under
+ * LOG_PULL_TIMEOUT_MS could hold one callback for 64s and put ~128s of work in
+ * front of a teardown that joins an in-flight drain then takes a fresh snapshot.
+ * `pollLogs` and `enforceTimeout` are both base-scheduler callbacks and run one at
+ * a time, so that also postpones token revocation. Keep the deadline at 2x
+ * LOG_PULL_TIMEOUT_MS; a drain cut short resumes from the advanced cursor next
+ * tick.
+ */
+export const LOG_DRAIN_BUDGET_MS = LOG_PULL_TIMEOUT_MS * 2;
+
+/**
+ * Payload bytes charged as one sink operation. A row's cost is at least 1 (the
+ * fixed per-row insert/serialize/send overhead) and grows with its length,
+ * because every byte is copied into a SQLite row, into a JSON payload, and into
+ * each subscriber's send buffer. Measured in UTF-16 code units — deterministic,
+ * and within a small constant factor of the real byte count. This is a WORK
+ * budget, not a storage bound; it does not need byte-exactness, it needs to be
+ * impossible to game.
+ */
+export const LOG_SINK_OP_PAYLOAD_BYTES = 1024;
+
+/**
+ * Deterministic ceiling on the SINK work one pull callback may do, in sink
+ * operations: for each ingested row, one SQLite insert plus one `ws.send` per
+ * live subscriber, weighted by the row's payload (`LOG_SINK_OP_PAYLOAD_BYTES`).
+ * A page of `n` rows with `s` subscribers therefore costs
+ * `(1 + s) * sum(max(1, ceil(len / LOG_SINK_OP_PAYLOAD_BYTES)))`.
+ *
+ * `LOG_DRAIN_BUDGET_MS` cannot bound this, and neither can any other clock. A
+ * deployed Worker's clock does not advance during CPU work — it moves on I/O —
+ * so `Date.now()` here measures the agent's response latency and scores every
+ * parse, insert and fan-out between the fetches as free. MAX_LOG_PULL_PAGES
+ * bounds the RESPONSE SIZE a callback may take (32 x MAX_LOG_RESPONSE_BYTES),
+ * but bounding the size of the data does not bound the work done on it: 64 MiB
+ * of rows fanned out to `s` subscribers is `(1 + s)` copies of it, and that
+ * whole cost sits in front of the SIGTERM/SIGKILL a cancel or timeout depends
+ * on, against the invocation's CPU allowance. The wall-clock deadline still
+ * bounds LATENCY (how long a teardown waits on a slow agent); this bounds WORK.
+ *
+ * Sized at MAX_STORED_LOG_LINES because that is the DO's retained window: rows
+ * ingested past it within the same callback are deleted by that same batch's
+ * eviction statement, so a larger budget could only buy work whose result is
+ * immediately discarded. An unsubscribed build of short lines therefore keeps
+ * today's behaviour (a full agent ring drains in one callback); a subscribed or
+ * chatty one spends the same budget proportionally faster, which is exactly the
+ * cost it imposes.
+ *
+ * Checked BETWEEN pages, never inside one. A response page is ingested
+ * atomically — the cursor may not advance past rows that were not ingested — so
+ * one maximum page may overshoot the cap. The callback then returns without the
+ * final acknowledgement request; the next one resumes from the advanced cursor,
+ * and its `since=<advanced>` IS that acknowledgement.
+ */
+export const MAX_LOG_SINK_OPS_PER_DRAIN = MAX_STORED_LOG_LINES;
+
+/**
+ * How long `onError` keeps retrying a live agent after a failed terminal pull.
+ * The agent holds its HTTP server open for an 8s idle window while waiting for
+ * the DO cursor acknowledgement. Leave one polling interval of margin so the
+ * final successful response can be observed before that server closes.
+ */
+export const LOG_TERMINAL_DRAIN_RETRY_WINDOW_MS = 7000;
+
+// Wall-clock granted to the container PAST its build budget, covering the agent's
+// exit-time drain barrier (`waitForLogDrain` in container/build-agent.mjs) plus
+// the final flush and server close that follow it.
+//
+// The budget must bound build EXECUTION only. After `runBuild` returns, the agent
+// deliberately holds the process open so the pull-loop can collect the tail — the
+// container is still `running`, and the DO status is still `deploying` because the
+// agent cannot report a terminal status by design (`handleStatus` rejects them). So
+// an `enforceTimeout` that comes due INSIDE that barrier wins its CAS and overwrites
+// a successful, already-live deploy with `failed` / 'build timed out', completing the
+// check run as a failure with `void deploy exited with code 0` sitting in its own log
+// tail. Routing KV and the `deployments` row are already committed by then and are
+// never rolled back, so the deployment stays live — only the report is wrong, which
+// is worse than it sounds for anyone reading it.
+//
+// 125s covers the agent's 120s absolute barrier with shutdown slack. The agent also
+// has an 8s no-progress deadline, so a dead DO still releases its container quickly;
+// the longer window is available only while acknowledged-cursor progress continues.
+// This remains inside the deploy token's 5-minute margin. Two copies of the timing
+// relation live in separate processes (the agent is plain JS copied into the image
+// and cannot import from `src/`), so build-manager.test.ts asserts it.
+//
+// Deliberately UNCONDITIONAL, and reviewed as such. It is true that nothing tells
+// the DO whether the agent has entered its drain phase, so a build still installing
+// at its deadline gets this grace too. Gating it on an explicit "draining"
+// signal from the agent would need a new agent->DO protocol message on the exact
+// path that is already failing, and a lost or late signal would kill the container
+// mid-drain — which is precisely the tail-loss bug this exists to prevent. Trading a
+// bounded overshoot, still inside the deploy token, for a new
+// silent-log-loss failure mode is the wrong direction. Revisit only if the agent
+// grows a status channel reliable enough to gate a kill on.
+export const LOG_DRAIN_GRACE_SECONDS = 125;
+
+// Hard ceiling on the pre-teardown Postgres revocation (`markBuildTerminalIfActive`
+// at the three teardown sites: enforceTimeout / cancelBuild / the startBuild catch).
+//
+// Those sites deliberately write `builds.status` BEFORE signalling the container,
+// because that row is the deploy token's authority and the drain now sits between
+// the decision and the kill. That ordering is right, but it put a Postgres round
+// trip in FRONT of the only thing that stops a runaway container — and
+// `createDb()` builds a bare `drizzle(connectionString)` over a `pg.Pool` with no
+// `connectionTimeoutMillis` and no `query_timeout` (all of pg's deadline defaults
+// are `false`/`0`). A query that PENDS rather than rejects therefore never reaches
+// the `catch`, and `forceStopContainer()` + `pokeScheduler()` are never reached at
+// all: the timed-out build keeps running with a still-honored token on a pinned
+// fleet slot.
+//
+// Nothing recovers that cheaply. The base scheduler runs callbacks serially inside
+// one `alarm()` and only deletes the schedule row after the callback returns, so
+// `syncPendingStoppedEvents`, the `sleepAfter` idle net and the `pollLogs` re-arm
+// all sit behind the hang. Worse, the retry after the runtime kills the invocation
+// is a NO-OP: `setStatus('failed')` has already run, so the entry guard
+// (`TERMINAL_STATUSES.includes(config.status)`) returns immediately. Teardown then
+// waits on the hourly stale reaper at STALE_CONTAINER_BUILD_MAX_AGE_MINUTES — long
+// past the deploy token's own expiry.
+//
+// So bound it and let a non-settling write fall into the SAME path a throw already
+// takes: capture, tear down, rethrow after. That trade is already made and
+// documented here — a revocation that fails leaves the row ACTIVE for the reaper,
+// which is strictly better than leaving the container alive to use it.
+//
+// 5s is ~3 orders above a warm Hyperdrive UPDATE and still covers a cold pool
+// connect, while staying well inside the SIGTERM grace that follows it.
+export const TERMINAL_WRITE_TIMEOUT_MS = 5000;
+
+// How long `reconcileTerminalWrite` waits before looking again when the row is still
+// ACTIVE. Deliberately coarse: by the time it re-arms, the write has ALREADY missed a
+// 5s deadline, so the interesting distribution is minutes, not milliseconds, and the
+// worst case (a write that never lands) polls until the hourly stale reaper flips the
+// row — capped by that, not by this. Nothing waits on the result, so a slow
+// convergence costs a late check-run PATCH and nothing else.
+export const RECONCILE_RETRY_SECONDS = 300;
+
+/**
+ * Reject with `reason` if `work` has not settled within `ms`.
+ *
+ * The loser is not cancelled — a `pg` query has no abort handle here — but both
+ * outcomes stay handled: the two-argument `then` attaches permanent handlers, so a
+ * late rejection resolves into a no-op `reject()` on an already-settled promise
+ * rather than an unhandled rejection.
+ */
+export function withDeadline<T>(work: Promise<T>, ms: number, reason: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(reason)), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 // Pin the build container's fallback Void CLI to the platform's shipped version.
 // Used ONLY when the repo has no local `void` dependency to run; a repo that
 // pins its own version is unaffected. Kept equal to
@@ -1018,6 +1201,17 @@ type StoredBuildStatus =
 type ManagerState = BuildConfig & { status: StoredBuildStatus };
 
 /**
+ * The narrow slice of `ctx.container` the log pull needs (the base class copies it
+ * into a private field, so we read it back through a cast): `running` for the
+ * cheap early-out and `getTcpPort` for the NON-starting fetch. `getTcpPort`
+ * returns a real `Fetcher`, so the init — specifically `signal` — is honored.
+ */
+type ContainerPortSurface = {
+  running: boolean;
+  getTcpPort(port: number): { fetch(url: string, init?: RequestInit): Promise<Response> };
+};
+
+/**
  * Per-build DO (keyed by build id) that runs one build inside a Cloudflare
  * Container, streams the container's logs to attached WebSocket consumers,
  * enforces a wall-clock timeout, and writes every status transition back to
@@ -1061,8 +1255,86 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
   private logCursor = 0;
   private logTableReady = false;
 
+  // In-flight `GET /logs` pull, or null when idle. See `pullLogsOnce`: the pull
+  // READS `logCursor` to build the URL and WRITES it three awaits later, so two
+  // overlapping pulls both start from the stale cursor and ingest the same lines
+  // twice. Concurrency here is real — a `fetch()` is NOT storage I/O, so it does
+  // not hold the DO input gate, and `forceStopContainer` (cancelBuild RPC, the
+  // agent's POST /cancel, the startBuild catch) can run while a scheduled
+  // `pollLogs` sits mid-fetch.
+  private pullInFlight: Promise<boolean> | null = null;
+
+  /**
+   * Whether some teardown has already claimed the right to ingest the
+   * `container terminated: …` marker. See `claimTerminationMarker`.
+   */
+  private terminationMarkerClaimed = false;
+
+  /**
+   * Whether a teardown in this DO instance has actually signalled a LIVE container.
+   * Distinguishes the two ways `forceStopContainer` can find `running === false`:
+   * the container exited on its own (its agent already drained the tail through
+   * `waitForLogDrain`, so the log ends where the agent ended it and owes no
+   * explanation), or a peer teardown killed it out from under this caller (which
+   * very much does). Only the second may emit a marker.
+   */
+  private containerTornDown = false;
+
+  /**
+   * Shared SIGTERM+SIGKILL attempt for overlapping teardowns. The marker owner
+   * must wait for the same attempt as its peers: otherwise it can observe both
+   * of its own calls fail just before a non-owner successfully signals, and
+   * either emit falsely or miss the only truthful marker.
+   */
+  private teardownInFlight: Promise<void> | null = null;
+
+  /**
+   * First-caller-wins claim on the termination marker, so overlapping teardowns
+   * leave the reader ONE authoritative explanation instead of several
+   * contradictory ones.
+   *
+   * Synchronous on purpose. The obvious spellings both fail:
+   *   - the Postgres CAS (`revokeBuildRow`) is a true global arbiter, but the
+   *     ordinary external cancel path (`cancelContainerBuildDos`) commits the
+   *     terminal row BEFORE calling in, so EVERY caller loses it and no marker
+   *     is ever emitted;
+   *   - reading the local status and then writing it is two awaits, and only
+   *     `ctx.storage` holds the input gate — a concurrent teardown interleaves
+   *     between them, both observe a non-terminal status, and both emit.
+   *
+   * A plain field read+write cannot be interleaved: a DO runs single-threaded
+   * and there is no await between the test and the set. Scoped to this DO
+   * instance, which is the scope that matters — a teardown after an eviction
+   * has no in-flight peer to duplicate.
+   */
+  private claimTerminationMarker(): boolean {
+    if (this.terminationMarkerClaimed) {
+      return false;
+    }
+    this.terminationMarkerClaimed = true;
+    return true;
+  }
+
   private db(): Db {
     return createDb(this.env.HYPERDRIVE.connectionString);
+  }
+
+  /**
+   * `markBuildTerminalIfActive` on a deadline — the ONLY form the three teardown
+   * sites may use, because there the write sits in front of the container kill.
+   * See TERMINAL_WRITE_TIMEOUT_MS. Reads elsewhere are not bounded: they do not
+   * gate a teardown, so a slow one costs latency, not a pinned fleet slot.
+   */
+  private revokeBuildRow(
+    buildId: string,
+    status: 'failed' | 'cancelled',
+    opts: { error: string; completedAt: string },
+  ): Promise<boolean> {
+    return withDeadline(
+      markBuildTerminalIfActive(this.db(), buildId, status, opts),
+      TERMINAL_WRITE_TIMEOUT_MS,
+      `build ${buildId}: terminal status write did not settle within ${TERMINAL_WRITE_TIMEOUT_MS}ms`,
+    );
   }
 
   private async getConfig(): Promise<ManagerState | null> {
@@ -1467,13 +1739,20 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       // (`timeoutMinutes: 0`): the base `sleepAfter` idle-stop never fires for a
       // busy container, so without this an orphaned build could run far past any
       // sane ceiling. 0 falls back to the hard max; a positive plan timeout is
-      // capped at it. Mirrors `deployTokenTtlSecondsForBuildMinutes`, so the
-      // build can never outlive its deploy token.
+      // capped at it.
+      //
+      // Armed at budget + LOG_DRAIN_GRACE_SECONDS: the plan budget bounds build
+      // EXECUTION, and the agent's exit-time drain barrier runs after that with the
+      // container still `running` and the status still `deploying`. Without the grace
+      // a build that finishes in the final seconds of its budget has its SUCCESSFUL,
+      // already-live deploy overwritten with 'build timed out'. Still mirrors
+      // `deployTokenTtlSecondsForBuildMinutes` with room to spare (the token carries a
+      // 5-minute margin), so the build can never outlive its deploy token.
       const effectiveTimeout =
         config.timeoutMinutes > 0
           ? Math.min(config.timeoutMinutes, DEPLOY_TOKEN_HARD_MAX_MINUTES)
           : DEPLOY_TOKEN_HARD_MAX_MINUTES;
-      await this.schedule(effectiveTimeout * 60, 'enforceTimeout');
+      await this.schedule(effectiveTimeout * 60 + LOG_DRAIN_GRACE_SECONDS, 'enforceTimeout');
     } catch (error) {
       if (isContainerCapacityError(error)) {
         // Capacity-to-start (fleet full), not a build failure. Nothing was started
@@ -1493,46 +1772,110 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       // SIGKILLs (idempotent / TERMINAL-safe) so a SIGTERM-ignoring build agent
       // can't outlive the failure; `stop()` alone is SIGTERM-only. Best-effort so
       // a teardown failure doesn't mask the original error.
+      const ownsMarker = this.claimTerminationMarker();
       await this.setStatus('failed');
-      if (containerStarted) {
-        await this.forceStopContainer();
-      }
       // CAS terminal-if-active (NOT an unconditional write): a concurrent cancel
       // (terminateBuildsForProject commits 'cancelled' out-of-band, then the
       // cancelBuild RPC) can have already driven this row terminal. An
       // unconditional updateBuildStatus('failed') would clobber that 'cancelled'
       // to 'failed'; the CAS no-ops on an already-terminal row (the slot is
-      // already freed). The DB write + broadcast run inside a try whose `finally`
-      // ALWAYS pokes the scheduler — mirroring onStop/onError/enforceTimeout — so a
-      // transient Hyperdrive/Postgres throw on the terminal write can't skip the
-      // queue re-arm and strand the slot until the stale reaper.
+      // already freed).
+      //
+      // Runs BEFORE the teardown, like enforceTimeout/cancelBuild: `builds.status`
+      // is the deploy token's authority, and `forceStopContainer` now drains logs
+      // for up to 2x LOG_DRAIN_BUDGET_MS before it signals (it joins an in-flight
+      // drain, then takes its own). While the row is still
+      // `starting`/`building` a runner already at final publish passes both
+      // `middleware/auth.ts` and the go-live transaction's re-check and ships,
+      // even though this manager has already decided startup failed. The write is
+      // captured rather than awaited inline so it still cannot GATE the teardown —
+      // rethrown below only after forceStopContainer and pokeScheduler, or a
+      // Hyperdrive blip would leave the container running the real `void deploy`
+      // CLI with a live token while Postgres says `failed`, pinning a fleet slot
+      // until the idle net. `revokeBuildRow`, not the bare helper: a write that
+      // PENDS never reaches the catch at all, and putting Postgres in front of the
+      // kill is what made that fatal (TERMINAL_WRITE_TIMEOUT_MS).
+      let terminal: { won: boolean } | null = null;
+      let terminalError: unknown;
       try {
-        const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
-          error: message,
-          completedAt: new Date().toISOString(),
-        });
-        await this.broadcast({ type: 'status', status: 'failed' });
-        // Finalize the check-run here too: the run is created BEFORE signDeployToken /
-        // this.start() / the staging-misconfig check, so a throw in that window marks
-        // the build `failed` HERE and no onStop ever finalizes it (force-stop →
-        // onStop's terminal-status guard no-op). Without this the run is stranded
-        // `in_progress` forever. The capacity-error branch re-throws above and never
-        // reaches here, so the requeued build correctly keeps its run `in_progress`.
-        // CAS-aware: only PATCH 'failure' when THIS site won the terminal transition.
-        // On a lost CAS (the row was terminalized out-of-band, e.g. a concurrent
-        // cancel) read the authoritative row and finalize to ITS outcome, so GitHub
-        // never contradicts the DB.
-        if (won) {
-          await this.finalizeCheckRun(config, 'failure', {
-            detailsUrl: this.projectUrl(config),
-            title: 'Void build failed',
-            summary: message,
-          });
-        } else {
-          await this.finalizeCheckRunToRecordedOutcome(config);
+        terminal = {
+          won: await this.revokeBuildRow(config.buildId, 'failed', {
+            error: message,
+            completedAt: new Date().toISOString(),
+          }),
+        };
+      } catch (err) {
+        terminalError = err;
+      }
+      // If the container already launched, a throw here (the onStart-reject inside
+      // start(), or schedule arming) must force it down. `forceStopContainer`
+      // SIGTERMs THEN SIGKILLs (idempotent / TERMINAL-safe) so a SIGTERM-ignoring
+      // build agent can't outlive the failure; `stop()` alone is SIGTERM-only.
+      // Best-effort so a teardown failure doesn't mask the original error.
+      //
+      // The broadcast + check-run finalize run inside a try whose `finally` ALWAYS
+      // pokes the scheduler — mirroring onStop/onError/enforceTimeout — so a
+      // transient throw can't skip the queue re-arm and strand the slot until the
+      // stale reaper.
+      try {
+        if (containerStarted) {
+          // `ownsMarker` from the transition above — NOT a second claim. The claim is
+          // first-caller-wins, so re-calling it here always returns false and would
+          // suppress the very marker this site reserved.
+          await this.forceStopContainer(
+            // Same rule as enforceTimeout/cancelBuild: unless this site WON the
+            // CAS, another outcome may already be authoritative, so this site's
+            // local reason is not safe to assert. It reads worse here, because
+            // the marker is the ONLY explanation emitted — this catch claims the
+            // marker synchronously, before any await, so an external cancel
+            // arriving after it finds the claim taken and stays silent. The check
+            // run below finalizes from the RECORDED outcome, so leaving the local
+            // reason in produced a check that says "cancelled" over a log tail
+            // that says the build failed to start.
+            terminal?.won === true ? `build failed: ${message}` : 'build terminated out of band',
+            ownsMarker,
+            terminalError === undefined,
+          );
+        }
+        // Skipped when the terminal write threw (`terminal` null): we don't know the
+        // recorded outcome, so finalizing the check run would be a guess. NOT an
+        // early `return` — that would run the `finally` and then skip the rethrow
+        // below, swallowing the error the callers assert on.
+        if (terminal) {
+          const won = terminal.won;
+          await this.broadcast({ type: 'status', status: 'failed' });
+          // Finalize the check-run here too: the run is created BEFORE signDeployToken /
+          // this.start() / the staging-misconfig check, so a throw in that window marks
+          // the build `failed` HERE and no onStop ever finalizes it (force-stop →
+          // onStop's terminal-status guard no-op). Without this the run is stranded
+          // `in_progress` forever. The capacity-error branch re-throws above and never
+          // reaches here, so the requeued build correctly keeps its run `in_progress`.
+          // CAS-aware: only PATCH 'failure' when THIS site won the terminal transition.
+          // On a lost CAS (the row was terminalized out-of-band, e.g. a concurrent
+          // cancel) read the authoritative row and finalize to ITS outcome, so GitHub
+          // never contradicts the DB.
+          if (won) {
+            await this.finalizeCheckRun(config, 'failure', {
+              detailsUrl: this.projectUrl(config),
+              title: 'Void build failed',
+              summary: message,
+            });
+          } else {
+            await this.finalizeCheckRunToRecordedOutcome(config);
+          }
+        } else if (terminalError !== undefined) {
+          // A terminal write that MISSED ITS DEADLINE may still commit afterwards, and
+          // the rejection left `terminal` null so nothing above finalizes. Reconcile
+          // once now — which catches a commit that beat this line — and let the
+          // reconciler re-arm itself for one that lands after it. Nothing else ever
+          // completes this check run; see `reconcileTerminalWrite`.
+          await this.reconcileTerminalWrite();
         }
       } finally {
         await this.pokeScheduler();
+      }
+      if (terminalError) {
+        throw terminalError;
       }
       throw error;
     }
@@ -1572,10 +1915,13 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       explicitId ??
       this.activeCheckRunId ??
       (await this.ctx.storage.get<string>(STORAGE_KEY_CHECK_RUN));
-    if (!checkRunId) {
+    if (!checkRunId && explicitId === undefined) {
       // DO storage missed — recover the id from Postgres (written by
       // `setBuildCheckRunId` at create). Best-effort: a read failure leaves the id
       // unknown and the run unfinalized (cosmetic), never throwing out of finalize.
+      // An explicit null means the caller already holds an authoritative row whose
+      // check_run_id is absent: still honor an in-memory/storage id above (the DB
+      // persist may have failed), but never issue a redundant row read.
       try {
         checkRunId = (await getBuild(this.db(), config.buildId))?.check_run_id ?? undefined;
       } catch (err) {
@@ -1651,16 +1997,85 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
    * by the caller's `finally { pokeScheduler() }`.
    */
   private async finalizeCheckRunToRecordedOutcome(config: BuildConfig): Promise<void> {
-    let status: string | undefined;
+    let row: Awaited<ReturnType<typeof getBuild>>;
     try {
-      status = (await getBuild(this.db(), config.buildId))?.status;
+      row = await getBuild(this.db(), config.buildId);
     } catch (err) {
       console.warn('finalizeCheckRunToRecordedOutcome: getBuild failed (best-effort)', err);
       return;
     }
-    if (status) {
-      await this.finalizeCheckRunToStatus(config, status);
+    if (row) {
+      await this.finalizeCheckRunToStatus(config, row.status, row.check_run_id);
     }
+  }
+
+  /**
+   * Complete the check run from the AUTHORITATIVE row after a terminal write missed
+   * its deadline — now, and again later if the answer isn't in yet.
+   *
+   * `withDeadline` rejects the WAIT, not the query: `markBuildTerminalIfActive` keeps
+   * running and commonly commits afterwards. Re-reading once at the teardown site only
+   * helps when that commit beat the read. When it lands after, the row turns terminal
+   * with nobody left to notice it — the DO-local status is already terminal, so
+   * `enforceTimeout`/`cancelBuild` retries and `onStop` early-out; the stale reaper
+   * scans ACTIVE rows only; and the container executor has no webhook completer
+   * (`routes/webhooks.ts` completes `github_actions` builds precisely BECAUSE they
+   * have no DO). The check run then sits `in_progress` forever, which under branch
+   * protection is a PR that can never merge.
+   *
+   * Public + named so the base scheduler can resolve it as a callback.
+   *
+   * The re-arm terminates in BOTH directions, which is what makes an unbounded-looking
+   * loop safe:
+   *   - the write commits late  -> row terminal -> finalize, no re-arm
+   *   - the write genuinely died -> row stays ACTIVE -> the hourly stale reaper marks
+   *     it `failed` (STALE_CONTAINER_BUILD_MAX_AGE_MINUTES) -> the next pass finalizes
+   * The second branch is why the reaper is a real backstop here. An earlier comment on
+   * this path claimed a failed write was "left to the reaper exactly as before"; the
+   * reaper terminalizes the ROW but never completes a CHECK RUN — it calls
+   * `cancelBuild`, which early-outs on the terminal status. Without this pass that
+   * check run had no completer at all.
+   */
+  async reconcileTerminalWrite(): Promise<void> {
+    const config = await this.getConfig();
+    if (!config) {
+      return; // build state gone (deleted) — nothing left to report against
+    }
+    let row: Awaited<ReturnType<typeof getBuild>>;
+    try {
+      // BOUNDED, for the same reason the write it is chasing is bounded: this
+      // runs precisely when Hyperdrive/Postgres is already stalling, and an
+      // unbounded SELECT that PENDS never reaches either `schedule()` below. The
+      // invocation would then be killed with no retry armed, which is the exact
+      // permanent orphan this method exists to prevent — reintroduced one layer up.
+      row = await withDeadline(
+        getBuild(this.db(), config.buildId),
+        TERMINAL_WRITE_TIMEOUT_MS,
+        `build ${config.buildId}: reconciliation read did not settle within ${TERMINAL_WRITE_TIMEOUT_MS}ms`,
+      );
+    } catch (err) {
+      // A failed or timed-out read says nothing about the write. Not yet known.
+      console.warn('reconcileTerminalWrite: getBuild failed (best-effort)', err);
+      await this.schedule(RECONCILE_RETRY_SECONDS, 'reconcileTerminalWrite');
+      return;
+    }
+    if (row === null) {
+      // `getBuild` returns null (never undefined) for a missing row.
+      // The row is GONE, not pending — `deleteProjectCascade` deletes build rows
+      // during project teardown. Re-arming here would poll a row that can never
+      // come back and can never be terminalized by the reaper, i.e. an alarm every
+      // RECONCILE_RETRY_SECONDS forever. Nothing is left to report against.
+      return;
+    }
+    if (TERMINAL_STATUSES.includes(row.status as StoredBuildStatus)) {
+      // Reuse BOTH authoritative fields from the bounded read. Omitting the id
+      // makes finalizeCheckRun issue a second, unbounded getBuild after an eviction
+      // or cache miss — exactly where a stalled Hyperdrive read would orphan the
+      // check with no retry armed. Explicit null suppresses that redundant read.
+      await this.finalizeCheckRunToStatus(config, row.status, row.check_run_id);
+      return;
+    }
+    await this.schedule(RECONCILE_RETRY_SECONDS, 'reconcileTerminalWrite');
   }
 
   override async onStart(): Promise<void> {
@@ -1815,6 +2230,15 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         error: message,
         completedAt: new Date().toISOString(),
       });
+      // Drain BEFORE finalizing, because `finalizeCheckRun` embeds the last
+      // CHECK_RUN_LOG_TAIL_LINES rows and this is the ONE terminalizer that does not
+      // force-stop — so nothing else has pulled. `pollLogs`' terminal branch does
+      // pull, but up to POLL_SECONDS later, i.e. after the check run is already
+      // completed: its tail then reaches `void build logs` and the live tail while
+      // being permanently absent from the check run a reader actually opens.
+      // Deliberately no stop() here — an errored container is left to the base class,
+      // and adding a kill would change onError's contract.
+      await this.drainLogsAfterError();
       await this.broadcast({ type: 'status', status: 'failed' });
       // CAS-aware: finalize 'failure' only when THIS site won; otherwise finalize to
       // the out-of-band recorded outcome so GitHub matches the DB.
@@ -1829,6 +2253,67 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       }
     } finally {
       await this.pokeScheduler();
+    }
+  }
+
+  /**
+   * Drain the live agent before `onError` snapshots the check-run tail. A terminal
+   * status stops the normal poll loop, so a one-shot transient port failure would
+   * otherwise strand the final diagnostics even though the agent is deliberately
+   * waiting for our cursor acknowledgement. Retry within that bounded idle window.
+   *
+   * `pullLogsOnce` can also return false because it spent MAX_LOG_SINK_OPS_PER_DRAIN
+   * on a deep backlog, and this loop retries that case too — which is what replaces
+   * the next scheduled callback the poll loop no longer has. The iteration count
+   * stays bounded even though a Worker clock does not advance during CPU work: each
+   * retry sleeps a real POLL_SECONDS, and time does advance across that.
+   */
+  private async drainLogsAfterError(): Promise<void> {
+    const deadline = Date.now() + LOG_TERMINAL_DRAIN_RETRY_WINDOW_MS;
+
+    // A snapshot already in flight may have frozen before the error line was
+    // recorded. Join it for single-flight ordering, then still take a fresh pull.
+    await this.pullInFlight?.catch(() => false);
+
+    while (Date.now() < deadline) {
+      const activeTeardown = this.teardownInFlight;
+      if (activeTeardown) {
+        // A cancel/startup-failure teardown owns the final snapshot once it has
+        // installed this gate. Join its drain/signals so onError neither starts a
+        // late pull nor finalizes before the teardown-owned snapshot completes.
+        await activeTeardown.catch(() => {});
+        return;
+      }
+
+      const container = this.rawContainer();
+      if (!container?.running) {
+        return;
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        return;
+      }
+      const drained = await this.pullLogsOnce(container, remaining);
+
+      // A teardown can begin while the pull is awaiting I/O. It joins that stale
+      // snapshot and then owns a fresh one plus the signals; join it even when our
+      // pull succeeded so check finalization cannot outrun its final tail.
+      const teardownAfterPull = this.teardownInFlight;
+      if (teardownAfterPull) {
+        await teardownAfterPull.catch(() => {});
+        return;
+      }
+
+      if (drained) {
+        return;
+      }
+      const retryRemaining = deadline - Date.now();
+      if (retryRemaining <= 0) {
+        return;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(POLL_SECONDS * 1000, retryRemaining)),
+      );
     }
   }
 
@@ -1848,17 +2333,150 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
    * container nor a transient teardown error must propagate past here. `destroy()`
    * triggers onStop, whose TERMINAL_STATUSES guard makes it a safe no-op (it only
    * pokes the scheduler).
+   *
+   * DRAIN FIRST. The agent's exit-time `waitForLogDrain()` barrier does NOT cover
+   * this path: `stop()`'s SIGTERM lands in `onShutdownSignal`, which ends in
+   * `process.exit(1)` (container/build-agent.mjs) — so `main()`'s `finally`, and
+   * with it the barrier, never runs. Everything the agent buffered since the last
+   * poll would die with the container: `pollLogs` re-arms on a 1s floor-to-the-
+   * second schedule, so the next tick lands 0–1s later, by which point `destroy()`
+   * has resolved and its `container.running` guard early-outs without fetching.
+   * One synchronous pull here, in front of the signals, is what keeps a cancelled
+   * or timed-out build from losing up to a full second of its tail — the pull
+   * happens-before the kill, so it captures everything the agent had recorded up
+   * to that instant.
+   *
+   * What it CANNOT capture, by construction, is anything the agent writes AFTER
+   * the pull returns — including the agent's own
+   * `[build-agent] received SIGTERM; cancelling build and shutting down` line,
+   * which `onShutdownSignal` only generates once our SIGTERM arrives, and which
+   * `process.exit(1)` then takes to the grave. Chasing it is impossible: any pull
+   * that could see it would have to run after the signal, i.e. against a process
+   * already exiting. So the DO writes its own terminated marker after at least
+   * one control signal succeeds — same information (why the output stops), no
+   * agent dependency, and no false claim when both control calls reject. The
+   * rest of the residue is the handful of milliseconds between this pull
+   * resolving and `stop()`'s signal landing, which is inherent to an
+   * asynchronous kill.
+   *
+   * Best-effort: `pullLogsOnce` never throws and each paginated callback is bounded
+   * by `LOG_DRAIN_BUDGET_MS`. Teardown may wait out one in-flight callback then
+   * take one fresh snapshot, so a wedged/productive-slow agent delays the SIGKILL
+   * by at most 2x that budget. The whole sequence is single-flight per teardown,
+   * not per caller.
+   *
+   * `reason` is recorded verbatim in the marker, so each teardown site passes its
+   * own: a startup failure is not a cancellation and must not claim to be one.
    */
-  private async forceStopContainer(): Promise<void> {
-    try {
-      await this.stop();
-    } catch {
-      // Best-effort SIGTERM — the build is already recorded terminal locally.
+  private async forceStopContainer(
+    reason: string,
+    markerAuthoritative = true,
+    drainFirst = true,
+  ): Promise<void> {
+    const container = this.rawContainer();
+    // The single-flight owns the WHOLE first-caller policy: scheduled-pull join,
+    // fresh drain, liveness recheck, and signals. Consulting it only after the
+    // drain let a second cancellation enter while the first was blocked in
+    // stop()/destroy(), start a late pull, and ingest after the first caller's
+    // final marker/check-run completion. It also matters that `drainFirst=false`
+    // wins when it is first: a later peer must not reopen a pull while the token
+    // revocation is still unsettled.
+    let teardown = this.teardownInFlight;
+    if (!teardown) {
+      teardown = (async () => {
+        // JOINING an in-flight pull is NOT a drain and is always safe: the
+        // request has already reached the agent, while its response may still be
+        // parsing or ingesting into SQLite. Teardown must wait for that sink work
+        // before it can signal the container and append the final marker. A
+        // failed/timed-out terminal write sets `drainFirst=false` only to forbid
+        // a NEW request while revocation is unsettled; it must not let an existing
+        // pull write rows after finalization. `.catch` is belt-and-braces: a pull
+        // failure must never skip the signals and strand a pinned slot.
+        const activePull = this.pullInFlight;
+        await activePull?.catch(() => {});
+        if (container?.running === true && drainFirst) {
+          // The agent snapshots each response at receipt, so after the old cursor
+          // advances take one fresh snapshot for lines written in the meantime.
+          await this.pullLogsOnce(container);
+        }
+        // The drain can last several seconds, during which the build may exit
+        // naturally and finish its own acknowledgement barrier. Successful
+        // stop()/destroy() no-ops against an already-dead container are not
+        // evidence that this manager terminated it.
+        if (this.rawContainer()?.running !== true) {
+          return;
+        }
+        let signalSucceeded = false;
+        try {
+          await this.stop();
+          signalSucceeded = true;
+        } catch {
+          // Best-effort SIGTERM — the build is already recorded terminal locally.
+        }
+        try {
+          await this.destroy();
+          signalSucceeded = true;
+        } catch {
+          // Best-effort SIGKILL — container already gone / mid-teardown.
+        }
+        if (signalSucceeded) {
+          this.containerTornDown = true;
+        }
+      })();
+      this.teardownInFlight = teardown;
+      void teardown.finally(() => {
+        if (this.teardownInFlight === teardown) {
+          this.teardownInFlight = null;
+        }
+      });
     }
-    try {
-      await this.destroy();
-    } catch {
-      // Best-effort SIGKILL — container already gone / mid-teardown.
+    if (teardown) {
+      await teardown;
+    }
+
+    // AFTER the drain AND a successful signal so it reads as the truthful last
+    // line of the build's output. Ingested through the same sink as pulled lines,
+    // so it reaches the live WS tail, `void build logs`, and the check-run tail.
+    // Best-effort like everything else on this path: a SQLite/broadcast throw
+    // must never affect teardown or strand a pinned fleet slot.
+    //
+    // Emitted ONLY by the caller that owns the synchronous first-caller-wins
+    // marker claim. Teardowns overlap in more ways than one: two cancels (a
+    // push-supersede and a project delete), or a startup-failure teardown racing a
+    // cancel that finds the row already terminal. All of them can observe
+    // `running`, coalesce onto the same drain/signals, and would otherwise ingest
+    // their own reason — leaving the reader and check-run tail two contradictory
+    // explanations for one termination.
+    //
+    // Authority is claimed SYNCHRONOUSLY before each site's first await — see
+    // `claimTerminationMarker`. It is deliberately independent of terminal CAS
+    // ownership because an external caller can commit the row before entering this
+    // DO, and `onError` can leave a locally terminal container live and unclaimed.
+    //
+    // Deliberately OUTSIDE the `running` guard, unlike the drain. A peer teardown
+    // that observed the already-terminal local status can drain and `destroy()`
+    // while the claiming caller is still awaiting Hyperdrive; that caller then
+    // arrives here with `running === false`. Gating the marker on a live container
+    // meant NOBODY ingested one — the peer had no claim and the owner had no
+    // container — and the build's log just stopped. Ingesting is DO-local
+    // (SQLite + broadcast), so it needs no container at all.
+    if (markerAuthoritative && this.containerTornDown) {
+      try {
+        await this.ingestLines([
+          {
+            line: `[build-manager] container terminated: ${reason}`,
+            stream: 'stderr',
+            ts: Date.now(),
+          },
+        ]);
+      } catch (err) {
+        console.warn('forceStopContainer: terminated marker ingest failed', err);
+      }
+    } else if (markerAuthoritative && !this.containerTornDown) {
+      // Both signals failed. Release the synchronous claim so a later retry can
+      // become authoritative if container control recovers; retaining it here
+      // would suppress every future truthful marker in this DO instance.
+      this.terminationMarkerClaimed = false;
     }
   }
 
@@ -1887,28 +2505,90 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     // still-honored deploy token + a pinned fleet slot) or pokeScheduler()
     // (stranding the freed concurrency slot). forceStopContainer SIGTERMs then
     // SIGKILLs so a SIGTERM-ignoring build can't outlive its timeout.
+    // Claimed HERE, synchronously, not at the `forceStopContainer` call below: the
+    // revocation await between them is long enough for a peer teardown to run to
+    // completion, and whoever holds the claim must be decided before yielding.
+    const ownsMarker = this.claimTerminationMarker();
     await this.setStatus('failed');
-    await this.forceStopContainer();
+    // The Postgres write comes BEFORE the teardown, because `builds.status` is the
+    // deploy token's authority: `middleware/auth.ts` honors a build-bound token for
+    // as long as the row is in ACTIVE_BUILD_STATUSES, and `routes/deploy.ts`
+    // re-checks the same set inside its go-live transaction. `forceStopContainer`
+    // now spends up to 2x LOG_DRAIN_BUDGET_MS draining logs before it even signals,
+    // and every millisecond of that is a window in which a `void deploy` sitting at
+    // its go-live step can still publish — writing routing KV, committing the
+    // deployment 'live' — only to be recorded `failed`/'build timed out' immediately
+    // after. Revoking first collapses that: the deploy's own re-check then fails and
+    // it unwinds instead of going live.
+    //
+    // The write still must NOT gate the teardown. `markBuildTerminalIfActive` has no
+    // internal try/catch, so its throw is captured here and rethrown only after
+    // `forceStopContainer` and `pokeScheduler` have run — otherwise a Hyperdrive
+    // blip would leave a timed-out container alive with a pinned fleet slot, which
+    // is the failure the previous ordering was protecting against. A throw is only
+    // half of it: `revokeBuildRow` bounds the write so one that PENDS lands in that
+    // same catch instead of stranding the container (TERMINAL_WRITE_TIMEOUT_MS).
+    let terminal: { won: boolean } | null = null;
+    let terminalError: unknown;
     try {
-      const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'failed', {
-        error: 'build timed out',
-        completedAt: new Date().toISOString(),
-      });
-      await this.broadcast({ type: 'status', status: 'failed' });
-      // CAS-aware: finalize 'failure' only when THIS site won; otherwise finalize to
-      // the out-of-band recorded outcome so GitHub matches the DB.
-      if (won) {
-        await this.finalizeCheckRun(config, 'failure', {
-          detailsUrl: this.projectUrl(config),
-          title: 'Void build failed',
-          summary: 'build timed out',
-        });
-      } else {
-        await this.finalizeCheckRunToRecordedOutcome(config);
+      terminal = {
+        won: await this.revokeBuildRow(config.buildId, 'failed', {
+          error: 'build timed out',
+          completedAt: new Date().toISOString(),
+        }),
+      };
+    } catch (err) {
+      terminalError = err;
+    }
+    try {
+      // Always marker-authoritative: this method early-returns on an already-terminal
+      // LOCAL status, so reaching here proves no other in-DO teardown claimed the
+      // build. The Postgres CAS can still lose to an out-of-band terminalization
+      // (an external cancel committing the row), and that must NOT silence the
+      // marker — nobody else emits one on that path. See cancelBuild.
+      // Reason, not ownership, defers to the CAS. Ownership must stay independent of
+      // it (an external cancel commits the row BEFORE its RPC arrives, so every
+      // caller loses and nobody would speak). But a LOST CAS means this build was
+      // terminalized elsewhere, and asserting "build timed out" there contradicts the
+      // check run, which finalizes from the recorded outcome — and the cancel RPC
+      // that follows sees a terminal local status and can no longer correct it. Say
+      // only what we know. A timed-out/failed CAS is unknown for the same reason:
+      // its uncancelled query can still lose to another terminal writer later.
+      await this.forceStopContainer(
+        terminal?.won === true ? 'build timed out' : 'build terminated out of band',
+        ownsMarker,
+        terminalError === undefined,
+      );
+      // Skipped when the terminal write threw: without it we don't know the recorded
+      // outcome, and finalizing the check run on a guess is worse than leaving it to
+      // the retry or the reaper.
+      if (terminal) {
+        await this.broadcast({ type: 'status', status: 'failed' });
+        // CAS-aware: finalize 'failure' only when THIS site won; otherwise finalize to
+        // the out-of-band recorded outcome so GitHub matches the DB.
+        if (terminal.won) {
+          await this.finalizeCheckRun(config, 'failure', {
+            detailsUrl: this.projectUrl(config),
+            title: 'Void build failed',
+            summary: 'build timed out',
+          });
+        } else {
+          await this.finalizeCheckRunToRecordedOutcome(config);
+        }
+      } else if (terminalError !== undefined) {
+        // A terminal write that MISSED ITS DEADLINE may still commit afterwards, and
+        // the rejection left `terminal` null so nothing above finalizes. Reconcile
+        // once now — which catches a commit that beat this line — and let the
+        // reconciler re-arm itself for one that lands after it. Nothing else ever
+        // completes this check run; see `reconcileTerminalWrite`.
+        await this.reconcileTerminalWrite();
       }
     } finally {
-      // Free the slot even if the DB write (or broadcast) threw.
+      // Free the slot even if the teardown (or broadcast) threw.
       await this.pokeScheduler();
+    }
+    if (terminalError) {
+      throw terminalError;
     }
   }
 
@@ -1927,6 +2607,25 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
   async cancelBuild(reason = 'build cancelled'): Promise<void> {
     const config = await this.getConfig();
     const shouldTerminalize = config != null && !TERMINAL_STATUSES.includes(config.status);
+    // Claimed HERE, synchronously, not at the `forceStopContainer` call below: the
+    // revocation await between them is long enough for a peer teardown to run to
+    // completion, and whoever holds the claim must be decided before yielding.
+    //
+    // UNCONDITIONAL, like enforceTimeout and the startBuild catch. Peer exclusion is
+    // the claim flag itself, never `shouldTerminalize`: `onError` is a terminal
+    // transition that deliberately does NOT stop the container and never reserves the
+    // marker, so a cancel arriving after it saw `shouldTerminalize === false`, skipped
+    // the claim, and SIGKILLed a LIVE container with `markerAuthoritative` false —
+    // the log just stopped, which is the exact failure the marker exists to end. A DO
+    // evicted between a peer's `setStatus(terminal)` and its `forceStopContainer`
+    // reaches the same state with no `onError` involved: durable terminal status, and
+    // a restarted instance whose claim flag is back to false.
+    //
+    // Burning the claim when the container is already dead is harmless —
+    // `containerTornDown` stays false so nothing is emitted, and no later teardown can
+    // want it (enforceTimeout early-returns on terminal status, and one DO starts
+    // exactly one container).
+    const ownsMarker = this.claimTerminationMarker();
     // Set the LOCAL terminal status first (DO storage — can't fail on Hyperdrive)
     // so onStop, triggered by stop() below, sees the terminal status and won't
     // clobber it. Only when the build isn't already terminal — a late cancel
@@ -1934,38 +2633,133 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     if (shouldTerminalize) {
       await this.setStatus('cancelled');
     }
-    // Container teardown is UNCONDITIONAL and independent of the Postgres write:
-    // `markBuildTerminalIfActive` has no internal try/catch, so a Hyperdrive
-    // throw must NOT skip forceStopContainer() (leaving the orphaned container
-    // running + a pinned fleet slot) or pokeScheduler() (stranding the freed
-    // slot). forceStopContainer SIGTERMs then SIGKILLs (idempotent) so a
+    // Revoke in Postgres BEFORE the teardown, for the same reason as
+    // `enforceTimeout`: `builds.status` is the deploy token's authority, and
+    // `forceStopContainer` now drains logs for up to 2x LOG_DRAIN_BUDGET_MS before it
+    // signals — a window in which a superseded `void deploy` at its go-live step
+    // would still pass both `middleware/auth.ts` and the go-live transaction's
+    // re-check and publish stale code.
+    //
+    // Container teardown stays UNCONDITIONAL and independent of that write:
+    // `markBuildTerminalIfActive` has no internal try/catch, so its throw is captured
+    // and rethrown only after forceStopContainer() (else an orphaned container keeps
+    // running on a pinned fleet slot) and pokeScheduler() (else the freed slot is
+    // stranded). Independence needs a DEADLINE too, not just a catch — hence
+    // `revokeBuildRow` (TERMINAL_WRITE_TIMEOUT_MS). forceStopContainer SIGTERMs then SIGKILLs (idempotent) so a
     // SIGTERM-ignoring orphan can't survive the cancel.
-    await this.forceStopContainer();
+    //
+    // `config` rides along on the captured result so the finalize block below keeps
+    // its non-null proof: `shouldTerminalize` implies `config != null`, but that
+    // narrowing does not survive into a separate `if (terminal)`.
+    let terminal: { won: boolean; config: BuildConfig } | null = null;
+    let terminalError: unknown;
+    let authoritativeRowIsTerminal = true;
+    let needsTerminalReconciliation = false;
+    let authoritativeTerminalRow: NonNullable<Awaited<ReturnType<typeof getBuild>>> | null = null;
+    if (shouldTerminalize) {
+      try {
+        terminal = {
+          won: await this.revokeBuildRow(config.buildId, 'cancelled', {
+            error: reason,
+            completedAt: new Date().toISOString(),
+          }),
+          config,
+        };
+      } catch (err) {
+        terminalError = err;
+      }
+    } else if (config != null) {
+      // A terminal DO-local status is not proof that Postgres revoked the deploy
+      // token: enforceTimeout writes local state before awaiting its CAS, and a
+      // concurrent cancel can enter during that await. Verify the authoritative
+      // row on the same deadline as a revocation. Only an explicitly terminal or
+      // absent row makes a multi-second drain safe; active/unknown means signal now.
+      try {
+        const row = await withDeadline(
+          getBuild(this.db(), config.buildId),
+          TERMINAL_WRITE_TIMEOUT_MS,
+          `build ${config.buildId}: authoritative terminal read did not settle within ${TERMINAL_WRITE_TIMEOUT_MS}ms`,
+        );
+        authoritativeRowIsTerminal =
+          row === null || TERMINAL_STATUSES.includes(row.status as StoredBuildStatus);
+        needsTerminalReconciliation = !authoritativeRowIsTerminal;
+        if (row !== null && authoritativeRowIsTerminal) {
+          authoritativeTerminalRow = row;
+        }
+      } catch (err) {
+        authoritativeRowIsTerminal = false;
+        needsTerminalReconciliation = true;
+        console.warn('cancelBuild: authoritative terminal read failed; skipping drain', err);
+      }
+    }
     try {
-      if (shouldTerminalize) {
-        const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'cancelled', {
-          error: reason,
-          completedAt: new Date().toISOString(),
-        });
+      // Marker authority is the LOCAL terminal transition, not the Postgres CAS.
+      // `shouldTerminalize` is exactly "no other in-DO teardown had already
+      // claimed this build" — which is what the marker must not duplicate.
+      //
+      // Losing the CAS does NOT mean someone else emitted a marker. The normal
+      // external cancel path (`cancelContainerBuildDos`: push-supersede,
+      // disconnect, branch-delete, project-delete) commits the terminal row
+      // BEFORE invoking this RPC by design, so `revokeBuildRow` always returns
+      // false there. Gating on `won` suppressed the only marker those builds
+      // would ever get, and the agent's own post-SIGTERM line can't be pulled —
+      // so their logs just stopped, with nothing saying why.
+      await this.forceStopContainer(
+        // See enforceTimeout: a lost or unknown revocation can belong to another
+        // terminal writer. A recovered terminal row likewise owns an earlier
+        // outcome, so this later cancellation cannot authoritatively explain the
+        // kill. When the row is still active/unknown, the cancellation does.
+        terminalError !== undefined || terminal?.won === false || authoritativeTerminalRow !== null
+          ? 'build terminated out of band'
+          : reason,
+        ownsMarker,
+        terminalError === undefined && authoritativeRowIsTerminal,
+      );
+      if (authoritativeTerminalRow && config != null) {
+        // This bounded read already found the outcome a lost prior invocation failed
+        // to publish. Reuse the row and check-run id instead of waiting for a retry
+        // path that only scans active builds.
+        await this.finalizeCheckRunToStatus(
+          config,
+          authoritativeTerminalRow.status,
+          authoritativeTerminalRow.check_run_id,
+        );
+      } else if (needsTerminalReconciliation) {
+        // Local terminal state can outlive a lost invocation before its Postgres
+        // write or check-run finalize completes. Keep watching an active/unknown
+        // authoritative row until the late write or stale reaper terminalizes it.
+        await this.reconcileTerminalWrite();
+      }
+      // This branch owns a newly attempted terminalization. A recovered terminal row
+      // was finalized above from its authoritative outcome; a thrown terminal write
+      // is also skipped because finalizing a guessed outcome would be worse.
+      if (terminal) {
         await this.broadcast({ type: 'status', status: 'cancelled' });
-        // Only when terminalizing: a late cancel against an already-terminal row must
-        // not re-PATCH and clobber the recorded outcome. `config` is non-null here
-        // (shouldTerminalize requires config != null). CAS-aware: finalize 'cancelled'
-        // only when THIS site won; otherwise finalize to the out-of-band recorded
-        // outcome so GitHub matches the DB.
-        if (won) {
-          await this.finalizeCheckRun(config, 'cancelled', {
-            detailsUrl: this.projectUrl(config),
+        // CAS-aware: finalize 'cancelled' only when THIS site won; otherwise finalize
+        // to the out-of-band recorded outcome so GitHub matches the DB.
+        if (terminal.won) {
+          await this.finalizeCheckRun(terminal.config, 'cancelled', {
+            detailsUrl: this.projectUrl(terminal.config),
             title: 'Void build cancelled',
             summary: reason,
           });
         } else {
-          await this.finalizeCheckRunToRecordedOutcome(config);
+          await this.finalizeCheckRunToRecordedOutcome(terminal.config);
         }
+      } else if (terminalError !== undefined && config != null) {
+        // A terminal write that MISSED ITS DEADLINE may still commit afterwards, and
+        // the rejection left `terminal` null so nothing above finalizes. Reconcile
+        // once now — which catches a commit that beat this line — and let the
+        // reconciler re-arm itself for one that lands after it. Nothing else ever
+        // completes this check run; see `reconcileTerminalWrite`.
+        await this.reconcileTerminalWrite();
       }
     } finally {
-      // Free the slot even if the DB write (or broadcast) threw.
+      // Free the slot even if the teardown (or broadcast) threw.
       await this.pokeScheduler();
+    }
+    if (terminalError) {
+      throw terminalError;
     }
   }
 
@@ -2172,44 +2966,188 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
    */
   async pollLogs(): Promise<void> {
     const config = await this.getConfig();
-    if (!config || TERMINAL_STATUSES.includes(config.status)) {
-      // No build, or the build finished — stop the loop (do NOT re-arm).
+    // Teardown owns the complete join -> optional fresh drain -> signal -> final
+    // marker ordering. Once that gate exists, a scheduled callback must not start
+    // another pull outside it. This guard covers both terminal and stale
+    // non-terminal config snapshots; if teardown began after the guard, its
+    // unconditional pullInFlight join above still orders the newly-started pull.
+    if (this.teardownInFlight) {
       return;
     }
     // The base copies `ctx.container` into a private field; read the same object via
     // a public-typed cast. We need both `running` (the cheap early-out below) and
-    // `getTcpPort` (the NON-starting fetch path used in the try block).
-    const container = (
-      this as unknown as {
-        container?: {
-          running: boolean;
-          getTcpPort(port: number): { fetch(url: string): Promise<Response> };
-        };
+    // `getTcpPort` (the NON-starting fetch path `pullLogsOnce` uses).
+    const container = this.rawContainer();
+    if (!config || TERMINAL_STATUSES.includes(config.status)) {
+      // No build, or the build finished — stop the loop (do NOT re-arm).
+      //
+      // The last pull below is a BACKSTOP, not the primary drain, and it is worth
+      // being precise about why — the obvious reading is wrong. It is NOT what
+      // releases the agent's `waitForLogDrain()` barrier: the agent's only status
+      // report is `deploying` and `handleStatus` rejects anything but
+      // `building`/`deploying`, so a terminal status can NEVER originate from the
+      // agent. While the barrier waits, the DO status is still non-terminal and
+      // the loop is taking the NORMAL branch below, pulling and re-arming until
+      // the cursor catches up. That path is self-sufficient.
+      //
+      // Nor is it the cancel/timeout drain any more: `forceStopContainer` now
+      // pulls synchronously in front of its own SIGTERM, which covers all three
+      // teardown sites (cancelBuild / enforceTimeout / the startBuild catch)
+      // without depending on an alarm landing in a sub-millisecond window.
+      //
+      // What is left is genuinely narrow, which is exactly why it stays: a
+      // terminal status written WITHOUT a teardown pull (`onError` sets 'failed'
+      // and never force-stops), or a tick that happens to land between a
+      // teardown's `setStatus` and its `destroy()`. Both leave a live agent
+      // holding unpulled lines. One best-effort, NON-starting, never-re-arming
+      // pull is cheap insurance; when the terminal status came from `onStop`
+      // (complete / failed) the container is already gone and the `running` guard
+      // skips it.
+      if (config && container?.running) {
+        await this.pullLogsOnce(container);
       }
-    ).container;
+      return;
+    }
     // Common case: the container has already exited. Stop the loop (do NOT re-arm)
-    // — onStop will finalize the build. Skips the fetch entirely.
+    // — onStop will finalize the build. Skips the fetch entirely, and by this point
+    // the tail has already been drained by whichever path ended the container: a
+    // natural exit holds the agent's control server open until this loop catches up
+    // (`waitForLogDrain` in container/build-agent.mjs), and a SIGTERM teardown —
+    // where that barrier is skipped, because `onShutdownSignal` calls
+    // `process.exit(1)` — pulls in `forceStopContainer` before signalling.
     if (!container?.running) {
       return;
     }
+    await this.pullLogsOnce(container);
+    // Re-arm. Reached on success AND on a swallowed fetch error (the container may
+    // still be running and just briefly unreachable). The running guard above ends
+    // the loop once the container is gone.
+    await this.schedule(POLL_SECONDS, 'pollLogs');
+  }
+
+  /**
+   * Read `ctx.container` off the base class (it copies it into a private field) as
+   * the narrow surface the log pull needs: `running` for the cheap early-out and
+   * `getTcpPort` for the NON-starting fetch.
+   */
+  private rawContainer(): ContainerPortSurface | undefined {
+    return (this as unknown as { container?: ContainerPortSurface }).container;
+  }
+
+  /**
+   * One `GET /logs?since=<cursor>` pull: ingest any new lines and advance the
+   * cursor. Returns true only after a successful terminal/acknowledgement page;
+   * false tells a bounded caller it may retry from the unchanged/advanced cursor.
+   * Never throws — it is called from a scheduled callback (`pollLogs`), where an
+   * escaping rejection would kill the alarm, and from
+   * `forceStopContainer`, where it must never block a cancel/timeout teardown.
+   * Bounded by `LOG_PULL_TIMEOUT_MS` for the same reason.
+   *
+   * SINGLE-FLIGHT (same shape as the agent's `flushLogs`, container/build-agent.mjs).
+   * The body reads `this.logCursor` to build the URL and writes it three awaits
+   * later, so two overlapping calls both request `since=<stale>` and ingest the
+   * same lines TWICE. Nothing downstream dedupes: the agent serves
+   * `logBuffer.filter(e => e.seq > since)`, the source `seq` is stripped at
+   * ingest, and the `logs` table is keyed only by its own AUTOINCREMENT `seq` —
+   * so duplicates land as distinct rows, are re-broadcast to every live tail,
+   * and spend the MAX_STORED_LOG_LINES / CHECK_RUN_LOG_TAIL_LINES budgets,
+   * evicting genuine history.
+   *
+   * The overlap is reachable because a `fetch()` is NOT storage I/O and so does
+   * NOT hold the DO input gate (only `ctx.storage` operations do): while a
+   * scheduled `pollLogs` sits in the await below, a `cancelBuild` RPC — or the
+   * agent's `POST /cancel`, or the `startBuild` catch — reaches
+   * `forceStopContainer`, which pulls again. (`enforceTimeout` cannot: it and
+   * `pollLogs` are both base-scheduler callbacks, which the alarm loop runs one
+   * at a time.) Concurrent callers JOIN the in-flight pull instead of starting a
+   * second one, which keeps N concurrent teardowns coalesced onto ONE pull.
+   *
+   * Joining is NOT a drain, though, and `forceStopContainer` must not treat it as
+   * one: the agent freezes a response body at RECEIPT, so a joined pull cannot
+   * carry lines written after it was issued, and on the teardown path there is no
+   * later poll to collect them. That is why teardown ALWAYS awaits this gate and,
+   * when its caller permits a new agent request, THEN takes its own fresh snapshot
+   * — see the comment there. Do not "simplify" it back into a bare
+   * `pullLogsOnce`; that traded duplicate-but-complete for
+   * deduplicated-but-truncated.
+   */
+  private pullLogsOnce(
+    container: Pick<ContainerPortSurface, 'getTcpPort'>,
+    budgetMs = LOG_DRAIN_BUDGET_MS,
+  ): Promise<boolean> {
+    this.pullInFlight ??= this.runLogPull(container, budgetMs).finally(() => {
+      this.pullInFlight = null;
+    });
+    return this.pullInFlight;
+  }
+
+  /** The actual pull. Only ever entered via `pullLogsOnce`'s single-flight gate. */
+  private async runLogPull(
+    container: Pick<ContainerPortSurface, 'getTcpPort'>,
+    budgetMs: number,
+  ): Promise<boolean> {
     try {
       // NON-STARTING fetch. Unlike `this.containerFetch(...)`, `getTcpPort().fetch()`
       // does NOT auto-start a stopped container (containerFetch's auto-start branch,
       // container.js:847, is exactly what we must avoid here). So even if the
-      // container exits in the TOCTOU window between the running guard above and this
-      // call, the fetch FAILS (caught below) instead of RESURRECTING the just-finished
-      // build — which would otherwise rerun install/build/`void deploy`. On a
-      // running/healthy container this is identical to what containerFetch does after
-      // its start check.
-      const res = await container
-        .getTcpPort(this.defaultPort)
-        .fetch(`http://manager/logs?since=${this.logCursor}`);
-      if (res.ok) {
+      // container exits in the TOCTOU window between the caller's running guard and
+      // this call, the fetch FAILS (caught below) instead of RESURRECTING the
+      // just-finished build — which would otherwise rerun install/build/`void
+      // deploy`. On a running/healthy container this is identical to what
+      // containerFetch does after its start check.
+      //
+      // TIMEBOXED. An agent that accepts the connection but never answers would
+      // otherwise hang here forever: on the poll path that stalls the alarm chain
+      // (no re-arm, no further logs), and on the teardown path it stalls the
+      // cancel/timeout SIGTERM+SIGKILL itself, pinning a global fleet slot. The
+      // abort surfaces as a throw, which the catch below swallows like any other
+      // transient failure.
+      // Drain PAGES within this one call rather than one per tick. The agent caps
+      // a response (MAX_LOG_RESPONSE_BYTES / _LINES) so an oversized backlog can
+      // never blow the per-request timeout, but at POLL_SECONDS per page a deep
+      // backlog would make no useful progress for long stretches. Productive
+      // pagination now resets the agent's idle deadline; batching still reduces
+      // callback churn and acknowledgement latency.
+      //
+      // ONE deadline for the whole drain, not one per page. Without it, fresh
+      // per-request timeouts let 32 productive-slow pages hold one callback for
+      // 64s and a join+fresh teardown for ~128s, also postponing the serialized
+      // timeout enforcer and token revocation.
+      //
+      // The deadline bounds LATENCY only. It cannot bound the parse/insert/fan-out
+      // CPU between the fetches, because a deployed Worker's clock does not advance
+      // during CPU work — see MAX_LOG_SINK_OPS_PER_DRAIN, which bounds that
+      // deterministically and is the reason this loop can also stop mid-backlog
+      // with time left on the clock.
+      const drainDeadline = Date.now() + Math.min(LOG_DRAIN_BUDGET_MS, Math.max(0, budgetMs));
+      let sinkOps = 0;
+      for (let page = 0; page < MAX_LOG_PULL_PAGES; page++) {
+        const remaining = drainDeadline - Date.now();
+        if (remaining <= 0) {
+          return false; // resume from the advanced cursor on the next tick
+        }
+        const res = await container
+          .getTcpPort(this.defaultPort)
+          .fetch(`http://manager/logs?since=${this.logCursor}`, {
+            signal: AbortSignal.timeout(Math.min(LOG_PULL_TIMEOUT_MS, remaining)),
+          });
+        if (!res.ok) {
+          return false;
+        }
         const body = (await res.json()) as {
           lines: Array<BuildLogLine & { seq: number }>;
           lastSeq: number;
+          hasMore?: boolean;
         };
         if (body.lines.length > 0) {
+          // Charge the page BEFORE ingesting it: the accounting must reflect the
+          // work this callback is about to do, and the fan-out width must be the
+          // one `ingestLines` will actually broadcast to.
+          const fanOut = 1 + this.ctx.getWebSockets().length;
+          for (const entry of body.lines) {
+            sinkOps +=
+              fanOut * Math.max(1, Math.ceil(entry.line.length / LOG_SINK_OP_PAYLOAD_BYTES));
+          }
           await this.ingestLines(
             body.lines.map(({ line, stream, ts, lineEnding }) => ({
               line,
@@ -2221,17 +3159,38 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         }
         // Monotonic-advance: never move the cursor backward if a stale/empty
         // response reports a lower lastSeq than we've already ingested.
-        this.logCursor = Math.max(this.logCursor, body.lastSeq);
+        const advanced = Math.max(this.logCursor, body.lastSeq);
+        const moved = advanced > this.logCursor;
+        this.logCursor = advanced;
+        // A moving final page still needs ONE more request. Its `since=<advanced>`
+        // is the acknowledgement the agent's exit barrier trusts; waiting for the
+        // next scheduled callback spends another POLL_SECONDS and can land exactly
+        // on the barrier deadline after a budget-length paginated drain. The extra
+        // empty request closes that loop immediately (and safely picks up lines
+        // recorded between the two snapshots).
+        //
+        // `hasMore` is absent on an agent from before paging; one page per tick is
+        // exactly the old behaviour, so preserve it. Also stop if the cursor did
+        // not move, or an empty page claiming more would spin.
+        if (!moved || body.hasMore === undefined) {
+          return true;
+        }
+        // Whole pages only: the page just ingested is fully accounted for and the
+        // cursor covers exactly the rows that reached the sink, so stopping here
+        // loses nothing. The next callback resumes from the advanced cursor, and
+        // that request doubles as the acknowledgement this one is skipping.
+        if (sinkOps >= MAX_LOG_SINK_OPS_PER_DRAIN) {
+          return false;
+        }
       }
+      return false;
     } catch (err) {
-      // Container gone / mid-start / transient — swallow and retry on the next tick.
+      // Container gone / mid-start / transient — swallow. Normal polling re-arms;
+      // the onError path observes false and retries inside its bounded window.
       // Must NOT throw out of a scheduled callback.
-      console.warn('pollLogs: container log fetch failed (will retry)', err);
+      console.warn('pollLogs: container log fetch failed', err);
+      return false;
     }
-    // Re-arm. Reached on success AND on a swallowed fetch error (the container may
-    // still be running and just briefly unreachable). The running guard above ends
-    // the loop once the container is gone.
-    await this.schedule(POLL_SECONDS, 'pollLogs');
   }
 
   private async handleStatus(request: Request): Promise<Response> {

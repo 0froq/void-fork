@@ -172,10 +172,14 @@ let cancelled = false;
  * the line; `GET /logs?since=N` returns lines with seq > N. Kept so a PULL-mode
  * DO can drain logs even if push (POST to DO_LOG_URL) is unavailable. BOUNDED by
  * MAX_BUFFERED_LOG_LINES (see below).
- * @type {Array<{ seq: number, line: string, stream: 'stdout' | 'stderr', ts: number, lineEnding?: 'cr' | 'lf' | 'crlf' | 'none' }>}
+ * `bytes` is the entry's serialized size, attached non-enumerably by
+ * `measureEntry` so it never reaches the wire.
+ * @type {Array<{ seq: number, line: string, stream: 'stdout' | 'stderr', ts: number, lineEnding?: 'cr' | 'lf' | 'crlf' | 'none', bytes: number }>}
  */
 const logBuffer = [];
 let logSeq = 0;
+/** Running SERIALIZED size of `logBuffer` — see MAX_BUFFERED_LOG_BYTES. */
+let bufferedBytes = 0;
 
 /**
  * Hard cap on the retained PULL history. A pathologically verbose build (huge
@@ -187,6 +191,23 @@ let logSeq = 0;
  * monotonic, so `since` queries over RETAINED lines are still exact.
  */
 export const MAX_BUFFERED_LOG_LINES = 10000;
+
+/**
+ * Companion BYTE cap on the same ring. The line cap alone bounds the COUNT, not
+ * the size: at MAX_PARTIAL_LINE_CHARS each, 10000 retained lines is ~1.22 GiB of
+ * live strings in the agent, and a puller draining MAX_LOG_PULL_PAGES x
+ * MAX_LOG_RESPONSE_BYTES per callback would need ~19 callbacks to clear it —
+ * which is what makes "32 pages covers the buffer" an average-case fact rather
+ * than a guarantee. Measured in SERIALIZED bytes (see `measureEntry`), the same
+ * unit the page cap uses, so the comparison is exact — counting UTF-16 code units
+ * here would let a nominal 16 MiB ring hold ~96 MiB on the wire and land straight
+ * back past the 64 MiB one drain can fetch. Capping bytes makes it structural: the retained ring is
+ * always smaller than a single drain, so the DO can never fall a callback behind
+ * on backlog size, only on wall clock. Well above any real build (a verbose
+ * install plus bundler is single-digit MiB in total), so this only ever trims
+ * output that is already far past what the 60000-byte check-run tail can show.
+ */
+export const MAX_BUFFERED_LOG_BYTES = 16 * 1024 * 1024;
 
 /**
  * Hard cap on the unflushed PUSH batch. `pendingLines` is drained every
@@ -203,6 +224,27 @@ export const MAX_BUFFERED_LOG_LINES = 10000;
  * bounded, so a far-behind reader simply misses the flood's start.
  */
 export const MAX_PENDING_LOG_LINES = 10000;
+
+/**
+ * Per-response bounds on `GET /logs?since=N`.
+ *
+ * The response used to be every retained line above the cursor: up to
+ * MAX_BUFFERED_LOG_LINES entries of MAX_PARTIAL_LINE_CHARS each, so a puller that
+ * fell behind a verbose build could be handed well over a gigabyte in one body.
+ * The DO aborts that read at LOG_PULL_TIMEOUT_MS and only advances `logCursor`
+ * after a SUCCESSFUL parse, so an oversized body is a livelock rather than a slow
+ * transfer: every retry asks for the same backlog, is aborted at the same point,
+ * and the cursor never moves. Natural exit then burns the drain idle timeout
+ * waiting for an ack that cannot arrive, and the tail is lost — the exact failure
+ * the drain barrier exists to prevent.
+ *
+ * Paging fixes it because `lastSeq` reports the last line actually INCLUDED, so
+ * each successful batch advances the cursor and the next pull asks for less. One
+ * line is always returned even if it alone exceeds the byte cap, or a single
+ * oversized line would reintroduce the same stall it is meant to remove.
+ */
+export const MAX_LOG_RESPONSE_BYTES = 2 * 1024 * 1024;
+export const MAX_LOG_RESPONSE_LINES = 2000;
 
 /**
  * Pending lines not yet flushed to the DO. Drained every LOG_FLUSH_MS. Bounded
@@ -304,6 +346,23 @@ async function reportStatus(status) {
 // --- log capture + batched flush ---------------------------------------------
 
 /**
+ * Serialized size of one retained entry, in the SAME unit `GET /logs` budgets a
+ * page with — bytes on the wire, including JSON escaping (a control character
+ * costs six) and the seq/stream/ts envelope. Both the retained-ring cap and the
+ * page cap have to speak this unit or the ring's guarantee is only nominal: 16
+ * MiB of UTF-16 code units is up to ~96 MiB serialized, which no longer fits the
+ * MAX_LOG_PULL_PAGES x MAX_LOG_RESPONSE_BYTES a teardown drain can fetch. Stored
+ * on the entry NON-ENUMERABLY, so it is measured once and never reaches the
+ * response body — which also removes the second stringify the page loop did.
+ * @param {{ seq: number, line: string, stream: string, ts: number }} entry
+ */
+function measureEntry(entry) {
+  const bytes = Buffer.byteLength(JSON.stringify(entry)) + 1; // + separator
+  Object.defineProperty(entry, 'bytes', { value: bytes, enumerable: false });
+  return bytes;
+}
+
+/**
  * Record a line: append to the in-memory ring (for PULL) and the pending batch
  * (for PUSH).
  * @param {string} line
@@ -313,12 +372,34 @@ async function reportStatus(status) {
 export function record(line, stream, lineEnding) {
   const ts = Date.now();
   logSeq += 1;
-  logBuffer.push({ seq: logSeq, line, stream, ts, ...(lineEnding ? { lineEnding } : {}) });
+  const entry = { seq: logSeq, line, stream, ts, ...(lineEnding ? { lineEnding } : {}) };
+  logBuffer.push(entry);
+  bufferedBytes += measureEntry(entry);
   // Bound the retained history (see MAX_BUFFERED_LOG_LINES): once over the cap,
   // drop the oldest fifth in one splice so eviction is amortized O(1) per line —
   // a per-line front-shift would be O(n^2) over a long, verbose build.
   if (logBuffer.length > MAX_BUFFERED_LOG_LINES) {
-    logBuffer.splice(0, Math.ceil(MAX_BUFFERED_LOG_LINES / 5));
+    for (const evicted of logBuffer.splice(0, Math.ceil(MAX_BUFFERED_LOG_LINES / 5))) {
+      bufferedBytes -= evicted.bytes;
+    }
+  }
+  // And by SERIALIZED SIZE (see MAX_BUFFERED_LOG_BYTES) — the line cap bounds the
+  // count only, so a run of MAX_PARTIAL_LINE_CHARS lines sits ~1.22 GiB under it.
+  // Trims to a LOW-WATER MARK, not to the cap exactly, for the same reason the
+  // eviction above drops a fifth at a time: landing on the cap means the very
+  // next big line evicts again, so the cost stops being amortized. One splice,
+  // since a repeated shift() is O(n) each. Always keeps the newest line, even
+  // when it alone exceeds the cap.
+  if (bufferedBytes > MAX_BUFFERED_LOG_BYTES) {
+    const target = Math.floor(MAX_BUFFERED_LOG_BYTES * 0.8);
+    let drop = 0;
+    let freed = 0;
+    while (drop < logBuffer.length - 1 && bufferedBytes - freed > target) {
+      freed += logBuffer[drop].bytes;
+      drop += 1;
+    }
+    logBuffer.splice(0, drop);
+    bufferedBytes -= freed;
   }
   pendingLines.push({ line, stream, ts, ...(lineEnding ? { lineEnding } : {}) });
   // Bound the unflushed PUSH batch the same way as logBuffer (see
@@ -345,6 +426,17 @@ export function record(line, stream, lineEnding) {
 /** Agent-originated line (not from the child) — surfaced on both streams' UI. */
 function agentLog(line) {
   record(`[build-agent] ${line}`, 'stdout', 'crlf');
+}
+
+/**
+ * Test-only: drop the retained PULL buffer. `logBuffer` is module state shared by
+ * every test in the file, and the byte cap trims from the FRONT, so a test that
+ * fills the ring shifts the indices a later `getBufferedLogLines().slice(before)`
+ * depends on. Call this after any test that deliberately saturates it.
+ */
+export function clearBufferedLogLines() {
+  logBuffer.length = 0;
+  bufferedBytes = 0;
 }
 
 /** Test-only: snapshot of the retained PULL buffer (bounded by MAX_BUFFERED_LOG_LINES). */
@@ -516,7 +608,58 @@ export function pipeStream(source, stream) {
 // GET /logs?since= -> buffered lines with seq > since (PULL fallback)
 // POST /cancel     -> set cancel flag + SIGTERM the active build child
 
-function startControlServer() {
+/**
+ * Highest `lastSeq` this agent has actually SERVED on `GET /logs`. Diagnostic
+ * only — it says the bytes left this process, NOT that the DO stored them, so
+ * the exit barrier must not trust it. See `ackedLogSeq`.
+ */
+let servedLogSeq = 0;
+
+/** Test-only: the `lastSeq` high-water mark handed to the DO's `GET /logs` puller. */
+export function getServedLogSeq() {
+  return servedLogSeq;
+}
+
+/**
+ * Highest `since` cursor the DO has ever SENT US, which is the only sound
+ * acknowledgement available and is what the exit barrier waits on.
+ *
+ * The DO advances its `logCursor` strictly AFTER a successful `res.json()` and a
+ * successful `ingestLines()` (`build-manager.ts` `runLogPull`), and every pull
+ * URL is built from that cursor. So a request carrying `since=N` proves every
+ * line up to N is already INSERTed in the DO's `logs` table. Any failure on the
+ * DO side — unparseable body, SQLite throw, aborted read — leaves the cursor
+ * where it was, so the next request repeats the old `since` and we keep waiting;
+ * the lines get re-delivered instead of dying with the container.
+ *
+ * `servedLogSeq` cannot do this job, and the reason is easy to miss: `res.end`'s
+ * completion callback means "this process finished writing the message", not
+ * "the peer received it". Measured on Node 24 — a client that hangs up without
+ * reading a single byte still fires that callback with NO error, for bodies from
+ * a few bytes to 8MB. Stamping the barrier there certified the wrong side of the
+ * transport: it proved the agent handed bytes to its own kernel, while the whole
+ * point of the barrier is that the DO has the tail.
+ *
+ * No off-by-one: the agent serves `lastSeq = logSeq` and lines with `seq > since`,
+ * and the DO stores `logCursor = max(cursor, lastSeq)` verbatim — so after
+ * ingesting through N the next request is `since=N`, and `acked >= recorded` is
+ * the exact release condition.
+ */
+let ackedLogSeq = 0;
+
+/** Test-only: the highest `since` cursor the DO's puller has acknowledged. */
+export function getAckedLogSeq() {
+  return ackedLogSeq;
+}
+
+/**
+ * @param {number} [port] listening port; defaults to the container's fixed PORT.
+ *   Exported (with an override) so a unit test can bind an ephemeral port and
+ *   exercise the real `GET /logs` handler — including the `servedLogSeq`
+ *   bookkeeping the exit-time drain barrier depends on.
+ * @returns {Promise<import('node:http').Server>}
+ */
+export function startControlServer(port = PORT) {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
@@ -528,9 +671,77 @@ function startControlServer() {
 
     if (req.method === 'GET' && url.pathname === '/logs') {
       const since = Number.parseInt(url.searchParams.get('since') ?? '0', 10) || 0;
-      const lines = logBuffer.filter((entry) => entry.seq > since);
+      // Snapshot the cursor ONCE so the body, the ack clamp and the served
+      // high-water mark can never disagree (they are read in the same synchronous
+      // turn, but a single read makes that invariant explicit rather than
+      // incidental).
+      const lastSeq = logSeq;
+      // The ACK, stamped synchronously at receipt: this cursor exists only because
+      // the DO already ingested everything below it (see `ackedLogSeq`). Monotonic,
+      // so an out-of-order or replayed request can never walk it backwards.
+      //
+      // CLAMPED to lines actually recorded. This server is unauthenticated and
+      // binds all interfaces on a fixed port, and the untrusted build children run
+      // in the same network namespace — so `since` is attacker-reachable. Unclamped,
+      // ONE forged `?since=2**53` would mark every FUTURE line acked and release the
+      // exit barrier permanently, which is the tail loss this barrier exists to
+      // prevent. For the real DO this is a no-op: its cursor is always a previously
+      // served `lastSeq` and `logSeq` only grows, so `since <= lastSeq` always holds.
+      // The clamp restores the invariant `ackedLogSeq <= logSeq at some past moment`,
+      // which forces a forger back to holding a request loop open through exit
+      // instead of firing one request — the same cost it faced before the ack
+      // existed. Closing that remaining loop needs the pull authenticated (the DO
+      // already mints a per-build `AGENT_TOKEN`); left out here deliberately, since
+      // the forger is the build's own code, it can only suppress its own log tail,
+      // and the build OUTCOME comes from the container exit code, not the logs.
+      ackedLogSeq = Math.max(ackedLogSeq, Math.min(since, lastSeq));
+      // PAGED — see MAX_LOG_RESPONSE_BYTES. `servedSeq` is the last line actually
+      // included, NOT the global high-water mark, so the puller's cursor advances
+      // exactly as far as this body carries it and the remainder arrives next tick.
+      const lines = [];
+      let responseBytes = 0;
+      for (const entry of logBuffer) {
+        if (entry.seq <= since) {
+          continue;
+        }
+        // Budget the SERIALIZED entry, not `entry.line.length`. That length is
+        // UTF-16 code units of the raw string, which is not what goes on the
+        // wire: JSON escaping turns one control character into six bytes
+        // (NUL U+0000), a BMP CJK code unit is three UTF-8 bytes, and each entry
+        // carries ~61 bytes of `seq`/`stream`/`ts` envelope. Counting code units
+        // under-counted the body by up to 6x — a full page of NUL-filled lines
+        // measured 12.1 MiB against a 2 MiB cap — and overran it by 6% even on
+        // plain ASCII. That matters because the DO advances `logCursor` only
+        // after a successful parse, so a body too large to read inside
+        // LOG_PULL_TIMEOUT_MS is a livelock, not a slow transfer: every retry
+        // asks for the same backlog and the cursor never moves.
+        const entryBytes = entry.bytes;
+        if (
+          lines.length > 0 &&
+          (lines.length >= MAX_LOG_RESPONSE_LINES ||
+            responseBytes + entryBytes > MAX_LOG_RESPONSE_BYTES)
+        ) {
+          break;
+        }
+        lines.push(entry);
+        responseBytes += entryBytes;
+      }
+      const servedSeq = lines.length > 0 ? lines[lines.length - 1].seq : lastSeq;
+      // Explicit, because the puller cannot infer it: it does not know our caps,
+      // and a page that happens to land exactly on one is indistinguishable from
+      // the last page. Without it the puller waits a full tick per page, and the
+      // exit barrier's idle deadline resets only when the acknowledged cursor
+      // advances, so `hasMore` lets productive pagination continue across
+      // scheduled callbacks without turning a dead peer into an unbounded wait.
+      const hasMore = logBuffer.some((entry) => entry.seq > servedSeq);
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ lines, lastSeq: logSeq }));
+      // Stamped from `end`'s completion callback so it at least reflects a message
+      // this process finished writing rather than one merely queued. Diagnostic
+      // only — the callback does NOT prove the response reached the DO, which is
+      // why the exit barrier waits on `ackedLogSeq` instead.
+      res.end(JSON.stringify({ lines, lastSeq: servedSeq, hasMore }), () => {
+        servedLogSeq = Math.max(servedLogSeq, servedSeq);
+      });
       return;
     }
 
@@ -554,8 +765,110 @@ function startControlServer() {
   });
 
   return new Promise((resolve) => {
-    server.listen(PORT, () => resolve(server));
+    server.listen(port, () => resolve(server));
   });
+}
+
+/**
+ * Exit-time drain barrier: how long the agent will hold the container open
+ * waiting for the DO's pull-loop to catch up, and how often it re-checks.
+ *
+ * The DO polls `GET /logs` on a ~1s cadence and one paginated callback may spend
+ * its full 4s wall-clock budget. The puller normally sends the final ACK inside
+ * that callback, but a callback that expires with `hasMore` must re-arm before it
+ * can fetch the unread page and acknowledge it. A deep ring can require several
+ * productive callbacks, so one fixed short deadline still loses the tail. Reset
+ * the 8s IDLE deadline only when the acknowledged cursor advances, while a 120s
+ * ABSOLUTE cap bounds even a peer that keeps making partial progress forever.
+ *
+ * It MUST stay bounded: a dead, wedged, or already-terminal DO will never
+ * acknowledge anything, and an unbounded wait would pin one of the fleet's global
+ * container slots on every such build. One path always runs to the idle deadline —
+ * `onError` writes a terminal status without force-stopping, so `pollLogs` takes
+ * its non-re-arming terminal branch and the last tail it pulled is never acked.
+ * That costs a container slot for `idleTimeoutMs` on a container that is already
+ * failing, which is the right side of the trade against losing its logs.
+ */
+export const LOG_DRAIN_IDLE_TIMEOUT_MS = 8000;
+export const LOG_DRAIN_ABSOLUTE_TIMEOUT_MS = 120000;
+export const LOG_DRAIN_POLL_MS = 100;
+
+/** @param {number} ms */
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Hold the process open until the DO's pull-loop has fetched every recorded line.
+ *
+ * The DO→container pull (`build-manager.ts` `pollLogs`) is the ONLY transport
+ * that reaches the DO's log sink — the agent's `POST /logs` push has no route
+ * back. That pull runs on a ~1s cadence and, once the container exits, cannot run
+ * at all: `logBuffer` and this HTTP server die with the process, and the DO's own
+ * `container.running` guard early-outs before it ever fetches. So EVERY line
+ * produced between the last successful poll and container exit was lost —
+ * including `void deploy exited with code N` and, worse, the compiler/deploy error
+ * that immediately preceded a failure. The DO cannot fix this alone; the agent has
+ * to keep the door open until the puller has caught up.
+ *
+ * Waits on the DO's ACKNOWLEDGED cursor (`ackedLogSeq`), not on what this process
+ * managed to write (`servedLogSeq`). Serving a response proves nothing about the
+ * far side: if the DO's `res.json()` or `ingestLines()` throws it leaves its cursor
+ * unadvanced and retries, but a barrier released by the write would already have
+ * let the container die — recreating this exact bug on a single transient failure,
+ * with no retry possible because the agent is gone. Waiting on the ack turns that
+ * into "delivered on the next tick".
+ *
+ * Bounded by an idle deadline (reset only by acknowledged-cursor progress) and
+ * a non-resettable absolute deadline, so an absent, dead, or malicious DO can
+ * never hang the container. Every dependency is injectable so the barrier is
+ * unit-testable without real timers.
+ *
+ * @param {{
+ *   timeoutMs?: number,
+ *   idleTimeoutMs?: number,
+ *   pollMs?: number,
+ *   served?: () => number,
+ *   recorded?: () => number,
+ *   sleep?: (ms: number) => Promise<void>,
+ *   now?: () => number,
+ * }} [options]
+ * @returns {Promise<boolean>} true if the puller caught up, false on deadline.
+ */
+export async function waitForLogDrain(options = {}) {
+  const {
+    timeoutMs = LOG_DRAIN_ABSOLUTE_TIMEOUT_MS,
+    idleTimeoutMs = Math.min(LOG_DRAIN_IDLE_TIMEOUT_MS, timeoutMs),
+    pollMs = LOG_DRAIN_POLL_MS,
+    // Named `served` for the injection sites; the DEFAULT is deliberately the
+    // acked cursor. Anything wired to the served mark would certify the wrong
+    // side of the transport.
+    served = getAckedLogSeq,
+    recorded = () => logSeq,
+    sleep = sleepMs,
+    now = () => Date.now(),
+  } = options;
+  const startedAt = now();
+  const absoluteDeadline = startedAt + timeoutMs;
+  let idleDeadline = startedAt + idleTimeoutMs;
+  let acknowledged = served();
+  while (acknowledged < recorded()) {
+    const currentAcknowledged = served();
+    const currentTime = now();
+    if (currentAcknowledged > acknowledged) {
+      acknowledged = currentAcknowledged;
+      idleDeadline = Math.min(absoluteDeadline, currentTime + idleTimeoutMs);
+    }
+    if (acknowledged >= recorded()) {
+      return true;
+    }
+    const nextDeadline = Math.min(absoluteDeadline, idleDeadline);
+    if (currentTime >= nextDeadline) {
+      return false;
+    }
+    await sleep(Math.min(pollMs, nextDeadline - currentTime));
+  }
+  return true;
 }
 
 /**
@@ -577,6 +890,49 @@ export function closeControlServer(server) {
       resolve();
     }
   });
+}
+
+/**
+ * The container's exit path, extracted from `main()`'s `finally` so its ORDERING
+ * is unit-testable — two separate review findings on this path were ordering bugs,
+ * and `main()` is not exported.
+ *
+ * Deliberately does NOT call `flushLogs()`. The agent's `POST /logs` push has no
+ * route to the DO's log sink: `BuildManager` registers no `outboundByHost` /
+ * `outbound` handler and the api worker exports no `ContainerProxy`, so
+ * `@cloudflare/containers` never installs outbound interception — the POST leaves
+ * for the public internet, where the single-label `DO_LOG_URL` host is
+ * unresolvable. (Even if it arrived, the DO's `fetch` routes only the WS upgrade,
+ * `GET /logs`, `POST /status` and `POST /cancel`; a `POST /logs` falls through to
+ * `super.fetch`, which forwards it back INTO the container for a 404 — and would
+ * auto-start a stopped one, the resurrection the pull-loop avoids on purpose.
+ * `ingestLines`' doc says the same: the pull-loop is the sole producer.)
+ *
+ * So awaiting it here bought nothing and could only spend the DO's
+ * LOG_DRAIN_GRACE_SECONDS window, which `enforceTimeout` is armed against. Up to
+ * 2 x DO_POST_TIMEOUT_MS of it, because the exit call JOINS an in-flight interval
+ * flush and then drains one more batch — and a grace miss inside the barrier
+ * overwrites an already-live, successful deploy with 'build timed out'. The
+ * periodic `flushTimer` is left alone: equally routeless today, but it does not
+ * sit in front of a deadline.
+ *
+ * @param {import('node:http').Server | null | undefined} server
+ * @param {Parameters<typeof waitForLogDrain>[0]} [drainOptions]
+ * @returns {Promise<void>}
+ */
+export async function finishBuildLogging(server, drainOptions) {
+  // Drain barrier BEFORE the server closes: the DO PULLs logs from this server on
+  // a ~1s cadence and can no longer reach it once the container is gone, so
+  // everything recorded since its last poll — the failing build's actual error
+  // output and the final `void deploy exited with code N` — would be lost.
+  // Bounded by idle + absolute deadlines so an absent/dead DO can't pin the slot.
+  await waitForLogDrain(drainOptions);
+  // Close the control server unconditionally: its open listening socket would
+  // otherwise keep the Node event loop alive after the build resolves, so the
+  // container would never reach `process.exit` and would leak a build slot until
+  // the DO's `sleepAfter` ceiling (or, for unlimited plans with no timeout alarm,
+  // far longer).
+  await closeControlServer(server);
 }
 
 // --- source download ---------------------------------------------------------
@@ -1314,14 +1670,7 @@ async function main() {
     exitCode = await runBuild();
   } finally {
     clearInterval(flushTimer);
-    // Final flush so the last lines reach the DO (best-effort) before exit.
-    await flushLogs();
-    // Close the control server unconditionally: its open listening socket would
-    // otherwise keep the Node event loop alive after the build resolves, so the
-    // container would never reach `process.exit` and would leak a build slot
-    // until the DO's `sleepAfter` ceiling (or, for unlimited plans with no
-    // timeout alarm, far longer).
-    await closeControlServer(server);
+    await finishBuildLogging(server);
   }
 
   // The DO's onStop maps exit 0 -> complete, non-zero -> failed. Run on EVERY

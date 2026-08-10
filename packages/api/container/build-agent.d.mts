@@ -34,6 +34,10 @@ export const MAX_BUFFERED_LOG_LINES: number;
 
 /** Hard cap on the unflushed PUSH batch (`record` evicts past it; bounds flood OOM). */
 export const MAX_PENDING_LOG_LINES: number;
+export const MAX_LOG_RESPONSE_BYTES: number;
+export const MAX_BUFFERED_LOG_BYTES: number;
+export function clearBufferedLogLines(): void;
+export const MAX_LOG_RESPONSE_LINES: number;
 
 /** Force-flush threshold for `pipeStream`'s unterminated partial-line tail. */
 export const MAX_PARTIAL_LINE_CHARS: number;
@@ -75,8 +79,62 @@ export function sanitizeChildEnv(
   extra?: Record<string, string | undefined>,
 ): Record<string, string>;
 
+/** Start the agent's HTTP control server (health / `GET /logs` PULL / `POST /cancel`). */
+export function startControlServer(port?: number): Promise<import('node:http').Server>;
+
+/**
+ * Test-only: highest `lastSeq` already served on `GET /logs`. Diagnostic only —
+ * bytes leaving this process is not proof the DO stored them, so the exit barrier
+ * waits on `getAckedLogSeq` instead.
+ */
+export function getServedLogSeq(): number;
+
+/**
+ * Test-only: highest `since` cursor the DO's puller has sent us. The DO advances
+ * that cursor only after a successful ingest, so it is the drain acknowledgement.
+ */
+export function getAckedLogSeq(): number;
+
+/** Bounds of the exit-time drain barrier (see `waitForLogDrain`). */
+export const LOG_DRAIN_IDLE_TIMEOUT_MS: number;
+export const LOG_DRAIN_ABSOLUTE_TIMEOUT_MS: number;
+export const LOG_DRAIN_POLL_MS: number;
+
+/**
+ * Bounded exit-time barrier: waits until the DO's `GET /logs` puller has ACKED
+ * every recorded line. Resolves true when drained, false at the deadline.
+ */
+export function waitForLogDrain(options?: {
+  timeoutMs?: number;
+  idleTimeoutMs?: number;
+  pollMs?: number;
+  served?: () => number;
+  recorded?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+}): Promise<boolean>;
+
 /** Best-effort, idempotent, null-safe close of the agent's HTTP control server. */
 export function closeControlServer(server: unknown): Promise<void>;
+
+/**
+ * The container's exit path: drain barrier, then close the control server.
+ * Deliberately does NOT flush — the agent's `POST /logs` push has no route to the
+ * DO, so awaiting it could only spend the DO's drain grace. Exported so the
+ * ORDERING is unit-testable (`main()` is not).
+ */
+export function finishBuildLogging(
+  server: unknown,
+  drainOptions?: {
+    timeoutMs?: number;
+    idleTimeoutMs?: number;
+    pollMs?: number;
+    served?: () => number;
+    recorded?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  },
+): Promise<void>;
 
 /**
  * Parse the real uid from a `/proc/<pid>/status` blob (first field of the `Uid:`
