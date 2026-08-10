@@ -31,6 +31,7 @@
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/sandbox": "0.12.4",
     "@voidcloud/isr-shared": "workspace:*",
+    "@xterm/headless": "^6.0.0",
     "aws4fetch": "^1.0.20",
     "blake3-jit": "^1.1.0",
     "cron-parser": "5.7.0",

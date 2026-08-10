@@ -52,6 +52,9 @@ importers:
       '@cloudflare/sandbox':
         specifier: 0.12.4
         version: 0.12.4
+      '@xterm/headless':
+        specifier: ^6.0.0
+        version: 6.0.0
       '@voidcloud/isr-shared':
         specifier: workspace:*
         version: link:../isr-shared
@@ -2121,6 +2124,9 @@ packages:
     engines: {node: '>=20.0.0'}
     cpu: [x64]
     os: [win32]
+
+  '@xterm/headless@6.0.0':
+    resolution: {integrity: sha512-5Yj1QINYCyzrZtf8OFIHi47iQtI+0qYFPHmouEfG8dHNxbZ9Tb9YGSuLcsEwj9Z+OL75GJqPyJbyoFer80a2Hw==}
 
   '@yuku-codegen/binding-darwin-arm64@0.5.48':
     resolution: {integrity: sha512-yo96Oef12WzqnphInfz/eexVse3+kWgfGS5g2S3rFS3dcGn1ENW9xLFDZUP9rh+yP76DOq38wBoFi1+I9+6qBg==}
@@ -4283,6 +4289,8 @@ snapshots:
 
   '@voidzero-dev/vite-plus-win32-x64-msvc@0.2.8':
     optional: true
+
+  '@xterm/headless@6.0.0': {}
 
   '@yuku-codegen/binding-darwin-arm64@0.5.48':
     optional: true

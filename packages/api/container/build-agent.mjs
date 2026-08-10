@@ -30,7 +30,7 @@
  *                       untrusted repo child processes (see `sanitizeChildEnv`).
  *
  * DO endpoints (see build-manager.ts `fetch`):
- *   POST /logs    body: Array<{ line, stream, ts }>
+ *   POST /logs    body: Array<{ line, stream, ts, lineEnding? }>
  *   POST /status  body: { status }
  *   POST /cancel  (DO -> agent; handled by this server)
  *   GET  /        (DO -> agent; health check)
@@ -63,7 +63,11 @@ const LOG_FLUSH_MS = 500;
 const DO_POST_TIMEOUT_MS = 10000;
 // Default pin kept in sync with the platform's shipped Void CLI. BuildManager
 // injects VOID_CLI_VERSION; this constant is the backstop if the env is absent.
-const DEFAULT_VOID_CLI_VERSION = '0.9.1';
+// Must equal PINNED_VOID_CLI_VERSION in src/build-manager.ts, which the
+// build-manager test asserts against the framework submodule — this file is
+// plain JS copied into the container image, so it can't import that constant
+// and the test mirrors the literal instead.
+export const DEFAULT_VOID_CLI_VERSION = '0.10.10';
 
 // --- non-root build isolation ------------------------------------------------
 
@@ -96,6 +100,28 @@ export function builderCacheEnv() {
     YARN_CACHE_FOLDER: `${BUILDER_HOME}/.cache/yarn`,
     BUN_INSTALL: `${BUILDER_HOME}/.bun`,
   };
+}
+
+/**
+ * Env that tells every build child it is running unattended, so interactive
+ * CLIs take their CI-safe rendering path. Merged into both untrusted children.
+ *
+ * A build container IS a CI environment, but nothing here set `CI`, so
+ * `void deploy` took its interactive branch: `@clack/prompts`' spinner redraws
+ * one line in place with `ESC[1G ESC[J` (cursor-to-column-1 + erase) and NO
+ * newline. `chunkToLines` splits on CR/LF only, so every frame the spinner ever
+ * drew arrived glued into a SINGLE captured line — unreadable in the live tail
+ * and in the completed check run's `output.text`.
+ *
+ * The framework already guards this: `createSpinner()` in the void CLI swaps in
+ * plain `log.step` output when `isCI()`. But that gate is `@clack/prompts`'
+ * `isCI`, which compares `process.env.CI` to the EXACT string `'true'` — `'1'`
+ * or `'yes'` will NOT do. The `github_actions` executor gets `CI=true` for free
+ * from the runner, which is why only container builds rendered broken.
+ * @returns {Record<string, string>}
+ */
+export function nonInteractiveEnv() {
+  return { CI: 'true' };
 }
 
 /**
@@ -146,7 +172,7 @@ let cancelled = false;
  * the line; `GET /logs?since=N` returns lines with seq > N. Kept so a PULL-mode
  * DO can drain logs even if push (POST to DO_LOG_URL) is unavailable. BOUNDED by
  * MAX_BUFFERED_LOG_LINES (see below).
- * @type {Array<{ seq: number, line: string, stream: 'stdout' | 'stderr', ts: number }>}
+ * @type {Array<{ seq: number, line: string, stream: 'stdout' | 'stderr', ts: number, lineEnding?: 'cr' | 'lf' | 'crlf' | 'none' }>}
  */
 const logBuffer = [];
 let logSeq = 0;
@@ -181,7 +207,7 @@ export const MAX_PENDING_LOG_LINES = 10000;
 /**
  * Pending lines not yet flushed to the DO. Drained every LOG_FLUSH_MS. Bounded
  * by MAX_PENDING_LOG_LINES (see above) so a log flood can't OOM the agent.
- * @type {Array<{ line: string, stream: 'stdout' | 'stderr', ts: number }>}
+ * @type {Array<{ line: string, stream: 'stdout' | 'stderr', ts: number, lineEnding?: 'cr' | 'lf' | 'crlf' | 'none' }>}
  */
 let pendingLines = [];
 
@@ -282,18 +308,19 @@ async function reportStatus(status) {
  * (for PUSH).
  * @param {string} line
  * @param {'stdout' | 'stderr'} stream
+ * @param {'cr' | 'lf' | 'crlf' | 'none'} [lineEnding]
  */
-export function record(line, stream) {
+export function record(line, stream, lineEnding) {
   const ts = Date.now();
   logSeq += 1;
-  logBuffer.push({ seq: logSeq, line, stream, ts });
+  logBuffer.push({ seq: logSeq, line, stream, ts, ...(lineEnding ? { lineEnding } : {}) });
   // Bound the retained history (see MAX_BUFFERED_LOG_LINES): once over the cap,
   // drop the oldest fifth in one splice so eviction is amortized O(1) per line —
   // a per-line front-shift would be O(n^2) over a long, verbose build.
   if (logBuffer.length > MAX_BUFFERED_LOG_LINES) {
     logBuffer.splice(0, Math.ceil(MAX_BUFFERED_LOG_LINES / 5));
   }
-  pendingLines.push({ line, stream, ts });
+  pendingLines.push({ line, stream, ts, ...(lineEnding ? { lineEnding } : {}) });
   // Bound the unflushed PUSH batch the same way as logBuffer (see
   // MAX_PENDING_LOG_LINES): a flood can fill it faster than LOG_FLUSH_MS drains,
   // so evict the oldest fifth in one splice once over the cap — amortized O(1)
@@ -317,7 +344,7 @@ export function record(line, stream) {
 
 /** Agent-originated line (not from the child) — surfaced on both streams' UI. */
 function agentLog(line) {
-  record(`[build-agent] ${line}`, 'stdout');
+  record(`[build-agent] ${line}`, 'stdout', 'crlf');
 }
 
 /** Test-only: snapshot of the retained PULL buffer (bounded by MAX_BUFFERED_LOG_LINES). */
@@ -384,82 +411,101 @@ const LINE_TRUNCATION_MARKER = ' …[line truncated]';
  *
  * Two cross-chunk concerns drive the hand-rolled scan rather than a `split()`:
  *   - Torn CRLF: a CR may be the last byte of one chunk and the LF the first of
- *     the next. A bare CR is treated as a line delimiter immediately; `pendingLf`
- *     then swallows a single leading LF on the next chunk so a CRLF collapses to
- *     one break instead of opening an empty line. The CR is NEVER buffered as
- *     data, so it can't later be flushed mid-line or at EOF.
- *   - Unbounded line: a line over MAX_PARTIAL_LINE_CHARS is recorded truncated
- *     and `dropping` discards the remainder until the next delimiter, so a
- *     terminator-free flood is bounded to a single record instead of being
- *     retained in full (the MAX_BUFFERED_LOG_LINES ring caps line COUNT, not
- *     bytes, so a full over-cap line would still let the buffer balloon).
+ *     the next. That one bounded row waits for one byte of lookahead (or EOF),
+ *     which is the only way to distinguish CR from CRLF without a correction
+ *     event. Same-chunk bare-CR frames still flush immediately.
+ *   - Unbounded line: once a line exceeds MAX_PARTIAL_LINE_CHARS, `dropping`
+ *     retains only its bounded prefix + marker and discards the remainder until
+ *     the delimiter. The one truncated record is emitted with that exact ending
+ *     (or `none` at EOF), so a terminator-free flood never grows unbounded.
  * @param {NodeJS.ReadableStream} source
  * @param {'stdout' | 'stderr'} stream
  */
 export function pipeStream(source, stream) {
   let tail = ''; // current unterminated line; never holds a trailing CR
-  let pendingLf = false; // prior delimiter was a CR — swallow one leading LF (CRLF)
+  let pendingCr = false; // a CR at the prior chunk seam; classification needs one-byte lookahead
   let dropping = false; // truncated an over-cap line — drop bytes until its terminator
 
   /** Record `line`, truncated if it exceeds the per-line cap. */
-  const recordLine = (line) => {
+  const recordLine = (line, lineEnding) => {
     record(
       line.length > MAX_PARTIAL_LINE_CHARS
         ? line.slice(0, MAX_PARTIAL_LINE_CHARS) + LINE_TRUNCATION_MARKER
         : line,
       stream,
+      lineEnding,
     );
+  };
+
+  /** Finish the bounded current row with its exact delimiter. */
+  const finishLine = (lineEnding) => {
+    recordLine(tail, lineEnding);
+    tail = '';
+    dropping = false;
+  };
+
+  /** Append data while retaining at most one capped row until its delimiter. */
+  const appendToTail = (text) => {
+    if (dropping) {
+      return;
+    }
+    tail += text;
+    if (tail.length > MAX_PARTIAL_LINE_CHARS) {
+      tail = tail.slice(0, MAX_PARTIAL_LINE_CHARS) + LINE_TRUNCATION_MARKER;
+      dropping = true;
+    }
   };
 
   source.setEncoding('utf8');
   source.on('data', (chunk) => {
     const n = chunk.length;
     let i = 0;
-    while (i < n) {
-      // Swallow the LF half of a CRLF that was torn across the chunk boundary.
-      if (pendingLf) {
-        pendingLf = false;
-        if (chunk[i] === '\n') {
-          i += 1;
-          continue;
-        }
+    // A CR at a chunk seam is the one ambiguous case: wait for the next byte so
+    // torn CRLF is not misreported as a bare-CR rewrite. Same-chunk CR frames
+    // still flush synchronously.
+    if (pendingCr && n > 0) {
+      pendingCr = false;
+      if (chunk[0] === '\n') {
+        finishLine('crlf');
+        i = 1;
+      } else {
+        finishLine('cr');
       }
+    }
+    while (i < n) {
       // Scan to the next CR or LF delimiter.
       let j = i;
       while (j < n && chunk[j] !== '\n' && chunk[j] !== '\r') {
         j += 1;
       }
       if (j < n) {
-        // Delimiter at j terminates the current line.
-        if (dropping) {
-          dropping = false; // the over-cap line ended; resume normal recording
+        appendToTail(chunk.slice(i, j));
+        if (chunk[j] === '\n') {
+          finishLine('lf');
+          i = j + 1;
+        } else if (j + 1 === n) {
+          pendingCr = true;
+          i = n;
+        } else if (chunk[j + 1] === '\n') {
+          finishLine('crlf');
+          i = j + 2;
         } else {
-          recordLine(tail + chunk.slice(i, j));
-          tail = '';
+          finishLine('cr');
+          i = j + 1;
         }
-        if (chunk[j] === '\r') {
-          pendingLf = true; // a following LF (this/next chunk) is the CRLF's other half
-        }
-        i = j + 1;
       } else {
         // No delimiter to end of chunk — extend the partial line.
-        if (!dropping) {
-          tail += chunk.slice(i, n);
-          if (tail.length > MAX_PARTIAL_LINE_CHARS) {
-            record(tail.slice(0, MAX_PARTIAL_LINE_CHARS) + LINE_TRUNCATION_MARKER, stream);
-            tail = '';
-            dropping = true; // drop the rest of this line until its terminator
-          }
-        }
+        appendToTail(chunk.slice(i, n));
         i = n;
       }
     }
   });
   source.on('end', () => {
-    // A dangling CR (pendingLf) already acted as a delimiter, so nothing trails
-    // it; only a genuine unterminated partial line remains in `tail`.
-    if (!dropping && tail.length > 0) {
-      recordLine(tail);
+    if (pendingCr) {
+      finishLine('cr');
+      pendingCr = false;
+    } else if (tail.length > 0 || dropping) {
+      finishLine('none');
     }
     tail = '';
   });
@@ -723,7 +769,23 @@ function resolveInstall() {
     return { manager: 'pnpm', cmd: 'corepack', args: ['pnpm', 'install'] };
   }
   if (pin.startsWith('yarn@')) {
-    return { manager: 'yarn', cmd: 'corepack', args: ['yarn', 'install'] };
+    // `--no-immutable` is REQUIRED here, and only here. Yarn Berry >= 3.0.0
+    // defaults `enableImmutableInstalls` to true whenever it smells CI — and
+    // `nonInteractiveEnv()` now tells every child `CI=true` — so this branch,
+    // whose entire purpose is to CREATE the missing lockfile, would abort with
+    // `YN0028: The lockfile would have been created by this install, which is
+    // explicitly forbidden`. Measured on Berry 3.0.0 / 3.6.4 / 4.14.1 / 4.18.0;
+    // 2.4.3 predates the default, and Yarn Classic ignores the flag (exit 0,
+    // "Saved lockfile"), which matters because a `yarn@1.x` pin lands here too.
+    // pnpm needs nothing: it drops its implicit CI frozen-lockfile when the
+    // lockfile is ABSENT. Yarn Berry is the outlier.
+    //
+    // Scope matters. Do NOT hoist this into `nonInteractiveEnv()` — that env is
+    // shared with the deploy child, where a repo's own `yarn install --immutable`
+    // must stay immutable — and do NOT relax the lockfile plans above, or a build
+    // could mutate a committed lockfile and deploy resolutions the repo never
+    // pinned.
+    return { manager: 'yarn', cmd: 'corepack', args: ['yarn', 'install', '--no-immutable'] };
   }
   if (pin.startsWith('bun@')) {
     return { manager: 'bun', cmd: 'bun', args: ['install'] };
@@ -1085,7 +1147,7 @@ export async function runBuild(deps = {}) {
     const installPlan = install();
     agentLog(`detected package manager: ${installPlan.manager}`);
     const installCode = await run(installPlan.cmd, installPlan.args, {
-      env: sanitizeChildEnv(process.env, builderCacheEnv()),
+      env: sanitizeChildEnv(process.env, { ...nonInteractiveEnv(), ...builderCacheEnv() }),
     });
     if (installCode !== 0) {
       // Fall through to the single exit decision with the failing code — do NOT
@@ -1173,6 +1235,7 @@ export async function runBuild(deps = {}) {
     }
     const deployCode = await run(deployCmd, deployArgs, {
       env: sanitizeChildEnv(process.env, {
+        ...nonInteractiveEnv(),
         ...builderCacheEnv(),
         VOID_TOKEN: voidToken,
         // Re-inject the staging CF Access service token (undefined off staging,

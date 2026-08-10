@@ -15,6 +15,12 @@ export const BUILDER_HOME: string;
 /** Cache/HOME env overrides so the non-root builder has writable package-manager caches. */
 export function builderCacheEnv(): Record<string, string>;
 
+/** `CI=true` for every build child, so interactive CLIs render CI-safe (non-animated) output. */
+export function nonInteractiveEnv(): Record<string, string>;
+
+/** Fallback `void` CLI version when BuildManager injects no `VOID_CLI_VERSION`. */
+export const DEFAULT_VOID_CLI_VERSION: string;
+
 /** spawn() options for an untrusted child: WORK_DIR cwd, piped stdio, non-root uid/gid. */
 export function childSpawnOptions(): {
   cwd: string;
@@ -39,7 +45,11 @@ export const MAX_PARTIAL_LINE_CHARS: number;
 export function pipeStream(source: NodeJS.ReadableStream, stream: 'stdout' | 'stderr'): void;
 
 /** Append a log line to the bounded PULL buffer (+ pending push batch + stderr). */
-export function record(line: string, stream: 'stdout' | 'stderr'): void;
+export function record(
+  line: string,
+  stream: 'stdout' | 'stderr',
+  lineEnding?: 'cr' | 'lf' | 'crlf' | 'none',
+): void;
 
 /** Single-flight, drain-to-empty best-effort flush of pending lines to the DO. */
 export function flushLogs(): Promise<void>;
@@ -50,6 +60,7 @@ export function getBufferedLogLines(): ReadonlyArray<{
   line: string;
   stream: 'stdout' | 'stderr';
   ts: number;
+  lineEnding?: 'cr' | 'lf' | 'crlf' | 'none';
 }>;
 
 /** Test-only: current length of the unflushed PUSH batch. */

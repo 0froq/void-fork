@@ -1,4 +1,5 @@
 import { Container } from '@cloudflare/containers';
+import { Terminal } from '@xterm/headless';
 import {
   DEPLOY_TOKEN_HARD_MAX_MINUTES,
   deployTokenTtlSecondsForBuildMinutes,
@@ -73,10 +74,13 @@ export const CHECK_RUN_OUTPUT_TEXT_MAX_BYTES = 65535;
 const POLL_SECONDS = 1;
 
 // Pin the build container's fallback Void CLI to the platform's shipped version.
-// Keep in sync with framework/packages/void/package.json (the submodule the
-// platform deploys against). Prevents a moving `void@latest` from changing
-// deploy behavior with no repo diff.
-const PINNED_VOID_CLI_VERSION = '0.9.1';
+// Used ONLY when the repo has no local `void` dependency to run; a repo that
+// pins its own version is unaffected. Kept equal to
+// framework/packages/void/package.json (the submodule the platform deploys
+// against) so a moving `void@latest` can't change deploy behavior with no repo
+// diff. The comment alone let this sit a full minor behind for the whole life of
+// the feature, so `build-manager.test.ts` now asserts the equality instead.
+export const PINNED_VOID_CLI_VERSION = '0.10.10';
 
 // Ceiling on how long a queued build may wait for the just-in-time branch-head
 // freshness recheck to succeed. While the GitHub compare API is unreachable
@@ -143,6 +147,701 @@ function longestBacktickRun(text: string): number {
 }
 
 /**
+ * Fixed width shared with the xterm oracle. A width derived from raw input bytes
+ * makes non-painting SGR sequences change the right margin and therefore the
+ * visible output. 32K columns comfortably covers real build diagnostics while
+ * keeping one headless grid to a few MiB.
+ */
+export const TERMINAL_RENDER_COLUMNS = 32 * 1024;
+
+/**
+ * Deterministic outer bounds around xterm. Worker clocks do not advance during
+ * CPU work, so a `performance.now()` deadline cannot interrupt a hostile CSI.
+ * Controlled rows larger than half the grid, or whose work-amplifying controls
+ * exceed this aggregate budget, are omitted fail-closed before a grid is
+ * allocated. The tail budget limits cumulative parser work across 100 rows.
+ */
+export const TERMINAL_RENDER_MAX_INPUT_CODE_UNITS = TERMINAL_RENDER_COLUMNS / 2;
+export const TERMINAL_RENDER_MAX_PARAMETER_WORK = 8 * 1024;
+export const TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS = 1024 * 1024;
+export const TERMINAL_TAIL_MAX_INPUT_CODE_UNITS = TERMINAL_RENDER_COLUMNS;
+const TERMINAL_FULL_GRID_WORK = TERMINAL_RENDER_MAX_PARAMETER_WORK / 4;
+const TERMINAL_ROW_MUTATION_WORK = 32;
+
+function hasTerminalControl(raw: string): boolean {
+  for (let index = 0; index < raw.length; index++) {
+    const code = raw.charCodeAt(index);
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+interface TerminalPreflight {
+  safe: boolean;
+  controlledCodeUnits: number;
+  parameterWork: number;
+  repeatCodeUnits: number;
+}
+
+/**
+ * Bound parameter-driven terminal work before it reaches xterm's handlers.
+ * This is deliberately only a resource preflight, not another terminal model:
+ * xterm remains authoritative for parsing and screen state. It recognizes CSI
+ * framing well enough to charge work-amplifying commands and rejects insert
+ * mode, whose printable path shifts the full row once per character.
+ */
+function preflightTerminalInput(
+  raw: string,
+  maxInputCodeUnits = TERMINAL_RENDER_MAX_INPUT_CODE_UNITS,
+): TerminalPreflight {
+  if (!hasTerminalControl(raw)) {
+    return { safe: true, controlledCodeUnits: 0, parameterWork: 0, repeatCodeUnits: 0 };
+  }
+  if (raw.length > maxInputCodeUnits) {
+    return {
+      safe: false,
+      controlledCodeUnits: raw.length,
+      parameterWork: 0,
+      repeatCodeUnits: 0,
+    };
+  }
+
+  let state: 'ground' | 'escape' | 'escapeIntermediate' | 'csi' | 'csiIgnore' = 'ground';
+  let parameterWork = 0;
+  let repeatCodeUnits = 0;
+  let precedingGraphicRun = 0;
+  let parameterValue = 0;
+  let parameterHasDigits = false;
+  let csiHasParameterBytes = false;
+  let csiPrefix = '';
+  let csiIntermediates = '';
+  let escapeIntermediates = '';
+  let defaultTabStopsCleared = false;
+  const csiParameters: Array<number> = [];
+
+  const resetCsi = (): void => {
+    parameterValue = 0;
+    parameterHasDigits = false;
+    csiHasParameterBytes = false;
+    csiPrefix = '';
+    csiIntermediates = '';
+    csiParameters.length = 0;
+  };
+  const finishParameter = (): void => {
+    if (!parameterHasDigits) {
+      return;
+    }
+    csiParameters.push(parameterValue);
+    parameterValue = 0;
+    parameterHasDigits = false;
+  };
+  const spendWork = (units: number): boolean => {
+    parameterWork += Math.max(1, units);
+    return parameterWork <= TERMINAL_RENDER_MAX_PARAMETER_WORK;
+  };
+  const enterCsi = (): void => {
+    resetCsi();
+    state = 'csi';
+  };
+
+  for (let index = 0; index < raw.length; index++) {
+    const code = raw.charCodeAt(index);
+    // Executed C0/C1 controls clear xterm's preceding-graphic state. ESC and
+    // CSI introducers preserve it just long enough for an immediately following
+    // REP; executed controls and successfully dispatched sequences reset it.
+    if ((code <= 0x1f && code !== 0x1b) || (code >= 0x80 && code <= 0x9f && code !== 0x9b)) {
+      precedingGraphicRun = 0;
+    }
+    // After TBC 3 clears every stop, xterm's HT search can scan the full fixed
+    // grid. Keep custom-tab semantics in xterm, but conservatively charge that
+    // worst case until RIS restores the default stops.
+    if (code === 0x09 && defaultTabStopsCleared && !spendWork(TERMINAL_FULL_GRID_WORK)) {
+      return { safe: false, controlledCodeUnits: raw.length, parameterWork, repeatCodeUnits };
+    }
+    // These controls scroll the sole row and make xterm allocate/fill a fresh
+    // 32K-column buffer line. Permit an isolated real control, but reject a
+    // reset/scroll flood before constructing the terminal grid.
+    if (
+      (code === 0x0a ||
+        code === 0x0b ||
+        code === 0x0c ||
+        code === 0x84 ||
+        code === 0x85 ||
+        code === 0x8d) &&
+      !spendWork(TERMINAL_FULL_GRID_WORK)
+    ) {
+      return { safe: false, controlledCodeUnits: raw.length, parameterWork, repeatCodeUnits };
+    }
+    // C1 CSI is an anywhere transition in xterm, including string controls.
+    if (code === 0x9b) {
+      enterCsi();
+      continue;
+    }
+
+    if (state === 'ground') {
+      if (code === 0x1b) {
+        escapeIntermediates = '';
+        state = 'escape';
+      } else if (code >= 0x20 && code <= 0x7e) {
+        // Every printable ASCII byte starts a new xterm cell/grapheme. Keep the
+        // conservative run bound only for non-ASCII code units, where combining
+        // and joiner behavior can make one grapheme span many source units.
+        precedingGraphicRun = 1;
+      } else if (code > 0x1f && !(code >= 0x7f && code <= 0x9f)) {
+        // Treat the whole printable run as one possible grapheme. This is
+        // conservative for Unicode and exact for the hostile combining case.
+        precedingGraphicRun += 1;
+      }
+      continue;
+    }
+    if (state === 'escape' || state === 'escapeIntermediate') {
+      if (code === 0x18 || code === 0x1a) {
+        state = 'ground';
+      } else if (code === 0x1b) {
+        escapeIntermediates = '';
+        state = 'escape';
+      } else if (code <= 0x1f || code === 0x7f) {
+        // Ordinary C0 controls execute without leaving the escape state; DEL is
+        // ignored. This matters for ESC BEL [ CSI routing.
+      } else if (state === 'escape' && code === 0x5b) {
+        enterCsi();
+      } else if (code >= 0x20 && code <= 0x2f) {
+        state = 'escapeIntermediate';
+        escapeIntermediates += String.fromCharCode(code);
+      } else if (code >= 0x30 && code <= 0x7e) {
+        const fullGridEscape =
+          (escapeIntermediates === '' &&
+            (code === 0x44 || code === 0x45 || code === 0x4d || code === 0x63)) ||
+          (escapeIntermediates === '#' && code === 0x38);
+        if (fullGridEscape && !spendWork(TERMINAL_FULL_GRID_WORK)) {
+          return { safe: false, controlledCodeUnits: raw.length, parameterWork, repeatCodeUnits };
+        }
+        if (escapeIntermediates === '' && code === 0x63) {
+          defaultTabStopsCleared = false;
+        }
+        state = 'ground';
+        precedingGraphicRun = 0;
+      }
+      continue;
+    }
+    if (state === 'csiIgnore') {
+      if (code === 0x18 || code === 0x1a) {
+        state = 'ground';
+      } else if (code === 0x1b) {
+        escapeIntermediates = '';
+        state = 'escape';
+      } else if (code >= 0x40 && code <= 0x7e) {
+        state = 'ground';
+      }
+      continue;
+    }
+
+    // CSI entry/parameter/intermediate states. Embedded C0 controls execute and
+    // stay in CSI; CAN/SUB abort; ESC restarts escape parsing.
+    if (code === 0x18 || code === 0x1a) {
+      state = 'ground';
+      resetCsi();
+      precedingGraphicRun = 0;
+    } else if (code === 0x1b) {
+      escapeIntermediates = '';
+      state = 'escape';
+      resetCsi();
+    } else if (code <= 0x1f || code === 0x7f) {
+      continue;
+    } else if (code >= 0x30 && code <= 0x39 && csiIntermediates === '') {
+      csiHasParameterBytes = true;
+      parameterHasDigits = true;
+      parameterValue = Math.min(
+        TERMINAL_RENDER_MAX_PARAMETER_WORK + 1,
+        parameterValue * 10 + code - 0x30,
+      );
+      if (parameterValue > TERMINAL_RENDER_MAX_PARAMETER_WORK) {
+        return { safe: false, controlledCodeUnits: raw.length, parameterWork, repeatCodeUnits };
+      }
+    } else if ((code === 0x3a || code === 0x3b) && csiIntermediates === '') {
+      csiHasParameterBytes = true;
+      finishParameter();
+    } else if (code >= 0x3c && code <= 0x3f && csiIntermediates === '') {
+      if (csiPrefix !== '' || csiHasParameterBytes) {
+        // xterm enters CSI_IGNORE when a second private marker appears or a
+        // marker follows parameters. An ignored sequence does not dispatch and
+        // therefore does not clear REP's preceding-graphic source.
+        state = 'csiIgnore';
+        resetCsi();
+      } else {
+        csiPrefix = String.fromCharCode(code);
+      }
+    } else if (code >= 0x20 && code <= 0x2f) {
+      finishParameter();
+      csiIntermediates += String.fromCharCode(code);
+    } else if (code >= 0x40 && code <= 0x7e) {
+      finishParameter();
+      const firstParameter = csiParameters[0] || 1;
+      if (csiPrefix === '' && csiIntermediates === '' && code === 0x67 && firstParameter === 3) {
+        defaultTabStopsCleared = true;
+      }
+      // REP allocates `precedingGrapheme.length * Ps` code points before it
+      // paints. A grapheme can contain most of the input as combining marks, so
+      // the generic Ps sum alone is not a memory bound.
+      if (code === 0x62 && csiPrefix === '' && csiIntermediates === '') {
+        repeatCodeUnits += precedingGraphicRun * (csiParameters[0] || 1);
+        if (repeatCodeUnits > TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS) {
+          return { safe: false, controlledCodeUnits: raw.length, parameterWork, repeatCodeUnits };
+        }
+      }
+      // ANSI insert mode makes every subsequent printable character shift the
+      // entire row. It is irrelevant to build output and unsafe to hand to a
+      // dense terminal grid under attacker-controlled input.
+      if (
+        code === 0x68 &&
+        csiPrefix === '' &&
+        csiIntermediates === '' &&
+        csiParameters.includes(4)
+      ) {
+        return { safe: false, controlledCodeUnits: raw.length, parameterWork, repeatCodeUnits };
+      }
+      let commandWork = 1;
+      if (csiPrefix === '' && csiIntermediates === '') {
+        switch (String.fromCharCode(code)) {
+          case 'S':
+          case 'T':
+          case 'L':
+          case 'M':
+            commandWork += TERMINAL_FULL_GRID_WORK + firstParameter;
+            break;
+          case 'J':
+          case 'K':
+            commandWork += TERMINAL_ROW_MUTATION_WORK;
+            break;
+          case '@':
+          case 'P':
+            commandWork += TERMINAL_ROW_MUTATION_WORK + firstParameter;
+            break;
+          case 'I':
+          case 'Z':
+            commandWork += firstParameter * (defaultTabStopsCleared ? TERMINAL_FULL_GRID_WORK : 1);
+            break;
+          case 'X':
+          case 'b':
+            commandWork += firstParameter;
+            break;
+        }
+      } else if (
+        csiPrefix === '' &&
+        ((csiIntermediates === ' ' && (code === 0x40 || code === 0x41)) ||
+          (csiIntermediates === "'" && (code === 0x7d || code === 0x7e)))
+      ) {
+        commandWork += TERMINAL_ROW_MUTATION_WORK + firstParameter;
+      } else if (csiPrefix === '?' && csiIntermediates === '' && (code === 0x4a || code === 0x4b)) {
+        // DECSED/DECSEL inspect protection metadata across the dense row even
+        // when few cells change, unlike the ordinary erase fast path.
+        commandWork += TERMINAL_ROW_MUTATION_WORK;
+      } else if (csiPrefix === '?' && csiIntermediates === '' && (code === 0x68 || code === 0x6c)) {
+        // DECSET/DECRST alternate-buffer switches clear/allocate a dense row.
+        commandWork +=
+          csiParameters.filter(
+            (parameter) => parameter === 47 || parameter === 1047 || parameter === 1049,
+          ).length * TERMINAL_FULL_GRID_WORK;
+      }
+      if (!spendWork(commandWork)) {
+        return { safe: false, controlledCodeUnits: raw.length, parameterWork, repeatCodeUnits };
+      }
+      state = 'ground';
+      resetCsi();
+      precedingGraphicRun = 0;
+    } else {
+      state = 'csiIgnore';
+      resetCsi();
+    }
+  }
+  return { safe: true, controlledCodeUnits: raw.length, parameterWork, repeatCodeUnits };
+}
+
+type TerminalParserBoundaryState =
+  | 'ground'
+  | 'escape'
+  | 'escapeIntermediate'
+  | 'csi'
+  | 'osc'
+  | 'dcs'
+  | 'sosPmApc';
+
+interface TerminalRenderGroup {
+  lines: Array<TerminalRenderLine>;
+  inputCodeUnits: number;
+  requiresTerminal: boolean;
+}
+
+type TerminalLineEnding = NonNullable<BuildLogLine['lineEnding']>;
+
+interface TerminalRenderLine {
+  raw: string;
+  lineEnding: TerminalLineEnding;
+}
+
+const LINE_ENDING_TEXT: Record<TerminalLineEnding, string> = {
+  cr: '\r',
+  lf: '\n',
+  crlf: '\r\n',
+  none: '',
+};
+
+type TerminalLogInput = string | { line: string; lineEnding?: TerminalLineEnding | null };
+
+function normalizeTerminalLogLines(lines: Array<TerminalLogInput>): Array<TerminalRenderLine> {
+  return lines.map((entry, index) => {
+    const capturedEnding = typeof entry === 'string' ? undefined : entry.lineEnding;
+    const validCapturedEnding =
+      capturedEnding === 'cr' ||
+      capturedEnding === 'lf' ||
+      capturedEnding === 'crlf' ||
+      capturedEnding === 'none'
+        ? capturedEnding
+        : undefined;
+    return {
+      raw: typeof entry === 'string' ? entry : entry.line,
+      // Old agents/rows did not preserve delimiters. Retain the previous CRLF
+      // reconstruction between records while avoiding a fabricated trailing EOL.
+      lineEnding: validCapturedEnding ?? (index + 1 < lines.length ? 'crlf' : 'none'),
+    };
+  });
+}
+
+/**
+ * Track only VT parser framing across captured-row boundaries. Rendering stays
+ * xterm's job; this state exists so the tail budget never cuts into the middle
+ * of OSC/DCS/SOS/PM/APC, ESC, or CSI and then feeds its payload to a fresh
+ * terminal as printable text.
+ *
+ * The transitions mirror xterm 6's VT500 table. DCS's entry/parameter/
+ * passthrough states are deliberately collapsed: they all remain non-ground
+ * until an anywhere transition or terminator, which is the only distinction
+ * grouping needs. Invalid bytes may therefore keep a group open longer than
+ * xterm would, but never close one early and expose hidden payload.
+ */
+function advanceTerminalParserBoundary(
+  initialState: TerminalParserBoundaryState,
+  raw: string,
+): TerminalParserBoundaryState {
+  let state = initialState;
+  for (let index = 0; index < raw.length; index++) {
+    const code = raw.charCodeAt(index);
+
+    // VT500 anywhere transitions. The named C1 introducers override the
+    // generic C1 execute-to-ground ranges below.
+    if (code === 0x18 || code === 0x1a || code === 0x9c) {
+      state = 'ground';
+      continue;
+    }
+    if (code === 0x1b) {
+      state = 'escape';
+      continue;
+    }
+    if (code === 0x90) {
+      state = 'dcs';
+      continue;
+    }
+    if (code === 0x98 || code === 0x9e || code === 0x9f) {
+      state = 'sosPmApc';
+      continue;
+    }
+    if (code === 0x9b) {
+      state = 'csi';
+      continue;
+    }
+    if (code === 0x9d) {
+      state = 'osc';
+      continue;
+    }
+    if ((code >= 0x80 && code <= 0x97) || code === 0x99 || code === 0x9a) {
+      state = 'ground';
+      continue;
+    }
+
+    switch (state) {
+      case 'ground':
+        break;
+      case 'escape':
+        if (code <= 0x1f || code === 0x7f) {
+          break;
+        }
+        if (code === 0x5b) {
+          state = 'csi';
+        } else if (code === 0x5d) {
+          state = 'osc';
+        } else if (code === 0x50) {
+          state = 'dcs';
+        } else if (code === 0x58 || code === 0x5e || code === 0x5f) {
+          state = 'sosPmApc';
+        } else if (code >= 0x20 && code <= 0x2f) {
+          state = 'escapeIntermediate';
+        } else if (code >= 0x30 && code <= 0x7e) {
+          state = 'ground';
+        }
+        break;
+      case 'escapeIntermediate':
+        if (code <= 0x1f || code === 0x7f || (code >= 0x20 && code <= 0x2f)) {
+          break;
+        }
+        if (code >= 0x30 && code <= 0x7e) {
+          state = 'ground';
+        }
+        break;
+      case 'csi':
+        // C0 controls execute without ending CSI; parameters/intermediates and
+        // DEL remain inside it. A final byte returns to ground.
+        if (code >= 0x40 && code <= 0x7e) {
+          state = 'ground';
+        }
+        break;
+      case 'osc':
+        // OSC alone accepts BEL as a terminator. ESC/CAN/SUB/ST were handled by
+        // the anywhere transitions above.
+        if (code === 0x07) {
+          state = 'ground';
+        }
+        break;
+      case 'dcs':
+      case 'sosPmApc':
+        // Their payload, including BEL and CR/LF, remains hidden until an
+        // anywhere transition above aborts or terminates the string.
+        break;
+    }
+  }
+  return state;
+}
+
+/** Partition chronological rows without cutting VT state or a bare-CR rewrite. */
+function groupTerminalLogLines(lines: Array<TerminalLogInput>): Array<TerminalRenderGroup> {
+  const groups: Array<TerminalRenderGroup> = [];
+  let state: TerminalParserBoundaryState = 'ground';
+  let current: TerminalRenderGroup | null = null;
+  const normalized = normalizeTerminalLogLines(lines);
+
+  for (let index = 0; index < normalized.length; index++) {
+    const line = normalized[index];
+    if (current === null) {
+      current = { lines: [], inputCodeUnits: 0, requiresTerminal: false };
+    }
+    current.lines.push(line);
+    current.inputCodeUnits += line.raw.length + LINE_ENDING_TEXT[line.lineEnding].length;
+    current.requiresTerminal ||=
+      hasTerminalControl(line.raw) ||
+      line.lineEnding === 'cr' ||
+      (line.lineEnding === 'lf' && index + 1 < normalized.length) ||
+      (line.lineEnding === 'none' && index + 1 < normalized.length);
+
+    state = advanceTerminalParserBoundary(state, line.raw);
+    state = advanceTerminalParserBoundary(state, LINE_ENDING_TEXT[line.lineEnding]);
+
+    // A bare CR rewrites the same terminal row, so it remains in this atomic
+    // group even at parser ground. LF/CRLF and EOF complete a logical row only
+    // once every spanning parser sequence has returned to ground.
+    if (
+      state === 'ground' &&
+      line.lineEnding !== 'cr' &&
+      (line.lineEnding !== 'none' || index + 1 === normalized.length)
+    ) {
+      groups.push(current);
+      current = null;
+    }
+  }
+
+  if (current !== null) {
+    groups.push(current);
+  }
+  return groups;
+}
+
+function preflightTerminalGroup(group: TerminalRenderGroup): TerminalPreflight {
+  if (!group.requiresTerminal) {
+    return { safe: true, controlledCodeUnits: 0, parameterWork: 0, repeatCodeUnits: 0 };
+  }
+  const controlledCodeUnits = group.inputCodeUnits;
+  if (controlledCodeUnits > TERMINAL_RENDER_MAX_INPUT_CODE_UNITS) {
+    return {
+      safe: false,
+      controlledCodeUnits,
+      parameterWork: 0,
+      repeatCodeUnits: 0,
+    };
+  }
+  // Captured endings participate in parser state (notably resetting REP's
+  // preceding grapheme), but their count is independently capped at 100. The
+  // preflight serializer represents them as CR so raw in-record LF/VT/FF/C1
+  // scroll controls still spend the hostile grid-work budget.
+  const preflight = preflightTerminalInput(
+    serializeTerminalGroupsForPreflight([group]),
+    TERMINAL_RENDER_MAX_INPUT_CODE_UNITS,
+  );
+  return {
+    safe: preflight.safe,
+    controlledCodeUnits,
+    parameterWork: preflight.parameterWork,
+    repeatCodeUnits: preflight.repeatCodeUnits,
+  };
+}
+
+function serializeTerminalGroups(groups: Array<TerminalRenderGroup>): string {
+  return groups
+    .flatMap((group) =>
+      group.lines.map((line) => `${line.raw}${LINE_ENDING_TEXT[line.lineEnding]}`),
+    )
+    .join('');
+}
+
+/**
+ * Preserve parser/REP boundaries without treating the at-most-100 captured
+ * delimiters as hostile full-grid controls. A CR executes in the same ESC/CSI
+ * states and resets REP's preceding graphic, but does not scroll xterm's row.
+ */
+function serializeTerminalGroupsForPreflight(groups: Array<TerminalRenderGroup>): string {
+  return groups
+    .flatMap((group) =>
+      group.lines.map((line) => `${line.raw}${line.lineEnding === 'none' ? '' : '\r'}`),
+    )
+    .join('');
+}
+
+async function renderTerminalGroups(groups: Array<TerminalRenderGroup>): Promise<Array<string>> {
+  if (groups.every((group) => !group.requiresTerminal)) {
+    return groups.flatMap((group) =>
+      group.lines.flatMap((line) => {
+        const visible = line.raw.trimEnd();
+        return visible === '' ? [] : [visible];
+      }),
+    );
+  }
+
+  const normalLines: Array<string> = [];
+  const alternateLines: Array<string> = [];
+  const term = new Terminal({
+    cols: TERMINAL_RENDER_COLUMNS,
+    rows: 1,
+    allowProposedApi: true,
+    // One scrollback row lets onLineFeed copy a completed row without retaining
+    // the whole 32K x 100 tail grid. Memory remains constant.
+    scrollback: 1,
+  });
+  let captureRecordedLineFeed = false;
+  const lineFeed = term.onLineFeed(() => {
+    // Line-motion controls inside one captured record keep the single-row
+    // sanitizer semantics. Only an exact captured LF/CRLF completes a log row.
+    if (!captureRecordedLineFeed) {
+      return;
+    }
+    const buffer = term.buffer.active;
+    const visible = (
+      buffer.getLine(Math.max(0, buffer.baseY - 1))?.translateToString(false) ?? ''
+    ).trimEnd();
+    if (visible !== '') {
+      if (buffer.type === 'alternate') {
+        // The alternate buffer has no scrollback. With the one-row model, a
+        // completed alternate row is gone after the scroll; only the final
+        // active row can be visible when formatting finishes in this buffer.
+        alternateLines.length = 0;
+      } else {
+        normalLines.push(visible);
+      }
+    }
+  });
+  // External row capture must follow xterm history clears. Returning false lets
+  // xterm's built-in handler run after this observation hook.
+  const clearCapturedHistory = (): boolean => {
+    normalLines.length = 0;
+    alternateLines.length = 0;
+    return false;
+  };
+  const ris = term.parser.registerEscHandler({ final: 'c' }, clearCapturedHistory);
+  const ed3 = term.parser.registerCsiHandler({ final: 'J' }, (params) => {
+    if (params[0] === 3) {
+      if (term.buffer.active.type === 'alternate') {
+        alternateLines.length = 0;
+      } else {
+        normalLines.length = 0;
+      }
+    }
+    return false;
+  });
+  const decsed3 = term.parser.registerCsiHandler({ prefix: '?', final: 'J' }, (params) => {
+    if (params[0] === 3) {
+      if (term.buffer.active.type === 'alternate') {
+        alternateLines.length = 0;
+      } else {
+        normalLines.length = 0;
+      }
+    }
+    return false;
+  });
+  try {
+    for (const group of groups) {
+      for (const line of group.lines) {
+        await new Promise<void>((resolve) => term.write(line.raw, resolve));
+        const ending = LINE_ENDING_TEXT[line.lineEnding];
+        if (ending !== '') {
+          captureRecordedLineFeed = line.lineEnding === 'lf' || line.lineEnding === 'crlf';
+          try {
+            await new Promise<void>((resolve) => term.write(ending, resolve));
+          } finally {
+            captureRecordedLineFeed = false;
+          }
+        }
+      }
+    }
+    const buffer = term.buffer.active;
+    const active = (buffer.getLine(buffer.baseY)?.translateToString(false) ?? '').trimEnd();
+    const visibleLines = buffer.type === 'alternate' ? alternateLines : normalLines;
+    if (active !== '') {
+      visibleLines.push(active);
+    }
+    return visibleLines;
+  } finally {
+    decsed3.dispose();
+    ed3.dispose();
+    ris.dispose();
+    lineFeed.dispose();
+    term.dispose();
+  }
+}
+
+/**
+ * Render one captured log line through the same maintained VT engine used by
+ * VS Code. A token parser is insufficient here: correctness depends on screen
+ * state (cursor, tab stops, protected cells, wide glyphs, REP, and erase modes),
+ * which is exactly the terminal emulator's job.
+ *
+ * Input is untrusted. xterm correctly bounds mutations to its configured grid,
+ * but some handlers loop or allocate from raw numeric parameters. The deterministic
+ * preflight above bounds those paths before allocation; an unsafe row is omitted
+ * rather than risking resource exhaustion or resurrecting text a terminal erased.
+ */
+export async function sanitizeLogLineForMarkdown(raw: string): Promise<string> {
+  // Nearly every captured line is ordinary text. It cannot mutate terminal
+  // state, so avoid constructing a grid or yielding through the write queue.
+  if (!hasTerminalControl(raw)) {
+    return raw.trimEnd();
+  }
+  const preflight = preflightTerminalInput(raw);
+  if (!preflight.safe) {
+    return '';
+  }
+  const term = new Terminal({
+    cols: TERMINAL_RENDER_COLUMNS,
+    rows: 1,
+    allowProposedApi: true,
+    scrollback: 0,
+  });
+  try {
+    await new Promise<void>((resolve) => term.write(raw, resolve));
+    const buffer = term.buffer.active;
+    return (buffer.getLine(buffer.baseY)?.translateToString(false) ?? '').trimEnd();
+  } finally {
+    term.dispose();
+  }
+}
+/**
  * Render the check-run `output.text` log tail: `lines` (already chronological —
  * the newest CHECK_RUN_LOG_TAIL_LINES captured) in a `text` fence under a
  * `**Last {M} log lines:**` header, with an `_…earlier lines omitted._` marker
@@ -158,18 +857,107 @@ function longestBacktickRun(text: string): number {
  * same way (oldest-drop, then lone-line tail-truncation), because the dynamic
  * fence can outgrow the headroom the content cap budgeted for. Returns null
  * when nothing was captured (`text` is then omitted from the PATCH).
+ *
+ * Captured rows are first grouped at VT parser ground-state boundaries and each
+ * group is reduced to terminal-visible text through one persistent xterm
+ * parser. Lines that were pure control output drop out entirely. Rendering runs
+ * BEFORE the byte accounting below, so every cap is measured against the bytes
+ * actually sent to GitHub — a spinner line holding hundreds of erased frames
+ * must not spend the tail's budget on output no reader will ever see.
+ * The stored newest-100-row window is the explicit terminal reset boundary:
+ * state older than that bounded capture is unavailable. Within the window we
+ * never restart after an omitted state-mutating group; that case fails closed.
  */
-export function formatLogTailMarkdown(lines: Array<string>, totalCaptured: number): string | null {
-  if (lines.length === 0) {
-    return null;
-  }
-  const kept = [...lines];
+export async function formatLogTailMarkdown(
+  lines: Array<TerminalLogInput>,
+  totalCaptured: number,
+): Promise<string | null> {
   // Joined UTF-8 byte length = sum(line byte lengths) + (n - 1) one-byte '\n'
   // separators; dropping the oldest removes its bytes + one separator. Tracked
   // incrementally (no O(n²) joins).
-  let joinedBytes = kept.reduce((sum, line) => sum + utf8Length(line), 0) + (kept.length - 1);
-  while (joinedBytes > CHECK_RUN_LOG_TAIL_MAX_BYTES && kept.length > 1) {
-    joinedBytes -= utf8Length(kept.shift() as string) + 1;
+  //
+  // Select one contiguous suffix newest-first, then render it chronologically
+  // through one xterm. Parser ground ends sequence framing, not persistent
+  // terminal modes (tab stops, protection, charsets, saved cursor), so restarting
+  // xterm per group is incorrect. Once an unsafe/over-budget group is reached,
+  // stop: hopping across it would invent terminal state for the later suffix.
+  const groups = groupTerminalLogLines(lines.slice(-CHECK_RUN_LOG_TAIL_LINES));
+  const selectedNewestFirst: Array<TerminalRenderGroup> = [];
+  let renderInputCodeUnits = 0;
+  let requiresTerminal = false;
+  let selectedStart = groups.length;
+  for (let index = groups.length - 1; index >= 0; index--) {
+    const group = groups[index];
+    const preflight = preflightTerminalGroup(group);
+    if (!preflight.safe) {
+      break;
+    }
+    const nextRequiresTerminal: boolean = requiresTerminal || group.requiresTerminal;
+    const nextRenderInputCodeUnits = renderInputCodeUnits + group.inputCodeUnits;
+    if (nextRequiresTerminal) {
+      if (nextRenderInputCodeUnits > TERMINAL_TAIL_MAX_INPUT_CODE_UNITS) {
+        break;
+      }
+      // Re-preflight the candidate suffix as one chronological xterm session.
+      // This carries tab-stop and mode state across parser-ground groups and
+      // accumulates REP/handler work across the same lifetime that will render.
+      const candidateGroups = [group, ...selectedNewestFirst.slice().reverse()];
+      if (
+        !preflightTerminalInput(
+          serializeTerminalGroupsForPreflight(candidateGroups),
+          TERMINAL_TAIL_MAX_INPUT_CODE_UNITS,
+        ).safe
+      ) {
+        break;
+      }
+    }
+    selectedNewestFirst.push(group);
+    selectedStart = index;
+    renderInputCodeUnits = nextRenderInputCodeUnits;
+    requiresTerminal = nextRequiresTerminal;
+  }
+  if (selectedNewestFirst.length === 0) {
+    return null;
+  }
+  // Starting a fresh terminal after an omitted state-mutating group can expose
+  // text that the full session erased (custom tab stops, charset, protection,
+  // insert mode, etc.). Plain omitted rows are harmless; an omitted controlled
+  // prefix makes the later screen state unknowable, so fail closed.
+  if (groups.slice(0, selectedStart).some((group) => group.requiresTerminal)) {
+    return null;
+  }
+  const visibleLines = await renderTerminalGroups(selectedNewestFirst.reverse());
+
+  // Apply the user-visible byte cap newest-first after terminal rendering. This
+  // keeps at most the final 60KB plus one currently considered row live.
+  const keptNewestFirst: Array<string> = [];
+  let joinedBytes = 0;
+  for (let lineIndex = visibleLines.length - 1; lineIndex >= 0; lineIndex--) {
+    let visible = visibleLines[lineIndex];
+    let visibleBytes = utf8Length(visible);
+    if (keptNewestFirst.length === 0 && visibleBytes > CHECK_RUN_LOG_TAIL_MAX_BYTES) {
+      while (visibleBytes > CHECK_RUN_LOG_TAIL_MAX_BYTES) {
+        visible = sliceTailAtUnit(
+          visible,
+          Math.ceil((visibleBytes - CHECK_RUN_LOG_TAIL_MAX_BYTES) / 3),
+        );
+        visibleBytes = utf8Length(visible);
+      }
+      keptNewestFirst.push(visible);
+      joinedBytes = visibleBytes;
+      break;
+    }
+    const separatorBytes = keptNewestFirst.length > 0 ? 1 : 0;
+    if (joinedBytes + separatorBytes + visibleBytes > CHECK_RUN_LOG_TAIL_MAX_BYTES) {
+      break;
+    }
+    keptNewestFirst.push(visible);
+    joinedBytes += separatorBytes + visibleBytes;
+  }
+
+  const kept = keptNewestFirst.reverse();
+  if (kept.length === 0) {
+    return null;
   }
   // Lone still-over-cap line: keep its LAST <= cap bytes. Bytes don't map 1:1
   // to code units, so converge: one dropped unit removes at most 3 bytes (the
@@ -271,6 +1059,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
   // the source of truth, so a persisted cursor would add no correctness and only
   // risk skipping unbuffered lines after an eviction.
   private logCursor = 0;
+  private logTableReady = false;
 
   private db(): Db {
     return createDb(this.env.HYPERDRIVE.connectionString);
@@ -801,7 +1590,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     // completes without `text`, exactly the pre-tail body).
     let text: string | undefined;
     try {
-      text = this.readLogTailMarkdown() ?? undefined;
+      text = (await this.readLogTailMarkdown()) ?? undefined;
     } catch (err) {
       console.warn('finalizeCheckRun: log tail read failed (best-effort)', err);
     }
@@ -1233,14 +2022,29 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
   // --- log storage + fan-out ---
 
   private ensureLogTable(): void {
+    if (this.logTableReady) {
+      return;
+    }
     this.ctx.storage.sql.exec(
       `CREATE TABLE IF NOT EXISTS logs (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
         line TEXT NOT NULL,
         stream TEXT NOT NULL,
-        ts INTEGER NOT NULL
+        ts INTEGER NOT NULL,
+        line_ending TEXT
       )`,
     );
+    const columns = this.ctx.storage.sql
+      .exec<{ name: string }>('PRAGMA table_info(logs)')
+      .toArray();
+    if (!columns.some((column) => column.name === 'line_ending')) {
+      // Existing per-build DOs may have created the table before delimiter
+      // provenance was stored. Keep those values NULL so the formatter can
+      // reconstruct CRLF only BETWEEN legacy rows without fabricating an EOL
+      // after the final row.
+      this.ctx.storage.sql.exec('ALTER TABLE logs ADD COLUMN line_ending TEXT');
+    }
+    this.logTableReady = true;
   }
 
   /**
@@ -1290,18 +2094,18 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
    * say when earlier lines exist. Null when nothing was captured — the
    * completion PATCH then omits `text` (body identical to the pre-tail one).
    */
-  private readLogTailMarkdown(): string | null {
+  private async readLogTailMarkdown(): Promise<string | null> {
     this.ensureLogTable();
     const rows = this.ctx.storage.sql
-      .exec<{ line: string }>(
-        'SELECT line FROM logs ORDER BY seq DESC LIMIT ?',
+      .exec<{ line: string; lineEnding: TerminalLineEnding | null }>(
+        'SELECT line, line_ending AS lineEnding FROM logs ORDER BY seq DESC LIMIT ?',
         CHECK_RUN_LOG_TAIL_LINES,
       )
       .toArray();
     const countRow = this.ctx.storage.sql
       .exec<{ count: number }>('SELECT COUNT(*) AS count FROM logs')
       .toArray()[0];
-    return formatLogTailMarkdown(rows.map((r) => r.line).reverse(), countRow?.count ?? rows.length);
+    return formatLogTailMarkdown(rows.reverse(), countRow?.count ?? rows.length);
   }
 
   /**
@@ -1316,10 +2120,11 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     this.ensureLogTable();
     for (const entry of lines) {
       this.ctx.storage.sql.exec(
-        'INSERT INTO logs (line, stream, ts) VALUES (?, ?, ?)',
+        'INSERT INTO logs (line, stream, ts, line_ending) VALUES (?, ?, ?, ?)',
         entry.line,
         entry.stream,
         entry.ts,
+        entry.lineEnding ?? null,
       );
     }
     // Evict everything older than the most-recent MAX_STORED_LOG_LINES rows so the
@@ -1333,16 +2138,21 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       );
     }
     for (const entry of lines) {
-      await this.broadcast({ type: 'log', ...entry });
+      await this.broadcast({
+        type: 'log',
+        line: entry.line,
+        stream: entry.stream,
+        ts: entry.ts,
+      });
     }
   }
 
   /**
    * DO→container log pull-loop. The agent buffers stdout/stderr and serves
-   * `GET /logs?since=N` (`{ lines: Array<{seq,line,stream,ts}>, lastSeq }`); this
-   * method polls it, ingests any new lines (cursor-stripped), advances the cursor
-   * to `lastSeq`, and re-arms itself — the only transport feeding container output
-   * into the DO's store + WS fan-out. Public + named so the base scheduler can
+   * `GET /logs?since=N` (`{ lines: Array<{seq,line,stream,ts,lineEnding?}>, lastSeq }`);
+   * this method polls it, ingests any new lines (cursor-stripped), advances the
+   * cursor to `lastSeq`, and re-arms itself — the only transport feeding container
+   * output into the DO's store + WS fan-out. Public + named so the base scheduler can
    * resolve it as a callback (same mechanism as `enforceTimeout`); we MUST NOT
    * override `alarm()` (the base owns the single DO alarm).
    *
@@ -1400,7 +2210,14 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
           lastSeq: number;
         };
         if (body.lines.length > 0) {
-          await this.ingestLines(body.lines.map(({ line, stream, ts }) => ({ line, stream, ts })));
+          await this.ingestLines(
+            body.lines.map(({ line, stream, ts, lineEnding }) => ({
+              line,
+              stream,
+              ts,
+              lineEnding,
+            })),
+          );
         }
         // Monotonic-advance: never move the cursor backward if a stale/empty
         // response reports a lower lastSeq than we've already ingested.

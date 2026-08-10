@@ -42,6 +42,8 @@ export type BuildLogLine = {
   line: string;
   stream: 'stdout' | 'stderr';
   ts: number;
+  /** Exact delimiter captured after `line`; absent rows predate delimiter capture. */
+  lineEnding?: 'cr' | 'lf' | 'crlf' | 'none';
 };
 
 /**

@@ -274,6 +274,8 @@ vi.mock('../../src/github/check-run.ts', () => ({
   completeCheckRun: vi.fn(async () => false),
 }));
 
+// eslint-disable-next-line import/no-relative-packages -- intentional cross-submodule contract reference
+import voidPackageJson from '../../../../framework/packages/void/package.json' with { type: 'json' };
 // Helpers from the container build agent. Importing the .mjs only pulls in its
 // exported helpers — the entrypoint guard keeps `main()` from running the
 // control server / spawning anything on import. Types come from the sibling
@@ -284,6 +286,7 @@ import {
   BUILDER_UID,
   builderCacheEnv,
   childSpawnOptions,
+  DEFAULT_VOID_CLI_VERSION,
   closeControlServer,
   getBufferedLogLines,
   getPendingLogLineCount,
@@ -291,6 +294,7 @@ import {
   MAX_BUFFERED_LOG_LINES,
   MAX_PARTIAL_LINE_CHARS,
   MAX_PENDING_LOG_LINES,
+  nonInteractiveEnv,
   parseProcStatusUid,
   pipeStream,
   record,
@@ -301,10 +305,18 @@ import {
 import { signDeployToken } from '../../src/auth/deploy-token.ts';
 import {
   BuildManager,
+  CHECK_RUN_LOG_TAIL_LINES,
   CHECK_RUN_LOG_TAIL_MAX_BYTES,
   CHECK_RUN_OUTPUT_TEXT_MAX_BYTES,
   formatLogTailMarkdown,
   MAX_STORED_LOG_LINES,
+  PINNED_VOID_CLI_VERSION,
+  sanitizeLogLineForMarkdown,
+  TERMINAL_RENDER_COLUMNS,
+  TERMINAL_RENDER_MAX_INPUT_CODE_UNITS,
+  TERMINAL_RENDER_MAX_PARAMETER_WORK,
+  TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS,
+  TERMINAL_TAIL_MAX_INPUT_CODE_UNITS,
 } from '../../src/build-manager.ts';
 import type { BuildConfig } from '../../src/build-types.ts';
 import {
@@ -322,18 +334,45 @@ import {
 
 // --- in-memory SQLite + storage + websocket fakes ---
 
-type LogRow = { seq: number; line: string; stream: string; ts: number };
+type LogRow = {
+  seq: number;
+  line: string;
+  stream: string;
+  ts: number;
+  lineEnding?: 'cr' | 'lf' | 'crlf' | 'none' | null;
+};
 
-function makeStubCtx() {
+function makeStubCtx(options: { legacyLogSchema?: boolean; initialLogs?: Array<LogRow> } = {}) {
   const kv = new Map<string, unknown>();
   let alarmTime: number | null = null;
-  const logs: Array<LogRow> = [];
-  let seq = 0;
+  const logs: Array<LogRow> = options.initialLogs?.map((row) => ({ ...row })) ?? [];
+  let seq = logs.reduce((max, row) => Math.max(max, row.seq), 0);
+  let hasLineEndingColumn = !options.legacyLogSchema;
+  const sqlQueries: Array<string> = [];
   const sockets: Array<FakeWebSocket> = [];
 
   const sql = {
     exec(query: string, ...bindings: Array<unknown>) {
+      sqlQueries.push(query);
       if (query.startsWith('CREATE TABLE')) {
+        return { toArray: () => [] };
+      }
+      if (query.startsWith('PRAGMA table_info')) {
+        return {
+          toArray: () => [
+            { name: 'seq' },
+            { name: 'line' },
+            { name: 'stream' },
+            { name: 'ts' },
+            ...(hasLineEndingColumn ? [{ name: 'line_ending' }] : []),
+          ],
+        };
+      }
+      if (query.startsWith('ALTER TABLE logs ADD COLUMN line_ending')) {
+        hasLineEndingColumn = true;
+        for (const row of logs) {
+          row.lineEnding ??= null;
+        }
         return { toArray: () => [] };
       }
       if (query.startsWith('INSERT INTO logs')) {
@@ -343,6 +382,7 @@ function makeStubCtx() {
           line: bindings[0] as string,
           stream: bindings[1] as string,
           ts: bindings[2] as number,
+          lineEnding: bindings[3] as LogRow['lineEnding'],
         });
         return { toArray: () => [] };
       }
@@ -371,10 +411,10 @@ function makeStubCtx() {
         // Mirror `SELECT COUNT(*) AS count FROM logs` (check-run log-tail total).
         return { toArray: () => [{ count: logs.length }] };
       }
-      if (query.startsWith('SELECT line FROM logs ORDER BY seq DESC')) {
-        // Mirror `SELECT line FROM logs ORDER BY seq DESC LIMIT ?` (check-run log
-        // tail): newest-first, bounded. Must be modeled BEFORE the generic branch,
-        // which would misread the LIMIT binding as a `seq > ?` bound.
+      if (query.startsWith('SELECT line, line_ending AS lineEnding')) {
+        // Mirror the check-run log tail query: newest-first, bounded. Must be
+        // modeled BEFORE the generic SELECT branch, which would misread the
+        // LIMIT binding as a `seq > ?` bound.
         const limit = bindings[0] as number;
         return {
           toArray: () =>
@@ -382,7 +422,7 @@ function makeStubCtx() {
               .slice()
               .sort((a, b) => b.seq - a.seq)
               .slice(0, limit)
-              .map((r) => ({ line: r.line })),
+              .map((r) => ({ line: r.line, lineEnding: r.lineEnding ?? null })),
         };
       }
       if (query.startsWith('SELECT')) {
@@ -396,7 +436,8 @@ function makeStubCtx() {
             logs
               .slice()
               .sort((a, b) => a.seq - b.seq)
-              .filter((r) => r.seq > since),
+              .filter((r) => r.seq > since)
+              .map(({ seq, line, stream, ts }) => ({ seq, line, stream, ts })),
         };
       }
       return { toArray: () => [] };
@@ -407,6 +448,7 @@ function makeStubCtx() {
     _logs: logs,
     _sockets: sockets,
     _kv: kv,
+    _sqlQueries: sqlQueries,
     storage: {
       sql,
       get: vi.fn(async (k: string) => kv.get(k)),
@@ -2324,6 +2366,24 @@ describe('BuildManager.pollLogs (DO log pull-loop)', () => {
 });
 
 describe('BuildManager.ingestLines (the pull-loop sink)', () => {
+  it('upgrades a legacy log table once without fabricating a final delimiter', async () => {
+    const ctx = makeStubCtx({
+      legacyLogSchema: true,
+      initialLogs: [{ seq: 1, line: '\x1b[?1049hERR', stream: 'stdout', ts: 1 }],
+    });
+    const m = makeManager(ctx, makeEnv());
+    const readTail = () =>
+      (m as unknown as { readLogTailMarkdown: () => Promise<string | null> }).readLogTailMarkdown;
+
+    const first = await readTail().call(m);
+    expect(parseFence(first as string).content).toEqual(['ERR']);
+    await readTail().call(m);
+    expect(
+      ctx._sqlQueries.filter((query) => query.startsWith('ALTER TABLE logs ADD COLUMN')),
+    ).toHaveLength(1);
+    expect(ctx._logs[0].lineEnding).toBeNull();
+  });
+
   it('inserts each line into SQLite and broadcasts it (sole producer is pollLogs)', async () => {
     const ctx = makeStubCtx();
     const env = makeEnv();
@@ -2396,30 +2456,30 @@ function parseFence(out: string): { fenceLen: number; content: Array<string> } {
 }
 
 describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
-  it('returns null when nothing was captured (PATCH omits text)', () => {
-    expect(formatLogTailMarkdown([], 0)).toBe(null);
+  it('returns null when nothing was captured (PATCH omits text)', async () => {
+    expect(await formatLogTailMarkdown([], 0)).toBe(null);
   });
 
-  it('renders header + six-backtick text fence, lines in given order, no marker when all captured lines are shown', () => {
-    expect(formatLogTailMarkdown(['a', 'b', 'c'], 3)).toBe(
+  it('renders header + six-backtick text fence, lines in given order, no marker when all captured lines are shown', async () => {
+    expect(await formatLogTailMarkdown(['a', 'b', 'c'], 3)).toBe(
       `**Last 3 log lines:**\n\n${SIX_BACKTICKS}text\na\nb\nc\n${SIX_BACKTICKS}`,
     );
   });
 
-  it('adds the omission marker when more lines were captured than are rendered', () => {
-    expect(formatLogTailMarkdown(['b', 'c'], 5)).toBe(
+  it('adds the omission marker when more lines were captured than are rendered', async () => {
+    expect(await formatLogTailMarkdown(['b', 'c'], 5)).toBe(
       `**Last 2 log lines:**\n\n_…earlier lines omitted._\n\n${SIX_BACKTICKS}text\nb\nc\n${SIX_BACKTICKS}`,
     );
   });
 
-  it('drops the OLDEST lines until the joined content fits the char cap (result under GitHub 65535)', () => {
+  it('drops the OLDEST lines until the joined content fits the char cap (result under GitHub 65535)', async () => {
     // 100 lines of exactly 1000 chars: joined = 100*1000 + 99 separators > 60000.
     // Kept-count k satisfies 1000k + (k-1) <= 60000 → k = 59 (59058 chars).
     const lines = Array.from(
       { length: 100 },
       (_, i) => `${String(i).padStart(4, '0')}${'x'.repeat(996)}`,
     );
-    const out = formatLogTailMarkdown(lines, 100);
+    const out = await formatLogTailMarkdown(lines, 100);
     expect(out).not.toBe(null);
     expect(out).toContain('**Last 59 log lines:**');
     expect(out).toContain('_…earlier lines omitted._');
@@ -2430,19 +2490,19 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
     expect((out as string).length).toBeLessThan(65535);
   });
 
-  it('keeps the LAST 60000 chars of a single over-cap line', () => {
+  it('keeps the LAST 60000 chars of a single over-cap line', async () => {
     const big = 'h'.repeat(5000) + 't'.repeat(CHECK_RUN_LOG_TAIL_MAX_BYTES);
-    expect(formatLogTailMarkdown([big], 1)).toBe(
+    expect(await formatLogTailMarkdown([big], 1)).toBe(
       `**Last 1 log lines:**\n\n${SIX_BACKTICKS}text\n${'t'.repeat(CHECK_RUN_LOG_TAIL_MAX_BYTES)}\n${SIX_BACKTICKS}`,
     );
     // Exactly AT the cap is kept whole — the cap only drops what EXCEEDS it.
     const atCap = 'e'.repeat(CHECK_RUN_LOG_TAIL_MAX_BYTES);
-    expect(formatLogTailMarkdown([atCap], 1)).toContain(`\n${atCap}\n`);
+    expect(await formatLogTailMarkdown([atCap], 1)).toContain(`\n${atCap}\n`);
   });
 
-  it('grows the fence to 7 backticks when a content line contains a 6-backtick run (no breakout)', () => {
+  it('grows the fence to 7 backticks when a content line contains a 6-backtick run (no breakout)', async () => {
     const line = `fence bait: ${SIX_BACKTICKS} tail`;
-    const out = formatLogTailMarkdown([line], 1) as string;
+    const out = (await formatLogTailMarkdown([line], 1)) as string;
     const { fenceLen, content } = parseFence(out);
     expect(fenceLen).toBe(7);
     // The line is preserved verbatim — sizing the fence, not mangling content.
@@ -2451,20 +2511,20 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
     expect(Math.max(...content.map(longestBacktickRun))).toBeLessThan(fenceLen);
   });
 
-  it('grows the fence to 13 backticks for a 12-backtick content run', () => {
-    const out = formatLogTailMarkdown(['a', `x${'`'.repeat(12)}y`, 'b'], 3) as string;
+  it('grows the fence to 13 backticks for a 12-backtick content run', async () => {
+    const out = (await formatLogTailMarkdown(['a', `x${'`'.repeat(12)}y`, 'b'], 3)) as string;
     const { fenceLen, content } = parseFence(out);
     expect(fenceLen).toBe(13);
     expect(content).toEqual(['a', `x${'`'.repeat(12)}y`, 'b']);
   });
 
-  it('keeps the fence at exactly six backticks when the content has no backticks', () => {
-    const { fenceLen } = parseFence(formatLogTailMarkdown(['plain', 'lines'], 2) as string);
+  it('keeps the fence at exactly six backticks when the content has no backticks', async () => {
+    const { fenceLen } = parseFence((await formatLogTailMarkdown(['plain', 'lines'], 2)) as string);
     expect(fenceLen).toBe(6);
   });
 
-  it('holds the WHOLE string under GitHub’s 65535 cap for a pathological all-backtick line', () => {
-    const out = formatLogTailMarkdown(['`'.repeat(61000)], 1) as string;
+  it('holds the WHOLE string under GitHub’s 65535 cap for a pathological all-backtick line', async () => {
+    const out = (await formatLogTailMarkdown(['`'.repeat(61000)], 1)) as string;
     expect(out.length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
     // Format still parses: header first, then fence lines matching
     // ^`+text$ / ^`+$, and the fence still beats every content run.
@@ -2479,7 +2539,7 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
   // per code unit and emoji 4 bytes per 2 units, so unit-measured caps let
   // such content sail past GitHub's real limit. ———
 
-  it('drops oldest lines by UTF-8 BYTE measure, not code units (CJK content)', () => {
+  it('drops oldest lines by UTF-8 BYTE measure, not code units (CJK content)', async () => {
     // 40 lines of 4 ASCII + 998 CJK chars: 1002 units / 2998 bytes each.
     // Joined: 40119 units (fits a 60000 UNIT cap — the wrong measure) but
     // 119959 bytes. The byte cap keeps k lines where 2998k + (k-1) <= 60000,
@@ -2488,7 +2548,7 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
       { length: 40 },
       (_, i) => `${String(i).padStart(4, '0')}${'语'.repeat(998)}`,
     );
-    const out = formatLogTailMarkdown(lines, 40) as string;
+    const out = (await formatLogTailMarkdown(lines, 40)) as string;
     expect(out).toContain('**Last 20 log lines:**');
     expect(out).toContain('_…earlier lines omitted._');
     expect(out).toContain(lines[39]);
@@ -2497,9 +2557,9 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
     expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
   });
 
-  it('tail-truncates a lone CJK line to its LAST ~60000 UTF-8 bytes (under 65535 total)', () => {
+  it('tail-truncates a lone CJK line to its LAST ~60000 UTF-8 bytes (under 65535 total)', async () => {
     // 30000 units (would fit a unit cap untouched) but 90000 bytes.
-    const out = formatLogTailMarkdown(['好'.repeat(30000)], 1) as string;
+    const out = (await formatLogTailMarkdown(['好'.repeat(30000)], 1)) as string;
     expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
     const { content } = parseFence(out);
     expect(content).toHaveLength(1);
@@ -2511,27 +2571,675 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
     expect(contentBytes).toBeGreaterThanOrEqual(59990);
   });
 
-  it('never leaves a split surrogate pair at a truncation cut (emoji at the boundary)', () => {
+  it('never leaves a split surrogate pair at a truncation cut (emoji at the boundary)', async () => {
     // '🚀' = 2 UTF-16 units / 4 UTF-8 bytes: 20000 emoji = 80000 bytes, so the
     // byte cap must cut inside the emoji run. A cut landing mid-pair would
     // strand a lone surrogate (re-encoded as a 3-byte U+FFFD — garbage).
-    const out = formatLogTailMarkdown(['🚀'.repeat(20000)], 1) as string;
+    const out = (await formatLogTailMarkdown(['🚀'.repeat(20000)], 1)) as string;
     expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
     expect(hasLoneSurrogate(out)).toBe(false);
   });
 
-  it('converges the WHOLE string under 65535 BYTES when the dynamic fence eats the byte headroom (emoji + backtick run)', () => {
+  it('converges the WHOLE string under 65535 BYTES when the dynamic fence eats the byte headroom (emoji + backtick run)', async () => {
     // Content: 13500 emoji (54000 bytes) + a 6000-backtick run = 60000 bytes
     // exactly — passes the content cap untouched. The 6001-backtick fence
     // delimiters then push the rendered BYTE length past 65535 while its
     // UTF-16 length stays far under (the unit measure never fires). The
     // converging loop must cut the lone line by bytes without splitting an
     // emoji pair.
-    const out = formatLogTailMarkdown(['🚀'.repeat(13500) + '`'.repeat(6000)], 1) as string;
+    const out = (await formatLogTailMarkdown(['🚀'.repeat(13500) + '`'.repeat(6000)], 1)) as string;
     expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
     expect(hasLoneSurrogate(out)).toBe(false);
     const { fenceLen, content } = parseFence(out);
     expect(fenceLen).toBeGreaterThan(Math.max(...content.map(longestBacktickRun)));
+  });
+});
+
+// A terminal CONSUMES escape sequences; a markdown code fence PRINTS them. The
+// container captures build output verbatim (piped, not a pty), so whatever the
+// repo's toolchain animates or colorizes lands in the check run as literal
+// `^[[32m` / `^[[1G` noise, with every erased spinner frame still glued onto one
+// line — the agent splits on CR/LF and a clack spinner separates frames with
+// `ESC[1G ESC[J` and no newline.
+describe('sanitizeLogLineForMarkdown (terminal-visible text for the check run)', () => {
+  const ESC = '\x1b';
+
+  it('leaves a plain line untouched', async () => {
+    expect(await sanitizeLogLineForMarkdown('[build-agent] source extracted')).toBe(
+      '[build-agent] source extracted',
+    );
+  });
+
+  it('collapses a clack spinner line to its LAST frame (the erased ones are gone on screen)', async () => {
+    // Exactly the shape captured from the voidzero.dev build: frame, cursor to
+    // column 1, erase down, next frame — hundreds of times, on ONE line.
+    const line =
+      `◒  Hashing assets (100/281)${ESC}[1G${ESC}[J` +
+      `◐  Hashing assets (200/281)${ESC}[1G${ESC}[J` +
+      `◓  Hashing assets (281/281)${ESC}[1G${ESC}[J` +
+      '◇  Checked for changes';
+    expect(await sanitizeLogLineForMarkdown(line)).toBe('◇  Checked for changes');
+  });
+
+  it('renders a trailing erase as the blank row a terminal would show', async () => {
+    // This used to assert '◆  Deployed!', on the theory that a message beats a
+    // blank line. A terminal disagrees: the writer moved to column 1 and erased
+    // from there, so the row IS blank (xterm.js confirms — see
+    // sanitize-log-line-oracle.test.ts). Nothing real is lost, because clack
+    // erases BEFORE writing each frame, so the final message lands after the
+    // last erase and survives — second assertion.
+    expect(await sanitizeLogLineForMarkdown(`◆  Deployed!${ESC}[1G${ESC}[J`)).toBe('');
+    expect(await sanitizeLogLineForMarkdown(`◒ Hash${ESC}[1G${ESC}[J◆  Deployed!`)).toBe(
+      '◆  Deployed!',
+    );
+  });
+
+  it('strips SGR color codes emitted by third-party build tools', async () => {
+    // vitepress/rolldown colorized despite the piped (non-TTY) stdio, and does
+    // not consult CI — which is why the render-time strip has to exist.
+    expect(
+      await sanitizeLogLineForMarkdown(`${ESC}[32m✓${ESC}[0m building client + server bundles...`),
+    ).toBe('✓ building client + server bundles...');
+  });
+
+  it('strips DEC private cursor hide/show, which clack emits around every spinner', async () => {
+    expect(await sanitizeLogLineForMarkdown(`${ESC}[?25l│`)).toBe('│');
+    expect(await sanitizeLogLineForMarkdown(`${ESC}[?25h└  Done!`)).toBe('└  Done!');
+  });
+
+  it('strips OSC sequences (window title / hyperlink) under both BEL and ST terminators', async () => {
+    expect(await sanitizeLogLineForMarkdown(`${ESC}]0;building\x07done`)).toBe('done');
+    expect(await sanitizeLogLineForMarkdown(`${ESC}]8;;https://void.app${ESC}\\link`)).toBe('link');
+  });
+
+  // Expectations for the string-control cases below are ground truth from
+  // @xterm/headless (a full VT500 parser), NOT from pyte — pyte implements OSC
+  // only and has no DCS/SOS/PM/APC handling at all, so it reproduces the very
+  // bug these lock down and cannot adjudicate them.
+  it('consumes every C1 string control WHOLE, payload included', async () => {
+    // A terminal displays nothing for any of these; leaving the payload behind
+    // spends the check-run tail budget on bytes no reader will ever see.
+    expect(await sanitizeLogLineForMarkdown(`before${ESC}Pq#0;2;0;0;0payload${ESC}\\after`)).toBe(
+      'beforeafter',
+    );
+    expect(await sanitizeLogLineForMarkdown(`before${ESC}_Ga=T,f=100;BASE64${ESC}\\after`)).toBe(
+      'beforeafter',
+    );
+    expect(await sanitizeLogLineForMarkdown(`before${ESC}Xsos${ESC}\\after`)).toBe('beforeafter');
+    expect(await sanitizeLogLineForMarkdown(`before${ESC}^pm${ESC}\\after`)).toBe('beforeafter');
+    // DECRQSS reply — a real one a tool can receive and echo.
+    expect(await sanitizeLogLineForMarkdown(`${ESC}P1$r0m${ESC}\\ok`)).toBe('ok');
+  });
+
+  it('consumes an UNTERMINATED string control to end of line', async () => {
+    // `pipeStream` caps one line at MAX_PARTIAL_LINE_CHARS and splits on LF, so
+    // a long payload reaches us with its ST already cut off. A VT parser stays
+    // in the string state to end of input, so this is faithful, and it is what
+    // stops a 128KB truncated blob from surviving into the fence.
+    expect(await sanitizeLogLineForMarkdown(`before${ESC}_Gpayload with no terminator`)).toBe(
+      'before',
+    );
+    expect(await sanitizeLogLineForMarkdown(`before${ESC}]0;title never closed`)).toBe('before');
+  });
+
+  it('terminates on BEL for OSC only — DCS/SOS/PM/APC run to ST', async () => {
+    // xterm's VT500 transition table exits OSC_STRING on BEL (`OSC_END` -> GROUND)
+    // but treats BEL as IGNORE / DCS_PUT in SOS_PM_APC_STRING and in every DCS
+    // state, so the payload after an embedded BEL is still invisible. BEL is also
+    // an ordinary data byte inside sixel, so this is reachable from real payloads.
+    for (const intro of ['P', 'X', '^', '_']) {
+      expect(
+        await sanitizeLogLineForMarkdown(`before${ESC}${intro}hidden\x07still${ESC}\\after`),
+      ).toBe('beforeafter');
+    }
+    // ...and with no ST at all, the string still runs to end of line.
+    expect(await sanitizeLogLineForMarkdown(`${ESC}Pabc\x07def`)).toBe('');
+    // OSC keeps BEL as a terminator (the legacy xterm convention).
+    expect(await sanitizeLogLineForMarkdown(`${ESC}]0;title\x07visible`)).toBe('visible');
+  });
+
+  it('aborts a string control on an embedded ESC, as a VT parser does', async () => {
+    expect(await sanitizeLogLineForMarkdown(`${ESC}Pq${ESC}[2Kmore${ESC}\\tail`)).toBe('moretail');
+  });
+
+  it('treats bare CR as a rewrite too (progress bars that never emit LF)', async () => {
+    expect(await sanitizeLogLineForMarkdown('12%\r45%\r100%')).toBe('100%');
+  });
+
+  it('returns empty for a line that was pure control output', async () => {
+    expect(await sanitizeLogLineForMarkdown(`${ESC}[?25l${ESC}[1G${ESC}[J`)).toBe('');
+    expect(await sanitizeLogLineForMarkdown('')).toBe('');
+  });
+
+  it('does not mistake ordinary text for an escape sequence', async () => {
+    expect(await sanitizeLogLineForMarkdown('cost [32m] and \\x1b are literal')).toBe(
+      'cost [32m] and \\x1b are literal',
+    );
+  });
+
+  // Expectations below are ground truth from a real VT emulator, not from reading
+  // the regex back to itself. An erase is only a frame boundary when it reaches
+  // BACK past the cursor; erase-forward leaves the prefix on screen, and
+  // discarding it drops diagnostic context.
+  //
+  // pyte adjudicates the EL cases and ED 0/1/2, but NOT ED 3: its
+  // `erase_in_display` hardcodes `how == 2 or how == 3`, so it reports 3J as a
+  // full-screen erase and cannot represent scrollback at all. The 3J expectation
+  // below comes from @xterm/headless (full VT500 parser), which leaves the cursor
+  // row untouched — an earlier revision trusted pyte here and misfiled 3J as
+  // prefix-erasing.
+  it('keeps the prefix across erase-FORWARD, which clears only from the cursor on', async () => {
+    // Terminal renders each of these as 'Downloading done'.
+    expect(await sanitizeLogLineForMarkdown(`Downloading${ESC}[K done`)).toBe('Downloading done');
+    expect(await sanitizeLogLineForMarkdown(`Downloading${ESC}[0K done`)).toBe('Downloading done');
+    expect(await sanitizeLogLineForMarkdown(`Downloading${ESC}[J done`)).toBe('Downloading done');
+    expect(await sanitizeLogLineForMarkdown(`Downloading${ESC}[0J done`)).toBe('Downloading done');
+    // ED 3 ("Erase Saved Lines", an xterm extension) drops scrollback rows ABOVE
+    // the viewport and writes no visible cell, so the prefix survives.
+    expect(await sanitizeLogLineForMarkdown(`Downloading${ESC}[3J done`)).toBe('Downloading done');
+  });
+
+  it('drops the prefix for erases that reach back past the cursor', async () => {
+    // Terminal blanks the prefix for each of these. 2J is here and 3J is not:
+    // 2J clears the entire screen INCLUDING the cursor's own row.
+    for (const seq of ['[1K', '[2K', '[1J', '[2J']) {
+      expect((await sanitizeLogLineForMarkdown(`Downloading${ESC}${seq} done`)).trim()).toBe(
+        'done',
+      );
+    }
+  });
+
+  it('still terminalizes the frame for the clear-screen combos that carry 3J', async () => {
+    // Every real emitter found in the dep tree (vite, tsc, playwright,
+    // /usr/bin/clear) pairs 3J with 2J, whose boundary still applies — so the
+    // reclassification above changes nothing for them.
+    for (const combo of [
+      `${ESC}[2J${ESC}[3J${ESC}[H`,
+      `${ESC}[3J${ESC}[H${ESC}[2J`,
+      `${ESC}[H${ESC}[2J${ESC}[3J`,
+    ]) {
+      expect((await sanitizeLogLineForMarkdown(`Downloading${combo} done`)).trim()).toBe('done');
+    }
+  });
+
+  it('overwrites in place on a partial column move', async () => {
+    // `ESC[5G` is neither a frame boundary nor a full rewrite: it parks the
+    // cursor at column 5 and the text that follows overwrites from there,
+    // leaving the tail of the old content visible. The previous sanitizer
+    // approximated this as 'Downloading done'; a terminal shows the splice.
+    expect(await sanitizeLogLineForMarkdown(`Downloading${ESC}[5G done`)).toBe('Down doneng');
+  });
+
+  it('bounds the row against a hostile cursor parameter', async () => {
+    // Build output is UNTRUSTED and a CSI parameter is just digits. `pad()` grew
+    // the row to the requested column, so one crafted line asked for a billion
+    // array pushes — and enough digits parse to Infinity, which never
+    // terminates. This runs inside the DO while finalizing the check run, so it
+    // could take out the BuildManager before its scheduler cleanup ran.
+    for (const seq of ['[999999999G', '[1;999999999H', '[999999999C', `[${'9'.repeat(400)}G`]) {
+      const out = await sanitizeLogLineForMarkdown(`x${ESC}${seq}y`);
+      // FAIL-WITHOUT-FIX: allocates until the isolate dies. Resource-bound rows
+      // drop fail-closed instead of partially applying a terminal mutation.
+      expect(out).toBe('');
+    }
+  });
+
+  it('preflights every parameter-driven loop before xterm executes it', async () => {
+    for (const final of ['S', 'T', 'L', 'M', 'I', 'Z', 'b', '@', 'P', 'X']) {
+      await expect(sanitizeLogLineForMarkdown(`SECRET${ESC}[999999999${final}`)).resolves.toBe('');
+    }
+  });
+
+  it('bounds repeated DEC selective erases that scan protection metadata', async () => {
+    for (const final of ['J', 'K']) {
+      const selectiveEraseFlood = `x${`${ESC}[?2${final}`.repeat(2_700)}ERR`;
+      expect(selectiveEraseFlood.length).toBeLessThanOrEqual(TERMINAL_RENDER_MAX_INPUT_CODE_UNITS);
+      await expect(sanitizeLogLineForMarkdown(selectiveEraseFlood)).resolves.toBe('');
+    }
+  });
+
+  it('bounds REP allocation by preceding-grapheme length as well as Ps', async () => {
+    const combining = `a${'\u0301'.repeat(131)}`;
+    expect(combining.length * 8_000).toBeGreaterThan(TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS);
+    expect(await sanitizeLogLineForMarkdown(`${combining}${ESC}[8000b`)).toBe('');
+  });
+
+  it('does not treat adjacent REP commands as repeated allocations', async () => {
+    // xterm clears its preceding-join state after CSI dispatch, so only the
+    // first REP can repeat the preceding grapheme; an adjacent REP is a no-op.
+    // Preflight must reset the source at the same boundary rather than charging
+    // a second allocation that the maintained parser will never perform.
+    expect(await sanitizeLogLineForMarkdown(`a${ESC}[2b${ESC}[2b`)).toBe('aaa');
+  });
+
+  it('preserves the REP source across an aborted or ignored escape sequence', async () => {
+    expect(await sanitizeLogLineForMarkdown(`a${ESC}[${ESC}[2b`)).toBe('aaa');
+    expect(await sanitizeLogLineForMarkdown(`a${ESC}[??x${ESC}[2b`)).toBe('aaa');
+
+    const grapheme = `a${'\u0301'.repeat(131)}`;
+    expect(await sanitizeLogLineForMarkdown(`${grapheme}${ESC}[${ESC}[8000b`)).toBe('');
+    expect(await sanitizeLogLineForMarkdown(`${grapheme}${ESC}[??x${ESC}[8000b`)).toBe('');
+  });
+
+  it('does not charge a whole ordinary ASCII run as REP source', async () => {
+    const text = 'a'.repeat(132);
+    expect(await sanitizeLogLineForMarkdown(`${text}${ESC}[8000b`)).toBe(
+      `${text}${'a'.repeat(8_000)}`,
+    );
+  });
+
+  it('does not charge unsupported private REP identities', async () => {
+    const grapheme = `a${'\u0301'.repeat(131)}`;
+    expect(await sanitizeLogLineForMarkdown(`${grapheme}${ESC}[?8000b`)).toBe(grapheme);
+  });
+
+  it('bounds cumulative REP expansion from distinct printable graphemes', async () => {
+    const grapheme = `a${'\u0301'.repeat(2_000)}`;
+    const allocation = grapheme.length * 200;
+    expect(allocation).toBeLessThan(TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS);
+    expect(allocation * 3).toBeGreaterThan(TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS);
+    const segment = `${grapheme}${ESC}[200b${ESC}[2K`;
+    expect(await sanitizeLogLineForMarkdown(segment.repeat(3))).toBe('');
+  });
+
+  it('drops insert mode because printable writes would shift the full dense row', async () => {
+    expect(await sanitizeLogLineForMarkdown(`${ESC}[4hSECRET`)).toBe('');
+  });
+
+  it('uses a fixed right margin independent of non-painting control bytes', async () => {
+    const raw = `SECRET${ESC}[200GZ`;
+    const padded = `SECRET${ESC}[m${ESC}[m${ESC}[m${ESC}[m${ESC}[m${ESC}[200GZ`;
+    const expected = await sanitizeLogLineForMarkdown(raw);
+    expect(await sanitizeLogLineForMarkdown(padded)).toBe(expected);
+    expect(expected).toHaveLength(200);
+  });
+
+  it('keeps a long diagnostic with harmless SGR instead of charging queue latency', async () => {
+    const text = 'x'.repeat(10_000);
+    expect(await sanitizeLogLineForMarkdown(`${text}${ESC}[0m`)).toBe(text);
+  });
+
+  it('does not charge truecolor values as parser work', async () => {
+    const truecolor = `${ESC}[38;2;255;255;255m`;
+    expect(await sanitizeLogLineForMarkdown(`${truecolor.repeat(11)}VISIBLE${ESC}[0m`)).toBe(
+      'VISIBLE',
+    );
+  });
+
+  it('rejects repeated full terminal resets before allocating the xterm grid', async () => {
+    const resets = `${ESC}c`.repeat(TERMINAL_RENDER_MAX_INPUT_CODE_UNITS / 2);
+    expect(resets).toHaveLength(TERMINAL_RENDER_MAX_INPUT_CODE_UNITS);
+    expect(await sanitizeLogLineForMarkdown(resets)).toBe('');
+  });
+
+  it('bounds tab searches after output clears every configured stop', async () => {
+    const prefix = `${ESC}[3g`;
+    const hostile = `${prefix}${'\r\t'.repeat(
+      Math.floor((TERMINAL_RENDER_MAX_INPUT_CODE_UNITS - prefix.length) / 2),
+    )}`;
+    expect(hostile.length).toBeLessThanOrEqual(TERMINAL_RENDER_MAX_INPUT_CODE_UNITS);
+    expect(await sanitizeLogLineForMarkdown(hostile)).toBe('');
+  });
+
+  it('does not let tab expansion amplify a hostile line', async () => {
+    // Tabs advance 8 columns per byte, so bounding the row at `length * 8` let a
+    // 128KB line of tabs (the agent's per-line capture cap) expand to a ~1M-cell
+    // row. `formatLogTailMarkdown` used to sanitize every line before trimming
+    // any, so a repo could hold ~100 of those live at once inside the DO while
+    // publishing 60KB of them.
+    const hostile = '\t'.repeat(MAX_PARTIAL_LINE_CHARS) + 'END';
+    const row = await sanitizeLogLineForMarkdown(hostile);
+    // The controlled input cap is checked before allocating the fixed grid.
+    expect(hostile.length).toBeGreaterThan(TERMINAL_RENDER_MAX_INPUT_CODE_UNITS);
+    expect(row).toBe('');
+
+    // And the tail formatter must not retain a full window of them.
+    const out = await formatLogTailMarkdown(
+      Array.from({ length: CHECK_RUN_LOG_TAIL_LINES }, () => hostile),
+      CHECK_RUN_LOG_TAIL_LINES,
+    );
+    expect(out).toBeNull();
+  });
+
+  it('skips repeated ICH at the row end instead of growing the row per command', async () => {
+    // ICH at the content end inserts only trailing blanks and leaves the cursor
+    // put. Materializing them grew the row on every command; spreading the insert
+    // into `splice` also blew V8's argument limit for a count near the row bound.
+    // Long enough that `maxColumn` reaches MAX_RENDERED_ROW_CELLS, so each count
+    // clamps to ~130000 — past V8's argument limit for a spread call.
+    const hostile = `seed${`${ESC}[130000@`.repeat(2000)}END`;
+    // FAIL-WITHOUT-FIX: RangeError from the spread, or minutes of quadratic copying.
+    expect(await sanitizeLogLineForMarkdown(hostile)).toBe('');
+  });
+
+  it('skips visually inert ICH beyond the modeled row instead of allocating blanks', async () => {
+    // EL2 makes the row structurally empty without moving the cursor. ICH at
+    // that empty suffix changes no visible cell, but allocating its full count
+    // and then clearing again bypassed the retained-suffix shift budget: this
+    // near-capture-limit line requested about 1.3 billion blank assignments.
+    const pair = `${ESC}[2K${ESC}[131072@`;
+    const hostile = pair.repeat(Math.floor(MAX_PARTIAL_LINE_CHARS / pair.length));
+    const out = await sanitizeLogLineForMarkdown(hostile);
+    expect(out).toBe('');
+  });
+
+  it('charges ICH row growth as well as retained-suffix movement', async () => {
+    // Seeding one cell after EL2 made `ichMoved === 1`, but ICH then allocated
+    // and filled the rest of the 131K row. Repeating this near the capture limit
+    // requested about one billion assignments while barely touching the budget.
+    const pair = `${ESC}[2Kx${ESC}[G${ESC}[131071@`;
+    const hostile = pair.repeat(Math.floor(MAX_PARTIAL_LINE_CHARS / pair.length));
+    const out = await sanitizeLogLineForMarkdown(hostile);
+    // Once growth spends the cumulative work budget, fail closed rather than
+    // preserving a cell that a later terminal mutation could hide.
+    expect(out).toBe('');
+  });
+
+  it('bounds the CUMULATIVE cost of many shifts on a long row', async () => {
+    // Bounding the ROW is not the same as bounding the WORK. Each DCH/ICH shifts
+    // the retained suffix, so N commands on an L-cell row cost N x L — and both
+    // come from the same repo-controlled line, which makes the total QUADRATIC in
+    // the input even though nothing grows without bound. This 125KB variant stays
+    // inside the capture cap and still asks for 20,000 full-row shifts.
+    const hostile = `${'a'.repeat(65_000)}${ESC}[G${`${ESC}[@`.repeat(20_000)}`;
+    expect(hostile.length).toBeLessThanOrEqual(MAX_PARTIAL_LINE_CHARS);
+    const out = await sanitizeLogLineForMarkdown(hostile);
+    // The first over-budget shift clears the row rather than preserving content
+    // a real terminal continued to mutate.
+    expect(out).toBe('');
+  });
+
+  it('bounds the cumulative cost of repeated erases on a long row', async () => {
+    // Bounding DCH/ICH was not enough: EL, ED and ECH all rewrite cells too.
+    // This input is below the agent's 128KiB capture ceiling but asks ECH to
+    // rewrite almost all of a 100,000-cell row 3,000 times — roughly 300 million
+    // assignments in the DO while it is trying to finalize a check run.
+    const hostile = `SECRET${'a'.repeat(99_994)}${ESC}[7G${`${ESC}[999999X`.repeat(3_000)}`;
+    const out = await sanitizeLogLineForMarkdown(hostile);
+    // Once the budget is spent, fail closed by dropping the modeled row. Ignoring
+    // an over-budget erase could resurrect text a real terminal hid.
+    expect(out).toBe('');
+  });
+
+  it('spends the shift budget on ordinary work before the fail-closed limit', async () => {
+    // The bound must not bite ordinary output. A handful of inserts on a normal
+    // row is far under the budget and behaves exactly as a terminal would.
+    expect(await sanitizeLogLineForMarkdown(`abcdef${ESC}[3D${ESC}[2@`)).toBe('abc  def');
+    expect(await sanitizeLogLineForMarkdown(`abcdef${ESC}[6D${ESC}[2P`)).toBe('cdef');
+  });
+
+  it('fails closed when aggregate CSI parameter work exceeds its deterministic budget', async () => {
+    const command = `${ESC}[64@`;
+    const hostile = command.repeat(Math.floor(TERMINAL_RENDER_MAX_PARAMETER_WORK / 64) + 1);
+    expect(hostile.length).toBeLessThan(TERMINAL_RENDER_MAX_INPUT_CODE_UNITS);
+    expect(await sanitizeLogLineForMarkdown(hostile)).toBe('');
+    expect(TERMINAL_RENDER_COLUMNS).toBe(32 * 1024);
+  });
+
+  it('strips colon-form truecolor SGR (ITU-T T.416)', async () => {
+    expect(await sanitizeLogLineForMarkdown(`${ESC}[38:2::255:0:0mRED${ESC}[0m done`)).toBe(
+      'RED done',
+    );
+  });
+
+  it('strips private-parameter CSI', async () => {
+    expect(await sanitizeLogLineForMarkdown(`${ESC}[>4;2mtext`)).toBe('text');
+    expect(await sanitizeLogLineForMarkdown(`${ESC}[=7htext`)).toBe('text');
+  });
+
+  it('leaves no ESC byte behind for any sequence it handles', async () => {
+    const line = `${ESC}[?25l${ESC}[38:2::0:255:0m✓${ESC}[0m built${ESC}[K${ESC}[?25h`;
+    expect(await sanitizeLogLineForMarkdown(line)).toBe('✓ built');
+    expect(await sanitizeLogLineForMarkdown(line)).not.toContain(ESC);
+  });
+});
+
+describe('formatLogTailMarkdown sanitizes before measuring', () => {
+  const ESC = '\x1b';
+
+  it('renders the visible frame, not the erased ones', async () => {
+    const spinner = `◒  Uploading${ESC}[1G${ESC}[J◐  Uploading (59/59)${ESC}[1G${ESC}[J◆  Deployed!`;
+    expect(await formatLogTailMarkdown([spinner], 1)).toBe(
+      `**Last 1 log lines:**\n\n${SIX_BACKTICKS}text\n◆  Deployed!\n${SIX_BACKTICKS}`,
+    );
+  });
+
+  it('drops lines that carried nothing but control output', async () => {
+    const out = (await formatLogTailMarkdown(
+      ['real output', `${ESC}[?25h`, 'more output'],
+      3,
+    )) as string;
+    expect(parseFence(out).content).toEqual(['real output', 'more output']);
+  });
+
+  it('returns null when every captured line was pure control output (PATCH omits text)', async () => {
+    expect(await formatLogTailMarkdown([`${ESC}[?25l`, `${ESC}[1G${ESC}[J`], 2)).toBe(null);
+  });
+
+  it('spends the byte budget on visible text only — an erased-frame flood must not evict real lines', async () => {
+    // One spinner line whose raw form is ~1.4MB of erased frames but whose
+    // visible text is 12 chars. Pre-sanitize accounting would blow the content
+    // cap and shift out every line before it.
+    const flood =
+      Array.from({ length: 20000 }, (_, i) => `frame ${i}${ESC}[1G${ESC}[J`).join('') + 'Deployed!';
+    expect(flood.length).toBeGreaterThan(CHECK_RUN_LOG_TAIL_MAX_BYTES);
+    const out = await formatLogTailMarkdown(['first real line', flood, 'last real line'], 3);
+    // The unsafe stateful group makes the later terminal state unknowable. Even
+    // rendering only the newer plain row could be wrong under a persisted mode.
+    expect(out).toBeNull();
+  });
+
+  it('a terminal-only string-control payload must not evict real diagnostics either', async () => {
+    // One 120KB Kitty graphics blob — under pipeStream's 128KB per-line cap, so
+    // this arrives intact. Its visible width is zero, but left as text it alone
+    // exceeds the tail budget and shifts out every line before it.
+    const blob = `${ESC}_Ga=T,f=100;${'QUJDRA'.repeat(20000)}${ESC}\\`;
+    expect(blob.length).toBeGreaterThan(CHECK_RUN_LOG_TAIL_MAX_BYTES);
+    const lines = [...Array.from({ length: 9 }, (_, i) => `[vite] error detail ${i}`), blob];
+    const out = await formatLogTailMarkdown(lines, lines.length);
+    // The newest group itself is unsafe, so there is no sound terminal suffix to
+    // render. Live/admin logs still retain the original bounded record.
+    expect(out).toBeNull();
+  });
+
+  it('preserves parser state when a 7-bit string control spans captured rows', async () => {
+    for (const [intro, terminator] of [
+      [`${ESC}]0;title=`, `${ESC}\\`],
+      [`${ESC}Pq`, `${ESC}\\`],
+      [`${ESC}X`, `${ESC}\\`],
+      [`${ESC}^`, `${ESC}\\`],
+      [`${ESC}_G`, `${ESC}\\`],
+    ]) {
+      const out = (await formatLogTailMarkdown(
+        ['first', `before${intro}SECRET`, `MORE${terminator}after`, 'last'],
+        4,
+      )) as string;
+      expect(parseFence(out).content).toEqual(['first', 'beforeafter', 'last']);
+      expect(out).not.toContain('SECRET');
+      expect(out).not.toContain('MORE');
+    }
+  });
+
+  it('preserves parser state for the 8-bit C1 forms across captured rows', async () => {
+    for (const intro of ['\u009d0;title=', '\u0090q', '\u0098', '\u009e', '\u009fG']) {
+      const out = (await formatLogTailMarkdown(
+        ['first', `before${intro}SECRET`, 'MORE', `PAYLOAD\u009cafter`, 'last'],
+        5,
+      )) as string;
+      expect(parseFence(out).content).toEqual(['first', 'beforeafter', 'last']);
+      expect(out).not.toContain('SECRET');
+      expect(out).not.toContain('MORE');
+      expect(out).not.toContain('PAYLOAD');
+    }
+  });
+
+  it('preserves incomplete ESC and CSI state across captured rows', async () => {
+    for (const lines of [
+      [`before${ESC}`, '[31mRED'],
+      [`before${ESC}[`, '31mRED'],
+    ]) {
+      const out = (await formatLogTailMarkdown(lines, lines.length)) as string;
+      expect(parseFence(out).content).toEqual(['before', 'RED']);
+      expect(out).not.toContain('31m');
+    }
+  });
+
+  it('restores exact captured CR, LF, and CRLF while CSI state spans rows', async () => {
+    const first = { line: `before${ESC}[`, lineEnding: 'cr' as const };
+    const bareCr = (await formatLogTailMarkdown(
+      [first, { line: '31mRED', lineEnding: 'none' }],
+      2,
+    )) as string;
+    expect(parseFence(bareCr).content).toEqual(['REDore']);
+
+    const bareLf = (await formatLogTailMarkdown(
+      [
+        { ...first, lineEnding: 'lf' as const },
+        { line: '31mRED', lineEnding: 'none' },
+      ],
+      2,
+    )) as string;
+    expect(parseFence(bareLf).content).toEqual(['before', '      RED']);
+
+    const crlf = (await formatLogTailMarkdown(
+      [
+        { ...first, lineEnding: 'crlf' as const },
+        { line: '31mRED', lineEnding: 'none' },
+      ],
+      2,
+    )) as string;
+    expect(parseFence(crlf).content).toEqual(['before', 'RED']);
+  });
+
+  it('preserves a bare LF cursor column even for otherwise plain rows', async () => {
+    const out = (await formatLogTailMarkdown(
+      [
+        { line: 'abc', lineEnding: 'lf' },
+        { line: 'X', lineEnding: 'none' },
+      ],
+      2,
+    )) as string;
+    expect(parseFence(out).content).toEqual(['abc', '   X']);
+  });
+
+  it('does not invent a REP source across a captured LF inside CSI', async () => {
+    const grapheme = `a${'\u0301'.repeat(8_200)}`;
+    const out = (await formatLogTailMarkdown(
+      [
+        { line: `${grapheme}${ESC}[`, lineEnding: 'lf' },
+        { line: `128b${ESC}[2K${ESC}[1GERR`, lineEnding: 'none' },
+      ],
+      2,
+    )) as string;
+    expect(parseFence(out).content).toEqual([grapheme, 'ERR']);
+  });
+
+  it('preserves protection and configured tab stops across parser-ground rows', async () => {
+    const protectedOut = (await formatLogTailMarkdown(
+      [`${ESC}[1"q`, `SECRET${ESC}[?2K`],
+      2,
+    )) as string;
+    expect(parseFence(protectedOut).content).toEqual(['SECRET']);
+
+    const tabsOut = (await formatLogTailMarkdown(
+      [`${ESC}[3g${ESC}[21G${ESC}H`, `SECRET_TOKEN_ABCDEFG\r\t${ESC}[1K${ESC}[1GERR`],
+      2,
+    )) as string;
+    expect(parseFence(tabsOut).content).toEqual(['ERR']);
+    expect(tabsOut).not.toContain('KEN_ABCDEFG');
+  });
+
+  it('retains a normal 100-row tail when the newest diagnostic uses color', async () => {
+    const lines = [
+      ...Array.from({ length: CHECK_RUN_LOG_TAIL_LINES - 1 }, (_, index) => `error ${index}`),
+      `${ESC}[31mFAILED${ESC}[0m`,
+    ];
+    const out = (await formatLogTailMarkdown(lines, lines.length)) as string;
+    const content = parseFence(out).content;
+    expect(content).toHaveLength(CHECK_RUN_LOG_TAIL_LINES);
+    expect(content.at(0)).toBe('error 0');
+    expect(content.at(-1)).toBe('FAILED');
+  });
+
+  it('does not resurrect cached rows cleared by later terminal history controls', async () => {
+    const ris = (await formatLogTailMarkdown([`SECRET${ESC}`, 'cERR'], 2)) as string;
+    expect(parseFence(ris).content).toEqual(['ERR']);
+
+    const ed3 = (await formatLogTailMarkdown(['SECRET', `${ESC}[3JERR`], 2)) as string;
+    expect(parseFence(ed3).content).toEqual(['ERR']);
+  });
+
+  it('keeps captured normal and alternate-buffer histories separate', async () => {
+    const staysAlternate = (await formatLogTailMarkdown(
+      ['SECRET', `${ESC}[?1049hERR`],
+      2,
+    )) as string;
+    expect(parseFence(staysAlternate).content).toEqual(['ERR']);
+
+    const returnsToNormal = (await formatLogTailMarkdown(
+      ['normal', `${ESC}[?1049hALT${ESC}[3J${ESC}[?1049lERR`],
+      2,
+    )) as string;
+    expect(parseFence(returnsToNormal).content).toEqual(['normal', 'ERR']);
+
+    const alternateScroll = (await formatLogTailMarkdown(
+      [`${ESC}[?1049hALT1`, { line: 'ALT2', lineEnding: 'none' }],
+      2,
+    )) as string;
+    expect(parseFence(alternateScroll).content).toEqual(['ALT2']);
+
+    const reentersClearedAlternate = (await formatLogTailMarkdown(
+      [`${ESC}[?1049hOLD`, `${ESC}[?1049l`, `${ESC}[?1049hNEW`],
+      3,
+    )) as string;
+    expect(parseFence(reentersClearedAlternate).content).toEqual(['NEW']);
+  });
+
+  it('does not resurrect a row scrolled away by control input within one capture', async () => {
+    const out = (await formatLogTailMarkdown([`SECRET\u0085ERR`], 1)) as string;
+    expect(parseFence(out).content).toEqual(['ERR']);
+  });
+
+  it('charges raw in-record vertical controls even though captured endings are bounded', async () => {
+    const hostile = `SECRET${'\u0085'.repeat(TERMINAL_RENDER_MAX_PARAMETER_WORK / 2048 + 1)}ERR`;
+    expect(await formatLogTailMarkdown([{ line: hostile, lineEnding: 'none' }], 1)).toBeNull();
+  });
+
+  it('drops an over-budget multiline string group whole and resumes after its terminator', async () => {
+    const payload = 'SECRET'.repeat(TERMINAL_RENDER_MAX_INPUT_CODE_UNITS);
+    const out = await formatLogTailMarkdown(
+      ['first diagnostic', `${ESC}_G`, payload, `${ESC}\\`, 'latest failure'],
+      5,
+    );
+    expect(out).toBeNull();
+  });
+
+  it('spends the controlled-input budget on newest whole parser groups first', async () => {
+    const olderControlled = Array.from(
+      { length: 6 },
+      (_, index) => `${ESC}[0mold-${index}-${'x'.repeat(7_000)}`,
+    );
+    const out = await formatLogTailMarkdown(
+      [...olderControlled, `before${ESC}_GSECRET`, `MORE${ESC}\\latest failure`],
+      olderControlled.length + 2,
+    );
+    // A fresh terminal after the omitted controlled prefix could expose text
+    // whose interpretation depends on persistent state from that prefix.
+    expect(out).toBeNull();
+  });
+
+  it('fails closed instead of starting after an omitted state-setting group', async () => {
+    const setup = `${ESC}[3g${ESC}[21G${ESC}H${'x'.repeat(TERMINAL_RENDER_MAX_INPUT_CODE_UNITS)}`;
+    const dependent = `SECRET_TOKEN_ABCDEFG\r\t${ESC}[1K${ESC}[1GERR`;
+    expect(await formatLogTailMarkdown([setup, dependent], 2)).toBeNull();
+  });
+
+  it('can omit an oversized plain prefix because it cannot mutate terminal state', async () => {
+    const out = (await formatLogTailMarkdown(
+      ['x'.repeat(TERMINAL_TAIL_MAX_INPUT_CODE_UNITS), `${ESC}[31mFAILED${ESC}[0m`],
+      2,
+    )) as string;
+    expect(parseFence(out).content).toEqual(['FAILED']);
   });
 });
 
@@ -2986,6 +3694,91 @@ describe('build-agent parent-process secret scrub', () => {
       // before the parent-env delete and re-injected via the extra overrides).
       const deploy = seen.find((s) => s.cmd === 'npx');
       expect(deploy?.env?.VOID_TOKEN).toBe('deploy-jwt');
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+});
+
+// The build container is a CI environment and must say so, or interactive CLIs
+// animate into a piped stdout: `@clack/prompts`' spinner redraws in place with
+// `ESC[1G ESC[J` and no newline, so the agent's CR/LF splitter glues every frame
+// into one unreadable captured line. The void CLI already guards this
+// (`createSpinner()` falls back to plain `log.step` output) behind clack's
+// `isCI`. `github_actions` builds got `CI=true` free from the runner; container
+// builds set nothing, which is why only they rendered broken.
+describe('PINNED_VOID_CLI_VERSION (fallback CLI ↔ submodule contract)', () => {
+  it('matches the framework submodule the platform deploys against', () => {
+    // The pin only applies to repos with no local `void` dependency, so drift is
+    // invisible in every normal build — it sat at 0.9.1 while the submodule moved
+    // to 0.10.x, meaning those repos would have deployed through a CLI a full
+    // minor behind the one the platform was tested against. A comment saying
+    // "keep in sync" did not hold; this assertion does. On a submodule bump,
+    // update the constant.
+    expect(PINNED_VOID_CLI_VERSION).toBe(voidPackageJson.version);
+  });
+
+  it('matches the container agent’s own backstop default', () => {
+    // Two copies of this literal exist: BuildManager injects VOID_CLI_VERSION,
+    // and the agent falls back to DEFAULT_VOID_CLI_VERSION when the env is
+    // absent. build-agent.mjs is plain JS copied into the image, so it cannot
+    // import the constant — only a test can hold the two in step. Both were
+    // sitting at 0.9.1; bumping one alone would leave the fallback path
+    // deploying through a different CLI than the injected path.
+    expect(DEFAULT_VOID_CLI_VERSION).toBe(PINNED_VOID_CLI_VERSION);
+  });
+});
+
+describe('build-agent nonInteractiveEnv (CI-safe child output)', () => {
+  it('sets CI to the exact string "true" — clack compares by identity, so "1" is a no-op', () => {
+    expect(nonInteractiveEnv()).toEqual({ CI: 'true' });
+  });
+
+  it('survives the env scrub (CI is not a secret)', () => {
+    expect(sanitizeChildEnv({ PATH: '/usr/bin' }, nonInteractiveEnv()).CI).toBe('true');
+  });
+
+  it('reaches BOTH build children — the deploy child renders the spinner, the install child its own progress', async () => {
+    // runBuild requireEnv()s the token pair up front (and deletes both from
+    // process.env as it runs) — save/restore covers that too.
+    const saved = {
+      VOID_TOKEN: process.env.VOID_TOKEN,
+      SOURCE_TOKEN: process.env.SOURCE_TOKEN,
+      VOID_API_URL: process.env.VOID_API_URL,
+      VOID_PROJECT: process.env.VOID_PROJECT,
+    };
+    process.env.VOID_TOKEN = 'deploy-jwt';
+    process.env.SOURCE_TOKEN = 'ghs_secret';
+    process.env.VOID_API_URL = 'https://api.void.cloud';
+    process.env.VOID_PROJECT = 'my-app';
+    try {
+      const seen: Array<{ cmd: string; env: NodeJS.ProcessEnv | undefined }> = [];
+      const code = await runBuild({
+        downloadSource: vi.fn(async () => {}),
+        resolveInstall: () => ({ manager: 'npm', cmd: 'npm', args: ['ci'] }),
+        runChild: vi.fn(
+          async (cmd: string, _args: ReadonlyArray<string>, opts?: { env?: NodeJS.ProcessEnv }) => {
+            seen.push({ cmd, env: opts?.env });
+            return 0;
+          },
+        ),
+        reportStatus: vi.fn(async () => {}),
+        hasLocalVoid: () => true,
+      });
+      expect(code).toBe(0);
+      expect(seen.map((s) => s.cmd)).toEqual(['npm', 'npx']);
+      for (const child of seen) {
+        expect(child.env?.CI).toBe('true');
+      }
+      // The cache overrides must survive being merged alongside it.
+      expect(seen[0]?.env?.HOME).toBe(BUILDER_HOME);
+      expect(seen[1]?.env?.HOME).toBe(BUILDER_HOME);
     } finally {
       for (const [key, value] of Object.entries(saved)) {
         if (value === undefined) {
@@ -3555,13 +4348,30 @@ describe('build-agent install + deploy resolution', () => {
     expect(seen.some((s) => s.cmd === 'npm')).toBe(false);
   });
 
-  it('no lockfile + packageManager yarn@4 → corepack yarn install (no frozen flag)', async () => {
+  it('no lockfile + packageManager yarn@4 → corepack yarn install --no-immutable (CI=true would otherwise forbid creating the lockfile)', async () => {
     writeFileSync(`${WORK_DIR}/package.json`, JSON.stringify({ packageManager: 'yarn@4.3.1' }));
 
     const seen = await runAndCapture(() => true);
 
+    // FAIL-WITHOUT-FIX: Berry >= 3.0.0 defaults `enableImmutableInstalls` to true
+    // under CI, and `nonInteractiveEnv()` sets `CI=true` on this child — so a bare
+    // `yarn install` aborts with YN0028 on the one plan whose job is to CREATE the
+    // missing lockfile. Measured against Berry 3.0.0 / 3.6.4 / 4.14.1 / 4.18.0.
     const install = seen.find((s) => s.cmd === 'corepack' && s.args[0] === 'yarn');
-    expect(install?.args).toEqual(['yarn', 'install']);
+    expect(install?.args).toEqual(['yarn', 'install', '--no-immutable']);
+  });
+
+  it('keeps the LOCKFILE yarn plans immutable — the escape hatch is scoped to the no-lockfile plan', async () => {
+    // Relaxing these would let a build mutate a committed lockfile and deploy
+    // resolutions the repo never pinned.
+    writeFileSync(`${WORK_DIR}/package.json`, JSON.stringify({ packageManager: 'yarn@4.3.1' }));
+    writeFileSync(`${WORK_DIR}/yarn.lock`, '__metadata:\n  version: 8\n');
+
+    const seen = await runAndCapture(() => true);
+
+    const install = seen.find((s) => s.cmd === 'corepack' && s.args[0] === 'yarn');
+    expect(install?.args).toEqual(['yarn', 'install', '--immutable']);
+    expect(install?.args).not.toContain('--no-immutable');
   });
 
   it('no lockfile + NO packageManager pin → npm install (default preserved)', async () => {
@@ -3828,6 +4638,14 @@ describe('build-agent pipeStream line splitting + tail cap', () => {
       .map((l) => l.line);
   }
 
+  function captureRows(run: (src: FakeReadable) => void) {
+    const before = getBufferedLogLines().length;
+    const src = new FakeReadable();
+    pipeStream(src as unknown as NodeJS.ReadableStream, 'stdout');
+    run(src);
+    return getBufferedLogLines().slice(before);
+  }
+
   it('flushes bare-CR progress frames as lines instead of holding them until end', () => {
     // FAIL-WITHOUT-FIX: splitting only on `\n`, "a\rb\rc" carries the whole run
     // in `tail` and records nothing before 'end' — live tail stays empty.
@@ -3848,6 +4666,61 @@ describe('build-agent pipeStream line splitting + tail cap', () => {
         .slice(before)
         .map((l) => l.line),
     ).toEqual(['a', 'b', 'c']);
+  });
+
+  it('preserves exact same-chunk CR, LF, CRLF, and EOF delimiters', () => {
+    const rows = captureRows((src) => {
+      src.feed('a\rb\nc\r\nd');
+      src.end();
+    });
+    expect(rows.map(({ line, lineEnding }) => ({ line, lineEnding }))).toEqual([
+      { line: 'a', lineEnding: 'cr' },
+      { line: 'b', lineEnding: 'lf' },
+      { line: 'c', lineEnding: 'crlf' },
+      { line: 'd', lineEnding: 'none' },
+    ]);
+  });
+
+  it('classifies a CR at a chunk seam after one-byte lookahead', () => {
+    const before = getBufferedLogLines().length;
+    const src = new FakeReadable();
+    pipeStream(src as unknown as NodeJS.ReadableStream, 'stdout');
+    src.feed('torn\r');
+    expect(getBufferedLogLines()).toHaveLength(before);
+    src.feed('\nrewrite\r');
+    expect(
+      getBufferedLogLines()
+        .slice(before)
+        .map(({ line, lineEnding }) => ({ line, lineEnding })),
+    ).toEqual([{ line: 'torn', lineEnding: 'crlf' }]);
+    src.feed('next');
+    src.end();
+    expect(
+      getBufferedLogLines()
+        .slice(before)
+        .map(({ line, lineEnding }) => ({ line, lineEnding })),
+    ).toEqual([
+      { line: 'torn', lineEnding: 'crlf' },
+      { line: 'rewrite', lineEnding: 'cr' },
+      { line: 'next', lineEnding: 'none' },
+    ]);
+  });
+
+  it('keeps an over-cap row bounded while its final CR awaits lookahead', () => {
+    const before = getBufferedLogLines().length;
+    const src = new FakeReadable();
+    pipeStream(src as unknown as NodeJS.ReadableStream, 'stdout');
+    src.feed(`${'x'.repeat(MAX_PARTIAL_LINE_CHARS * 3)}\r`);
+    // The ambiguous row is pending, but only its capped prefix + marker remains.
+    expect(getBufferedLogLines()).toHaveLength(before);
+    src.feed('next');
+    src.end();
+    const rows = getBufferedLogLines().slice(before);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].line.length).toBeLessThanOrEqual(MAX_PARTIAL_LINE_CHARS + 32);
+    expect(rows[0].line.endsWith('truncated]')).toBe(true);
+    expect(rows[0].lineEnding).toBe('cr');
+    expect(rows[1]).toMatchObject({ line: 'next', lineEnding: 'none' });
   });
 
   it('bounds a terminator-free flood to ONE truncated record (memory cap)', () => {
