@@ -34,7 +34,7 @@
     "@xterm/headless": "^6.0.0",
     "aws4fetch": "^1.0.20",
     "blake3-jit": "^1.1.0",
-    "cron-parser": "5.8.1",
+    "cron-parser": "5.9.0",
     "drizzle-orm": "^0.45.2",
     "hono": "catalog:",
     "jose": "6.2.8",
