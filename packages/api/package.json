@@ -29,22 +29,22 @@
   },
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
-    "@cloudflare/sandbox": "0.12.4",
+    "@cloudflare/sandbox": "0.12.6",
     "@voidcloud/isr-shared": "workspace:*",
     "@xterm/headless": "^6.0.0",
     "aws4fetch": "^1.0.20",
     "blake3-jit": "^1.1.0",
-    "cron-parser": "5.7.0",
+    "cron-parser": "5.8.1",
     "drizzle-orm": "^0.45.2",
     "hono": "catalog:",
     "jose": "6.2.8",
     "mime": "^4.1.0",
-    "pg": "8.22.0"
+    "pg": "8.23.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
-    "@electric-sql/pglite": "0.5.4",
-    "@types/pg": "8.20.4",
+    "@electric-sql/pglite": "0.5.5",
+    "@types/pg": "8.21.0",
     "@typescript/native-preview": "catalog:",
     "drizzle-kit": "^0.31.10",
     "miniflare": "^4.20260421.0",
