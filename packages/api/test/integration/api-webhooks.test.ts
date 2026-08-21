@@ -58,6 +58,28 @@ let compareStatus: string | null = 'identical';
 function setCompareStatus(status: string | null): void {
   compareStatus = status;
 }
+// Per-branch overrides. A commit can be the head of one connected branch and not
+// another, which the single `compareStatus` cannot express.
+let compareStatusByBranch: Record<string, string | null> | null = null;
+function setCompareStatusByBranch(map: Record<string, string | null> | null): void {
+  compareStatusByBranch = map;
+}
+
+// Concurrency probe for the rerun fan-out. A `check_suite` rerequest compares
+// one branch head per DISTINCT branch, and GitHub drops a webhook delivery it has
+// not been answered in 10s (with no automatic redelivery), so those compares must
+// not be awaited in series. When armed with N, every compare call parks until N
+// of them have been in flight AT ONCE. `compareConcurrencyPeak` is monotonic, so
+// a serial handler tops out at 1, releases each call on the deadline, and the
+// test fails on the assertion rather than hanging.
+let compareInFlight = 0;
+let compareConcurrencyPeak = 0;
+let compareBarrierSize = 0;
+function armCompareConcurrencyProbe(size: number): void {
+  compareInFlight = 0;
+  compareConcurrencyPeak = 0;
+  compareBarrierSize = size;
+}
 
 // A one-shot side effect the compare mock runs BEFORE returning, used by the
 // route test to inject a revocation that commits AFTER the push resolver's
@@ -98,11 +120,31 @@ function setListReposResult(
 }
 
 vi.mock('../../src/github/installation-token.ts', () => ({
-  getBranchHeadComparisonStatus: async () => {
+  getBranchHeadComparisonStatus: async (
+    _env: unknown,
+    _installationId: unknown,
+    _repo: unknown,
+    _sha: unknown,
+    branch?: string,
+  ) => {
+    if (compareBarrierSize > 1) {
+      compareInFlight++;
+      compareConcurrencyPeak = Math.max(compareConcurrencyPeak, compareInFlight);
+      // Wait on the monotonic PEAK, not the live count: the last arrival exits
+      // immediately and decrements, which would otherwise strand its peers.
+      const deadline = Date.now() + 1000;
+      while (compareConcurrencyPeak < compareBarrierSize && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      compareInFlight--;
+    }
     if (compareSideEffect) {
       const fn = compareSideEffect;
       compareSideEffect = null;
       await fn();
+    }
+    if (compareStatusByBranch && branch !== undefined && branch in compareStatusByBranch) {
+      return compareStatusByBranch[branch]!;
     }
     return compareStatus;
   },
@@ -252,6 +294,8 @@ beforeEach(async () => {
   await clearTables(env.db);
   // Default to the head verdict so pre-existing push tests build as before.
   setCompareStatus('identical');
+  setCompareStatusByBranch(null);
+  armCompareConcurrencyProbe(0);
   setCompareSideEffect(null);
   // Default to 'absent' so pre-existing branch-delete tests still cancel.
   setBranchExistence('absent');
@@ -4610,5 +4654,789 @@ describe('POST /webhooks/github — organization member_removed revocation', () 
     expect(second).not.toBeNull();
     // High-water mark: the redelivery advances or holds, never regresses.
     expect(second!).toBeGreaterThanOrEqual(first!);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GitHub's "Re-run" button on the Void Build check run (`check_run:rerequested`)
+// and "Re-run all checks" (`check_suite:rerequested`).
+//
+// Before this, the webhook had no `check_run` case at all: the button rendered,
+// the click delivered an event, and the API answered "unhandled" — so the only
+// way to retry a failed build was to push a new commit. Build bld_33gs31a2x6qj
+// failed on a stalled source download and its repo's `main` sat on the failing
+// commit with no way to retry it.
+//
+// The rerun reuses the PUSH pipeline, so it inherits the freshness gate: a rerun
+// can never deploy a commit a push could not.
+// ---------------------------------------------------------------------------
+describe('POST /webhooks/github — rerun from the check run', () => {
+  /** A BUILD_SCHEDULER stand-in that records pokes. */
+  function pokeEnvWith(base: TestEnv): { pokeEnv: TestEnv; pokes: Array<string> } {
+    const pokes: Array<string> = [];
+    const pokeEnv: TestEnv = {
+      ...base,
+      BUILD_SCHEDULER: {
+        idFromName: (name: string) => ({ toString: () => name }),
+        get: () => ({
+          fetch: async (url: string) => {
+            pokes.push(url);
+            return Response.json({ ok: true });
+          },
+        }),
+      } as unknown as DurableObjectNamespace,
+    };
+    return { pokeEnv, pokes };
+  }
+
+  const checkRunPayload = (overrides?: {
+    name?: string;
+    action?: string;
+    headSha?: string;
+    headBranch?: string | null;
+    id?: number;
+    // No default: a per-check rerun that cannot name its build FAILS CLOSED, so
+    // every test that expects work must pass a real build id.
+    externalId?: string;
+    conclusion?: string | null;
+  }) => ({
+    action: overrides?.action ?? 'rerequested',
+    installation: { id: 900 },
+    repository: { full_name: 'octo/site', id: 9001 },
+    check_run: {
+      id: overrides?.id ?? 55001,
+      name: overrides?.name ?? 'Void Build',
+      head_sha: overrides?.headSha ?? 'cafe1234',
+      external_id: overrides?.externalId ?? 'bld_old',
+      conclusion: overrides?.conclusion === undefined ? 'failure' : overrides.conclusion,
+      check_suite: {
+        head_branch: overrides?.headBranch === undefined ? 'main' : overrides.headBranch,
+      },
+    },
+  });
+
+  /**
+   * The build a clicked check run points at. A per-check rerun FAILS CLOSED
+   * without one, so every test that expects the handler to get as far as the
+   * freshness gate needs a real row to name.
+   */
+  async function seedClickedBuild(
+    project: { id: string },
+    user: { id: string },
+    status: 'queued' | 'failed' | 'complete' = 'failed',
+  ) {
+    const build = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      commitSha: 'cafe1234',
+      branch: 'main',
+    });
+    if (status !== 'queued') {
+      await env.db.update(builds).set({ status }).where(eq(builds.id, build.id));
+    }
+    return build;
+  }
+
+  async function seedContainerProject(slug: string, branch = 'main') {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, slug);
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '900',
+      repoFullName: 'octo/site',
+      repositoryId: '9001',
+      branch,
+      buildExecutor: 'container',
+    });
+    await seedInstallation(env.db, '900');
+    return { user, project };
+  }
+
+  it('enqueues a fresh build when the previous build for the commit FAILED', async () => {
+    const { project, user } = await seedContainerProject('wh-rerun-failed');
+    // The state the button exists for: a terminal failed build on the branch head.
+    const failed = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      commitSha: 'cafe1234',
+      branch: 'main',
+    });
+    await env.db.update(builds).set({ status: 'failed' }).where(eq(builds.id, failed.id));
+
+    const { pokeEnv, pokes } = pokeEnvWith(env);
+    const { app, appEnv } = makeApp(pokeEnv);
+
+    const res = await post(app, appEnv, 'check_run', checkRunPayload({ externalId: failed.id }));
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { buildId?: string };
+    expect(json.buildId).toBeTruthy();
+    // A NEW row — a failed build is never reused.
+    expect(json.buildId).not.toBe(failed.id);
+    const build = await getBuild(env.db, json.buildId!);
+    expect(build!.project_id).toBe(project.id);
+    expect(build!.commit_sha).toBe('cafe1234');
+    expect(build!.status).toBe('queued');
+    // The scheduler is woken now rather than on its next alarm.
+    expect(pokes).toHaveLength(1);
+  });
+
+  it('refuses to rerun a commit that is no longer the branch head', async () => {
+    const { project, user } = await seedContainerProject('wh-rerun-stale');
+    const clicked = await seedClickedBuild(project, user);
+    // 'behind' = the branch moved off this commit (force-push / rollback). Building
+    // it would roll production back to an abandoned commit.
+    setCompareStatus('behind');
+    const { app, appEnv } = makeApp(env);
+
+    const res = await post(app, appEnv, 'check_run', checkRunPayload({ externalId: clicked.id }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, enqueued: 0 });
+    // No NEW build — only the failed one the check pointed at.
+    expect((await getProjectBuilds(env.db, project.id)).map((b) => b.id)).toEqual([clicked.id]);
+  });
+
+  it('refuses to rerun when the compare API is unreachable (fail closed)', async () => {
+    const { project, user } = await seedContainerProject('wh-rerun-unknown');
+    const clicked = await seedClickedBuild(project, user);
+    setCompareStatus(null);
+    const { app, appEnv } = makeApp(env);
+
+    const res = await post(app, appEnv, 'check_run', checkRunPayload({ externalId: clicked.id }));
+
+    expect(await res.json()).toEqual({ ok: true, enqueued: 0 });
+    expect((await getProjectBuilds(env.db, project.id)).map((b) => b.id)).toEqual([clicked.id]);
+  });
+
+  it('ignores a rerequest for a check run that is not ours', async () => {
+    await seedContainerProject('wh-rerun-foreign');
+    const { app, appEnv } = makeApp(env);
+
+    const res = await post(
+      app,
+      appEnv,
+      'check_run',
+      checkRunPayload({ name: 'Socket Security: Project Report' }),
+    );
+
+    expect(await res.json()).toEqual({ ok: true, ignored: 'check_run is not the Void build' });
+  });
+
+  it('ignores non-rerequested check_run actions', async () => {
+    await seedContainerProject('wh-rerun-created');
+    const { app, appEnv } = makeApp(env);
+
+    const res = await post(app, appEnv, 'check_run', checkRunPayload({ action: 'created' }));
+
+    expect(await res.json()).toEqual({ ok: true, ignored: 'check_run:created' });
+  });
+
+  it('skips a connection whose branch head is not this commit', async () => {
+    const { project, user } = await seedContainerProject('wh-rerun-otherbranch', 'release');
+    const clicked = await seedClickedBuild(project, user);
+    // The suite names `main`, but the connection tracks `release` — and `release`
+    // has moved on. The FRESHNESS gate is what refuses, not a branch filter.
+    setCompareStatusByBranch({ release: 'behind' });
+    const { app, appEnv } = makeApp(env);
+
+    const res = await post(
+      app,
+      appEnv,
+      'check_run',
+      checkRunPayload({ headBranch: 'main', externalId: clicked.id }),
+    );
+
+    expect(await res.json()).toEqual({ ok: true, enqueued: 0 });
+    expect((await getProjectBuilds(env.db, project.id)).map((b) => b.id)).toEqual([clicked.id]);
+  });
+
+  it('reruns a project tracking another branch at the SAME commit', async () => {
+    // GitHub keeps ONE suite per app per commit even when that commit heads several
+    // branches, so the payload names only one of them. Treating `head_branch` as a
+    // filter would drop this project's connection entirely and break its button.
+    const { project, user } = await seedContainerProject('wh-rerun-samesha', 'release');
+    const clicked = await seedClickedBuild(project, user);
+    setCompareStatusByBranch({ release: 'identical' });
+    const { pokeEnv } = pokeEnvWith(env);
+    const { app, appEnv } = makeApp(pokeEnv);
+
+    const res = await post(
+      app,
+      appEnv,
+      'check_run',
+      checkRunPayload({ headBranch: 'main', externalId: clicked.id }),
+    );
+
+    const json = (await res.json()) as { buildIds?: Array<string> };
+    expect(json.buildIds).toHaveLength(1);
+    expect((await getBuild(env.db, json.buildIds![0]))!.project_id).toBe(project.id);
+  });
+
+  it('tells a github_actions project to rerun from Actions instead', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'wh-rerun-actions');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '900',
+      repoFullName: 'octo/site',
+      repositoryId: '9001',
+      branch: 'main',
+      buildExecutor: 'github_actions',
+    });
+    await seedInstallation(env.db, '900');
+    const clicked = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'github_actions',
+      commitSha: 'cafe1234',
+      branch: 'main',
+    });
+    const { app, appEnv } = makeApp(env);
+
+    const res = await post(app, appEnv, 'check_run', checkRunPayload({ externalId: clicked.id }));
+
+    // Nothing in the Checks API can start a workflow run, so say so rather than
+    // returning a silent success the user would read as a working button.
+    expect(await res.json()).toEqual({
+      ok: true,
+      ignored: 'github_actions rerun must be run from Actions',
+    });
+  });
+
+  it('handles "Re-run all checks" (check_suite:rerequested) the same way', async () => {
+    const { project } = await seedContainerProject('wh-rerun-suite');
+    const { pokeEnv } = pokeEnvWith(env);
+    const { app, appEnv } = makeApp(pokeEnv);
+
+    const res = await post(app, appEnv, 'check_suite', {
+      action: 'rerequested',
+      installation: { id: 900 },
+      repository: { full_name: 'octo/site', id: 9001 },
+      check_suite: { head_sha: 'cafe1234', head_branch: 'main' },
+    });
+
+    const json = (await res.json()) as { buildId?: string };
+    expect(json.buildId).toBeTruthy();
+    const build = await getBuild(env.db, json.buildId!);
+    expect(build!.project_id).toBe(project.id);
+  });
+
+  it('ignores check_suite:requested so a push is not built twice', async () => {
+    await seedContainerProject('wh-suite-requested');
+    const { app, appEnv } = makeApp(env);
+
+    // A suite is requested on EVERY push, which the push handler already builds.
+    const res = await post(app, appEnv, 'check_suite', {
+      action: 'requested',
+      installation: { id: 900 },
+      repository: { full_name: 'octo/site', id: 9001 },
+      check_suite: { head_sha: 'cafe1234', head_branch: 'main' },
+    });
+
+    expect(await res.json()).toEqual({ ok: true, ignored: 'check_suite:requested' });
+  });
+
+  it('self-heals a renamed repo on rerun, so the build fetches the right source', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'wh-rerun-renamed');
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '900',
+      // Stored under the OLD name; the immutable id still matches.
+      repoFullName: 'octo/old-site',
+      repositoryId: '9001',
+      branch: 'main',
+      buildExecutor: 'container',
+    });
+    await seedInstallation(env.db, '900');
+    const clicked = await seedClickedBuild(project, user);
+    const { pokeEnv } = pokeEnvWith(env);
+    const { app, appEnv } = makeApp(pokeEnv);
+
+    const res = await post(app, appEnv, 'check_run', checkRunPayload({ externalId: clicked.id }));
+
+    const json = (await res.json()) as { buildId?: string };
+    expect(json.buildId).toBeTruthy();
+    const connection = await getGitHubConnection(env.db, project.id);
+    expect(connection!.repo_full_name).toBe('octo/site');
+  });
+
+  it('ignores a rerequest with missing routing fields', async () => {
+    const { app, appEnv } = makeApp(env);
+
+    const res = await post(app, appEnv, 'check_run', {
+      action: 'rerequested',
+      check_run: { name: 'Void Build' },
+    });
+
+    expect(await res.json()).toEqual({ ok: true, ignored: 'missing check_run routing fields' });
+  });
+
+  /** A second project on the SAME repo AND branch — allowed: only project_id is unique. */
+  async function seedSiblingProject(
+    slug: string,
+    executor: 'container' | 'github_actions',
+    branch = 'main',
+  ) {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, slug);
+    await createGitHubConnection(env.db, {
+      projectId: project.id,
+      installationId: '900',
+      repoFullName: 'octo/site',
+      repositoryId: '9001',
+      branch,
+      buildExecutor: executor,
+    });
+    return { user, project };
+  }
+
+  it('rebuilds only the project whose check run was clicked', async () => {
+    const { project: clicked, user } = await seedContainerProject('wh-rerun-target');
+    const { project: sibling } = await seedSiblingProject('wh-rerun-sibling', 'container');
+    // The check the user clicked belongs to THIS build, on THIS project.
+    const failed = await createBuild(env.db, {
+      projectId: clicked.id,
+      userId: user.id,
+      executor: 'container',
+      commitSha: 'cafe1234',
+      branch: 'main',
+    });
+    await env.db.update(builds).set({ status: 'failed' }).where(eq(builds.id, failed.id));
+
+    const { pokeEnv } = pokeEnvWith(env);
+    const { app, appEnv } = makeApp(pokeEnv);
+    const res = await post(app, appEnv, 'check_run', checkRunPayload({ externalId: failed.id }));
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { buildIds?: Array<string> };
+    expect(json.buildIds).toHaveLength(1);
+    // Resolving by repo + branch alone would have rebuilt the sibling too.
+    expect(await getProjectBuilds(env.db, sibling.id)).toHaveLength(0);
+    expect((await getBuild(env.db, json.buildIds![0]))!.project_id).toBe(clicked.id);
+  });
+
+  it('never enqueues a sibling container build from a click on an Actions check', async () => {
+    const actions = await seedSiblingProject('wh-rerun-actions-owner', 'github_actions');
+    await seedInstallation(env.db, '900');
+    const { project: containerSibling } = await seedSiblingProject(
+      'wh-rerun-container-sib',
+      'container',
+    );
+    const actionsBuild = await createBuild(env.db, {
+      projectId: actions.project.id,
+      userId: actions.user.id,
+      executor: 'github_actions',
+      commitSha: 'cafe1234',
+      branch: 'main',
+    });
+
+    const { app, appEnv } = makeApp(env);
+    const res = await post(
+      app,
+      appEnv,
+      'check_run',
+      checkRunPayload({ externalId: actionsBuild.id }),
+    );
+
+    expect(await res.json()).toEqual({
+      ok: true,
+      ignored: 'github_actions rerun must be run from Actions',
+    });
+    expect(await getProjectBuilds(env.db, containerSibling.id)).toHaveLength(0);
+  });
+
+  it('fans out across sibling projects for "Re-run all checks"', async () => {
+    const { project: first } = await seedContainerProject('wh-suite-first');
+    const { project: second } = await seedSiblingProject('wh-suite-second', 'container');
+
+    const { pokeEnv } = pokeEnvWith(env);
+    const { app, appEnv } = makeApp(pokeEnv);
+    // A suite rerequest carries no external_id, and covers every check in it.
+    const res = await post(app, appEnv, 'check_suite', {
+      action: 'rerequested',
+      installation: { id: 900 },
+      repository: { full_name: 'octo/site', id: 9001 },
+      check_suite: { head_sha: 'cafe1234', head_branch: 'main' },
+    });
+
+    const json = (await res.json()) as { buildIds?: Array<string> };
+    expect(json.buildIds).toHaveLength(2);
+    expect(await getProjectBuilds(env.db, first.id)).toHaveLength(1);
+    expect(await getProjectBuilds(env.db, second.id)).toHaveLength(1);
+  });
+
+  it('compares every branch of a suite fan-out concurrently, not in series', async () => {
+    // Two projects on the SAME repo tracking DIFFERENT branches. `head_branch` is
+    // not a filter, so both are candidates and the handler owes one branch-head
+    // compare each. GitHub drops a delivery it has not been answered in 10s and
+    // does not redeliver it, so awaiting those compares in series is what turns a
+    // slow GitHub into a silently lost Re-run click.
+    const { project: first } = await seedContainerProject('wh-suite-conc-main');
+    const { project: second } = await seedSiblingProject(
+      'wh-suite-conc-release',
+      'container',
+      'release',
+    );
+    // The same commit heads both branches, so both compares return 'identical'
+    // and both projects really do rebuild.
+    setCompareStatusByBranch({ main: 'identical', release: 'identical' });
+    // Park each compare until BOTH are in flight at once. A serial handler can
+    // never get there: call two does not start until call one has returned.
+    armCompareConcurrencyProbe(2);
+
+    const { pokeEnv } = pokeEnvWith(env);
+    const { app, appEnv } = makeApp(pokeEnv);
+    const res = await post(app, appEnv, 'check_suite', {
+      action: 'rerequested',
+      installation: { id: 900 },
+      repository: { full_name: 'octo/site', id: 9001 },
+      check_suite: { head_sha: 'cafe1234', head_branch: 'main' },
+    });
+
+    expect(compareConcurrencyPeak).toBe(2);
+    const json = (await res.json()) as { buildIds?: Array<string> };
+    expect(json.buildIds).toHaveLength(2);
+    expect(await getProjectBuilds(env.db, first.id)).toHaveLength(1);
+    expect(await getProjectBuilds(env.db, second.id)).toHaveLength(1);
+  });
+
+  it('refuses a per-check rerun whose build no longer exists', async () => {
+    const { project } = await seedContainerProject('wh-rerun-orphan-check');
+    const { project: sibling } = await seedSiblingProject('wh-rerun-orphan-sib', 'container');
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi.spyOn(checkRunModule, 'completeCheckRun').mockResolvedValue(true);
+    try {
+      const { pokeEnv, pokes } = pokeEnvWith(env);
+      const { app, appEnv } = makeApp(pokeEnv);
+
+      // Deleting a project cascades its build rows away while GitHub keeps the
+      // check for months. Falling back to the branch set here would rebuild —
+      // and could deploy — sibling projects owned by other users.
+      const res = await post(app, appEnv, 'check_run', checkRunPayload({ id: 77004 }));
+
+      expect(await res.json()).toEqual({ ok: true, ignored: 'originating build not found' });
+      expect(await getProjectBuilds(env.db, project.id)).toHaveLength(0);
+      expect(await getProjectBuilds(env.db, sibling.id)).toHaveLength(0);
+      expect(pokes).toHaveLength(0);
+      // The refusal is reported, and it does NOT invent a passing conclusion.
+      const [, , , , opts] = spy.mock.calls[0]!;
+      expect(opts.conclusion).toBe('failure');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('never writes a passing conclusion for a rerun it refused', async () => {
+    // GitHub counts `neutral` as passing for a REQUIRED status check. Writing one
+    // here would let anyone with rerun rights clear branch protection on a commit
+    // that never built.
+    const { project, user } = await seedContainerProject('wh-rerun-no-bypass');
+    const failed = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      commitSha: 'cafe1234',
+      branch: 'main',
+    });
+    await env.db.update(builds).set({ status: 'failed' }).where(eq(builds.id, failed.id));
+    setCompareStatus('behind');
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi.spyOn(checkRunModule, 'completeCheckRun').mockResolvedValue(true);
+    try {
+      const { app, appEnv } = makeApp(env);
+      const res = await post(
+        app,
+        appEnv,
+        'check_run',
+        checkRunPayload({ id: 77005, externalId: failed.id, conclusion: 'failure' }),
+      );
+
+      expect(await res.json()).toEqual({ ok: true, enqueued: 0 });
+      const [, , , , opts] = spy.mock.calls[0]!;
+      // The run stays red, with an explanation. It does not become passing.
+      expect(opts.conclusion).toBe('failure');
+      expect(opts.title).toBe('Commit is no longer the branch head');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('maps an unwritable `stale` conclusion to cancelled', async () => {
+    // GitHub reports `stale` on a run but REJECTS it on update, so echoing it
+    // back would 422 every time and leave the rerequest unresolved.
+    const { project, user } = await seedContainerProject('wh-rerun-stale-conclusion');
+    const clicked = await seedClickedBuild(project, user);
+    setCompareStatus('behind');
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi.spyOn(checkRunModule, 'completeCheckRun').mockResolvedValue(true);
+    try {
+      const { app, appEnv } = makeApp(env);
+      await post(
+        app,
+        appEnv,
+        'check_run',
+        checkRunPayload({ id: 77008, externalId: clicked.id, conclusion: 'stale' }),
+      );
+
+      const [, , , , opts] = spy.mock.calls[0]!;
+      expect(opts.conclusion).toBe('cancelled');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('completes a refused rerun as cancelled when the run had no conclusion', async () => {
+    const { project, user } = await seedContainerProject('wh-rerun-null-conclusion');
+    const failed = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      commitSha: 'cafe1234',
+      branch: 'main',
+    });
+    await env.db.update(builds).set({ status: 'failed' }).where(eq(builds.id, failed.id));
+    setCompareStatus('behind');
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi.spyOn(checkRunModule, 'completeCheckRun').mockResolvedValue(true);
+    try {
+      const { app, appEnv } = makeApp(env);
+      await post(
+        app,
+        appEnv,
+        'check_run',
+        checkRunPayload({ id: 77006, externalId: failed.id, conclusion: null }),
+      );
+
+      const [, , , , opts] = spy.mock.calls[0]!;
+      // Never ran to a verdict, so it was never passing. `cancelled`, not neutral.
+      expect(opts.conclusion).toBe('cancelled');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('treats a reused QUEUED build as work, not as already live', async () => {
+    const { project, user } = await seedContainerProject('wh-rerun-queued-reuse');
+    // A queued build for this exact commit already exists — a duplicate webhook
+    // delivery, or a push that landed first. The supersede tx REUSES it.
+    const queued = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      commitSha: 'cafe1234',
+      branch: 'main',
+    });
+    expect((await getBuild(env.db, queued.id))!.status).toBe('queued');
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi.spyOn(checkRunModule, 'completeCheckRun').mockResolvedValue(true);
+    try {
+      const { pokeEnv, pokes } = pokeEnvWith(env);
+      const { app, appEnv } = makeApp(pokeEnv);
+
+      const res = await post(
+        app,
+        appEnv,
+        'check_run',
+        checkRunPayload({ id: 77007, externalId: queued.id }),
+      );
+
+      // An UNRUN build must never be reported as deployed, and it still needs the
+      // scheduler poke it is waiting for.
+      const json = (await res.json()) as { buildIds?: Array<string> };
+      expect(json.buildIds).toEqual([queued.id]);
+      expect(pokes).toHaveLength(1);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('reports success, not neutral, when the commit is already built and live', async () => {
+    const { project, user } = await seedContainerProject('wh-rerun-already-live');
+    const done = await createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      executor: 'container',
+      status: 'complete',
+      commitSha: 'cafe1234',
+      branch: 'main',
+    });
+    // The project is LIVE on exactly this commit, so the supersede tx REUSES the
+    // completed row and returns it non-null — which used to read as an enqueue.
+    await createTestDeployment(env.db, project.id, 'live', undefined, undefined, {
+      commit: 'cafe1234',
+    });
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi.spyOn(checkRunModule, 'completeCheckRun').mockResolvedValue(true);
+    try {
+      const { pokeEnv, pokes } = pokeEnvWith(env);
+      const { app, appEnv } = makeApp(pokeEnv);
+
+      const res = await post(
+        app,
+        appEnv,
+        'check_run',
+        checkRunPayload({ id: 77003, externalId: done.id }),
+      );
+
+      // Nothing was enqueued, and the scheduler is not woken for work that
+      // does not exist.
+      expect(await res.json()).toEqual({ ok: true, enqueued: 0, reused: [done.id] });
+      expect(pokes).toHaveLength(0);
+      // The run this replaces was green; downgrading it to `neutral` would lose an
+      // accurate success.
+      expect(spy).toHaveBeenCalledTimes(1);
+      const [, , , checkRunId, opts] = spy.mock.calls[0]!;
+      expect(checkRunId).toBe('77003');
+      expect(opts.conclusion).toBe('success');
+      expect(opts.title).toBe('Already built and live');
+      // No second build row was created.
+      expect(await getProjectBuilds(env.db, project.id)).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('completes the clicked check run when a stale commit enqueues nothing', async () => {
+    const { project, user } = await seedContainerProject('wh-rerun-stale-reported');
+    const clicked = await seedClickedBuild(project, user);
+    setCompareStatus('behind');
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi.spyOn(checkRunModule, 'completeCheckRun').mockResolvedValue(true);
+    try {
+      const { app, appEnv } = makeApp(env);
+      const res = await post(
+        app,
+        appEnv,
+        'check_run',
+        checkRunPayload({ id: 77001, externalId: clicked.id, conclusion: 'neutral' }),
+      );
+
+      expect(await res.json()).toEqual({ ok: true, enqueued: 0 });
+      // GitHub reset the suite to `queued` on the click. Leaving it there is what
+      // makes the button look broken, so the refusal is reported ON the check.
+      expect(spy).toHaveBeenCalledTimes(1);
+      const [, , , checkRunId, opts] = spy.mock.calls[0]!;
+      expect(checkRunId).toBe('77001');
+      // Echoes the run's OWN conclusion back; it does not invent one.
+      expect(opts.conclusion).toBe('neutral');
+      expect(opts.title).toBe('Commit is no longer the branch head');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('still returns 2xx when GitHub REJECTS the no-op report', async () => {
+    // completeCheckRun resolves false on a non-2xx; it does not throw. The
+    // rejection-mock test below covers the other shape.
+    const { project, user } = await seedContainerProject('wh-rerun-report-false');
+    const clicked = await seedClickedBuild(project, user);
+    setCompareStatus('behind');
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi.spyOn(checkRunModule, 'completeCheckRun').mockResolvedValue(false);
+    try {
+      const { app, appEnv } = makeApp(env);
+      const res = await post(
+        app,
+        appEnv,
+        'check_run',
+        checkRunPayload({ id: 77009, externalId: clicked.id }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, enqueued: 0 });
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('answers the webhook without waiting for the no-op report', async () => {
+    // GitHub drops a delivery we have not answered in 10s and does NOT redeliver a
+    // failure automatically. completeCheckRun mints a token and retries with no
+    // clock of its own, so the report goes to waitUntil and the 2xx does not wait
+    // on it. `post` deliberately AWAITS waitUntil for determinism, so this calls
+    // app.fetch directly.
+    const { project, user } = await seedContainerProject('wh-rerun-report-deferred');
+    const clicked = await seedClickedBuild(project, user);
+    setCompareStatus('behind');
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    let settle: (v: boolean) => void = () => {};
+    const spy = vi
+      .spyOn(checkRunModule, 'completeCheckRun')
+      .mockImplementation(() => new Promise<boolean>((resolve) => (settle = resolve)));
+    try {
+      const { app, appEnv } = makeApp(env);
+      const payload = checkRunPayload({ id: 77010, externalId: clicked.id });
+      const body = JSON.stringify(payload);
+      const pending: Array<Promise<unknown>> = [];
+      const res = await app.fetch(
+        new Request('http://localhost/webhooks/github', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-GitHub-Event': 'check_run',
+            'X-Hub-Signature-256': await sign(WEBHOOK_SECRET, body),
+          },
+          body,
+        }),
+        { ...appEnv, GITHUB_WEBHOOK_SECRET: WEBHOOK_SECRET },
+        {
+          waitUntil: (p: Promise<unknown>) => {
+            pending.push(p);
+          },
+          passThroughOnException: () => {},
+        } as unknown as ExecutionContext,
+      );
+
+      // Answered while the report is STILL outstanding...
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, enqueued: 0 });
+      expect(pending).toHaveLength(1);
+      // ...and the call really did start, so it cannot be silently skipped.
+      expect(spy).toHaveBeenCalledTimes(1);
+      settle(true);
+      await Promise.all(pending);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('still returns 2xx when reporting the no-op to GitHub fails', async () => {
+    const { project, user } = await seedContainerProject('wh-rerun-report-throws');
+    const clicked = await seedClickedBuild(project, user);
+    setCompareStatus('behind');
+
+    const checkRunModule = await import('../../src/github/check-run.ts');
+    const spy = vi
+      .spyOn(checkRunModule, 'completeCheckRun')
+      .mockRejectedValue(new Error('check-run PATCH exploded'));
+    try {
+      const { app, appEnv } = makeApp(env);
+      const res = await post(
+        app,
+        appEnv,
+        'check_run',
+        checkRunPayload({ id: 77002, externalId: clicked.id }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, enqueued: 0 });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

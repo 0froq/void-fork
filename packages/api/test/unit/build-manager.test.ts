@@ -271,7 +271,13 @@ vi.mock('../../src/github/installation-token.ts', () => ({
 // `getInstallationToken` mock. `createCheckRun` returns null by default (no run
 // created → finalizers no-op), keeping every existing lifecycle assertion unchanged.
 // The real create/finalize wiring is covered by test/integration/api-check-runs.test.ts.
-vi.mock('../../src/github/check-run.ts', () => ({
+// Partial mock: stub the two network calls, keep everything else REAL. The module
+// also exports `VOID_BUILD_CHECK_RUN_NAME`, which `startBuild` reads — spelling it
+// out again here would let the check-run name drift from the one
+// `check_run:rerequested` matches on, and that name is the only thing making
+// GitHub's "Re-run" button work.
+vi.mock('../../src/github/check-run.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/github/check-run.ts')>()),
   createCheckRun: vi.fn(async () => null),
   completeCheckRun: vi.fn(async () => false),
 }));

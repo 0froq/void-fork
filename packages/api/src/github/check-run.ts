@@ -21,7 +21,64 @@ import { GITHUB_API_BASE, GITHUB_API_VERSION, getInstallationToken } from './ins
  * `workflow_run.conclusion === 'timed_out'` faithfully. All four are valid
  * GitHub Checks conclusions.
  */
-export type CheckRunConclusion = 'success' | 'failure' | 'cancelled' | 'timed_out';
+// GitHub's full terminal set. The container path uses success/failure/cancelled
+// and the Actions path maps `workflow_run.conclusion === 'timed_out'` faithfully.
+//
+// The rest exist so a REFUSED rerun can echo a run's EXISTING conclusion back
+// verbatim. That matters for more than tidiness: GitHub treats `neutral` and
+// `skipped` as passing for a required status check, so completing a run we did
+// not actually run with a passing conclusion would let anyone with rerun rights
+// clear branch protection on a commit that never built. A refusal therefore
+// re-states what the run already said, and only an authoritatively complete and
+// live build is allowed to write `success`.
+export type CheckRunConclusion =
+  | 'success'
+  | 'failure'
+  | 'cancelled'
+  | 'timed_out'
+  | 'neutral'
+  | 'skipped'
+  | 'action_required'
+  | 'stale';
+
+/**
+ * The conclusions an INTEGRATION may write. `stale` is observable on a run but
+ * GitHub rejects it on update, so echoing one back would 422 every time and leave
+ * the rerequest unresolved. It maps to `cancelled` below: non-passing, writable,
+ * and honest about a rerun that did not run.
+ */
+const WRITABLE_CONCLUSIONS: ReadonlyArray<CheckRunConclusion> = [
+  'success',
+  'failure',
+  'cancelled',
+  'timed_out',
+  'neutral',
+  'skipped',
+  'action_required',
+];
+
+/**
+ * The conclusion a REFUSED rerun should write: whatever the run already had, as
+ * long as we are allowed to write it. `cancelled` otherwise — for a run that had
+ * no conclusion (it was still running, so it was never passing) and for `stale`
+ * (observable, not writable). Never invents a passing conclusion, which would be
+ * a branch-protection bypass.
+ */
+export function preservedCheckRunConclusion(raw: unknown): CheckRunConclusion {
+  return typeof raw === 'string' && (WRITABLE_CONCLUSIONS as ReadonlyArray<string>).includes(raw)
+    ? (raw as CheckRunConclusion)
+    : 'cancelled';
+}
+
+/**
+ * The single check-run name both executors publish under, and the name the
+ * `check_run:rerequested` webhook matches on to recognize its own run.
+ *
+ * Shared rather than repeated: GitHub identifies a re-run request only by the
+ * run's name + repo + head SHA, so a rename in one producer and not the other
+ * would silently make the "Re-run" button a no-op for that executor.
+ */
+export const VOID_BUILD_CHECK_RUN_NAME = 'Void Build';
 
 // Same retry shape as `getBranchHeadComparisonStatus` (compare): up to 2 extra
 // attempts with a short fixed delay on transient 5xx/network/token-mint. A 4xx

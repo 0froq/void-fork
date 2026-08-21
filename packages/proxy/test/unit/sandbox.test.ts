@@ -54,13 +54,11 @@ function createMockCounter(opts?: {
   // One stub object is reused for the whole test — assertions check the
   // `idFromName` value separately.
   const stub: MockCounterStub = {
-    acquire: vi.fn(
-      async (sandboxId: string, limit: number): Promise<AcquireResult> =>
-        opts?.acquire ? opts.acquire(sandboxId, limit) : { ok: true },
+    acquire: vi.fn(async (sandboxId: string, limit: number): Promise<AcquireResult> =>
+      opts?.acquire ? opts.acquire(sandboxId, limit) : { ok: true },
     ),
-    refresh: vi.fn(
-      async (sandboxId: string): Promise<RefreshResult> =>
-        opts?.refresh ? opts.refresh(sandboxId) : { ok: true },
+    refresh: vi.fn(async (sandboxId: string): Promise<RefreshResult> =>
+      opts?.refresh ? opts.refresh(sandboxId) : { ok: true },
     ),
     release: vi.fn(async (sandboxId: string) => {
       if (opts?.release) {

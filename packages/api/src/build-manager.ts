@@ -21,7 +21,12 @@ import {
   type Db,
 } from './db.ts';
 import type { ApiEnv } from './env.ts';
-import { type CheckRunConclusion, completeCheckRun, createCheckRun } from './github/check-run.ts';
+import {
+  type CheckRunConclusion,
+  VOID_BUILD_CHECK_RUN_NAME,
+  completeCheckRun,
+  createCheckRun,
+} from './github/check-run.ts';
 import {
   generateSourceTarballUrl,
   getBranchHeadComparisonStatus,
@@ -1541,7 +1546,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         null;
       if (!checkRunId && config.commitSha) {
         checkRunId = await createCheckRun(this.env, config.installationId, config.repoFullName, {
-          name: 'Void Build',
+          name: VOID_BUILD_CHECK_RUN_NAME,
           headSha: config.commitSha,
           externalId: config.buildId,
           detailsUrl: this.projectUrl(config),
@@ -2194,10 +2199,16 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         // CAS-aware: finalize 'failure' only when THIS site won; otherwise finalize to
         // the out-of-band recorded outcome so GitHub matches the DB.
         if (won) {
+          // `reason` is carried too, not just the code. It is the ONE bit that
+          // separates "the agent decided to exit" (`exit`) from "the runtime killed
+          // the container" (`runtime_signal`), and the two need completely different
+          // investigations. The DB row has always recorded it; the check run — the
+          // only surface most people ever see — did not, so a failure whose log tail
+          // was also lost read as `Build exited with code 1.` and nothing more.
           await this.finalizeCheckRun(config, 'failure', {
             detailsUrl: this.projectUrl(config),
             title: 'Void build failed',
-            summary: `Build exited with code ${params.exitCode}.`,
+            summary: `Build exited with code ${params.exitCode} (${params.reason}).`,
           });
         } else {
           await this.finalizeCheckRunToRecordedOutcome(config);

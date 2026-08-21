@@ -45,6 +45,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { argv } from 'node:process';
 import { Readable } from 'node:stream';
@@ -54,7 +55,12 @@ import { pathToFileURL } from 'node:url';
 // --- constants ---------------------------------------------------------------
 
 const PORT = 4000;
-const WORK_DIR = '/tmp/build/src';
+// Overridable ONLY so a test that drives the real `tar` extraction can claim a
+// private directory. Vitest runs test files in parallel workers, and two suites
+// wiping one absolute path under each other is a race, not a flake. The container
+// never sets this: production is always `/tmp/build/src` (pinned by the
+// `childSpawnOptions` cwd assertion in build-manager.test.ts).
+const WORK_DIR = process.env.VOID_BUILD_WORK_DIR ?? '/tmp/build/src';
 const LOG_FLUSH_MS = 500;
 // Hard timeout on each best-effort DO POST. Without it a hung DO connection would
 // stall the single-flight log flush forever (logging would silently stop for the
@@ -68,6 +74,54 @@ const DO_POST_TIMEOUT_MS = 10000;
 // plain JS copied into the container image, so it can't import that constant
 // and the test mirrors the literal instead.
 export const DEFAULT_VOID_CLI_VERSION = '0.10.10';
+
+// --- source-download bounds --------------------------------------------------
+//
+// The tarball fetch used to run with NO deadline of any kind, and that is how a
+// single build burned its whole 15-minute budget: the stream degraded to short
+// bursts separated by dead minutes, delivered ~4.4 MB of a 20.8 MB archive, and
+// only died at the end. Node's undici defaults are no help — `bodyTimeout` resets
+// on every chunk, so any trickle defeats it. The container sat at 0.03% CPU with
+// its memory and disk untouched for 17 minutes while the DO's log puller reported
+// healthy the entire time; nothing in the system could tell the build apart from
+// one that was legitimately busy.
+//
+// The guard that matters is the STALL timer, not a wall-clock cap on the attempt.
+// A healthy download streams continuously (measured: 1.5 MB/s for this archive),
+// so a "no bytes at all for 20s" rule cannot fire on it — while an absolute
+// per-attempt cap, or a minimum-throughput floor, WOULD newly fail a large repo
+// on a slow but steady link. The phase budget below is the only wall clock, and
+// it bounds every attempt together rather than each one separately.
+
+/**
+ * No bytes received for this long aborts the in-flight attempt. Reset by every
+ * chunk, so it measures a dead stream, not a slow one.
+ */
+export const SOURCE_STALL_TIMEOUT_MS = 20000;
+/**
+ * Hard ceiling on the whole download phase, across ALL attempts. Sized to sit
+ * well inside the smallest plan budget (free tier = 10 minutes) so a pathological
+ * but never-quite-stalled trickle still leaves most of the budget for the build.
+ */
+export const SOURCE_PHASE_BUDGET_MS = 240000;
+/** Attempts per build, including the first. */
+export const SOURCE_DOWNLOAD_MAX_ATTEMPTS = 3;
+/** Backoff before attempt 2 and attempt 3. */
+export const SOURCE_RETRY_BACKOFF_MS = [2000, 5000];
+/**
+ * How often the download logs progress. Without this the agent recorded one line
+ * before the fetch and the next only after extraction, so a stalled download was
+ * invisible in the live tail AND in the check-run tail. The check run keeps the
+ * last 100 lines and the phase is capped at 4 minutes, so this can add at most
+ * ~16 lines.
+ */
+export const SOURCE_PROGRESS_INTERVAL_MS = 15000;
+/**
+ * How long a killed `tar` gets between SIGTERM and SIGKILL. A child that ignores
+ * SIGTERM must not be able to hold the retry loop — and therefore the phase
+ * budget — open.
+ */
+export const EXTRACT_KILL_GRACE_MS = 5000;
 
 // --- non-root build isolation ------------------------------------------------
 
@@ -938,41 +992,237 @@ export async function finishBuildLogging(server, drainOptions) {
 // --- source download ---------------------------------------------------------
 
 /**
- * Download the GitHub source tarball (authenticated) and extract it into
- * WORK_DIR, stripping the top-level `<repo>-<sha>/` directory. Streams bytes
- * straight into `tar` to avoid buffering the whole archive in memory.
- *
- * Uses Node's built-in fetch (so the SOURCE_TOKEN is never placed on a shell
- * command line). Equivalent curl form, documented as a fallback:
- *   curl -fsSL -H "Authorization: Bearer $SOURCE_TOKEN" "$SOURCE_TARBALL_URL" \
- *     | tar xz --strip-components=1 -C "$WORK_DIR"
+ * Tag an error with whether another attempt could plausibly succeed. The retry
+ * loop reads `retryable === true` only, so anything unmarked fails fast rather
+ * than spending the phase budget three times over.
+ * @param {string} message
+ * @param {boolean} retryable
+ * @returns {Error & { retryable: boolean }}
  */
-async function downloadSource() {
-  const tarballUrl = requireEnv('SOURCE_TARBALL_URL');
-  const sourceToken = requireEnv('SOURCE_TOKEN');
+function sourceError(message, retryable, retryAfterMs = null) {
+  const err = /** @type {Error & { retryable: boolean, retryAfterMs: number | null }} */ (
+    new Error(message)
+  );
+  err.retryable = retryable;
+  // A server-directed delay (GitHub's `retry-after` / `x-ratelimit-reset`). Null
+  // means "use the caller's fixed backoff".
+  err.retryAfterMs = retryAfterMs;
+  return err;
+}
 
+/**
+ * How long the server asked us to wait, in ms, or null. Handles `retry-after` in
+ * both of its documented forms (delta-seconds and an HTTP-date) and GitHub's
+ * `x-ratelimit-reset` (epoch SECONDS). Clamped at zero: a reset time already in
+ * the past means "retry now", not a negative sleep.
+ * @param {{ get(name: string): string | null } | undefined | null} headers
+ * @param {number} now
+ */
+/**
+ * GitHub's secondary-limit wording. Matched against a BOUNDED prefix of the error
+ * body, never the whole response.
+ */
+export const SECONDARY_RATE_LIMIT_PATTERN = /secondary rate limit|abuse detection/i;
+
+/** Bytes of a 403 body read to look for that wording. Error bodies are tiny JSON. */
+export const ERROR_BODY_SNIFF_BYTES = 2048;
+
+/** Fallback wait for a rate limit that names no delay (GitHub advises >= 60s). */
+export const SECONDARY_RATE_LIMIT_DELAY_MS = 60000;
+
+export function parseRetryAfterMs(headers, now = Date.now()) {
+  if (!headers || typeof headers.get !== 'function') {
+    return null;
+  }
+  const retryAfter = headers.get('retry-after');
+  if (retryAfter !== null && retryAfter.trim() !== '') {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) {
+      return Math.max(0, Math.round(seconds * 1000));
+    }
+    const at = Date.parse(retryAfter);
+    if (Number.isFinite(at)) {
+      return Math.max(0, at - now);
+    }
+  }
+  // ONLY when the quota is actually spent. GitHub returns `x-ratelimit-reset` on
+  // EVERY response, so honouring it unconditionally turns an ordinary retryable
+  // 500 into a fatal one: the routine reset can be an hour out, and a backoff that
+  // long never fits the phase budget, so the loop breaks instead of retrying.
+  if (headers.get('x-ratelimit-remaining') !== '0') {
+    return null;
+  }
+  const reset = Number(headers.get('x-ratelimit-reset'));
+  if (Number.isFinite(reset) && reset > 0) {
+    return Math.max(0, reset * 1000 - now);
+  }
+  return null;
+}
+
+/**
+ * Is this response worth another attempt?
+ *
+ * Status alone is not enough for 403. GitHub returns 403 for BOTH a permission
+ * failure and a rate limit — primary (`x-ratelimit-remaining: 0`) and secondary
+ * (`retry-after`) — and a rate limit is the most retryable thing there is. Only a
+ * 403 with no rate-limit signal is the settled "this token may not read this
+ * repo" answer. 401 and 404/410 stay terminal: they do not change in a minute.
+ *
+ * @param {number} status
+ * @param {{ get(name: string): string | null } | undefined | null} headers
+ */
+export function isRetryableSourceStatus(status, headers = null, body = '') {
+  if (status === 408 || status === 425 || status === 429 || status >= 500) {
+    return true;
+  }
+  if (status !== 403) {
+    return false;
+  }
+  if (headers && typeof headers.get === 'function') {
+    if (headers.get('retry-after') !== null || headers.get('x-ratelimit-remaining') === '0') {
+      return true;
+    }
+  }
+  // A SECONDARY rate limit can arrive with neither header — GitHub documents it
+  // as a 403 (or 429) whose body names the limit. Without this, a burst of
+  // concurrent builds against one installation fails outright on the first try.
+  return SECONDARY_RATE_LIMIT_PATTERN.test(body);
+}
+
+/** `headers.get`, tolerant of the plain objects the unit tests hand in. */
+function headerValue(headers, name) {
+  return headers && typeof headers.get === 'function' ? headers.get(name) : null;
+}
+
+/**
+ * Cancel a response body we are about to discard. `readErrorSnippet` already
+ * cancels the ones it reads, so this is a no-op for those (the stream is locked).
+ * @param {{ body?: unknown }} res
+ */
+async function discardBody(res) {
+  const body = /** @type {ReadableStream<Uint8Array> | null | undefined} */ (res.body);
+  if (!body || typeof body.cancel !== 'function' || body.locked) {
+    return;
+  }
+  try {
+    await body.cancel();
+  } catch {
+    // Already errored or closed; nothing to release.
+  }
+}
+
+/**
+ * Read at most `ERROR_BODY_SNIFF_BYTES` of an error response. Never throws and
+ * never waits on the whole body: this runs on the failure path, where the point
+ * is to classify quickly, not to collect the payload.
+ * @param {{ body?: unknown }} res
+ */
+async function readErrorSnippet(res) {
+  const body = /** @type {ReadableStream<Uint8Array> | null | undefined} */ (res.body);
+  if (!body || typeof body.getReader !== 'function') {
+    return '';
+  }
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let out = '';
+  let bytes = 0;
+  try {
+    while (bytes < ERROR_BODY_SNIFF_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      // Slice BEFORE decoding. Bounding the loop on the accumulated result is not
+      // the same as bounding the work: one chunk can be arbitrarily large, and
+      // decoding it whole would materialize the entire body before the next
+      // length check ever runs.
+      const take = value.subarray(0, ERROR_BODY_SNIFF_BYTES - bytes);
+      bytes += take.length;
+      out += decoder.decode(take, { stream: true });
+    }
+  } catch {
+    // A truncated or broken error body tells us nothing; treat it as empty.
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // already closed
+    }
+  }
+  return out;
+}
+
+/**
+ * Wipe and recreate WORK_DIR. A retry MUST start from an empty tree: a stalled
+ * attempt leaves a partially extracted archive behind, and `tar` would happily
+ * extract the second attempt's copy on top of it, leaving a mix of both.
+ *
+ * Scoped to WORK_DIR (`/tmp/build/src`) and nothing else.
+ */
+async function resetWorkDirTree() {
+  // ASYNC, not `rmSync`. This agent is PID 1: a synchronous recursive delete of a
+  // large partial tree blocks the stall watchdog, the HTTP control server (so
+  // /cancel and the DO's log pull both stop answering) and the event loop itself
+  // for as long as it runs. It also sits on the timed path, so it must not be able
+  // to push the phase budget past its ceiling unobserved.
+  await rm(WORK_DIR, { recursive: true, force: true });
   mkdirSync(WORK_DIR, { recursive: true });
-  agentLog(`downloading source from ${redactUrl(tarballUrl)}`);
+}
 
-  const res = await fetch(tarballUrl, {
-    headers: {
-      authorization: `Bearer ${sourceToken}`,
-      // GitHub codeload follows a redirect from api.github.com; UA keeps it happy.
-      'user-agent': 'void-build-agent',
-      accept: 'application/vnd.github+json',
-    },
-    redirect: 'follow',
-  });
-  if (!res.ok || !res.body) {
-    throw new Error(`source download failed: HTTP ${res.status}`);
+/** Render a byte count for a log line. Whole units — this is progress, not telemetry. */
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
-  if (cancelled) {
-    // Cancel landed during the fetch await — don't start extraction at all.
-    throw new Error('build cancelled');
+  if (bytes >= 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
   }
+  return `${Math.round(bytes)} B`;
+}
 
-  await new Promise((resolve, reject) => {
-    const tar = spawn('tar', ['xz', '--strip-components=1', '-C', WORK_DIR], {
+/**
+ * Render a duration for a log line. Sub-second values stay in milliseconds:
+ * rounding them to seconds prints "0s", which reads as a bug in the very message
+ * that is supposed to explain a failure.
+ */
+function formatDuration(ms) {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${Math.round(ms / 1000)}s`;
+}
+
+/** Average transfer rate over an elapsed span, rendered as bytes-per-second. */
+function formatRate(bytes, elapsedMs) {
+  return `${formatBytes((bytes * 1000) / Math.max(1, elapsedMs))}/s`;
+}
+
+/**
+ * Stream a fetch body through `tar` into WORK_DIR, stripping the top-level
+ * `<repo>-<sha>/` directory. Streams straight into the child to avoid buffering
+ * the whole archive in memory.
+ *
+ * `onBytes` is called with each chunk's length. That is what feeds both the stall
+ * watchdog and the progress log in `downloadSource`; the metering runs as a
+ * pipeline STAGE rather than a `data` listener, which would put the source into
+ * flowing mode and race `pipeline` for the chunks.
+ *
+ * Exported so the retry loop above it is unit-testable without spawning `tar`.
+ *
+ * @param {unknown} body web ReadableStream from `fetch`
+ * @param {{ onBytes?: (length: number) => void, signal?: AbortSignal }} [options]
+ * @returns {Promise<void>}
+ */
+export function extractTarball(body, options = {}) {
+  const {
+    onBytes = () => {},
+    signal,
+    // Seams for the child-lifecycle test. A real `tar` reacts to SIGTERM far too
+    // promptly to prove that this promise waits for 'close' rather than settling
+    // on the pipeline's rejection, so the test supplies a child that deliberately
+    // stays alive. Production always uses the real spawn and grace.
+    spawnImpl = spawn,
+    killGraceMs = EXTRACT_KILL_GRACE_MS,
+  } = options;
+  return new Promise((resolve, reject) => {
+    const tar = spawnImpl('tar', ['xz', '--strip-components=1', '-C', WORK_DIR], {
       stdio: ['pipe', 'inherit', 'pipe'],
     });
     // Track the extraction child as the cancel target, mirroring runChild. A
@@ -983,33 +1233,408 @@ async function downloadSource() {
     // registered, so a cancel during a large download kept pulling + extracting
     // the full archive before the post-download gate (runBuild) finally bailed.
     activeChild = tar;
-    if (cancelled) {
-      // Cancel raced the spawn — terminate immediately.
+
+    /** First failure seen. The promise still settles from 'close', never before. */
+    let settleError = null;
+    /** @type {NodeJS.Timeout | undefined} */
+    let killTimer;
+
+    // SIGTERM, then SIGKILL if the child ignores it. Without the escalation a
+    // wedged `tar` would hold this promise — and therefore the retry loop and the
+    // phase budget — open indefinitely.
+    const stopTar = () => {
+      if (tar.exitCode !== null || tar.signalCode !== null) {
+        return;
+      }
       try {
         tar.kill('SIGTERM');
       } catch {
-        // ignore
+        // already gone
       }
+      if (!killTimer) {
+        killTimer = setTimeout(() => {
+          try {
+            tar.kill('SIGKILL');
+          } catch {
+            // already gone
+          }
+        }, killGraceMs);
+        killTimer.unref?.();
+      }
+    };
+
+    const fail = (err) => {
+      if (!settleError) {
+        settleError = err instanceof Error ? err : new Error(String(err));
+      }
+      stopTar();
+    };
+
+    // Aborting the fetch errors the body stream, which `pipeline` already turns
+    // into a rejection — but only once the stream notices. Killing `tar` directly
+    // makes the stall guard authoritative instead of dependent on how promptly a
+    // half-dead socket reports itself, and it releases the child either way.
+    signal?.addEventListener('abort', () => fail(sourceError('extraction aborted', true)), {
+      once: true,
+    });
+    if (cancelled) {
+      // Cancel raced the spawn — terminate immediately.
+      stopTar();
     }
     pipeStream(/** @type {NodeJS.ReadableStream} */ (tar.stderr), 'stderr');
-    tar.on('error', reject);
+    tar.on('error', (err) => {
+      if (tar.pid === undefined) {
+        // The child never spawned, so 'close' is not guaranteed to arrive. This is
+        // the ONE path allowed to settle without it.
+        if (activeChild === tar) {
+          activeChild = null;
+        }
+        clearTimeout(killTimer);
+        reject(sourceError(err instanceof Error ? err.message : String(err), true));
+        return;
+      }
+      fail(err);
+    });
     tar.on('close', (code) => {
-      activeChild = null;
+      clearTimeout(killTimer);
+      // Clear the cancel target only when it is still OURS. A superseded attempt's
+      // late 'close' must not erase the CURRENT attempt's child — that would make a
+      // subsequent /cancel or PID-1 SIGTERM a silent no-op for a live extraction.
+      if (activeChild === tar) {
+        activeChild = null;
+      }
+      if (settleError) {
+        reject(settleError);
+        return;
+      }
       if (code === 0) {
         resolve(undefined);
-      } else {
-        reject(new Error(`tar exited with code ${code}`));
+        return;
       }
+      // Retryable: by far the likeliest cause is a truncated stream, which is
+      // exactly what an aborted or dropped download produces. A genuinely
+      // corrupt archive costs the remaining attempts, and the phase budget
+      // bounds that.
+      reject(sourceError(`tar exited with code ${code}`, true));
     });
     // Use `pipeline` (not a bare `.pipe()`): the source web stream can abort
     // mid-download, and a bare pipe would emit 'error' on the Readable with no
     // listener → an uncaughtException that crashes the process WITHOUT the
-    // structured fatal log / final flushLogs. `pipeline` routes a source error
-    // to `reject`, so it surfaces through runBuild's try/catch as a clean exit 1.
-    pipeline(Readable.fromWeb(/** @type {any} */ (res.body)), tar.stdin).catch(reject);
+    // structured fatal log / final flushLogs.
+    //
+    // A pipeline failure records the error and KILLS the child — it does NOT
+    // settle. Settling here was a real hazard: the promise resolved while `tar`
+    // was still alive and writing, so the retry loop could `rm -rf` WORK_DIR under
+    // a running extraction, and the old child's later 'close' would clear
+    // `activeChild` out from under the new attempt. Waiting for 'close' makes
+    // "attempt finished" mean the child is actually reaped.
+    pipeline(
+      Readable.fromWeb(/** @type {any} */ (body)),
+      async function* meter(source) {
+        for await (const chunk of source) {
+          onBytes(chunk.length);
+          yield chunk;
+        }
+      },
+      tar.stdin,
+    ).catch(fail);
   });
+}
 
-  agentLog('source extracted');
+/**
+ * Download the GitHub source tarball (authenticated) and extract it into
+ * WORK_DIR.
+ *
+ * Uses Node's built-in fetch (so the SOURCE_TOKEN is never placed on a shell
+ * command line). Equivalent curl form, documented as a fallback:
+ *   curl -fsSL -H "Authorization: Bearer $SOURCE_TOKEN" "$SOURCE_TARBALL_URL" \
+ *     | tar xz --strip-components=1 -C "$WORK_DIR"
+ *
+ * Bounded on three axes, in order of which one actually fires:
+ *
+ *   1. STALL — no bytes for `stallTimeoutMs` aborts the attempt. This is the real
+ *      guard. A healthy download streams continuously, so it cannot fire on one;
+ *      a dead stream trips it in 20s instead of holding the build until the DO's
+ *      `enforceTimeout`.
+ *   2. RETRY — a transient failure starts over from an empty WORK_DIR. The
+ *      incident's stream recovered briefly several times, so a fresh connection
+ *      is a real chance rather than a formality.
+ *   3. PHASE BUDGET — one wall clock across ALL attempts. Catches the case no
+ *      stall timer can see: a steady trickle that never pauses long enough to
+ *      look dead.
+ *
+ * Deliberately NOT bounded by a per-attempt wall clock or a throughput floor.
+ * Either would newly fail a large repo on a slow but honest link, which is a
+ * worse trade than the one this fixes.
+ *
+ * Every dependency is injectable so the retry policy is unit-testable without a
+ * network or a `tar` child. Timers are real — pass small millisecond values.
+ *
+ * @param {{
+ *   fetchImpl?: typeof fetch,
+ *   extract?: (
+ *     body: unknown,
+ *     options?: { onBytes?: (length: number) => void, signal?: AbortSignal },
+ *   ) => Promise<void>,
+ *   resetWorkDir?: () => void | Promise<void>,
+ *   sleep?: (ms: number) => Promise<void>,
+ *   isCancelled?: () => boolean,
+ *   stallTimeoutMs?: number,
+ *   phaseBudgetMs?: number,
+ *   maxAttempts?: number,
+ *   backoffMs?: ReadonlyArray<number>,
+ *   progressIntervalMs?: number,
+ * }} [options]
+ * @returns {Promise<void>}
+ */
+export async function downloadSource(options = {}) {
+  const {
+    fetchImpl = fetch,
+    extract = extractTarball,
+    resetWorkDir = resetWorkDirTree,
+    sleep = sleepMs,
+    isCancelled = () => cancelled,
+    stallTimeoutMs = SOURCE_STALL_TIMEOUT_MS,
+    phaseBudgetMs = SOURCE_PHASE_BUDGET_MS,
+    maxAttempts = SOURCE_DOWNLOAD_MAX_ATTEMPTS,
+    backoffMs = SOURCE_RETRY_BACKOFF_MS,
+    progressIntervalMs = SOURCE_PROGRESS_INTERVAL_MS,
+  } = options;
+
+  const tarballUrl = requireEnv('SOURCE_TARBALL_URL');
+  const sourceToken = requireEnv('SOURCE_TOKEN');
+  const phaseDeadline = Date.now() + phaseBudgetMs;
+
+  agentLog(`downloading source from ${redactUrl(tarballUrl)}`);
+
+  let lastError = sourceError('source download made no attempt', false);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (isCancelled()) {
+      throw new Error('build cancelled');
+    }
+    if (Date.now() >= phaseDeadline) {
+      lastError = sourceError(
+        `source download exceeded its ${formatDuration(phaseBudgetMs)} budget`,
+        false,
+      );
+      break;
+    }
+
+    // Always from an empty tree — see resetWorkDirTree. Awaited: the reset is real
+    // I/O on the timed path, so the deadline is re-checked AFTER it. Without the
+    // recheck a slow cleanup could hand the next attempt a budget that is already
+    // spent, and the phase would quietly overrun the ceiling it advertises.
+    await resetWorkDir();
+    if (Date.now() >= phaseDeadline) {
+      lastError = sourceError(
+        `source download exceeded its ${formatDuration(phaseBudgetMs)} budget`,
+        false,
+      );
+      break;
+    }
+
+    try {
+      await downloadSourceAttempt({
+        tarballUrl,
+        sourceToken,
+        fetchImpl,
+        extract,
+        isCancelled,
+        stallTimeoutMs,
+        phaseDeadline,
+        progressIntervalMs,
+      });
+      return;
+    } catch (err) {
+      lastError = /** @type {Error & { retryable?: boolean }} */ (
+        err instanceof Error ? err : new Error(String(err))
+      );
+      // A cancel is not a download failure and must never be retried.
+      if (isCancelled()) {
+        throw new Error('build cancelled');
+      }
+      if (lastError.retryable !== true || attempt >= maxAttempts) {
+        break;
+      }
+      // A rate-limited server told us when to come back; retrying sooner just
+      // deepens the limit. Anything else uses the fixed backoff.
+      const backoff =
+        typeof lastError.retryAfterMs === 'number' && lastError.retryAfterMs >= 0
+          ? lastError.retryAfterMs
+          : (backoffMs[attempt - 1] ?? backoffMs[backoffMs.length - 1] ?? 0);
+      // Don't sleep into the deadline just to be refused at the top of the loop.
+      // This is also what keeps a long `retry-after` from parking the whole build:
+      // a delay that does not fit the phase budget ends the download now.
+      if (Date.now() + backoff >= phaseDeadline) {
+        break;
+      }
+      agentLog(
+        `source download attempt ${attempt} failed (${lastError.message}); retrying in ${formatDuration(backoff)}`,
+      );
+      await sleep(backoff);
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * One download attempt: fetch, meter, extract. Resolves on success; every failure
+ * path throws an error carrying `retryable`.
+ * @param {{
+ *   tarballUrl: string,
+ *   sourceToken: string,
+ *   fetchImpl: typeof fetch,
+ *   extract: (
+ *     body: unknown,
+ *     options?: { onBytes?: (length: number) => void, signal?: AbortSignal },
+ *   ) => Promise<void>,
+ *   isCancelled: () => boolean,
+ *   stallTimeoutMs: number,
+ *   phaseDeadline: number,
+ *   progressIntervalMs: number,
+ * }} args
+ */
+async function downloadSourceAttempt(args) {
+  const {
+    tarballUrl,
+    sourceToken,
+    fetchImpl,
+    extract,
+    isCancelled,
+    stallTimeoutMs,
+    phaseDeadline,
+    progressIntervalMs,
+  } = args;
+
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  let bytes = 0;
+  let lastByteAt = startedAt;
+  let lastProgressAt = startedAt;
+  /** Set by whichever watchdog aborted, so the throw below can name the cause. */
+  let abortReason = null;
+  let abortRetryable = true;
+
+  // ONE repeating watchdog rather than a timer re-armed per chunk: a 20 MB archive
+  // is hundreds of chunks, and this also covers the case where the very first byte
+  // never arrives (lastByteAt starts at the attempt's start).
+  const tick = Math.max(1, Math.min(1000, Math.floor(stallTimeoutMs / 4)));
+  const watchdog = setInterval(() => {
+    const nowMs = Date.now();
+    if (nowMs - lastByteAt >= stallTimeoutMs) {
+      abortReason = `no data for ${formatDuration(stallTimeoutMs)}`;
+      abortRetryable = true;
+      controller.abort();
+      return;
+    }
+    if (nowMs >= phaseDeadline) {
+      abortReason = 'download budget exhausted';
+      abortRetryable = false;
+      controller.abort();
+    }
+  }, tick);
+  if (typeof watchdog.unref === 'function') {
+    watchdog.unref();
+  }
+
+  try {
+    const res = await fetchImpl(tarballUrl, {
+      headers: {
+        authorization: `Bearer ${sourceToken}`,
+        // GitHub codeload follows a redirect from api.github.com; UA keeps it happy.
+        'user-agent': 'void-build-agent',
+        accept: 'application/vnd.github+json',
+      },
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      // Classify from the STATUS LINE AND HEADERS FIRST, before touching the body.
+      // A 429, or a 403 that already carries `retry-after` / `x-ratelimit-remaining:
+      // 0`, is a rate limit on the evidence we already hold — and reading its body
+      // could only lose that: a response whose headers arrived and whose body then
+      // stalls trips the stall watchdog, and the abort would replace a known
+      // `retry-after` with a generic retryable error.
+      const headerRateLimited =
+        res.status === 429 ||
+        (res.status === 403 &&
+          (headerValue(res.headers, 'retry-after') !== null ||
+            headerValue(res.headers, 'x-ratelimit-remaining') === '0'));
+      // ONLY an otherwise-ambiguous 403 is worth a body read: it is the one case
+      // where retryability itself is undecidable from status plus headers.
+      const snippet = res.status === 403 && !headerRateLimited ? await readErrorSnippet(res) : '';
+      // Release the connection. Nothing downstream reads an error body, and undici
+      // holds the socket open for one that is never consumed OR cancelled — which
+      // on the retry path means the abandoned attempt competes with its own retry
+      // for the pool.
+      await discardBody(res);
+      const retryable = isRetryableSourceStatus(res.status, res.headers, snippet);
+      const rateLimited =
+        headerRateLimited || (res.status === 403 && SECONDARY_RATE_LIMIT_PATTERN.test(snippet));
+      throw sourceError(
+        `source download failed: HTTP ${res.status}`,
+        retryable,
+        parseRetryAfterMs(res.headers) ?? (rateLimited ? SECONDARY_RATE_LIMIT_DELAY_MS : null),
+      );
+    }
+    if (!res.body) {
+      throw sourceError('source download failed: empty response body', true);
+    }
+    if (isCancelled()) {
+      // Cancel landed during the fetch await — don't start extraction at all.
+      throw new Error('build cancelled');
+    }
+
+    await extract(res.body, {
+      signal: controller.signal,
+      onBytes: (length) => {
+        bytes += length;
+        const nowMs = Date.now();
+        lastByteAt = nowMs;
+        if (nowMs - lastProgressAt >= progressIntervalMs) {
+          lastProgressAt = nowMs;
+          const elapsed = nowMs - startedAt;
+          agentLog(
+            `downloading source: ${formatBytes(bytes)} in ${formatDuration(elapsed)} (${formatRate(bytes, elapsed)})`,
+          );
+        }
+      },
+    });
+
+    const elapsed = Date.now() - startedAt;
+    agentLog(
+      `source extracted (${formatBytes(bytes)} in ${formatDuration(elapsed)}, ${formatRate(bytes, elapsed)})`,
+    );
+  } catch (err) {
+    // An abort surfaces as a generic AbortError from fetch or the pipeline, so the
+    // watchdog's reason is the only thing that says WHICH bound was hit. Without
+    // this the log would read "This operation was aborted" and explain nothing —
+    // the exact opacity that made the original incident unreadable.
+    if (abortReason) {
+      throw sourceError(`source download aborted: ${abortReason}`, abortRetryable);
+    }
+    // A cancel is not a transport failure and must never be retried; the loop's
+    // own `isCancelled()` check owns it. Pass it through untouched.
+    if (cancelled) {
+      throw err;
+    }
+    // Anything already classified (an HTTP status, a non-zero `tar`) keeps its
+    // verdict.
+    if (err instanceof Error && typeof (/** @type {any} */ (err).retryable) === 'boolean') {
+      throw err;
+    }
+    // Everything else reaching here came off the wire: `fetch` rejecting with
+    // `TypeError: fetch failed`, or the body stream erroring mid-transfer so
+    // `pipeline` rejects. Those are the MOST ordinary transient failures there
+    // are — the incident's own stream died exactly this way after its last burst —
+    // and leaving them untagged made the retry loop break on the first one,
+    // silently contradicting the policy this change exists to add. Retry them;
+    // `maxAttempts` and the phase budget are what bound it.
+    throw sourceError(err instanceof Error ? err.message : String(err), true);
+  } finally {
+    clearInterval(watchdog);
+  }
 }
 
 // --- dependency install ------------------------------------------------------

@@ -8,7 +8,7 @@ import {
   setBuildCheckRunId,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
-import { createCheckRun } from '../github/check-run.ts';
+import { VOID_BUILD_CHECK_RUN_NAME, createCheckRun } from '../github/check-run.ts';
 import {
   getBranchHeadComparisonStatus,
   getRepoInstallation,
@@ -391,7 +391,7 @@ app.post('/github-oidc', async (context) => {
         connection.installation_id,
         claims.repository,
         {
-          name: 'Void Build',
+          name: VOID_BUILD_CHECK_RUN_NAME,
           headSha: claims.sha,
           externalId: build.id,
           // The GitHub Actions run page is this build's real details view (the

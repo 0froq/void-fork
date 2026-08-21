@@ -21,6 +21,87 @@ export function nonInteractiveEnv(): Record<string, string>;
 /** Fallback `void` CLI version when BuildManager injects no `VOID_CLI_VERSION`. */
 export const DEFAULT_VOID_CLI_VERSION: string;
 
+/**
+ * Bounds on the source download. `SOURCE_STALL_TIMEOUT_MS` is the guard that does
+ * the work (no bytes at all for this long); `SOURCE_PHASE_BUDGET_MS` is the only
+ * wall clock and spans every attempt together.
+ */
+export const SOURCE_STALL_TIMEOUT_MS: number;
+export const SOURCE_PHASE_BUDGET_MS: number;
+export const SOURCE_DOWNLOAD_MAX_ATTEMPTS: number;
+export const SOURCE_RETRY_BACKOFF_MS: ReadonlyArray<number>;
+export const SOURCE_PROGRESS_INTERVAL_MS: number;
+/** SIGTERM -> SIGKILL grace for a killed `tar` child. */
+export const EXTRACT_KILL_GRACE_MS: number;
+
+/**
+ * Is this response worth another attempt? 408/425/429/5xx always are. 403 is
+ * retryable ONLY when the headers carry a rate-limit signal, because GitHub uses
+ * 403 for both a permission failure and a rate limit.
+ */
+export function isRetryableSourceStatus(
+  status: number,
+  headers?: { get(name: string): string | null } | null,
+  body?: string,
+): boolean;
+
+/** GitHub's secondary-rate-limit wording, matched against a bounded body prefix. */
+export const SECONDARY_RATE_LIMIT_PATTERN: RegExp;
+export const ERROR_BODY_SNIFF_BYTES: number;
+export const SECONDARY_RATE_LIMIT_DELAY_MS: number;
+
+/**
+ * The server-directed retry delay in ms: `retry-after` in either documented form,
+ * or `x-ratelimit-reset` (epoch SECONDS) but ONLY when `x-ratelimit-remaining` is
+ * exactly `0` — that header rides along on every response, including a plain 500.
+ */
+export function parseRetryAfterMs(
+  headers?: { get(name: string): string | null } | null,
+  now?: number,
+): number | null;
+
+/**
+ * Stream a fetch body through `tar` into WORK_DIR. `onBytes` receives each
+ * chunk's length and drives the caller's stall watchdog + progress log.
+ */
+export function extractTarball(
+  body: unknown,
+  options?: {
+    onBytes?: (length: number) => void;
+    signal?: AbortSignal;
+    /** Test seam: substitute the `tar` child so its lifecycle is controllable. */
+    spawnImpl?: (
+      cmd: string,
+      args: ReadonlyArray<string>,
+      opts: unknown,
+    ) => import('node:child_process').ChildProcess;
+    /** Test seam: SIGTERM -> SIGKILL grace (defaults to EXTRACT_KILL_GRACE_MS). */
+    killGraceMs?: number;
+  },
+): Promise<void>;
+
+export interface DownloadSourceOptions {
+  fetchImpl?: typeof fetch;
+  extract?: (
+    body: unknown,
+    options?: { onBytes?: (length: number) => void; signal?: AbortSignal },
+  ) => Promise<void>;
+  resetWorkDir?: () => void | Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
+  isCancelled?: () => boolean;
+  stallTimeoutMs?: number;
+  phaseBudgetMs?: number;
+  maxAttempts?: number;
+  backoffMs?: ReadonlyArray<number>;
+  progressIntervalMs?: number;
+}
+
+/**
+ * Fetch + extract the source tarball, bounded by a stall watchdog, bounded
+ * retries from an empty WORK_DIR, and one phase budget across all attempts.
+ */
+export function downloadSource(options?: DownloadSourceOptions): Promise<void>;
+
 /** spawn() options for an untrusted child: WORK_DIR cwd, piped stdio, non-root uid/gid. */
 export function childSpawnOptions(): {
   cwd: string;

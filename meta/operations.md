@@ -317,7 +317,16 @@ build status via Checks — `Checks: Write` is now exercised by the "Void Build"
 Check Run that container builds publish.
 
 Webhook events: `push`, `installation`, `installation_repositories`,
-`pull_request`, `workflow_run`.
+`pull_request`, `workflow_run`, `check_run`, `check_suite`.
+
+`check_run` and `check_suite` back GitHub's **Re-run** and **Re-run all checks**
+buttons on the "Void Build" check. Subscribing is a separate switch from the
+`Checks: Write` permission above — without the subscription GitHub renders the
+button, delivers nothing, and the click is silently a no-op. Enable both events on
+the App (prod **Void Deploy**, App ID 3113472, and the staging App) after
+deploying the handler. Only the `rerequested` action does anything; `requested`
+and `completed` are ignored, because a suite is requested on every push and the
+`push` handler already builds it.
 
 Webhook URLs (one App, both environments):
 

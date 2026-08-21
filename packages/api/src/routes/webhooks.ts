@@ -1,11 +1,13 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import {
   ACTIVE_BUILD_STATUSES,
   clearGitHubInstallationOwnerForUser,
   deleteGitHubConnection,
   deleteGitHubInstallationMembers,
   deleteGitHubInstallationMembersByGithubAccount,
+  getBuild,
   getBuildByProjectRunIdAndAttempt,
   getDeploymentByProjectAndCommit,
   getGitHubConnectionsByRepo,
@@ -28,7 +30,12 @@ import {
 import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { cancelContainerBuildDos } from '../github/cancel-builds.ts';
-import { completeCheckRun, type CheckRunConclusion } from '../github/check-run.ts';
+import {
+  VOID_BUILD_CHECK_RUN_NAME,
+  completeCheckRun,
+  preservedCheckRunConclusion,
+  type CheckRunConclusion,
+} from '../github/check-run.ts';
 import { listInstallationRepositories } from '../github/installation-repos.ts';
 import {
   getBranchExistence,
@@ -86,6 +93,41 @@ type InstallationRepositoriesPayload = {
   repository_selection?: string;
 };
 
+// `check_run:rerequested` — GitHub's per-check "Re-run" button. `check_suite`
+// carries the branch; `external_id` is the build id we stamped at create time
+// (`createCheckRun` requires it, so every run we publish carries one) and it is
+// what makes a per-check rerun hit ONE project. A repo can back several projects
+// on the SAME branch — `project_id` is unique on `github_connections`, the repo
+// and branch are not — so each publishes its own "Void Build" run on the same
+// commit. Resolving by repo + branch alone would rebuild every one of them from a
+// click on a single check, and could enqueue a container build from a click on
+// another project's `github_actions` check. The id NARROWS the fan-out; it never
+// widens it or authorizes anything, and the branch-head freshness gate below
+// still decides whether the rebuild may happen at all.
+type CheckRunPayload = {
+  action?: string;
+  installation?: { id?: number | string };
+  repository?: { full_name?: string; id?: number | string };
+  check_run?: {
+    id?: number | string;
+    name?: string;
+    head_sha?: string;
+    external_id?: string | null;
+    // The run's EXISTING conclusion. A refused rerun echoes it back rather than
+    // writing one of its own.
+    conclusion?: string | null;
+    check_suite?: { head_branch?: string | null };
+  };
+};
+
+// `check_suite:rerequested` — GitHub's "Re-run all checks" button.
+type CheckSuitePayload = {
+  action?: string;
+  installation?: { id?: number | string };
+  repository?: { full_name?: string; id?: number | string };
+  check_suite?: { head_sha?: string; head_branch?: string | null };
+};
+
 type WorkflowRunPayload = {
   action?: string;
   installation?: { id?: number | string };
@@ -136,6 +178,359 @@ function normalizeRepositories(
 // safe `'selected'` default so an unknown/garbled value never loosens access.
 function normalizeRepositorySelection(value: string | undefined): 'all' | 'selected' {
   return value === 'all' ? 'all' : 'selected';
+}
+
+/**
+ * Re-run a build for an already-pushed commit, driven by GitHub's "Re-run" /
+ * "Re-run all checks" buttons (`check_run:rerequested` / `check_suite:rerequested`).
+ *
+ * Deliberately reuses the PUSH pipeline rather than inventing a second way to
+ * enqueue: same connection resolution, same renamed-repo self-heal, same
+ * fail-closed branch-head freshness gate, same `supersedeAndCreateContainerBuild`.
+ * A re-run must not become a back door that deploys a commit a push could not.
+ *
+ * AUTHORIZATION is the same shape as `push`: the payload is HMAC-verified and
+ * bound to an installation we know, and GitHub only offers the button to users
+ * with write access on the repo. We add nothing on top, and `sender` is ignored.
+ *
+ * That is NOT strictly weaker than push, and the difference is deliberate rather
+ * than overlooked. Branch protection can restrict pushes to `main` to named
+ * users, teams, or apps while everyone else keeps repo write — so the set of
+ * people who can click Re-run is a SUPERSET of the set who can push the branch.
+ * The freshness gate bounds what that buys them: the only commit they can build
+ * is the branch head, which our push pipeline already built and deployed. The one
+ * real capability is re-deploying the current head, which matters when a rollback
+ * is active — a rerun can roll forward onto the branch head again. We accept it,
+ * because the alternative is mapping GitHub actors to per-project deploy rights,
+ * and a connection carries exactly one Void user; gating on `sender` would break
+ * ordinary team use to close a hole bounded by "redeploy what is already HEAD".
+ *
+ * FRESHNESS is what makes it safe. The head SHA must still be the connected
+ * branch's head (`identical`), so re-running an old check cannot roll production
+ * back to an abandoned commit. Re-running a check on a superseded commit is
+ * therefore an intentional no-op.
+ *
+ * A `check_suite` refusal reports NOTHING, deliberately. The Checks API cannot
+ * conclude a suite at all — GitHub derives that from the runs — and the suite
+ * payload carries no run ids.
+ *
+ * Deriving them from our own build rows was tried and REVERTED: the row is not
+ * authoritative for the `github_actions` executor, whose check is completed
+ * straight from `workflow_run.conclusion` independent of the status CAS, so a
+ * `cancelled` row can carry a published `success` and rewriting it from the row
+ * would turn a passing required check into a blocking one.
+ *
+ * A bounded read DOES exist (`GET /repos/{o}/{r}/check-suites/{id}/check-runs`
+ * with `check_name` + `per_page`), so cost is not the objection. The objection is
+ * that the premise is unverified: it is not established that GitHub leaves our
+ * runs needing resolution at all — a suite rerequest resets the SUITE's own state,
+ * and a run that kept its conclusion is not pending. Re-PATCHing a run with the
+ * conclusion it already has, hoping the suite recomputes, is a guess about GitHub
+ * internals, and the last guess in this area shipped the bug above. Verify it
+ * against a real suite rerequest on staging before building on it.
+ *
+ * DEDUP falls out of the shared helper: a `failed` build for the commit is never
+ * reused, so the failing case this exists for always enqueues fresh work. A
+ * commit whose build already succeeded AND is live reuses that build and enqueues
+ * nothing — the check is green and there is nothing to redo.
+ *
+ * `github_actions` connections cannot be re-run from here: their build is driven
+ * by the workflow, and nothing in the Checks API can start one. They report an
+ * explicit ignore rather than silently doing nothing.
+ */
+async function rerunBuildForCommit(
+  context: Context<ApiEnv>,
+  db: Db,
+  args: {
+    installationId: number | string | undefined;
+    repoFullName: string | undefined;
+    repoId: number | string | undefined;
+    headSha: string | undefined;
+    headBranch: string | null | undefined;
+    event: string;
+    // Present only for `check_run`: the run the user actually clicked. `buildId`
+    // narrows the rebuild to that run's project; `checkRunId` lets an accepted
+    // request that enqueues nothing say so ON the check instead of leaving the
+    // button looking broken.
+    checkRun?: { id: string | null; buildId: string | null; conclusion: unknown };
+  },
+) {
+  const { installationId, repoFullName, repoId, headSha, headBranch, event, checkRun } = args;
+
+  // GitHub flips the suite back to `queued` the moment the button is clicked. If
+  // we then enqueue nothing and say nothing, the user sees exactly what was
+  // reported here: a Re-run that does nothing. Every no-op path reports through
+  // `completeRerun` below.
+  //
+  // What a REFUSAL writes: the conclusion the run already had. Never a passing
+  // conclusion we did not earn — GitHub counts `neutral`/`skipped` as passing for
+  // a required status check, so writing one for a build that never ran would let
+  // anyone with rerun rights clear branch protection.
+  const refusedConclusion = preservedCheckRunConclusion(checkRun?.conclusion);
+  const completeRerun = async (conclusion: CheckRunConclusion, title: string, summary: string) => {
+    // Called with `refusedConclusion` for a refusal, or 'success' only for a build
+    // that authoritatively completed and is live.
+    if (!checkRun?.id || installationId === undefined || installationId === null || !repoFullName) {
+      return;
+    }
+    // OFF the response path. `completeCheckRun` mints a token and retries
+    // internally, none of it against a clock, while GitHub drops a webhook delivery
+    // we have not answered in 10 seconds — and does NOT redeliver a failure
+    // automatically, so a lost delivery has to be replayed by hand. Racing a
+    // deadline here would not have bounded the handler anyway: the DB work, the
+    // compare call and the supersede transaction all run before this point.
+    //
+    // `waitUntil` is the shape the `workflow_run` completion already uses: the
+    // call STARTS synchronously (so it cannot be skipped) and the Worker stays
+    // alive for it after the 2xx.
+    const runId = checkRun.id;
+    const reported = completeCheckRun(context.env, String(installationId), repoFullName, runId, {
+      conclusion,
+      title,
+      summary,
+    })
+      .then((patched) => {
+        if (!patched) {
+          // `completeCheckRun` RESOLVES false on a non-2xx; it does not throw.
+          console.warn(`[webhooks] rerun report for check run ${runId} was rejected by GitHub`);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('[webhooks] failed to report rerun no-op:', err);
+      });
+    try {
+      context.executionCtx.waitUntil(reported);
+    } catch {
+      // No execution context (a bare `app.request` in a test, say). The call is
+      // already in flight; a missing lifetime extension must not 500 a webhook.
+      void reported;
+    }
+  };
+
+  if (
+    installationId === undefined ||
+    installationId === null ||
+    !repoFullName ||
+    typeof headSha !== 'string' ||
+    headSha === ''
+  ) {
+    return context.json({ ok: true, ignored: `missing ${event} routing fields` });
+  }
+
+  const repoIdStr = repoId === undefined || repoId === null ? null : String(repoId);
+  const connections = await getGitHubConnectionsByRepo(
+    db,
+    String(installationId),
+    repoFullName,
+    repoIdStr,
+  );
+
+  // Same self-heal as the push path: a connection matched by immutable id may
+  // carry a stale name, and the container build uses that name as its tarball
+  // source.
+  if (repoIdStr !== null) {
+    const hasStaleName = connections.some(
+      (c) => c.repository_id === repoIdStr && c.repo_full_name !== repoFullName,
+    );
+    if (hasStaleName) {
+      await updateGitHubConnectionRepoNamesByRepoId(
+        db,
+        String(installationId),
+        repoIdStr,
+        repoFullName,
+      );
+    }
+  }
+
+  // `head_branch` is NOT a filter. GitHub keeps one suite per app per commit even
+  // when that commit is the head of SEVERAL branches, so the suite reports one of
+  // them — and filtering on it would drop the connection for a project tracking
+  // the other branch at the same SHA. The per-branch freshness gate below is what
+  // decides, and it is exact: a connection whose branch head is not this commit
+  // fails `identical` and is skipped anyway.
+  const branchCandidates = connections;
+
+  // A per-check rerun targets the ONE project whose build published that check,
+  // which `external_id` names exactly. Several projects can share a repo AND a
+  // branch, so nothing about the branch can substitute for it.
+  let candidates = branchCandidates;
+  if (checkRun) {
+    // FAIL CLOSED. Falling back to the branch set here would reopen the very
+    // fan-out this narrowing exists to close, and the case is reachable: deleting
+    // a project cascades away its build rows while GitHub keeps the check runs for
+    // months, so an old check could enqueue builds for sibling projects owned by
+    // OTHER users. A per-check rerun that cannot name its own build does nothing.
+    const originating = checkRun.buildId ? await getBuild(db, checkRun.buildId) : null;
+    if (!originating) {
+      await completeRerun(
+        refusedConclusion,
+        'Nothing to rebuild',
+        'The build behind this check no longer exists. Push a new commit to build again.',
+      );
+      return context.json({ ok: true, ignored: 'originating build not found' });
+    }
+    candidates = branchCandidates.filter((c) => c.project_id === originating.project_id);
+  }
+  if (candidates.length === 0) {
+    await completeRerun(
+      refusedConclusion,
+      'Nothing to rebuild',
+      'This repository is no longer connected to a Void project on this branch.',
+    );
+    return context.json({ ok: true, ignored: 'no matching connection' });
+  }
+
+  // One compare per DISTINCT branch — candidates share repo + installation, so a
+  // repo backing prod and staging costs two calls, not one per project.
+  //
+  // Run them CONCURRENTLY. The push path affords one compare on the response
+  // path; only a `check_suite` fan-out can have more than one, and awaiting them
+  // in series multiplies that latency by the branch count against GitHub's 10s
+  // delivery deadline — a deadline GitHub enforces by dropping the delivery, with
+  // no automatic redelivery, so the click is simply lost. The compares are
+  // independent (distinct keys, no read-modify-write on `freshness`) and
+  // `getBranchHeadComparisonStatus` resolves rather than throws on every failure
+  // path, so `Promise.all` cannot turn one bad branch into a 500. Latency now
+  // tracks the SLOWEST branch instead of their sum, which is the push path's cost
+  // regardless of how many projects share the repo.
+  //
+  // Warm the installation token first. `getInstallationToken` memoizes per
+  // installation, so a serial loop paid one mint and reused it; firing the
+  // compares concurrently on a cold cache would instead stampede N mints. One
+  // awaited call ahead of the fan-out restores that sharing. Failure is ignored on
+  // purpose — each compare mints and retries on its own, and this call exists only
+  // to populate the cache.
+  const distinctBranches = [...new Set(candidates.map((c) => c.branch))];
+  if (distinctBranches.length > 1) {
+    try {
+      await getInstallationToken(context.env, String(installationId));
+    } catch {
+      // Ignored: the per-branch compares own the real retry/backoff for this.
+    }
+  }
+  const freshness = new Map<string, boolean>();
+  await Promise.all(
+    distinctBranches.map(async (branch) => {
+      const status = await getBranchHeadComparisonStatus(
+        context.env,
+        String(installationId),
+        repoFullName,
+        headSha,
+        branch,
+      );
+      if (status !== 'identical') {
+        console.warn(
+          `[webhooks] skipping ${event} rerun for ${repoFullName}@${branch} ${headSha}: branch-head comparison ${status ?? 'unavailable'}`,
+        );
+      }
+      freshness.set(branch, status === 'identical');
+    }),
+  );
+
+  const buildIds: Array<string> = [];
+  const cancelledContainerBuilds: Array<{
+    id: string;
+    executor: Build['executor'];
+    status: Build['status'];
+    instance_type: string | null;
+  }> = [];
+  // A build that was REUSED and is already terminal is the case Codex called the
+  // visibly-broken button: `supersedeAndCreateContainerBuild` returns the existing
+  // `complete` row (non-null), so it LOOKS like an enqueue, but nothing will ever
+  // run and nothing will ever update the check again. Separate it from real work.
+  const alreadyLive: Array<string> = [];
+  let sawActions = false;
+  for (const connection of candidates) {
+    if (!freshness.get(connection.branch)) {
+      continue;
+    }
+    if (connection.build_executor !== 'container') {
+      sawActions = true;
+      continue;
+    }
+    const owner = await getUser(db, connection.user_id);
+    const { build, reused, cancelled } = await supersedeAndCreateContainerBuild(db, {
+      projectId: connection.project_id,
+      userId: connection.user_id,
+      branch: connection.branch,
+      commitSha: headSha,
+      connectionId: connection.id,
+      installationId: connection.installation_id,
+      repositoryId: connection.repository_id,
+      instanceType: owner ? getBuildInstanceType(owner.plan) : null,
+    });
+    cancelledContainerBuilds.push(...cancelled);
+    if (!build) {
+      continue;
+    }
+    // ONLY `complete` counts as already-live. The reuse branch also returns
+    // `queued` rows, and `ACTIVE_BUILD_STATUSES` deliberately excludes `queued`
+    // (it counts slot holders), so testing against it would report an UNRUN build
+    // as deployed and skip the very poke it is waiting for. Every non-complete
+    // reuse — queued, starting, building, deploying — is real work: it needs the
+    // scheduler, and its DO still owns the same check-run id.
+    if (reused && build.status === 'complete') {
+      alreadyLive.push(build.id);
+    } else {
+      buildIds.push(build.id);
+    }
+  }
+
+  // The supersede tx already committed (revoking tokens), so this best-effort DO
+  // teardown runs outside any row lock — same ordering as the push path.
+  await cancelContainerBuildDos(context.env, cancelledContainerBuilds, 'superseded by rerun');
+
+  if (buildIds.length === 0) {
+    if (sawActions) {
+      // Nothing in the Checks API can start a workflow run, so this button cannot
+      // do the job for an Actions-backed project. Say that rather than sit there.
+      await completeRerun(
+        refusedConclusion,
+        'Re-run this from GitHub Actions',
+        'This project builds on GitHub Actions. Re-run the workflow from the Actions tab.',
+      );
+      return context.json({ ok: true, ignored: 'github_actions rerun must be run from Actions' });
+    }
+    if (alreadyLive.length > 0) {
+      // Truthful, and deliberately NOT `neutral`: this commit really did build and
+      // really is live, so the run being replaced was green. Downgrading an
+      // accurate success is a worse answer than restating it.
+      await completeRerun(
+        'success',
+        'Already built and live',
+        'This commit is already built and deployed. There is nothing to rebuild.',
+      );
+      return context.json({ ok: true, enqueued: 0, reused: alreadyLive });
+    }
+    if (candidates.some((c) => !freshness.get(c.branch))) {
+      await completeRerun(
+        refusedConclusion,
+        'Commit is no longer the branch head',
+        'A rerun deploys only the current head of the connected branch. Push or re-run on the newest commit.',
+      );
+    } else {
+      // Everything left is a `skipped` reason from the supersede tx: project
+      // deleting, connection reconfigured or replaced, or installation revoked.
+      await completeRerun(
+        refusedConclusion,
+        'Nothing to rebuild',
+        'This project is not currently accepting builds for this branch.',
+      );
+    }
+    return context.json({ ok: true, enqueued: 0 });
+  }
+
+  // Wake the scheduler now instead of waiting for its next alarm. Best-effort.
+  try {
+    const scheduler = context.env.BUILD_SCHEDULER.get(
+      context.env.BUILD_SCHEDULER.idFromName('global'),
+    );
+    await scheduler.fetch('https://scheduler/poke', { method: 'POST' });
+  } catch (err) {
+    console.error('[webhooks] failed to poke build scheduler:', err);
+  }
+
+  return context.json({ ok: true, buildId: buildIds[0], buildIds });
 }
 
 // POST /webhooks/github — GitHub App webhook receiver. PUBLIC: the HMAC
@@ -753,6 +1148,51 @@ app.post('/github', async (context) => {
       });
       await cancelContainerBuildDos(context.env, cancelled, reason);
       return context.json({ ok: true });
+    }
+
+    case 'check_run': {
+      const data = payload as CheckRunPayload;
+      if (data.action !== 'rerequested') {
+        return context.json({ ok: true, ignored: `check_run:${data.action ?? 'unknown'}` });
+      }
+      // GitHub only delivers `rerequested` for runs OUR App created, but the App
+      // may publish more check names later; match ours explicitly so a future run
+      // can't accidentally trigger a deploy.
+      if (data.check_run?.name !== VOID_BUILD_CHECK_RUN_NAME) {
+        return context.json({ ok: true, ignored: 'check_run is not the Void build' });
+      }
+      const runId = data.check_run?.id;
+      return await rerunBuildForCommit(context, db, {
+        installationId: data.installation?.id,
+        repoFullName: data.repository?.full_name,
+        repoId: data.repository?.id,
+        headSha: data.check_run?.head_sha,
+        headBranch: data.check_run?.check_suite?.head_branch,
+        event: 'check_run',
+        checkRun: {
+          id: runId === undefined || runId === null ? null : String(runId),
+          buildId: data.check_run?.external_id ?? null,
+          conclusion: data.check_run?.conclusion ?? null,
+        },
+      });
+    }
+
+    case 'check_suite': {
+      const data = payload as CheckSuitePayload;
+      // "Re-run all checks". `requested`/`completed` are noise here: a suite is
+      // requested on every push, which the `push` handler already builds — acting
+      // on it too would double-enqueue every commit.
+      if (data.action !== 'rerequested') {
+        return context.json({ ok: true, ignored: `check_suite:${data.action ?? 'unknown'}` });
+      }
+      return await rerunBuildForCommit(context, db, {
+        installationId: data.installation?.id,
+        repoFullName: data.repository?.full_name,
+        repoId: data.repository?.id,
+        headSha: data.check_suite?.head_sha,
+        headBranch: data.check_suite?.head_branch,
+        event: 'check_suite',
+      });
     }
 
     case 'workflow_run': {
