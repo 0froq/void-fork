@@ -95,6 +95,7 @@ function createEnv(options: {
   dispatchGet: ReturnType<typeof vi.fn>;
   kvStore: Map<string, { value: ArrayBuffer; metadata: { s: number; c: number; t: number } }>;
   analyticsWrites: Array<unknown>;
+  logWrites: Array<unknown>;
 } {
   const workerFetch = vi.fn(
     async () => options.workerFetchImpl?.() ?? options.workerResponse ?? new Response('worker'),
@@ -104,6 +105,7 @@ function createEnv(options: {
     { value: ArrayBuffer; metadata: { s: number; c: number; t: number } }
   >();
   const analyticsWrites: Array<unknown> = [];
+  const logWrites: Array<unknown> = [];
 
   // Seed initial ISR cache entries
   if (options.assets) {
@@ -152,9 +154,12 @@ function createEnv(options: {
     ANALYTICS: {
       writeDataPoint: (data: unknown) => analyticsWrites.push(data),
     },
+    LOGS: {
+      writeDataPoint: (data: unknown) => logWrites.push(data),
+    },
   } as unknown as Env;
 
-  return { env, workerFetch, dispatchGet, kvStore, analyticsWrites };
+  return { env, workerFetch, dispatchGet, kvStore, analyticsWrites, logWrites };
 }
 
 describe('dispatch fetch handler', () => {
@@ -5381,5 +5386,91 @@ describe('static asset content-type normalization', () => {
     const res = await app.fetch(new Request('https://test.void.app/data.bin'), env, createCtx());
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBeNull();
+  });
+});
+
+describe('worker timeout explains itself in the project log stream', () => {
+  // A worker cut at the dispatch budget returns nothing, so it logs nothing and
+  // `void project logs` was empty for the one failure users most need
+  // explained. Dispatch now writes the explanation itself, keyed the way the
+  // tail worker keys its rows so the existing read path finds it.
+  function createHangingEnv(workerName: string) {
+    const { env, logWrites, analyticsWrites } = createEnv({
+      routing: { workerName, projectId: 'proj_1', type: 'void', ssr: true },
+      // Never settles — `withTimeout` wins the race.
+      workerFetchImpl: () => new Promise<Response>(() => {}),
+    });
+    return {
+      env: { ...env, DISPATCH_TIMEOUT_MS: '20' } as Env,
+      logWrites,
+      analyticsWrites,
+    };
+  }
+
+  it('returns 503 and writes one log row attributed to the project', async () => {
+    const { env, logWrites } = createHangingEnv('user-my-app-dpl_abc123');
+
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/api/slow', { method: 'POST' }),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get('X-Void-Timeout')).toBe('dispatch');
+
+    expect(logWrites).toHaveLength(1);
+    const dp = logWrites[0] as { indexes: Array<string>; blobs: Array<string> };
+    expect(dp.indexes).toEqual(['user-my-app']);
+    expect(dp.blobs[6]).toBe('dpl_abc123');
+    expect(dp.blobs[5]).toBe('503');
+    expect(dp.blobs[4]).toBe('POST');
+
+    const logs = JSON.parse(dp.blobs[1]) as Array<{ level: string; message: Array<string> }>;
+    expect(logs[0].level).toBe('error');
+    expect(logs[0].message.join(' ')).toContain('POST /api/slow');
+    // The budget reported must be the one actually enforced, not the default.
+    expect(logs[0].message.join(' ')).toContain('20 ms');
+  });
+
+  it('still meters the request exactly once', async () => {
+    const { env, analyticsWrites, logWrites } = createHangingEnv('user-my-app-dpl_abc123');
+
+    await app.fetch(new Request('https://my-app.void.app/api/slow'), env, createCtx());
+
+    // One `void_requests` row, unchanged, plus the new `void_logs` row.
+    expect(analyticsWrites).toHaveLength(1);
+    expect(logWrites).toHaveLength(1);
+    const dp = analyticsWrites[0] as { blobs: Array<string> };
+    expect(dp.blobs[3]).toBe('503');
+  });
+
+  it('writes no log row for a project whose routing carries no worker name', async () => {
+    const { env, logWrites } = createHangingEnv('');
+
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/api/slow'),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(503);
+    expect(logWrites).toHaveLength(0);
+  });
+
+  it('does not write a log row when the worker answers in time', async () => {
+    const { env, logWrites } = createEnv({
+      routing: { workerName: 'user-my-app-dpl_abc123', projectId: 'proj_1' },
+      workerResponse: new Response('ok'),
+    });
+
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/api/fast'),
+      env,
+      createCtx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(logWrites).toHaveLength(0);
   });
 });

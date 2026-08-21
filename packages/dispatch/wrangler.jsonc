@@ -43,6 +43,10 @@
       "binding": "ANALYTICS",
       "dataset": "void_requests",
     },
+    {
+      "binding": "LOGS",
+      "dataset": "void_logs",
+    },
   ],
   "queues": {
     "producers": [
@@ -93,6 +97,10 @@
         {
           "binding": "ANALYTICS",
           "dataset": "void_requests",
+        },
+        {
+          "binding": "LOGS",
+          "dataset": "void_logs",
         },
       ],
       "queues": {
@@ -147,6 +155,10 @@
         {
           "binding": "ANALYTICS",
           "dataset": "void_requests_staging",
+        },
+        {
+          "binding": "LOGS",
+          "dataset": "void_logs_staging",
         },
       ],
       "queues": {

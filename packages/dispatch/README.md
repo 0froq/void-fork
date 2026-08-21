@@ -78,6 +78,16 @@ Any request that resolves to a routing entry and is not suspended records:
 
 Analytics Engine is the source for usage reporting. Dispatch also publishes lightweight usage events to `USAGE_QUEUE` when the routing entry includes a `userId`.
 
+### Explaining a dispatch-generated 503
+
+A user worker cut at the dispatch budget (`DISPATCH_TIMEOUT_MS`, default 10s) never returns, so it emits no log of its own and its tail event records only `canceled` — the same outcome a real client hang-up produces. Dispatch is the only party that knows it was the one that hung up.
+
+On those three worker-timeout paths, `recordPlatformLog` (`metering.ts`) writes one row into the `void_logs` dataset through the `LOGS` binding, so `void project logs` explains the 503 instead of showing nothing. The row uses the same seven-blob/two-double shape `packages/tail` writes, and is keyed by splitting `RoutingEntry.workerName` (`user-<slug>-dpl_<id>`) into `index1` and `blob7` exactly as the tail worker does — the read path in `GET /projects/:id/logs` selects on `index1`, so a differently-keyed row would be unreadable. Do not key it off the metering `slug`, which falls back to the hostname on a custom domain.
+
+The write is best effort and swallows its own failures: every call site is already returning a 503, and a throw there would surface as a 500.
+
+Because the failure is swallowed, the row must never be one Analytics Engine would drop. AE caps the **sum** of a data point's blobs at 16 KB (there is no per-blob limit), and this row would otherwise carry the request URL twice — raw in `blob4` and as the pathname inside the `blob2` message. The longest URL already recorded in `void_logs` is 6,703 bytes against a p99 of 195, so the exposure is real. `truncateUtf8` bounds the URL at 2048 bytes and the message pathname at 1024, which holds any blob set under ~3.5 KB. The budget is measured in UTF-8 bytes and cuts on a character boundary; a split sequence would decode to U+FFFD, which is itself 3 bytes. `index1` is deliberately **not** truncated — it is the read key, so a shortened one would be unselectable, which is worse than a dropped row.
+
 ## Edge Caching
 
 - **Hashed assets**: `Cache-Control: public, max-age=31536000, immutable`
@@ -102,3 +112,4 @@ Not cached:
 - `test/unit/headers.test.ts` — header rule application
 - `test/unit/hostname.test.ts` — slug extraction
 - `test/unit/metering.test.ts` — Analytics Engine payload shape
+- `test/unit/platform-log.test.ts` — `void_logs` row shape, and lockstep with `packages/tail`'s script-name split

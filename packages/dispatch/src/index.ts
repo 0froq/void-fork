@@ -19,7 +19,13 @@ import {
   extractPageDataFromHtml,
   normalizePageDataForJsonCache,
 } from './isr.ts';
-import { recordRequest, sendUsageEvent, type FailureKind, type RequestType } from './metering.ts';
+import {
+  recordPlatformLog,
+  recordRequest,
+  sendUsageEvent,
+  type FailureKind,
+  type RequestType,
+} from './metering.ts';
 import { classifyDynamicRequestType, hasExtension } from './request-type.ts';
 import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules.ts';
 import { resolveStaticPath, resolveAssetContentType, safeDecodePathname } from './static.ts';
@@ -672,6 +678,22 @@ export default {
       return res;
     };
 
+    // The user's worker blew the dispatch budget. It returned nothing, so it
+    // logged nothing, and its own tail event records only `canceled` — which a
+    // real client hang-up produces too. Dispatch is the only party that knows
+    // it was the one that hung up, so it says so in the project's log stream.
+    // Metering is unchanged; this only adds the explanation.
+    const meterWorkerTimeout = () => {
+      recordPlatformLog(env, {
+        workerName: routing.workerName,
+        method: request.method,
+        url: request.url,
+        status: 503,
+        timeoutMs,
+      });
+      return meter(timeoutResponse(503, 'dispatch'));
+    };
+
     // Routing rules — redirects short-circuit, rewrites modify pathname
     // Two distinct values flow out of a rewrite:
     //   - `originalUrlVariant`: feeds the ISR variant key. Normalized via
@@ -1109,7 +1131,7 @@ export default {
             );
           } catch (error) {
             if (error instanceof DispatchTimeoutError) {
-              return meter(timeoutResponse(503, 'dispatch'));
+              return meterWorkerTimeout();
             }
             throw error;
           }
@@ -1156,7 +1178,7 @@ export default {
               });
             } catch (error) {
               if (error instanceof DispatchTimeoutError) {
-                return meter(timeoutResponse(503, 'dispatch'));
+                return meterWorkerTimeout();
               }
               throw error;
             }
@@ -1696,7 +1718,7 @@ export default {
         if (dynamicType) {
           requestType = dynamicType;
         }
-        return meter(timeoutResponse(503, 'dispatch'));
+        return meterWorkerTimeout();
       }
       if (err instanceof StaticAssetReadError) {
         return meter(staticAssetFailureResponse(PLATFORM_STATIC_ASSET_ERROR), {
