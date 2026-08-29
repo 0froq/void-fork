@@ -5,6 +5,8 @@ export type PlanLimits = Readonly<{
   requestsPerMonth: number;
   /** Max CPU milliseconds per request (0 = unlimited) */
   cpuMsPerRequest: number;
+  /** Highest cpuMs a project may request via its deploy manifest (0 = no ceiling) */
+  maxCpuMsPerRequest: number;
   /** Max sub-requests per invocation (0 = unlimited) */
   subRequestsPerInvocation: number;
   /** Max deploys per day (0 = unlimited) */
@@ -35,6 +37,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
   free: {
     requestsPerMonth: 3_000_000,
     cpuMsPerRequest: 10,
+    maxCpuMsPerRequest: 10,
     subRequestsPerInvocation: 50,
     deploysPerDay: 100,
     d1StorageBytes: 1 * GB,
@@ -51,6 +54,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
   solo: {
     requestsPerMonth: 10_000_000,
     cpuMsPerRequest: 30,
+    maxCpuMsPerRequest: 30_000,
     subRequestsPerInvocation: 50,
     deploysPerDay: 500,
     d1StorageBytes: 5 * GB,
@@ -66,6 +70,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
   pro: {
     requestsPerMonth: 100_000_000,
     cpuMsPerRequest: 50,
+    maxCpuMsPerRequest: 30_000,
     subRequestsPerInvocation: 1000,
     deploysPerDay: 3000,
     d1StorageBytes: 10 * GB,
@@ -81,6 +86,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
   sponsored: {
     requestsPerMonth: 0,
     cpuMsPerRequest: 50,
+    maxCpuMsPerRequest: 30_000,
     subRequestsPerInvocation: 1000,
     deploysPerDay: 0,
     d1StorageBytes: 0,
@@ -96,6 +102,7 @@ export const PLAN_LIMITS: Record<PlanId, PlanLimits> = {
   custom: {
     requestsPerMonth: 0,
     cpuMsPerRequest: 0,
+    maxCpuMsPerRequest: 0,
     subRequestsPerInvocation: 0,
     deploysPerDay: 0,
     d1StorageBytes: 0,

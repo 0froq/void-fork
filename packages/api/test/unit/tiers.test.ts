@@ -90,6 +90,15 @@ describe('PLAN_LIMITS', () => {
     expect(PLAN_LIMITS.custom.concurrentBuilds).toBe(0);
   });
 
+  it('defines the manifest cpuMs ceiling per tier', () => {
+    expect(PLAN_LIMITS.free.maxCpuMsPerRequest).toBe(10);
+    expect(PLAN_LIMITS.solo.maxCpuMsPerRequest).toBe(30_000);
+    expect(PLAN_LIMITS.pro.maxCpuMsPerRequest).toBe(30_000);
+    expect(PLAN_LIMITS.sponsored.maxCpuMsPerRequest).toBe(30_000);
+    // 0 = no ceiling by the shared PlanLimits convention.
+    expect(PLAN_LIMITS.custom.maxCpuMsPerRequest).toBe(0);
+  });
+
   it('defines build timeout minutes per tier', () => {
     expect(PLAN_LIMITS.free.buildTimeoutMinutes).toBe(10);
     expect(PLAN_LIMITS.solo.buildTimeoutMinutes).toBe(15);

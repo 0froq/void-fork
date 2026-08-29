@@ -1087,6 +1087,49 @@ describe('POST /projects/:id/rollback', () => {
     expect(routing.workerName).toBe(`user-rollback-app-${d1.id}`);
   });
 
+  it('clamps a stored manifest limits.cpuMs to the current plan ceiling (never rejects)', async () => {
+    // Free plan ceiling is 10 cpuMs; the target manifest requests 60000 —
+    // e.g. deployed under a higher plan before a downgrade. Rollback must
+    // clamp with min() and go through, not 400.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'clamp-rollback-app');
+
+    const d1 = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {}, limits: { cpuMs: 60_000 } }),
+    );
+    await updateDeploymentStatus(env.db, d1.id, 'live');
+    await markDeploymentRetained(env.db, d1.id, true);
+
+    const d2 = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, d2.id, 'live');
+    await markDeploymentRetained(env.db, d2.id, true);
+    await setActiveDeployment(env.db, project.id, d2.id);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deploymentId: d1.id }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const routing = (await env.ROUTING.get(project.slug, 'json')) as {
+      limits: { cpuMs: number; subRequests: number };
+    };
+    expect(routing.limits).toEqual({ cpuMs: 10, subRequests: 50 });
+  });
+
   it('returns 400 for non-retained deployment', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'evicted-app');

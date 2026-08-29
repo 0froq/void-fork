@@ -218,6 +218,13 @@ export type DeployManifest = Readonly<{
   workerMain?: string;
   compatibilityDate?: string;
   compatibilityFlags?: ReadonlyArray<string>;
+  /**
+   * Per-project worker limit overrides (void.json `worker.limits`, snake_case
+   * `cpu_ms` on the config surface — camelCase here like other manifest
+   * fields). Ingest rejects a `cpuMs` above the plan's `maxCpuMsPerRequest`;
+   * rollback clamps instead (see `computeDispatchLimits`).
+   */
+  limits?: Readonly<{ cpuMs?: number }>;
   hashedAssetsPrefix?: string;
   headerRules?: ReadonlyArray<HeaderRule>;
   redirectRules?: ReadonlyArray<RedirectRule>;

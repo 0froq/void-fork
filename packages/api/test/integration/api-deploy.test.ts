@@ -925,6 +925,93 @@ describe('POST /projects/:id/deploy', () => {
     expect(routing.limits).toBeUndefined();
   });
 
+  it('rejects a manifest limits.cpuMs above the plan ceiling with both numbers', async () => {
+    const user = await createTestUser(env.db, 'prolimituser', 'github', undefined, 'pro');
+    const project = await createTestProject(env.db, user.id, 'over-ceiling-app');
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: { version: 3, bindings: {}, limits: { cpuMs: 60_000 } },
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { event: string; message: string };
+    expect(body.event).toBe('error');
+    expect(body.message).toBe('limits.cpuMs 60000 exceeds your plan maximum of 30000');
+
+    // Rejected before the claim transaction — no deployment row was created.
+    const rows = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.project_id, project.id));
+    expect(rows).toEqual([]);
+  });
+
+  it('accepts a manifest limits.cpuMs under the plan ceiling and routes with it', async () => {
+    const user = await createTestUser(env.db, 'prolimituser2', 'github', undefined, 'pro');
+    const project = await createTestProject(env.db, user.id, 'under-ceiling-app');
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: { version: 3, bindings: {}, limits: { cpuMs: 500 } },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    requireEvent<DoneEvent>(events, 'done');
+
+    const routing = (await env.ROUTING.get('under-ceiling-app', 'json')) as {
+      limits: { cpuMs: number; subRequests: number };
+    };
+    expect(routing.limits).toEqual({ cpuMs: 500, subRequests: 1000 });
+  });
+
+  it('accepts a manifest limits.cpuMs exactly at the plan ceiling', async () => {
+    const user = await createTestUser(env.db, 'prolimituser3', 'github', undefined, 'pro');
+    const project = await createTestProject(env.db, user.id, 'at-ceiling-app');
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: { version: 3, bindings: {}, limits: { cpuMs: 30_000 } },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const events = await readAllEvents(res);
+    requireEvent<DoneEvent>(events, 'done');
+
+    const routing = (await env.ROUTING.get('at-ceiling-app', 'json')) as {
+      limits: { cpuMs: number; subRequests: number };
+    };
+    expect(routing.limits).toEqual({ cpuMs: 30_000, subRequests: 1000 });
+  });
+
+  it('passes an unbounded limits.cpuMs through for the custom plan (no ceiling)', async () => {
+    const user = await createTestUser(env.db, 'customlimituser', 'github', undefined, 'custom');
+    const project = await createTestProject(env.db, user.id, 'custom-ceiling-app');
+    mockCfApi();
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: { version: 3, bindings: {}, limits: { cpuMs: 300_000 } },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await readAllEvents(res);
+
+    const routing = (await env.ROUTING.get('custom-ceiling-app', 'json')) as {
+      limits: { cpuMs: number };
+    };
+    // subRequests stays absent (custom plan value is 0 = unlimited).
+    expect(routing.limits).toEqual({ cpuMs: 300_000 });
+  });
+
   it('includes manifest vars as plain_text bindings in worker upload', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'vars-app');
@@ -3947,5 +4034,28 @@ describe('validateManifestShape — pathRevalidate', () => {
     expect(validateManifestShape({ ...base, pathRevalidate: { '/a': 'x' } })).toMatch(
       /pathRevalidate\.\/a must be a number/,
     );
+  });
+});
+
+describe('validateManifestShape — limits', () => {
+  const base = { version: 3, bindings: {} };
+  it('accepts a valid limits object', () => {
+    expect(validateManifestShape({ ...base, limits: { cpuMs: 500 } })).toBeNull();
+  });
+  it('accepts an empty limits object and absence of limits', () => {
+    expect(validateManifestShape({ ...base, limits: {} })).toBeNull();
+    expect(validateManifestShape(base)).toBeNull();
+  });
+  it('rejects a non-object limits', () => {
+    expect(validateManifestShape({ ...base, limits: 500 })).toMatch(/limits must be an object/);
+    expect(validateManifestShape({ ...base, limits: [] })).toMatch(/limits must be an object/);
+    expect(validateManifestShape({ ...base, limits: null })).toMatch(/limits must be an object/);
+  });
+  it('rejects a zero, negative, non-integer, or non-number cpuMs', () => {
+    for (const cpuMs of [0, -5, 1.5, Number.NaN, Infinity, 2 ** 53, '10', true]) {
+      expect(validateManifestShape({ ...base, limits: { cpuMs } })).toMatch(
+        /limits\.cpuMs must be a positive integer/,
+      );
+    }
   });
 });

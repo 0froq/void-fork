@@ -4,10 +4,12 @@ import {
   buildProjectAccountJson,
   buildRoutingJson,
   buildStaticRoutingJson,
+  computeDispatchLimits,
   projectAccountKey,
   refreshProjectKvForUser,
   setProjectsRoutingSuspension,
 } from '../../src/routing.ts';
+import { PLAN_LIMITS, type PlanLimits } from '../../src/tiers.ts';
 import type { DeployManifest } from '../../src/types.ts';
 
 function createKvStore(initial: Record<string, string> = {}): {
@@ -29,6 +31,92 @@ function createKvStore(initial: Record<string, string> = {}): {
   } as unknown as KVNamespace;
   return { store, puts, kv };
 }
+
+describe('computeDispatchLimits', () => {
+  function planWith(overrides: Partial<PlanLimits>): PlanLimits {
+    return { ...PLAN_LIMITS.free, ...overrides };
+  }
+
+  it('matches the historical inline expression for every plan when the manifest has no limits', () => {
+    for (const planLimits of Object.values(PLAN_LIMITS)) {
+      const legacy =
+        planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
+          ? {
+              ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
+              ...(planLimits.subRequestsPerInvocation > 0
+                ? { subRequests: planLimits.subRequestsPerInvocation }
+                : {}),
+            }
+          : null;
+      expect(computeDispatchLimits(planLimits, undefined)).toEqual(legacy);
+      expect(computeDispatchLimits(planLimits, null)).toEqual(legacy);
+      expect(computeDispatchLimits(planLimits, {})).toEqual(legacy);
+    }
+  });
+
+  it('returns null when both plan values are 0 and there is no override', () => {
+    expect(computeDispatchLimits(PLAN_LIMITS.custom, undefined)).toBeNull();
+  });
+
+  it('omits the key whose plan value is 0 (no override)', () => {
+    expect(
+      computeDispatchLimits(planWith({ cpuMsPerRequest: 0, subRequestsPerInvocation: 50 }), null),
+    ).toEqual({ subRequests: 50 });
+    expect(
+      computeDispatchLimits(planWith({ cpuMsPerRequest: 10, subRequestsPerInvocation: 0 }), null),
+    ).toEqual({ cpuMs: 10 });
+  });
+
+  it('passes an override below the plan ceiling through', () => {
+    expect(computeDispatchLimits(PLAN_LIMITS.pro, { cpuMs: 500 })).toEqual({
+      cpuMs: 500,
+      subRequests: 1000,
+    });
+  });
+
+  it('clamps an override above the plan ceiling to the ceiling', () => {
+    expect(computeDispatchLimits(PLAN_LIMITS.pro, { cpuMs: 60_000 })).toEqual({
+      cpuMs: 30_000,
+      subRequests: 1000,
+    });
+  });
+
+  it('passes any override through when the ceiling is 0 (custom plan)', () => {
+    expect(computeDispatchLimits(PLAN_LIMITS.custom, { cpuMs: 123_456 })).toEqual({
+      cpuMs: 123_456,
+    });
+  });
+
+  it('allows an override lower than the plan default', () => {
+    // Free default cpuMs is 10; an explicit 5 wins over the default.
+    expect(computeDispatchLimits(PLAN_LIMITS.free, { cpuMs: 5 })).toEqual({
+      cpuMs: 5,
+      subRequests: 50,
+    });
+  });
+
+  it('falls back to the plan default when a stored override is out of domain', () => {
+    // A rollback replays a stored manifest, and a manifest stored before
+    // ingest validated `limits` can carry values ingest now rejects. They
+    // must not erase (0) or corrupt (negative, fractional) the plan cap.
+    for (const cpuMs of [0, -5, 3.7, 2 ** 53, '10' as unknown as number]) {
+      expect(computeDispatchLimits(PLAN_LIMITS.free, { cpuMs })).toEqual({
+        cpuMs: 10,
+        subRequests: 50,
+      });
+    }
+  });
+
+  it('always sources subRequests from the plan, override or not', () => {
+    expect(computeDispatchLimits(planWith({ subRequestsPerInvocation: 77 }), { cpuMs: 5 })).toEqual(
+      { cpuMs: 5, subRequests: 77 },
+    );
+    expect(computeDispatchLimits(planWith({ subRequestsPerInvocation: 77 }), undefined)).toEqual({
+      cpuMs: 10,
+      subRequests: 77,
+    });
+  });
+});
 
 describe('buildRoutingJson', () => {
   const base = {

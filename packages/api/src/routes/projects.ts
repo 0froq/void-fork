@@ -45,7 +45,7 @@ import {
   InvalidHyperdriveConnectionStringError,
   getDispatchWorkerProxyToken,
 } from '../provisioning/cloudflare-api.ts';
-import { buildRoutingJson, buildStaticRoutingJson } from '../routing.ts';
+import { buildRoutingJson, buildStaticRoutingJson, computeDispatchLimits } from '../routing.ts';
 import { tokenizeSql } from '../sql/tokenize.ts';
 import { getPlanLimits } from '../tiers.ts';
 import type { Build, DeployManifest } from '../types.ts';
@@ -300,10 +300,10 @@ type LineComment = Readonly<{
  *      on data like `VALUES('DROP TABLE users')` and on `-- DROP TABLE`
  *      in a line comment, which could block legitimate migrations.
  *   3. Block comments are intentionally NOT counted toward the pragma. A
- *      docstring like `/* use -- void:allow-destructive to permit drops *​/`
+ *      docstring like `/* use -- void:allow-destructive to permit drops *\/`
  *      is documentation, not authorization. They are also replaced with a
  *      single space rather than deleted outright so that token boundaries
- *      are preserved — `DROP/**​/TABLE` must not collapse to `DROPTABLE`,
+ *      are preserved — `DROP/**\/TABLE` must not collapse to `DROPTABLE`,
  *      which would slip the destructive keyword regex entirely.
  *   4. The standalone bit on each line comment lets the caller require
  *      that the destructive pragma occupies its own raw line. Trailing
@@ -312,7 +312,7 @@ type LineComment = Readonly<{
  *
  * Only the SQLite lexical forms are handled: `'...'` strings with `''`
  * escape, `"..."` / `` `...` `` / `[...]` identifier quotes with doubled
- * closing-quote escape, `-- line` comments, and `/* block *​/` comments.
+ * closing-quote escape, `-- line` comments, and `/* block *\/` comments.
  */
 function stripSqlStringsAndComments(sql: string): {
   code: string;
@@ -330,7 +330,7 @@ function stripSqlStringsAndComments(sql: string): {
         // Walk backwards from the `--` to the previous newline (or start of
         // input). The comment is "standalone" iff every character in that
         // raw-source prefix is whitespace — anything else (a SQL token, the
-        // closing `*​/` of a block comment, a string literal, etc.) means the
+        // closing `*/` of a block comment, a string literal, etc.) means the
         // pragma is sharing its line with content and must not authorize.
         let standalone = true;
         for (let k = seg.start - 1; k >= 0; k--) {
@@ -350,7 +350,7 @@ function stripSqlStringsAndComments(sql: string): {
       }
       case 'block-comment':
         // Replace the block comment with a single space so token boundaries
-        // are preserved — `DROP/**​/TABLE` must NOT collapse to `DROPTABLE`,
+        // are preserved — `DROP/**/TABLE` must NOT collapse to `DROPTABLE`,
         // which would slip past the destructive regex entirely. The space
         // is sufficient because every destructive pattern requires `\b` /
         // `\s+` between keywords.
@@ -698,15 +698,6 @@ const app = new Hono<ApiEnv>()
     }
 
     const planLimits = getPlanLimits(context.get('user').plan);
-    const dispatchLimits =
-      planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
-        ? {
-            ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
-            ...(planLimits.subRequestsPerInvocation > 0
-              ? { subRequests: planLimits.subRequestsPerInvocation }
-              : {}),
-          }
-        : null;
 
     // The entire rollback cutover runs inside a single row-locked tx so
     // concurrent rollbacks / applies / renames serialize and no external
@@ -818,6 +809,12 @@ const app = new Hono<ApiEnv>()
         const manifest: DeployManifest | null = target.manifest
           ? JSON.parse(target.manifest)
           : null;
+        // Effective dispatch limits honor the TARGET manifest's per-project
+        // override, clamped to the CURRENT plan ceiling — a rollback under a
+        // downgraded plan clamps, never rejects. Computed here (pure CPU, no
+        // I/O added inside the lock) because the manifest is re-read inside
+        // the lock; `planLimits` itself is resolved before the tx.
+        const dispatchLimits = computeDispatchLimits(planLimits, manifest?.limits);
         // Rollback external-write pass depends only on authoritative
         // persistent sources (pg deployments table for queue activation
         // history; target's manifest + unconditional DO reconciliation

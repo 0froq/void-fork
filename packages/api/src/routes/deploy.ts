@@ -73,6 +73,7 @@ import { presignAssetPut } from '../r2-presign.ts';
 import {
   buildRoutingJson,
   buildStaticRoutingJson,
+  computeDispatchLimits,
   projectAccountKey,
   writeProjectAccountEntry,
 } from '../routing.ts';
@@ -645,6 +646,29 @@ export function validateManifestShape(parsed: unknown): string | null {
       !manifest.compatibilityFlags.every((x) => typeof x === 'string')
     ) {
       return 'invalid manifest shape: compatibilityFlags must be an array of strings';
+    }
+  }
+
+  // Per-project worker limit overrides (void.json `worker.limits`). Shape-only
+  // here; the plan ceiling (`maxCpuMsPerRequest`) is enforced by the deploy
+  // handler once the authenticated user's plan is in scope.
+  if (manifest.limits !== undefined) {
+    if (
+      manifest.limits == null ||
+      typeof manifest.limits !== 'object' ||
+      Array.isArray(manifest.limits)
+    ) {
+      return 'invalid manifest shape: limits must be an object';
+    }
+    const limits = manifest.limits as Record<string, unknown>;
+    if (limits.cpuMs !== undefined) {
+      if (
+        typeof limits.cpuMs !== 'number' ||
+        !Number.isSafeInteger(limits.cpuMs) ||
+        limits.cpuMs < 1
+      ) {
+        return 'invalid manifest shape: limits.cpuMs must be a positive integer';
+      }
     }
   }
 
@@ -2201,6 +2225,24 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       },
       400,
     );
+  }
+
+  // Plan ceiling on a requested per-project CPU limit. Rejected at ingest —
+  // before the precheck-and-claim transaction or any asset work — so an
+  // over-ceiling deploy fails fast with both numbers. Rollback deliberately
+  // clamps instead of rejecting (see `computeDispatchLimits`).
+  const requestedCpuMs = incomingManifest.limits?.cpuMs;
+  if (requestedCpuMs !== undefined) {
+    const maxCpuMs = getPlanLimits(user.plan).maxCpuMsPerRequest;
+    if (maxCpuMs > 0 && requestedCpuMs > maxCpuMs) {
+      return context.json(
+        {
+          event: 'error',
+          message: `limits.cpuMs ${requestedCpuMs} exceeds your plan maximum of ${maxCpuMs}`,
+        },
+        400,
+      );
+    }
   }
 
   // Validate the v2 asset manifest. Each entry MUST carry a 32-hex blake3
@@ -3878,15 +3920,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         // Routing switch
         const existingRouting = await context.env.ROUTING.get(project.slug);
         const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-        const dispatchLimits =
-          planLimits.cpuMsPerRequest > 0 || planLimits.subRequestsPerInvocation > 0
-            ? {
-                ...(planLimits.cpuMsPerRequest > 0 ? { cpuMs: planLimits.cpuMsPerRequest } : {}),
-                ...(planLimits.subRequestsPerInvocation > 0
-                  ? { subRequests: planLimits.subRequestsPerInvocation }
-                  : {}),
-              }
-            : null;
+        const dispatchLimits = computeDispatchLimits(planLimits, manifest.limits);
         const routingJson = buildRoutingJson({
           workerName,
           projectId,

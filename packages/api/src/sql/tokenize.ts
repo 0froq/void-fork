@@ -9,7 +9,7 @@
  *
  * Lexical forms handled (SQLite / drizzle-kit SQLite output):
  *   - `-- line`            line comments (terminate at `\n` or EOF)
- *   - `/* block *​/`        block comments (tolerate unterminated — span to EOF)
+ *   - `/* block *\/`        block comments (tolerate unterminated — span to EOF)
  *   - `'...'`              string literals with `''` doubled-quote escape
  *   - `"..."` / `` `...` `` identifier quotes with `""` / `` `` `` escape
  *   - `[...]`              bracket identifiers, NO `]]` escape — a single
