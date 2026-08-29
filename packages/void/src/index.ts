@@ -67,6 +67,7 @@ import { routingPlugin } from './plugin-routing.ts';
 import { assertNoRootSourceConventionConflicts, resolveProjectPaths } from './project-paths.ts';
 import { scanQueuesSync } from './queues/scan.ts';
 import { compileAssetFallbackHelper } from './router/compile.ts';
+import { isRouteEnabledForEnvironment, type RouteEnvironment } from './router/parse-filename.ts';
 import { scanMiddlewareSync, scanRoutePatternsSync } from './router/scan.ts';
 import { scanWebSocketRoutesSync } from './router/websocket.ts';
 import { SANDBOX_MIGRATION_TAG, isSandboxEnabled, resolveSandboxConfig } from './sandbox/config.ts';
@@ -662,6 +663,7 @@ export function voidPlugin(options?: {
     : getOrCreateDevTriggerToken(root);
   const config = readConfig(root);
   const paths = resolveProjectPaths(root, config);
+  let routeEnvironment: RouteEnvironment = 'prod';
   assertNoRootSourceConventionConflicts(paths);
   const dialect = getDatabaseDialect(config);
   const detected = detectFramework(root);
@@ -756,6 +758,13 @@ export function voidPlugin(options?: {
   // Scan queues/websocket routes early so both framework-mode and default-mode
   // branches can safely close over these bindings.
   const queues = framework ? [] : scanQueuesSync(root, paths.queuesDir);
+  // Deliberately scanned with NO environment: this list is the superset used to
+  // RESERVE binding and Durable Object class names below, and reservation must
+  // not depend on which command is running. A filtered list would let the live
+  // DO resolve to `VOID_LIVE` under `vite dev` and `VOID_LIVE_2` under
+  // `vite build` for the same project. Consumers that emit config rather than
+  // reserve names re-filter by `routeEnvironment` (see `mergeBindings` and
+  // `resolveConfiguredAssetRoutingPolicy`).
   const websocketRoutes = framework ? [] : scanWebSocketRoutesSync(root, paths);
   const liveConfig = !isNodeTarget(config.target)
     ? bindings.needsLive
@@ -941,6 +950,7 @@ export function voidPlugin(options?: {
   // Core worker config — always set by voidPlugin (main, triggers, assets).
   // Bindings are handled separately in the config function below.
   const workerConfig: Record<string, unknown> = {};
+  let assetRouting: AssetRoutingPolicy;
   if (config.worker?.vars) {
     workerConfig.vars = { ...config.worker.vars };
   }
@@ -990,6 +1000,9 @@ export function voidPlugin(options?: {
   // When no wrangler.json exists, resolved config has empty bindings and
   // all inferred bindings are added — matching the previous behavior.
   function mergeBindings(resolved: WorkerConfig): Partial<WorkerConfig> {
+    const environmentWebsocketRoutes = websocketRoutes.filter((route) =>
+      isRouteEnabledForEnvironment(route, routeEnvironment),
+    );
     const result: Record<string, unknown> = { ...workerConfig };
 
     // Void owns the generated asset routing policy. Replace stale root
@@ -1071,7 +1084,7 @@ export function voidPlugin(options?: {
       };
     }
 
-    if (websocketRoutes.length > 0) {
+    if (environmentWebsocketRoutes.length > 0) {
       type DurableObjectBindingsConfig = {
         durable_objects?: {
           bindings?: Array<{ name: string; class_name: string }>;
@@ -1081,7 +1094,7 @@ export function voidPlugin(options?: {
         ((resolved as DurableObjectBindingsConfig).durable_objects?.bindings as
           | Array<{ name: string; class_name: string }>
           | undefined) ?? [];
-      const missingDurableObjectBindings = websocketRoutes
+      const missingDurableObjectBindings = environmentWebsocketRoutes
         .filter(
           (route) =>
             !existingDurableObjectBindings.some((binding) => binding.name === route.bindingName),
@@ -1101,7 +1114,7 @@ export function voidPlugin(options?: {
         (result as Record<string, unknown>).migrations = [
           {
             tag: 'void-ws-v1',
-            new_classes: websocketRoutes.map((route) => route.className),
+            new_classes: environmentWebsocketRoutes.map((route) => route.className),
           },
         ];
       }
@@ -1304,8 +1317,25 @@ export function voidPlugin(options?: {
       getVoidDeployBuildConfig: (): { mode: string; envDir: string | undefined } | undefined =>
         voidDeployBuildConfig,
     },
-    config(userConfig, { mode, command }) {
+    config(userConfig, { mode, command, isPreview }) {
       viteCommand = command;
+      // `dev` is the Vite dev server only. Every build, `void deploy`, and
+      // `vite preview` (which reports `command: 'serve'`) is `prod`.
+      routeEnvironment = command === 'serve' && !isPreview ? 'dev' : 'prod';
+      // Re-resolve now that the environment is known — the construction-time
+      // value below always assumes `prod`.
+      //
+      // The guard is NOT an optimization. `envPlugin` is also returned by the
+      // framework and node-target branches, and both of those `return` before
+      // `ssrEntry` / `hasPages` / `hasMiddleware` are declared. Calling
+      // `resolveConfiguredAssetRoutingPolicy()` there throws a TDZ
+      // `ReferenceError`. Those branches also must not write
+      // `workerConfig.assets` at all — `mergeBindings` keys off it staying
+      // unset.
+      if (!framework && !isNodeTarget(config.target)) {
+        assetRouting = resolveConfiguredAssetRoutingPolicy();
+        applyAssetRoutingPolicy(assetRouting);
+      }
       // Exclude the .void cache directory from the file watcher so that
       // miniflare SQLite writes don't trigger infinite HMR refreshes.
       const ignored = ['**/.void/**'];
@@ -1341,7 +1371,7 @@ export function voidPlugin(options?: {
       // Vite's own module URLs still need to bypass the worker so HMR,
       // virtual modules, and dev CSS are served by Vite middleware directly.
       const assets = workerConfig.assets as { run_worker_first?: Array<string> } | undefined;
-      if (command === 'serve' && assets?.run_worker_first?.includes('/**')) {
+      if (command === 'serve' && !isPreview && assets?.run_worker_first?.includes('/**')) {
         assets.run_worker_first = [...DEV_ASSET_ROUTING_EXCLUSIONS, '/**'];
       }
 
@@ -1721,21 +1751,34 @@ export function voidPlugin(options?: {
   const ssrEntry = validateSsrEntry(root, paths);
   const hasPages = existsSync(paths.pagesDir);
   const hasMiddleware = scanMiddlewareSync(root, paths).length > 0;
-  const routePatterns = scanRoutePatternsSync(root, paths);
-  const hasDocumentRoutes = routeScanHasDocumentRoutes(routePatterns);
-  const hasApiRoutes =
-    routeScanHasApiRoutes(routePatterns) || routeScanHasApiRoutes(websocketRoutes) || authEnabled;
-  let assetRouting = resolveAssetRoutingPolicy({
-    isSsr: Boolean(ssrEntry),
-    hasPages,
-    hasApiRoutes,
-    hasDocumentRoutes,
-    hasMiddleware,
-    hasWebSockets: routeScanHasDocumentRoutes(websocketRoutes),
-    authEnabled,
-    liveEnabled: liveConfig !== undefined,
-    notFound: config.routing?.notFound,
-  });
+
+  function resolveConfiguredAssetRoutingPolicy(): AssetRoutingPolicy {
+    const routePatterns = scanRoutePatternsSync(root, paths, routeEnvironment);
+    const environmentWebsocketRoutes = websocketRoutes.filter((route) =>
+      isRouteEnabledForEnvironment(route, routeEnvironment),
+    );
+    return resolveAssetRoutingPolicy({
+      isSsr: Boolean(ssrEntry),
+      hasPages,
+      hasApiRoutes:
+        routeScanHasApiRoutes(routePatterns) ||
+        routeScanHasApiRoutes(environmentWebsocketRoutes) ||
+        authEnabled,
+      hasDocumentRoutes: routeScanHasDocumentRoutes(routePatterns),
+      hasMiddleware,
+      hasWebSockets: routeScanHasDocumentRoutes(environmentWebsocketRoutes),
+      authEnabled,
+      liveEnabled: liveConfig !== undefined,
+      notFound: config.routing?.notFound,
+    });
+  }
+
+  // Provisional: `routeEnvironment` is still its `prod` default here, because no
+  // `config` hook has run yet. `envPlugin.config` recomputes this before any
+  // consumer reads it — `mergeBindings` runs inside the Cloudflare plugin's own
+  // `config` hook, which Vite sorts after `envPlugin`'s. It is assigned here so
+  // `assetRouting` is never read while unassigned.
+  assetRouting = resolveConfiguredAssetRoutingPolicy();
 
   workerConfig.main = join(root, '.void', 'entry.ts');
 
