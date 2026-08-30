@@ -25,7 +25,7 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
-      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+      - uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
         with:
           cache: true
           node-version-file: .node-version
@@ -60,7 +60,7 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
-      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+      - uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
         with:
           cache: true
           node-version-file: .node-version
@@ -103,7 +103,7 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
-      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+      - uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
         with:
           cache: true
           node-version-file: .node-version
@@ -129,7 +129,7 @@ jobs:
           submodules: recursive
           token: ${{ secrets.FRAMEWORK_REPO_TOKEN }}
       - run: git clean -fd
-      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+      - uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
         with:
           cache: true
           node-version-file: .node-version
