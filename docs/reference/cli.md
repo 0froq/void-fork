@@ -25,10 +25,9 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void db studio`                  | Open Drizzle Studio (--remote for a deployed external database)               |
 | `void secret put <name=value>`    | Set a production secret                                                       |
 | `void secret list`                | List production secrets                                                       |
-| `void secret sync .env.local`     | Bulk upload secrets from dotenv file                                          |
+| `void secret sync .env`           | Bulk upload secrets from dotenv file                                          |
 | `void env check [--remote]`       | Validate env.ts schema                                                        |
 | `void env types`                  | Regenerate .void/env.d.ts from env.ts                                         |
-| `void env example`                | Refresh the void-managed block in .env.example                                |
 | `void auth login`                 | Authenticate with Void                                                        |
 | `void cloudflare login`           | Authenticate with Cloudflare through Void                                     |
 | `void platform install`           | Install a company Void platform in Cloudflare                                 |
@@ -104,7 +103,7 @@ After that, the full interactive flow walks through:
 5. **Demo code:** for existing non-Pages projects, optionally scaffolds a `db/migrations/` directory plus an API route and typed fetch example.
 6. **Deployment platform:** asks where `void deploy` should send the app: Cloudflare (the default), Void, or Skip deployment setup. The choice is stored as `platform` in `.void/project.json`. Choosing Cloudflare creates or augments `wrangler.jsonc`, checks the Cloudflare session through Void's bundled tooling, opens secure browser sign-in when needed, and writes the selected account as `account_id` (automatically when only one account is available).
 7. **GitHub Actions:** optionally creates `.github/workflows/void-deploy.yml` for the selected target. Cloudflare workflows run `void deploy --platform cloudflare` with `CLOUDFLARE_API_TOKEN` and pass the optional `DATABASE_URL` secret needed by PostgreSQL/MySQL apps. Void workflows use the selected platform's API URL and are offered only when its discovery document advertises GitHub Actions support.
-8. **`env.ts` scaffold:** if the project has no `env.ts` but has `.env` / `.env.example` / `.env.local` / `.env.development*` files on disk, generates an `env.ts` pre-populated with their keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
+8. **`env.ts` scaffold:** if the project has no `env.ts` but has a root `.env`, generates an `env.ts` pre-populated with its keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
 9. **Void project setup:** when Void is selected, optionally logs you in, lets you select or create a project, and adds the link to `.void/project.json` so your first deploy can just be `void deploy`.
 
 If Cloudflare sign-in is declined or does not complete, initialization still finishes with the configuration in place. Rerun `void init`, or use `void cloudflare login`, when you are ready.
@@ -707,7 +706,7 @@ Email setup needs a browser session from `void cloudflare login`, which carries 
 
 Sandbox apps need Docker, [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans), and Containers access. API tokens need Account / Containers: Edit and Account / Cloudchamber: Edit. Void checks access before provisioning or building; apps without Sandbox skip that check.
 
-Void provisions inferred resources, builds and validates the app, applies migrations, uploads encrypted secrets, and checks the uploaded Worker Version before sending it traffic. After activation it synchronizes routes, custom domains, cron triggers, queue consumers, and the Email Routing rules derived from `addresses`. Static, hybrid, and SSR output from supported frameworks is also supported. A brand-new Worker may need one ordinary deployment before the Versions API can be used.
+Void provisions inferred resources, builds and validates the app, applies migrations, validates remote secrets, and checks the uploaded Worker Version before sending it traffic. After activation it synchronizes routes, custom domains, cron triggers, queue consumers, and the Email Routing rules derived from `addresses`. Static, hybrid, and SSR output from supported frameworks is also supported. A brand-new Worker may need one ordinary deployment before the Versions API can be used.
 
 If Cloudflare Access protects readiness URLs, supply an allowed `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` pair, or a short-lived local `CF_ACCESS_TOKEN`. These credentials are used only for matching HTTPS readiness requests. Versions without accessible previews can be checked at 0% traffic through the stable hostname.
 
@@ -715,7 +714,9 @@ Secrets and migrations are validated after the build, so a failed check may leav
 
 Provisioning reuses known resource IDs and writes newly resolved IDs into `wrangler.jsonc`, preserving comments but possibly changing indentation. Commit that file for other machines and CI. Run the first deploy from one machine at a time because provisioning locks are local. The old `--provision` flag is accepted but no longer needed.
 
-Keys marked `.secret()` become encrypted Worker secrets; existing remote secrets are preserved. Void also preserves or creates `BETTER_AUTH_SECRET` for auth apps. Custom D1 migration layouts are accepted only when Cloudflare's file set, content, and order match the validated migrations.
+`.env` is local-only and isn't emitted into Worker vars. Store every schema-declared server key with `void secret put <NAME>`; Void emits required names through `secrets.required` and blocks plaintext server vars. On a new Worker, set required secrets before retrying if the initial remote check reports them missing. Custom D1 layouts are accepted only when Cloudflare's exact file set, bytes, and numeric order match the migrations Void validated. Direct deploy and operational commands use the top-level root config and reject named environments and alternate config-path overrides.
+
+Existing remote secrets are preserved. Void also preserves or creates `BETTER_AUTH_SECRET` for auth apps.
 
 **Email.** When the app uses email (`sendEmail()` or `email/` handlers) and `void.json` has `email.from`, the deploy reads the state of that address's zone before the build — session scopes, zone, MX records, Email Routing, subaddressing, routing rules, Email Sending, and what `wrangler.jsonc` holds — prints a checklist of what it would change in your account, and asks once (default Yes). On Yes it enables what is missing, writes `send_email: [{ "name": "SEND_EMAIL" }]`, the `__VOID_EMAIL_FROM` var and the `addresses` array into `wrangler.jsonc`, and lets wrangler create the routing rules when the activated version's triggers are synchronized; the deploy ends with the address map. A deploy with nothing left to set up asks nothing. Without `email.from` the deploy prints `add "email": { "from": "you@mail.acme.com" } to void.json` and continues without email. Non-interactive runs (CI, or stdin/stdout not a terminal) never prompt: they print the checklist plus `Run void email setup --platform cloudflare once locally, commit wrangler.jsonc, then redeploy` and deploy without email (or with the setup `wrangler.jsonc` already carries, when the binding is committed; a committed `addresses` array whose routing is off is removed first, since wrangler's plan on it would fail after the upload) — unless `--require-email` is passed, which fails instead. A deploy whose account rows all read ready reconciles the two config rows — `addresses` against the current derivation and `vars.__VOID_EMAIL_FROM` against `email.from` — with a plain file write and no prompt. See [Your own Cloudflare account](../guide/email.md#your-own-cloudflare-account) for the whole flow, including the subdomain-vs-apex rule and what stays manual.
 
@@ -725,7 +726,7 @@ See the [Cloudflare guide](../integrations/cloudflare.md#deploy-to-your-own-clou
 
 ### `void db push`
 
-Apply your Drizzle schema directly to the development database without creating migration files. D1 updates the local database; PostgreSQL and MySQL use `DATABASE_URL` from `.env.local`.
+Apply your Drizzle schema directly to the development database without creating migration files. D1 updates the local database; PostgreSQL and MySQL use `DATABASE_URL` from `.env`.
 
 Use this for quick schema iteration while prototyping. Before deploying, generate and review migration files with `void db generate`.
 
@@ -815,7 +816,7 @@ NEON_API_KEY=... void db connect --provider neon --name my-app
 void db connect --provider @acme/void-db-provider --region region-id
 ```
 
-The command saves `DATABASE_URL` in `.env.local`. When authenticated with a linked Void project, it also updates the encrypted deployment URL; pass `--local-only` to skip that sync. `neon` is built in. Other adapters are project dependencies or local modules exporting a `DatabaseProviderAdapter` from `void/database-provider`.
+The command saves `DATABASE_URL` in `.env`. When authenticated with a linked Void project, it also updates the encrypted deployment URL; pass `--local-only` to skip that sync. `neon` is built in. Other adapters are project dependencies or local modules exporting a `DatabaseProviderAdapter` from `void/database-provider`.
 
 Provider-created credentials are never printed. For direct Cloudflare deploys, configure the same URL as a protected `DATABASE_URL` in the shell or CI environment that runs deploy.
 
@@ -986,11 +987,11 @@ void secret sync <file> [--project <name>]
 Bulk upload secrets from a dotenv file. Each `KEY=value` line in the file is uploaded as a secret.
 
 ```sh
-void secret sync .env.local       # uploads secrets from .env.local
-void secret sync .env.production  # uploads a specific file
+void secret sync .env             # validates and uploads declared server values
 ```
 
 Direct Cloudflare targets use Cloudflare's bulk-secret API. Existing remote secrets absent from the file are not pruned.
+Every entry must be a non-client key declared in `env.ts`, and its plaintext value must pass the schema before upload.
 
 ### `void secret delete`
 
@@ -1008,7 +1009,7 @@ Secret commands use the platform saved in `.void/project.json`. Hosted project r
 void env check [--remote]
 ```
 
-Validate `env.ts` against `.env` + `.env.production` (and, with `--remote`, also against the remote secret list). Exits non-zero if any required key is missing or invalid. Use in CI before deploy.
+Without `--remote`, validate `.env` plus the shell for local development. With `--remote`, validate build-shell client values and the remote server-secret names. Exits non-zero if a required key is missing or a readable value is invalid.
 
 ### `void env types`
 
@@ -1017,40 +1018,6 @@ void env types
 ```
 
 Regenerate `.void/env.d.ts` from `env.ts`. Normally happens automatically on dev server start and HMR; use this command after a fresh clone or to refresh stale types in non-dev contexts.
-
-### `void env example`
-
-```
-void env example [--force]
-```
-
-Generate or refresh a marker-delimited "void env" block inside `.env.example` at the project root, sourced from the registered `env.ts` schema. The block is grouped into `required`, `with defaults`, and `optional` sections, with enum members emitted as inline comments. Prefilled values are used for keys with a `.default(...)`.
-
-The command never overwrites the whole file — anything above or below the markers (custom CI tokens, build flags, etc.) is preserved verbatim:
-
-| State of `.env.example`                     | Behavior                                                                                                               |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| File doesn't exist                          | Writes a fresh file containing only the marker block.                                                                  |
-| Exists, contains both markers               | Replaces only the lines between (and including) the markers; everything else is preserved.                             |
-| Exists, no markers                          | Appends the block at the end (one blank line separator) and prints `appended void env block to existing .env.example`. |
-| Exists, only one of the two markers present | Hard error — fix the file (restore the missing marker or delete the file) and rerun.                                   |
-
-Pass `--force` to suppress the "appended block" notice for scripted runs.
-
-Example output:
-
-```ini
-# >>> void env: managed block — do not edit between markers <<<
-# Run `void env example` to refresh.
-# required
-STRIPE_KEY=
-# enum: development | production
-NODE_ENV=
-
-# with defaults
-PORT=3000
-# >>> end void env <<<
-```
 
 ::: tip Deploy validation
 `void deploy` runs the same schema validation automatically (with remote secrets) and refuses to upload if any required key is missing — no need to call `env check` separately when deploying.
