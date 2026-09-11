@@ -902,7 +902,7 @@ Add a custom domain to the saved target. Hosted Void projects print the DNS reco
 void domain delete <hostname> [--project <name>]
 ```
 
-Remove a custom domain from the saved target. For Cloudflare, this removes the matching `custom_domain` route and synchronizes triggers; if Cloudflare rejects the update, Void restores the exact previous local config.
+Remove a custom domain from the saved target. For Cloudflare, this removes the matching `custom_domain` route and synchronizes triggers. If Cloudflare rejects the update, Void restores the exact previous local config and immediately reapplies it remotely. If that second synchronization also fails, the CLI reports that remote route state may be partial instead of claiming a successful rollback.
 
 ### `void domain list`
 

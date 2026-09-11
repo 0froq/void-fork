@@ -396,8 +396,17 @@ export async function changeCloudflareDomain(
     await run(context, ['triggers', 'deploy', ...targetArgs(context)], { capture: false });
   } catch (error) {
     writeFileSync(before.configPath, original);
+    try {
+      await run(context, ['triggers', 'deploy', ...targetArgs(context)], { capture: false });
+    } catch (restoreError) {
+      throw new Error(
+        `Cloudflare rejected the domain trigger update and also rejected the automatic remote restore. ` +
+          `The local Wrangler config was restored, but remote route state may be partially applied. ` +
+          `${errorMessage(error)} Restore failed: ${errorMessage(restoreError)}`,
+      );
+    }
     throw new Error(
-      `Cloudflare rejected the domain trigger update; the local Wrangler config was restored. ${errorMessage(error)}`,
+      `Cloudflare rejected the domain trigger update; both the local config and remote triggers were restored. ${errorMessage(error)}`,
     );
   }
   return update;

@@ -288,7 +288,21 @@ describe('Cloudflare custom domains', () => {
     );
   });
 
-  it('syncs triggers and restores the exact config bytes on failure', async () => {
+  it('restores the exact local and remote config on trigger failure', async () => {
+    const root = project();
+    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
+    const runner = vi
+      .fn<CloudflareOperationRunner>()
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'not accepted' })
+      .mockReturnValueOnce(ok());
+    await expect(changeCloudflareDomain(root, 'app.example.com', 'add', runner)).rejects.toThrow(
+      'local config and remote triggers were restored',
+    );
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(before);
+    expect(runner).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports uncertain remote route state when automatic restore also fails', async () => {
     const root = project();
     const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
     const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue({
@@ -296,8 +310,9 @@ describe('Cloudflare custom domains', () => {
       stdout: '',
       stderr: 'not accepted',
     });
+
     await expect(changeCloudflareDomain(root, 'app.example.com', 'add', runner)).rejects.toThrow(
-      'local Wrangler config was restored',
+      'remote route state may be partially applied',
     );
     expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(before);
   });
