@@ -104,16 +104,17 @@ vp run dev:docs        # local docs dev server
 
 ### Project Structure
 
-| Path                | Purpose                                                           |
-| ------------------- | ----------------------------------------------------------------- |
-| `packages/void`     | Core Vite plugin + CLI                                            |
-| `packages/react`    | React framework adapter                                           |
-| `packages/vue`      | Vue framework adapter                                             |
-| `packages/svelte`   | Svelte 5 framework adapter                                        |
-| `packages/solid`    | SolidJS framework adapter                                         |
-| `platform/packages` | Hosted Void control plane, routing, proxy, logging, and dashboard |
-| `docs`              | Documentation (VitePress)                                         |
-| `playground/*`      | Test apps for local development                                   |
+| Path                   | Purpose                                                           |
+| ---------------------- | ----------------------------------------------------------------- |
+| `packages/void`        | Core Vite plugin + CLI                                            |
+| `packages/deploy-core` | Shared deploy contracts, artifacts, planning, and target boundary |
+| `packages/react`       | React framework adapter                                           |
+| `packages/vue`         | Vue framework adapter                                             |
+| `packages/svelte`      | Svelte 5 framework adapter                                        |
+| `packages/solid`       | SolidJS framework adapter                                         |
+| `platform/packages`    | Hosted Void control plane, routing, proxy, logging, and dashboard |
+| `docs`                 | Documentation (VitePress)                                         |
+| `playground/*`         | Test apps for local development                                   |
 
 Public SDK packages must not import from `platform/`. Hosted platform packages may depend on public or shared workspace packages.
 

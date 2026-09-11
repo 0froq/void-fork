@@ -73,7 +73,11 @@ src/
     validate.ts             # Destructive-op detection + pragma enforcement
   cli/
     cli.ts                  # CLI entry: `void deploy|link|login`
-    deploy.ts               # Orchestrator: build → collect/validate migrations → package → upload
+    deploy.ts               # Managed/native target dispatch and deployment orchestration
+    cloudflare-deploy/
+      classify.ts           # Fail-closed native app-shape classifier
+      config.ts             # Shared Wrangler JSON/JSONC config readers
+      execute.ts            # Verified final Wrangler upload executor
     project.ts              # Reads/creates .void/project.json (deploy platform + optional Void link)
     auth.ts                 # Token read/save + runLogin() (local server + browser OAuth)
     login.ts                # Login command UI (@clack/prompts)
