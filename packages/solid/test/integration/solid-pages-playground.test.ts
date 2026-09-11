@@ -35,6 +35,10 @@ afterAll(async () => {
 });
 
 function defineClientTests(getBase: () => string) {
+  describe.concurrent('shared client behavior', () => registerClientTests(getBase));
+}
+
+function registerClientTests(getBase: () => string) {
   let BASE: string;
   beforeAll(() => {
     BASE = getBase();
@@ -210,7 +214,7 @@ function defineClientTests(getBase: () => string) {
     }
   });
 
-  it('form submission adds user', async () => {
+  it.sequential('form submission adds user', async () => {
     const page = await newPage();
 
     try {
@@ -233,7 +237,7 @@ function defineClientTests(getBase: () => string) {
     }
   });
 
-  it('navigate to newly added user detail', async () => {
+  it.sequential('navigate to newly added user detail', async () => {
     const page = await newPage();
 
     try {
@@ -461,6 +465,10 @@ function defineClientTests(getBase: () => string) {
 }
 
 function defineIslandTests(getBase: () => string) {
+  describe.concurrent('shared island behavior', () => registerIslandTests(getBase));
+}
+
+function registerIslandTests(getBase: () => string) {
   let BASE: string;
   beforeAll(() => {
     BASE = getBase();
