@@ -42,6 +42,7 @@ describe('GitHub Actions deployment workflows', () => {
     const yaml = getWorkflowYaml('/project', 'npm', null, 'cloudflare');
     expect(yaml).toContain('name: Deploy to Cloudflare');
     expect(yaml).toContain('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}');
+    expect(yaml).toContain('DATABASE_URL: ${{ secrets.DATABASE_URL }}');
     expect(yaml).toContain('npx void deploy --platform cloudflare');
     expect(yaml).toContain('contents: read');
     expect(yaml).not.toContain('id-token: write');

@@ -2117,6 +2117,8 @@ ${install}
         env:
           # Add this scoped token at Settings → Secrets and variables → Actions.
           CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Required only for PostgreSQL/MySQL provisioning and migrations.
+          DATABASE_URL: \${{ secrets.DATABASE_URL }}
         run: ${runner} deploy --platform cloudflare
 `;
   }
@@ -2187,7 +2189,8 @@ function setupGithubActions(
   if (platform === 'cloudflare') {
     note(
       'Pushes to main will deploy through the same readiness-gated Cloudflare path.\n' +
-        'Add a scoped CLOUDFLARE_API_TOKEN repository secret; keep account_id in wrangler.jsonc.',
+        'Add a scoped CLOUDFLARE_API_TOKEN repository secret; PostgreSQL/MySQL apps also need DATABASE_URL.\n' +
+        'Keep account_id in wrangler.jsonc.',
       'GitHub Actions Cloudflare deploy',
     );
   } else if (slug) {
