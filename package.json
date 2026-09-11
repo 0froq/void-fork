@@ -5,8 +5,11 @@
     "build": "vp run --filter './packages/**' --parallel build",
     "build:core": "vp run --filter ./packages/void build",
     "build:docs": "vp run --filter ./docs build",
+    "build:platform": "vp run --filter './platform/packages/**' build",
     "check": "vp run -r --parallel typecheck",
+    "check:platform": "vp run --filter './platform/**' --parallel typecheck",
     "dev:docs": "vp run --filter ./docs dev",
+    "dev:platform": "vp run --filter @voidcloud/platform dev",
     "fmt": "vp fmt --write .",
     "lint": "vp lint",
     "prepare": "vp config",
@@ -15,6 +18,7 @@
     "test:metaframeworks": "vp test run --project metaframeworks",
     "test:pages:react-vue": "vp test run --project pages-react-vue",
     "test:pages:svelte-solid": "vp test run --project pages-svelte-solid",
+    "test:platform": "vp test run --project 'platform-*'",
     "test:unit": "vp test run --project unit"
   },
   "devDependencies": {

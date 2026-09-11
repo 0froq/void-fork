@@ -41,6 +41,7 @@ vp run build                        # Build all packages
 vp run build:all                    # Build packages and playgrounds
 vp run build:core                   # Build only the core plugin
 vp test run                         # Run tests (unit + integration tests)
+vpr test:all                        # Format, lint, build, typecheck, and run all SDK/platform tests
 vp test run packages/void           # Only test the core plugin
 vp lint                             # Oxlint through Vite+
 vp fmt                              # Oxfmt through Vite+
@@ -60,7 +61,10 @@ pnpm workspaces managed through Vite+. Shared dependency versions use the **pnpm
 | [`packages/svelte`](./packages/svelte/README.md) | `@void/svelte` | Svelte 5 framework adapter for Pages mode (SSR, Link, useForm) |
 | [`packages/solid`](./packages/solid/README.md)   | `@void/solid`  | SolidJS framework adapter for Pages mode (SSR, Link, useForm)  |
 | [`docs`](./docs)                                 | (private)      | Documentation site (VitePress)                                 |
+| [`platform`](./platform/README.md)               | (private)      | Hosted control plane, routing, proxy, logs, and dashboard      |
 | `playground/*`                                   | (private)      | local apps for testing                                         |
+
+Platform packages live under `platform/packages/*` and may depend on public/shared root packages. Public SDK packages under `packages/*` must not import from `platform/`.
 
 ## `void` Overview
 

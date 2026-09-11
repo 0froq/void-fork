@@ -1,4 +1,5 @@
 import { availableParallelism } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite-plus';
 
 const maxWorkers = process.env.CI ? 2 : Math.max(2, Math.floor(availableParallelism() * 0.75));
@@ -19,14 +20,29 @@ const ciTimeoutScale = process.platform === 'win32' ? 3 : 1;
 const testTimeout = 120_000 * ciTimeoutScale;
 const hookTimeout = 120_000 * ciTimeoutScale;
 
+const platformAlias = {
+  // cloudflare:workers is only available in the Workers runtime.
+  'cloudflare:workers': fileURLToPath(
+    new URL('platform/packages/api/test/__mocks__/cloudflare-workers.ts', import.meta.url),
+  ),
+  'vite-plus/test': fileURLToPath(
+    new URL('node_modules/vite-plus/dist/test/index.js', import.meta.url),
+  ),
+};
+
 export default defineConfig({
   run: {
     tasks: {
       'build:all': {
-        command: "vp run build && vp run --filter './playground/**' --parallel build",
+        command:
+          "vp run build && vp run --filter './platform/packages/**' build && vp run --filter './playground/**' --parallel build",
+      },
+      'lint:platform': {
+        command: 'vp lint platform --type-aware --tsconfig platform/tsconfig.json',
       },
       'test:all': {
-        command: 'vp check && vp run build:all && vp run check && vp test run',
+        command:
+          'vp fmt --check && vp lint && vp run lint:platform && vp run build:all && vp run check && vp test run',
         // `vp run` passes ONLY the env vars a task declares to that task — not the full environment.
         // Without this, the gated live Cloudflare e2e's credentials never reach `vp test run`, so it
         // skips even when the CI job injects them. `untrackedEnv` forwards them without folding them
@@ -80,7 +96,7 @@ export default defineConfig({
         specifier: 'eslint-plugin-react-hooks',
       },
     ],
-    plugins: ['typescript', 'import', 'react', 'unicorn', 'vitest', 'node'],
+    plugins: ['typescript', 'import', 'react', 'unicorn', 'vitest', 'node', 'jsdoc'],
     ignorePatterns: [
       '**/node_modules/**',
       '**/dist/**',
@@ -164,6 +180,14 @@ export default defineConfig({
         files: ['**/*.vue'],
         rules: {
           'no-undef': 'off',
+        },
+      },
+      {
+        files: ['platform/**/*'],
+        rules: {
+          // The hosted platform historically used Node's native path module.
+          // Keep its existing lint contract while shared SDK code uses pathslash.
+          'no-restricted-imports': 'off',
         },
       },
       {
@@ -314,6 +338,7 @@ export default defineConfig({
       typeCheck: false,
     },
   },
+  resolve: { alias: platformAlias },
   test: {
     silent: 'passed-only',
     projects: [
@@ -324,6 +349,26 @@ export default defineConfig({
           // Share one worker pool with independent integrations. This lets long integration
           // startups begin immediately while short unit files fill otherwise-idle workers.
           sequence: { groupOrder: 2 },
+          maxWorkers,
+        },
+      },
+      {
+        resolve: { alias: platformAlias },
+        test: {
+          name: 'platform-unit',
+          include: ['platform/packages/*/test/**/*.test.ts'],
+          exclude: ['platform/packages/api/test/integration/**'],
+          maxWorkers,
+        },
+      },
+      {
+        resolve: { alias: platformAlias },
+        test: {
+          name: 'platform-api-integration',
+          include: ['platform/packages/api/test/integration/**/*.test.ts'],
+          globalSetup: ['platform/packages/api/test/integration/global-setup.ts'],
+          setupFiles: ['platform/packages/api/test/integration/setup.ts'],
+          ...(process.env.VOID_TEST_DATABASE_URL ? { fileParallelism: false } : {}),
           maxWorkers,
         },
       },
