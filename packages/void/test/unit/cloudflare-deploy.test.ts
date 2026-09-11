@@ -6266,6 +6266,26 @@ describe('runCloudflareDeploy — schema probe runs under the build NODE_ENV', (
       }
     }
   });
+
+  it('marks both schema probes and the build as a Cloudflare deploy build', async () => {
+    const root = d1Project(PROVISIONED_D1);
+    let probeMarker: string | undefined;
+    let buildMarker: string | undefined;
+    const { deps } = harness({
+      resolveSchemaFacts: ((_input, env) => {
+        probeMarker = env.VOID_CLOUDFLARE_DEPLOY_BUILD;
+        return okSchemaFacts();
+      }) as CloudflareDeployDeps['resolveSchemaFacts'],
+      runBuild: (env) => {
+        buildMarker = env.VOID_CLOUDFLARE_DEPLOY_BUILD;
+      },
+    });
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(probeMarker).toBe('1');
+    expect(buildMarker).toBe('1');
+  });
 });
 
 // ---------------------------------------------------------------------------

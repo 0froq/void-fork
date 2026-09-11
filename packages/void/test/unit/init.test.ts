@@ -2040,6 +2040,8 @@ export default config;
       expect(gitignore).toContain('node_modules');
       expect(gitignore).toContain('.void');
       expect(gitignore).toContain('.wrangler');
+      expect(gitignore).toContain('.env.local');
+      expect(gitignore).toContain('.env.*.local');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -2056,6 +2058,8 @@ export default config;
       expect(gitignore).toContain('custom-cache');
       expect(gitignore).toContain('.void');
       expect(gitignore).toContain('.wrangler');
+      expect(gitignore).toContain('.env.local');
+      expect(gitignore).toContain('.env.*.local');
       expect(gitignore.match(/^node_modules$/gm)).toHaveLength(1);
     } finally {
       rmSync(root, { recursive: true, force: true });

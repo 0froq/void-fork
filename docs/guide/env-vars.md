@@ -114,17 +114,13 @@ Whether a file's values ship depends on which deploy path you use:
 | File                    | Loaded in dev | Shipped by `void deploy` | Shipped by `--backend cloudflare` |
 | ----------------------- | ------------- | ------------------------ | --------------------------------- |
 | `.env`                  | yes           | yes (`plain_text`)       | yes (worker `vars`)               |
-| `.env.local`            | yes           | no                       | **yes** (worker `vars`)           |
+| `.env.local`            | yes           | no                       | no                                |
 | `.env.production`       | yes           | yes (`plain_text`)       | yes (worker `vars`)               |
-| `.env.production.local` | yes           | no                       | **yes** (worker `vars`)           |
+| `.env.production.local` | yes           | no                       | no                                |
 
 `.local` files are gitignored by convention — use them for secrets you don't want in source control.
 
-::: warning `.local` files are not deploy-excluded on `--backend cloudflare`
-Managed `void deploy` reads only `.env` and `.env.production`, so a `.local` file keeps secrets off the platform. The self-host `void deploy --backend cloudflare` path instead runs Vite's production env loading, which reads all four files and bakes them into the worker's `vars` as plaintext. A value that is also `export`ed in the shell with the same value is stripped back out, so this bites hardest in CI, where the variable usually only exists in the file.
-
-On that path, keep real secrets out of every `.env*` file and use `wrangler secret put <NAME>` instead. See [Cloudflare deploy](/integrations/cloudflare).
-:::
+Both deploy paths read only `.env` and `.env.production`. The direct Cloudflare backend excludes `.env.local` and `.env.production.local` from the generated Worker `vars`; outside that deploy path, Void retains Vite's normal dotenv loading behavior. Values in the two portable files still ship as plaintext, so keep real secrets in platform secrets or `wrangler secret put <NAME>`. See [Cloudflare deploy](/integrations/cloudflare).
 
 ### Dotenv variable expansion
 

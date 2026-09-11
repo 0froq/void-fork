@@ -25,6 +25,8 @@ describe('playground/kitchen-sink build', () => {
     const pg = playground.root;
     dist = join(pg, 'dist');
     const envProductionPath = join(pg, '.env.production');
+    const envLocalPath = join(pg, '.env.local');
+    const envProductionLocalPath = join(pg, '.env.production.local');
 
     rmSync(join(pg, 'dist'), { recursive: true, force: true });
     rmSync(join(pg, '.void'), { recursive: true, force: true });
@@ -44,12 +46,26 @@ describe('playground/kitchen-sink build', () => {
         'LEGIT_USER_VAR=kept',
       ].join('\n') + '\n',
     );
+    writeFileSync(
+      envLocalPath,
+      ['LOCAL_ONLY_VAR=must-not-ship', 'LEGIT_USER_VAR=local-override'].join('\n') + '\n',
+    );
+    writeFileSync(
+      envProductionLocalPath,
+      ['PRODUCTION_LOCAL_ONLY_VAR=must-not-ship', 'LEGIT_USER_VAR=production-local-override'].join(
+        '\n',
+      ) + '\n',
+    );
 
     const result = spawn.sync('vp', ['run', '--filter', `./${playground.workspacePath}`, 'build'], {
       cwd: ROOT,
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env, VOID_TOKEN: 'test-leak-token-do-not-use' },
+      env: {
+        ...process.env,
+        VOID_TOKEN: 'test-leak-token-do-not-use',
+        VOID_CLOUDFLARE_DEPLOY_BUILD: '1',
+      },
     });
 
     buildOutput = `${result.stdout ?? ''}${result.stderr ?? ''}`;
@@ -107,6 +123,15 @@ describe('playground/kitchen-sink build', () => {
   it('keeps non-internal .env.production vars in dist/ssr/wrangler.json', () => {
     const wranglerConfig = JSON.parse(readFileSync(join(dist, 'ssr', 'wrangler.json'), 'utf-8'));
     const vars = (wranglerConfig.vars ?? {}) as Record<string, unknown>;
+    expect(vars.LEGIT_USER_VAR).toBe('kept');
+  });
+
+  it('excludes local dotenv files from Cloudflare deploy worker vars', () => {
+    const wranglerConfig = JSON.parse(readFileSync(join(dist, 'ssr', 'wrangler.json'), 'utf-8'));
+    const vars = (wranglerConfig.vars ?? {}) as Record<string, unknown>;
+    expect(vars.LOCAL_ONLY_VAR).toBeUndefined();
+    expect(vars.PRODUCTION_LOCAL_ONLY_VAR).toBeUndefined();
+    // A local override must not replace the portable production value.
     expect(vars.LEGIT_USER_VAR).toBe('kept');
   });
 

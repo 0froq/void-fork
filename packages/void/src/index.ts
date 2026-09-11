@@ -71,7 +71,13 @@ import { isRouteEnabledForEnvironment, type RouteEnvironment } from './router/pa
 import { scanMiddlewareSync, scanRoutePatternsSync } from './router/scan.ts';
 import { scanWebSocketRoutesSync } from './router/websocket.ts';
 import { SANDBOX_MIGRATION_TAG, isSandboxEnabled, resolveSandboxConfig } from './sandbox/config.ts';
-import { filterLoadedEnv, resolveRemoteMode, stripInternalEnvKeys } from './shared/env.ts';
+import { mergeAndExpand, parseDotenvFile } from './shared/dotenv.ts';
+import {
+  CLOUDFLARE_DEPLOY_BUILD_ENV,
+  filterLoadedEnv,
+  resolveRemoteMode,
+  stripInternalEnvKeys,
+} from './shared/env.ts';
 import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from './shared/proxy.ts';
 import { validateSsrEntry } from './ssr/entry.ts';
 
@@ -1348,12 +1354,34 @@ export function voidPlugin(options?: {
           : undefined;
       voidDeployBuildConfig = { mode, envDir: rawEnvDir };
       const envDir = rawEnvDir ? join(root, rawEnvDir) : root;
-      // loadEnv with prefix "" returns .env file vars AND all process.env vars.
-      // filterLoadedEnv strips shell pollution (PATH, HOME, etc.) so only
-      // .env-file vars reach worker bindings. stripInternalEnvKeys then
-      // removes any internal Void keys a user may have set in their .env
-      // files, so they can't hijack credential-shaped worker bindings.
-      const filtered = filterLoadedEnv(loadEnv(mode, envDir, ''));
+      // Direct Cloudflare deploys must never turn machine-local dotenv files
+      // into plaintext Worker vars. Rebuild the deploy env from the two
+      // portable files instead of trying to delete `.local` keys from Vite's
+      // already-merged result: a key overridden by `.env.production.local`
+      // must fall back to its `.env.production` value, not disappear or retain
+      // the local override. Development and ordinary Vite builds keep Vite's
+      // standard four-file loading for compatibility.
+      let filtered: Record<string, string>;
+      if (process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] === '1') {
+        const deployFiles = ['.env', `.env.${mode}`];
+        filtered = mergeAndExpand(
+          deployFiles.map((file) => parseDotenvFile(join(envDir, file), { expand: false })),
+          { onWarn: (message) => voidWarn(message) },
+        );
+        // Vite gives the shell precedence over dotenv, after which
+        // filterLoadedEnv removes those shell-sourced keys. Preserve that
+        // invariant so credentials exported for the CLI never become vars.
+        for (const key of Object.keys(process.env)) {
+          delete filtered[key];
+        }
+      } else {
+        // loadEnv with prefix "" returns .env file vars AND all process.env
+        // vars. filterLoadedEnv strips shell pollution (PATH, HOME, etc.) so
+        // only .env-file vars reach worker bindings.
+        filtered = filterLoadedEnv(loadEnv(mode, envDir, ''));
+      }
+      // Remove any internal Void keys a user may have set in portable env
+      // files so they cannot hijack credential-shaped Worker bindings.
       const { sanitized: env, stripped } = stripInternalEnvKeys(filtered);
       if (stripped.length > 0) {
         voidWarn(

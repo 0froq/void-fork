@@ -64,7 +64,11 @@ import {
   resolveSandboxConfig,
 } from '../sandbox/config.ts';
 import { mergeAndExpand, parseDotenvFile, scanWranglerDotenvKeys } from '../shared/dotenv.ts';
-import { resolveRemoteMode, stripInternalEnvKeys } from '../shared/env.ts';
+import {
+  CLOUDFLARE_DEPLOY_BUILD_ENV,
+  resolveRemoteMode,
+  stripInternalEnvKeys,
+} from '../shared/env.ts';
 import { validateSsrEntry } from '../ssr/entry.ts';
 import { getApiUrl, getToken, getTokenSource } from './auth.ts';
 import {
@@ -1386,6 +1390,12 @@ function scrubWranglerAuthCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv
  */
 function buildSchemaProbeEnv(accountId: string, apiBaseUrl: string): NodeJS.ProcessEnv {
   const env = scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl));
+  // Match the Cloudflare deploy build's dotenv boundary. Besides keeping a
+  // schema conditioned on this internal marker consistent with the build,
+  // this prevents an ambient case variant from shadowing the pinned value on
+  // Windows.
+  requireProvisionModule().deleteEnvVarCaseAware(env, CLOUDFLARE_DEPLOY_BUILD_ENV);
+  env[CLOUDFLARE_DEPLOY_BUILD_ENV] = '1';
   // Scrub any ambient spelling first (case-aware on win32) so it cannot shadow the pin.
   requireProvisionModule().deleteEnvVarCaseAware(env, 'NODE_ENV');
   env.NODE_ENV = 'production';
@@ -4050,6 +4060,11 @@ export async function runCloudflareDeploy(
   // the PARENT holds, which the project never had.
   const buildChildEnv = scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl));
   delete buildChildEnv.VOID_DEPLOY_PROJECT_ID;
+  // Tell void:env to build Worker vars from portable production dotenv files
+  // only. Outside this deploy path Vite keeps its standard dotenv behavior,
+  // but local files cannot be serialized into the artifact this command uploads.
+  requireProvisionModule().deleteEnvVarCaseAware(buildChildEnv, CLOUDFLARE_DEPLOY_BUILD_ENV);
+  buildChildEnv[CLOUDFLARE_DEPLOY_BUILD_ENV] = '1';
   // Pin NODE_ENV=production for the build too, so the build and the env-schema probes evaluate
   // env.ts under the SAME environment. `vite build` only DEFAULTS NODE_ENV to production when it
   // is unset (`if (!isNodeEnvSet) process.env.NODE_ENV = defaultNodeEnv`), so an ambient
