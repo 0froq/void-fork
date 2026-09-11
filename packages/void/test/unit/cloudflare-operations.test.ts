@@ -6,12 +6,16 @@ import {
   activateCloudflareExistingVersion,
   changeCloudflareDomain,
   deleteCloudflareSecret,
+  executeCloudflareD1Sql,
+  applyCloudflareD1Migrations,
   listCloudflareDomains,
   listCloudflareSecrets,
   parseActiveVersionId,
   parseCloudflareVersions,
   putCloudflareSecret,
   readCloudflareWorkerStatus,
+  readCloudflareD1Migrations,
+  resolveCloudflareD1Context,
   syncCloudflareSecrets,
   tailCloudflareWorker,
   type CloudflareOperationContext,
@@ -201,6 +205,76 @@ describe('Cloudflare version operations', () => {
         '--status',
         'error',
       ],
+      { capture: false, input: undefined },
+    ]);
+  });
+});
+
+describe('Cloudflare D1 operations', () => {
+  it('resolves the configured migration identity and executes remote SQL as JSON', async () => {
+    const root = project(`{
+  "name": "my-worker",
+  "account_id": "account-1",
+  "d1_databases": [{
+    "binding": "DATA",
+    "database_name": "my-data",
+    "database_id": "11111111-2222-3333-4444-555555555555",
+    "migrations_dir": "db/custom",
+    "migrations_table": "custom_migrations"
+  }]
+}\n`);
+    const runner = vi
+      .fn<CloudflareOperationRunner>()
+      .mockReturnValue(ok(JSON.stringify([{ success: true, results: [{ id: 1, name: 'Ada' }] }])));
+    const ctx = resolveCloudflareD1Context(root, 'DATA', runner);
+    expect(ctx).toMatchObject({
+      binding: 'DATA',
+      migrateToken: 'my-data',
+      migrationsDir: 'db/custom',
+      migrationsTable: 'custom_migrations',
+    });
+    await expect(executeCloudflareD1Sql(ctx, 'select * from users')).resolves.toEqual([
+      { id: 1, name: 'Ada' },
+    ]);
+    expect(runner.mock.calls[0][0]).toContain('--remote');
+    expect(runner.mock.calls[0][0]).toContain('--json');
+  });
+
+  it('reads applied migration names from a custom tracking table', async () => {
+    const runner = vi
+      .fn<CloudflareOperationRunner>()
+      .mockReturnValue(
+        ok(
+          JSON.stringify([
+            { success: true, results: [{ name: '0000_init.sql' }, { name: '0001_more.sql' }] },
+          ]),
+        ),
+      );
+    const ctx = {
+      operation: context(runner),
+      binding: 'DB',
+      migrateToken: 'db-name',
+      migrationsDir: 'db/migrations',
+      migrationsTable: 'custom"table',
+    };
+    await expect(readCloudflareD1Migrations(ctx)).resolves.toEqual([
+      '0000_init.sql',
+      '0001_more.sql',
+    ]);
+    expect(runner.mock.calls[0][0]).toContain('SELECT name FROM "custom""table" ORDER BY name');
+  });
+
+  it('applies migrations through the exact configured D1 target', async () => {
+    const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue(ok());
+    await applyCloudflareD1Migrations({
+      operation: context(runner),
+      binding: 'DB',
+      migrateToken: 'db-name',
+      migrationsDir: 'db/migrations',
+      migrationsTable: 'd1_migrations',
+    });
+    expect(runner.mock.calls[0]).toEqual([
+      ['d1', 'migrations', 'apply', 'db-name', '--remote', '-c', '/app/wrangler.jsonc', '--env='],
       { capture: false, input: undefined },
     ]);
   });

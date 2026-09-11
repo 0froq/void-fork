@@ -4,7 +4,9 @@ import {
   encodeCloudflareVersionMessage,
   parseCloudflareVersionMessage,
   parseRootWranglerConfig,
+  readBindingFieldPresence,
   readWranglerTopLevelString,
+  resolveD1MigrateTarget,
   type CloudflareVersionMetadata,
 } from '@void/deploy-cloudflare';
 import { join } from 'pathslash';
@@ -53,6 +55,14 @@ export type CloudflareWorkerStatus = {
   workerName: string;
   activeVersionId: string | null;
   versions: Array<CloudflareWorkerVersion>;
+};
+
+export type CloudflareD1Context = {
+  operation: CloudflareOperationContext;
+  binding: string;
+  migrateToken: string;
+  migrationsDir: string;
+  migrationsTable: string;
 };
 
 export function resolveCloudflareOperationContext(
@@ -133,6 +143,117 @@ export async function deleteCloudflareSecret(
   name: string,
 ): Promise<void> {
   await run(context, ['secret', 'delete', name, ...targetArgs(context)]);
+}
+
+export function resolveCloudflareD1Context(
+  root: string,
+  binding: string,
+  runner?: CloudflareOperationRunner,
+): CloudflareD1Context {
+  const operation = resolveCloudflareOperationContext(root, runner);
+  const config = parseRootWranglerConfig(operation.configPath);
+  const target = resolveD1MigrateTarget(config, binding);
+  if (!target.ok) {
+    throw new Error(`Cannot resolve D1 binding ${binding}: ${target.reason}.`);
+  }
+  const migrationsDir = readBindingFieldPresence(config, 'd1_databases', binding, 'migrations_dir');
+  const migrationsTable = readBindingFieldPresence(
+    config,
+    'd1_databases',
+    binding,
+    'migrations_table',
+  );
+  if (
+    migrationsDir.present &&
+    (typeof migrationsDir.value !== 'string' || migrationsDir.value.length === 0)
+  ) {
+    throw new Error(`D1 binding ${binding} has an invalid migrations_dir.`);
+  }
+  if (
+    migrationsTable.present &&
+    (typeof migrationsTable.value !== 'string' || migrationsTable.value.length === 0)
+  ) {
+    throw new Error(`D1 binding ${binding} has an invalid migrations_table.`);
+  }
+  return {
+    operation,
+    binding,
+    migrateToken: target.token,
+    migrationsDir: migrationsDir.present ? (migrationsDir.value as string) : 'db/migrations',
+    migrationsTable: migrationsTable.present ? (migrationsTable.value as string) : 'd1_migrations',
+  };
+}
+
+export async function executeCloudflareD1Sql(
+  context: CloudflareD1Context,
+  sql: string,
+): Promise<Array<Record<string, unknown>>> {
+  const result = await run(context.operation, [
+    'd1',
+    'execute',
+    context.migrateToken,
+    '--remote',
+    '--command',
+    sql,
+    '--json',
+    '-c',
+    context.operation.configPath,
+    '--env=',
+  ]);
+  const parsed = parseJson(result.stdout, 'Cloudflare D1 execute');
+  if (!Array.isArray(parsed)) {
+    throw new Error('Cloudflare D1 execute returned an unexpected response.');
+  }
+  const rows: Array<Record<string, unknown>> = [];
+  for (const item of parsed) {
+    if (typeof item !== 'object' || item === null) {
+      throw new Error('Cloudflare D1 execute returned a malformed result.');
+    }
+    const resultRows = (item as Record<string, unknown>).results;
+    if (!Array.isArray(resultRows)) {
+      continue;
+    }
+    for (const row of resultRows) {
+      if (typeof row === 'object' && row !== null && !Array.isArray(row)) {
+        rows.push(row as Record<string, unknown>);
+      }
+    }
+  }
+  return rows;
+}
+
+export async function readCloudflareD1Migrations(
+  context: CloudflareD1Context,
+): Promise<Array<string>> {
+  const table = context.migrationsTable.replace(/"/g, '""');
+  try {
+    const rows = await executeCloudflareD1Sql(context, `SELECT name FROM "${table}" ORDER BY name`);
+    return rows
+      .map((row) => (typeof row.name === 'string' ? row.name : null))
+      .filter((name): name is string => name !== null);
+  } catch (error) {
+    if (/no such table/i.test(errorMessage(error))) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export async function applyCloudflareD1Migrations(context: CloudflareD1Context): Promise<void> {
+  await run(
+    context.operation,
+    [
+      'd1',
+      'migrations',
+      'apply',
+      context.migrateToken,
+      '--remote',
+      '-c',
+      context.operation.configPath,
+      '--env=',
+    ],
+    { capture: false },
+  );
 }
 
 export async function readCloudflareWorkerStatus(
