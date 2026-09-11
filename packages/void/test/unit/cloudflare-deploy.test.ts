@@ -1284,6 +1284,34 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(wranglerArgs.at(-1)).toContain(join(root, 'wrangler.jsonc'));
   });
 
+  it('rejects a static build that rewrites the root Wrangler config', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'viteapp', dependencies: { vite: '6.0.0' } }),
+      'void.json': JSON.stringify({}),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
+      'index.html': '<!doctype html><div id="app"></div>',
+    });
+    const { deps, trace, wranglerArgs, exitCalls } = harness({
+      runStaticBuild: () => {
+        trace.push('static-build');
+        mkdirSync(join(root, 'dist'), { recursive: true });
+        writeFileSync(join(root, 'dist/index.html'), '<h1>Built</h1>');
+        writeFileSync(
+          join(root, 'wrangler.jsonc'),
+          JSON.stringify({ account_id: 'acc123', services: [{ binding: 'INJECTED' }] }),
+        );
+      },
+    });
+
+    await expect(
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    expect(exitCalls).toEqual([1]);
+    expect(trace).toEqual(['wrangler:whoami', 'static-build']);
+    expect(wranglerArgs.some((args) => args[0] === 'deploy')).toBe(false);
+  });
+
   it('rejects a bare --spa deploy before any account op', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'app' }),

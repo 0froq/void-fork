@@ -5140,6 +5140,7 @@ async function runCloudflareStaticDeploy(
   const runWrangler = deps.runWrangler ?? createDeployWranglerRunner(root, accountId, apiBaseUrl);
   const hashUploader = deps.hashWranglerUploader ?? hashWranglerUploader;
   const uploaderHash = hashUploader(root);
+  const rootConfigBeforeBuild = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
   const uploaderIsPinned = (): boolean => {
     const result = assertWranglerUploaderUnchanged(uploaderHash, hashUploader(root));
     if (!result.ok) {
@@ -5188,6 +5189,16 @@ async function runCloudflareStaticDeploy(
     return exit(1);
   }
   if (!uploaderIsPinned()) {
+    return exit(1);
+  }
+  const rootConfigAfterBuild = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
+  if (rootConfigAfterBuild !== rootConfigBeforeBuild) {
+    log.error(
+      [
+        'deploy: the root Wrangler config changed during the static build.',
+        'Refusing to upload a config rewritten by project build code. Restore the config and retry.',
+      ].join('\n'),
+    );
     return exit(1);
   }
 
@@ -5256,7 +5267,7 @@ const cloudflareDeployTarget: RunDeployTargetAdapter = {
   target: 'cloudflare',
   capabilities: {
     managedProjects: false,
-    skipBuild: false,
+    skipBuild: true,
     appTypes: {
       void: 'supported',
       spa: 'supported',
