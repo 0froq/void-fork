@@ -140,6 +140,7 @@ export default defineConfig({
     clean: true,
     plugins: [stripUseAsmPlugin(), injectWorkersTypesReferencePlugin()],
     deps: {
+      resolveDepSubpath: true,
       neverBundle: [
         // This module is augmented by users, keep it as external so tsdown does not rewrite it.
         'void/routes',

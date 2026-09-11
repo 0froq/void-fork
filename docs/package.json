@@ -9,7 +9,7 @@
   },
   "devDependencies": {
     "@iconify/vue": "5.0.1",
-    "@voidzero-dev/vitepress-theme": "^4.8.4",
+    "@voidzero-dev/vitepress-theme": "catalog:",
     "oxc-minify": "^0.138.0",
     "reka-ui": "2.10.1",
     "vitepress": "2.0.0-alpha.16",

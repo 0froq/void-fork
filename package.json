@@ -24,8 +24,8 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "playwright": "^1.61.1",
     "rolldown": "^1.1.4",
-    "vite-plus": "catalog:",
-    "vitest": "catalog:"
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   },
   "packageManager": "pnpm@11.1.2"
 }
