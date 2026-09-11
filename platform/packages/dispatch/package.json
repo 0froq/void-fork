@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@void/deploy-core": "workspace:*",
+    "@void/edge": "workspace:*",
     "@voidcloud/isr-shared": "workspace:*"
   },
   "devDependencies": {
