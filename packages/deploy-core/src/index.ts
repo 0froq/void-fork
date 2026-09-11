@@ -169,3 +169,8 @@ export {
   MAX_ROUTING_RULES,
   validateManifestShape,
 } from './validate.ts';
+export {
+  createDeployResourcePlan,
+  type DeployResource,
+  type DeployResourcePlan,
+} from './resource-plan.ts';
