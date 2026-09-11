@@ -1,0 +1,259 @@
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'pathslash';
+import { describe, expect, it, vi } from 'vite-plus/test';
+import {
+  activateCloudflareExistingVersion,
+  changeCloudflareDomain,
+  deleteCloudflareSecret,
+  listCloudflareDomains,
+  listCloudflareSecrets,
+  parseActiveVersionId,
+  parseCloudflareVersions,
+  putCloudflareSecret,
+  readCloudflareWorkerStatus,
+  syncCloudflareSecrets,
+  tailCloudflareWorker,
+  type CloudflareOperationContext,
+  type CloudflareOperationRunner,
+} from '../../src/cli/cloudflare-operations.ts';
+import { readWranglerCustomDomains, updateWranglerCustomDomain } from '../../src/cli/wrangler.ts';
+
+const ok = (stdout = '') => ({ status: 0, stdout, stderr: '', signal: null, error: null });
+
+function context(runWrangler: CloudflareOperationRunner): CloudflareOperationContext {
+  return {
+    accountId: 'account-1',
+    configPath: '/app/wrangler.jsonc',
+    workerName: 'my-worker',
+    runWrangler,
+  };
+}
+
+function project(config?: string): string {
+  const root = mkdtempSync(join(tmpdir(), 'void-cf-operations-'));
+  writeFileSync(
+    join(root, 'wrangler.jsonc'),
+    config ??
+      '{\n  "name": "my-worker",\n  "account_id": "account-1",\n  "compatibility_date": "2026-02-24"\n}\n',
+  );
+  return root;
+}
+
+describe('Cloudflare operational parsing', () => {
+  it('reads active traffic and Void migration metadata', () => {
+    expect(
+      parseActiveVersionId(
+        JSON.stringify({
+          versions: [
+            { version_id: 'canary', percentage: 10 },
+            { version_id: 'active', percentage: 100 },
+          ],
+        }),
+      ),
+    ).toBe('active');
+    expect(
+      parseCloudflareVersions(
+        JSON.stringify([
+          {
+            id: 'version-1',
+            metadata: { created_on: '2026-09-11T00:00:00.000Z' },
+            annotations: {
+              'workers/message': 'void:{"schema":1,"migrations":["0000_init.sql"]}',
+            },
+          },
+        ]),
+      ),
+    ).toEqual([
+      {
+        id: 'version-1',
+        createdAt: '2026-09-11T00:00:00.000Z',
+        message: 'void:{"schema":1,"migrations":["0000_init.sql"]}',
+        metadata: { schema: 1, migrations: ['0000_init.sql'] },
+      },
+    ]);
+  });
+
+  it('fails closed on malformed Wrangler JSON', () => {
+    expect(() => parseCloudflareVersions('{}')).toThrow('unexpected response');
+    expect(() => parseActiveVersionId('{')).toThrow('did not return valid JSON');
+  });
+});
+
+describe('Cloudflare secret operations', () => {
+  it('lists only secret names and sorts them', async () => {
+    const runner = vi
+      .fn<CloudflareOperationRunner>()
+      .mockReturnValue(
+        ok(JSON.stringify([{ name: 'ZED', type: 'secret_text' }, { name: 'ALPHA' }])),
+      );
+    await expect(listCloudflareSecrets(context(runner))).resolves.toEqual(['ALPHA', 'ZED']);
+    expect(runner).toHaveBeenCalledWith(
+      [
+        'secret',
+        'list',
+        '-c',
+        '/app/wrangler.jsonc',
+        '--env=',
+        '--name',
+        'my-worker',
+        '--format',
+        'json',
+      ],
+      { capture: true, input: undefined },
+    );
+  });
+
+  it('streams put and bulk values over stdin, never argv', async () => {
+    const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue(ok());
+    const ctx = context(runner);
+    await putCloudflareSecret(ctx, 'API_KEY', 'super-secret');
+    await syncCloudflareSecrets(ctx, [
+      { name: 'ONE', value: 'first' },
+      { name: 'TWO', value: 'second' },
+    ]);
+    const putCall = runner.mock.calls[0];
+    expect(putCall[0]).not.toContain('super-secret');
+    expect(putCall[1].input).toBe('super-secret');
+    const bulkCall = runner.mock.calls[1];
+    expect(bulkCall[0]).not.toContain('first');
+    expect(JSON.parse(bulkCall[1].input!)).toEqual({ ONE: 'first', TWO: 'second' });
+  });
+
+  it('uses Wrangler delete only after the user invokes delete', async () => {
+    const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue(ok());
+    await deleteCloudflareSecret(context(runner), 'OLD_KEY');
+    expect(runner.mock.calls[0][0].slice(0, 3)).toEqual(['secret', 'delete', 'OLD_KEY']);
+  });
+});
+
+describe('Cloudflare version operations', () => {
+  it('reads deployment status and recent versions', async () => {
+    const runner = vi.fn<CloudflareOperationRunner>((args) => {
+      if (args[0] === 'deployments') {
+        return ok(JSON.stringify({ versions: [{ version_id: 'v2', percentage: 100 }] }));
+      }
+      return ok(
+        JSON.stringify([
+          { id: 'v1', metadata: {}, annotations: {} },
+          { id: 'v2', metadata: {}, annotations: {} },
+        ]),
+      );
+    });
+    const status = await readCloudflareWorkerStatus(context(runner));
+    expect(status.activeVersionId).toBe('v2');
+    expect(status.versions.map((version) => version.id)).toEqual(['v1', 'v2']);
+  });
+
+  it('activates the selected version and synchronizes triggers', async () => {
+    const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue(ok());
+    await activateCloudflareExistingVersion(
+      context(runner),
+      {
+        id: 'v1',
+        createdAt: null,
+        message: null,
+        metadata: { schema: 1, migrations: ['0000_init.sql'] },
+      },
+      'v2',
+    );
+    expect(runner.mock.calls[0][0]).toContain('v1@100');
+    expect(runner.mock.calls[0][0]).toContain('void:{"schema":1,"migrations":["0000_init.sql"]}');
+    expect(runner.mock.calls[1][0].slice(0, 2)).toEqual(['triggers', 'deploy']);
+  });
+
+  it('restores previous traffic when trigger synchronization fails', async () => {
+    const runner = vi
+      .fn<CloudflareOperationRunner>()
+      .mockReturnValueOnce(ok())
+      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'trigger failed' })
+      .mockReturnValueOnce(ok());
+    await expect(
+      activateCloudflareExistingVersion(
+        context(runner),
+        { id: 'v1', createdAt: null, message: null, metadata: null },
+        'v2',
+      ),
+    ).rejects.toThrow('production traffic was restored to v2');
+    expect(runner.mock.calls[2][0]).toContain('v2@100');
+  });
+
+  it('maps search, version, and error filters to a live tail', async () => {
+    const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue(ok());
+    await tailCloudflareWorker(context(runner), {
+      filter: 'socket',
+      versionId: 'v1',
+      status: 'error',
+    });
+    expect(runner.mock.calls[0]).toEqual([
+      [
+        'tail',
+        'my-worker',
+        '-c',
+        '/app/wrangler.jsonc',
+        '--env=',
+        '--format',
+        'pretty',
+        '--search',
+        'socket',
+        '--version-id',
+        'v1',
+        '--status',
+        'error',
+      ],
+      { capture: false, input: undefined },
+    ]);
+  });
+});
+
+describe('Cloudflare custom domains', () => {
+  it('adds and removes a custom domain while preserving unrelated routes and comments', () => {
+    const root = project(`{
+  "name": "my-worker",
+  "account_id": "account-1",
+  // Keep this route.
+  "routes": [
+    { "pattern": "api.example.com/*", "zone_name": "example.com" }
+  ]
+}\n`);
+    const added = updateWranglerCustomDomain(root, 'app.example.com', 'add');
+    expect(added.domains.map((domain) => domain.pattern)).toEqual(['app.example.com']);
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toContain('// Keep this route.');
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toContain('api.example.com/*');
+    const removed = updateWranglerCustomDomain(root, 'app.example.com', 'delete');
+    expect(removed.domains).toEqual([]);
+    expect(readWranglerCustomDomains(root).domains).toEqual([]);
+  });
+
+  it('rejects a collision with an existing non-custom route', () => {
+    const root = project(
+      '{"name":"my-worker","account_id":"account-1","routes":["app.example.com"]}',
+    );
+    expect(() => updateWranglerCustomDomain(root, 'app.example.com', 'add')).toThrow(
+      'already exists as a non-custom route',
+    );
+  });
+
+  it('syncs triggers and restores the exact config bytes on failure', async () => {
+    const root = project();
+    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
+    const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue({
+      status: 1,
+      stdout: '',
+      stderr: 'not accepted',
+    });
+    await expect(changeCloudflareDomain(root, 'app.example.com', 'add', runner)).rejects.toThrow(
+      'local Wrangler config was restored',
+    );
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(before);
+  });
+
+  it('lists configured domains without an account mutation', () => {
+    const root = project(
+      '{"name":"my-worker","account_id":"account-1","routes":[{"pattern":"app.example.com","custom_domain":true}]}',
+    );
+    expect(listCloudflareDomains(root)).toEqual([
+      { pattern: 'app.example.com', customDomain: true },
+    ]);
+  });
+});

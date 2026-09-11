@@ -35,6 +35,17 @@ export const DEFAULT_LIVE_BINDING = 'VOID_LIVE';
 export const DEFAULT_LIVE_CLASS = 'VoidLiveStreamDurableObject';
 export const LIVE_MIGRATION_TAG = 'live-v1';
 
+export type WranglerCustomDomain = {
+  pattern: string;
+  customDomain: true;
+};
+
+export type WranglerCustomDomainUpdate = {
+  configPath: string;
+  domains: Array<WranglerCustomDomain>;
+  modified: boolean;
+};
+
 export type LiveBindingConfig = {
   bindingName: string;
   className: string;
@@ -1438,6 +1449,148 @@ export function writeProvisionedWranglerConfig(
     writeFileSync(configPath, finalText);
   }
   return { configPath, modified, d1MigrationsDirSkipped };
+}
+
+/** Read the custom-domain routes owned by the root Wrangler config. */
+export function readWranglerCustomDomains(root: string): WranglerCustomDomainUpdate {
+  const configPath = discoverWranglerConfigPath(root);
+  const raw = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '{}';
+  const text = raw.startsWith(UTF8_BOM) ? raw.slice(UTF8_BOM.length) : raw;
+  const parsed = parseJsonc(text);
+  assertNoDuplicateMembers(text, configPath);
+  return {
+    configPath,
+    domains: parseCustomDomains(parsed.routes, configPath),
+    modified: false,
+  };
+}
+
+/**
+ * Add or remove one Wrangler `custom_domain` route without rewriting unrelated
+ * configuration. The returned domain list is the post-edit source of truth used
+ * by `void domain list|status` on direct Cloudflare projects.
+ */
+export function updateWranglerCustomDomain(
+  root: string,
+  hostname: string,
+  action: 'add' | 'delete',
+): WranglerCustomDomainUpdate {
+  const configPath = discoverWranglerConfigPath(root);
+  if (!existsSync(configPath)) {
+    throw new Error(
+      `domain: No Wrangler config found at "${configPath}". Run \`void init\` first.`,
+    );
+  }
+  const raw = readFileSync(configPath, 'utf-8');
+  const hasBom = raw.startsWith(UTF8_BOM);
+  const original = hasBom ? raw.slice(UTF8_BOM.length) : raw;
+  const parsed = parseJsonc(original);
+  assertNoDuplicateMembers(original, configPath);
+  const routes = parsed.routes;
+  if (routes !== undefined && !Array.isArray(routes)) {
+    throw new Error(`domain: "routes" in "${configPath}" must be an array.`);
+  }
+  const routeArray = (routes ?? []) as Array<unknown>;
+  const matches: Array<number> = [];
+  for (let index = 0; index < routeArray.length; index++) {
+    const route = routeArray[index];
+    if (typeof route === 'string') {
+      if (route === hostname) {
+        throw new Error(
+          `domain: ${JSON.stringify(hostname)} already exists as a non-custom route in "${configPath}". Remove or convert that route first.`,
+        );
+      }
+      continue;
+    }
+    if (typeof route !== 'object' || route === null || Array.isArray(route)) {
+      throw new Error(`domain: "routes[${index}]" in "${configPath}" is malformed.`);
+    }
+    const entry = route as Record<string, unknown>;
+    if (entry.pattern !== hostname) {
+      continue;
+    }
+    if (entry.custom_domain !== true) {
+      throw new Error(
+        `domain: ${JSON.stringify(hostname)} already exists as a non-custom route in "${configPath}". Remove or convert that route first.`,
+      );
+    }
+    matches.push(index);
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `domain: ${JSON.stringify(hostname)} is declared more than once in "${configPath}". Remove the duplicate before continuing.`,
+    );
+  }
+
+  let text = original;
+  const formattingOptions = detectFormattingOptions(original);
+  if (action === 'add' && matches.length === 0) {
+    text = applyMemberEdit(
+      text,
+      ['routes', routeArray.length],
+      { pattern: hostname, custom_domain: true },
+      { formattingOptions, isArrayInsertion: true },
+    );
+    const dropped = findDroppedComment(extractCommentTokens(original), extractCommentTokens(text));
+    if (dropped !== undefined) {
+      throw new Error(
+        `domain: cannot update "${configPath}" because the edit would drop a comment (${dropped}).`,
+      );
+    }
+  } else if (action === 'delete' && matches.length === 1) {
+    text = applyEdits(text, modify(text, ['routes', matches[0]], undefined, { formattingOptions }));
+  }
+
+  const finalText = hasBom ? `${UTF8_BOM}${text}` : text;
+  const modified = finalText !== raw;
+  if (modified) {
+    writeFileSync(configPath, finalText);
+  }
+  return {
+    configPath,
+    domains: parseCustomDomains(parseJsonc(text).routes, configPath),
+    modified,
+  };
+}
+
+function discoverWranglerConfigPath(root: string): string {
+  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
+    const path = join(root, name);
+    if (existsSync(path)) {
+      return path;
+    }
+  }
+  return join(root, 'wrangler.jsonc');
+}
+
+function parseCustomDomains(value: unknown, configPath: string): Array<WranglerCustomDomain> {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`domain: "routes" in "${configPath}" must be an array.`);
+  }
+  const domains: Array<WranglerCustomDomain> = [];
+  for (let index = 0; index < value.length; index++) {
+    const route = value[index];
+    if (typeof route === 'string') {
+      continue;
+    }
+    if (typeof route !== 'object' || route === null || Array.isArray(route)) {
+      throw new Error(`domain: "routes[${index}]" in "${configPath}" is malformed.`);
+    }
+    const entry = route as Record<string, unknown>;
+    if (entry.custom_domain !== true) {
+      continue;
+    }
+    if (typeof entry.pattern !== 'string' || entry.pattern.length === 0) {
+      throw new Error(
+        `domain: custom domain route "routes[${index}]" in "${configPath}" needs a non-empty pattern.`,
+      );
+    }
+    domains.push({ pattern: entry.pattern, customDomain: true });
+  }
+  return domains;
 }
 
 /**
