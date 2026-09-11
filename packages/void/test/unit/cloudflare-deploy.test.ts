@@ -1234,6 +1234,23 @@ describe('computeDesiredCloudflareResources — provisioned resources are never 
 // ---------------------------------------------------------------------------
 
 describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
+  it('rejects a static-looking non-Cloudflare runtime before any account operation', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'node-static', dependencies: { vite: '6.0.0' } }),
+      'void.json': JSON.stringify({ target: 'node' }),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
+      'index.html': '<!doctype html><div id="app"></div>',
+    });
+    const { deps, trace, exitCalls } = harness();
+
+    await expect(
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    expect(exitCalls).toEqual([1]);
+    expect(trace).toEqual([]);
+  });
+
   it('deploys a configured SPA through the thin edge Worker', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'spaapp' }),

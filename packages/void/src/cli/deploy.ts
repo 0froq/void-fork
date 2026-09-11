@@ -3717,6 +3717,20 @@ export async function runCloudflareDeploy(
     provision: options.provision === true ? true : undefined,
   });
 
+  // Static deploys branch before the full Worker classifier, so keep the
+  // runtime-target guard ahead of both paths. An explicit Cloudflare deploy
+  // must never reinterpret a node/bun/deno project as a Workers Assets app.
+  if (isNodeTarget(voidConfig.target)) {
+    log.error(
+      [
+        `deploy: --platform cloudflare is not supported for the "${voidConfig.target}" target.`,
+        'This backend deploys Cloudflare Workers only. Deploy a node/bun/deno build with its',
+        'own host/runtime, or use the default Cloudflare target for --platform cloudflare.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
   const provisionModule = await loadProvisionModule();
   const staticPreset =
     resolveCloudflareStaticPreset(root, voidConfig, options) ??
