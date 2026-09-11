@@ -11,7 +11,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { parse as parseJsoncConfig, type ParseError } from 'jsonc-parser';
 import { basename, dirname, join, relative, resolve } from 'pathslash';
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
@@ -78,6 +77,15 @@ import {
   type ManifestOnlyDeployPayload,
 } from './client.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
+import {
+  parseRootWranglerConfig,
+  readBindingFieldPresence,
+  readConfigEntryString as readD1EntryString,
+  readStoredResourceName,
+  readWranglerTopLevelString,
+  resolveD1MigrateTarget,
+} from './cloudflare-deploy/config.ts';
+export { parseRootWranglerConfig } from './cloudflare-deploy/config.ts';
 import { promptAndCreateProject } from './create-project.ts';
 import {
   formatConnectionLostMessage,
@@ -2408,153 +2416,6 @@ function isCleanWranglerExit(result: DeployWranglerRunResult): boolean {
   return (
     result.status === 0 && result.signal == null && (result.error == null || result.error === '')
   );
-}
-
-/**
- * Parse the root wrangler config (BOM-aware, trailing commas allowed), matching
- * the provisioner's `readRootConfig`. Returns `{}` when the file is absent or
- * unreadable — callers then treat every field as unset (safe: a genuinely broken
- * config fails later in wrangler with a clear error).
- */
-export function parseRootWranglerConfig(configPath: string): Record<string, unknown> {
-  if (!existsSync(configPath)) {
-    return {};
-  }
-  let raw: string;
-  try {
-    raw = readFileSync(configPath, 'utf-8');
-  } catch {
-    return {};
-  }
-  const content = raw.startsWith('﻿') ? raw.slice(1) : raw;
-  const errors: Array<ParseError> = [];
-  const parsed = parseJsoncConfig(content, errors, { allowTrailingComma: true });
-  if (errors.length > 0 || typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return {};
-  }
-  return parsed as Record<string, unknown>;
-}
-
-/** Read a non-empty top-level string field (`account_id` / `name`) from the config. */
-function readWranglerTopLevelString(
-  config: Record<string, unknown>,
-  field: string,
-): string | undefined {
-  const value = config[field];
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-/** Read the stored resource name (`database_name` / `bucket_name`) for a binding. */
-function readStoredResourceName(
-  config: Record<string, unknown>,
-  field: string,
-  binding: string,
-  nameField: string,
-): string | undefined {
-  const list = config[field];
-  if (!Array.isArray(list)) {
-    return undefined;
-  }
-  for (const entry of list) {
-    if (
-      entry &&
-      typeof entry === 'object' &&
-      (entry as { binding?: unknown }).binding === binding
-    ) {
-      const name = (entry as Record<string, unknown>)[nameField];
-      return typeof name === 'string' && name.length > 0 ? name : undefined;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Whether a resource binding DECLARES a field at all — present with ANY defined
- * value, INCLUDING an empty string. Distinct from {@link readStoredResourceName}
- * (which collapses both "absent" and "empty string" to `undefined`): a
- * present-but-empty `migrations_pattern: ""` is still a CUSTOM pattern — wrangler
- * 4.107 takes its non-default branch for any value that is not `undefined`
- * (`rawPattern !== void 0`), so an empty pattern diverges from the default flat
- * `*.sql` enumeration this backend validates against. v1 therefore rejects a
- * custom pattern on PRESENCE, not on a non-empty length. Returns the raw value so
- * the caller can name it (never a secret — a wrangler config field).
- */
-function readBindingFieldPresence(
-  config: Record<string, unknown>,
-  field: string,
-  binding: string,
-  key: string,
-): { present: boolean; value: unknown } {
-  const list = config[field];
-  if (!Array.isArray(list)) {
-    return { present: false, value: undefined };
-  }
-  for (const entry of list) {
-    if (
-      entry &&
-      typeof entry === 'object' &&
-      (entry as { binding?: unknown }).binding === binding
-    ) {
-      return Object.hasOwn(entry as object, key)
-        ? { present: true, value: (entry as Record<string, unknown>)[key] }
-        : { present: false, value: undefined };
-    }
-  }
-  return { present: false, value: undefined };
-}
-
-/** Read a `d1_databases` entry's string field. */
-function readD1EntryString(entry: unknown, field: string): string | undefined {
-  if (!entry || typeof entry !== 'object') {
-    return undefined;
-  }
-  const value = (entry as Record<string, unknown>)[field];
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-/**
- * Resolve the token to pass to `wrangler d1 migrations apply` so wrangler's OWN
- * resolution (`getDatabaseInfoFromConfig`, wrangler 4.107 src/d1/utils.ts) selects
- * EXACTLY the `d1_databases` entry the gate validated (matched by `binding`). wrangler
- * iterates the array and returns the FIRST entry where
- * `token === database_name || token === binding`, then uses that entry's `migrations_dir`.
- * We prefer the validated entry's own `database_name` as the token (falling back to the
- * binding), and FAIL CLOSED when an EARLIER entry also matches it — because wrangler would
- * then select the earlier entry (a different DB / an unrelated migrations folder) though
- * the gate validated ours.
- */
-function resolveD1MigrateTarget(
-  config: Record<string, unknown>,
-  binding: string,
-): { ok: true; token: string } | { ok: false; reason: string } {
-  const list = config.d1_databases;
-  if (!Array.isArray(list)) {
-    return { ok: false, reason: `the root config has no "d1_databases" array` };
-  }
-  const validatedIndex = list.findIndex((entry) => readD1EntryString(entry, 'binding') === binding);
-  if (validatedIndex === -1) {
-    return { ok: false, reason: `no d1_databases entry has binding ${JSON.stringify(binding)}` };
-  }
-  const validated = list[validatedIndex];
-  // wrangler matches by database_name OR binding; the validated entry always matches its
-  // own binding, so the binding is a safe fallback token when it has no database_name.
-  const token = readD1EntryString(validated, 'database_name') ?? binding;
-  for (let i = 0; i < validatedIndex; i++) {
-    const earlier = list[i];
-    if (
-      readD1EntryString(earlier, 'database_name') === token ||
-      readD1EntryString(earlier, 'binding') === token
-    ) {
-      return {
-        ok: false,
-        reason:
-          `an earlier d1_databases entry (binding ${JSON.stringify(readD1EntryString(earlier, 'binding'))}, ` +
-          `database_name ${JSON.stringify(readD1EntryString(earlier, 'database_name'))}) also matches the ` +
-          `token ${JSON.stringify(token)}, so wrangler would migrate it instead`,
-      };
-    }
-  }
-  return { ok: true, token };
 }
 
 /** The length cap {@link toValidWorkerName} applies (the CF plugin's own rule). */
