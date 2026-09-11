@@ -892,7 +892,7 @@ void build logs bld_123 -o build.log  # download a specific build's logs
 void domain add <hostname> [--project <name>]
 ```
 
-Add a custom domain to the saved target. Hosted Void projects print the DNS records needed for SaaS hostname validation. Direct Cloudflare projects add a Wrangler `custom_domain` route and immediately run trigger synchronization; Cloudflare manages the DNS record and TLS certificate in a zone on the pinned account.
+Add a custom domain to the saved target. Hosted Void projects print the DNS records needed for SaaS hostname validation. Direct Cloudflare projects add a Wrangler `custom_domain` route and immediately synchronize only the route configuration, leaving cron, queue, and workflow triggers unchanged; Cloudflare manages the DNS record and TLS certificate in a zone on the pinned account. Convert a legacy singular `route` field to a `routes` array first so adding the domain cannot shadow the existing route.
 
 > Wildcard custom hostnames (`*.example.com`) are not supported — register each subdomain individually.
 

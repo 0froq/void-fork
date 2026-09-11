@@ -1486,6 +1486,11 @@ export function updateWranglerCustomDomain(
   const original = hasBom ? raw.slice(UTF8_BOM.length) : raw;
   const parsed = parseJsonc(original);
   assertNoDuplicateMembers(original, configPath);
+  if (parsed.route !== undefined) {
+    throw new Error(
+      `domain: "${configPath}" uses the singular "route" field. Convert it to a "routes" array before managing custom domains so the existing route cannot be shadowed.`,
+    );
+  }
   const routes = parsed.routes;
   if (routes !== undefined && !Array.isArray(routes)) {
     throw new Error(`domain: "routes" in "${configPath}" must be an array.`);

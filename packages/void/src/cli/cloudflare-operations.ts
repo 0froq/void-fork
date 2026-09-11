@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import {
   encodeCloudflareVersionMessage,
   parseCloudflareVersionMessage,
@@ -392,12 +393,22 @@ export async function changeCloudflareDomain(
   if (!update.modified) {
     return update;
   }
+  const triggerConfigDir = mkdtempSync(join(tmpdir(), 'void-domain-triggers-'));
+  const triggerConfigPath = join(triggerConfigDir, 'wrangler.json');
+  const deployRoutes = async (): Promise<void> => {
+    writeDomainTriggerConfig(context, before.configPath, triggerConfigPath);
+    await run(
+      context,
+      ['triggers', 'deploy', '-c', triggerConfigPath, '--env=', '--name', context.workerName],
+      { capture: false },
+    );
+  };
   try {
-    await run(context, ['triggers', 'deploy', ...targetArgs(context)], { capture: false });
+    await deployRoutes();
   } catch (error) {
     writeFileSync(before.configPath, original);
     try {
-      await run(context, ['triggers', 'deploy', ...targetArgs(context)], { capture: false });
+      await deployRoutes();
     } catch (restoreError) {
       throw new Error(
         `Cloudflare rejected the domain trigger update and also rejected the automatic remote restore. ` +
@@ -408,8 +419,41 @@ export async function changeCloudflareDomain(
     throw new Error(
       `Cloudflare rejected the domain trigger update; both the local config and remote triggers were restored. ${errorMessage(error)}`,
     );
+  } finally {
+    rmSync(triggerConfigDir, { recursive: true, force: true });
   }
   return update;
+}
+
+/**
+ * Build a route-only Wrangler config for a domain update. `triggers deploy`
+ * also reconciles cron, queue-consumer, and workflow triggers found in its
+ * config, so using the root config here could drop generated schedules or
+ * replay stale consumers. The isolated config carries only the route surface
+ * this command owns and the workers.dev switches that route reconciliation
+ * also evaluates.
+ */
+function writeDomainTriggerConfig(
+  context: CloudflareOperationContext,
+  sourceConfigPath: string,
+  triggerConfigPath: string,
+): void {
+  const source = parseRootWranglerConfig(sourceConfigPath);
+  const config: Record<string, unknown> = {
+    name: context.workerName,
+    account_id: context.accountId,
+    routes: Array.isArray(source.routes) ? source.routes : [],
+  };
+  for (const field of ['workers_dev', 'preview_urls'] as const) {
+    if (typeof source[field] === 'boolean') {
+      config[field] = source[field];
+    }
+  }
+  const compatibilityDate = readWranglerTopLevelString(source, 'compatibility_date');
+  if (compatibilityDate) {
+    config.compatibility_date = compatibilityDate;
+  }
+  writeFileSync(triggerConfigPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
 function targetArgs(context: CloudflareOperationContext): Array<string> {

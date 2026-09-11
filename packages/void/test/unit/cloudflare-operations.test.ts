@@ -288,6 +288,45 @@ describe('Cloudflare custom domains', () => {
     );
   });
 
+  it('rejects a singular route instead of shadowing it with a routes array', () => {
+    const root = project(
+      '{"name":"my-worker","account_id":"account-1","route":"api.example.com/*"}',
+    );
+    expect(() => updateWranglerCustomDomain(root, 'app.example.com', 'add')).toThrow(
+      'uses the singular "route" field',
+    );
+  });
+
+  it('synchronizes domains without replaying cron, queue, or workflow triggers', async () => {
+    const root = project(`{
+  "name": "my-worker",
+  "account_id": "account-1",
+  "workers_dev": false,
+  "triggers": { "crons": ["0 * * * *"] },
+  "queues": { "consumers": [{ "queue": "jobs" }] },
+  "workflows": [{ "name": "flow", "class_name": "Flow" }]
+}\n`);
+    let deployedConfig: Record<string, unknown> | undefined;
+    const runner = vi.fn<CloudflareOperationRunner>((args) => {
+      const configIndex = args.indexOf('-c');
+      deployedConfig = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf-8')) as Record<
+        string,
+        unknown
+      >;
+      return ok();
+    });
+
+    await changeCloudflareDomain(root, 'app.example.com', 'add', runner);
+
+    expect(deployedConfig).toEqual({
+      name: 'my-worker',
+      account_id: 'account-1',
+      workers_dev: false,
+      routes: [{ pattern: 'app.example.com', custom_domain: true }],
+    });
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
   it('restores the exact local and remote config on trigger failure', async () => {
     const root = project();
     const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
