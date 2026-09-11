@@ -895,10 +895,10 @@ it('prewarms when only manifest.pages carries TTLs (no flat revalidate)', async 
 **Files:**
 
 - Modify: `meta/design-docs/0077-route-aware-isr-ttl.md` (`status: draft` → `implemented`), this plan (`status`)
-- Modify (if applicable): `packages/isr-shared/README.md` / `packages/dispatch/README.md` route-aware ISR note.
+- Modify (if applicable): `packages/isr/README.md` / `packages/dispatch/README.md` route-aware ISR note.
 
 - [ ] **Step 1:** `vp run check` (all packages) → clean.
-- [ ] **Step 2:** `vp test run packages/dispatch packages/api packages/isr-shared` → all green.
+- [ ] **Step 2:** `vp test run platform/packages/dispatch platform/packages/api packages/isr` → all green.
 - [ ] **Step 3:** `vp fmt --check` → clean; `vp lint` → clean.
 - [ ] **Step 4:** Update doc statuses + any package README route-aware note. Commit: `docs(isr): mark route-aware ISR TTL implemented`.
 - [ ] **Step 5:** Confirm the framework PR (Phase A) is merged and the submodule pointer (Phase B) references the merge commit. Hold #228 from merge until green CI + human review.
