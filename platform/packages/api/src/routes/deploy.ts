@@ -1,6 +1,7 @@
 import {
   MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES,
   MAX_ROUTING_RULES,
+  planWebSocketMigrations,
   validateManifestShape,
 } from '@void/deploy-core';
 import { isrCacheKey, isrCachePrefix, isrLegacyCachePrefix } from '@voidcloud/isr-shared';
@@ -419,16 +420,6 @@ async function deleteContainerApplicationWithRetry(
 
 const app = new Hono<ApiEnv>();
 
-function sameClassSet(
-  leftClasses: ReadonlyArray<string>,
-  rightClasses: ReadonlyArray<string>,
-): boolean {
-  return (
-    leftClasses.length === rightClasses.length &&
-    leftClasses.every((value, index) => value === rightClasses[index])
-  );
-}
-
 function sortUnique(values: ReadonlyArray<string> | undefined): ReadonlyArray<string> {
   return [...new Set(values ?? [])].sort((left, right) => left.localeCompare(right));
 }
@@ -641,6 +632,7 @@ export function buildWebSocketUploadMigrations(
       new_tag: string;
       steps: ReadonlyArray<{
         new_classes?: ReadonlyArray<string>;
+        new_sqlite_classes?: ReadonlyArray<string>;
         deleted_classes?: ReadonlyArray<string>;
       }>;
     }
@@ -675,6 +667,9 @@ export function buildDurableObjectUploadMigrations(
       tag: migration.tag,
       index: steps.length,
       ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
+      ...(migration.newSqliteClasses?.length
+        ? { new_sqlite_classes: migration.newSqliteClasses }
+        : {}),
       ...(migration.deletedClasses?.length ? { deleted_classes: migration.deletedClasses } : {}),
     });
   }
@@ -736,6 +731,7 @@ export function buildLegacyWebSocketUploadMigrations(
       new_tag: string;
       steps: ReadonlyArray<{
         new_classes?: ReadonlyArray<string>;
+        new_sqlite_classes?: ReadonlyArray<string>;
         deleted_classes?: ReadonlyArray<string>;
       }>;
     }
@@ -746,9 +742,12 @@ export function buildLegacyWebSocketUploadMigrations(
 
   return {
     new_tag: migrations[migrations.length - 1].tag,
-    steps: migrations.map((migration) =>
-      migration.newClasses?.length ? { new_classes: migration.newClasses } : {},
-    ),
+    steps: migrations.map((migration) => ({
+      ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
+      ...(migration.newSqliteClasses?.length
+        ? { new_sqlite_classes: migration.newSqliteClasses }
+        : {}),
+    })),
   };
 }
 
@@ -882,12 +881,15 @@ export function enrichWebSocketManifest(
   previousManifest: DeployManifest | null,
   currentVersion: number,
 ): { manifest: DeployManifest; changed: boolean; nextVersion: number } {
-  const nextClasses = sortUnique(manifest.websocket?.classes);
-  const previousClasses = sortUnique(previousManifest?.websocket?.classes);
   const previousMigrations = previousManifest?.websocket?.migrations ?? [];
-  const changed = !sameClassSet(nextClasses, previousClasses);
+  const planned = planWebSocketMigrations({
+    nextClasses: manifest.websocket?.classes,
+    previousClasses: previousManifest?.websocket?.classes,
+    previousMigrations,
+    currentVersion,
+  });
 
-  if (!changed) {
+  if (!planned.changed) {
     if (!manifest.websocket && previousMigrations.length === 0) {
       return { manifest, changed: false, nextVersion: currentVersion };
     }
@@ -897,8 +899,8 @@ export function enrichWebSocketManifest(
         websocket: manifest.websocket
           ? {
               ...manifest.websocket,
-              classes: nextClasses,
-              migrations: previousMigrations,
+              classes: planned.classes,
+              migrations: planned.migrations,
             }
           : previousManifest?.websocket,
       },
@@ -907,55 +909,17 @@ export function enrichWebSocketManifest(
     };
   }
 
-  // Compute classes that currently exist in Cloudflare by replaying
-  // migration history: add from newClasses, remove from deletedClasses.
-  // Also include previousClasses as fallback for legacy projects that
-  // predate the migration system.
-  const existingClasses = new Set(previousClasses);
-  for (const m of previousMigrations) {
-    for (const name of m.newClasses ?? []) {
-      existingClasses.add(name);
-    }
-    for (const name of m.deletedClasses ?? []) {
-      existingClasses.delete(name);
-    }
-  }
-  const newClasses = nextClasses.filter((name) => !existingClasses.has(name));
-
-  // If no new classes to create, no migration step is needed.
-  // The class list update is still recorded in the manifest.
-  if (newClasses.length === 0) {
-    return {
-      manifest: {
-        ...manifest,
-        websocket: {
-          routes: manifest.websocket?.routes ?? [],
-          classes: nextClasses,
-          migrations: previousMigrations,
-        },
-      },
-      changed: true,
-      nextVersion: currentVersion,
-    };
-  }
-
-  const nextVersion = currentVersion + 1;
-  const migration: WebSocketMigrationMeta = {
-    tag: `ws-v${nextVersion}`,
-    newClasses,
-  };
-
   return {
     manifest: {
       ...manifest,
       websocket: {
         routes: manifest.websocket?.routes ?? [],
-        classes: nextClasses,
-        migrations: [...previousMigrations, migration],
+        classes: planned.classes,
+        migrations: planned.migrations,
       },
     },
     changed: true,
-    nextVersion,
+    nextVersion: planned.nextVersion,
   };
 }
 

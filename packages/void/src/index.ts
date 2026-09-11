@@ -1,6 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { cloudflare, type PluginConfig, type WorkerConfig } from '@cloudflare/vite-plugin';
+import { appendSqliteClassMigration } from '@void/deploy-core';
 import { join } from 'pathslash';
 import pc from 'picocolors';
 import { loadEnv, type Plugin } from 'vite';
@@ -26,6 +27,7 @@ import {
   resolveLiveBindingConfig,
   syncWranglerBindings,
   syncWranglerDurableObjects,
+  syncWranglerWebSockets,
 } from './cli/wrangler.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
 import {
@@ -803,6 +805,10 @@ export function voidPlugin(options?: {
   }
   if (!isNodeTarget(config.target)) {
     syncWranglerDurableObjects(root, durableObjects);
+    syncWranglerWebSockets(
+      root,
+      websocketRoutes.filter((route) => isRouteEnabledForEnvironment(route, 'prod')),
+    );
   }
   const liveConfig = !isNodeTarget(config.target)
     ? bindings.needsLive
@@ -1149,6 +1155,16 @@ export function voidPlugin(options?: {
         ((resolved as DurableObjectBindingsConfig).durable_objects?.bindings as
           | Array<{ name: string; class_name: string }>
           | undefined) ?? [];
+      for (const route of environmentWebsocketRoutes) {
+        const conflict = existingDurableObjectBindings.find(
+          (binding) => binding.name === route.bindingName && binding.class_name !== route.className,
+        );
+        if (conflict) {
+          throw new Error(
+            `websocket: binding '${route.bindingName}' is already configured for class '${conflict.class_name}', but '${route.filePath}' requires '${route.className}'.`,
+          );
+        }
+      }
       const missingDurableObjectBindings = environmentWebsocketRoutes
         .filter(
           (route) =>
@@ -1165,13 +1181,15 @@ export function voidPlugin(options?: {
         };
       }
 
-      if (!Array.isArray((resolved as Record<string, unknown>).migrations)) {
-        (result as Record<string, unknown>).migrations = [
-          {
-            tag: 'void-ws-v1',
-            new_classes: environmentWebsocketRoutes.map((route) => route.className),
-          },
-        ];
+      const currentMigrations = (resolved as Record<string, unknown>).migrations;
+      const planned = appendSqliteClassMigration(
+        Array.isArray(currentMigrations) ? currentMigrations : [],
+        environmentWebsocketRoutes.map((route) => route.className),
+        'void-ws-v1',
+        existingDurableObjectBindings.map((binding) => binding.class_name),
+      );
+      if (planned.added) {
+        (result as Record<string, unknown>).migrations = planned.migrations;
       }
     }
 

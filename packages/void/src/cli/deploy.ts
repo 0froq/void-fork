@@ -5066,7 +5066,7 @@ const cloudflareDeployTarget: RunDeployTargetAdapter = {
       cron: 'supported',
       queues: 'supported',
       durableState: 'supported',
-      webSockets: 'unsupported',
+      webSockets: 'supported',
       live: 'supported',
       sandbox: 'supported',
       isr: 'partial',

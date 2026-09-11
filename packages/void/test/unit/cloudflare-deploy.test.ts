@@ -1410,29 +1410,26 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(wranglerArgs).toEqual([]);
   });
 
-  it('rejects a WebSocket / Durable Object app (.ws.ts route) before any account op', async () => {
-    // A `.ws.ts` route makes the build emit a `new_classes` (KV-backed) DO migration, which a
-    // fresh Cloudflare account refuses to create — reject via the SAME `scanWebSocketRoutesSync`
-    // scan the build's DO emission uses.
+  it('deploys a WebSocket app with a SQLite Durable Object migration', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'wsapp' }),
       'void.json': JSON.stringify({}),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
       'routes/index.ts': `export const GET = () => new Response('ok');`,
       'routes/chat/[room].ws.ts': `import { defineRoom } from 'void/ws';\nexport default defineRoom({});`,
     });
     const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    expect(trace).toEqual([]);
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(exitCalls).toEqual([]);
+    expect(trace).toEqual(['wrangler:whoami', 'build', 'gate', 'wrangler:deploy']);
+    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toMatchObject({
+      migrations: [{ tag: 'void-ws-v1', new_sqlite_classes: ['ChatRoomWs'] }],
+    });
   });
 
   it('does not reject a dev-only WebSocket route (.dev.ws.ts) — it never reaches production', async () => {
-    // The gate scans with `'prod'`, the same environment the build compiles with, so a
-    // dev-only room emits no `new_classes` migration and must not block the deploy. Compare
-    // with the test above: the same project with a suffix-free `.ws.ts` route is rejected
-    // pre-account with an empty trace.
+    // The production scan ignores a dev-only route, so no Durable Object is emitted.
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'wsapp' }),
       'void.json': JSON.stringify({}),

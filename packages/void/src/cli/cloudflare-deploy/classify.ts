@@ -6,7 +6,7 @@ import { assertNoRootSourceConventionConflicts, resolveProjectPaths } from '../.
 import { scanWebSocketRoutesSync } from '../../router/websocket.ts';
 import { validateSsrEntry } from '../../ssr/entry.ts';
 import { detectPreset, hasBackendFiles } from '../preset.ts';
-import { syncWranglerDurableObjects } from '../wrangler.ts';
+import { syncWranglerDurableObjects, syncWranglerWebSockets } from '../wrangler.ts';
 
 export type CloudflareDeployAppOptions = {
   dir?: string;
@@ -79,20 +79,9 @@ export function classifyCloudflareDeployApp(
     validateSsrEntry(root, paths);
     scanJobsSync(root, paths.cronsDir);
     syncWranglerDurableObjects(root, scanDurableObjectModules(root));
+    syncWranglerWebSockets(root, scanWebSocketRoutesSync(root, paths, 'prod'));
   } catch (error) {
     return unsupported(`deploy: ${getErrorMessage(error)}`);
-  }
-
-  if (scanWebSocketRoutesSync(root, paths, 'prod').length > 0) {
-    return unsupported(
-      [
-        'deploy: --platform cloudflare does not yet support WebSocket / Durable Object routes.',
-        'A `.ws.ts` route makes the build emit a key-value-backed Durable Object namespace',
-        '(a `new_classes` migration), which a fresh Cloudflare account (and every Workers Free',
-        'account) refuses to create. Deploy this app with `void deploy` (the managed platform).',
-        'SQLite-backed WebSocket support for this backend is a follow-up.',
-      ].join('\n'),
-    );
   }
 
   return { supported: true };

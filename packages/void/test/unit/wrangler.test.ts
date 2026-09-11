@@ -15,6 +15,7 @@ import {
   resolveLiveBindingConfig,
   syncWranglerBindings,
   syncWranglerDurableObjects,
+  syncWranglerWebSockets,
   writeProvisionedWranglerConfig,
 } from '../../src/cli/wrangler.ts';
 import type { VoidConfig } from '../../src/config.ts';
@@ -431,6 +432,65 @@ describe('syncWranglerBindings', () => {
     );
     const result = syncWranglerBindings(tmpDir, { ...noBindings, needsD1: true });
     expect(result).toBe(false);
+  });
+
+  it('adds WebSocket classes as SQLite Durable Objects', () => {
+    setup('wrangler.jsonc', '{ "name": "test" }');
+    const result = syncWranglerWebSockets(tmpDir, [
+      {
+        pattern: '/chat/:room',
+        methods: ['GET'],
+        params: ['room'],
+        catchAll: false,
+        env: null,
+        filePath: 'chat/[room].ws.ts',
+        className: 'WsChatRoomWs',
+        bindingName: 'WS_CHAT_ROOM_WS',
+        mode: 'room',
+        hasAuthGate: false,
+      },
+    ]);
+
+    expect(result).toBe(true);
+    const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
+    expect(parsed.durable_objects.bindings).toEqual([
+      { name: 'WS_CHAT_ROOM_WS', class_name: 'WsChatRoomWs' },
+    ]);
+    expect(parsed.migrations).toEqual([
+      { tag: 'void-ws-v1', new_sqlite_classes: ['WsChatRoomWs'] },
+    ]);
+  });
+
+  it('preserves a legacy WebSocket class and appends new classes as SQLite', () => {
+    setup(
+      'wrangler.jsonc',
+      JSON.stringify({
+        durable_objects: {
+          bindings: [{ name: 'LEGACY', class_name: 'LegacyRoom' }],
+        },
+        migrations: [{ tag: 'void-ws-v1', new_classes: ['LegacyRoom'] }],
+      }),
+    );
+    const route = (className: string, bindingName: string) => ({
+      pattern: `/${bindingName}`,
+      methods: ['GET'],
+      params: [],
+      catchAll: false,
+      env: null,
+      filePath: `${bindingName}.ws.ts`,
+      className,
+      bindingName,
+      mode: 'room' as const,
+      hasAuthGate: false,
+    });
+
+    syncWranglerWebSockets(tmpDir, [route('LegacyRoom', 'LEGACY'), route('ChatRoom', 'CHAT')]);
+
+    const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
+    expect(parsed.migrations).toEqual([
+      { tag: 'void-ws-v1', new_classes: ['LegacyRoom'] },
+      { tag: 'void-ws-v1-2', new_sqlite_classes: ['ChatRoom'] },
+    ]);
   });
 
   it('adds sandbox durable object, container, and migration metadata', () => {

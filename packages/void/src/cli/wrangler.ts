@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { appendSqliteClassMigration, type DurableObjectMigrationStep } from '@void/deploy-core';
 import {
   applyEdits,
   createScanner,
@@ -39,10 +40,8 @@ export type LiveBindingConfig = {
   className: string;
 };
 
-type DurableObjectMigration = {
+type DurableObjectMigration = DurableObjectMigrationStep & {
   tag?: string;
-  new_classes?: Array<string>;
-  new_sqlite_classes?: Array<string>;
 };
 
 /** Latest compatibility date the Void test suite is pinned against. */
@@ -481,6 +480,16 @@ export function syncWranglerBindings(
           | { bindings?: Array<{ name: string; class_name: string }> }
           | undefined
       )?.bindings as Array<{ name: string; class_name: string }> | undefined) ?? [];
+    for (const route of options.websockets) {
+      const conflict = existing.find(
+        (binding) => binding.name === route.bindingName && binding.class_name !== route.className,
+      );
+      if (conflict) {
+        throw new Error(
+          `websocket: binding '${route.bindingName}' is already configured for class '${conflict.class_name}', but '${route.filePath}' requires '${route.className}'.`,
+        );
+      }
+    }
     const additions = options.websockets
       .filter((route) => !existing.some((binding) => binding.name === route.bindingName))
       .map((route) => ({ name: route.bindingName, class_name: route.className }));
@@ -489,13 +498,17 @@ export function syncWranglerBindings(
       modified = true;
     }
 
-    if (!Array.isArray(parsed.migrations)) {
-      parsed.migrations = [
-        {
-          tag: 'void-ws-v1',
-          new_classes: options.websockets.map((route) => route.className),
-        },
-      ];
+    const migrations = Array.isArray(parsed.migrations)
+      ? (parsed.migrations as Array<DurableObjectMigration>)
+      : [];
+    const planned = appendSqliteClassMigration(
+      migrations,
+      options.websockets.map((route) => route.className),
+      'void-ws-v1',
+      existing.map((binding) => binding.class_name),
+    );
+    if (planned.added) {
+      parsed.migrations = planned.migrations;
       modified = true;
     }
   }
@@ -693,6 +706,17 @@ export function syncWranglerDurableObjects(
     return false;
   }
   return syncWranglerBindings(root, NO_INFERRED_BINDINGS, { durableObjects });
+}
+
+/** Persist WebSocket Durable Object bindings and SQLite migration history. */
+export function syncWranglerWebSockets(
+  root: string,
+  websockets: Array<WebSocketRouteDefinition>,
+): boolean {
+  if (websockets.length === 0) {
+    return false;
+  }
+  return syncWranglerBindings(root, NO_INFERRED_BINDINGS, { websockets });
 }
 
 /**

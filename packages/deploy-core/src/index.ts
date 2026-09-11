@@ -52,8 +52,127 @@ export type WebSocketRouteMeta = {
 export type WebSocketMigrationMeta = {
   tag: string;
   newClasses?: ReadonlyArray<string>;
+  newSqliteClasses?: ReadonlyArray<string>;
   deletedClasses?: ReadonlyArray<string>;
 };
+
+export type DurableObjectMigrationStep = {
+  tag?: string;
+  new_classes?: ReadonlyArray<string>;
+  new_sqlite_classes?: ReadonlyArray<string>;
+  deleted_classes?: ReadonlyArray<string>;
+};
+
+export type PlannedWebSocketMigrations = {
+  classes: ReadonlyArray<string>;
+  migrations: ReadonlyArray<WebSocketMigrationMeta>;
+  changed: boolean;
+  nextVersion: number;
+};
+
+/**
+ * Preserve an existing WebSocket class history while assigning every genuinely
+ * new class to SQLite-backed Durable Object storage.
+ */
+export function planWebSocketMigrations(input: {
+  nextClasses: ReadonlyArray<string> | undefined;
+  previousClasses: ReadonlyArray<string> | undefined;
+  previousMigrations: ReadonlyArray<WebSocketMigrationMeta> | undefined;
+  currentVersion: number;
+  tagPrefix?: string;
+}): PlannedWebSocketMigrations {
+  const nextClasses = sortUniqueStrings(input.nextClasses);
+  const previousClasses = sortUniqueStrings(input.previousClasses);
+  const previousMigrations = input.previousMigrations ?? [];
+  const changed = !sameStringSet(nextClasses, previousClasses);
+  if (!changed) {
+    return {
+      classes: nextClasses,
+      migrations: previousMigrations,
+      changed: false,
+      nextVersion: input.currentVersion,
+    };
+  }
+
+  const existingClasses = new Set(previousClasses);
+  for (const migration of previousMigrations) {
+    for (const name of migration.newClasses ?? []) {
+      existingClasses.add(name);
+    }
+    for (const name of migration.newSqliteClasses ?? []) {
+      existingClasses.add(name);
+    }
+    for (const name of migration.deletedClasses ?? []) {
+      existingClasses.delete(name);
+    }
+  }
+  const additions = nextClasses.filter((name) => !existingClasses.has(name));
+  if (additions.length === 0) {
+    return {
+      classes: nextClasses,
+      migrations: previousMigrations,
+      changed: true,
+      nextVersion: input.currentVersion,
+    };
+  }
+
+  const nextVersion = input.currentVersion + 1;
+  return {
+    classes: nextClasses,
+    migrations: [
+      ...previousMigrations,
+      {
+        tag: `${input.tagPrefix ?? 'ws'}-v${nextVersion}`,
+        newSqliteClasses: additions,
+      },
+    ],
+    changed: true,
+    nextVersion,
+  };
+}
+
+/** Append one SQLite class step without reclassifying an existing namespace. */
+export function appendSqliteClassMigration(
+  migrations: ReadonlyArray<DurableObjectMigrationStep>,
+  classes: ReadonlyArray<string>,
+  baseTag: string,
+  knownExistingClasses: ReadonlyArray<string> = [],
+): { migrations: ReadonlyArray<DurableObjectMigrationStep>; added: boolean } {
+  const existingClasses = new Set<string>(knownExistingClasses);
+  for (const migration of migrations) {
+    for (const name of migration.new_classes ?? []) {
+      existingClasses.add(name);
+    }
+    for (const name of migration.new_sqlite_classes ?? []) {
+      existingClasses.add(name);
+    }
+    for (const name of migration.deleted_classes ?? []) {
+      existingClasses.delete(name);
+    }
+  }
+  const additions = sortUniqueStrings(classes).filter((name) => !existingClasses.has(name));
+  if (additions.length === 0) {
+    return { migrations, added: false };
+  }
+
+  const tags = new Set(migrations.map((migration) => migration.tag).filter(Boolean));
+  let tag = baseTag;
+  for (let suffix = 2; tags.has(tag); suffix++) {
+    tag = `${baseTag}-${suffix}`;
+  }
+  return {
+    migrations: [...migrations, { tag, new_sqlite_classes: additions }],
+    added: true,
+  };
+}
+
+function sortUniqueStrings(values: ReadonlyArray<string> | undefined): Array<string> {
+  return [...new Set(values ?? [])].sort((a, b) => a.localeCompare(b));
+}
+
+function sameStringSet(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
 
 export type WebSocketManifestMeta = {
   routes: ReadonlyArray<WebSocketRouteMeta>;
