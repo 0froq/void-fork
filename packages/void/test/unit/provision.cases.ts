@@ -19,7 +19,7 @@ import {
 import { types as nodeUtilTypes } from 'node:util';
 import { parse as parseJsoncRaw } from 'jsonc-parser';
 import { join } from 'pathslash';
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, beforeEach, describe as vitestDescribe, expect, it } from 'vite-plus/test';
 import {
   acquireProvisionLock,
   assertNoTransportRedirectInProjectDotenv,
@@ -35,6 +35,42 @@ import {
   type RunWrangler,
   type RunWranglerResult,
 } from '../../src/cli/provision.ts';
+import { getProvisionTestShard, type ProvisionTestShard } from './provision-test-shard.ts';
+
+const activeTestShard = getProvisionTestShard();
+
+function shardForDescribe(name: string): ProvisionTestShard {
+  if (name.startsWith('normalizeRunWranglerResult')) {
+    return 'runner-signals';
+  }
+  if (name.startsWith('createDefaultRunWrangler')) {
+    return name.includes('hard timeout') || name.includes('confirmed child termination')
+      ? 'runner-timeouts'
+      : 'runner-signals';
+  }
+  if (name.startsWith('withListerDeadline') || name.includes('Hyperdrive lister deadline')) {
+    return 'runner-timeouts';
+  }
+  if (name.startsWith('acquireProvisionLock')) {
+    return name.includes('durable sidecar') || name.includes('sidecar DIRECTORY')
+      ? 'lock-durability'
+      : 'lock-recovery';
+  }
+  if (
+    name.includes('whole-provision cross-process lock') ||
+    name.includes('quarantine retains the whole-provision lock') ||
+    name.includes('dangling-symlink lock identity')
+  ) {
+    return 'locking';
+  }
+  return 'resources';
+}
+
+function describe(name: string, factory: () => void): void {
+  if (shardForDescribe(name) === activeTestShard) {
+    vitestDescribe(name, factory);
+  }
+}
 
 /**
  * A passthrough of proper-lockfile's callback-style fs seam (mkdir/stat/utimes/rmdir/
@@ -42,7 +78,7 @@ import {
  */
 const passthruFs = { mkdir, stat, utimes, rmdir, realpath, rmdirSync };
 
-const tmpDir = join(import.meta.dirname, '.tmp-provision-test');
+const tmpDir = join(import.meta.dirname, `.tmp-provision-test-${activeTestShard}`);
 const wranglerPath = join(tmpDir, 'wrangler.jsonc');
 
 function setup(content: string): void {
