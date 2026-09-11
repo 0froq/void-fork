@@ -174,6 +174,7 @@ export {
   type DeployResource,
   type DeployResourcePlan,
 } from './resource-plan.ts';
+export { createDeployIntent, type DeployIntent, type DeployRuntimeFeatures } from './intent.ts';
 export type {
   DeployArtifact,
   DeployAssetManifestEntry,
