@@ -311,7 +311,7 @@
   "scripts": {
     "build": "node scripts/sync-skill-docs.mjs && vp pack",
     "dev": "vp pack --watch",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit --rootDir ../.."
   },
   "dependencies": {
     "@cloudflare/sandbox": "^0.12.3",
@@ -342,7 +342,6 @@
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
     "@types/proper-lockfile": "^4.1.4",
-    "@typescript/native-preview": "catalog:",
     "arktype": "^2.2.2",
     "estree-walker": "^3.0.3",
     "magic-string": "^0.30.21",
@@ -351,6 +350,7 @@
     "pglite-server": "0.1.5",
     "picocolors": "^1.1.1",
     "tinyglobby": "^0.2.17",
+    "typescript": "catalog:",
     "valibot": "^1.4.2",
     "vite": "catalog:",
     "vite-plus": "catalog:",

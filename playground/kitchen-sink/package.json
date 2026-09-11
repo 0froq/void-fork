@@ -7,7 +7,7 @@
     "dev": "vp dev",
     "preview": "vp preview",
     "remote": "VOID_REMOTE=1 vp dev",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "hono": "^4.12.27",
@@ -16,10 +16,9 @@
   },
   "devDependencies": {
     "@void/vue": "workspace:*",
-    "typescript": "~6.0.3",
+    "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
-    "void": "workspace:*",
-    "vue-tsc": "^3.3.6"
+    "void": "workspace:*"
   }
 }

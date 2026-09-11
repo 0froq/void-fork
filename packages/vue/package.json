@@ -38,7 +38,7 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit --rootDir ../.."
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^6.0.7"

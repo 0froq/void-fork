@@ -45,13 +45,13 @@ vp test run                         # Run tests (unit + integration tests)
 vp test run packages/void           # Only test the core plugin
 vp lint                             # Oxlint through Vite+
 vp fmt                              # Oxfmt through Vite+
-vp run check                        # Typecheck all packages (tsgo/vue-tsc)
+vp run check                        # Typecheck all packages with TypeScript
 vp run --filter ./packages/vue typecheck # Typecheck a specific package
 ```
 
 ## Monorepo Structure
 
-pnpm workspaces managed through Vite+. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (`@typescript/native-preview`, `vite-plus`, Vite+/Vitest aliases, `@cloudflare/workers-types`, wrangler). Make sure to run `vp install` after making package structure changes.
+pnpm workspaces managed through Vite+. Shared dependency versions use the **pnpm catalog** in `pnpm-workspace.yaml` (`typescript`, `vite-plus`, Vite+/Vitest aliases, `@cloudflare/workers-types`, wrangler). Make sure to run `vp install` after making package structure changes.
 
 | Package                                          | npm name       | Purpose                                                        |
 | ------------------------------------------------ | -------------- | -------------------------------------------------------------- |
@@ -140,6 +140,8 @@ See [`packages/solid/README.md`](./packages/solid/README.md) for details.
 | oxlint   | via Vite+ | Linting via `vp lint` / `vp check`                                                             |
 | oxfmt    | via Vite+ | Formatting via `vp fmt` / `vp check`                                                           |
 | vite     | via Vite+ | Dev server + build                                                                             |
+
+TypeScript 7 is the workspace compiler. The Analog playground remains pinned to TypeScript 6 because Angular 22's compiler API requires `typescript >=6.0 <6.1`.
 
 ## Testing
 

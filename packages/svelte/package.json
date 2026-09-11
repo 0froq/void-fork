@@ -38,7 +38,7 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit --rootDir ../.."
   },
   "dependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.1.2"

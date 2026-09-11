@@ -997,7 +997,7 @@ describe('isScaffoldableEmptyProject', () => {
               '@void/svelte': '^0.2.3',
               vite: '^8.0.10',
               'vite-plus': '^0.1.21',
-              typescript: '^5.9.3',
+              typescript: '^7.0.2',
             },
           },
           null,

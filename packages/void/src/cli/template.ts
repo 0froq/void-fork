@@ -17,7 +17,7 @@ export const SCAFFOLD_BASE_DEPENDENCIES = {
 
 export const SCAFFOLD_BASE_DEV_DEPENDENCIES = {
   vite: '^8.0.10',
-  typescript: '^5.9.3',
+  typescript: '^7.0.2',
 } as const;
 
 export const SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES = {

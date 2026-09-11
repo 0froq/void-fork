@@ -18,7 +18,7 @@
   },
   "scripts": {
     "build": "vp pack",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",

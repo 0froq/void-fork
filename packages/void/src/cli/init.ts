@@ -128,7 +128,6 @@ const EMPTY_PROJECT_ALLOWED_PACKAGES = new Set([
   'vite',
   'vite-plus',
   'typescript',
-  '@typescript/native-preview',
   '@rolldown/plugin-babel',
   '@vitejs/plugin-react',
   'babel-plugin-react-compiler',
@@ -1266,7 +1265,7 @@ export function detectProjectState(root: string): ProjectState {
       ...(asRecord(pkgRecord.dependencies) ?? {}),
       ...(asRecord(pkgRecord.devDependencies) ?? {}),
     };
-    hasTypescript = 'typescript' in allDeps || '@typescript/native-preview' in allDeps;
+    hasTypescript = 'typescript' in allDeps;
   } catch {
     // no package.json
   }

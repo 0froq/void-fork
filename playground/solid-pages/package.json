@@ -6,7 +6,7 @@
     "build": "vp build",
     "dev": "vp dev",
     "preview": "vp preview",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "hono": "^4.12.27",
@@ -14,8 +14,8 @@
     "valibot": "^1.4.2"
   },
   "devDependencies": {
-    "@typescript/native-preview": "catalog:",
     "@void/solid": "workspace:*",
+    "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "void": "workspace:*"
