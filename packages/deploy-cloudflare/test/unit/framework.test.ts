@@ -11,6 +11,7 @@ describe('Cloudflare framework deployment', () => {
     const pointerPath = join(root, '.wrangler/deploy/config.json');
     const assetsDirectory = '.svelte-kit/cloudflare';
     mkdirSync(join(root, assetsDirectory), { recursive: true });
+    writeFileSync(join(root, assetsDirectory, '.assetsignore'), '# framework rule\n.keep-out\n');
     writeFileSync(
       configPath,
       `{
@@ -60,7 +61,7 @@ describe('Cloudflare framework deployment', () => {
       auxiliaryWorkers: [],
     });
     expect(readFileSync(join(root, assetsDirectory, '.assetsignore'), 'utf-8')).toBe(
-      '_worker.js\n_routes.json\n',
+      '# framework rule\n.keep-out\n_worker.js\n_routes.json\n',
     );
   });
 });

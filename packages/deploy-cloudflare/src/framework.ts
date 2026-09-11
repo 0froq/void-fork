@@ -82,8 +82,17 @@ export function writeCloudflareFrameworkDeployConfig(
 
   if (options.assetsIgnore && options.assetsIgnore.length > 0) {
     const ignorePath = join(dirname(options.configPath), options.assetsDirectory, '.assetsignore');
-    const ignore = `${options.assetsIgnore.join('\n')}\n`;
     const previousIgnore = existsSync(ignorePath) ? readFileSync(ignorePath, 'utf-8') : null;
+    const existingLines = new Set((previousIgnore ?? '').split(/\r?\n/));
+    let ignore = previousIgnore ?? '';
+    if (ignore.length > 0 && !ignore.endsWith('\n') && !ignore.endsWith('\r')) {
+      ignore += '\n';
+    }
+    for (const pattern of options.assetsIgnore) {
+      if (!existingLines.has(pattern)) {
+        ignore += `${pattern}\n`;
+      }
+    }
     if (previousIgnore !== ignore) {
       writeFileSync(ignorePath, ignore);
       changed = true;
