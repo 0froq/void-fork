@@ -1,15 +1,9 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
-import { executeCloudflareDeploy } from '../../src/cli/cloudflare-deploy/execute.ts';
+import { executeCloudflareDeploy } from '../../src/index.ts';
 
 describe('executeCloudflareDeploy', () => {
-  it('pins the verified artifact and disables Wrangler provisioning and autoconfig', async () => {
-    const runWrangler = vi.fn().mockReturnValue({
-      status: 0,
-      stdout: '',
-      stderr: '',
-      signal: null,
-      error: null,
-    });
+  it('uploads the verified artifact with implicit provisioning disabled', async () => {
+    const runWrangler = vi.fn(() => ({ stdout: '', stderr: '', status: 0 }));
 
     await expect(
       executeCloudflareDeploy({ runWrangler, verifyUploader: () => true }),
@@ -26,8 +20,8 @@ describe('executeCloudflareDeploy', () => {
     );
   });
 
-  it('never starts Wrangler when uploader integrity cannot be verified', async () => {
-    const runWrangler = vi.fn();
+  it('does not invoke Wrangler when its uploader changed', async () => {
+    const runWrangler = vi.fn(() => ({ stdout: '', stderr: '', status: 0 }));
 
     await expect(
       executeCloudflareDeploy({ runWrangler, verifyUploader: () => false }),
@@ -35,14 +29,13 @@ describe('executeCloudflareDeploy', () => {
     expect(runWrangler).not.toHaveBeenCalled();
   });
 
-  it('fails when the Wrangler process does not exit cleanly', async () => {
-    const runWrangler = vi.fn().mockReturnValue({
-      status: 0,
+  it('reports failed and interrupted Wrangler commands', async () => {
+    const runWrangler = vi.fn(() => ({
       stdout: '',
       stderr: '',
-      signal: 'SIGTERM',
-      error: null,
-    });
+      status: 0,
+      signal: 'SIGTERM' as const,
+    }));
 
     await expect(
       executeCloudflareDeploy({ runWrangler, verifyUploader: () => true }),

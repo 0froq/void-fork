@@ -17,6 +17,15 @@ const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '.
 const deployDriftCheckDir = join('.void', 'deploy-drift-check');
 import { intro, outro, log, note, confirm, isCancel, type SpinnerResult } from '@clack/prompts';
 import {
+  executeCloudflareDeploy,
+  parseRootWranglerConfig,
+  readBindingFieldPresence,
+  readConfigEntryString as readD1EntryString,
+  readStoredResourceName,
+  readWranglerTopLevelString,
+  resolveD1MigrateTarget,
+} from '@void/deploy-cloudflare';
+import {
   hasApiRoutes as routeScanHasApiRoutes,
   hasDocumentRoutes as routeScanHasDocumentRoutes,
   resolveAssetConfig,
@@ -77,16 +86,7 @@ import {
   type ManifestOnlyDeployPayload,
 } from './client.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
-import {
-  parseRootWranglerConfig,
-  readBindingFieldPresence,
-  readConfigEntryString as readD1EntryString,
-  readStoredResourceName,
-  readWranglerTopLevelString,
-  resolveD1MigrateTarget,
-} from './cloudflare-deploy/config.ts';
-export { parseRootWranglerConfig } from './cloudflare-deploy/config.ts';
-import { executeCloudflareDeploy } from './cloudflare-deploy/execute.ts';
+export { parseRootWranglerConfig } from '@void/deploy-cloudflare';
 import { promptAndCreateProject } from './create-project.ts';
 import {
   formatConnectionLostMessage,
