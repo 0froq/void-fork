@@ -1763,7 +1763,7 @@ describe('runCloudflareDeploy — D1 migrations_dir gate', () => {
 });
 
 describe('runCloudflareDeploy — full Void app queues', () => {
-  it('rejects a framework app (with a queue) via the framework guard before any account op', async () => {
+  it('deploys a Class-A framework queue through the verified artifact', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({
         name: 'fwapp',
@@ -1774,12 +1774,10 @@ describe('runCloudflareDeploy — full Void app queues', () => {
       'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'fwapp' }, null, 2),
     });
     const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    // Guard fires before preflight/provision — nothing ran.
-    expect(trace).toEqual([]);
+    await runCloudflareDeploy(root, { backend: 'cloudflare', provision: true }, silentCliLog, deps);
+    expect(exitCalls).toEqual([]);
+    expect(trace).toContain('provision');
+    expect(trace).toContain('wrangler:deploy');
   });
 
   it('lets a full Void app with a queue proceed (queues wire through the build)', async () => {
@@ -4833,7 +4831,7 @@ describe('runCloudflareDeploy — managed path does not import the provision mod
 // lighter Void composition that emits no worker artifact here — reject early.
 // ---------------------------------------------------------------------------
 
-describe('runCloudflareDeploy — framework guard (all framework SSR deferred in v1)', () => {
+describe('runCloudflareDeploy — framework artifact guard', () => {
   it('rejects a Class B/C framework SSR app before any account operation', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({
@@ -4853,7 +4851,7 @@ describe('runCloudflareDeploy — framework guard (all framework SSR deferred in
     expect(trace).toEqual([]);
   });
 
-  it('rejects a Class-A framework SSR app before any account operation (narrowed in v1)', async () => {
+  it('deploys a Class-A framework through its Cloudflare Vite artifact', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({
         name: 'tsapp',
@@ -4864,12 +4862,10 @@ describe('runCloudflareDeploy — framework guard (all framework SSR deferred in
       'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'tsapp' }, null, 2),
     });
     const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    // The whole framework path is deferred — rejected before any account op.
-    expect(trace).toEqual([]);
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(exitCalls).toEqual([]);
+    expect(trace).toContain('build');
+    expect(trace).toContain('wrangler:deploy');
   });
 });
 

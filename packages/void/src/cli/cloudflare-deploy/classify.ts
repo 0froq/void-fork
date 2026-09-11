@@ -5,7 +5,7 @@ import { detectFramework } from '../../plugin-inference.ts';
 import { assertNoRootSourceConventionConflicts, resolveProjectPaths } from '../../project-paths.ts';
 import { scanWebSocketRoutesSync } from '../../router/websocket.ts';
 import { validateSsrEntry } from '../../ssr/entry.ts';
-import { detectPreset, hasBackendFiles } from '../preset.ts';
+import { detectPreset, FRAMEWORK_PRESETS, hasBackendFiles } from '../preset.ts';
 import { syncWranglerDurableObjects, syncWranglerWebSockets } from '../wrangler.ts';
 
 export type CloudflareDeployAppOptions = {
@@ -38,14 +38,17 @@ export function classifyCloudflareDeployApp(
 
   const framework = detectFramework(root);
   if (framework) {
-    return unsupported(
-      [
-        `deploy: --platform cloudflare does not yet support framework SSR (${framework.name}).`,
-        'v1 deploys full Void apps only. Deploy this framework with `void deploy` (the managed',
-        'platform) or the framework’s own Cloudflare adapter. Framework SSR support for this',
-        'backend is a follow-up.',
-      ].join('\n'),
-    );
+    const preset = FRAMEWORK_PRESETS[framework.name];
+    if (!preset) {
+      return unsupported(
+        `deploy: --platform cloudflare has no deployment preset for framework ${framework.name}.`,
+      );
+    }
+    if (preset.cloudflareArtifact === 'worker-output') {
+      return unsupported(
+        `deploy: --platform cloudflare does not yet support ${framework.name}'s standalone Worker output.`,
+      );
+    }
   }
 
   const staticPreset = detectPreset(root, { dir: options.dir, spa: options.spa });
@@ -63,7 +66,7 @@ export function classifyCloudflareDeployApp(
     );
   }
 
-  if (!hasBackendFiles(root)) {
+  if (!framework && !hasBackendFiles(root)) {
     return unsupported(
       [
         'deploy: --platform cloudflare found no Void backend to deploy.',

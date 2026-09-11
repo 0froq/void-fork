@@ -53,6 +53,8 @@ export const SSG_PRESETS: Record<string, SsgPreset> = {
 
 /** Build output conventions for a meta-framework. */
 export type FrameworkPreset = {
+  /** How native Cloudflare deployment obtains the Wrangler artifact. */
+  cloudflareArtifact: 'vite-plugin' | 'worker-output';
   /** Default build command (overridable via void.json `build`). */
   buildCommand: string;
   /** Directory containing the worker entry, relative to project root. */
@@ -81,24 +83,28 @@ export type FrameworkPreset = {
 export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
   // Class A
   'tanstack-start': {
+    cloudflareArtifact: 'vite-plugin',
     buildCommand: 'vite build',
     workerDir: 'dist/server',
     workerMain: 'index.js',
     assetsDir: 'dist/client',
   },
   'react-router': {
+    cloudflareArtifact: 'vite-plugin',
     buildCommand: 'vite build',
     workerDir: 'build/server',
     workerMain: 'index.js',
     assetsDir: 'build/client',
   },
   'vinext-app': {
+    cloudflareArtifact: 'vite-plugin',
     buildCommand: 'vite build',
     workerDir: 'dist/rsc',
     workerMain: 'index.js',
     assetsDir: 'dist/client',
   },
   'vinext-pages': {
+    cloudflareArtifact: 'vite-plugin',
     buildCommand: 'vite build',
     workerDir: 'dist/ssr',
     workerMain: 'index.js',
@@ -106,6 +112,7 @@ export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
   },
   // Class B/C
   sveltekit: {
+    cloudflareArtifact: 'worker-output',
     buildCommand: 'vite build',
     workerDir: '.svelte-kit/cloudflare',
     workerMain: '_worker.js',
@@ -114,6 +121,7 @@ export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
     bundle: true,
   },
   nuxt: {
+    cloudflareArtifact: 'worker-output',
     buildCommand: 'nuxt build',
     workerDir: '.output/server',
     workerMain: 'index.mjs',
@@ -121,6 +129,7 @@ export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
     hashedAssetsPrefix: '_nuxt',
   },
   analog: {
+    cloudflareArtifact: 'worker-output',
     buildCommand: 'vite build',
     workerDir: 'dist/analog/server',
     workerMain: 'index.mjs',
@@ -128,6 +137,7 @@ export const FRAMEWORK_PRESETS: Record<string, FrameworkPreset> = {
     hashedAssetsPrefix: 'assets',
   },
   astro: {
+    cloudflareArtifact: 'worker-output',
     buildCommand: 'astro build',
     workerDir: 'dist/server',
     workerMain: 'entry.mjs',
