@@ -5556,6 +5556,16 @@ describe('provisionCloudflareResources — quarantine retains the whole-provisio
   });
 });
 
+/**
+ * Windows cannot DELIVER a signal to another process. libuv maps SIGTERM/SIGINT/SIGKILL to
+ * `TerminateProcess`, which destroys the target immediately WITHOUT running any handler in it,
+ * and a synthetic Ctrl-C would need `GenerateConsoleCtrlEvent` (unreachable from Node). The
+ * cases carrying this note drive a real child `node` parent with `kill('SIGTERM')` and then
+ * assert on that parent's signal-teardown handler — work that only happens under POSIX signal
+ * semantics.
+ */
+const WINDOWS_NO_SIGNALS = 'signal delivery to another process is POSIX-only (see note above)';
+
 describe('createDefaultRunWrangler — parent-signal forwarding awaits confirmed teardown', () => {
   const SIGNAL_TEARDOWN_TMP = join(import.meta.dirname, '.tmp-signal-teardown');
   beforeEach(() => {
@@ -5566,7 +5576,8 @@ describe('createDefaultRunWrangler — parent-signal forwarding awaits confirmed
     rmSync(SIGNAL_TEARDOWN_TMP, { recursive: true, force: true });
   });
 
-  it('SIGTERM to the parent: the child group is confirmed dead BEFORE the parent re-raises and exits', async () => {
+  it('SIGTERM to the parent: the child group is confirmed dead BEFORE the parent re-raises and exits', async (ctx) => {
+    ctx.skip(process.platform === 'win32', WINDOWS_NO_SIGNALS);
     // A REAL parent process (so the re-raise/exit is observable) runs the runner around a
     // child that exits 250ms AFTER receiving the forwarded SIGTERM. Pre-fix the parent
     // re-raised immediately — it was dead while the child lived on (proper-lockfile's exit
@@ -6480,16 +6491,6 @@ describe('acquireProvisionLock — recovery decisions are serialized + generatio
     rmSync(sidecar, { force: true });
   });
 });
-
-/**
- * Windows cannot DELIVER a signal to another process. libuv maps SIGTERM/SIGINT/SIGKILL to
- * `TerminateProcess`, which destroys the target immediately WITHOUT running any handler in it,
- * and a synthetic Ctrl-C would need `GenerateConsoleCtrlEvent` (unreachable from Node). The
- * cases carrying this note drive a real child `node` parent with `kill('SIGTERM')` and then
- * assert on that parent's signal-teardown handler — work that only happens under POSIX signal
- * semantics.
- */
-const WINDOWS_NO_SIGNALS = 'signal delivery to another process is POSIX-only (see note above)';
 
 describe('createDefaultRunWrangler — signal-path kill failure quarantines the lock (child-process)', () => {
   const SIGNAL_KILL_TMP = join(import.meta.dirname, '.tmp-signal-kill');

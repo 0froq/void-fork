@@ -26,6 +26,25 @@ async function waitForBodyText(page: Page, text: string) {
   await page.waitForFunction((expected) => document.body.textContent?.includes(expected), text);
 }
 
+async function goto(page: Page, url: string) {
+  const attempts = process.platform === 'win32' ? 3 : 1;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await page.goto(url);
+      return;
+    } catch (error) {
+      const isTransientWindowsSocketExhaustion =
+        error instanceof Error && error.message.includes('net::ERR_NO_BUFFER_SPACE');
+      if (!isTransientWindowsSocketExhaustion || attempt === attempts) {
+        throw error;
+      }
+      // Windows can keep recently closed browser sockets in rundown long enough for Chromium's
+      // next navigation to fail before it reaches the dev server. Retry only that OS error.
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+  }
+}
+
 function collectUnexpectedBrowserErrors(page: Page) {
   const errors: Array<string> = [];
 
@@ -106,7 +125,7 @@ describe('playground/websockets', () => {
     const message = `hello-${room}`;
 
     try {
-      await page.goto(`${base}/chat`);
+      await goto(page, `${base}/chat`);
       await waitForHydration(page);
       await waitForBodyText(page, 'Connected to room "general"');
 
@@ -142,7 +161,7 @@ describe('playground/websockets', () => {
     const errors = collectUnexpectedBrowserErrors(page);
 
     try {
-      await page.goto(`${base}/notifications`);
+      await goto(page, `${base}/notifications`);
       await waitForHydration(page);
       await page.waitForFunction(() => {
         const text = document.body.textContent || '';
