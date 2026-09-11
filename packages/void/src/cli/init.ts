@@ -593,7 +593,7 @@ async function resolveInitRoot(root: string): Promise<string> {
     validate: (value) => validateSubfolderName(root, value),
   });
 
-  if (isCancel(folder)) {
+  if (isCancel(folder) || typeof folder === 'symbol') {
     cancel('Setup cancelled.');
     process.exit(0);
   }
@@ -1768,7 +1768,7 @@ async function promptStarterMode(): Promise<ScaffoldStarterMode> {
     ],
   });
 
-  if (isCancel(choice)) {
+  if (isCancel(choice) || typeof choice === 'symbol') {
     cancel('Setup cancelled.');
     process.exit(0);
   }
@@ -3258,7 +3258,7 @@ async function pickAgentWhenUndetected(): Promise<AgentSetupSelection> {
       { value: 'generic', label: 'Generic' },
     ],
   });
-  if (isCancel(choice)) {
+  if (isCancel(choice) || typeof choice === 'symbol') {
     cancel('Setup cancelled.');
     process.exit(0);
   }

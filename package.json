@@ -21,8 +21,8 @@
     "@types/cross-spawn": "^6.0.6",
     "cross-spawn": "^7.0.6",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "playwright": "^1.61.1",
-    "rolldown": "^1.1.4",
+    "playwright": "^1.63.0",
+    "rolldown": "^1.2.8",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:"

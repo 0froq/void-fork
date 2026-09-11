@@ -40,12 +40,12 @@
     "typecheck": "tsc --noEmit --rootDir ../.."
   },
   "dependencies": {
-    "vite-plugin-solid": "^2.11.12"
+    "vite-plugin-solid": "^2.11.14"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "pathslash": "catalog:",
-    "solid-js": "^1.9.14",
+    "solid-js": "^1.9.15",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "void": "workspace:*"

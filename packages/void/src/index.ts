@@ -597,7 +597,7 @@ async function runAiSetupPrompt(
             initialValue: defaultSlug,
             validate: validateProjectSlug,
           });
-          if (isCancel(slugResult)) {
+          if (isCancel(slugResult) || typeof slugResult === 'symbol') {
             return undefined;
           }
           return slugResult.trim();

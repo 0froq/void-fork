@@ -232,7 +232,7 @@ async function resolveValidator(root: string): Promise<Validator> {
     ],
   });
 
-  if (isCancel(choice)) {
+  if (isCancel(choice) || typeof choice === 'symbol') {
     cancel('Cancelled.');
     process.exit(0);
   }

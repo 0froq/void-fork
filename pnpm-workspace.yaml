@@ -19,22 +19,25 @@ allowBuilds:
   workerd: true
 
 catalog:
-  '@clack/prompts': ^1.7.0
+  '@clack/prompts': ^1.8.0
   '@cloudflare/workers-types': ^4.20260702.1
-  '@types/node': ^26.1.0
+  '@types/node': ^26.5.1
   typescript: 7.0.2
   '@voidzero-dev/vitepress-theme': ^5.0.7
   pathslash: ^0.1.0
   vite: npm:@voidzero-dev/vite-plus-core@0.3.1
   vite-plus: 0.3.1
-  wrangler: ^4.107.0
+  wrangler: 4.107.0
 
 catalogs:
   angular:
     typescript: 6.0.3
+  sveltekit:
+    typescript: 6.0.3
 
 overrides:
   esbuild: ^0.27.3
+  react-server-dom-webpack: 19.2.7
   vite@*: 'catalog:'
 
 peerDependencyRules:
