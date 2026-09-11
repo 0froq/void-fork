@@ -47,7 +47,7 @@ git submodule status
 - **Important**: The source of truth of this file on disk is `README.md`. Both `AGENTS.md` and `CLAUDE.md` are symlinks to this file. When asked to update any of these, always update `README.md` (the actual file).
 - Refer to the [Design Doc](./meta/design-docs/0001-design.md) for the high-level vision and architecture.
 - Refer to the [Progress Doc](./meta/progress.md) for tracking progress.
-- Framework repo: `framework/` (git submodule — run `git submodule update --init` after cloning). If work involves the framework, read `framework/CLAUDE.md` first.
+- Framework repo: `framework/` (git submodule — run `git submodule update --init` after cloning). If work involves the framework, read `framework/AGENTS.md` first.
 - Public-facing docs: `framework/docs` (Vitepress site).
 
 ## Best Practices That Must Be Followed

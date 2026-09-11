@@ -9,25 +9,24 @@
     "deploy:staging": "node ../../scripts/wrangler-deploy.ts --build --env staging",
     "dev": "node scripts/refresh-access-token.mjs && vp dev",
     "preview": "vp preview",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@nkzw/stack": "2.3.2",
     "@voidcloud/ui": "workspace:*",
     "hono": "catalog:",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
-    "@tailwindcss/vite": "^4.2.4",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@typescript/native-preview": "catalog:",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@void/react": "link:../../framework/packages/react",
     "@voidcloud/api": "workspace:*",
-    "tailwindcss": "^4.2.4",
-    "typescript": "~7.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "void": "link:../../framework/packages/void",

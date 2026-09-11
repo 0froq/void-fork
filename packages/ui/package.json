@@ -15,15 +15,15 @@
     "./fonts/*": "./src/fonts/*"
   },
   "dependencies": {
-    "@base-ui/react": "1.7.0",
+    "@base-ui/react": "1.8.0",
     "@iconify/react": "^6.0.2",
     "clsx": "^2.1.1",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@tailwindcss/typography": "^0.5.19",
-    "@types/react": "^19.2.14",
-    "tailwindcss": "^4.2.4"
+    "@tailwindcss/typography": "^0.5.20",
+    "@types/react": "^19.3.0",
+    "tailwindcss": "^4.3.3"
   },
   "peerDependencies": {
     "react": "^19.2.5"
