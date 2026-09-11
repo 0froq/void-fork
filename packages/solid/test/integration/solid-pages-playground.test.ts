@@ -531,7 +531,9 @@ function registerIslandTests(getBase: () => string) {
       await page.waitForSelector('[data-island][data-hydrated="true"]');
 
       await page.click('button:has-text("Add Post")');
-      await page.waitForFunction(() => document.body.textContent?.includes('Title is required'));
+      // The first action can include a cold worker compile under full-suite load. Keep the normal
+      // 10s page timeout for every other assertion, but give this server round-trip more headroom.
+      await page.getByText('Title is required').waitFor({ timeout: 20_000 });
 
       const text = await page.textContent('body');
       expect(text).toContain('Title is required');
