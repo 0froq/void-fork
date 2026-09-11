@@ -373,7 +373,7 @@ The command compares your current `db/schema.ts` or `db/schema/` modules against
 
 ### `void db status`
 
-Show migration status. Displays which migrations are applied or pending locally, then uses the saved deployment target for remote status: the hosted API for Void projects, or the pinned D1 database and its configured migration table for Cloudflare projects.
+Show migration status. Displays which migrations are applied or pending locally, then uses the saved deployment target for remote status: the hosted API for Void projects, the pinned D1 database and its configured migration table for direct Cloudflare SQLite projects, or the shell `DATABASE_URL` for direct Cloudflare PostgreSQL/MySQL projects. If the remote credential or service is unavailable, local status is still shown.
 
 ### `void db reset`
 

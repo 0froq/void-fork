@@ -250,4 +250,32 @@ describe('void db migrate', () => {
     );
     expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration(s) to remote database.');
   });
+
+  it('reads direct Cloudflare PostgreSQL migration status from DATABASE_URL', async () => {
+    const root = createPgProjectRoot({
+      '001_create_users.sql': 'CREATE TABLE users (id text primary key);',
+    });
+    selectCloudflare(root);
+    process.env.DATABASE_URL = 'postgresql://example.test/app';
+    mockGetPgAppliedMigrations.mockResolvedValue(['001_create_users.sql']);
+
+    await runDbCommand(root, { action: 'status' });
+
+    expect(mockGetPgAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
+    expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('remote: applied'));
+  });
+
+  it('reads direct Cloudflare MySQL migration status from DATABASE_URL', async () => {
+    const root = createMySqlProjectRoot({
+      '001_create_users.sql': 'CREATE TABLE users (id varchar(255) primary key);',
+    });
+    selectCloudflare(root);
+    process.env.DATABASE_URL = 'mysql://example.test/app';
+    mockGetMySqlAppliedMigrations.mockResolvedValue(['001_create_users.sql']);
+
+    await runDbCommand(root, { action: 'status' });
+
+    expect(mockGetMySqlAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
+    expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('remote: applied'));
+  });
 });

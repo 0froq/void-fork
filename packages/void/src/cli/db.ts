@@ -485,16 +485,30 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
   // Try to get remote status
   let remoteApplied: Array<{ name: string; applied_at: string }> | null = null;
   const deploymentPlatform = readDeploymentPlatform(root);
-  if (deploymentPlatform === 'cloudflare' && dialect === 'sqlite') {
+  if (deploymentPlatform === 'cloudflare') {
     try {
-      const { readCloudflareD1Migrations, resolveCloudflareD1Context } =
-        await import('./cloudflare-operations.ts');
-      const configured = resolveBindingNames(readConfig(root).inference?.bindings);
-      const context = resolveCloudflareD1Context(root, configured?.d1 ?? 'DB');
-      remoteApplied = (await readCloudflareD1Migrations(context)).map((name) => ({
-        name,
-        applied_at: '',
-      }));
+      if (dialect !== 'sqlite') {
+        const databaseUrl = process.env.DATABASE_URL;
+        if (!databaseUrl) {
+          throw new Error('DATABASE_URL is not available.');
+        }
+        const names =
+          dialect === 'postgresql'
+            ? await (await import('../migrations/runner-pg.ts')).getPgAppliedMigrations(databaseUrl)
+            : await (
+                await import('../migrations/runner-mysql.ts')
+              ).getMySqlAppliedMigrations(databaseUrl);
+        remoteApplied = names.map((name) => ({ name, applied_at: '' }));
+      } else {
+        const { readCloudflareD1Migrations, resolveCloudflareD1Context } =
+          await import('./cloudflare-operations.ts');
+        const configured = resolveBindingNames(readConfig(root).inference?.bindings);
+        const context = resolveCloudflareD1Context(root, configured?.d1 ?? 'DB');
+        remoteApplied = (await readCloudflareD1Migrations(context)).map((name) => ({
+          name,
+          applied_at: '',
+        }));
+      }
     } catch {
       // Graceful degradation — local migration status remains useful offline.
     }
