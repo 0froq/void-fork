@@ -927,7 +927,10 @@ export async function handleIsr(
     // but the CLIENT must still receive the first-render cookies (session/CSRF/
     // prefs). Re-append each Set-Cookie from the ORIGINAL render response — folding
     // via `getSetCookie()` preserves multiple distinct cookies.
-    for (const cookie of response.headers.getSetCookie()) {
+    const cookies = (
+      response.headers as Headers & { getSetCookie(): Array<string> }
+    ).getSetCookie();
+    for (const cookie of cookies) {
       clientHeaders.append('set-cookie', cookie);
     }
     return new Response(response.body, {

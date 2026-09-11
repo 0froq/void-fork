@@ -1,5 +1,11 @@
+import {
+  denormalizeIsrPath,
+  htmlEdgeKey,
+  isrKey,
+  jsonEdgeKey,
+  listIsrHosts,
+} from '@void/isr/runtime';
 import { getRawRuntimeEnv } from './env-raw.ts';
-import { denormalizeIsrPath, htmlEdgeKey, isrKey, jsonEdgeKey, listIsrHosts } from './isr-cache.ts';
 
 export type RevalidateOptions = {
   paths?: Array<string>;

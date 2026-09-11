@@ -572,7 +572,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         isrRevalidate = emitIsr ? merged : undefined;
         // Resolve the ISR runtime path LAZILY — only when ISR is actually emitted
         // — so non-ISR/managed/dev builds never depend on it.
-        const isr = emitIsr ? { runtimePath: resolveFile('#self/runtime/isr-cache') } : undefined;
+        const isr = emitIsr ? { runtimePath: resolveFile('@void/isr/runtime') } : undefined;
         writeFileIfChanged(
           join(outDir, 'entry.ts'),
           compileWorkerEntry(

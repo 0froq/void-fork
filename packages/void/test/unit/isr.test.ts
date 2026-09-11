@@ -1,6 +1,6 @@
+import { hostRegistryKey, htmlEdgeKey, isrKey, jsonEdgeKey } from '@void/isr/runtime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { envContext } from '../../src/runtime/env-raw.ts';
-import { hostRegistryKey, htmlEdgeKey, isrKey, jsonEdgeKey } from '../../src/runtime/isr-cache.ts';
 import { revalidate } from '../../src/runtime/isr.ts';
 
 const DPL = 'dpl_1';

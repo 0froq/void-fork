@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   cloneWithoutVoidPages,
   deleteIsrCache,
@@ -23,7 +22,8 @@ import {
   type IsrCacheEnv,
   type IsrCacheMetadata,
   type RenderFn,
-} from '../../src/runtime/isr-cache.ts';
+} from '@void/isr/runtime';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 // Collapsed self-host deployment id (baked as a compile-time literal on the real
 // worker). Every key in this suite is scoped by it — `void-isr/<id>/...`.
