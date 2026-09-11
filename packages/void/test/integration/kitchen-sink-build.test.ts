@@ -126,6 +126,13 @@ describe('playground/kitchen-sink build', () => {
     expect(vars.LEGIT_USER_VAR).toBe('kept');
   });
 
+  it('requires auth deployments to inherit BETTER_AUTH_SECRET without emitting plaintext', () => {
+    const wranglerConfig = JSON.parse(readFileSync(join(dist, 'ssr', 'wrangler.json'), 'utf-8'));
+    const vars = (wranglerConfig.vars ?? {}) as Record<string, unknown>;
+    expect(wranglerConfig.secrets?.required).toContain('BETTER_AUTH_SECRET');
+    expect(vars.BETTER_AUTH_SECRET).toBeUndefined();
+  });
+
   it('excludes local dotenv files from Cloudflare deploy worker vars', () => {
     const wranglerConfig = JSON.parse(readFileSync(join(dist, 'ssr', 'wrangler.json'), 'utf-8'));
     const vars = (wranglerConfig.vars ?? {}) as Record<string, unknown>;

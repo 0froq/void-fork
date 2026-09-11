@@ -1011,6 +1011,19 @@ export function voidPlugin(options?: {
     );
     const result: Record<string, unknown> = { ...workerConfig };
 
+    // Direct Cloudflare deploys create BETTER_AUTH_SECRET before upload. Tell
+    // Wrangler to inherit that remote secret into the new Worker version;
+    // otherwise a normal deploy can replace the version without carrying the
+    // secret forward. Scope this to the Void CLI's Cloudflare build marker so
+    // local dev, managed Void deploys, and bare user builds keep their existing
+    // behavior. Preserve and dedupe any user-declared required secrets.
+    if (authEnabled && process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] === '1') {
+      const resolvedSecrets = (resolved as { secrets?: { required?: Array<string> } }).secrets;
+      if (!resolvedSecrets?.required?.includes('BETTER_AUTH_SECRET')) {
+        result.secrets = { required: ['BETTER_AUTH_SECRET'] };
+      }
+    }
+
     // Void owns the generated asset routing policy. Replace stale root
     // wrangler settings instead of letting the Cloudflare plugin concatenate
     // them with generated rules. This preserves static-first behavior for

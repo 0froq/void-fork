@@ -152,6 +152,8 @@ void secret delete STRIPE_KEY
 
 Remote secrets count as "present" for deploy validation — `void deploy` checks both `.env*` and the remote secret list before uploading.
 
+For auth-enabled apps, both Void Cloud and `void deploy --platform cloudflare` manage `BETTER_AUTH_SECRET` automatically: they preserve an existing encrypted secret and generate one only when missing. Other secrets remain user-managed. Bare `vite build && wrangler deploy` does not provide this lifecycle; set `BETTER_AUTH_SECRET` with Wrangler and declare it in `secrets.required` yourself.
+
 ## Defaults
 
 Schema defaults from `defineEnv({ PORT: number().default(3000) })` flow into:

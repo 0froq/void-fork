@@ -14,6 +14,7 @@ import {
   DEPLOY_PASSTHROUGH_ASSERT_FIELDS,
   DEPLOY_PASSTHROUGH_EXCLUDE_FIELDS,
   DEPLOY_WHOLE_OBJECT_PINNED_FIELDS,
+  ensureCloudflareAuthSecret,
   hashWranglerUploader,
   runCloudflareDeploy,
   snapshotBindingIdentities,
@@ -280,6 +281,12 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
       trace.push('gate');
       return { hasSchema: false, remoteSecretNames: null };
     }) as CloudflareDeployDeps['dischargeSelfHostEnv'],
+    // Persistent auth-secret provisioning. Dedicated tests exercise the real
+    // list/put/verify lifecycle; orchestration tests record only its position.
+    ensureAuthSecret: (async () => {
+      trace.push('auth-secret');
+      return { created: false };
+    }) as CloudflareDeployDeps['ensureAuthSecret'],
     // The stubbed build never writes dist/ssr/wrangler.json, so the real config
     // verification would have nothing to read — pass it by default; dedicated tests
     // exercise the real verifier and the fail-closed branch.
@@ -300,6 +307,147 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
   };
   return { deps, trace, wranglerArgs, exitCalls };
 }
+
+describe('ensureCloudflareAuthSecret', () => {
+  function authSecretProject(): string {
+    return makeProject({
+      'package.json': JSON.stringify({ name: 'authapp' }),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'authapp' }),
+    });
+  }
+
+  it('preserves an existing remote secret without writing it again', async () => {
+    const root = authSecretProject();
+    const calls: Array<Array<string>> = [];
+    const result = await ensureCloudflareAuthSecret({
+      root,
+      configPath: join(root, 'wrangler.jsonc'),
+      accountId: 'acc123',
+      workerName: 'authapp',
+      runWrangler: (args) => {
+        calls.push(args);
+        return {
+          ...cleanExit,
+          stdout: JSON.stringify([{ name: 'BETTER_AUTH_SECRET', type: 'secret_text' }]),
+        };
+      },
+    });
+
+    expect(result).toEqual({ created: false });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual([
+      'secret',
+      'list',
+      '--format=json',
+      '-c',
+      join(root, 'wrangler.jsonc'),
+      '--env=',
+    ]);
+  });
+
+  it('creates a missing secret through stdin and verifies it before returning', async () => {
+    const root = authSecretProject();
+    const calls: Array<{
+      args: Array<string>;
+      opts: Parameters<DeployWranglerRun>[1];
+    }> = [];
+    let listCount = 0;
+    const result = await ensureCloudflareAuthSecret({
+      root,
+      configPath: join(root, 'wrangler.jsonc'),
+      accountId: 'acc123',
+      workerName: 'authapp',
+      runWrangler: (args, opts) => {
+        calls.push({ args, opts });
+        if (args[1] === 'list') {
+          listCount++;
+          return {
+            ...cleanExit,
+            stdout: listCount === 1 ? '[]' : JSON.stringify([{ name: 'BETTER_AUTH_SECRET' }]),
+          };
+        }
+        return cleanExit;
+      },
+    });
+
+    expect(result).toEqual({ created: true });
+    expect(calls.map((call) => call.args.slice(0, 3))).toEqual([
+      ['secret', 'list', '--format=json'],
+      ['secret', 'put', 'BETTER_AUTH_SECRET'],
+      ['secret', 'list', '--format=json'],
+    ]);
+    const put = calls[1]!;
+    expect(put.opts.capture).toBe(true);
+    expect(put.opts.input).toMatch(/^[0-9a-f]{64}\n$/);
+    expect(put.args.join(' ')).not.toContain(put.opts.input!.trim());
+  });
+
+  it('bootstraps the secret when the Worker has not been deployed yet', async () => {
+    const root = authSecretProject();
+    let call = 0;
+    const result = await ensureCloudflareAuthSecret({
+      root,
+      configPath: join(root, 'wrangler.jsonc'),
+      accountId: 'acc123',
+      workerName: 'authapp',
+      runWrangler: (args) => {
+        call++;
+        if (call === 1) {
+          return {
+            ...cleanExit,
+            status: 1,
+            stderr: [
+              'Worker "authapp" not found.',
+              'If this is a new Worker, run `wrangler deploy` first to create it.',
+              "Otherwise, check that the Worker name is correct and you're logged into the right account.",
+            ].join('\n'),
+          };
+        }
+        if (args[1] === 'list') {
+          return { ...cleanExit, stdout: JSON.stringify([{ name: 'BETTER_AUTH_SECRET' }]) };
+        }
+        return cleanExit;
+      },
+    });
+
+    expect(result).toEqual({ created: true });
+    expect(call).toBe(3);
+  });
+
+  it('fails closed when secret creation fails without surfacing the generated value', async () => {
+    const root = authSecretProject();
+    let generated = '';
+    const promise = ensureCloudflareAuthSecret({
+      root,
+      configPath: join(root, 'wrangler.jsonc'),
+      accountId: 'acc123',
+      workerName: 'authapp',
+      runWrangler: (args, opts) => {
+        if (args[1] === 'list') {
+          return { ...cleanExit, stdout: '[]' };
+        }
+        generated = opts.input?.trim() ?? '';
+        return { ...cleanExit, status: 1, stderr: `unsafe diagnostic ${generated}` };
+      },
+    });
+
+    await expect(promise).rejects.toMatchObject({ reason: 'put-failed' });
+    await expect(promise).rejects.not.toThrow(generated);
+  });
+
+  it('fails closed when the secret is still absent after a successful put', async () => {
+    const root = authSecretProject();
+    await expect(
+      ensureCloudflareAuthSecret({
+        root,
+        configPath: join(root, 'wrangler.jsonc'),
+        accountId: 'acc123',
+        workerName: 'authapp',
+        runWrangler: (args) => (args[1] === 'list' ? { ...cleanExit, stdout: '[]' } : cleanExit),
+      }),
+    ).rejects.toMatchObject({ reason: 'verification-failed' });
+  });
+});
 
 /** A worker-bearing D1 app fixture with a fully-provisioned wrangler.jsonc. */
 function d1Project(
@@ -2122,6 +2270,32 @@ describe('verifyGeneratedDeployConfig', () => {
     const result = verifyGeneratedDeployConfig(root, { accountId: 'acc123', workerName: 'myapp' });
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/worker name/);
+  });
+
+  it('requires auth-enabled builds to inherit BETTER_AUTH_SECRET', () => {
+    const root = deployConfigProject({ account_id: 'acc123', name: 'myapp' });
+    const result = verifyGeneratedDeployConfig(root, {
+      accountId: 'acc123',
+      workerName: 'myapp',
+      authEnabled: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/BETTER_AUTH_SECRET.*secrets\.required/);
+  });
+
+  it('accepts auth inheritance while preserving other required secrets', () => {
+    const root = deployConfigProject({
+      account_id: 'acc123',
+      name: 'myapp',
+      secrets: { required: ['API_KEY', 'BETTER_AUTH_SECRET'] },
+    });
+    expect(
+      verifyGeneratedDeployConfig(root, {
+        accountId: 'acc123',
+        workerName: 'myapp',
+        authEnabled: true,
+      }),
+    ).toEqual({ ok: true });
   });
 
   it('fails closed when the deploy config was not emitted', () => {
@@ -4669,6 +4843,8 @@ describe('runCloudflareDeploy — migrations dir / count / auth', () => {
     // schema check; here we assert the guard lets a satisfied auth app proceed to deploy.
     const { deps, trace } = harness();
     await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(trace).toContain('auth-secret');
+    expect(trace.indexOf('auth-secret')).toBeLessThan(trace.indexOf('wrangler:d1'));
     expect(trace).toContain('wrangler:deploy');
   });
 });
@@ -6027,6 +6203,56 @@ describe('compareWranglerMigrationPaths (wrangler 4.107 numeric-prefix comparato
 // ---------------------------------------------------------------------------
 
 describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
+  it('rejects a plaintext BETTER_AUTH_SECRET before provisioning or upload', async () => {
+    const root = d1Project(PROVISIONED_D1, {
+      'void.json': JSON.stringify({ auth: {} }),
+    });
+    const { deps, trace, wranglerArgs, exitCalls } = harness({
+      readEmittedWorkerVars: (() =>
+        emittedVars({
+          BETTER_AUTH_SECRET: 'plaintext-secret',
+        })) as CloudflareDeployDeps['readEmittedWorkerVars'],
+    });
+
+    await expect(
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(exitCalls).toEqual([1]);
+    expect(trace).toContain('build');
+    expect(trace).not.toContain('auth-secret');
+    expect(trace).not.toContain('wrangler:deploy');
+    expect(wranglerArgs.some((args) => args[0] === 'secret')).toBe(false);
+  });
+
+  it('removes BETTER_AUTH_SECRET from the generic schema gate because deploy owns it', async () => {
+    const root = d1Project(PROVISIONED_D1, {
+      'void.json': JSON.stringify({ auth: {} }),
+    });
+    let captured: SelfHostEnvContext | undefined;
+    const { deps, trace } = harness({
+      resolveSchemaFacts: (() =>
+        okSchemaFacts({
+          hasSchema: true,
+          requiredKeys: ['BETTER_AUTH_SECRET'],
+          secretKeys: ['BETTER_AUTH_SECRET'],
+        })) as CloudflareDeployDeps['resolveSchemaFacts'],
+      validateEmittedVars: (async () => ({
+        kind: 'invalid-keys',
+        invalidKeys: ['BETTER_AUTH_SECRET'],
+      })) as CloudflareDeployDeps['validateEmittedVars'],
+      dischargeSelfHostEnv: (async (ctx: SelfHostEnvContext) => {
+        captured = ctx;
+        return { hasSchema: true, remoteSecretNames: null };
+      }) as CloudflareDeployDeps['dischargeSelfHostEnv'],
+    });
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(captured?.absentRequired).toEqual([]);
+    expect(captured?.invalidKeys).toEqual([]);
+    expect(trace).toContain('auth-secret');
+    expect(trace).toContain('wrangler:deploy');
+  });
+
   it('discharges a context DERIVED from the REAL emitted vars + env-insensitive required names', async () => {
     const root = d1Project(PROVISIONED_D1);
     let captured: SelfHostEnvContext | undefined;

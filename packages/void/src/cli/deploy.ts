@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   cpSync,
   existsSync,
@@ -97,6 +97,7 @@ import {
   fetchRemoteSecretNames,
   formatEnvReport,
   getDeployEnvDefaults,
+  listSelfHostSecretNames,
   readEmittedWorkerVars,
   selfHostSchemaFailureMessage,
   SelfHostEnvValidationError,
@@ -1559,6 +1560,12 @@ export function verifyGeneratedDeployConfig(
      */
     needsAI?: boolean;
     /**
+     * Auth-enabled Cloudflare builds must emit `secrets.required` with
+     * BETTER_AUTH_SECRET so Wrangler inherits the persistent remote value into
+     * the uploaded Worker version instead of dropping it during replacement.
+     */
+    authEnabled?: boolean;
+    /**
      * The exact `containers` set Void's build emits, reconstructed PRE-BUILD
      * ({@link reconstructExpectedContainers}) from the root-declared containers plus — when the
      * source needs the sandbox — Void's own sandbox container. A bare `wrangler deploy` PROVISIONS a
@@ -1617,6 +1624,25 @@ export function verifyGeneratedDeployConfig(
       ok: false,
       reason: `generated config worker name ${JSON.stringify(generated.name)} does not match the expected worker ${JSON.stringify(expected.workerName)}.`,
     };
+  }
+  if (expected.authEnabled) {
+    const secrets = generated.secrets;
+    const required =
+      typeof secrets === 'object' && secrets !== null && !Array.isArray(secrets)
+        ? (secrets as Record<string, unknown>).required
+        : undefined;
+    if (
+      !Array.isArray(required) ||
+      !required.every((name): name is string => typeof name === 'string') ||
+      !required.includes(BETTER_AUTH_SECRET_NAME)
+    ) {
+      return {
+        ok: false,
+        reason:
+          `generated config must include ${BETTER_AUTH_SECRET_NAME} in ` +
+          '`secrets.required` so wrangler inherits the persistent auth secret during upload.',
+      };
+    }
   }
   // Binding-identity check: the generated artifact's id-bearing bindings must be the SAME ones
   // (by id) as were PINNED before the build (the in-memory snapshot). A flattened named-env /
@@ -2054,7 +2080,7 @@ export type DeployWranglerRunResult = {
  */
 export type DeployWranglerRun = (
   args: Array<string>,
-  opts: { capture: boolean },
+  opts: { capture: boolean; input?: string },
 ) => DeployWranglerRunResult | Promise<DeployWranglerRunResult>;
 
 /**
@@ -2078,6 +2104,8 @@ export interface CloudflareDeployDeps {
   provision?: typeof provisionCloudflareResources;
   /** Parent-side secret-gate discharge seam (default: {@link dischargeSelfHostEnvContext}). */
   dischargeSelfHostEnv?: typeof dischargeSelfHostEnvContext;
+  /** Persistent Better Auth secret seam (default: {@link ensureCloudflareAuthSecret}). */
+  ensureAuthSecret?: typeof ensureCloudflareAuthSecret;
   /** Generated-deploy-config verification seam (default: {@link verifyGeneratedDeployConfig}). */
   verifyDeployConfig?: typeof verifyGeneratedDeployConfig;
   /** Pre-remote-migrate gate seam (default: {@link assertRemoteMigrationsDeployable}). */
@@ -2141,6 +2169,25 @@ const PLAINTEXT_WARNING_REASONS: Record<PlaintextVarWarning['reason'], string> =
   heuristic: '',
   'value-shape': ' (value looks like a connection URL with embedded credentials)',
 };
+
+const BETTER_AUTH_SECRET_NAME = 'BETTER_AUTH_SECRET';
+
+type CloudflareAuthSecretFailureReason =
+  | 'uploader-changed'
+  | 'list-failed'
+  | 'put-failed'
+  | 'verification-failed';
+
+/** Values-free failure from the Cloudflare Better Auth secret lifecycle. */
+export class CloudflareAuthSecretError extends Error {
+  override name = 'CloudflareAuthSecretError';
+  readonly reason: CloudflareAuthSecretFailureReason;
+
+  constructor(message: string, reason: CloudflareAuthSecretFailureReason) {
+    super(message);
+    this.reason = reason;
+  }
+}
 
 /** True only for a wrangler child that ran to completion with a clean exit 0. */
 function isCleanWranglerExit(result: DeployWranglerRunResult): boolean {
@@ -3391,7 +3438,13 @@ function createDeployWranglerRunner(
     const childEnv = deployChildEnv(accountId, apiBaseUrl);
     const result = spawnSync(command as string, [...prefix, ...args], {
       cwd: root,
-      stdio: opts.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      stdio:
+        opts.input === undefined
+          ? opts.capture
+            ? ['ignore', 'pipe', 'pipe']
+            : 'inherit'
+          : ['pipe', opts.capture ? 'pipe' : 'inherit', opts.capture ? 'pipe' : 'inherit'],
+      input: opts.input,
       encoding: 'utf-8',
       env: childEnv,
       shell: false,
@@ -3405,6 +3458,97 @@ function createDeployWranglerRunner(
       error: result.error ? result.error.message : null,
     };
   };
+}
+
+/**
+ * Ensure an auth-enabled worker has one persistent Better Auth secret.
+ *
+ * Existing remote secrets are adopted unchanged. A missing secret is generated
+ * once, streamed to `wrangler secret put` over stdin (never argv), then verified
+ * by listing names again. A not-yet-deployed Worker is the one safe list failure
+ * treated as absence because Wrangler can attach a secret to its draft Worker.
+ */
+export async function ensureCloudflareAuthSecret(options: {
+  root: string;
+  configPath: string;
+  accountId?: string;
+  workerName: string;
+  runWrangler: DeployWranglerRun;
+  beforeWranglerRun?: () => boolean;
+}): Promise<{ created: boolean }> {
+  const beforeRun = (): void => {
+    if (options.beforeWranglerRun && !options.beforeWranglerRun()) {
+      throw new CloudflareAuthSecretError('', 'uploader-changed');
+    }
+  };
+  const list = async (allowMissingWorker: boolean): Promise<Array<string>> => {
+    beforeRun();
+    try {
+      return await listSelfHostSecretNames(
+        {
+          root: options.root,
+          configPath: options.configPath,
+          accountId: options.accountId,
+          workerName: options.workerName,
+          runWrangler: (args) => options.runWrangler(args, { capture: true }),
+        },
+        [BETTER_AUTH_SECRET_NAME],
+      );
+    } catch (error) {
+      if (allowMissingWorker && error instanceof SelfHostFirstDeployError) {
+        return [];
+      }
+      if (error instanceof SelfHostSecretListError) {
+        throw new CloudflareAuthSecretError(
+          `deploy: could not confirm the remote ${BETTER_AUTH_SECRET_NAME}. ` +
+            'No worker was uploaded. Run `wrangler secret list -c <config>` to diagnose the Cloudflare response, then retry.',
+          allowMissingWorker ? 'list-failed' : 'verification-failed',
+        );
+      }
+      throw error;
+    }
+  };
+
+  const existing = await list(true);
+  if (existing.includes(BETTER_AUTH_SECRET_NAME)) {
+    return { created: false };
+  }
+
+  const secret = randomBytes(32).toString('hex');
+  beforeRun();
+  let put: DeployWranglerRunResult;
+  try {
+    put = await Promise.resolve(
+      options.runWrangler(
+        ['secret', 'put', BETTER_AUTH_SECRET_NAME, '-c', options.configPath, '--env='],
+        { capture: true, input: `${secret}\n` },
+      ),
+    );
+  } catch {
+    throw new CloudflareAuthSecretError(
+      `deploy: could not create the remote ${BETTER_AUTH_SECRET_NAME}. ` +
+        `No worker was uploaded. Run \`wrangler secret put ${BETTER_AUTH_SECRET_NAME}\` and retry.`,
+      'put-failed',
+    );
+  }
+  if (!isCleanWranglerExit(put)) {
+    throw new CloudflareAuthSecretError(
+      `deploy: could not create the remote ${BETTER_AUTH_SECRET_NAME} ` +
+        `(wrangler exit ${String(put.status)}). No worker was uploaded. ` +
+        `Run \`wrangler secret put ${BETTER_AUTH_SECRET_NAME}\` and retry.`,
+      'put-failed',
+    );
+  }
+
+  const verified = await list(false);
+  if (!verified.includes(BETTER_AUTH_SECRET_NAME)) {
+    throw new CloudflareAuthSecretError(
+      `deploy: wrangler reported success but ${BETTER_AUTH_SECRET_NAME} was not present afterward. ` +
+        'No worker was uploaded; retry once Cloudflare secret storage is available.',
+      'verification-failed',
+    );
+  }
+  return { created: true };
 }
 
 /**
@@ -4153,6 +4297,20 @@ export async function runCloudflareDeploy(
   }
   const emittedVars = emitted.vars;
 
+  // Better Auth's signing secret must never be baked into the generated config.
+  // Match the managed Void deploy contract: the deploy target owns this secret
+  // and stores it through its encrypted secret API, not through plaintext vars.
+  if (authEnabled && Object.prototype.hasOwnProperty.call(emittedVars, BETTER_AUTH_SECRET_NAME)) {
+    log.error(
+      [
+        `deploy: ${BETTER_AUTH_SECRET_NAME} must be stored as a Cloudflare Worker secret, not a plaintext worker var.`,
+        'Remove it from .env / .env.production and rerun. This deploy command preserves an',
+        'existing remote value or creates a persistent one automatically when it is missing.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
   // 8a. Plaintext-var warnings — classify the secret-looking keys among the REAL emitted vars
   // (`.secret()`-flagged from the schema facts, OR the shared name heuristic). Ground truth —
   // no `loadEnv`, no facsimile.
@@ -4199,6 +4357,17 @@ export async function runCloudflareDeploy(
       return exit(1);
     }
     envContext.invalidKeys = validateResult.invalidKeys;
+  }
+  // The auth secret has its own deploy-owned lifecycle below. If an env schema
+  // also declares it required, do not make the generic secret gate reject it
+  // before the deploy has a chance to provision and verify it.
+  if (authEnabled) {
+    envContext.absentRequired = envContext.absentRequired.filter(
+      (key) => key !== BETTER_AUTH_SECRET_NAME,
+    );
+    envContext.invalidKeys = envContext.invalidKeys.filter(
+      (key) => key !== BETTER_AUTH_SECRET_NAME,
+    );
   }
   // DISCHARGE the context. Reuses the same `dischargeSelfHostEnvContext` the unit tests
   // exercise — now fed the ground-truth vars + the real invalid-value set. It may spawn a
@@ -4383,6 +4552,60 @@ export async function runCloudflareDeploy(
     }
   }
 
+  // 8e. Persistent Better Auth secret — after every local/build-derived gate,
+  // but before the first remote migration or worker upload. Existing secrets
+  // are adopted unchanged; a missing value is generated once, sent over stdin,
+  // and verified by name before deployment can continue.
+  if (authEnabled) {
+    // Prove the artifact will inherit the secret BEFORE creating it. Wrangler
+    // replaces Worker versions on deploy; without `secrets.required`, a secret
+    // successfully written to the draft/current Worker can be dropped by the
+    // immediately following upload.
+    const inheritance = (deps.verifyDeployConfig ?? verifyGeneratedDeployConfig)(root, {
+      accountId,
+      workerName,
+      desired,
+      bindingIdentitySnapshot,
+      passthroughIdentitySnapshot,
+      passthroughRawFields,
+      needsAI,
+      authEnabled,
+      expectedContainers,
+      expectedCrons,
+    });
+    if (!inheritance.ok) {
+      log.error(
+        [
+          'deploy: the generated deploy config cannot preserve the Better Auth secret — refusing to deploy.',
+          inheritance.reason,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+      return exit(1);
+    }
+    try {
+      const authSecret = await (deps.ensureAuthSecret ?? ensureCloudflareAuthSecret)({
+        root,
+        configPath,
+        accountId,
+        workerName,
+        runWrangler,
+        beforeWranglerRun: assertUploaderStillPinned,
+      });
+      cliLog.info('cloudflare_auth_secret_ready', { created: authSecret.created });
+    } catch (error) {
+      if (error instanceof CloudflareAuthSecretError && error.reason === 'uploader-changed') {
+        return exit(1);
+      }
+      if (error instanceof CloudflareAuthSecretError) {
+        log.error(error.message);
+        return exit(1);
+      }
+      throw error;
+    }
+  }
+
   // 9. Apply pending migrations to remote D1 — AFTER all local + ground-truth gates pass, so a
   // failed gate never mutates remote D1. Uses the token resolved + validated at step 8d, and the
   // pinned root config (`-c`), which targets the account already verified by provision/drift.
@@ -4480,6 +4703,7 @@ export async function runCloudflareDeploy(
     passthroughIdentitySnapshot,
     passthroughRawFields,
     needsAI,
+    authEnabled,
     expectedContainers,
     expectedCrons,
   });
