@@ -3842,11 +3842,12 @@ describe('provisionCloudflareResources — queue name grammar (Cloudflare Queues
 });
 
 describe('provisionCloudflareResources — whole-provision cross-process lock (proper-lockfile)', () => {
-  // proper-lockfile locks a dedicated adjacent MARKER file (persists between runs) and
-  // implements the mutex as `${marker}.lock` DIRECTORY (removed on release). "No leak"
-  // therefore means the MUTEX dir is gone (not the marker file).
-  const lockMarker = `${wranglerPath}.void-provision.lock`;
-  const lockMutex = `${lockMarker}.lock`;
+  // proper-lockfile uses a synthetic adjacent identity without creating that pathname;
+  // the actual mutex is a `${target}.lock` DIRECTORY and is removed on release.
+  const lockTarget = `${wranglerPath}.void-provision.lock`;
+  const recoveryTarget = `${lockTarget}.recovery`;
+  const lockMutex = `${lockTarget}.lock`;
+  const recoveryMutex = `${recoveryTarget}.lock`;
   const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
   it('a SECOND in-process provision fails fast with a clear hard error (at most one per process)', async () => {
@@ -3890,6 +3891,36 @@ describe('provisionCloudflareResources — whole-provision cross-process lock (p
     const third = await provisionCloudflareResources(tmpDir, wranglerPath, desired, opts);
     expect(third.resources.find((r) => r.kind === 'hyperdrive')?.action).toBe('reused');
     expect(createCalls).toBe(1);
+  });
+
+  it('leaves no persistent marker files and lets different app configs lock concurrently', async () => {
+    setup(JSON.stringify({ name: 'app-a' }));
+    const otherDir = join(tmpDir, 'other-app');
+    const otherConfig = join(otherDir, 'wrangler.jsonc');
+    const otherLockTarget = `${otherConfig}.void-provision.lock`;
+    const otherRecoveryTarget = `${otherLockTarget}.recovery`;
+    mkdirSync(otherDir, { recursive: true });
+    writeFileSync(otherConfig, JSON.stringify({ name: 'app-b' }));
+
+    const first = await acquireProvisionLock(wranglerPath, { retries: 0 });
+    const second = await acquireProvisionLock(otherConfig, { retries: 0 });
+    try {
+      // Both are held at once: lock identity is per canonical config, not machine-global.
+      expect(existsSync(lockMutex)).toBe(true);
+      expect(existsSync(`${otherLockTarget}.lock`)).toBe(true);
+      // Synthetic identities never materialize as empty files in either project.
+      expect(existsSync(lockTarget)).toBe(false);
+      expect(existsSync(recoveryTarget)).toBe(false);
+      expect(existsSync(otherLockTarget)).toBe(false);
+      expect(existsSync(otherRecoveryTarget)).toBe(false);
+    } finally {
+      await Promise.all([first.release(), second.release()]);
+    }
+
+    expect(existsSync(lockMutex)).toBe(false);
+    expect(existsSync(recoveryMutex)).toBe(false);
+    expect(existsSync(`${otherLockTarget}.lock`)).toBe(false);
+    expect(existsSync(`${otherRecoveryTarget}.lock`)).toBe(false);
   });
 
   it('two concurrent provisions in SEPARATE processes race — exactly ONE create, the other reuses, mutex released', async () => {
@@ -3957,9 +3988,8 @@ describe('provisionCloudflareResources — whole-provision cross-process lock (p
     setup(
       JSON.stringify({ account_id: 'acct', hyperdrive: [{ binding: 'HYPERDRIVE', id: 'local' }] }),
     );
-    // Simulate a crashed owner's abandoned mutex: the marker + a mutex dir whose mtime
-    // is well past the 120s stale window, so proper-lockfile compromises + steals it.
-    writeFileSync(lockMarker, '');
+    // Simulate a crashed owner's abandoned mutex dir whose mtime is well past the 120s
+    // stale window, so proper-lockfile compromises + steals it.
     mkdirSync(lockMutex);
     const old = new Date(Date.now() - 300_000);
     utimesSync(lockMutex, old, old);
@@ -4028,7 +4058,7 @@ describe('provisionCloudflareResources — whole-provision cross-process lock (p
   it('a provision via a SYMLINK ALIAS contends on the SAME canonical lock and reuses the id written via the real path', async () => {
     // A real config + a symlink alias to it. Both paths hit the SAME underlying file but
     // via DIFFERENT lexical paths. Without realpath canonicalization each derives its
-    // own marker dir (`<lexical>.void-provision.lock`), so an alias provision would not
+    // own mutex dir (`<lexical>.void-provision.lock.lock`), so an alias provision would not
     // contend on the real path's lock and both could create a duplicate. (Two
     // provisions can no longer race in ONE process — the identity proof is that the
     // alias provision blocks on the CANONICAL mutex, plus create-then-reuse across the
@@ -6349,7 +6379,7 @@ describe('acquireProvisionLock — sidecar DIRECTORY durability failures propaga
 describe('acquireProvisionLock — recovery decisions are serialized + generation-verified', () => {
   const sidecar = `${wranglerPath}.void-provision.lock.quarantine.json`;
   const lockMutex = `${wranglerPath}.void-provision.lock.lock`;
-  const recoveryMarker = `${wranglerPath}.void-provision.lock.recovery`;
+  const recoveryTarget = `${wranglerPath}.void-provision.lock.recovery`;
 
   async function waitForDead(pid: number, timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
@@ -6408,9 +6438,11 @@ describe('acquireProvisionLock — recovery decisions are serialized + generatio
       sidecar,
       JSON.stringify({ pid, pgid: pid, reason: 'dead group', generation: 'gen-stale' }),
     );
-    writeFileSync(recoveryMarker, '');
     const properLockfile = (await import('proper-lockfile')).default;
-    const releaseRecovery = await properLockfile.lock(recoveryMarker, { stale: 6_000 });
+    const releaseRecovery = await properLockfile.lock(recoveryTarget, {
+      stale: 6_000,
+      realpath: false,
+    });
     try {
       // The dead-group sidecar WOULD be cleared — but the recovery mutex is held, so
       // the acquirer cannot even enter the decision (retries: 0 → fail fast).

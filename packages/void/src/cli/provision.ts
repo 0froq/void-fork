@@ -11,12 +11,12 @@ import {
   realpathSync,
   renameSync,
   unlinkSync,
-  writeFileSync,
   writeSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { types as utilTypes } from 'node:util';
 import { parse, type ParseError } from 'jsonc-parser';
+import { resolve as resolveNativePath } from 'pathslash';
 import { basename, dirname, join, normalize, resolve } from 'pathslash';
 import lockfile from 'proper-lockfile';
 import { voidLog, voidWarn } from '../log.ts';
@@ -2108,7 +2108,7 @@ function selectHyperdriveMatch(
 // ownership-scoped release.
 
 interface ProvisionLock {
-  /** The locked marker path (`<configPath>.void-provision.lock`), for diagnostics. */
+  /** The synthetic lock target (`<configPath>.void-provision.lock`), for diagnostics. */
   readonly lockTargetPath: string;
   /**
    * Drop the mutex. REJECTS on a genuine (non-`onCompromised`) unlock failure so a
@@ -2569,11 +2569,14 @@ function normalizeLockRetries(retries: ProvisionLockOptions['retries']): {
 /**
  * Acquire the cross-process provision lock over the resolved config path via
  * `proper-lockfile` (an atomic `mkdir`-based mutex at `<configPath>.void-provision.lock.lock`).
- * `proper-lockfile` requires the locked pathname to EXIST, so we lock a DEDICATED
- * adjacent marker file (`<configPath>.void-provision.lock`), creating it if absent —
- * never the real config, so the writer's missing-vs-empty config semantics stay
- * untouched. Returns a handle whose `release()` drops the mutex; ALWAYS call it in a
- * `finally` so an interruption never leaks the lock.
+ * The library normally realpaths the pathname being locked, which requires it to exist.
+ * Both lock identities here are deliberately SYNTHETIC adjacent paths, so acquisition
+ * passes `realpath: false`: proper-lockfile resolves the identity lexically and creates
+ * only its temporary mutex directory — never an empty marker file in the user's project.
+ * This is safe because the config path was already canonicalized (including missing-file
+ * and symlink cases) before reaching this function. It also preserves the writer's
+ * missing-vs-empty config semantics. Returns a handle whose `release()` drops the mutex;
+ * ALWAYS call it in a `finally` so an interruption never leaks the lock.
  *
  * `onCompromised` FAILS CLOSED (re-throws): if the lock is ever detected stolen (its
  * mtime changed, or the mutex vanished under a live owner), provisioning must NEVER
@@ -2606,12 +2609,6 @@ export async function acquireProvisionLock(
 ): Promise<ProvisionLock> {
   const lockTarget = `${configPath}.void-provision.lock`;
   const recoveryTarget = `${lockTarget}.recovery`;
-  if (!existsSync(lockTarget)) {
-    writeFileSync(lockTarget, '');
-  }
-  if (!existsSync(recoveryTarget)) {
-    writeFileSync(recoveryTarget, '');
-  }
   const staleMs = lockOptions?.stale ?? LOCK_STALE_MS;
   const retryCfg = normalizeLockRetries(lockOptions?.retries);
   const isElocked = (error: unknown): boolean =>
@@ -2630,6 +2627,9 @@ export async function acquireProvisionLock(
       stale: staleMs,
       update: lockOptions?.update ?? LOCK_UPDATE_MS,
       retries: 0,
+      // `lockTarget` is a synthetic identity derived from an already-canonical config
+      // path. Do not require/create an on-disk marker merely so it can be realpathed.
+      realpath: false,
       // `proper-lockfile`'s callback-style fs seam — overridable so a test can force an
       // unlock failure. Production uses the library default (graceful-fs).
       ...(lockOptions?.fs !== undefined ? { fs: lockOptions.fs as never } : {}),
@@ -2644,6 +2644,9 @@ export async function acquireProvisionLock(
     lockfile.lock(recoveryTarget, {
       stale: RECOVERY_LOCK_STALE_MS,
       retries: 0,
+      // Same synthetic-identity contract as the main mutex above. Distinct config paths
+      // remain distinct, so different apps can provision concurrently on one machine.
+      realpath: false,
       onCompromised: (error) => {
         throw error;
       },
@@ -2814,13 +2817,10 @@ export async function acquireProvisionLock(
       if (!locks) {
         return; // degraded: retained only until process exit (internals unavailable)
       }
-      // proper-lockfile keys its registry on the REALPATH of the locked marker file.
-      let key: string;
-      try {
-        key = realpathSync(lockTarget);
-      } catch {
-        key = resolve(lockTarget);
-      }
+      // With `realpath: false`, proper-lockfile keys its registry using node:path.resolve.
+      // Use that same NATIVE spelling here (not pathslash's POSIX spelling) so quarantine
+      // detaches correctly on Windows too.
+      const key = resolveNativePath(lockTarget);
       const tracked = locks[key];
       if (tracked) {
         tracked.released = true;
@@ -3949,7 +3949,7 @@ async function provisionWithProcessSlot(
   // Then CANONICALIZE it with `realpath` so the lock identity (and every read/
   // write/`-c`) is keyed on the REAL file, not a lexical alias. Without this, a real
   // config and a symlink alias to it resolve to DIFFERENT lexical paths → DIFFERENT lock
-  // marker dirs (`<path>.void-provision.lock`), so both processes acquire "the" lock at
+  // mutex dirs (`<path>.void-provision.lock.lock`), so both processes acquire "the" lock at
   // once and race the same underlying file. Canonicalizing collapses all aliases to one
   // identity; a missing config canonicalizes its parent dir so the identity is still
   // alias-stable before the file is created.
