@@ -1,6 +1,17 @@
 import { execSync, type spawn } from 'node:child_process';
 import { once } from 'node:events';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:net';
+import { basename, join, relative } from 'node:path/posix';
 
 /**
  * Timeout multiplier for Windows CI runners, which are 2–3× slower
@@ -15,6 +26,74 @@ const CI_TIMEOUT_SCALE = process.platform === 'win32' ? 3 : 1;
  * during the gap between close and the child process's listen().
  */
 const heldServers = new Map<number, Server>();
+
+const GENERATED_PLAYGROUND_ENTRIES = new Set([
+  '.astro',
+  '.nuxt',
+  '.output',
+  '.react-router',
+  '.svelte-kit',
+  '.tanstack',
+  '.void',
+  '.vite-cloud',
+  '.wrangler',
+  'build',
+  'dist',
+  'node_modules',
+]);
+
+export type IsolatedPlayground = {
+  root: string;
+  workspacePath: string;
+  cleanup: () => void;
+};
+
+/**
+ * Copies a playground into the gitignored playground-local workspace so tests that rewrite configs,
+ * source, or build output can run beside tests using the checked-in playground. Dependencies stay
+ * linked to the installed source tree; generated state is deliberately not copied.
+ */
+export function createIsolatedPlayground(
+  workspaceRoot: string,
+  sourceWorkspacePath: string,
+): IsolatedPlayground {
+  const sourceRoot = join(workspaceRoot, sourceWorkspacePath);
+  const playgroundLocal = join(workspaceRoot, 'playground-local');
+  mkdirSync(playgroundLocal, { recursive: true });
+  const root = mkdtempSync(join(playgroundLocal, `test-${basename(sourceWorkspacePath)}-`));
+
+  cpSync(sourceRoot, root, {
+    recursive: true,
+    filter(path) {
+      const relativePath = relative(sourceRoot, path);
+      const topLevelEntry = relativePath.split('/')[0];
+      return relativePath === '' || !GENERATED_PLAYGROUND_ENTRIES.has(topLevelEntry);
+    },
+  });
+
+  const sourceNodeModules = join(sourceRoot, 'node_modules');
+  if (existsSync(sourceNodeModules)) {
+    symlinkSync(
+      sourceNodeModules,
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+  }
+
+  // Avoid duplicate workspace package names when multiple copies exist concurrently.
+  const packagePath = join(root, 'package.json');
+  const packageJson = JSON.parse(readFileSync(packagePath, 'utf-8')) as { name?: string };
+  packageJson.name = `${packageJson.name ?? basename(sourceWorkspacePath)}-${basename(root)}`;
+  writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+  return {
+    root,
+    workspacePath: relative(workspaceRoot, root),
+    cleanup() {
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+    },
+  };
+}
 
 /**
  * Returns an unused port by binding to port 0 and reading the
