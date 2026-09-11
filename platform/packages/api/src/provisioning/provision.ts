@@ -1,4 +1,4 @@
-import { createDeployResourcePlan } from '@void/deploy-core';
+import { createDeployIntent } from '@void/deploy-core';
 import { eq } from 'drizzle-orm';
 import { hmacSignState } from '../auth/hmac.ts';
 import { getProjectResources, createResource, type Db } from '../db.ts';
@@ -41,7 +41,7 @@ export async function provisionBindings(
   aiProxyService: string,
 ): Promise<ReadonlyArray<WorkerBinding>> {
   const existing = await getProjectResources(db, projectId);
-  const plan = createDeployResourcePlan(manifest);
+  const plan = createDeployIntent(manifest).resourcePlan;
 
   // Run all CF API provisioning calls in parallel
   const tasks: Array<Promise<WorkerBinding>> = [];

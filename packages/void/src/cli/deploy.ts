@@ -25,6 +25,7 @@ import {
   readWranglerTopLevelString,
   resolveD1MigrateTarget,
 } from '@void/deploy-cloudflare';
+import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
 import {
   hasApiRoutes as routeScanHasApiRoutes,
   hasDocumentRoutes as routeScanHasDocumentRoutes,
@@ -5602,23 +5603,26 @@ async function streamDirectR2Deploy(
   // Build the JSON-mode payload. Worker bytes go in as base64 — the
   // manifest-only endpoint's design (0068) keeps worker bundles in the
   // body since they are bounded at 32 MiB total.
-  const payload: ManifestOnlyDeployPayload = {
+  let encodedWorkerFiles: Record<string, string> | undefined;
+  if (workerFiles && workerFiles.size > 0) {
+    encodedWorkerFiles = {};
+    for (const [relPath, buf] of workerFiles) {
+      encodedWorkerFiles[relPath] = buf.toString('base64');
+    }
+  }
+  const artifact = createDeployArtifact({
     manifest,
     assetManifest,
+    workerFiles: encodedWorkerFiles,
+  });
+  const payload: ManifestOnlyDeployPayload = createDeployUploadPayload(artifact, {
     source: getTokenSource(),
     commit: gitMetadata?.commit ?? null,
     repositoryUrl: gitMetadata?.repositoryUrl ?? null,
     commitUrl: gitMetadata?.commitUrl ?? null,
     gitRef: gitMetadata?.gitRef ?? null,
     preflight: preflightUsed ? 'true' : null,
-  };
-  if (workerFiles && workerFiles.size > 0) {
-    const encoded: Record<string, string> = {};
-    for (const [relPath, buf] of workerFiles) {
-      encoded[relPath] = buf.toString('base64');
-    }
-    payload.workerFiles = encoded;
-  }
+  });
 
   s.message('Finalizing deploy...');
   cliLog?.info('finalize_start', {

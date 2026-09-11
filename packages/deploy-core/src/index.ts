@@ -182,6 +182,11 @@ export type {
   DeploySourceMetadata,
   DeployUploadPayload,
 } from './artifact.ts';
+export {
+  DEPLOY_ARTIFACT_VERSION,
+  createDeployArtifact,
+  createDeployUploadPayload,
+} from './artifact.ts';
 export type {
   DeployAppType,
   DeployCapabilitySupport,
