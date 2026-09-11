@@ -1,11 +1,37 @@
 /** A concrete destination that can execute a Void deployment. */
 export type DeployTarget = 'cloudflare' | 'void';
 
-/** Cross-target deploy modes whose support affects CLI planning. */
+export type DeployAppType = 'void' | 'spa' | 'static' | 'framework';
+
+export type DeployCapabilitySupport = 'supported' | 'partial' | 'unsupported';
+
+/**
+ * Cross-target capabilities used by CLI planning and user-facing diagnostics.
+ *
+ * A target reports what it can execute today. Capability declarations must not
+ * be aspirational: feature gates are removed only when the corresponding
+ * adapter and end-to-end coverage exist.
+ */
 export type DeployTargetCapabilities = {
   managedProjects: boolean;
-  staticDeploys: boolean;
   skipBuild: boolean;
+  appTypes: Readonly<Record<DeployAppType, DeployCapabilitySupport>>;
+  features: Readonly<{
+    auth: DeployCapabilitySupport;
+    cron: DeployCapabilitySupport;
+    queues: DeployCapabilitySupport;
+    durableState: DeployCapabilitySupport;
+    webSockets: DeployCapabilitySupport;
+    live: DeployCapabilitySupport;
+    sandbox: DeployCapabilitySupport;
+    isr: DeployCapabilitySupport;
+    remoteDevelopment: DeployCapabilitySupport;
+    deploymentHistory: DeployCapabilitySupport;
+    rollback: DeployCapabilitySupport;
+    secrets: DeployCapabilitySupport;
+    domains: DeployCapabilitySupport;
+    logs: DeployCapabilitySupport;
+  }>;
 };
 
 /**

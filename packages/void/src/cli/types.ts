@@ -2,6 +2,7 @@ import type { RedirectRule } from '@void/deploy-core';
 
 export type {
   AssetConfig,
+  DeployAppType,
   DeployArtifact,
   DeployAssetManifestEntry,
   DeployAssetUploadRequest,
@@ -11,6 +12,7 @@ export type {
   DeployTarget,
   DeployTargetAdapter,
   DeployTargetCapabilities,
+  DeployCapabilitySupport,
   DeployUploadPayload,
   HeaderRule,
   LiveManifestMeta,

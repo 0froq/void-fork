@@ -21,7 +21,9 @@ import type {
 export { MANIFEST_REDIRECT_RULE_STATUSES, SUPPORTED_MANIFEST_VERSIONS } from '@void/deploy-core';
 export type {
   AssetConfig,
+  DeployAppType,
   DeployArtifact,
+  DeployCapabilitySupport,
   DeployAssetManifestEntry,
   DeployAssetUploadRequest,
   DeployEvent,

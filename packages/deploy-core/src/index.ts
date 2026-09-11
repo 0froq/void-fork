@@ -181,4 +181,10 @@ export type {
   DeploySourceMetadata,
   DeployUploadPayload,
 } from './artifact.ts';
-export type { DeployTarget, DeployTargetAdapter, DeployTargetCapabilities } from './target.ts';
+export type {
+  DeployAppType,
+  DeployCapabilitySupport,
+  DeployTarget,
+  DeployTargetAdapter,
+  DeployTargetCapabilities,
+} from './target.ts';

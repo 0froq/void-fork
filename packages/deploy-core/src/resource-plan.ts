@@ -9,6 +9,13 @@ export type DeployResource =
 
 export type DeployResourcePlan = {
   resources: Array<DeployResource>;
+  runtime: {
+    ai: boolean;
+    schedules: NonNullable<DeployManifest['schedules']>;
+    websocket: DeployManifest['websocket'] | null;
+    sandbox: DeployManifest['sandbox'] | null;
+    live: DeployManifest['live'] | null;
+  };
 };
 
 /**
@@ -41,5 +48,14 @@ export function createDeployResourcePlan(manifest: DeployManifest): DeployResour
     resources.push({ type: 'hyperdrive', bindingName });
   }
 
-  return { resources };
+  return {
+    resources,
+    runtime: {
+      ai: manifest.bindings.ai === true,
+      schedules: manifest.schedules ?? [],
+      websocket: manifest.websocket ?? null,
+      sandbox: manifest.sandbox ?? null,
+      live: manifest.live ?? null,
+    },
+  };
 }

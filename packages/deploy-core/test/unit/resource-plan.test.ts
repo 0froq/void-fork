@@ -36,12 +36,57 @@ describe('createDeployResourcePlan', () => {
         },
         { type: 'hyperdrive', bindingName: 'HYPERDRIVE' },
       ],
+      runtime: {
+        ai: true,
+        schedules: [],
+        websocket: null,
+        sandbox: null,
+        live: null,
+      },
     });
   });
 
   it('returns an empty plan when no provisionable resources are requested', () => {
     const manifest: DeployManifest = { version: 3, bindings: { ai: true } };
 
-    expect(createDeployResourcePlan(manifest)).toEqual({ resources: [] });
+    expect(createDeployResourcePlan(manifest)).toEqual({
+      resources: [],
+      runtime: {
+        ai: true,
+        schedules: [],
+        websocket: null,
+        sandbox: null,
+        live: null,
+      },
+    });
+  });
+
+  it('preserves runtime feature intent without target-specific binding details', () => {
+    const manifest: DeployManifest = {
+      version: 3,
+      bindings: {},
+      schedules: [{ name: 'cleanup', cron: '0 0 * * *' }],
+      websocket: { routes: [], classes: ['ChatRoom'] },
+      sandbox: {
+        bindingName: 'SANDBOX',
+        className: 'Sandbox',
+        containerName: 'sandbox',
+        image: 'registry.example/sandbox:latest',
+      },
+      live: {
+        bindingName: 'LIVE',
+        className: 'Live',
+        storage: 'sqlite',
+        classes: ['Live'],
+      },
+    };
+
+    expect(createDeployResourcePlan(manifest).runtime).toEqual({
+      ai: false,
+      schedules: manifest.schedules,
+      websocket: manifest.websocket,
+      sandbox: manifest.sandbox,
+      live: manifest.live,
+    });
   });
 });
