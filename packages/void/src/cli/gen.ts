@@ -760,10 +760,12 @@ function runMigration(root: string, name: string): void {
       );
       process.exit(1);
     }
+    const authSchemaPath = join(root, '.void', 'better-auth-schema.ts');
+    const additionalSchemas = existsSync(authSchemaPath) ? [authSchemaPath] : undefined;
     const configPath =
       journalDialect === 'postgresql'
-        ? writeDrizzleConfig(root, 'postgresql://dummy', 'postgresql')
-        : writeDrizzleConfig(root, ':memory:');
+        ? writeDrizzleConfig(root, 'postgresql://dummy', 'postgresql', { additionalSchemas })
+        : writeDrizzleConfig(root, ':memory:', 'sqlite', { additionalSchemas });
 
     // Round 38: under Yarn Berry PnP, there is no `node_modules` tree —
     // dependencies live inside ZIP archives (`.yarn/cache/*.zip`) and are

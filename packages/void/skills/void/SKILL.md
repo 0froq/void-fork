@@ -73,4 +73,5 @@ Then ask what to do next.
 - Never guess or infer `void` CLI command names or flags. Always consult `docs/reference/cli.md` for the exact command before running it.
 - For multi-topic tasks, combine only the needed doc files.
 - If docs and memory differ, follow docs.
+- For Void-managed auth, `void db generate` automatically includes the production Better Auth schema in the generated migration, including configured model/field renames and plugin tables. Keep those migrations under `db/migrations/`; do not duplicate generated auth tables in the application Drizzle schema.
 - **Env vars:** When the project has `env.ts`, the canonical access pattern is `import { env } from "void/env"`. Declare every env key in `env.ts` via `defineEnv({...})` so values are typed and validated. Do not introduce ad-hoc `process.env.X` or untyped `c.env.X` access in new code — add the key to `env.ts` first.

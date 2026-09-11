@@ -61,4 +61,29 @@ describe('writeDrizzleConfig', () => {
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(config.migrations).toEqual({ prefix: 'timestamp' });
   });
+
+  it('includes generated schemas alongside the application schema', () => {
+    const authSchema = join(root, '.void', 'better-auth-schema.ts');
+    writeFileSync(authSchema, 'export const user = {};');
+
+    const configPath = writeDrizzleConfig(root, ':memory:', 'sqlite', {
+      additionalSchemas: [authSchema],
+    });
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.schema).toEqual(['./db/schema.ts', './.void/better-auth-schema.ts']);
+  });
+
+  it('supports an auth-only project without an application schema', () => {
+    rmSync(join(root, 'db', 'schema.ts'));
+    const authSchema = join(root, '.void', 'better-auth-schema.ts');
+    writeFileSync(authSchema, 'export const user = {};');
+
+    const configPath = writeDrizzleConfig(root, ':memory:', 'sqlite', {
+      additionalSchemas: [authSchema],
+    });
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.schema).toBe('./.void/better-auth-schema.ts');
+  });
 });

@@ -201,12 +201,21 @@ async function runPush(root: string, dialect: DatabaseDialect): Promise<void> {
 }
 
 async function runGenerate(root: string, dialect: DatabaseDialect): Promise<void> {
+  const { prepareProject } = await import('../codegen/prepare.ts');
   const { writeDrizzleConfig } = await import('../drizzle/config.ts');
+
+  // Generate the auth schema using the same production env mode Cloudflare deploy
+  // builds with, then include those tables in Drizzle Kit's schema input. This makes
+  // Better Auth tables ordinary, reviewable migration SQL instead of a deploy-time
+  // side effect. `prepareProject` removes a stale file when auth is no longer enabled.
+  await prepareProject(root, { mode: 'production' });
+  const authSchemaPath = join(root, '.void', 'better-auth-schema.ts');
+  const additionalSchemas = existsSync(authSchemaPath) ? [authSchemaPath] : undefined;
 
   const configPath =
     dialect === 'postgresql'
-      ? writeDrizzleConfig(root, 'postgresql://dummy', 'postgresql')
-      : writeDrizzleConfig(root, ':memory:');
+      ? writeDrizzleConfig(root, 'postgresql://dummy', 'postgresql', { additionalSchemas })
+      : writeDrizzleConfig(root, ':memory:', 'sqlite', { additionalSchemas });
 
   try {
     runDrizzleKit(root, ['generate', '--config', configPath]);

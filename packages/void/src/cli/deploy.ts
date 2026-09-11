@@ -4252,11 +4252,9 @@ export async function runCloudflareDeploy(
           'they must already produce the Better Auth schema — tables, columns, and the primary',
           'keys, unique constraints and foreign keys it declares:',
           `  ${getErrorMessage(err)}`,
-          'Define the Better Auth tables in `db/schema.ts`, run `void db generate`, commit the',
-          'migration, then rerun — or deploy this app with `void deploy` (the managed platform).',
-          "Note that Drizzle opts out of constraints by default: every auth table's `id` needs",
-          '`.primaryKey()`, a field the schema marks unique needs `.unique()`, and one that',
-          'references another table needs `.references()`.',
+          '`void db generate` includes the production Better Auth schema automatically. Run it,',
+          'review and commit the generated migration, then rerun deploy — or deploy this app',
+          'with `void deploy` (the managed platform).',
         ].join('\n'),
       );
       return exit(1);
@@ -6439,7 +6437,8 @@ function assertDeploySchemaDriftFree(root: string, dialect: DatabaseDialect): vo
 }
 
 export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): boolean {
-  if (!discoverSchema(root, readProjectPaths(root))) {
+  const authSchemaPath = join(root, '.void', 'better-auth-schema.ts');
+  if (!discoverSchema(root, readProjectPaths(root)) && !existsSync(authSchemaPath)) {
     return false;
   }
 
@@ -6451,10 +6450,14 @@ export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): bo
   try {
     const migrationsDir = readProjectPaths(driftProjectRoot).migrationsDir;
     const before = snapshotDir(migrationsDir);
+    const driftAuthSchemaPath = join(driftProjectRoot, '.void', 'better-auth-schema.ts');
     const driftConfigPath = writeDrizzleConfig(
       driftProjectRoot,
       dialect === 'postgresql' ? 'postgresql://dummy' : ':memory:',
       dialect,
+      {
+        additionalSchemas: existsSync(driftAuthSchemaPath) ? [driftAuthSchemaPath] : undefined,
+      },
     );
 
     const output = runDrizzleKitGenerate(driftProjectRoot, driftConfigPath);
@@ -6572,6 +6575,16 @@ function createDeployDriftProject(root: string, driftProjectRoot: string): void 
     const target = join(driftProjectRoot, entry.name);
 
     cpSync(source, target, { recursive: true });
+  }
+
+  // The build-generated Better Auth schema participates in `void db generate`, so
+  // it must also participate in the isolated drift check. Copy only this known
+  // generated input; the rest of `.void` remains excluded as before.
+  const authSchemaPath = join(root, '.void', 'better-auth-schema.ts');
+  if (existsSync(authSchemaPath)) {
+    const target = join(driftProjectRoot, '.void', 'better-auth-schema.ts');
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(authSchemaPath, target);
   }
 }
 
