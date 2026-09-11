@@ -36,7 +36,7 @@ type RevalidateRequestBody = Readonly<{
  * (`v2`) shape is hostless: `<projectId>/isr/v2/<deploymentId>/<path>[#rw=<token>]`.
  * The version segment ENCODES the shape — a `v3` tail always starts with the
  * `<host>` segment, a `v2` tail is the bare path — so no runtime heuristic is
- * needed to tell them apart (see isr-shared `ISR_LEGACY_CACHE_KEY_VERSION` for
+ * needed to tell them apart (see @void/isr `ISR_LEGACY_CACHE_KEY_VERSION` for
  * the aliasing hazard that forced the bump). Dispatch reads/writes `v3` only;
  * the `v2` sweeps below are transition-only and can be deleted once pre-bump
  * entries have aged out.

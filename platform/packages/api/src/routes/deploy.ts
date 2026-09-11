@@ -3194,7 +3194,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                 // Host-scope the warmed key to the slug host implied by the
                 // fetch URL — dispatch reads `<pid>/isr/v3/<did>/<host>/<path>`
                 // keyed on the request hostname, so without this the warmed
-                // bytes are a permanent cold miss (see isr-shared `isrCacheKey`).
+                // bytes are a permanent cold miss (see @void/isr `isrCacheKey`).
                 const key = isrCacheKey(projectId, deployment.id, slugHost, pathname);
                 const headers = serializePrerenderHeaders(response);
                 const body = await response.arrayBuffer();
