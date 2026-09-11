@@ -35,6 +35,11 @@ catalogs:
   sveltekit:
     typescript: 6.0.3
 
+packageExtensions:
+  '@analogjs/vite-plugin-angular@2.7.2':
+    peerDependencies:
+      typescript: '>=6.0 <6.1'
+
 overrides:
   esbuild: ^0.27.3
   react-server-dom-webpack: 19.2.7
