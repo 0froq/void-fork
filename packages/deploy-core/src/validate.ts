@@ -539,6 +539,19 @@ export function validateManifestShape(parsed: unknown): string | null {
         if (migration == null || typeof migration !== 'object' || Array.isArray(migration)) {
           return 'invalid manifest shape: websocket.migrations entries must be objects';
         }
+        const migrationObject = migration as Record<string, unknown>;
+        if (typeof migrationObject.tag !== 'string' || migrationObject.tag.length === 0) {
+          return 'invalid manifest shape: websocket.migrations entries must have a non-empty string tag';
+        }
+        for (const field of ['newClasses', 'newSqliteClasses', 'deletedClasses'] as const) {
+          const value = migrationObject[field];
+          if (
+            value !== undefined &&
+            (!Array.isArray(value) || !value.every((className) => typeof className === 'string'))
+          ) {
+            return `invalid manifest shape: websocket.migrations ${field} must be an array of strings`;
+          }
+        }
       }
     }
   }
