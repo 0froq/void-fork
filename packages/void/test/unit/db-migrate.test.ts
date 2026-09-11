@@ -1,5 +1,6 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { stripVTControlCharacters } from 'node:util';
 import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
@@ -47,6 +48,10 @@ vi.mock('../../src/migrations/runner-mysql', () => ({
 }));
 
 const roots: Array<string> = [];
+
+function infoMessagesWithoutColor(): Array<string> {
+  return mockLog.info.mock.calls.map(([message]) => stripVTControlCharacters(String(message)));
+}
 
 function createProjectRoot(migrations: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'void-db-migrate-'));
@@ -262,7 +267,7 @@ describe('void db migrate', () => {
     await runDbCommand(root, { action: 'status' });
 
     expect(mockGetPgAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
-    expect(mockLog.info).toHaveBeenCalledWith(
+    expect(infoMessagesWithoutColor()).toContain(
       '  001_create_users.sql  local: pending  remote: applied',
     );
   });
@@ -278,7 +283,7 @@ describe('void db migrate', () => {
     await runDbCommand(root, { action: 'status' });
 
     expect(mockGetMySqlAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
-    expect(mockLog.info).toHaveBeenCalledWith(
+    expect(infoMessagesWithoutColor()).toContain(
       '  001_create_users.sql  local: pending  remote: applied',
     );
   });
