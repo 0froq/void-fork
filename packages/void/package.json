@@ -56,6 +56,11 @@
       "import": "./dist/database-provider.mjs",
       "require": "./dist/database-provider.mjs"
     },
+    "./edge": {
+      "types": "./dist/edge.d.mts",
+      "import": "./dist/edge.mjs",
+      "require": "./dist/edge.mjs"
+    },
     "./handler": {
       "types": "./dist/runtime/handler.d.mts",
       "import": "./dist/runtime/handler.mjs",
@@ -347,6 +352,7 @@
     "@napi-rs/keyring": "2.0.0",
     "@void/deploy-cloudflare": "workspace:*",
     "@void/deploy-core": "workspace:*",
+    "@void/edge": "workspace:*",
     "better-auth": "^1.7.3",
     "better-sqlite3": "^13.0.3",
     "blake3-jit": "^1.1.0",

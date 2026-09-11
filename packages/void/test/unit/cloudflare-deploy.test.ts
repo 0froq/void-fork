@@ -16,6 +16,7 @@ import {
   DEPLOY_WHOLE_OBJECT_PINNED_FIELDS,
   ensureCloudflareAuthSecret,
   hashWranglerUploader,
+  parseRootWranglerConfig,
   runCloudflareDeploy,
   syncCloudflareSchemaSecrets,
   snapshotBindingIdentities,
@@ -1199,35 +1200,55 @@ describe('computeDesiredCloudflareResources — provisioned resources are never 
 // Orchestration flow
 // ---------------------------------------------------------------------------
 
-describe('runCloudflareDeploy — app-class guard (narrowed to full Void apps)', () => {
-  it('rejects a configured static/SPA app with exit(1) and never runs wrangler', async () => {
+describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
+  it('deploys a configured SPA through the thin edge Worker', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'spaapp' }),
       'void.json': JSON.stringify({ inference: { appType: 'spa' } }),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
+      'dist/index.html': '<!doctype html><div id="app"></div>',
     });
-    const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    expect(trace).toEqual([]);
+    const { deps, wranglerArgs, exitCalls } = harness();
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(exitCalls).toEqual([]);
+    expect(wranglerArgs.map((args) => args[0])).toEqual(['whoami', 'deploy']);
+    const config = parseRootWranglerConfig(join(root, 'wrangler.jsonc'));
+    expect(config).toMatchObject({
+      name: 'spaapp',
+      account_id: 'acc123',
+      main: '.void/deploy/cloudflare/static-edge.mjs',
+      assets: {
+        directory: 'dist',
+        binding: 'ASSETS',
+        run_worker_first: true,
+        not_found_handling: 'single-page-application',
+      },
+    });
+    expect(readFileSync(join(root, '.void/deploy/cloudflare/static-edge.mjs'), 'utf-8')).toContain(
+      'void/edge',
+    );
   });
 
-  it('rejects an UNCONFIGURED Vite SPA (no void.json appType) via the managed detectPreset classifier', async () => {
-    // resolveStaticDeployPreset returns null here (no --dir, no configured appType), so the
-    // old guard let this slip; detectPreset structurally classifies it as an SPA (vite dep,
-    // no backend files) and this fork now rejects it.
+  it('builds and deploys an unconfigured Vite SPA', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'viteapp', dependencies: { vite: '6.0.0' } }),
       'void.json': JSON.stringify({}),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
       'index.html': '<!doctype html><div id="app"></div>',
     });
-    const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    expect(trace).toEqual([]);
+    const { deps, trace, wranglerArgs, exitCalls } = harness({
+      runStaticBuild: () => {
+        trace.push('static-build');
+        mkdirSync(join(root, 'dist'), { recursive: true });
+        writeFileSync(join(root, 'dist/index.html'), '<!doctype html><div id="app"></div>');
+      },
+    });
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(exitCalls).toEqual([]);
+    expect(trace).toEqual(['wrangler:whoami', 'static-build', 'wrangler:deploy']);
+    expect(wranglerArgs.at(-1)).toContain(join(root, 'wrangler.jsonc'));
   });
 
   it('rejects a bare --spa deploy before any account op', async () => {
@@ -1244,18 +1265,22 @@ describe('runCloudflareDeploy — app-class guard (narrowed to full Void apps)',
     expect(trace).toEqual([]);
   });
 
-  it('rejects a --dir static deploy before any account op', async () => {
+  it('deploys an explicit pre-built directory without running a build', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'app' }),
       'void.json': JSON.stringify({}),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
+      'public/index.html': '<h1>Static</h1>',
       'routes/index.ts': `export const GET = () => new Response('ok');`,
     });
     const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare', dir: 'dist' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    expect(trace).toEqual([]);
+    await runCloudflareDeploy(root, { backend: 'cloudflare', dir: 'public' }, silentCliLog, deps);
+
+    expect(exitCalls).toEqual([]);
+    expect(trace).toEqual(['wrangler:whoami', 'wrangler:deploy']);
+    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toMatchObject({
+      assets: { directory: 'public', not_found_handling: '404-page' },
+    });
   });
 
   it('rejects a bare project with no Void backend files (positive full-Void assertion)', async () => {

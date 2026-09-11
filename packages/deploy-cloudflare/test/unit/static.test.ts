@@ -15,7 +15,7 @@ describe('Cloudflare static deployment', () => {
         redirectRules: [{ source: '/old', destination: '/new', status: 301 }],
       }),
     ).toBe(
-      `import { createStaticEdgeHandler } from '@void/edge';\n` +
+      `import { createStaticEdgeHandler } from "@void/edge";\n` +
         `export default createStaticEdgeHandler({"redirectRules":[{"source":"/old","destination":"/new","status":301}]});\n`,
     );
   });

@@ -14,6 +14,7 @@ export type CloudflareStaticDeployConfig = Readonly<{
 
 /** Generate the deterministic thin Worker entry bundled by Wrangler. */
 export function renderCloudflareStaticEntry(options: {
+  runtimeImport?: string;
   headerRules?: ReadonlyArray<HeaderRule>;
   redirectRules?: ReadonlyArray<RedirectRule>;
   fallbackRules?: ReadonlyArray<RedirectRule>;
@@ -24,7 +25,7 @@ export function renderCloudflareStaticEntry(options: {
     ...(options.fallbackRules?.length ? { fallbackRules: options.fallbackRules } : {}),
   });
   return [
-    `import { createStaticEdgeHandler } from '@void/edge';`,
+    `import { createStaticEdgeHandler } from ${JSON.stringify(options.runtimeImport ?? '@void/edge')};`,
     `export default createStaticEdgeHandler(${config});`,
     '',
   ].join('\n');

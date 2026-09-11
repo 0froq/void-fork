@@ -23,7 +23,9 @@ import {
   readConfigEntryString as readD1EntryString,
   readStoredResourceName,
   readWranglerTopLevelString,
+  renderCloudflareStaticEntry,
   resolveD1MigrateTarget,
+  writeCloudflareStaticDeployConfig,
 } from '@void/deploy-cloudflare';
 import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
 import {
@@ -2312,6 +2314,8 @@ export interface CloudflareDeployDeps {
   runWrangler?: DeployWranglerRun;
   /** Run the project's `vite build` (inherited stdio). Throws on a nonzero build. */
   runBuild?: (env: NodeJS.ProcessEnv) => void;
+  /** Run a static/SPA/SSG preset build command. */
+  runStaticBuild?: (command: string, env: NodeJS.ProcessEnv) => void;
   /**
    * Wrangler-uploader content-hash seam (default: {@link hashWranglerUploader}). Snapshotted
    * BEFORE the build and re-checked AFTER, so a build that overwrote the wrangler bundle the
@@ -3667,6 +3671,12 @@ export async function runCloudflareDeploy(
     provision: options.provision === true ? true : undefined,
   });
 
+  const provisionModule = await loadProvisionModule();
+  const staticPreset = resolveCloudflareStaticPreset(root, voidConfig, options);
+  if (staticPreset) {
+    return runCloudflareStaticDeploy(root, options, voidConfig, staticPreset, cliLog, deps);
+  }
+
   // 0. Flag guard — `--skip-build` cannot be honored by this backend, so REJECT the
   // combination rather than silently ignore it. Every gate on this path reads the artifact
   // `vite build` emits as ground truth: the plaintext-var warnings, the required-secret gate
@@ -3692,8 +3702,6 @@ export async function runCloudflareDeploy(
   // reach its transport/drift/scrub primitives without a static import that would
   // make every managed `void deploy` eagerly load the provision lifecycle. Awaited
   // here BEFORE any sync helper that calls `requireProvisionModule()`.
-  const provisionModule = await loadProvisionModule();
-
   // 1. App-class narrowing — reject every artifact shape the current native
   // verifier cannot prove safe before any account, provision, or build op.
   const classification = classifyCloudflareDeployApp(root, voidConfig, options);
@@ -4812,6 +4820,171 @@ function discoverRootWranglerConfig(root: string): string {
   return join(root, 'wrangler.jsonc');
 }
 
+function resolveCloudflareStaticPreset(
+  root: string,
+  voidConfig: VoidConfig,
+  options: Pick<RunDeployOptions, 'dir' | 'spa'>,
+): StaticPreset | null {
+  const configured = resolveStaticDeployPreset(root, voidConfig, options);
+  if (configured) {
+    return {
+      ...configured,
+      buildCommand: resolveStaticBuildCommand(
+        configured,
+        voidConfig.inference?.build,
+        Boolean(options.dir),
+      ),
+    };
+  }
+  if (detectFramework(root)) {
+    return null;
+  }
+  const detected = detectPreset(root, { spa: options.spa, strictBackend: true });
+  return detected
+    ? {
+        ...detected,
+        buildCommand: resolveStaticBuildCommand(detected, voidConfig.inference?.build, false),
+      }
+    : null;
+}
+
+async function runCloudflareStaticDeploy(
+  root: string,
+  options: RunDeployOptions,
+  voidConfig: VoidConfig,
+  preset: StaticPreset,
+  cliLog: CliLogger,
+  deps: CloudflareDeployDeps,
+): Promise<void> {
+  const exit = deps.exit ?? ((code: number): never => process.exit(code));
+  const configPath = discoverRootWranglerConfig(root);
+  const rootConfig = parseRootWranglerConfig(configPath);
+  let apiBaseUrl: string;
+  try {
+    apiBaseUrl = resolveDeployTransport(root, rootConfig);
+  } catch (error) {
+    log.error(`deploy: ${getErrorMessage(error)}`);
+    return exit(1);
+  }
+  const accountId =
+    readWranglerTopLevelString(rootConfig, 'account_id') ??
+    (process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || undefined);
+  if (!accountId) {
+    log.error(
+      'deploy: no Cloudflare account is pinned. Set account_id in wrangler.jsonc or CLOUDFLARE_ACCOUNT_ID.',
+    );
+    return exit(1);
+  }
+
+  const runWrangler = deps.runWrangler ?? createDeployWranglerRunner(root, accountId, apiBaseUrl);
+  const hashUploader = deps.hashWranglerUploader ?? hashWranglerUploader;
+  const uploaderHash = hashUploader(root);
+  const uploaderIsPinned = (): boolean => {
+    const result = assertWranglerUploaderUnchanged(uploaderHash, hashUploader(root));
+    if (!result.ok) {
+      log.error(
+        [
+          'deploy: refusing to run the wrangler uploader with your Cloudflare credentials.',
+          result.reason,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+    }
+    return result.ok;
+  };
+
+  if (!uploaderIsPinned()) {
+    return exit(1);
+  }
+  const whoami = await Promise.resolve(
+    runWrangler(['whoami', '--json', '-c', configPath, '--env='], { capture: true }),
+  );
+  if (!isCleanWranglerExit(whoami)) {
+    log.error('deploy: not authenticated with Cloudflare. Run `wrangler login` and retry.');
+    return exit(1);
+  }
+
+  if (preset.buildCommand && !options.skipBuild) {
+    log.step('Building...');
+    const buildChildEnv = scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl));
+    requireProvisionModule().deleteEnvVarCaseAware(buildChildEnv, 'NODE_ENV');
+    buildChildEnv.NODE_ENV = 'production';
+    const runStaticBuild =
+      deps.runStaticBuild ??
+      ((command: string, env: NodeJS.ProcessEnv) => {
+        execSync(command, { cwd: root, stdio: 'inherit', env });
+      });
+    try {
+      runStaticBuild(preset.buildCommand, buildChildEnv);
+    } catch (error) {
+      log.error(`deploy: build failed — ${getErrorMessage(error)}`);
+      return exit(getExitCode(error));
+    }
+  }
+  if (!existsSync(preset.outputDir)) {
+    log.error(`deploy: Output directory '${preset.outputDir}' not found. Run the build first.`);
+    return exit(1);
+  }
+  if (!uploaderIsPinned()) {
+    return exit(1);
+  }
+
+  const merged = mergeRoutingRules({ dir: preset.outputDir, routing: voidConfig.routing });
+  warnRedundantForceOn3xx(merged.redundantForceOn3xx);
+  lintDuplicateSources(merged.redirectRules, 'redirects/rewrites (pre-asset)');
+  lintDuplicateSources(merged.fallbackRules, 'fallbacks (post-asset)');
+  lintDestinationSplats(merged.redirectRules, 'redirects/rewrites (pre-asset)');
+  lintDestinationSplats(merged.fallbackRules, 'fallbacks (post-asset)');
+  const manifest = buildStaticManifest({
+    appType: preset.appType,
+    hashedAssetsPrefix: 'assets',
+    headerRules: merged.headerRules,
+    redirectRules: merged.redirectRules,
+    fallbackRules: merged.fallbackRules,
+    notFound: voidConfig.routing?.notFound,
+  });
+  const entryPath = join(root, '.void', 'deploy', 'cloudflare', 'static-edge.mjs');
+  mkdirSync(dirname(entryPath), { recursive: true });
+  writeFileSync(
+    entryPath,
+    renderCloudflareStaticEntry({
+      runtimeImport: 'void/edge',
+      headerRules: manifest.headerRules,
+      redirectRules: manifest.redirectRules,
+      fallbackRules: manifest.fallbackRules,
+    }),
+  );
+
+  const workerName = readWranglerTopLevelString(rootConfig, 'name') ?? deriveWorkerName(root);
+  writeCloudflareStaticDeployConfig({
+    configPath,
+    name: workerName,
+    accountId,
+    main: relative(dirname(configPath), entryPath),
+    assetsDirectory: relative(dirname(configPath), preset.outputDir),
+    compatibilityDate:
+      voidConfig.worker?.compatibility_date ??
+      readWranglerTopLevelString(rootConfig, 'compatibility_date') ??
+      '2026-09-11',
+    assetConfig: manifest.assetConfig ?? { not_found_handling: 'none' },
+  });
+
+  const execution = await executeCloudflareDeploy({
+    runWrangler,
+    verifyUploader: uploaderIsPinned,
+    configPath,
+  });
+  if (!execution.ok) {
+    if (execution.reason === 'deploy-failed') {
+      log.error(`deploy: \`wrangler deploy\` failed (exit ${String(execution.status)}).`);
+    }
+    return exit(1);
+  }
+  cliLog.info('cloudflare_deploy_end', { ok: true, worker: workerName });
+  log.success(`Deployed "${workerName}" to your Cloudflare account.`);
+}
+
 type RunDeployTargetAdapter = DeployTargetAdapter<RunDeployOptions, CliLogger>;
 
 const cloudflareDeployTarget: RunDeployTargetAdapter = {
@@ -4821,8 +4994,8 @@ const cloudflareDeployTarget: RunDeployTargetAdapter = {
     skipBuild: false,
     appTypes: {
       void: 'supported',
-      spa: 'unsupported',
-      static: 'unsupported',
+      spa: 'supported',
+      static: 'supported',
       framework: 'unsupported',
     },
     features: {
@@ -4846,16 +5019,6 @@ const cloudflareDeployTarget: RunDeployTargetAdapter = {
     if (options.projectSlug !== undefined) {
       throw new Error(
         'deploy: --project is not supported with platform cloudflare — this platform deploys to your own Cloudflare account and no Void project is involved.',
-      );
-    }
-    if (options.dir !== undefined) {
-      throw new Error(
-        'deploy: --dir is not supported with platform cloudflare — this platform uploads the worker your build emits, not a static directory.',
-      );
-    }
-    if (options.spa) {
-      throw new Error(
-        'deploy: --spa is not supported with platform cloudflare — this platform uploads the worker your build emits, not a static SPA.',
       );
     }
     return runCloudflareDeploy(root, options, cliLog);

@@ -506,6 +506,9 @@ importers:
       '@void/deploy-core':
         specifier: workspace:*
         version: link:../deploy-core
+      '@void/edge':
+        specifier: workspace:*
+        version: link:../edge
       '@void/md':
         specifier: workspace:*
         version: link:../md
