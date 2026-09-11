@@ -3807,7 +3807,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
     expect(capturedMetadata!.tail_consumers).toEqual([{ service: 'void-tail-staging' }]);
   });
 
-  it('serializes websocket durable object migrations in Cloudflare upload format', async () => {
+  it('serializes new websocket durable objects as SQLite class migrations', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'ws-migrations-proj');
 
@@ -3868,7 +3868,7 @@ describe('POST /projects/:id/deploy/preflight', () => {
     expect(capturedMetadata).not.toHaveProperty('durable_objects');
     expect(capturedMetadata!.migrations).toEqual({
       new_tag: 'ws-v1',
-      steps: [{ new_classes: ['WsChatRoomWs', 'WsPresenceWs'] }],
+      steps: [{ new_sqlite_classes: ['WsChatRoomWs', 'WsPresenceWs'] }],
     });
   });
 
