@@ -2339,6 +2339,8 @@ export interface CloudflareDeployDeps {
   syncSchemaSecrets?: typeof syncCloudflareSchemaSecrets;
   /** Generated-deploy-config verification seam (default: {@link verifyGeneratedDeployConfig}). */
   verifyDeployConfig?: typeof verifyGeneratedDeployConfig;
+  /** Resolve the generated config selected by the fresh deploy pointer. */
+  resolveGeneratedConfigPath?: (root: string) => string;
   /** Pre-remote-migrate gate seam (default: {@link assertRemoteMigrationsDeployable}). */
   assertMigrationsDeployable?: typeof assertRemoteMigrationsDeployable;
   /** Migration apply-set equality gate seam (default: {@link checkWranglerMigrationApplySet}). */
@@ -4856,27 +4858,35 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
 
-  // 11. Deploy — bare `wrangler deploy` follows .wrangler/deploy/config.json →
-  // dist/ssr/wrangler.json (which carries the real ids + pinned account). `--env=` pins
-  // the top-level env so an ambient CLOUDFLARE_ENV cannot reselect a named one.
+  // 11. Deploy the exact generated config verified above. Passing its absolute path
+  // explicitly keeps the version upload AND the later trigger synchronization on the
+  // same artifact. `versions upload` follows the deploy pointer on its own, but
+  // `triggers deploy` does not; omitting `configPath` here would therefore upload the
+  // generated cron/queue configuration and then synchronize triggers from the root
+  // config, silently dropping generated Cron Triggers and queue consumers.
   // `--experimental-provision=false` / `--experimental-auto-create=false` disable
   // wrangler 4.107's OWN resource provisioning (both default true, deployCommand +
   // globalFlags, wrangler-dist/cli.js), so ONLY `provisionCloudflareResources` may create
   // resources — a bare deploy can never auto-create a missing binding (e.g. an R2 bucket
   // absent remotely but passing the local drift predicate), even in CI.
   // `--autoconfig=false` disables wrangler 4.107's framework detection + auto-config
-  // (`autoconfig` defaults true, deployCommand cli.js:292315). Without it, and because we
-  // pass no `-c`, a detected framework marker (e.g. OpenNext) makes wrangler DELEGATE the
-  // deploy to another tool (`maybeDelegateToOpenNextDeployCommand`, cli.js:292343) — which
+  // (`autoconfig` defaults true, deployCommand cli.js:292315). Without it, a detected
+  // framework marker (e.g. OpenNext) can make wrangler DELEGATE the deploy to another tool
+  // (`maybeDelegateToOpenNextDeployCommand`, cli.js:292343) — which
   // would upload something OTHER than the artifact Void just built and verified. Forcing it
   // off guarantees wrangler uploads exactly the verified `dist/ssr/wrangler.json`.
   //
   // Final uploader re-verification immediately before the deploy — the last and most privileged
   // credentialed run of the hashed bundle. Against the same pre-build baseline; fail closed.
+  const generatedConfigPath = (
+    deps.resolveGeneratedConfigPath ??
+    ((projectRoot) => readGeneratedDeployConfig(projectRoot).path)
+  )(root);
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: assertUploaderStillPinned,
     workerName,
+    configPath: generatedConfigPath,
     message: encodeCloudflareVersionMessage(migrations.map((migration) => migration.name)),
   });
   if (!execution.ok) {

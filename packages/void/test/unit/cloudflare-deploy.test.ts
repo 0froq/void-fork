@@ -339,6 +339,7 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
     // verification would have nothing to read — pass it by default; dedicated tests
     // exercise the real verifier and the fail-closed branch.
     verifyDeployConfig: () => ({ ok: true }),
+    resolveGeneratedConfigPath: (root) => join(root, 'dist/ssr/wrangler.json'),
     // Stub the migration gate so orchestration tests never spawn drizzle-kit; dedicated
     // tests inject a throwing stub (drift) or exercise the real pure gates (journal /
     // destructive) directly.
@@ -1601,10 +1602,12 @@ describe('runCloudflareDeploy — resource provisioning', () => {
       join(root, 'wrangler.jsonc'),
       '--env=',
     ]);
-    // deploy follows the .wrangler/deploy redirect, pins the top-level env, disables
-    // wrangler's own implicit provisioning + auto-create + framework autoconfig.
+    // Upload and trigger synchronization use the exact generated config that was
+    // verified above, rather than letting triggers fall back to the root config.
     expect(wranglerArgs.find((a) => a[0] === 'deploy')).toEqual([
       'deploy',
+      '-c',
+      join(root, 'dist/ssr/wrangler.json'),
       '--env=',
       '--experimental-provision=false',
       '--experimental-auto-create=false',
@@ -2383,6 +2386,8 @@ describe('runCloudflareDeploy — wrangler implicit provisioning disabled on dep
     await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
     expect(wranglerArgs.find((a) => a[0] === 'deploy')).toEqual([
       'deploy',
+      '-c',
+      join(root, 'dist/ssr/wrangler.json'),
       '--env=',
       '--experimental-provision=false',
       '--experimental-auto-create=false',

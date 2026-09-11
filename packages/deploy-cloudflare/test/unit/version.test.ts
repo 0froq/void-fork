@@ -89,6 +89,15 @@ describe('Cloudflare version activation', () => {
     ]);
     expect(runWrangler.mock.calls[1]![0]).toContain('--strict');
     expect(runWrangler.mock.calls[2]![0]).toContain(`${NEXT}@100`);
+    expect(runWrangler.mock.calls[3]![0]).toEqual([
+      'triggers',
+      'deploy',
+      '-c',
+      '/app/wrangler.jsonc',
+      '--env=',
+      '--name',
+      'my-worker',
+    ]);
   });
 
   it('does not activate a version whose preview never becomes ready', async () => {
