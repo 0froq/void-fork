@@ -15,6 +15,7 @@ import {
   ensureVoidDependency,
   extractPnpmWorkspacePackages,
   generateStarterMigration,
+  getWorkflowYaml,
   getTodayCompatDate,
   isScaffoldableEmptyProject,
   isVoidResolvableFrom,
@@ -35,6 +36,25 @@ const mockSaveToken = vi.fn();
 const mockIsStagingMode = vi.fn();
 const mockListProjects = vi.fn();
 const mockCreateProject = vi.fn();
+
+describe('GitHub Actions deployment workflows', () => {
+  it('scaffolds the direct Cloudflare deployment path with a scoped API token', () => {
+    const yaml = getWorkflowYaml('/project', 'npm', null, 'cloudflare');
+    expect(yaml).toContain('name: Deploy to Cloudflare');
+    expect(yaml).toContain('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}');
+    expect(yaml).toContain('npx void deploy --platform cloudflare');
+    expect(yaml).toContain('contents: read');
+    expect(yaml).not.toContain('id-token: write');
+    expect(yaml).not.toContain('VOID_TOKEN');
+  });
+
+  it('retains the GitHub OIDC workflow for managed deployments', () => {
+    const yaml = getWorkflowYaml('/project', 'npm', 'my-app', 'void');
+    expect(yaml).toContain('name: Deploy to Void');
+    expect(yaml).toContain('id-token: write');
+    expect(yaml).toContain('npx void deploy --platform void --project "$VOID_PROJECT"');
+  });
+});
 
 function expectPnpmAllowBuilds(root: string): void {
   const yaml = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf-8');
