@@ -175,10 +175,6 @@ if (helpPath) {
       process.exit(1);
     });
   });
-} else if (command === 'mcp') {
-  import('./mcp.ts').then(({ runMcp }) => {
-    runMcp();
-  });
 } else if (command === '-v' || command === '--version') {
   const version = JSON.parse(readFileSync(join(getPackageDir(), 'package.json'), 'utf-8')).version;
   console.log(version);
@@ -235,7 +231,6 @@ if (helpPath) {
       name: 'prepare',
       description: 'Generate .void artifacts without starting Vite',
     },
-    { name: 'mcp', description: 'Start MCP server (for AI agents)' },
     { name: 'help', description: 'Show help message' },
   ];
 
@@ -260,11 +255,6 @@ if (helpPath) {
       case 'deploy': {
         const { runDeploy } = await import('./deploy.ts');
         await runDeploy(root);
-        return;
-      }
-      case 'mcp': {
-        const { runMcp } = await import('./mcp.ts');
-        runMcp();
         return;
       }
       case 'auth':

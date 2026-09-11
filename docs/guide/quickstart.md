@@ -79,7 +79,7 @@ We do not recommend installing `void` globally, because the CLI needs to be in s
 
 ## Using with Coding Agents
 
-`void init` detects your agent once and reuses that choice for instructions, skills linking, and MCP config.
+`void init` detects your agent once and reuses that choice for instructions and skills linking.
 
 If auto-detection fails, `void init` asks you to choose from a short list (Claude, Cursor, Codex, Gemini CLI, Generic).
 

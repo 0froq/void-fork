@@ -26,7 +26,7 @@ const HELP_TREE: HelpTree = {
     summary: 'Set up Void in a new or existing project.',
     usage: ['void init [options]'],
     options: [
-      { command: '--agents', description: 'Set up agent instructions, skills, and MCP config' },
+      { command: '--agents', description: 'Set up agent instructions and skills' },
       { command: '--tsconfig', description: 'Only update tsconfig.json' },
       {
         command: '--github',
@@ -35,7 +35,7 @@ const HELP_TREE: HelpTree = {
     ],
     examples: [
       { command: 'void init', description: 'Scaffold or configure the current project' },
-      { command: 'void init --agents', description: 'Install agent instructions and MCP config' },
+      { command: 'void init --agents', description: 'Install agent instructions and skills' },
       { command: 'void init --github', description: 'Scaffold the GitHub Actions deploy workflow' },
     ],
   },
@@ -588,10 +588,6 @@ const HELP_TREE: HelpTree = {
     usage: ['void prepare'],
     examples: [{ command: 'void prepare', description: 'Refresh generated project types' }],
   },
-  mcp: {
-    summary: 'Start the Void MCP server over stdio for AI agents.',
-    usage: ['void mcp'],
-  },
 };
 
 function basicSubcommand(summary: string, usage: string, example?: string): HelpPage {
@@ -653,7 +649,6 @@ export function printGlobalHelp(): void {
       '',
       categoryTitle('agent'),
       helpLine('void init --agents', requiredOption(['init'], '--agents').description),
-      globalCommandLine(['mcp'], 'void mcp'),
       '',
       categoryTitle('help'),
       helpLine('void help <command>', 'Show command-specific help'),

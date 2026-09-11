@@ -37,7 +37,6 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void project cancel`             | Cancel an active deployment                                         |
 | `void project purge-cache`        | Purge all cached pages                                              |
 | `void build logs`                 | Stream, tail, or download build logs                                |
-| `void mcp`                        | Start the Void MCP server                                           |
 | `void init`                       | Setup wizard for new or existing projects                           |
 
 ## Binary Invocation
@@ -86,21 +85,20 @@ After that, the full interactive flow walks through:
 2. **Database:** asks whether you want D1, PostgreSQL, or no database yet. Choosing PostgreSQL writes `"database": "pg"` to `void.json`; D1 stays implicit; choosing no database leaves config unchanged so you can add data features later.
 3. **Agent instructions:** detects agents once and injects instructions into `CLAUDE.md` or `AGENTS.md`.
 4. **Skills:** links Void skills using the same detected or selected agent context.
-5. **MCP config:** writes MCP server config using that same agent context.
-6. **Demo code:** for existing non-Pages projects, optionally scaffolds a `db/migrations/` directory plus an API route and typed fetch example.
-7. **GitHub Actions:** optionally creates `.github/workflows/void-deploy.yml`. The workflow deploys on pushes to `main` and authenticates via [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) — no long-lived `VOID_TOKEN` secret is stored in the repo. The workflow is a single `void deploy` step: when it runs in GitHub Actions, `void deploy` mints an OIDC token (audience `void`), exchanges it at `POST $VOID_API_URL/auth/github-oidc` for a short-lived project-scoped deploy token, and deploys. `permissions: id-token: write` is retained so the CLI can mint that token. The project slug is baked in from your linked project (`.void/project.json`) when known; otherwise the workflow reads a `VOID_PROJECT` repository variable.
-8. **`env.ts` scaffold:** if the project has no `env.ts` but has `.env` / `.env.example` / `.env.local` / `.env.development*` files on disk, generates an `env.ts` pre-populated with their keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
-9. **Project setup:** optionally logs you in, lets you select or create a project, and writes `.void/project.json` so your first deploy can just be `void deploy`.
+5. **Demo code:** for existing non-Pages projects, optionally scaffolds a `db/migrations/` directory plus an API route and typed fetch example.
+6. **GitHub Actions:** optionally creates `.github/workflows/void-deploy.yml`. The workflow deploys on pushes to `main` and authenticates via [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) — no long-lived `VOID_TOKEN` secret is stored in the repo. The workflow is a single `void deploy` step: when it runs in GitHub Actions, `void deploy` mints an OIDC token (audience `void`), exchanges it at `POST $VOID_API_URL/auth/github-oidc` for a short-lived project-scoped deploy token, and deploys. `permissions: id-token: write` is retained so the CLI can mint that token. The project slug is baked in from your linked project (`.void/project.json`) when known; otherwise the workflow reads a `VOID_PROJECT` repository variable.
+7. **`env.ts` scaffold:** if the project has no `env.ts` but has `.env` / `.env.example` / `.env.local` / `.env.development*` files on disk, generates an `env.ts` pre-populated with their keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
+8. **Project setup:** optionally logs you in, lets you select or create a project, and writes `.void/project.json` so your first deploy can just be `void deploy`.
 
 If no agent is detected, `void init` asks you to choose one from a short list (Claude, Cursor, Codex, Gemini CLI, Generic). That single choice is reused across all agent steps.
 
 Use flags to run individual steps without prompts:
 
-| Flag         | Purpose                                           |
-| ------------ | ------------------------------------------------- |
-| `--tsconfig` | Only update `tsconfig.json`                       |
-| `--agents`   | Set up agent instructions, skills, and MCP config |
-| `--github`   | Only create the GitHub Actions deploy workflow    |
+| Flag         | Purpose                                        |
+| ------------ | ---------------------------------------------- |
+| `--tsconfig` | Only update `tsconfig.json`                    |
+| `--agents`   | Set up agent instructions and skills           |
+| `--github`   | Only create the GitHub Actions deploy workflow |
 
 Flags can be combined. When any flag is provided, only the specified steps run and interactive prompts are skipped.
 
@@ -889,17 +887,8 @@ Runs all agent setup steps:
 
 1. **Instructions:** detects agents once and injects Void framework instructions with versioned markers.
 2. **Skills:** links skills for the same detected or selected agent context.
-3. **MCP config:** writes MCP server config for that same context, or prints generic MCP JSON in Generic mode.
 
 If no agent is detected, `void init --agents` asks you to choose from Claude Code, Cursor, Codex, Gemini CLI, or Generic.
-
-### `void mcp`
-
-```
-void mcp
-```
-
-Start the Void MCP server over stdio for supported coding agents.
 
 ## Environment variables
 

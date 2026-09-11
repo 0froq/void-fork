@@ -20,13 +20,7 @@ import { getDatabaseDialect, readConfig, type DatabaseDialect } from '../config.
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { detectFramework, type DetectedFramework } from '../plugin-inference.ts';
 import { readProjectPaths } from '../project-paths.ts';
-import {
-  detectAgents,
-  getAgentById,
-  getPackageDir,
-  type AgentConfig,
-  type McpConfigTarget,
-} from './agents.ts';
+import { detectAgents, getAgentById, getPackageDir, type AgentConfig } from './agents.ts';
 import { maybeSetupDeployProject } from './deploy-setup.ts';
 import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { cliTitle } from './output.ts';
@@ -3346,89 +3340,6 @@ function injectAgentBlock(root: string, filePath: string): void {
   }
 }
 
-function writeMcpConfigForTarget(root: string, target: McpConfigTarget): void {
-  const fullPath = join(root, target.filePath);
-  let existing: JsonObject = {};
-  if (existsSync(fullPath)) {
-    try {
-      existing = asRecord(JSON.parse(readFileSync(fullPath, 'utf-8'))) ?? {};
-    } catch {
-      // unparseable — start fresh
-    }
-  }
-
-  const rootConfig = asRecord(existing[target.rootKey]) ?? {};
-  existing[target.rootKey] = rootConfig;
-
-  if (rootConfig['void']) {
-    log.info(`${target.filePath} already has void MCP config`);
-    return;
-  }
-
-  rootConfig['void'] = {
-    command: 'npx',
-    args: ['void', 'mcp'],
-    ...target.extraFields,
-  };
-
-  mkdirSync(dirname(fullPath), { recursive: true });
-  writeFileSync(fullPath, JSON.stringify(existing, null, 2) + '\n');
-  log.success(`Added void MCP server to ${target.filePath}`);
-}
-
-function pickMcpTarget(root: string, targets: Array<McpConfigTarget>): McpConfigTarget {
-  if (targets.length === 1) {
-    return targets[0];
-  }
-  const existingTargets = targets.filter((t) => existsSync(join(root, t.filePath)));
-  if (existingTargets.length > 0) {
-    return existingTargets[0];
-  }
-  return targets[0];
-}
-
-function setupMcpConfig(root: string, selectedAgents: Array<AgentConfig>): void {
-  const mcpAgents: Array<{ agent: AgentConfig; targets: Array<McpConfigTarget> }> = [];
-  const hintAgents: Array<{ agent: AgentConfig; hint: string }> = [];
-
-  for (const agent of selectedAgents) {
-    if (agent.mcpConfig) {
-      mcpAgents.push({ agent, targets: agent.mcpConfig });
-    } else if (agent.mcpHint) {
-      hintAgents.push({ agent, hint: agent.mcpHint });
-    }
-  }
-
-  if (selectedAgents.length === 0) {
-    note(
-      JSON.stringify(
-        {
-          void: {
-            command: 'npx',
-            args: ['void', 'mcp'],
-          },
-        },
-        null,
-        2,
-      ),
-      'Add this MCP server config to your agent',
-    );
-    return;
-  }
-
-  // Print hints for agents without project-level config
-  for (const { agent, hint } of hintAgents) {
-    log.info(`${agent.displayName}: ${hint}`);
-  }
-
-  // Write config for agents with project-level support
-  for (const { agent, targets } of mcpAgents) {
-    const target = pickMcpTarget(root, targets);
-    log.info(`${agent.displayName} MCP target: ${target.filePath}`);
-    writeMcpConfigForTarget(root, target);
-  }
-}
-
 export async function runInitCommand(root: string, initArgs?: InitArgs): Promise<void> {
   console.log();
   intro(cliTitle('init'));
@@ -3576,7 +3487,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     applyDatabaseSetup(root, await promptDatabaseSetup(root));
   }
 
-  // Steps 4–6: Agent instructions, skills, MCP config
+  // Steps 4–5: Agent instructions and skills
   if (!targeted || initArgs?.agents) {
     const agentSetup = await resolveAgentSetup(root);
 
@@ -3590,12 +3501,9 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     } else {
       log.info('Skills linking skipped for generic agent setup');
     }
-
-    // Step 6: MCP config
-    setupMcpConfig(root, agentSetup.agents);
   }
 
-  // Step 7: Demo code (only in full interactive flow, not for meta-frameworks)
+  // Step 6: Demo code (only in full interactive flow, not for meta-frameworks)
   if (!targeted && !framework) {
     if (didScaffoldStarter || state.hasRoutes || state.hasMigrations || state.hasPages) {
       log.info('Project already has pages, routes, or migrations, skipping demo');
