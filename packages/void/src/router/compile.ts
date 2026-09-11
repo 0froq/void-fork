@@ -2481,7 +2481,7 @@ export function compileWorkerEntry(
    * When absent, the render path is emitted byte-identical to today (zero
    * behavioral change for managed/dev/no-ISR builds).
    */
-  isr?: { runtimePath: string },
+  isr?: { runtimePath: string; queryAllowlist?: Record<string, Array<string>> },
   /**
    * Resolved `assetConfig.not_found_handling` for this build. Threaded to
    * `compileAssetFallbackHelper` so `routing.notFound: '404-page'` is honored
@@ -2620,7 +2620,7 @@ function __filterInternalBindings(env) {
   const renderBlock = isr
     ? `      const __render = async (req) => serveWithAssets(req, env, await app.fetch(req, userEnv, ctx));
       if (env.ISR_CACHE) {
-        const __isr = await handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID }, __render);
+        const __isr = await handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: ${JSON.stringify(isr?.queryAllowlist)} }, __render);
         if (__isr) return __isr;
       }
       return __render(request);`

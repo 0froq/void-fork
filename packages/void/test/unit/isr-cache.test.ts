@@ -555,6 +555,42 @@ describe('handleIsr', () => {
     return new Request(`https://${HOST}${path}`, { method: 'GET', headers });
   }
 
+  it('isolates only allowlisted query variants and ignores unrelated parameters', async () => {
+    const { store, kv } = createKvMock();
+    const env = makeEnv(kv);
+    const render = vi.fn(async (request: Request) => {
+      const q = new URL(request.url).searchParams.get('q');
+      return new Response(`<html>${q}</html>`, { headers: { 'content-type': 'text/html' } });
+    });
+    const options = {
+      ...OPTS,
+      revalidate: { '/search': 60 },
+      queryAllowlist: { '/search': ['q'] },
+    };
+
+    const first = createCtx();
+    await handleIsr(htmlRequest('/search?q=one&utm=a'), env, first.ctx, options, render);
+    await first.flush();
+    const second = createCtx();
+    const same = await handleIsr(
+      htmlRequest('/search?utm=b&q=one'),
+      env,
+      second.ctx,
+      options,
+      render,
+    );
+    await second.flush();
+    const third = createCtx();
+    await handleIsr(htmlRequest('/search?q=two'), env, third.ctx, options, render);
+    await third.flush();
+
+    expect(await same!.text()).toBe('<html>one</html>');
+    expect(render).toHaveBeenCalledTimes(2);
+    expect(store.has(isrKey(DPL, HOST, '/search', `https://${HOST}/search?q=one`))).toBe(true);
+    expect(store.has(isrKey(DPL, HOST, '/search', `https://${HOST}/search?q=two`))).toBe(true);
+    expect(store.has(isrKey(DPL, HOST, '/search'))).toBe(false);
+  });
+
   it('MISS → renders live, returns MISS, and writes KV + HTML edge in the background', async () => {
     const { store, kv } = createKvMock();
     const env = makeEnv(kv);

@@ -1,5 +1,6 @@
 import { matchSegmentPattern } from '@void/edge';
 import {
+  buildVariantOriginalUrl,
   decodeIsrCacheEntry,
   extractPageDataFromHtml,
   isrCacheResponse,
@@ -12,8 +13,9 @@ import {
   shouldBypassIsr,
   type IsrCacheEntry,
   type IsrCacheMetadata,
+  type QueryAllowlist,
 } from './core.ts';
-import { isrCacheKey, isrCachePrefix, isrEdgeCacheUrl } from './index.ts';
+import { isrCacheKey, isrCachePrefix, isrCacheVariantPrefix, isrEdgeCacheUrl } from './index.ts';
 
 export {
   extractPageDataFromHtml,
@@ -79,7 +81,10 @@ export type RenderFn = (request: Request) => Promise<Response>;
 export type HandleIsrOptions = Readonly<{
   revalidate: number | Record<string, number> | undefined;
   deploymentId: string;
+  queryAllowlist?: QueryAllowlist;
 }>;
+
+export const MAX_ISR_VARIANTS_PER_PATH = 200;
 
 // ---------------------------------------------------------------------------
 // Collapsed single-tenant cache keys
@@ -99,8 +104,17 @@ export function isrPrefix(deploymentId: string): string {
  * cached content never bleeds into another host served by the same worker
  * (custom domain + workers.dev, apex + www, etc.).
  */
-export function isrKey(deploymentId: string, host: string, pathname: string): string {
-  return isrCacheKey(DIRECT_ISR_PROJECT_ID, deploymentId, host, pathname);
+export function isrKey(
+  deploymentId: string,
+  host: string,
+  pathname: string,
+  variantUrl?: string | null,
+): string {
+  return isrCacheKey(DIRECT_ISR_PROJECT_ID, deploymentId, host, pathname, variantUrl);
+}
+
+export function isrVariantPrefix(deploymentId: string, host: string, pathname: string): string {
+  return isrCacheVariantPrefix(DIRECT_ISR_PROJECT_ID, deploymentId, host, pathname);
 }
 
 /**
@@ -118,16 +132,26 @@ export function hostRegistryKey(deploymentId: string, host: string): string {
  * clean; this internal key carries the deployment id so a new deploy never
  * reads HTML produced by an older deploy.
  */
-export function htmlEdgeKey(host: string, pathname: string, id: string): string {
-  return isrEdgeCacheUrl(host, pathname, id, 'html');
+export function htmlEdgeKey(
+  host: string,
+  pathname: string,
+  id: string,
+  variantUrl?: string | null,
+): string {
+  return isrEdgeCacheUrl(host, pathname, id, 'html', variantUrl);
 }
 
 /**
  * Edge-cache key for the JSON (pages-protocol) variant. Separated from HTML by
  * the `&__void=json` marker.
  */
-export function jsonEdgeKey(host: string, pathname: string, id: string): string {
-  return isrEdgeCacheUrl(host, pathname, id, 'json');
+export function jsonEdgeKey(
+  host: string,
+  pathname: string,
+  id: string,
+  variantUrl?: string | null,
+): string {
+  return isrEdgeCacheUrl(host, pathname, id, 'json', variantUrl);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,12 +168,13 @@ export async function readIsrCache(
   env: IsrCacheEnv,
   host: string,
   pathname: string,
+  variantUrl?: string | null,
 ): Promise<IsrCacheEntry | null> {
   const kv = env.ISR_CACHE;
   if (!kv) {
     return null;
   }
-  const key = isrKey(env.__VOID_ISR_DEPLOYMENT_ID ?? '', host, pathname);
+  const key = isrKey(env.__VOID_ISR_DEPLOYMENT_ID ?? '', host, pathname, variantUrl);
   let value: ArrayBuffer | null;
   let metadata: IsrCacheMetadata | null;
   try {
@@ -175,6 +200,7 @@ export async function writeIsrCache(
   pathname: string,
   response: Response,
   ttl: number,
+  variantUrl?: string | null,
 ): Promise<void> {
   const kv = env.ISR_CACHE;
   if (!kv) {
@@ -188,9 +214,14 @@ export async function writeIsrCache(
 
   const id = env.__VOID_ISR_DEPLOYMENT_ID ?? '';
   try {
+    const key = isrKey(id, host, pathname, variantUrl);
+    if (variantUrl && !(await isVariantWriteAllowed(kv, id, host, pathname, key))) {
+      await registerIsrHost(kv, id, host);
+      return;
+    }
     const body = await responseClone.arrayBuffer();
     const packed = packIsrValue(headers, body);
-    await kv.put(isrKey(id, host, pathname), packed, {
+    await kv.put(key, packed, {
       metadata: {
         s: status,
         c: Date.now(),
@@ -204,6 +235,23 @@ export async function writeIsrCache(
   // by an in-isolate Set so it costs one KV write per (isolate, id, host), not
   // one per page write. Fail-open — a registry write error never 500s a render.
   await registerIsrHost(kv, id, host);
+}
+
+async function isVariantWriteAllowed(
+  kv: KVNamespace,
+  deploymentId: string,
+  host: string,
+  pathname: string,
+  key: string,
+): Promise<boolean> {
+  const listed = await kv.list({
+    prefix: isrVariantPrefix(deploymentId, host, pathname),
+    limit: 1000,
+  });
+  return (
+    listed.keys.length < MAX_ISR_VARIANTS_PER_PATH ||
+    listed.keys.some((entry) => entry.name === key)
+  );
 }
 
 /**
@@ -265,13 +313,14 @@ export async function deleteIsrCache(
   env: IsrCacheEnv,
   host: string,
   pathname: string,
+  variantUrl?: string | null,
 ): Promise<void> {
   const kv = env.ISR_CACHE;
   if (!kv) {
     return;
   }
   try {
-    await kv.delete(isrKey(env.__VOID_ISR_DEPLOYMENT_ID ?? '', host, pathname));
+    await kv.delete(isrKey(env.__VOID_ISR_DEPLOYMENT_ID ?? '', host, pathname, variantUrl));
   } catch {
     // Fail open.
   }
@@ -430,6 +479,7 @@ async function revalidateInBackground(
   defaultTtl: number,
   keys: { htmlKey: string; jsonKey: string },
   render: RenderFn,
+  variantUrl: string | null,
 ): Promise<void> {
   try {
     const cleanRequest = cloneWithoutVoidPages(request);
@@ -440,7 +490,7 @@ async function revalidateInBackground(
     const ttl = resolveRevalidateTtl(response, defaultTtl);
     const cache = edgeCache();
     if (ttl > 0 && response.status === 200) {
-      await writeIsrCache(env, host, pathname, response, ttl);
+      await writeIsrCache(env, host, pathname, response, ttl, variantUrl);
       // Update HTML edge cache with the fresh response.
       const headers = new Headers(response.headers);
       headers.set('x-isr-cache', 'HIT');
@@ -458,7 +508,7 @@ async function revalidateInBackground(
       await populateJsonEdgeCache(cache, keys.jsonKey, response, ttl, 'HIT');
     } else if (ttl === 0) {
       // Worker permanently opted out — remove KV + both edge variants.
-      await deleteIsrCache(env, host, pathname);
+      await deleteIsrCache(env, host, pathname, variantUrl);
       await safeCacheDelete(cache, keys.htmlKey);
       await safeCacheDelete(cache, keys.jsonKey);
     }
@@ -497,7 +547,7 @@ export async function handleIsr(
   options: HandleIsrOptions,
   render: RenderFn,
 ): Promise<Response | null> {
-  const { revalidate, deploymentId } = options;
+  const { revalidate, deploymentId, queryAllowlist } = options;
 
   if (request.method !== 'GET') {
     return null;
@@ -529,11 +579,13 @@ export async function handleIsr(
   env.__VOID_ISR_DEPLOYMENT_ID ??= deploymentId;
 
   const host = url.hostname;
+  const normalizedVariantUrl = buildVariantOriginalUrl(request.url, pathname, queryAllowlist);
+  const variantUrl = new URL(normalizedVariantUrl).search ? normalizedVariantUrl : null;
   const cache = edgeCache();
 
   // Pages protocol: JSON edge cache only (cold colo re-renders JSON).
   if (request.headers.has('X-VoidPages')) {
-    const jsonKey = jsonEdgeKey(host, pathname, deploymentId);
+    const jsonKey = jsonEdgeKey(host, pathname, deploymentId, variantUrl);
     let jsonCached: Response | undefined;
     try {
       // `cache?.` — an absent/degraded Cache API (edgeCache() → undefined) is a
@@ -553,8 +605,8 @@ export async function handleIsr(
   }
 
   // HTML path: L1 edge → L2 KV → live render.
-  const htmlKey = htmlEdgeKey(host, pathname, deploymentId);
-  const jsonKey = jsonEdgeKey(host, pathname, deploymentId);
+  const htmlKey = htmlEdgeKey(host, pathname, deploymentId, variantUrl);
+  const jsonKey = jsonEdgeKey(host, pathname, deploymentId, variantUrl);
 
   // L1: edge cache (per-colo, sub-ms).
   let edgeCached: Response | undefined;
@@ -571,7 +623,7 @@ export async function handleIsr(
   }
 
   // L2: KV (global, authoritative). `readIsrCache` fails open to null.
-  const cached = await readIsrCache(env, host, pathname);
+  const cached = await readIsrCache(env, host, pathname, variantUrl);
   if (cached) {
     // Belt-and-suspenders: `readIsrCache` already validates the entry so the
     // Response constructors below can't throw, but the never-500 fail-open
@@ -589,6 +641,7 @@ export async function handleIsr(
             isrTtl,
             { htmlKey, jsonKey },
             render,
+            variantUrl,
           ),
         );
       }
@@ -610,7 +663,7 @@ export async function handleIsr(
   if (ttl > 0 && response.status === 200) {
     // Every clone below is taken synchronously (before `response.body` is read
     // for the client) so no consumer races the body away.
-    ctx.waitUntil(writeIsrCache(env, host, pathname, response, ttl));
+    ctx.waitUntil(writeIsrCache(env, host, pathname, response, ttl, variantUrl));
     ctx.waitUntil(populateJsonEdgeCache(cache, jsonKey, response, ttl, 'MISS'));
 
     const cacheHeaders = new Headers(response.headers);

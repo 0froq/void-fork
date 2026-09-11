@@ -174,6 +174,30 @@ describe('revalidate — self-host (own ISR_CACHE + edge)', () => {
     ]);
   });
 
+  it('{ paths } deletes every allowlisted query variant from KV and edge cache', async () => {
+    const { store, kv } = createKvMock();
+    const variantA = `https://${HOST}/search?q=a`;
+    const variantB = `https://${HOST}/search?q=b`;
+    store.set(isrKey(DPL, HOST, '/search', variantA), new ArrayBuffer(4));
+    store.set(isrKey(DPL, HOST, '/search', variantB), new ArrayBuffer(4));
+    edge.store.set(htmlEdgeKey(HOST, '/search', DPL, variantA), new Response('a'));
+    edge.store.set(jsonEdgeKey(HOST, '/search', DPL, variantA), new Response('a'));
+    edge.store.set(htmlEdgeKey(HOST, '/search', DPL, variantB), new Response('b'));
+    edge.store.set(jsonEdgeKey(HOST, '/search', DPL, variantB), new Response('b'));
+
+    await envContext.run(
+      { ISR_CACHE: kv, __VOID_ISR_DEPLOYMENT_ID: DPL, __VOID_ISR_HOST: HOST },
+      async () => revalidate({ paths: ['/search'] }),
+    );
+
+    expect(store.has(isrKey(DPL, HOST, '/search', variantA))).toBe(false);
+    expect(store.has(isrKey(DPL, HOST, '/search', variantB))).toBe(false);
+    expect(edge.store.has(htmlEdgeKey(HOST, '/search', DPL, variantA))).toBe(false);
+    expect(edge.store.has(jsonEdgeKey(HOST, '/search', DPL, variantA))).toBe(false);
+    expect(edge.store.has(htmlEdgeKey(HOST, '/search', DPL, variantB))).toBe(false);
+    expect(edge.store.has(jsonEdgeKey(HOST, '/search', DPL, variantB))).toBe(false);
+  });
+
   // Cron/queue handlers stamp the deployment id WITHOUT a request host (the F1
   // fix), so a host-less `revalidate({ paths })` must enumerate EVERY registered
   // host from the registry and purge each host's (host, path) entry.

@@ -559,7 +559,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         // it, and non-CF targets took the branch above. Read the command from
         // `resolvedConfig` (set in configResolved, available here) — not a stale
         // captured value.
-        const merged = collectRevalidate(readConfig(root), scan!.pages);
+        const buildConfig = readConfig(root);
+        const merged = collectRevalidate(buildConfig, scan!.pages);
         const emitIsr =
           !options.target &&
           resolvedConfig?.command === 'build' &&
@@ -572,7 +573,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         isrRevalidate = emitIsr ? merged : undefined;
         // Resolve the ISR runtime path LAZILY — only when ISR is actually emitted
         // — so non-ISR/managed/dev builds never depend on it.
-        const isr = emitIsr ? { runtimePath: resolveFile('@void/isr/runtime') } : undefined;
+        const isr = emitIsr
+          ? {
+              runtimePath: resolveFile('@void/isr/runtime'),
+              queryAllowlist: buildConfig.routing?.revalidateQueryAllowlist,
+            }
+          : undefined;
         writeFileIfChanged(
           join(outDir, 'entry.ts'),
           compileWorkerEntry(

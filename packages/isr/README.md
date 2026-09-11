@@ -17,8 +17,8 @@ Any new helper that touches the key or URL format belongs here, not in `api/` or
 The package has three entry points:
 
 - `@void/isr` owns the immutable, versioned KV-key and edge-cache URL protocol.
-- `@void/isr/core` owns target-neutral codecs, validation, TTL selection, request bypass rules, response construction, header sanitization, and Void Pages data extraction.
-- `@void/isr/runtime` implements the fail-open, single-tenant Cloudflare KV and Cache API ladder used by direct Void deployments.
+- `@void/isr/core` owns target-neutral codecs, validation, TTL selection, request bypass rules, response construction, header sanitization, Void Pages data extraction, and query-variant normalization.
+- `@void/isr/runtime` implements the fail-open, single-tenant Cloudflare KV and Cache API ladder used by direct Void deployments, including bounded variants from `routing.revalidateQueryAllowlist`.
 
 | Symbol                        | Description                                                                                                              |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
