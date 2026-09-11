@@ -1,7 +1,6 @@
-export type AssetConfig = Readonly<{
-  not_found_handling?: 'none' | 'single-page-application' | '404-page';
-  html_handling?: 'auto-trailing-slash' | 'force-trailing-slash' | 'drop-trailing-slash' | 'none';
-}>;
+import type { AssetConfig } from '@void/deploy-core';
+
+export type { AssetConfig } from '@void/deploy-core';
 
 export type ResolvedAsset = Readonly<{
   path: string;

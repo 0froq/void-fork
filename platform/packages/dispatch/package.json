@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@void/deploy-core": "workspace:*",
     "@voidcloud/isr-shared": "workspace:*"
   },
   "devDependencies": {

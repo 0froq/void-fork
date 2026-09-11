@@ -345,6 +345,7 @@
     "@cloudflare/workers-types": "catalog:",
     "@hono/oauth-providers": "^0.9.0",
     "@napi-rs/keyring": "2.0.0",
+    "@void/deploy-core": "workspace:*",
     "better-auth": "^1.7.3",
     "better-sqlite3": "^13.0.3",
     "blake3-jit": "^1.1.0",

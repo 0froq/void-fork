@@ -1,18 +1,7 @@
+import type { RedirectRule } from '@void/deploy-core';
 import { compilePattern, substituteParams } from './pattern.ts';
 
-export type RedirectRule = Readonly<{
-  source: string;
-  destination: string;
-  status: number;
-  /**
-   * Optional literal host the rule is scoped to. The framework parser
-   * splits a `https://host/path` source into `host` and a path-only
-   * `source`, lowercase-normalized. Dispatch matches `host` byte-for-byte
-   * against `url.hostname` at request time. Optional — path-only rules
-   * apply to every host bound to the project.
-   */
-  host?: string;
-}>;
+export type { RedirectRule } from '@void/deploy-core';
 
 export type RoutingRuleResult =
   | { type: 'redirect'; destination: string; status: number }

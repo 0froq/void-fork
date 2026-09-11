@@ -1,9 +1,7 @@
+import type { HeaderRule } from '@void/deploy-core';
 import { matchLiteralPattern } from './pattern.ts';
 
-export type HeaderRule = Readonly<{
-  pattern: string;
-  headers: ReadonlyArray<[string, string]>;
-}>;
+export type { HeaderRule } from '@void/deploy-core';
 
 /**
  * Headers that user header rules may not set at all, because they are always a

@@ -80,7 +80,7 @@ src/
     package.ts              # Packages dist/ into FormData (worker + assets + migrations + manifest)
     agents.ts               # Shared agent configs and detection
     client.ts               # HTTP client for platform API
-    types.ts                # DeployManifest, MigrationMeta types
+    types.ts                # CLI-only deploy types and @void/deploy-core re-exports
 ```
 
 ### Key Design Decisions

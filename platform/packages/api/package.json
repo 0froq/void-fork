@@ -30,6 +30,7 @@
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/sandbox": "0.12.9",
+    "@void/deploy-core": "workspace:*",
     "@voidcloud/isr-shared": "workspace:*",
     "@xterm/headless": "^6.0.0",
     "aws4fetch": "^1.0.20",
