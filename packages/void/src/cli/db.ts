@@ -1053,14 +1053,64 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
   }
 
   if (remote) {
+    const deploymentPlatform = readDeploymentPlatform(root);
     if (dialect !== 'sqlite') {
-      log.error(
-        `db: \`void db migrate --remote\` is only supported for D1 projects. ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} remote migrations run during \`void deploy\` through the project Hyperdrive binding.`,
-      );
-      process.exit(1);
+      if (deploymentPlatform !== 'cloudflare') {
+        log.error(
+          `db: \`void db migrate --remote\` is only supported for D1 projects. ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} remote migrations run during \`void deploy\` through the project Hyperdrive binding.`,
+        );
+        process.exit(1);
+      }
+
+      if (rawMigrations.length === 0) {
+        log.info(`No migration files found in ${paths.sourceRelative('db/migrations')}/`);
+        outro('Done.');
+        return;
+      }
+      const databaseUrl = process.env.DATABASE_URL;
+      if (!databaseUrl) {
+        log.error(
+          'DATABASE_URL is required in the shell for a direct Cloudflare remote database command.',
+        );
+        process.exit(1);
+      }
+
+      try {
+        let appliedNames: Array<string>;
+        let applyMigrations: () => Promise<Array<string>>;
+        if (dialect === 'postgresql') {
+          const { getPgAppliedMigrations, runPgMigrations } =
+            await import('../migrations/runner-pg.ts');
+          appliedNames = await getPgAppliedMigrations(databaseUrl);
+          applyMigrations = () => runPgMigrations(migrationsDir, databaseUrl);
+        } else {
+          const { getMySqlAppliedMigrations, runMySqlMigrations } =
+            await import('../migrations/runner-mysql.ts');
+          appliedNames = await getMySqlAppliedMigrations(databaseUrl);
+          applyMigrations = () => runMySqlMigrations(migrationsDir, databaseUrl);
+        }
+        const appliedSet = new Set(appliedNames);
+        const pending = rawMigrations.filter((migration) => !appliedSet.has(migration.name));
+        if (pending.length === 0) {
+          log.info('Remote database is up to date.');
+          outro('Done.');
+          return;
+        }
+        validateMigrations(pending);
+        const applied = await applyMigrations();
+        for (const migration of applied) {
+          log.step(migration);
+        }
+        log.success(`Applied ${applied.length} migration(s) to remote database.`);
+        outro('Done.');
+        return;
+      } catch (error) {
+        log.error(`db: Remote ${dialect} migrations failed — ${getErrorMessage(error)}`);
+        process.exit(1);
+      }
     }
 
-    if (readDeploymentPlatform(root) === 'cloudflare') {
+    if (deploymentPlatform === 'cloudflare') {
       if (rawMigrations.length === 0) {
         log.info(`No migration files found in ${paths.sourceRelative('db/migrations')}/`);
         outro('Done.');

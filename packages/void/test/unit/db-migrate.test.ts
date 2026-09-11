@@ -14,6 +14,10 @@ const mockLog = {
 const mockGetMiniflareDatabasePath = vi.fn();
 const mockGetAppliedMigrations = vi.fn();
 const mockRunMigrations = vi.fn();
+const mockGetPgAppliedMigrations = vi.fn();
+const mockRunPgMigrations = vi.fn();
+const mockGetMySqlAppliedMigrations = vi.fn();
+const mockRunMySqlMigrations = vi.fn();
 
 vi.mock('@clack/prompts', () => ({
   intro: (...args: Array<unknown>) => mockIntro(...args),
@@ -30,6 +34,16 @@ vi.mock('../../src/migrations/runner', () => ({
   getMiniflareDatabasePath: (...args: Array<unknown>) => mockGetMiniflareDatabasePath(...args),
   getAppliedMigrations: (...args: Array<unknown>) => mockGetAppliedMigrations(...args),
   runMigrations: (...args: Array<unknown>) => mockRunMigrations(...args),
+}));
+
+vi.mock('../../src/migrations/runner-pg', () => ({
+  getPgAppliedMigrations: (...args: Array<unknown>) => mockGetPgAppliedMigrations(...args),
+  runPgMigrations: (...args: Array<unknown>) => mockRunPgMigrations(...args),
+}));
+
+vi.mock('../../src/migrations/runner-mysql', () => ({
+  getMySqlAppliedMigrations: (...args: Array<unknown>) => mockGetMySqlAppliedMigrations(...args),
+  runMySqlMigrations: (...args: Array<unknown>) => mockRunMySqlMigrations(...args),
 }));
 
 const roots: Array<string> = [];
@@ -86,6 +100,34 @@ function createPgProjectRoot(migrations: Record<string, string>): string {
   return root;
 }
 
+function createMySqlProjectRoot(migrations: Record<string, string>): string {
+  const root = createProjectRoot(migrations);
+  writeFileSync(join(root, 'void.json'), JSON.stringify({ database: 'mysql' }, null, 2) + '\n');
+  writeFileSync(
+    join(root, 'db', 'migrations', 'meta', '_journal.json'),
+    JSON.stringify({
+      version: '7',
+      dialect: 'mysql',
+      entries: Object.keys(migrations).map((name, idx) => ({
+        idx,
+        version: '7',
+        when: Date.now(),
+        tag: name.replace(/\.sql$/, ''),
+        breakpoints: true,
+      })),
+    }),
+  );
+  return root;
+}
+
+function selectCloudflare(root: string): void {
+  mkdirSync(join(root, '.void'), { recursive: true });
+  writeFileSync(
+    join(root, '.void', 'project.json'),
+    JSON.stringify({ platform: 'cloudflare' }, null, 2) + '\n',
+  );
+}
+
 describe('void db migrate', () => {
   let runDbCommand: typeof import('../../src/cli/db.ts').runDbCommand;
 
@@ -94,6 +136,10 @@ describe('void db migrate', () => {
     mockGetMiniflareDatabasePath.mockReturnValue(join(tmpdir(), 'void-db-migrate.sqlite'));
     mockGetAppliedMigrations.mockResolvedValue([]);
     mockRunMigrations.mockResolvedValue([]);
+    mockGetPgAppliedMigrations.mockResolvedValue([]);
+    mockRunPgMigrations.mockResolvedValue([]);
+    mockGetMySqlAppliedMigrations.mockResolvedValue([]);
+    mockRunMySqlMigrations.mockResolvedValue([]);
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new Error(`process.exit:${code ?? 0}`);
@@ -106,6 +152,7 @@ describe('void db migrate', () => {
     for (const root of roots.splice(0, roots.length)) {
       rmSync(root, { recursive: true, force: true });
     }
+    delete process.env.DATABASE_URL;
   });
 
   it('fails before applying a pending destructive migration without pragma', async () => {
@@ -166,5 +213,41 @@ describe('void db migrate', () => {
     );
     expect(mockGetAppliedMigrations).not.toHaveBeenCalled();
     expect(mockRunMigrations).not.toHaveBeenCalled();
+  });
+
+  it('applies pending PostgreSQL migrations directly for a Cloudflare target', async () => {
+    const root = createPgProjectRoot({
+      '001_create_users.sql': 'CREATE TABLE users (id text primary key);',
+    });
+    selectCloudflare(root);
+    process.env.DATABASE_URL = 'postgresql://example.test/app';
+    mockRunPgMigrations.mockResolvedValue(['001_create_users.sql']);
+
+    await runDbCommand(root, { action: 'migrate', remote: true });
+
+    expect(mockGetPgAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
+    expect(mockRunPgMigrations).toHaveBeenCalledWith(
+      join(root, 'db', 'migrations'),
+      process.env.DATABASE_URL,
+    );
+    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration(s) to remote database.');
+  });
+
+  it('applies pending MySQL migrations directly for a Cloudflare target', async () => {
+    const root = createMySqlProjectRoot({
+      '001_create_users.sql': 'CREATE TABLE users (id varchar(255) primary key);',
+    });
+    selectCloudflare(root);
+    process.env.DATABASE_URL = 'mysql://example.test/app';
+    mockRunMySqlMigrations.mockResolvedValue(['001_create_users.sql']);
+
+    await runDbCommand(root, { action: 'migrate', remote: true });
+
+    expect(mockGetMySqlAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
+    expect(mockRunMySqlMigrations).toHaveBeenCalledWith(
+      join(root, 'db', 'migrations'),
+      process.env.DATABASE_URL,
+    );
+    expect(mockLog.success).toHaveBeenCalledWith('Applied 1 migration(s) to remote database.');
   });
 });
