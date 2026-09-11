@@ -20,6 +20,7 @@ export type CloudflareVersionActivation =
       reason:
         | 'uploader-changed'
         | 'status-failed'
+        | 'traffic-split-unsupported'
         | 'upload-failed'
         | 'upload-output-invalid'
         | 'preview-unavailable'
@@ -79,6 +80,9 @@ export async function activateCloudflareVersion(options: {
   const previous = await readCurrentProductionVersion(options, commonArgs);
   if (previous.kind === 'failed') {
     return { ok: false, reason: 'status-failed', status: previous.status };
+  }
+  if (previous.kind === 'split') {
+    return { ok: false, reason: 'traffic-split-unsupported' };
   }
   if (!options.verifyUploader()) {
     return { ok: false, reason: 'uploader-changed' };
@@ -205,7 +209,9 @@ export async function activateCloudflareVersion(options: {
 async function readCurrentProductionVersion(
   options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
   commonArgs: Array<string>,
-): Promise<{ kind: 'ok'; versionId: string | null } | { kind: 'failed'; status: number }> {
+): Promise<
+  { kind: 'ok'; versionId: string | null } | { kind: 'failed'; status: number } | { kind: 'split' }
+> {
   const result = await Promise.resolve(
     options.runWrangler(
       ['deployments', 'status', ...commonArgs, '--name', options.workerName, '--json'],
@@ -221,8 +227,13 @@ async function readCurrentProductionVersion(
   }
   try {
     const deployment = JSON.parse(result.stdout) as ProductionDeployment;
-    const versions = deployment.versions ?? [];
-    const active = versions.find((version) => Number(version.percentage) === 100) ?? versions[0];
+    const versions = (deployment.versions ?? []).filter(
+      (version) => Number(version.percentage) > 0,
+    );
+    if (versions.length > 1 || (versions.length === 1 && Number(versions[0]?.percentage) !== 100)) {
+      return { kind: 'split' };
+    }
+    const active = versions[0];
     return {
       kind: 'ok',
       versionId: typeof active?.version_id === 'string' ? active.version_id : null,

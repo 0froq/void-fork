@@ -121,6 +121,29 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'deploy')).toBe(false);
   });
 
+  it('refuses to flatten an existing gradual traffic split', async () => {
+    const runWrangler = runner({
+      status: ok(
+        JSON.stringify({
+          versions: [
+            { version_id: CURRENT, percentage: 90 },
+            { version_id: NEXT, percentage: 10 },
+          ],
+        }),
+      ),
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toEqual({ ok: false, reason: 'traffic-split-unsupported' });
+    expect(runWrangler).toHaveBeenCalledTimes(1);
+  });
+
   it('fails closed when Wrangler does not return a preview URL', async () => {
     const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
     await expect(

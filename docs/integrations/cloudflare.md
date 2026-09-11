@@ -250,6 +250,8 @@ Provisioning is automatic and **idempotent**. Void reads existing ids first, ado
 
 Activation is deliberately separate from upload. Void records the exact migration filenames in the Worker Version annotation, probes the uploaded version before it receives traffic, and only then promotes it to 100%. If trigger synchronization fails, Void restores the previously active version. `void project status` lists available versions and `void project rollback [version]` activates one of them without rebuilding.
 
+If the Worker already has a gradual deployment that splits traffic across versions, deploy stops before upload instead of flattening that rollout to 100%. Finish or cancel the gradual rollout in Cloudflare first.
+
 #### Scope and limitations
 
 - **Supported apps:** worker-bearing Void apps, static sites, SPAs, known SSGs, explicit `--dir` deploys, fully prerenderable Void Pages apps with `output: "static"`, and Cloudflare output from TanStack Start, React Router, vinext App Router, vinext Pages Router, SvelteKit, Nuxt, Analog, and Astro. Static deployments always use a thin Worker in front of Workers Assets so redirects, rewrites, fallbacks, and headers match the Void edge. Hybrid and SSR framework builds keep their generated application Worker. Worker-bearing apps support D1 (SQLite), KV, R2, Queues, typed SQLite-backed state from `durable-objects/`, PostgreSQL or MySQL through Hyperdrive, auth, WebSockets, AI, cron jobs, and ISR. Unsupported shapes fail closed **before** account operations, with guidance:

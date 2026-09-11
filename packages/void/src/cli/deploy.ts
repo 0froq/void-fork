@@ -4939,6 +4939,12 @@ function formatCloudflareActivationError(
       return 'deploy: the verified Wrangler uploader changed before version activation.';
     case 'status-failed':
       return `deploy: could not snapshot the current Cloudflare deployment${status}; no version was uploaded.`;
+    case 'traffic-split-unsupported':
+      return [
+        'deploy: the current Cloudflare deployment splits traffic across multiple Worker Versions.',
+        'Void will not flatten an existing gradual rollout to 100%. Finish or cancel that rollout',
+        'in Cloudflare, then retry; no version was uploaded.',
+      ].join('\n');
     case 'upload-failed':
       return `deploy: Cloudflare Worker Version upload failed${status}; production traffic is unchanged.`;
     case 'upload-output-invalid':
