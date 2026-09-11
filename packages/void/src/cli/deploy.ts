@@ -54,11 +54,7 @@ import {
   type DetectedFramework,
 } from '../plugin-inference.ts';
 import { collectPrerenderPaths, collectPrerenderPathsNode } from '../prerender.ts';
-import {
-  assertNoRootSourceConventionConflicts,
-  readProjectPaths,
-  resolveProjectPaths,
-} from '../project-paths.ts';
+import { readProjectPaths, resolveProjectPaths } from '../project-paths.ts';
 import { scanQueuesSync } from '../queues/scan.ts';
 import { scanRoutes } from '../router/scan.ts';
 import { scanWebSocketRoutesSync } from '../router/websocket.ts';
@@ -81,6 +77,7 @@ import {
   type DeploymentResponse,
   type ManifestOnlyDeployPayload,
 } from './client.ts';
+import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
 import { promptAndCreateProject } from './create-project.ts';
 import {
   formatConnectionLostMessage,
@@ -135,7 +132,6 @@ import {
 } from './package.ts';
 import {
   detectPreset,
-  hasBackendFiles,
   FRAMEWORK_PRESETS,
   formatProjectCommand,
   resolveProjectCommand,
@@ -207,7 +203,6 @@ import {
   ensureWranglerCompat,
   resolveLiveBindingConfig,
   syncWranglerBindings,
-  syncWranglerDurableObjects,
   writeProvisionedWranglerConfig,
   bindingEntriesForField,
   FRIENDLY_BINDING_NAMES,
@@ -3836,129 +3831,11 @@ export async function runCloudflareDeploy(
   // here BEFORE any sync helper that calls `requireProvisionModule()`.
   const provisionModule = await loadProvisionModule();
 
-  // 1. App-class narrowing — v1 of `--backend cloudflare` supports ONE well-understood
-  // shape: a FULL VOID APP (worker-bearing, running `routingPlugin`) on the Cloudflare
-  // Workers target, with D1/KV/R2/Queues/Hyperdrive, auth, and ISR.
-  // Everything else FAILS CLOSED here, BEFORE any account / preflight / provision / build
-  // op, reusing the SAME classifiers the managed deploy path uses (`detectPreset` +
-  // `detectFramework`) so this fork can never disagree with the build about what the app is.
-
-  // 1a. Target guard — this backend deploys Cloudflare Workers ONLY. A node/bun/deno target
-  // builds a non-CF worker; reject before the desired set or any account operation.
-  if (isNodeTarget(voidConfig.target)) {
-    log.error(
-      [
-        `deploy: --platform cloudflare is not supported for the "${voidConfig.target}" target.`,
-        'This backend deploys Cloudflare Workers only. Deploy a node/bun/deno build with its',
-        'own host/runtime, or use the default Cloudflare target for --platform cloudflare.',
-      ].join('\n'),
-    );
-    return exit(1);
-  }
-
-  // 1b. Framework guard — v1 defers the ENTIRE framework SSR path (every class). Class A
-  // (tanstack-start / react-router / vinext) composes the Void CF stack but the framework
-  // owns its own entry + routing; Class B/C (sveltekit / nuxt / analog / astro) build
-  // through their own adapter with NO CF Vite plugin, so `vite build` emits no worker
-  // artifact here. Rejecting all of them leaves exactly one supported class — the full Void
-  // app that runs `routingPlugin` and emits ISR coherently — so this fork never has to
-  // reason about framework wiring. Checked before the static guard so a framework app with
-  // no Void backend dirs gets the framework message, not a misleading static one.
-  const framework = detectFramework(root);
-  if (framework) {
-    log.error(
-      [
-        `deploy: --platform cloudflare does not yet support framework SSR (${framework.name}).`,
-        'v1 deploys full Void apps only. Deploy this framework with `void deploy` (the managed',
-        'platform) or the framework’s own Cloudflare adapter. Framework SSR support for this',
-        'backend is a follow-up.',
-      ].join('\n'),
-    );
-    return exit(1);
-  }
-
-  // 1c. Static / SPA / SSG guard — reuse the MANAGED path's own classifier `detectPreset`
-  // (NOT `resolveStaticDeployPreset`, whose fallback fires only for an explicit `--dir` or a
-  // configured `inference.appType`, so an UNCONFIGURED static/SPA/SSG app slips past it).
-  // `detectPreset` structurally detects an SSG dep, a Vite-only SPA, and prebuilt html; the
-  // explicit `--dir` / `--spa` intents and a configured static appType are checked alongside
-  // it (a configured-but-not-yet-built static app has no structural marker for `detectPreset`).
-  // `voidConfig.output === 'static'` is the SSG signal the BUILD itself branches on
-  // (index.ts `void:env` skips worker minify + prerenders the SSR bundle for it, deploy.ts
-  // `deployConfig.output === 'static'` takes the static-asset path). A pages/ project with
-  // `output: "static"` satisfies `hasBackendFiles` and yields a `null` `detectPreset`, so
-  // without this signal it would slip past the guard and reach account/build as if it were a
-  // full worker app — include it in the reject.
-  const staticPreset = detectPreset(root, { dir: options.dir, spa: options.spa });
-  const configuredStatic =
-    voidConfig.inference?.appType === 'static' ||
-    voidConfig.inference?.appType === 'spa' ||
-    voidConfig.output === 'static';
-  if (staticPreset || configuredStatic || options.dir || options.spa) {
-    const appType = staticPreset?.appType ?? (options.spa ? 'spa' : 'static');
-    log.error(
-      [
-        `deploy: --platform cloudflare does not yet support ${appType} (static-asset) apps.`,
-        'The Cloudflare backend v1 deploys full Void apps (worker-bearing) on the Cloudflare',
-        'Workers target. Deploy this app with `void deploy` (the managed platform), or host',
-        'the built assets on Cloudflare Pages / any static host.',
-      ].join('\n'),
-    );
-    return exit(1);
-  }
-
-  // 1d. Positive full-Void assertion — the app must actually be worker-bearing. Mirrors the
-  // managed dispatch's `runFullDeploy` branch (a `null` preset with no framework) and rejects
-  // a bare project with no backend files (no routes/pages/middleware/crons/queues/SSR entry)
-  // that `detectPreset` also returns `null` for.
-  if (!hasBackendFiles(root)) {
-    log.error(
-      [
-        'deploy: --platform cloudflare found no Void backend to deploy.',
-        'A full Void app has at least one of: routes/, pages/, middleware, crons/, queues/,',
-        'or an SSR entry. Add your server code, or use `void deploy` for a static site.',
-      ].join('\n'),
-    );
-    return exit(1);
-  }
-
-  // 1e. voidPlugin structural rejects — mirror the deterministic throws voidPlugin itself
-  // hits during `vite build`, reusing voidPlugin's OWN validators (no re-derivation), so an
-  // app that cannot build never reaches account mutation first: a sourceDir convention
-  // duplicated at the root (`assertNoRootSourceConventionConflicts`), a broken SSR entry
-  // (`validateSsrEntry`), and a malformed cron file (`scanJobsSync`). (sandbox / void/live /
-  // AI / remote / websocket are wired fine by the full-Void self-host build — no guard.)
-  const paths = resolveProjectPaths(root, voidConfig);
-  try {
-    assertNoRootSourceConventionConflicts(paths);
-    validateSsrEntry(root, paths);
-    scanJobsSync(root, paths.cronsDir);
-    syncWranglerDurableObjects(root, scanDurableObjectModules(root));
-  } catch (err) {
-    log.error(`deploy: ${getErrorMessage(err)}`);
-    return exit(1);
-  }
-
-  // 1f. WebSocket / Durable Object guard — FAIL CLOSED before any account op. For a `.ws.ts`
-  // route, the self-host `vite build` emits a `durable_objects` binding plus a DO migration
-  // block keyed `new_classes` (index.ts `mergeBindings`, via the SAME `scanWebSocketRoutesSync`
-  // scan; also cli/wrangler.ts for provisioning) — i.e. a KEY-VALUE-backed Durable Object
-  // namespace. As of Cloudflare's 2026-07-09 change, a fresh account (every Workers Free
-  // account, and any account with no pre-existing KV-backed namespace) REJECTS a `new_classes`
-  // migration at `wrangler deploy` ("create a namespace using a new_sqlite_classes migration
-  // instead"). So a websocket app deployed to a fresh own-account hard-fails after the build.
-  // Emitting `new_sqlite_classes` is a build-side follow-up; until then reject those apps.
-  // (sandbox / void/live DOs already emit `new_sqlite_classes` — they stay supported.)
-  if (scanWebSocketRoutesSync(root, paths, 'prod').length > 0) {
-    log.error(
-      [
-        'deploy: --platform cloudflare does not yet support WebSocket / Durable Object routes.',
-        'A `.ws.ts` route makes the build emit a key-value-backed Durable Object namespace',
-        '(a `new_classes` migration), which a fresh Cloudflare account (and every Workers Free',
-        'account) refuses to create. Deploy this app with `void deploy` (the managed platform).',
-        'SQLite-backed WebSocket support for this backend is a follow-up.',
-      ].join('\n'),
-    );
+  // 1. App-class narrowing — reject every artifact shape the current native
+  // verifier cannot prove safe before any account, provision, or build op.
+  const classification = classifyCloudflareDeployApp(root, voidConfig, options);
+  if (!classification.supported) {
+    log.error(classification.reason);
     return exit(1);
   }
 
