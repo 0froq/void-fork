@@ -86,6 +86,7 @@ import {
   resolveD1MigrateTarget,
 } from './cloudflare-deploy/config.ts';
 export { parseRootWranglerConfig } from './cloudflare-deploy/config.ts';
+import { executeCloudflareDeploy } from './cloudflare-deploy/execute.ts';
 import { promptAndCreateProject } from './create-project.ts';
 import {
   formatConnectionLostMessage,
@@ -4781,23 +4782,14 @@ export async function runCloudflareDeploy(
   //
   // Final uploader re-verification immediately before the deploy — the last and most privileged
   // credentialed run of the hashed bundle. Against the same pre-build baseline; fail closed.
-  if (!assertUploaderStillPinned()) {
-    return exit(1);
-  }
-  const deployResult = await Promise.resolve(
-    runWrangler(
-      [
-        'deploy',
-        '--env=',
-        '--experimental-provision=false',
-        '--experimental-auto-create=false',
-        '--autoconfig=false',
-      ],
-      { capture: false },
-    ),
-  );
-  if (!isCleanWranglerExit(deployResult)) {
-    log.error(`deploy: \`wrangler deploy\` failed (exit ${String(deployResult.status)}).`);
+  const execution = await executeCloudflareDeploy({
+    runWrangler,
+    verifyUploader: assertUploaderStillPinned,
+  });
+  if (!execution.ok) {
+    if (execution.reason === 'deploy-failed') {
+      log.error(`deploy: \`wrangler deploy\` failed (exit ${String(execution.status)}).`);
+    }
     return exit(1);
   }
   cliLog.info('cloudflare_deploy_end', { ok: true, worker: workerName });
