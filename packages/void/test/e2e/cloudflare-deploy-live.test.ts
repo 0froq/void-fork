@@ -4,7 +4,7 @@ import { join } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 
 // ---------------------------------------------------------------------------------------------
-// Gated live-account e2e for the self-host `void deploy --backend cloudflare` path.
+// Gated live-account e2e for the `void deploy --platform cloudflare` path.
 //
 // Runs whenever BOTH env vars are present, and cleanly SKIPS (per test, at runtime) otherwise:
 //   - VOID_E2E_CF_TOKEN       a Cloudflare API token with permissions to create + delete Workers
@@ -355,7 +355,7 @@ async function cfWorkerApi(path: string, signal?: AbortSignal): Promise<Response
   );
 }
 
-describe('void deploy --backend cloudflare (live account)', () => {
+describe('void deploy --platform cloudflare (live account)', () => {
   beforeAll(async () => {
     // Gate at execution time (see the credential note): when the token/account are absent the suite is
     // a no-op — the tests below skip too. Compute the unique resource names now, from the injected env.
@@ -454,7 +454,7 @@ describe('void deploy --backend cloudflare (live account)', () => {
 
     // No extra flag: this exercises automatic provision → build → tamper guard → remote migrations
     // → `wrangler deploy` against the live account.
-    const res = spawn.sync('node', [CLI_ENTRY, 'deploy', '--backend', 'cloudflare'], {
+    const res = spawn.sync('node', [CLI_ENTRY, 'deploy', '--platform', 'cloudflare'], {
       cwd: APP,
       encoding: 'utf8',
       maxBuffer: 20 * 1024 * 1024,
@@ -675,7 +675,7 @@ describe('void deploy --backend cloudflare (live account)', () => {
     // drift-check still passes (the overlay covers every id), the remote migration is already applied
     // (a no-op), and the worker is updated in place. The overlay wrangler.jsonc is still on disk
     // (afterAll restores it only after every test), so this reuses it. Runs LAST for that reason.
-    const res = spawn.sync('node', [CLI_ENTRY, 'deploy', '--backend', 'cloudflare'], {
+    const res = spawn.sync('node', [CLI_ENTRY, 'deploy', '--platform', 'cloudflare'], {
       cwd: APP,
       encoding: 'utf8',
       maxBuffer: 20 * 1024 * 1024,

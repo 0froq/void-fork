@@ -251,7 +251,7 @@ Void manages Better Auth migrations as part of the normal Void migration flow:
 
 This applies to `void deploy` (the managed platform), which creates the Better Auth
 tables at runtime after dispatch. Deploying to your own Cloudflare account with
-[`--backend cloudflare`](/integrations/cloudflare) does **not** run that step: there,
+[`--platform cloudflare`](/integrations/cloudflare) does **not** run that step: there,
 your checked-in `db/migrations/*.sql` must already produce the Better Auth schema, and
 deploy fails closed if they do not. Define the tables in `db/schema.ts` and run
 `void db generate` — Drizzle's `.unique()` and `.references()` are opt-in, and the

@@ -111,12 +111,12 @@ Void uses Vite's standard `.env` convention to populate the schema:
 
 Whether a file's values ship depends on which deploy path you use:
 
-| File                    | Loaded in dev | Shipped by `void deploy` | Shipped by `--backend cloudflare` |
-| ----------------------- | ------------- | ------------------------ | --------------------------------- |
-| `.env`                  | yes           | yes (`plain_text`)       | yes (worker `vars`)               |
-| `.env.local`            | yes           | no                       | no                                |
-| `.env.production`       | yes           | yes (`plain_text`)       | yes (worker `vars`)               |
-| `.env.production.local` | yes           | no                       | no                                |
+| File                    | Loaded in dev | Shipped by `void deploy` | Shipped by `--platform cloudflare` |
+| ----------------------- | ------------- | ------------------------ | ---------------------------------- |
+| `.env`                  | yes           | yes (`plain_text`)       | yes (worker `vars`)                |
+| `.env.local`            | yes           | no                       | no                                 |
+| `.env.production`       | yes           | yes (`plain_text`)       | yes (worker `vars`)                |
+| `.env.production.local` | yes           | no                       | no                                 |
 
 `.local` files are gitignored by convention — use them for secrets you don't want in source control.
 

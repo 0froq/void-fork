@@ -742,6 +742,8 @@ export type ProvisionedWranglerPatch = {
   name?: string;
   /** Compatibility date → top-level `compatibility_date` (only written when absent). */
   compatibilityDate?: string;
+  /** Compatibility flags to add without removing existing flags. */
+  compatibilityFlags?: Array<string>;
   /**
    * Adds `migrations_dir` to the `d1_databases[]` entry whose `binding` matches.
    * The D1 entry itself is created by `wrangler d1 create --update-config`; this
@@ -896,6 +898,28 @@ export function writeProvisionedWranglerConfig(
   }
   if (patch.compatibilityDate !== undefined && parsed.compatibility_date === undefined) {
     set(['compatibility_date'], patch.compatibilityDate);
+  }
+  if (patch.compatibilityFlags !== undefined) {
+    const existingFlags = parsed.compatibility_flags;
+    if (
+      existingFlags !== undefined &&
+      (!Array.isArray(existingFlags) ||
+        !existingFlags.every((flag): flag is string => typeof flag === 'string'))
+    ) {
+      throw new Error(
+        `deploy: cannot update "${configPath}" — "compatibility_flags" must be an array of strings.`,
+      );
+    }
+    const flags = existingFlags ?? [];
+    for (const flag of patch.compatibilityFlags) {
+      if (!flags.includes(flag)) {
+        text = applyMemberEdit(text, ['compatibility_flags', flags.length], flag, {
+          formattingOptions,
+          isArrayInsertion: true,
+        });
+        flags.push(flag);
+      }
+    }
   }
 
   // Lazily-built map of EVERY binding name already used anywhere in the config

@@ -130,7 +130,7 @@ See [`packages/solid/README.md`](./packages/solid/README.md) for details.
 
 | Tool     | Version   | Purpose                                                                                        |
 | -------- | --------- | ---------------------------------------------------------------------------------------------- |
-| Node.js  | 24.13.1   | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
+| Node.js  | 24.21.0   | Runtime (TS type stripping enabled natively — no `tsx` or `--experimental-strip-types` needed) |
 | Vite+    | 0.1.x     | Unified toolchain (`vp`, Vite, Vitest, Oxlint, Oxfmt, tsdown)                                  |
 | pnpm     | 11.x      | Package manager used by Vite+ for this workspace                                               |
 | tsdown   | via Vite+ | Library packaging through `vp pack`                                                            |

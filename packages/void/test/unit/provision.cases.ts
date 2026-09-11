@@ -29,6 +29,7 @@ import {
   normalizeRunWranglerResult,
   provisionCloudflareResources,
   provisionEnv,
+  resolveProperLockfileKey,
   resolvePinnedApiBaseUrl,
   WranglerQuarantineError,
   type DesiredResourceSet,
@@ -6314,6 +6315,19 @@ describe('acquireProvisionLock — durable sidecar is a PRECONDITION for quarant
       rmSync(WATCHDOG_EXIT_TMP, { recursive: true, force: true });
     }
   }, 20_000);
+});
+
+describe('acquireProvisionLock — proper-lockfile registry key spelling', () => {
+  it('preserves the native separators used by proper-lockfile on each platform', () => {
+    const lockTarget = 'D:/a/void/void/wrangler.jsonc.void-provision.lock';
+
+    expect(resolveProperLockfileKey(lockTarget, 'win32')).toBe(
+      'D:\\a\\void\\void\\wrangler.jsonc.void-provision.lock',
+    );
+    expect(resolveProperLockfileKey('/tmp/void/wrangler.jsonc.void-provision.lock', 'linux')).toBe(
+      '/tmp/void/wrangler.jsonc.void-provision.lock',
+    );
+  });
 });
 
 describe('acquireProvisionLock — sidecar DIRECTORY durability failures propagate', () => {

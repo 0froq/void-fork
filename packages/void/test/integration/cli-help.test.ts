@@ -53,7 +53,7 @@ describe('void help (subprocess)', () => {
     const { output, status } = runVoid(root, ['deploy', '--help']);
 
     expect(status).toBe(0);
-    expect(output).toContain('Build and deploy the current project to Void');
+    expect(output).toContain('Build and deploy the current project to its configured platform');
     expect(output).toContain('--project <name>');
     expect(output).not.toContain('No auth token found');
   });

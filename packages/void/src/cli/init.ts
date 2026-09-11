@@ -24,8 +24,13 @@ import { detectAgents, getAgentById, getPackageDir, type AgentConfig } from './a
 import { maybeSetupDeployProject } from './deploy-setup.ts';
 import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { cliTitle } from './output.ts';
-import { formatProjectCommand } from './preset.ts';
-import { readProjectConfig } from './project.ts';
+import { formatProjectCommand, resolveWranglerArgv } from './preset.ts';
+import {
+  readDeploymentPlatform,
+  readProjectConfig,
+  writeDeploymentPlatform,
+  type DeploymentPlatform,
+} from './project.ts';
 import {
   createPagesStarterTemplate,
   detectScaffoldFrameworkFromDependencies,
@@ -39,6 +44,7 @@ import {
   type ScaffoldStarterMode,
   type ScaffoldToolchain,
 } from './template.ts';
+import { writeProvisionedWranglerConfig } from './wrangler.ts';
 import {
   buildDrizzleKitSpawnEnv,
   findInstalledYarnPnpRuntime,
@@ -1583,60 +1589,22 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
     return;
   }
 
-  let configPath: string | undefined;
-  let parsed: Record<string, unknown> | undefined;
-  let created = false;
+  const hadConfig = ['wrangler.jsonc', 'wrangler.json'].some((name) =>
+    existsSync(join(root, name)),
+  );
+  const result = writeProvisionedWranglerConfig(root, {
+    compatibilityDate: getTodayCompatDate(),
+    compatibilityFlags: ['nodejs_als'],
+  });
 
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const p = join(root, name);
-    if (existsSync(p)) {
-      configPath = p;
-      try {
-        const raw = readFileSync(p, 'utf-8');
-        const errors: Array<ParseError> = [];
-        parsed = parse(raw, errors);
-        if (errors.length > 0) {
-          throw new SyntaxError('Failed to parse JSONC');
-        }
-      } catch {
-        // unparseable — start fresh
-      }
-      break;
-    }
-  }
-
-  if (!configPath || !parsed) {
-    configPath = join(root, 'wrangler.jsonc');
-    parsed = {};
-    created = true;
-  }
-
-  let modified = false;
-
-  // Ensure compatibility_date
-  if (!parsed.compatibility_date) {
-    parsed.compatibility_date = getTodayCompatDate();
-    modified = true;
-  }
-
-  // Ensure nodejs_als flag
-  const flags = Array.isArray(parsed.compatibility_flags)
-    ? (parsed.compatibility_flags as Array<string>)
-    : [];
-  if (!flags.includes('nodejs_als')) {
-    parsed.compatibility_flags = [...flags, 'nodejs_als'];
-    modified = true;
-  }
-
-  if (created || modified) {
-    writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n');
-    if (created) {
-      log.success('Created wrangler.jsonc with compatibility_date and nodejs_als');
-    } else {
-      log.success('Updated wrangler.jsonc with compatibility_date and nodejs_als');
-    }
+  if (result.modified) {
+    log.success(
+      hadConfig
+        ? 'Updated wrangler config with compatibility_date and nodejs_als'
+        : 'Created wrangler.jsonc with compatibility_date and nodejs_als',
+    );
   } else {
-    log.success('wrangler.jsonc looks good');
+    log.success(`${basename(result.configPath)} looks good`);
   }
 }
 
@@ -1839,6 +1807,178 @@ async function promptDatabaseSetup(root: string): Promise<DatabaseSetupChoice> {
   return choice as DatabaseSetupChoice;
 }
 
+async function promptDeploymentPlatform(root: string): Promise<DeploymentPlatform> {
+  const current = readDeploymentPlatform(root);
+  const choice = await select({
+    message: 'Where should this project deploy?',
+    initialValue: current ?? 'cloudflare',
+    options: [
+      {
+        value: 'cloudflare',
+        label: current === 'cloudflare' ? 'Cloudflare [current]' : 'Cloudflare',
+        hint: 'Deploy to your own Cloudflare account. (default)',
+      },
+      {
+        value: 'void',
+        label: current === 'void' ? 'Void [current]' : 'Void',
+        hint: 'Deploy to the managed Void Platform.',
+      },
+      {
+        value: 'none',
+        label: current === 'none' ? 'Skip deployment setup [current]' : 'Skip deployment setup',
+        hint: 'Use Void locally or deploy another way.',
+      },
+    ],
+  });
+
+  if (isCancel(choice) || typeof choice === 'symbol') {
+    cancel('Setup cancelled.');
+    process.exit(0);
+  }
+
+  const platform = choice as DeploymentPlatform;
+  writeDeploymentPlatform(root, platform);
+  return platform;
+}
+
+type CloudflareAccount = {
+  id: string;
+  name: string;
+};
+
+function parseCloudflareAccounts(stdout: string): Array<CloudflareAccount> | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(stdout.trim());
+  } catch {
+    return null;
+  }
+  const record = asRecord(value);
+  if (record?.loggedIn !== true || !Array.isArray(record.accounts)) {
+    return null;
+  }
+
+  const accounts: Array<CloudflareAccount> = [];
+  for (const account of record.accounts) {
+    const item = asRecord(account);
+    if (!item || typeof item.id !== 'string' || item.id.length === 0) {
+      continue;
+    }
+    accounts.push({
+      id: item.id,
+      name:
+        typeof item.name === 'string' && item.name.length > 0 ? item.name : 'Cloudflare account',
+    });
+  }
+  return accounts;
+}
+
+function runInitWrangler(
+  root: string,
+  args: Array<string>,
+  capture: boolean,
+): { status: number | null; stdout: string; stderr: string } {
+  const [command, ...prefix] = resolveWranglerArgv(root);
+  const result = spawnSync(command, [...prefix, ...args], {
+    cwd: root,
+    encoding: 'utf-8',
+    stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+  });
+  return {
+    status: result.status,
+    stdout: typeof result.stdout === 'string' ? result.stdout : '',
+    stderr: typeof result.stderr === 'string' ? result.stderr : '',
+  };
+}
+
+async function setupCloudflareDeployment(root: string): Promise<void> {
+  const compatibilityDate = readProjectWranglerCompatDate(root) ?? getTodayCompatDate();
+  const initialWrite = writeProvisionedWranglerConfig(root, { compatibilityDate });
+  if (initialWrite.modified) {
+    log.success(
+      `Created or updated ${basename(initialWrite.configPath)} for Cloudflare deployment`,
+    );
+  } else {
+    log.info(`${basename(initialWrite.configPath)} is ready for Cloudflare deployment`);
+  }
+
+  const readAccounts = (): Array<CloudflareAccount> | null => {
+    const result = runInitWrangler(root, ['whoami', '--json', '-c', initialWrite.configPath], true);
+    return result.status === 0 ? parseCloudflareAccounts(result.stdout) : null;
+  };
+
+  let accounts = readAccounts();
+  if (!accounts) {
+    const shouldLogin = await confirm({
+      message: 'Log in to Cloudflare with Wrangler now?',
+      initialValue: true,
+    });
+    if (isCancel(shouldLogin)) {
+      cancel('Setup cancelled.');
+      process.exit(0);
+    }
+    if (!shouldLogin) {
+      note(
+        `Run \`wrangler login\`, then rerun \`void init\` to select an account.\n${basename(initialWrite.configPath)} is already created.`,
+        'Cloudflare deployment',
+      );
+      return;
+    }
+
+    const login = runInitWrangler(root, ['login'], false);
+    if (login.status !== 0) {
+      log.warn('Wrangler login did not complete. Run `wrangler login`, then rerun `void init`.');
+      return;
+    }
+    accounts = readAccounts();
+    if (!accounts) {
+      log.warn(
+        'Wrangler login completed, but the Cloudflare account could not be read. Rerun `void init`.',
+      );
+      return;
+    }
+  }
+
+  if (accounts.length === 0) {
+    log.warn('Wrangler is authenticated but returned no Cloudflare accounts.');
+    return;
+  }
+
+  const existingConfig = parseJsoncFile(initialWrite.configPath);
+  const existingAccountId =
+    typeof existingConfig?.account_id === 'string' ? existingConfig.account_id : undefined;
+  const existingAccount = accounts.find((account) => account.id === existingAccountId);
+  let account = existingAccount ?? accounts[0];
+
+  if (!existingAccount && accounts.length > 1) {
+    const accountId = await select({
+      message: 'Choose a Cloudflare account:',
+      initialValue: accounts[0].id,
+      options: accounts.map((candidate) => ({
+        value: candidate.id,
+        label: candidate.name,
+        hint: candidate.id,
+      })),
+    });
+    if (isCancel(accountId) || typeof accountId === 'symbol') {
+      cancel('Setup cancelled.');
+      process.exit(0);
+    }
+    account = accounts.find((candidate) => candidate.id === accountId) ?? accounts[0];
+  }
+
+  const accountWrite = writeProvisionedWranglerConfig(
+    root,
+    { accountId: account.id },
+    { configPath: initialWrite.configPath },
+  );
+  if (accountWrite.modified) {
+    log.success(`Configured Cloudflare account: ${account.name}`);
+  } else {
+    log.info(`Cloudflare account already configured: ${account.name}`);
+  }
+}
+
 /** Get the dev command for a detected framework. */
 function getDevCommand(root: string, framework?: DetectedFramework): string {
   if (!framework) {
@@ -1970,7 +2110,7 @@ jobs:
 ${setup}
 ${install}
       - name: Deploy
-        run: ${runner} deploy --project "$VOID_PROJECT"
+        run: ${runner} deploy --platform void --project "$VOID_PROJECT"
 `;
 }
 
@@ -3579,7 +3719,17 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     }
   }
 
-  // Step 8: GitHub Actions
+  // Step 8: Deployment platform. Targeted init commands retain their focused,
+  // non-interactive behavior and do not change the saved preference.
+  const deploymentPlatform = !targeted
+    ? await promptDeploymentPlatform(root)
+    : readDeploymentPlatform(root);
+
+  if (!targeted && deploymentPlatform === 'cloudflare') {
+    await setupCloudflareDeployment(root);
+  }
+
+  // Step 9: GitHub Actions (the built-in workflow currently targets Void).
   // Skip when `root` is a workspace subpackage: `setupGithubActions` would
   // write `.github/workflows/deploy.yml` under the subpackage root, but
   // GitHub only reads `.github/workflows/*` from the repository root, so
@@ -3594,7 +3744,8 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   // subpackage-membership signal directly so both targeted and
   // interactive modes agree.
   const githubStepSkipForSubpackage = isInsideWorkspaceSubpackage(root);
-  if ((!targeted || initArgs?.github) && !githubStepSkipForSubpackage) {
+  const shouldSetupGithub = targeted ? initArgs?.github === true : deploymentPlatform === 'void';
+  if (shouldSetupGithub && !githubStepSkipForSubpackage) {
     // `setupGithubActions` writes `void-deploy.yml` (skipping with a warning if
     // it already exists). It does not touch any pre-existing `deploy.yml`.
     if (targeted) {
@@ -3612,7 +3763,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
         setupGithubActions(root, state);
       }
     }
-  } else if (githubStepSkipForSubpackage && (initArgs?.github || !targeted)) {
+  } else if (githubStepSkipForSubpackage && shouldSetupGithub) {
     log.info(
       'Skipping GitHub Actions setup: workflow files must live at the repo root, not in a workspace subpackage.',
     );
@@ -3643,7 +3794,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     generateStarterMigration(root, scaffoldedStarterMode);
   }
 
-  if (!targeted) {
+  if (!targeted && deploymentPlatform === 'void') {
     const linked = await maybeSetupDeployProject(root);
     // Step 8 wrote `void-deploy.yml` before the project was linked, so it baked
     // in the `${{ vars.VOID_PROJECT }}` placeholder. Now that linking resolved a

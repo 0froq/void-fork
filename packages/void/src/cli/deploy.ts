@@ -138,7 +138,13 @@ import {
   type StaticPreset,
   type FrameworkPreset,
 } from './preset.ts';
-import { readProjectConfig, writeProjectConfig, type ProjectConfig } from './project.ts';
+import {
+  readDeploymentPlatform,
+  readProjectConfig,
+  writeProjectConfig,
+  type DeploymentPlatform,
+  type ProjectConfig,
+} from './project.ts';
 import { promptProjectSelection, promptProjectSetupAction } from './prompt.ts';
 // The provision module pulls in the whole-provision cross-process lock
 // (`proper-lockfile` → `signal-exit`), which patches `process.emit` /
@@ -211,9 +217,18 @@ export type RunDeployOptions = {
   spa?: boolean;
   skipBuild?: boolean;
   debug?: boolean;
+  platform?: Exclude<DeploymentPlatform, 'none'>;
+  /** @deprecated Use platform instead. */
   backend?: 'cloudflare';
   provision?: boolean;
 };
+
+export function resolveDeploymentPlatform(
+  root: string,
+  options?: RunDeployOptions,
+): DeploymentPlatform {
+  return options?.platform ?? options?.backend ?? readDeploymentPlatform(root) ?? 'void';
+}
 
 type DeployDoneEvent = Extract<DeployEvent, { event: 'done' }>;
 type StreamDeployResult = DeployDoneEvent;
@@ -578,7 +593,7 @@ function assertNoAmbientConfigOverride(): void {
   const cloudflareEnv = process.env.CLOUDFLARE_ENV;
   if (typeof cloudflareEnv === 'string' && cloudflareEnv.trim().length > 0) {
     throw new Error(
-      'CLOUDFLARE_ENV is set. --backend cloudflare deploys the TOP-LEVEL environment of ' +
+      'CLOUDFLARE_ENV is set. --platform cloudflare deploys the TOP-LEVEL environment of ' +
         'your root wrangler config only (a named environment can carry a different account, ' +
         'worker name, or binding set). Unset CLOUDFLARE_ENV and retry.',
     );
@@ -586,7 +601,7 @@ function assertNoAmbientConfigOverride(): void {
   const configPathOverride = process.env.CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH;
   if (typeof configPathOverride === 'string' && configPathOverride.trim().length > 0) {
     throw new Error(
-      'CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH is set. --backend cloudflare builds from the ' +
+      'CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH is set. --platform cloudflare builds from the ' +
         'canonical root wrangler config only. Unset it and retry.',
     );
   }
@@ -1248,7 +1263,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
  * post-build re-check (a build plugin can write these files during `vite build`).
  */
 const PG_CHECKED_IN_MIGRATIONS_REJECT_MESSAGE = [
-  'deploy: --backend cloudflare will not run a PostgreSQL app’s checked-in migrations.',
+  'deploy: --platform cloudflare will not run a PostgreSQL app’s checked-in migrations.',
   'This backend applies only remote D1 (SQLite) migrations. A PostgreSQL app’s',
   'db/migrations/*.sql are applied over Hyperdrive by the managed platform (`void deploy`);',
   'this self-host backend does not run them, so your database would be left unmigrated.',
@@ -1445,7 +1460,7 @@ function cloudflareEnvDirModeRejectMessage(
 ): string {
   if (reject.reason === 'custom-envdir') {
     return [
-      'deploy: --backend cloudflare does not support a custom Vite `envDir` (including `envDir: false`).',
+      'deploy: --platform cloudflare does not support a custom Vite `envDir` (including `envDir: false`).',
       'v1 loads env from the project root only. The build reads `.env*` from your envDir but',
       'generates the auth schema from the project root, so a custom envDir could validate a',
       'different table set than the worker actually ships. Remove `envDir` from your Vite config',
@@ -1454,7 +1469,7 @@ function cloudflareEnvDirModeRejectMessage(
     ].join('\n');
   }
   return [
-    'deploy: --backend cloudflare builds in production mode only (your build resolves to a non-production mode).',
+    'deploy: --platform cloudflare builds in production mode only (your build resolves to a non-production mode).',
     'A non-production build mode selects a different `.env.<mode>` set than this backend validates.',
     'Remove the custom `mode` from your Vite config / build command so the build runs in production,',
     'then rerun — or deploy this app with `void deploy` (the managed platform).',
@@ -3438,7 +3453,7 @@ export async function runCloudflareDeploy(
   if (options.skipBuild) {
     log.error(
       [
-        'deploy: --skip-build is not supported with --backend cloudflare.',
+        'deploy: --skip-build is not supported with --platform cloudflare.',
         'This backend validates the artifact the build emits — the worker vars in',
         'dist/ssr/wrangler.json and the generated auth schema — so a skipped build would',
         'leave every check reading a stale or missing artifact instead of the worker you',
@@ -3467,9 +3482,9 @@ export async function runCloudflareDeploy(
   if (isNodeTarget(voidConfig.target)) {
     log.error(
       [
-        `deploy: --backend cloudflare is not supported for the "${voidConfig.target}" target.`,
+        `deploy: --platform cloudflare is not supported for the "${voidConfig.target}" target.`,
         'This backend deploys Cloudflare Workers only. Deploy a node/bun/deno build with its',
-        'own host/runtime, or use the default Cloudflare target for --backend cloudflare.',
+        'own host/runtime, or use the default Cloudflare target for --platform cloudflare.',
       ].join('\n'),
     );
     return exit(1);
@@ -3487,7 +3502,7 @@ export async function runCloudflareDeploy(
   if (framework) {
     log.error(
       [
-        `deploy: --backend cloudflare does not yet support framework SSR (${framework.name}).`,
+        `deploy: --platform cloudflare does not yet support framework SSR (${framework.name}).`,
         'v1 deploys full Void apps only. Deploy this framework with `void deploy` (the managed',
         'platform) or the framework’s own Cloudflare adapter. Framework SSR support for this',
         'backend is a follow-up.',
@@ -3517,7 +3532,7 @@ export async function runCloudflareDeploy(
     const appType = staticPreset?.appType ?? (options.spa ? 'spa' : 'static');
     log.error(
       [
-        `deploy: --backend cloudflare does not yet support ${appType} (static-asset) apps.`,
+        `deploy: --platform cloudflare does not yet support ${appType} (static-asset) apps.`,
         'The Cloudflare backend v1 deploys full Void apps (worker-bearing) on the Cloudflare',
         'Workers target. Deploy this app with `void deploy` (the managed platform), or host',
         'the built assets on Cloudflare Pages / any static host.',
@@ -3533,7 +3548,7 @@ export async function runCloudflareDeploy(
   if (!hasBackendFiles(root)) {
     log.error(
       [
-        'deploy: --backend cloudflare found no Void backend to deploy.',
+        'deploy: --platform cloudflare found no Void backend to deploy.',
         'A full Void app has at least one of: routes/, pages/, middleware, crons/, queues/,',
         'or an SSR entry. Add your server code, or use `void deploy` for a static site.',
       ].join('\n'),
@@ -3570,7 +3585,7 @@ export async function runCloudflareDeploy(
   if (scanWebSocketRoutesSync(root, paths, 'prod').length > 0) {
     log.error(
       [
-        'deploy: --backend cloudflare does not yet support WebSocket / Durable Object routes.',
+        'deploy: --platform cloudflare does not yet support WebSocket / Durable Object routes.',
         'A `.ws.ts` route makes the build emit a key-value-backed Durable Object namespace',
         '(a `new_classes` migration), which a fresh Cloudflare account (and every Workers Free',
         'account) refuses to create. Deploy this app with `void deploy` (the managed platform).',
@@ -3606,7 +3621,7 @@ export async function runCloudflareDeploy(
   if (authEnabled && dialect === 'postgresql') {
     log.error(
       [
-        'deploy: --backend cloudflare does not yet support Void-managed auth on a PostgreSQL app.',
+        'deploy: --platform cloudflare does not yet support Void-managed auth on a PostgreSQL app.',
         'This backend verifies + applies auth tables through remote D1 (SQLite) migrations',
         'only; it cannot provision or verify the Better Auth schema on Postgres/Hyperdrive.',
         'Deploy this app with `void deploy` (the managed platform), or switch the app to D1.',
@@ -3649,7 +3664,7 @@ export async function runCloudflareDeploy(
     if (migrationsPattern.present) {
       log.error(
         [
-          `deploy: --backend cloudflare does not support a custom migrations_pattern (${JSON.stringify(migrationsPattern.value)}).`,
+          `deploy: --platform cloudflare does not support a custom migrations_pattern (${JSON.stringify(migrationsPattern.value)}).`,
           'v1 deploys only the default Void migration convention: db/migrations/*.sql with',
           "wrangler's default pattern (leave `migrations_pattern` unset). A custom glob would",
           'apply a set to remote D1 that Void cannot verify against its own db/migrations.',
@@ -3870,7 +3885,7 @@ export async function runCloudflareDeploy(
           missing,
           reasons,
           'deploy: provisioning did not satisfy every required resource:',
-          'Retry `void deploy --backend cloudflare`, or provision the listed resources manually.',
+          'Retry `void deploy --platform cloudflare`, or provision the listed resources manually.',
         ),
       );
       return exit(1);
@@ -3885,7 +3900,7 @@ export async function runCloudflareDeploy(
       ) !== desired.d1.migrationsDir
     ) {
       log.error(
-        `deploy: provisioning did not set migrations_dir for D1 binding ${desired.d1.binding}. Retry \`void deploy --backend cloudflare\`.`,
+        `deploy: provisioning did not set migrations_dir for D1 binding ${desired.d1.binding}. Retry \`void deploy --platform cloudflare\`.`,
       );
       return exit(1);
     }
@@ -4231,7 +4246,7 @@ export async function runCloudflareDeploy(
     } catch (err) {
       log.error(
         [
-          'deploy: --backend cloudflare cannot verify the Void-managed Better Auth schema.',
+          'deploy: --platform cloudflare cannot verify the Void-managed Better Auth schema.',
           'The managed platform creates these tables at runtime (POST /__void/migrate/auth)',
           'after deploy; this self-host backend only applies checked-in db/migrations/*.sql, so',
           'they must already produce the Better Auth schema — tables, columns, and the primary',
@@ -4294,7 +4309,7 @@ export async function runCloudflareDeploy(
             'Refusing to run `wrangler d1 migrations apply` — wrangler would default to',
             '`./migrations` (relative to the config) and apply an unrelated folder to your',
             'remote database, or error. Automatic provisioning should have set this field;',
-            'rerun `void deploy --backend cloudflare`, or add it yourself.',
+            'rerun `void deploy --platform cloudflare`, or add it yourself.',
           ].join('\n'),
         );
         return exit(1);
@@ -4546,11 +4561,39 @@ async function runDeployInner(
   options: RunDeployOptions | undefined,
   cliLog: CliLogger,
 ): Promise<void> {
-  // Fork to the self-hosted Cloudflare backend BEFORE any managed-platform work
+  // A missing field retains the historical Void behavior. New interactive
+  // init runs always persist an explicit choice, with Cloudflare preselected.
+  const platform = resolveDeploymentPlatform(root, options);
+
+  if (platform === 'none') {
+    throw new Error(
+      'deploy: deployment setup was skipped during `void init`. Pass `--platform cloudflare` or `--platform void` to choose a destination.',
+    );
+  }
+
+  if (platform === 'cloudflare') {
+    if (options?.projectSlug !== undefined) {
+      throw new Error(
+        'deploy: --project is not supported with platform cloudflare — this platform deploys to your own Cloudflare account and no Void project is involved.',
+      );
+    }
+    if (options?.dir !== undefined) {
+      throw new Error(
+        'deploy: --dir is not supported with platform cloudflare — this platform uploads the worker your build emits, not a static directory.',
+      );
+    }
+    if (options?.spa) {
+      throw new Error(
+        'deploy: --spa is not supported with platform cloudflare — this platform uploads the worker your build emits, not a static SPA.',
+      );
+    }
+  }
+
+  // Fork to the self-hosted Cloudflare platform BEFORE any managed-platform work
   // (auth token, PlatformClient, project resolution, config read, branch
   // selection). Everything below stays byte-for-byte the managed `void` path.
-  if (options?.backend === 'cloudflare') {
-    return runCloudflareDeploy(root, options, cliLog);
+  if (platform === 'cloudflare') {
+    return runCloudflareDeploy(root, options ?? {}, cliLog);
   }
 
   let reauthenticated = false;

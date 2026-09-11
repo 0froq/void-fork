@@ -101,6 +101,7 @@ if (helpPath) {
       spa: deployArgs.spa,
       skipBuild: deployArgs.skipBuild,
       debug: deployArgs.debug,
+      platform: deployArgs.platform,
       backend: deployArgs.backend,
       provision: deployArgs.provision,
     }).catch((err) => {
@@ -185,7 +186,7 @@ if (helpPath) {
   // Interactive top-level prompt
   const topLevelCommands: Array<SubcommandDef> = [
     { name: 'init', description: 'Set up void in a new or existing project' },
-    { name: 'deploy', description: 'Build and deploy to Void' },
+    { name: 'deploy', description: 'Build and deploy to the configured platform' },
     {
       name: 'auth',
       hint: 'login | logout | whoami | token',

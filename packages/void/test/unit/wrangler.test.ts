@@ -650,6 +650,42 @@ describe('writeProvisionedWranglerConfig', () => {
     expect(readRaw('wrangler.jsonc')).toContain('// user-owned fields');
   });
 
+  it('adds compatibility flags without removing existing flags or comments', () => {
+    setup(
+      'wrangler.jsonc',
+      `{
+  "compatibility_flags": [
+    "nodejs_compat" // user-selected runtime mode
+  ]
+}`,
+    );
+
+    const result = writeProvisionedWranglerConfig(tmpDir, {
+      compatibilityFlags: ['nodejs_als', 'nodejs_compat'],
+    });
+
+    expect(result.modified).toBe(true);
+    expect(parseRaw('wrangler.jsonc').compatibility_flags).toEqual(['nodejs_compat', 'nodejs_als']);
+    expect(readRaw('wrangler.jsonc')).toContain('// user-selected runtime mode');
+  });
+
+  it('creates compatibility_flags idempotently when the field is absent', () => {
+    setup('wrangler.jsonc', '{\n  "name": "my-worker"\n}');
+
+    const first = writeProvisionedWranglerConfig(tmpDir, {
+      compatibilityFlags: ['nodejs_als'],
+    });
+    const afterFirst = readRaw('wrangler.jsonc');
+    const second = writeProvisionedWranglerConfig(tmpDir, {
+      compatibilityFlags: ['nodejs_als'],
+    });
+
+    expect(first.modified).toBe(true);
+    expect(second.modified).toBe(false);
+    expect(parseRaw('wrangler.jsonc').compatibility_flags).toEqual(['nodejs_als']);
+    expect(readRaw('wrangler.jsonc')).toBe(afterFirst);
+  });
+
   it('adds migrations_dir to the D1 entry matched by binding, leaving others untouched', () => {
     setup('wrangler.jsonc', commentedFixture);
     const result = writeProvisionedWranglerConfig(tmpDir, {

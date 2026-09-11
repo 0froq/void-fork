@@ -13,7 +13,7 @@ Docs in this skill are bundled from `docs/` during `void` package build and live
 
 ## Command Naming
 
-Use `void` in examples and commands in this skill. For first-time setup, prefer `void init` followed by `void deploy`; in an empty directory, install `void` first and let `void init` add the matching Pages adapter and starter dependencies with Vite+ as the default scaffold toolchain. In an existing app, `void init` configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`. `void init` can also handle auth and project linking interactively.
+Use `void` in examples and commands in this skill. For first-time setup, prefer `void init` followed by `void deploy`; in an empty directory, install `void` first and let `void init` add the matching Pages adapter and starter dependencies with Vite+ as the default scaffold toolchain. In an existing app, `void init` configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`. For Cloudflare deployment, init creates or augments `wrangler.jsonc`, offers Wrangler login, and saves the selected `account_id`; for Void deployment, it can handle Void auth and project linking interactively.
 
 Use `void` and `@void/*` in code examples and package manifests.
 
@@ -25,7 +25,7 @@ If invoked without a concrete task, do a brief app status check and report:
 2. Backend feature usage (`routes/`, `pages/`, `middleware/`, `migrations/`, `crons/`, `queues/`, SSR entries).
 3. Runtime signals (`void/db`, `void/kv`, `void/storage`, queue usage).
 4. Auth signals (`void/auth`, `auth` client imports, OAuth env vars).
-5. Project linkage (`.void/project.json`) and config readiness (`void.json`, tsconfig extends).
+5. Deployment platform and optional Void project linkage (`.void/project.json`), plus config readiness (`void.json`, Wrangler `account_id` for Cloudflare, tsconfig extends).
 6. Optional health checks (`void auth whoami`, `void db status` when relevant).
 
 Then ask what to do next.

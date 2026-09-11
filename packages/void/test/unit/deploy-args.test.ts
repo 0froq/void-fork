@@ -99,6 +99,26 @@ describe('parseDeployArgs', () => {
     expect(result.provision).toBeUndefined();
   });
 
+  it('parses --platform cloudflare', () => {
+    expect(parseDeployArgs(['--platform', 'cloudflare']).platform).toBe('cloudflare');
+  });
+
+  it('parses --platform void', () => {
+    expect(parseDeployArgs(['--platform', 'void']).platform).toBe('void');
+  });
+
+  it('rejects an unsupported platform', () => {
+    expect(() => parseDeployArgs(['--platform', 'other'])).toThrow(
+      "deploy: --platform must be 'cloudflare' or 'void'.",
+    );
+  });
+
+  it('rejects --platform together with the legacy --backend alias', () => {
+    expect(() => parseDeployArgs(['--platform', 'cloudflare', '--backend', 'cloudflare'])).toThrow(
+      'deploy: --platform and --backend cannot be used together.',
+    );
+  });
+
   it('accepts the legacy --provision flag for backwards compatibility', () => {
     const result = parseDeployArgs(['--backend', 'cloudflare', '--provision']);
     expect(result.backend).toBe('cloudflare');
@@ -107,7 +127,7 @@ describe('parseDeployArgs', () => {
 
   it('throws when --provision is used without --backend cloudflare', () => {
     expect(() => parseDeployArgs(['--provision'])).toThrow(
-      'deploy: --provision requires --backend cloudflare.',
+      'deploy: --provision requires --platform cloudflare.',
     );
   });
 
@@ -146,7 +166,7 @@ describe('parseDeployArgs', () => {
   // and ignoring `--project` in particular looked like it chose a destination.
   it('throws when --project is used with --backend cloudflare', () => {
     expect(() => parseDeployArgs(['--backend', 'cloudflare', '--project', 'foo'])).toThrow(
-      /--project is not supported with --backend cloudflare/,
+      /--project is not supported with --platform cloudflare/,
     );
   });
 
@@ -158,13 +178,13 @@ describe('parseDeployArgs', () => {
 
   it('throws when --dir is used with --backend cloudflare', () => {
     expect(() => parseDeployArgs(['--backend', 'cloudflare', '--dir', 'dist'])).toThrow(
-      /--dir is not supported with --backend cloudflare/,
+      /--dir is not supported with --platform cloudflare/,
     );
   });
 
   it('throws when --spa is used with --backend cloudflare', () => {
     expect(() => parseDeployArgs(['--backend', 'cloudflare', '--spa'])).toThrow(
-      /--spa is not supported with --backend cloudflare/,
+      /--spa is not supported with --platform cloudflare/,
     );
   });
 

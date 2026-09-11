@@ -40,7 +40,7 @@ const HELP_TREE: HelpTree = {
     ],
   },
   deploy: {
-    summary: 'Build and deploy the current project to Void.',
+    summary: 'Build and deploy the current project to its configured platform.',
     usage: ['void deploy [options]'],
     options: [
       { command: '--project <name>', description: 'Deploy target project name' },
@@ -48,11 +48,11 @@ const HELP_TREE: HelpTree = {
       { command: '--spa', description: 'Use SPA mode for static deploys' },
       {
         command: '--skip-build',
-        description: 'Skip the build step and use existing output (not with --backend cloudflare)',
+        description: 'Skip the build step and use existing output (not with --platform cloudflare)',
       },
       {
-        command: '--backend cloudflare',
-        description: 'Provision and deploy to your own Cloudflare account',
+        command: '--platform <cloudflare|void>',
+        description: 'Override the platform saved by void init',
       },
       {
         command: '--debug',
@@ -64,7 +64,7 @@ const HELP_TREE: HelpTree = {
       { command: 'void deploy --project my-app', description: 'Deploy to a specific project' },
       { command: 'void deploy --dir dist --spa', description: 'Deploy a static SPA directory' },
       {
-        command: 'void deploy --backend cloudflare',
+        command: 'void deploy --platform cloudflare',
         description: 'Deploy to your own Cloudflare account',
       },
     ],

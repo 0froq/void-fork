@@ -23,7 +23,7 @@ npm install -D void
 
 If you run `void init` in an empty directory, the scaffold flow adds the matching Pages adapter and Vite+ by default.
 
-Then run `npx void init`. In an empty directory, the full interactive flow can scaffold a starter, configure local project files, log you in, and link or create your Void project so the next step is just `npx void deploy`. In an existing app, it configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`.
+Then run `npx void init`. In an empty directory, the full interactive flow can scaffold a starter and configure local project files. It then asks where to deploy: Cloudflare (the default) creates or augments `wrangler.jsonc`, offers Wrangler login, and saves the selected account; Void can log you in and link or create a managed project. The next step is just `npx void deploy`. In an existing app, init configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`.
 
 ```ts
 // vite.config.ts

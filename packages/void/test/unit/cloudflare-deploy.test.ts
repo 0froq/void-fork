@@ -6880,7 +6880,7 @@ describe('runCloudflareDeploy — --skip-build is rejected', () => {
     }
     const joined = messages.join('\n');
     expect(joined).toContain('--skip-build');
-    expect(joined).toContain('--backend cloudflare');
+    expect(joined).toContain('--platform cloudflare');
     expect(joined).toMatch(/validat/i);
   });
 

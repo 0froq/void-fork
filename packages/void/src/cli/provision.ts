@@ -14,9 +14,10 @@ import {
   writeSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
+import { resolve as resolvePosixPath } from 'node:path/posix';
+import { resolve as resolveWindowsPath } from 'node:path/win32';
 import { types as utilTypes } from 'node:util';
 import { parse, type ParseError } from 'jsonc-parser';
-import { resolve as resolveNativePath } from 'pathslash';
 import { basename, dirname, join, normalize, resolve } from 'pathslash';
 import lockfile from 'proper-lockfile';
 import { voidLog, voidWarn } from '../log.ts';
@@ -2567,6 +2568,20 @@ function normalizeLockRetries(retries: ProvisionLockOptions['retries']): {
 }
 
 /**
+ * Match the key spelling `proper-lockfile` stores when `realpath: false`.
+ *
+ * The library uses the host's native `node:path.resolve`, including backslashes on
+ * Windows. Most Void paths intentionally use `pathslash`, but its forward-slash output
+ * cannot address `proper-lockfile`'s internal registry on Windows.
+ */
+export function resolveProperLockfileKey(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === 'win32' ? resolveWindowsPath(file) : resolvePosixPath(file);
+}
+
+/**
  * Acquire the cross-process provision lock over the resolved config path via
  * `proper-lockfile` (an atomic `mkdir`-based mutex at `<configPath>.void-provision.lock.lock`).
  * The library normally realpaths the pathname being locked, which requires it to exist.
@@ -2820,7 +2835,7 @@ export async function acquireProvisionLock(
       // With `realpath: false`, proper-lockfile keys its registry using node:path.resolve.
       // Use that same NATIVE spelling here (not pathslash's POSIX spelling) so quarantine
       // detaches correctly on Windows too.
-      const key = resolveNativePath(lockTarget);
+      const key = resolveProperLockfileKey(lockTarget);
       const tracked = locks[key];
       if (tracked) {
         tracked.released = true;

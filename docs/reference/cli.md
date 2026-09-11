@@ -12,7 +12,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 
 | Command                           | Purpose                                                             |
 | --------------------------------- | ------------------------------------------------------------------- |
-| `void deploy`                     | Build and deploy to Void                                            |
+| `void deploy`                     | Build and deploy to the configured platform                         |
 | `void prepare`                    | Generate `.void` artifacts without starting Vite                    |
 | `void gen model <name> [cols...]` | Scaffold migration + CRUD routes                                    |
 | `void gen route <path>`           | Create an API route                                                 |
@@ -86,9 +86,12 @@ After that, the full interactive flow walks through:
 3. **Agent instructions:** detects agents once and injects instructions into `CLAUDE.md` or `AGENTS.md`.
 4. **Skills:** links Void skills using the same detected or selected agent context.
 5. **Demo code:** for existing non-Pages projects, optionally scaffolds a `db/migrations/` directory plus an API route and typed fetch example.
-6. **GitHub Actions:** optionally creates `.github/workflows/void-deploy.yml`. The workflow deploys on pushes to `main` and authenticates via [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) — no long-lived `VOID_TOKEN` secret is stored in the repo. The workflow is a single `void deploy` step: when it runs in GitHub Actions, `void deploy` mints an OIDC token (audience `void`), exchanges it at `POST $VOID_API_URL/auth/github-oidc` for a short-lived project-scoped deploy token, and deploys. `permissions: id-token: write` is retained so the CLI can mint that token. The project slug is baked in from your linked project (`.void/project.json`) when known; otherwise the workflow reads a `VOID_PROJECT` repository variable.
-7. **`env.ts` scaffold:** if the project has no `env.ts` but has `.env` / `.env.example` / `.env.local` / `.env.development*` files on disk, generates an `env.ts` pre-populated with their keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
-8. **Project setup:** optionally logs you in, lets you select or create a project, and writes `.void/project.json` so your first deploy can just be `void deploy`.
+6. **Deployment platform:** asks where `void deploy` should send the app: Cloudflare (the default), Void, or Skip deployment setup. The choice is stored as `platform` in `.void/project.json`. Choosing Cloudflare creates or augments `wrangler.jsonc`, checks `wrangler whoami`, offers to run `wrangler login` when needed, and writes the selected account as `account_id` (automatically when Wrangler returns only one account).
+7. **GitHub Actions:** when Void is selected, optionally creates `.github/workflows/void-deploy.yml`. The workflow deploys on pushes to `main` through GitHub OIDC and explicitly runs `void deploy --platform void`.
+8. **`env.ts` scaffold:** if the project has no `env.ts` but has `.env` / `.env.example` / `.env.local` / `.env.development*` files on disk, generates an `env.ts` pre-populated with their keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
+9. **Void project setup:** when Void is selected, optionally logs you in, lets you select or create a project, and adds the link to `.void/project.json` so your first deploy can just be `void deploy`.
+
+If Cloudflare login is declined or does not complete, initialization still finishes with the Wrangler config in place. Run `wrangler login` and then rerun `void init` to select and save the account.
 
 If no agent is detected, `void init` asks you to choose one from a short list (Claude, Cursor, Codex, Gemini CLI, Generic). That single choice is reused across all agent steps.
 
@@ -250,27 +253,29 @@ If `--project` is provided, purges that project's cache instead of the linked pr
 
 ```
 void deploy [--project <name>] [--dir <path>] [--spa] [--skip-build] [--debug]
-void deploy --backend cloudflare
+void deploy [--platform <cloudflare|void>]
 ```
 
 Auto-detects your project type and chooses the right pipeline. See [Supported App Types](../guide/app-types.md) and [Deployment](../guide/deployment.md) for details.
 
 For Drizzle projects, deploy performs a read-only schema drift check. If a new migration would be generated, deploy stops and tells you to run `void db generate`, review the migration, commit it yourself, and rerun `void deploy`.
 
-| Flag                   | Purpose                                                                                      |
-| ---------------------- | -------------------------------------------------------------------------------------------- |
-| `--project <name>`     | Target a specific project by slug; not supported with `--backend cloudflare`                 |
-| `--dir <path>`         | Deploy a pre-built static directory (skips build); not supported with `--backend cloudflare` |
-| `--spa`                | Use SPA mode instead of SSG for static deploys; not supported with `--backend cloudflare`    |
-| `--skip-build`         | Skip the build step (use existing build output); not supported with `--backend cloudflare`   |
-| `--backend cloudflare` | Deploy to your own Cloudflare account instead of the Void platform                           |
-| `--debug`              | Mirror the structured deploy log to stderr (also written to `~/.void/logs/`)                 |
+| Flag                            | Purpose                                                                                       |
+| ------------------------------- | --------------------------------------------------------------------------------------------- |
+| `--platform <cloudflare\|void>` | Override the platform stored in `.void/project.json`                                          |
+| `--project <name>`              | Target a specific Void project by slug; not supported with `--platform cloudflare`            |
+| `--dir <path>`                  | Deploy a pre-built static directory (skips build); not supported with `--platform cloudflare` |
+| `--spa`                         | Use SPA mode instead of SSG for static deploys; not supported with `--platform cloudflare`    |
+| `--skip-build`                  | Skip the build step (use existing build output); not supported with `--platform cloudflare`   |
+| `--debug`                       | Mirror the structured deploy log to stderr (also written to `~/.void/logs/`)                  |
+
+The older `--backend cloudflare` spelling remains available as a compatibility alias for `--platform cloudflare`.
 
 Every deploy writes a structured JSONL trace to `~/.void/logs/deploy-<timestamp>.jsonl` regardless of `--debug`. On failure the path is printed at the end of the error message so you can attach it when reporting platform issues. `VOID_DEPLOY_DEBUG=1` is accepted as an alternate trigger for stderr mirroring.
 
 When a deploy fails after it starts, the CLI also prints a summary of that trace under the error, so the cause is visible where the file is not — a CI runner, for example, is discarded with the job. The summary has two blocks: every `error` record with its flattened cause chain, then the last 20 records as a timeline.
 
-Pre-flight failures print no summary. A missing project, a rejected flag combination, or an unsupported `--backend cloudflare` feature stops before any trace exists, and each of those prints its own message explaining what to change. A build failure prints no summary either — the build streams its own output straight to the terminal.
+Pre-flight failures print no summary. A missing project, a rejected flag combination, or an unsupported `--platform cloudflare` feature stops before any trace exists, and each of those prints its own message explaining what to change. A build failure prints no summary either — the build streams its own output straight to the terminal.
 
 Void masks the credentials it emits itself: signed query parameters, bearer tokens, and any field whose key names a credential.
 
@@ -292,7 +297,15 @@ Masking your own values is left to your CI platform, which holds the secrets and
 │     9.0s  error  deploy_server_error   message=deploy in progress
 ```
 
-Project resolution precedence:
+Platform resolution precedence:
+
+1. `--platform <cloudflare|void>` (or the legacy `--backend cloudflare` alias)
+2. `platform` in `.void/project.json`
+3. Void for projects initialized by an older SDK without a saved platform
+
+Selecting Skip deployment setup stores `"platform": "none"`; a later `void deploy` stops with guidance until a platform override is provided.
+
+For the Void platform, project resolution precedence is:
 
 1. `--project <name>`
 2. `VOID_PROJECT`
@@ -302,12 +315,12 @@ If no project is linked and no override is provided, CLI prompts to link or crea
 
 That fallback is mainly for projects that skipped Void project setup during `void init`.
 
-### `void deploy --backend cloudflare`
+### `void deploy --platform cloudflare`
 
 Deploy the built worker straight to **your own** Cloudflare account instead of the Void platform. This path uses your local `wrangler` auth and your root `wrangler.jsonc` — no Void login or linked project is involved.
 
 ```
-void deploy --backend cloudflare
+void deploy --platform cloudflare
 ```
 
 Prerequisites:
@@ -315,8 +328,8 @@ Prerequisites:
 - A Cloudflare account must be **pinned**: set `account_id` in your root `wrangler.jsonc`, or export `CLOUDFLARE_ACCOUNT_ID`. A multi-account token otherwise makes wrangler prompt (or error in CI), which Void cannot intercept.
 - Authenticate wrangler (`wrangler login`, or set `CLOUDFLARE_API_TOKEN`). Deploy needs `Workers Scripts:Edit` plus read on the resources you bind, and per-product `*:Edit` whenever it must create a missing D1 database, KV namespace, R2 bucket, Queue, or Hyperdrive config.
 - `CLOUDFLARE_API_TOKEN` is **required** to provision a Hyperdrive config for the first time — `wrangler login` covers every other resource, but wrangler exposes no machine-readable Hyperdrive list, so Void checks for an existing config over the Cloudflare REST API, which OAuth cannot authenticate. Without a token, automatic provisioning stops before touching your account. Alternatively create the Hyperdrive config yourself and put its id in `wrangler.jsonc` — deploying an already-provisioned Hyperdrive app needs no token.
-- `--skip-build` is **not supported** with `--backend cloudflare`: this backend validates the artifact the build emits (worker `vars` in `dist/ssr/wrangler.json`, the generated auth schema), so there is nothing to check without a fresh build.
-- `--project`, `--dir` and `--spa` are **not supported** with `--backend cloudflare` either, and are rejected rather than ignored: no Void project is resolved on this path, and it uploads the worker your build emits rather than a static directory.
+- `--skip-build` is **not supported** with `--platform cloudflare`: this path validates the artifact the build emits (worker `vars` in `dist/ssr/wrangler.json`, the generated auth schema), so there is nothing to check without a fresh build.
+- `--project`, `--dir` and `--spa` are **not supported** with `--platform cloudflare` either, and are rejected rather than ignored: no Void project is resolved on this path, and it uploads the worker your build emits rather than a static directory.
 - Local Docker is required to build apps that use the sandbox.
 
 What it does, in order: settles the app class before any account op (v1 supports **full Void apps on the Cloudflare Workers target** -- worker-bearing apps running Void's routing, with D1/KV/R2/Queues/Hyperdrive and, on D1/SQLite, auth + ISR; framework SSR of every kind, static/SPA/SSG apps, node/bun/deno targets, and PostgreSQL apps with auth or with checked-in migrations all fail closed with guidance), pins the account and checks auth, automatically provisions missing resources, **builds**, then gates on the artifact the build emitted — production secrets checked against the build's effective mode/envDir, the auth schema, and migration validation — then applies remote D1 migrations for SQLite apps (verifying the applied set equals the validated set and none remain pending), and finally runs `wrangler deploy` on exactly the verified artifact. Auth apps must ship checked-in migrations that produce the Better Auth schema — the managed platform's runtime auth-migration step does not run on this backend.

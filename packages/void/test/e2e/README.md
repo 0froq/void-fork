@@ -6,11 +6,11 @@ they run on **pushes to `main`** (see [In CI](#in-ci)).
 
 ## `cloudflare-deploy-live.test.ts`
 
-Deploys `playground/spa` (D1 + KV + cron) to the target account via `void deploy --backend cloudflare`,
+Deploys `playground/spa` (D1 + KV + cron) to the target account via `void deploy --platform cloudflare`,
 verifies the live worker answers HTTP 200, then deletes the worker and every resource it created.
 
 The test starts with an intentionally incomplete root config and runs only
-`void deploy --backend cloudflare`. The deploy automatically creates D1 + KV, persists their real
+`void deploy --platform cloudflare`. The deploy automatically creates D1 + KV, persists their real
 ids, builds, applies the checked migration, and uploads the worker. This exercises the complete
 one-command path in the same non-interactive environment used by CI.
 

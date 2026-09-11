@@ -214,26 +214,28 @@ When deploying via `void deploy` (to the Void platform), the `wrangler.json` in 
 
 ## Deploy to your own Cloudflare account
 
-Void's default deployment path is `void deploy`, which uploads to the Void platform. But the generated worker is a standard Cloudflare Worker -- you can deploy it directly to your own account. Two paths get you there:
+During `void init`, Cloudflare is the default deployment platform. The generated worker is a standard Cloudflare Worker, so you can deploy it directly to your own account. Two paths get you there:
 
-- **[`void deploy --backend cloudflare`](#one-command-void-deploy-backend-cloudflare)** -- a first-class flow that provisions bindings, applies remote migrations, checks secrets, builds, and runs `wrangler deploy` for you.
+When you choose Cloudflare, init creates or augments the root `wrangler.jsonc` with a compatibility date, checks your local Wrangler session, and offers to run `wrangler login` if needed. A single available account is selected automatically; when your login can access multiple accounts, init asks which one to use. The resulting `account_id` is written to the Wrangler config without removing comments or unrelated fields. If you skip login, run `wrangler login` and rerun `void init` later.
+
+- **[`void deploy --platform cloudflare`](#one-command-void-deploy-platform-cloudflare)** -- a first-class flow that provisions bindings, applies remote migrations, checks secrets, builds, and runs `wrangler deploy` for you. `void init` saves this choice so the override is normally unnecessary.
 - **[Manual `vite build && wrangler deploy`](#manual-build-and-deploy-with-wrangler)** -- create resources and edit `wrangler.jsonc` yourself, then build and deploy with wrangler directly.
 
 Either way, the [Local development](#local-development), [AI](#ai-self-host), and [ISR](#isr-self-host) notes below apply.
 
-### One command: `void deploy --backend cloudflare`
+### One command: `void deploy --platform cloudflare`
 
-`void deploy --backend cloudflare` deploys the built worker to **your own** Cloudflare account. It uses your local wrangler auth and your root `wrangler.jsonc` -- there is no Void login or linked project.
+`void deploy --platform cloudflare` deploys the built worker to **your own** Cloudflare account. It uses your local wrangler auth and your root `wrangler.jsonc` -- there is no Void login or linked project. When `.void/project.json` already contains `"platform": "cloudflare"`, plain `void deploy` takes the same path.
 
 ```bash
 # Create or adopt missing resources, then deploy
-void deploy --backend cloudflare
+void deploy --platform cloudflare
 ```
 
 **Prerequisites**
 
-- **Pin an account.** Set `account_id` in your root `wrangler.jsonc`, or export `CLOUDFLARE_ACCOUNT_ID`. A multi-account token otherwise makes wrangler prompt (or error in CI), which Void cannot intercept -- so the account must be pinned first.
-- **Authenticate wrangler.** Run `wrangler login`, or set `CLOUDFLARE_API_TOKEN`. Deploy needs `Workers Scripts:Edit` plus read on the resources you bind, and per-product `*:Edit` whenever automatic provisioning must create a missing D1 database, KV namespace, R2 bucket, Queue, or Hyperdrive config.
+- **Pin an account.** Interactive `void init` normally writes `account_id` to your root `wrangler.jsonc`. You can also set it manually or export `CLOUDFLARE_ACCOUNT_ID`. A multi-account token otherwise makes wrangler prompt (or error in CI), which Void cannot intercept.
+- **Authenticate wrangler.** Interactive `void init` offers to run `wrangler login`; you can also run it yourself or set `CLOUDFLARE_API_TOKEN`. Deploy needs `Workers Scripts:Edit` plus read on the resources you bind, and per-product `*:Edit` whenever automatic provisioning must create a missing D1 database, KV namespace, R2 bucket, Queue, or Hyperdrive config.
 - **`CLOUDFLARE_API_TOKEN` is required to provision a Hyperdrive config for the first time.** `wrangler login` covers every other resource, but wrangler exposes no machine-readable Hyperdrive list, so Void checks whether the config already exists over the Cloudflare REST API -- which an OAuth session cannot authenticate. Without a token automatic provisioning stops **before** touching your account rather than risk minting a duplicate config. Either export `CLOUDFLARE_API_TOKEN` (with Hyperdrive edit permission), or create the Hyperdrive config yourself and add its id to the `hyperdrive` binding in `wrangler.jsonc` -- deploying an **already-provisioned** Hyperdrive app needs no token and works under `wrangler login` alone.
 - **Docker**, if your app uses the sandbox -- the build needs it locally.
 
