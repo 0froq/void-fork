@@ -196,6 +196,8 @@ import type {
   AssetConfig,
   DeployEvent,
   DeployManifest,
+  DeployTarget,
+  DeployTargetAdapter,
   DevRedirectRule,
   HeaderRule,
 } from './types.ts';
@@ -5079,6 +5081,50 @@ function discoverRootWranglerConfig(root: string): string {
   return join(root, 'wrangler.jsonc');
 }
 
+type RunDeployTargetAdapter = DeployTargetAdapter<RunDeployOptions, CliLogger>;
+
+const cloudflareDeployTarget: RunDeployTargetAdapter = {
+  target: 'cloudflare',
+  capabilities: {
+    managedProjects: false,
+    staticDeploys: false,
+    skipBuild: false,
+  },
+  async deploy(root, options, cliLog): Promise<void> {
+    if (options.projectSlug !== undefined) {
+      throw new Error(
+        'deploy: --project is not supported with platform cloudflare — this platform deploys to your own Cloudflare account and no Void project is involved.',
+      );
+    }
+    if (options.dir !== undefined) {
+      throw new Error(
+        'deploy: --dir is not supported with platform cloudflare — this platform uploads the worker your build emits, not a static directory.',
+      );
+    }
+    if (options.spa) {
+      throw new Error(
+        'deploy: --spa is not supported with platform cloudflare — this platform uploads the worker your build emits, not a static SPA.',
+      );
+    }
+    return runCloudflareDeploy(root, options, cliLog);
+  },
+};
+
+const voidDeployTarget: RunDeployTargetAdapter = {
+  target: 'void',
+  capabilities: {
+    managedProjects: true,
+    staticDeploys: true,
+    skipBuild: true,
+  },
+  deploy: runManagedDeploy,
+};
+
+const deployTargets: Record<DeployTarget, RunDeployTargetAdapter> = {
+  cloudflare: cloudflareDeployTarget,
+  void: voidDeployTarget,
+};
+
 async function runDeployInner(
   root: string,
   options: RunDeployOptions | undefined,
@@ -5094,31 +5140,14 @@ async function runDeployInner(
     );
   }
 
-  if (platform === 'cloudflare') {
-    if (options?.projectSlug !== undefined) {
-      throw new Error(
-        'deploy: --project is not supported with platform cloudflare — this platform deploys to your own Cloudflare account and no Void project is involved.',
-      );
-    }
-    if (options?.dir !== undefined) {
-      throw new Error(
-        'deploy: --dir is not supported with platform cloudflare — this platform uploads the worker your build emits, not a static directory.',
-      );
-    }
-    if (options?.spa) {
-      throw new Error(
-        'deploy: --spa is not supported with platform cloudflare — this platform uploads the worker your build emits, not a static SPA.',
-      );
-    }
-  }
+  return deployTargets[platform].deploy(root, options ?? {}, cliLog);
+}
 
-  // Fork to the self-hosted Cloudflare platform BEFORE any managed-platform work
-  // (auth token, PlatformClient, project resolution, config read, branch
-  // selection). Everything below stays byte-for-byte the managed `void` path.
-  if (platform === 'cloudflare') {
-    return runCloudflareDeploy(root, options ?? {}, cliLog);
-  }
-
+async function runManagedDeploy(
+  root: string,
+  options: RunDeployOptions,
+  cliLog: CliLogger,
+): Promise<void> {
   let reauthenticated = false;
   while (true) {
     try {

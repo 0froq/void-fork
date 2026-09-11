@@ -9,4 +9,6 @@ manifest validation, and provider-neutral resource planning. It has no
 dependency on either deployment target and must remain usable from Node.js and
 Cloudflare Workers.
 
-Target-specific orchestration belongs in `void` or `platform/`, not here.
+The package also defines the adapter boundary implemented by deployment
+targets. Target-specific orchestration belongs in `void` or `platform/`, not
+here.
