@@ -21,8 +21,13 @@ import type {
 export { MANIFEST_REDIRECT_RULE_STATUSES, SUPPORTED_MANIFEST_VERSIONS } from '@void/deploy-core';
 export type {
   AssetConfig,
+  DeployArtifact,
+  DeployAssetManifestEntry,
+  DeployAssetUploadRequest,
   DeployEvent,
   DeployManifest,
+  DeploySourceMetadata,
+  DeployUploadPayload,
   HeaderRule,
   LiveManifestMeta,
   LiveMigrationMeta,

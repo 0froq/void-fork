@@ -174,3 +174,10 @@ export {
   type DeployResource,
   type DeployResourcePlan,
 } from './resource-plan.ts';
+export type {
+  DeployArtifact,
+  DeployAssetManifestEntry,
+  DeployAssetUploadRequest,
+  DeploySourceMetadata,
+  DeployUploadPayload,
+} from './artifact.ts';
