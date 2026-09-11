@@ -107,7 +107,7 @@ async function runCloudflareDomainCommand(root: string, args: DomainArgs): Promi
   }
   const lines = [
     `Hostname: ${domain.pattern}`,
-    'Status:   configured — present in wrangler.jsonc and accepted by the last trigger sync.',
+    'Status:   configured locally — present in wrangler.jsonc; remote certificate state is managed by Cloudflare.',
   ];
   if (args.verbose) {
     lines.push('', 'Details:', '  Type:        Cloudflare Custom Domain', '  TLS:         managed');

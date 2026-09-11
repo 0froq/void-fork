@@ -924,7 +924,7 @@ Pass `--verbose` to additionally print the raw multi-line status breakdown (DB s
 
 Project resolution for domain commands follows the same order as deploy (`--project`, `VOID_PROJECT`, linked project).
 
-For direct Cloudflare projects, status reports whether the route is present in the root config and was accepted by the last trigger sync; Cloudflare owns ongoing certificate state. `--project` is hosted-only.
+For direct Cloudflare projects, status reports whether the route is present in the root config. It does not claim to inspect remote certificate issuance; Cloudflare owns that state and exposes it in the dashboard. `--project` is hosted-only.
 
 ## Agent
 
