@@ -266,6 +266,33 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
     prepareFrameworkArtifact: async () => {
       trace.push('prepare-framework');
     },
+    activateVersion: async (options) => {
+      if (!options.verifyUploader()) {
+        return { ok: false, reason: 'uploader-changed' };
+      }
+      const result = await Promise.resolve(
+        runWrangler(
+          [
+            'deploy',
+            ...(options.configPath ? ['-c', options.configPath] : []),
+            '--env=',
+            '--experimental-provision=false',
+            '--experimental-auto-create=false',
+            '--autoconfig=false',
+          ],
+          { capture: false },
+        ),
+      );
+      if (result.status !== 0 || result.signal != null || result.error) {
+        return { ok: false, reason: 'upload-failed', status: result.status };
+      }
+      return {
+        ok: true,
+        versionId: '22222222-2222-4222-8222-222222222222',
+        previewUrl: 'https://preview.example.workers.dev',
+        previousVersionId: null,
+      };
+    },
     // Stub the wrangler-uploader hash so orchestration tests never hash the real ~18MB bundle
     // twice; a constant means the pre-build and post-build snapshots match (an unchanged uploader).
     // Dedicated tests inject a stateful stub that changes across the build to drive the fail path.

@@ -21,3 +21,10 @@ export {
   writeCloudflareStaticDeployConfig,
   type CloudflareStaticDeployConfig,
 } from './static.ts';
+export {
+  activateCloudflareVersion,
+  encodeCloudflareVersionMessage,
+  parseCloudflareVersionMessage,
+  type CloudflareVersionActivation,
+  type CloudflareVersionMetadata,
+} from './version.ts';

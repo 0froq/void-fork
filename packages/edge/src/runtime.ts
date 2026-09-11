@@ -31,6 +31,9 @@ export function createStaticEdgeHandler(config: StaticEdgeConfig): StaticEdgeHan
   return {
     async fetch(request, env): Promise<Response> {
       const originalUrl = new URL(request.url);
+      if (request.method === 'GET' && originalUrl.pathname === '/__void/ready') {
+        return Response.json({ ready: true });
+      }
       let effectiveUrl = new URL(originalUrl);
       let effectiveRequest = request;
 

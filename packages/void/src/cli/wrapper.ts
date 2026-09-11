@@ -23,6 +23,8 @@ export type WrapperFeatures = {
   queues: Array<{ name: string; filePath: string; bindingName: string }>;
   /** Whether migrations are present (framework deploys need a /__void/migrate endpoint). */
   hasMigrations?: boolean;
+  /** Expose the readiness endpoint used by direct version activation. */
+  readiness?: boolean;
   /** Database dialect for migration handler. */
   migrationDialect?: 'sqlite' | 'postgresql' | 'mysql';
 };
@@ -50,7 +52,12 @@ export function selectBundledEntryFilename(outFiles: Array<string>): string {
  * Determine whether a wrapper is needed based on the features.
  */
 export function needsWrapper(features: WrapperFeatures): boolean {
-  return features.crons.length > 0 || features.queues.length > 0 || !!features.hasMigrations;
+  return (
+    features.crons.length > 0 ||
+    features.queues.length > 0 ||
+    !!features.hasMigrations ||
+    !!features.readiness
+  );
 }
 
 /**
@@ -379,7 +386,8 @@ function generateWrapperSource(
   lines.push('');
 
   // Wrap fetch if any intercepted routes are needed
-  const needsFetchWrap = features.crons.length > 0 || (migrations && migrations.length > 0);
+  const needsFetchWrap =
+    features.readiness || features.crons.length > 0 || (migrations && migrations.length > 0);
 
   if (needsFetchWrap) {
     lines.push('async function wrappedFetch(request, env, ctx) {');
@@ -390,9 +398,11 @@ function generateWrapperSource(
     // framework handler doesn't route it to env.ASSETS, which returns CF's
     // "Assets have not yet been deployed" stub during asset propagation
     // and would trip the platform's probe.
-    lines.push('  if (request.method === "GET" && url.pathname === "/__void/ready") {');
-    lines.push('    return Response.json({ ready: true });');
-    lines.push('  }');
+    if (features.readiness || features.crons.length > 0 || features.hasMigrations) {
+      lines.push('  if (request.method === "GET" && url.pathname === "/__void/ready") {');
+      lines.push('    return Response.json({ ready: true });');
+      lines.push('  }');
+    }
 
     // Migration handler
     if (migrations && migrations.length > 0) {

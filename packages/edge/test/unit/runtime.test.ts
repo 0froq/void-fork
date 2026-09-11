@@ -11,6 +11,18 @@ function assets(responses: Record<string, Response>) {
 }
 
 describe('createStaticEdgeHandler', () => {
+  it('answers the deployment readiness probe without touching assets', async () => {
+    const binding = assets({});
+    const response = await createStaticEdgeHandler({}).fetch(
+      new Request('https://example.com/__void/ready'),
+      { ASSETS: binding },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ready: true });
+    expect(binding.fetch).not.toHaveBeenCalled();
+  });
+
   it('serves assets through the mandatory edge Worker', async () => {
     const binding = assets({ '/': new Response('home') });
     const response = await createStaticEdgeHandler({}).fetch(new Request('https://example.com/'), {

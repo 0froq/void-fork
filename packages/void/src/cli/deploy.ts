@@ -17,7 +17,8 @@ const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '.
 const deployDriftCheckDir = join('.void', 'deploy-drift-check');
 import { intro, outro, log, note, confirm, isCancel, type SpinnerResult } from '@clack/prompts';
 import {
-  executeCloudflareDeploy,
+  activateCloudflareVersion,
+  encodeCloudflareVersionMessage,
   parseRootWranglerConfig,
   readBindingFieldPresence,
   readConfigEntryString as readD1EntryString,
@@ -2319,6 +2320,8 @@ export interface CloudflareDeployDeps {
   runStaticBuild?: (command: string, env: NodeJS.ProcessEnv) => void;
   /** Prepare a standalone framework Worker/config after its native build. */
   prepareFrameworkArtifact?: typeof prepareCloudflareFrameworkArtifact;
+  /** Upload, readiness-probe, and activate the verified Worker Version. */
+  activateVersion?: typeof activateCloudflareVersion;
   /**
    * Wrangler-uploader content-hash seam (default: {@link hashWranglerUploader}). Snapshotted
    * BEFORE the build and re-checked AFTER, so a build that overwrote the wrangler bundle the
@@ -4848,17 +4851,21 @@ export async function runCloudflareDeploy(
   //
   // Final uploader re-verification immediately before the deploy — the last and most privileged
   // credentialed run of the hashed bundle. Against the same pre-build baseline; fail closed.
-  const execution = await executeCloudflareDeploy({
+  const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: assertUploaderStillPinned,
+    workerName,
+    message: encodeCloudflareVersionMessage(migrations.map((migration) => migration.name)),
   });
   if (!execution.ok) {
-    if (execution.reason === 'deploy-failed') {
-      log.error(`deploy: \`wrangler deploy\` failed (exit ${String(execution.status)}).`);
-    }
+    log.error(formatCloudflareActivationError(execution));
     return exit(1);
   }
-  cliLog.info('cloudflare_deploy_end', { ok: true, worker: workerName });
+  cliLog.info('cloudflare_deploy_end', {
+    ok: true,
+    worker: workerName,
+    versionId: execution.versionId,
+  });
   log.success(`Deployed "${workerName}" to your Cloudflare account.`);
 }
 
@@ -4875,6 +4882,43 @@ function discoverRootWranglerConfig(root: string): string {
     }
   }
   return join(root, 'wrangler.jsonc');
+}
+
+function formatCloudflareActivationError(
+  result: Exclude<Awaited<ReturnType<typeof activateCloudflareVersion>>, { ok: true }>,
+): string {
+  const status = result.status === undefined ? '' : ` (exit ${String(result.status)})`;
+  switch (result.reason) {
+    case 'uploader-changed':
+      return 'deploy: the verified Wrangler uploader changed before version activation.';
+    case 'status-failed':
+      return `deploy: could not snapshot the current Cloudflare deployment${status}; no version was uploaded.`;
+    case 'upload-failed':
+      return `deploy: Cloudflare Worker Version upload failed${status}; production traffic is unchanged.`;
+    case 'upload-output-invalid':
+      return 'deploy: Wrangler uploaded a version but did not report its version id; production traffic is unchanged.';
+    case 'preview-unavailable':
+      return [
+        'deploy: the uploaded Worker Version has no preview URL, so Void cannot verify readiness.',
+        'Enable version preview URLs for this Worker in Cloudflare and retry; production traffic is unchanged.',
+      ].join('\n');
+    case 'readiness-failed':
+      return [
+        'deploy: the uploaded Worker Version did not pass /__void/ready.',
+        'The failed version was left inactive for inspection; production traffic is unchanged.',
+      ].join('\n');
+    case 'activation-failed':
+      return `deploy: the ready Worker Version could not be activated${status}; production traffic is unchanged.`;
+    case 'triggers-failed': {
+      const rollback =
+        result.rollback === 'succeeded'
+          ? 'Traffic was restored to the previous version.'
+          : result.rollback === 'unavailable'
+            ? 'This was the first deployment, so no previous version was available to restore.'
+            : 'Automatic traffic restoration failed; inspect `void project status` immediately.';
+      return `deploy: the Worker activated, but Cloudflare trigger synchronization failed${status}. ${rollback}`;
+    }
+  }
 }
 
 /** Build the trusted Wrangler pointer for a framework that emits Worker files directly. */
@@ -4910,6 +4954,7 @@ export async function prepareCloudflareFrameworkArtifact(
     // hosted platform's internal migration endpoint in its framework wrapper.
     hasMigrations: false,
     migrationDialect: getDatabaseDialect(voidConfig),
+    readiness: true,
   });
   if (preset.cloudflareArtifact === 'vite-plugin') {
     return;
@@ -5154,18 +5199,22 @@ async function runCloudflareStaticDeploy(
     assetConfig: manifest.assetConfig ?? { not_found_handling: 'none' },
   });
 
-  const execution = await executeCloudflareDeploy({
+  const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: uploaderIsPinned,
     configPath,
+    workerName,
+    message: encodeCloudflareVersionMessage([]),
   });
   if (!execution.ok) {
-    if (execution.reason === 'deploy-failed') {
-      log.error(`deploy: \`wrangler deploy\` failed (exit ${String(execution.status)}).`);
-    }
+    log.error(formatCloudflareActivationError(execution));
     return exit(1);
   }
-  cliLog.info('cloudflare_deploy_end', { ok: true, worker: workerName });
+  cliLog.info('cloudflare_deploy_end', {
+    ok: true,
+    worker: workerName,
+    versionId: execution.versionId,
+  });
   log.success(`Deployed "${workerName}" to your Cloudflare account.`);
 }
 
