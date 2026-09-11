@@ -1,4 +1,4 @@
-import { hashOriginalUrl } from '@voidcloud/isr-shared';
+import { hashOriginalUrl } from '@void/isr';
 import {
   describe,
   it,

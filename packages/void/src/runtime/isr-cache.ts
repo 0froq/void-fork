@@ -22,8 +22,7 @@
  *
  * Worker-only: no `lib.dom` types — globals come from `@cloudflare/workers-types`.
  *
- * Ported from `void-platform/packages/dispatch` (`isr.ts`, `index.ts`,
- * `pattern.ts`) and `void-platform/packages/isr-shared`.
+ * Ported from the hosted dispatch runtime and the shared `@void/isr` contract.
  */
 
 // ---------------------------------------------------------------------------

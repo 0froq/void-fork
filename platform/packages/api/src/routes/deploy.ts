@@ -4,8 +4,8 @@ import {
   planWebSocketMigrations,
   validateManifestShape,
 } from '@void/deploy-core';
-import { isrCacheKey, isrCachePrefix, isrLegacyCachePrefix } from '@voidcloud/isr-shared';
-import type { IsrCacheMetadata } from '@voidcloud/isr-shared';
+import { isrCacheKey, isrCachePrefix, isrLegacyCachePrefix } from '@void/isr';
+import type { IsrCacheMetadata } from '@void/isr';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import {

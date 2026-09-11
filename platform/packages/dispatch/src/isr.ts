@@ -1,5 +1,5 @@
-import { isrCacheKey, isrCacheVariantPrefix, isrEdgeCacheUrl } from '@voidcloud/isr-shared';
-import type { IsrCacheMetadata } from '@voidcloud/isr-shared';
+import { isrCacheKey, isrCacheVariantPrefix, isrEdgeCacheUrl } from '@void/isr';
+import type { IsrCacheMetadata } from '@void/isr';
 import type { Env } from './env.ts';
 import { matchSegmentPattern } from './pattern.ts';
 

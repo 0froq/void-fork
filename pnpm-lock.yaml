@@ -344,6 +344,18 @@ importers:
         specifier: 'catalog:'
         version: 0.3.1(@types/node@26.5.1)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.101.0)(svelte@5.57.0)(terser@5.51.2)(tsx@4.23.0)(typescript@7.0.2)(yaml@2.9.0)
 
+  packages/isr:
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 4.20260702.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.3.1(@types/node@26.5.1)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.101.0)(svelte@5.57.0)(terser@5.51.2)(tsx@4.23.0)(typescript@7.0.2)(yaml@2.9.0)
+
   packages/md:
     dependencies:
       '@shikijs/engine-javascript':
@@ -670,9 +682,9 @@ importers:
       '@void/deploy-core':
         specifier: workspace:*
         version: link:../../../packages/deploy-core
-      '@voidcloud/isr-shared':
+      '@void/isr':
         specifier: workspace:*
-        version: link:../isr-shared
+        version: link:../../../packages/isr
       '@xterm/headless':
         specifier: ^6.0.0
         version: 6.0.0
@@ -793,9 +805,9 @@ importers:
       '@void/edge':
         specifier: workspace:*
         version: link:../../../packages/edge
-      '@voidcloud/isr-shared':
+      '@void/isr':
         specifier: workspace:*
-        version: link:../isr-shared
+        version: link:../../../packages/isr
     devDependencies:
       '@cloudflare/workers-types':
         specifier: catalog:platform
@@ -809,18 +821,6 @@ importers:
       wrangler:
         specifier: catalog:platform
         version: 4.130.0(@cloudflare/workers-types@5.20260910.1)
-
-  platform/packages/isr-shared:
-    devDependencies:
-      '@cloudflare/workers-types':
-        specifier: catalog:platform
-        version: 5.20260910.1
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vite-plus:
-        specifier: 'catalog:'
-        version: 0.3.1(@types/node@26.5.1)(esbuild@0.27.7)(jiti@2.7.0)(sass@1.101.0)(svelte@5.57.0)(terser@5.51.2)(tsx@4.23.0)(typescript@7.0.2)(yaml@2.9.0)
 
   platform/packages/proxy:
     dependencies:

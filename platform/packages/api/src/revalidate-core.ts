@@ -9,7 +9,7 @@ import {
   isrLegacyCachePrefix,
   isrLegacyCacheVariantPrefix,
   splitIsrCacheKey,
-} from '@voidcloud/isr-shared';
+} from '@void/isr';
 import type { Context } from 'hono';
 import { R2_CONCURRENCY, uploadPool } from './concurrency.ts';
 import { SITE_DOMAIN } from './constants.ts';
