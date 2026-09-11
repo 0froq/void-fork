@@ -1428,6 +1428,45 @@ export function voidPlugin(options?: {
     workerConfig.vars = vars;
   }
 
+  // A direct Cloudflare deploy promotes only explicitly `.secret()`-marked
+  // schema values to Worker secrets. Make production-local and CI shell values
+  // available to the post-build validator/uploader without exposing unrelated
+  // machine env or changing ordinary Vite build behaviour.
+  function applySchemaSecretsToWorkerVars(secretKeys: Array<string>): void {
+    if (process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] !== '1' || secretKeys.length === 0) {
+      return;
+    }
+    const mode = voidDeployBuildConfig?.mode ?? 'production';
+    const rawEnvDir = voidDeployBuildConfig?.envDir;
+    const envDir = rawEnvDir ? join(root, rawEnvDir) : root;
+    const local = mergeAndExpand(
+      [parseDotenvFile(join(envDir, `.env.${mode}.local`), { expand: false })],
+      { onWarn: (message) => voidWarn(message) },
+    );
+    const selected: Record<string, string> = {};
+    for (const key of secretKeys) {
+      if (authEnabled && key === 'BETTER_AUTH_SECRET') {
+        continue;
+      }
+      if (Object.prototype.hasOwnProperty.call(local, key)) {
+        selected[key] = local[key]!;
+      }
+      if (process.env[key] !== undefined) {
+        selected[key] = process.env[key]!;
+      }
+    }
+    const { sanitized, stripped } = stripInternalEnvKeys(selected);
+    if (stripped.length > 0) {
+      voidWarn(
+        `Ignoring schema secret keys reserved for Void runtime use: ${stripped.join(', ')}.`,
+      );
+    }
+    workerConfig.vars = {
+      ...(workerConfig.vars as Record<string, string> | undefined),
+      ...sanitized,
+    };
+  }
+
   // Plugin that loads .env files and merges them into workerConfig.vars.
   // Runs before the Cloudflare plugin so vars are available as worker bindings.
   //
@@ -1799,7 +1838,10 @@ export function voidPlugin(options?: {
       restartPlugin(),
       bindingWatchPlugin,
       envPlugin,
-      envSchemaPlugin(root, { onDefaults: applySchemaDefaultsToWorkerVars }),
+      envSchemaPlugin(root, {
+        onDefaults: applySchemaDefaultsToWorkerVars,
+        onSecrets: applySchemaSecretsToWorkerVars,
+      }),
       envClientGuardPlugin(root),
       envClientFoldPlugin(),
       clientStubsPlugin,
@@ -1975,7 +2017,10 @@ export function voidPlugin(options?: {
     restartPlugin(),
     bindingWatchPlugin,
     envPlugin,
-    envSchemaPlugin(root, { onDefaults: applySchemaDefaultsToWorkerVars }),
+    envSchemaPlugin(root, {
+      onDefaults: applySchemaDefaultsToWorkerVars,
+      onSecrets: applySchemaSecretsToWorkerVars,
+    }),
     envClientGuardPlugin(root),
     envClientFoldPlugin(),
     clientStubsPlugin,

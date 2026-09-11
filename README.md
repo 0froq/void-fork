@@ -69,6 +69,7 @@ pnpm void deploy
 
 - **Zero config** — no `wrangler.json`, no dashboard clicks
 - **Automatic provisioning** — import `db`, `kv`, `storage`, or `ai` from `void` and resources are created on deploy
+- **Typed secrets** — mark env schema keys with `.secret()`; direct Cloudflare deploys upload them as encrypted Worker secrets instead of plaintext vars
 - **File-based routing** — drop a file in `routes/`, get an endpoint with method exports, dynamic params, middleware, and [Standard Schema](https://standardschema.dev/) validation
 - **Full-stack pages** — `pages/` directory for server-rendered UI with co-located data loading, SPA navigation, and typed forms (React, Vue, Svelte, Solid)
 - **End-to-end type safety** — SQL migrations generate DB types, route handlers infer return types, typed fetch client checks everything at the call site

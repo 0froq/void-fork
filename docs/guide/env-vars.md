@@ -116,11 +116,11 @@ Whether a file's values ship depends on which deploy path you use:
 | `.env`                  | yes           | yes (`plain_text`)       | yes (worker `vars`)                |
 | `.env.local`            | yes           | no                       | no                                 |
 | `.env.production`       | yes           | yes (`plain_text`)       | yes (worker `vars`)                |
-| `.env.production.local` | yes           | no                       | no                                 |
+| `.env.production.local` | yes           | no                       | `.secret()` keys only (encrypted)  |
 
 `.local` files are gitignored by convention — use them for secrets you don't want in source control.
 
-Both deploy paths read only `.env` and `.env.production`. The direct Cloudflare backend excludes `.env.local` and `.env.production.local` from the generated Worker `vars`; outside that deploy path, Void retains Vite's normal dotenv loading behavior. Values in the two portable files still ship as plaintext, so keep real secrets in platform secrets or `wrangler secret put <NAME>`. See [Cloudflare deploy](/integrations/cloudflare).
+The direct Cloudflare backend excludes local files from generated Worker `vars`, but it reads explicitly `.secret()`-marked keys from `.env.production.local` and the deploy process environment, uploads them through Cloudflare's encrypted secret mechanism, and removes them from the generated plaintext config. Shell values take precedence. Unmarked local and shell keys are never shipped. Values in `.env` and `.env.production` normally remain plaintext, except that explicitly marked schema keys are promoted to encrypted secrets there too. See [Cloudflare deploy](/integrations/cloudflare).
 
 ### Dotenv variable expansion
 
@@ -152,7 +152,9 @@ void secret delete STRIPE_KEY
 
 Remote secrets count as "present" for deploy validation — `void deploy` checks both `.env*` and the remote secret list before uploading.
 
-For auth-enabled apps, both Void Cloud and `void deploy --platform cloudflare` manage `BETTER_AUTH_SECRET` automatically: they preserve an existing encrypted secret and generate one only when missing. Other secrets remain user-managed. Bare `vite build && wrangler deploy` does not provide this lifecycle; set `BETTER_AUTH_SECRET` with Wrangler and declare it in `secrets.required` yourself.
+For direct Cloudflare deployment, mark a built-in schema helper with `.secret()` to make `void deploy --platform cloudflare` upload its non-empty production value automatically. Void accepts the value from `.env`, `.env.production`, `.env.production.local`, or the deploy process environment; removes it from Worker `vars`; uploads it over stdin; and adds it to `secrets.required`. Existing remote-only marked secrets are preserved, optional absent secrets stay absent, and deploy never deletes remote secrets. Name/value heuristics still warn only—they do not automatically promote unmarked keys.
+
+For auth-enabled apps, both Void Cloud and `void deploy --platform cloudflare` manage `BETTER_AUTH_SECRET` automatically: they preserve an existing encrypted secret and generate one only when missing. Bare `vite build && wrangler deploy` does not provide either automatic lifecycle; use Wrangler and declare the names in `secrets.required` yourself.
 
 ## Defaults
 

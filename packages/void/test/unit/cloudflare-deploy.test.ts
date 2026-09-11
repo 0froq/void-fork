@@ -17,6 +17,7 @@ import {
   ensureCloudflareAuthSecret,
   hashWranglerUploader,
   runCloudflareDeploy,
+  syncCloudflareSchemaSecrets,
   snapshotBindingIdentities,
   snapshotPassthroughIdentities,
   snapshotPassthroughRawFields,
@@ -288,6 +289,14 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
       trace.push('auth-secret');
       return { created: false };
     }) as CloudflareDeployDeps['ensureAuthSecret'],
+    syncSchemaSecrets: (async ({ emittedVars, secretKeys }) => ({
+      requiredSecretNames: secretKeys.filter(
+        (key) => typeof emittedVars[key] === 'string' && emittedVars[key] !== '',
+      ),
+      uploaded: secretKeys.filter(
+        (key) => typeof emittedVars[key] === 'string' && emittedVars[key] !== '',
+      ).length,
+    })) as CloudflareDeployDeps['syncSchemaSecrets'],
     // The stubbed build never writes dist/ssr/wrangler.json, so the real config
     // verification would have nothing to read — pass it by default; dedicated tests
     // exercise the real verifier and the fail-closed branch.
@@ -451,6 +460,119 @@ describe('ensureCloudflareAuthSecret', () => {
         runWrangler: (args) => (args[1] === 'list' ? { ...cleanExit, stdout: '[]' } : cleanExit),
       }),
     ).rejects.toMatchObject({ reason: 'verification-failed' });
+  });
+});
+
+describe('syncCloudflareSchemaSecrets', () => {
+  function schemaSecretProject(): string {
+    return makeProject({
+      'package.json': JSON.stringify({ name: 'app' }),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'app' }),
+      '.wrangler/deploy/config.json': JSON.stringify({
+        configPath: '../../dist/ssr/wrangler.json',
+      }),
+      'dist/ssr/wrangler.json': JSON.stringify({
+        account_id: 'acc123',
+        name: 'app',
+        vars: { API_TOKEN: 'local-token', ORDINARY: 'visible' },
+        secrets: { required: ['MANUAL_SECRET'] },
+      }),
+    });
+  }
+
+  it('uploads marked values through stdin and removes them from plaintext vars', async () => {
+    const root = schemaSecretProject();
+    const calls: Array<{ args: Array<string>; input?: string }> = [];
+    let listCount = 0;
+    const result = await syncCloudflareSchemaSecrets({
+      root,
+      configPath: join(root, 'wrangler.jsonc'),
+      accountId: 'acc123',
+      workerName: 'app',
+      emittedVars: { API_TOKEN: 'local-token', ORDINARY: 'visible' },
+      secretKeys: ['API_TOKEN', 'REMOTE_ONLY'],
+      runWrangler: (args, opts) => {
+        calls.push({ args, input: opts.input });
+        if (args[1] === 'list') {
+          listCount++;
+          return {
+            ...cleanExit,
+            stdout: JSON.stringify(
+              listCount === 1
+                ? [{ name: 'REMOTE_ONLY' }, { name: 'UNMARKED_REMOTE' }]
+                : [{ name: 'API_TOKEN' }, { name: 'REMOTE_ONLY' }],
+            ),
+          };
+        }
+        return cleanExit;
+      },
+    });
+
+    expect(result).toEqual({
+      requiredSecretNames: ['API_TOKEN', 'REMOTE_ONLY'],
+      uploaded: 1,
+    });
+    const bulk = calls.find((call) => call.args[1] === 'bulk')!;
+    expect(bulk.args).toEqual(['secret', 'bulk', '-c', join(root, 'wrangler.jsonc'), '--env=']);
+    expect(JSON.parse(bulk.input!)).toEqual({ API_TOKEN: 'local-token' });
+    expect(bulk.args.join(' ')).not.toContain('local-token');
+    const generated = JSON.parse(readFileSync(join(root, 'dist/ssr/wrangler.json'), 'utf-8'));
+    expect(generated.vars).toEqual({ ORDINARY: 'visible' });
+    expect(generated.secrets.required).toEqual(['API_TOKEN', 'MANUAL_SECRET', 'REMOTE_ONLY']);
+  });
+
+  it('bootstraps a first deploy and skips an absent optional marked secret', async () => {
+    const root = schemaSecretProject();
+    let call = 0;
+    const result = await syncCloudflareSchemaSecrets({
+      root,
+      configPath: join(root, 'wrangler.jsonc'),
+      accountId: 'acc123',
+      workerName: 'app',
+      emittedVars: { API_TOKEN: 'local-token' },
+      secretKeys: ['API_TOKEN', 'OPTIONAL_TOKEN'],
+      runWrangler: (args) => {
+        call++;
+        if (call === 1) {
+          return {
+            ...cleanExit,
+            status: 1,
+            stderr: [
+              'Worker "app" not found.',
+              'If this is a new Worker, run `wrangler deploy` first to create it.',
+              "Otherwise, check that the Worker name is correct and you're logged into the right account.",
+            ].join('\n'),
+          };
+        }
+        if (args[1] === 'list') {
+          return { ...cleanExit, stdout: JSON.stringify([{ name: 'API_TOKEN' }]) };
+        }
+        return cleanExit;
+      },
+    });
+
+    expect(result).toEqual({ requiredSecretNames: ['API_TOKEN'], uploaded: 1 });
+    expect(call).toBe(3);
+  });
+
+  it('fails without echoing a value when bulk upload fails', async () => {
+    const root = schemaSecretProject();
+    const secret = 'never-print-this';
+    const promise = syncCloudflareSchemaSecrets({
+      root,
+      configPath: join(root, 'wrangler.jsonc'),
+      accountId: 'acc123',
+      workerName: 'app',
+      emittedVars: { API_TOKEN: secret },
+      secretKeys: ['API_TOKEN'],
+      runWrangler: (args) =>
+        args[1] === 'list'
+          ? { ...cleanExit, stdout: '[]' }
+          : { ...cleanExit, status: 1, stderr: secret },
+    });
+
+    await expect(promise).rejects.toMatchObject({ reason: 'bulk-failed' });
+    await expect(promise).rejects.not.toThrow(secret);
   });
 });
 
@@ -2277,6 +2399,28 @@ describe('verifyGeneratedDeployConfig', () => {
         ok: true,
       },
     );
+  });
+
+  it('requires every promoted schema secret to be inherited', () => {
+    const root = deployConfigProject({
+      account_id: 'acc123',
+      name: 'myapp',
+      secrets: { required: ['API_TOKEN'] },
+    });
+    expect(
+      verifyGeneratedDeployConfig(root, {
+        accountId: 'acc123',
+        workerName: 'myapp',
+        requiredSecretNames: ['API_TOKEN'],
+      }),
+    ).toEqual({ ok: true });
+    const missing = verifyGeneratedDeployConfig(root, {
+      accountId: 'acc123',
+      workerName: 'myapp',
+      requiredSecretNames: ['API_TOKEN', 'REMOTE_ONLY'],
+    });
+    expect(missing.ok).toBe(false);
+    expect(missing.reason).toMatch(/REMOTE_ONLY.*secrets\.required/);
   });
 
   it('fails when the generated account_id differs (named-env redirect)', () => {
@@ -6224,6 +6368,28 @@ describe('compareWranglerMigrationPaths (wrangler 4.107 numeric-prefix comparato
 // ---------------------------------------------------------------------------
 
 describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
+  it('promotes marked secrets after migration gates and before Worker upload', async () => {
+    const root = d1Project(PROVISIONED_D1);
+    const { deps, trace } = harness({
+      resolveSchemaFacts: (() =>
+        okSchemaFacts({
+          hasSchema: true,
+          requiredKeys: ['API_TOKEN'],
+          secretKeys: ['API_TOKEN'],
+        })) as CloudflareDeployDeps['resolveSchemaFacts'],
+      readEmittedWorkerVars: (() =>
+        emittedVars({ API_TOKEN: 'secret' })) as CloudflareDeployDeps['readEmittedWorkerVars'],
+      syncSchemaSecrets: (async () => {
+        trace.push('schema-secrets');
+        return { requiredSecretNames: ['API_TOKEN'], uploaded: 1 };
+      }) as CloudflareDeployDeps['syncSchemaSecrets'],
+    });
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(trace.indexOf('migrate-gate')).toBeLessThan(trace.indexOf('schema-secrets'));
+    expect(trace.indexOf('schema-secrets')).toBeLessThan(trace.indexOf('wrangler:deploy'));
+  });
+
   it('rejects a plaintext BETTER_AUTH_SECRET before provisioning or upload', async () => {
     const root = d1Project(PROVISIONED_D1, {
       'void.json': JSON.stringify({ auth: {} }),

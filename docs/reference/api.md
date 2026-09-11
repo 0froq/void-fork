@@ -924,7 +924,7 @@ const port = env.PORT;
 
 ### Schema helpers
 
-`void/env` includes Standard Schema-compatible helpers: `string()`, `number()`, `boolean()`, `url()`, `email()`, `oneOf([...])`, and `json<T>()`. Each helper supports `.optional()`, `.default(value)`, `.secret()`, and `.public()`.
+`void/env` includes Standard Schema-compatible helpers: `string()`, `number()`, `boolean()`, `url()`, `email()`, `oneOf([...])`, and `json<T>()`. Each helper supports `.optional()`, `.default(value)`, `.secret()`, and `.public()`. Besides forcing redaction, `.secret()` tells `void deploy --platform cloudflare` to remove the value from plaintext Worker vars and upload it through Cloudflare's encrypted secret mechanism. This automation applies only to built-in helpers and the Void CLI deploy path.
 
 ### Types
 
