@@ -138,6 +138,7 @@ const EMPTY_PROJECT_ALLOWED_PACKAGES = new Set([
   '@rolldown/plugin-babel',
   '@vitejs/plugin-react',
   'babel-plugin-react-compiler',
+  'oxc-transform-react',
   '@types/react',
   '@types/react-dom',
   'react',

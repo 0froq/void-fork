@@ -1099,20 +1099,20 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies.typescript).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
-      expect(pkg.devDependencies['@rolldown/plugin-babel']).toBeDefined();
       expect(pkg.devDependencies['@types/react']).toBeDefined();
       expect(pkg.devDependencies['@types/react-dom']).toBeDefined();
-      expect(pkg.devDependencies['@vitejs/plugin-react']).toBeDefined();
-      expect(pkg.devDependencies['babel-plugin-react-compiler']).toBeDefined();
+      expect(pkg.devDependencies['oxc-transform-react']).toBeDefined();
+      expect(pkg.devDependencies['@rolldown/plugin-babel']).toBeUndefined();
+      expect(pkg.devDependencies['@vitejs/plugin-react']).toBeUndefined();
+      expect(pkg.devDependencies['babel-plugin-react-compiler']).toBeUndefined();
       expect(pkg.scripts.dev).toBe('vp dev');
       expect(pkg.scripts.build).toBe('vp build');
       expect(pkg.scripts.preview).toBe('vp preview');
 
       const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
-      expect(reactViteConfig).toContain('from "@rolldown/plugin-babel"');
       expect(reactViteConfig).toContain('from "@void/react/plugin"');
-      expect(reactViteConfig).toContain('reactCompilerPreset()');
-      expect(reactViteConfig).toContain('voidReact()');
+      expect(reactViteConfig).toContain('voidReact({ react: { compiler: true } })');
+      expect(reactViteConfig).not.toContain('babel');
       expect(readFileSync(join(root, 'pages', 'index.tsx'), 'utf-8')).toContain('Welcome to Void');
       expect(readFileSync(join(root, 'pages', 'index.server.ts'), 'utf-8')).toContain(
         'import { messages } from "@schema";',
@@ -1371,7 +1371,9 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.scripts.dev).toBe('vp dev');
       expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
       expect(pkg.devDependencies.void).toBe('^0.8.9');
-      expect(readFileSync(join(root, 'vite.config.ts'), 'utf-8')).toContain('voidReact()');
+      expect(readFileSync(join(root, 'vite.config.ts'), 'utf-8')).toContain(
+        'voidReact({ react: { compiler: true } })',
+      );
       expectPnpmAllowBuilds(root);
 
       expect(mockSelect.mock.calls[0]?.[0].message).toBe('Choose a Pages scaffold toolchain:');
@@ -2298,16 +2300,16 @@ export default config;
       expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
       expect(pkg.devDependencies.void).toBe('^0.2.3');
       expect(pkg.devDependencies['@void/react']).toBe('^0.2.3');
-      expect(pkg.devDependencies['@rolldown/plugin-babel']).toBe('^0.2.3');
-      expect(pkg.devDependencies['@vitejs/plugin-react']).toBe('^6.0.1');
-      expect(pkg.devDependencies['babel-plugin-react-compiler']).toBe('^1.0.0');
+      expect(pkg.devDependencies['oxc-transform-react']).toBe('^0.149.0');
+      expect(pkg.devDependencies['@rolldown/plugin-babel']).toBeUndefined();
+      expect(pkg.devDependencies['@vitejs/plugin-react']).toBeUndefined();
+      expect(pkg.devDependencies['babel-plugin-react-compiler']).toBeUndefined();
       expectPnpmAllowBuilds(root);
 
       const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
-      expect(reactViteConfig).toContain('from "@rolldown/plugin-babel"');
       expect(reactViteConfig).toContain('from "@void/react/plugin"');
-      expect(reactViteConfig).toContain('reactCompilerPreset()');
-      expect(reactViteConfig).toContain('voidReact()');
+      expect(reactViteConfig).toContain('voidReact({ react: { compiler: true } })');
+      expect(reactViteConfig).not.toContain('babel');
 
       expect(mockSelect.mock.calls[0]?.[0].message).toBe('Choose a Pages scaffold toolchain:');
       expect(mockSelect.mock.calls[0]?.[0].initialValue).toBe('vite-plus');

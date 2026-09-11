@@ -38,9 +38,7 @@ export const SCAFFOLD_TOOLCHAIN_OPTIONS = [
 ] as const;
 
 const REACT_SCAFFOLD_COMPILER_DEV_DEPENDENCIES = {
-  '@rolldown/plugin-babel': '^0.2.3',
-  '@vitejs/plugin-react': '^6.0.1',
-  'babel-plugin-react-compiler': '^1.0.0',
+  'oxc-transform-react': '^0.149.0',
 } as const;
 
 export const SCAFFOLD_FRAMEWORK_OPTIONS = [
@@ -204,19 +202,14 @@ export function createPagesStarterTemplate(options: {
 
 function getViteConfig(framework: ScaffoldFramework, config: ScaffoldFrameworkConfig): string {
   if (framework === 'react') {
-    return `import babel from "@rolldown/plugin-babel";
-import { reactCompilerPreset } from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+    return `import { defineConfig } from "vite";
 import { voidPlugin } from "void";
 import { ${config.adapterImport} } from "${config.adapterPlugin}";
 
 export default defineConfig({
   plugins: [
-    babel({
-      presets: [reactCompilerPreset()],
-    }),
     voidPlugin(),
-    ${config.adapterImport}(),
+    ${config.adapterImport}({ react: { compiler: true } }),
   ],
 });
 `;
