@@ -1,4 +1,4 @@
-import { matchSegmentPattern } from '@void/edge';
+import { matchLiteralPattern, matchSegmentPattern } from '@void/edge';
 
 export type IsrCacheMetadata = Readonly<{
   /** HTTP status code. */
@@ -20,6 +20,67 @@ export type IsrCacheEntry = Readonly<{
 const PAGE_DATA_SCRIPT_RE =
   /<script\b[^>]*\bid=(["'])__VOID_PAGE_DATA__\1[^>]*>([\s\S]*?)<\/script>/i;
 const SKIP_HEADERS = new Set(['cache-control', 'x-isr-cache', 'x-void-page-data', 'set-cookie']);
+
+/** Map of literal path pattern to the query names retained in an ISR cache variant. */
+export type QueryAllowlist = Record<string, ReadonlyArray<string>>;
+
+/**
+ * Normalize a request URL for cache-key use by retaining only query parameters
+ * explicitly allowlisted for its user-facing pathname.
+ */
+export function buildVariantOriginalUrl(
+  requestUrl: string,
+  pathname: string,
+  queryAllowlist: QueryAllowlist | undefined,
+): string {
+  const url = new URL(requestUrl);
+  if (!url.search) {
+    return url.toString();
+  }
+  const allowed = resolveQueryAllowlist(queryAllowlist, pathname);
+  if (allowed.size === 0) {
+    url.search = '';
+    return url.toString();
+  }
+  const keys = [...new Set(url.searchParams.keys())].filter((key) => allowed.has(key)).sort();
+  const filtered = new URLSearchParams();
+  for (const key of keys) {
+    for (const value of url.searchParams.getAll(key)) {
+      filtered.append(key, value);
+    }
+  }
+  const filteredString = filtered.toString();
+  url.search = filteredString ? `?${filteredString}` : '';
+  return url.toString();
+}
+
+/** Keep only exact allowlist patterns for uncapped static-cache consumers. */
+export function exactQueryAllowlist(
+  allowlist: QueryAllowlist | undefined,
+): QueryAllowlist | undefined {
+  if (!allowlist) {
+    return undefined;
+  }
+  const exact = Object.fromEntries(
+    Object.entries(allowlist).filter(([pattern]) => !pattern.includes('*')),
+  );
+  return Object.keys(exact).length > 0 ? exact : undefined;
+}
+
+function resolveQueryAllowlist(
+  allowlist: QueryAllowlist | undefined,
+  pathname: string,
+): Set<string> {
+  if (!allowlist) {
+    return new Set();
+  }
+  for (const [pattern, params] of Object.entries(allowlist)) {
+    if (matchLiteralPattern(pattern, pathname)) {
+      return new Set(params);
+    }
+  }
+  return new Set();
+}
 
 /** Pack response headers and body into the canonical ISR binary value. */
 export function packIsrValue(headers: Record<string, string>, body: ArrayBuffer): ArrayBuffer {
