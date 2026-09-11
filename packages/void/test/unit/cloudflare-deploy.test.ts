@@ -59,6 +59,7 @@ function makeProject(files: Record<string, string>): string {
 
 afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true });
+  delete process.env.DATABASE_URL;
 });
 
 const silentCliLog: CliLogger = {
@@ -300,6 +301,10 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
     // Stub the migration apply-set equality gate so orchestration tests need no on-disk
     // migration dir; a dedicated suite exercises the real `checkWranglerMigrationApplySet`.
     checkMigrationApplySet: async () => ({ ok: true }),
+    applyPostgresMigrations: async () => {
+      trace.push('postgres-migrate');
+      return [];
+    },
     // Stub auth-schema validation so orchestration tests never load Better Auth; dedicated
     // tests exercise the real `validateAuthMigrationSchema` + `assertMigrationsProduceAuthSchema`.
     validateAuthMigrations: async () => {},
@@ -718,15 +723,11 @@ describe('computeDesiredCloudflareResources — desired set from source', () => 
 });
 
 // ---------------------------------------------------------------------------
-// PostgreSQL checked-in migration guard: this backend applies only remote D1
-// (SQLite) migrations — the remote-migrate step is gated on `desired.d1`, which
-// a pg app never has. The managed platform DOES apply a pg app's migrations over
-// Hyperdrive at deploy, so a pg app WITH checked-in migrations must be rejected
-// (else it would ship against an unmigrated database), while a pg app WITHOUT
-// migrations (externally-managed schema) is still deployable.
+// PostgreSQL checked-in migrations: direct Cloudflare deploy validates and applies
+// them transactionally before uploading the Worker.
 // ---------------------------------------------------------------------------
 
-describe('runCloudflareDeploy — PostgreSQL checked-in migration guard', () => {
+describe('runCloudflareDeploy — PostgreSQL checked-in migrations', () => {
   /** A worker-bearing pg app with a provisioned Hyperdrive config (drift-clean). */
   function pgProject(extraFiles: Record<string, string> = {}): string {
     return makeProject({
@@ -746,10 +747,7 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migration guard', () => 
     });
   }
 
-  it('rejects a pg app that has checked-in migrations BEFORE any account operation', async () => {
-    // The remote-migrate path is gated on `desired.d1`; a pg app desires `hyperdrive` instead, so
-    // its db/migrations/*.sql would never run here and the worker would hit an unmigrated database.
-    // (Reverting the guard lets this app build + deploy against an unmigrated DB.)
+  it('requires DATABASE_URL before any account operation when pg migrations are checked in', async () => {
     const root = pgProject({
       'db/migrations/0000_init.sql': 'CREATE TABLE notes (id integer primary key);',
     });
@@ -758,9 +756,31 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migration guard', () => 
       runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
     ).rejects.toBeInstanceOf(ExitError);
     expect(exitCalls).toEqual([1]);
-    // Rejected pre-account-op: no whoami/provision/build/deploy seam ran.
     expect(wranglerArgs).toEqual([]);
     expect(trace).toEqual([]);
+  });
+
+  it('validates and applies pg migrations before uploading the Worker', async () => {
+    process.env.DATABASE_URL = 'postgresql://prod.example/app';
+    const root = pgProject({
+      'db/migrations/0000_init.sql': 'CREATE TABLE notes (id integer primary key);',
+    });
+    const applied: Array<{ dir: string; url: string }> = [];
+    const { deps, trace, wranglerArgs, exitCalls } = harness({
+      applyPostgresMigrations: async (dir, url) => {
+        applied.push({ dir, url });
+        trace.push('postgres-migrate');
+        return ['0000_init.sql'];
+      },
+    });
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(exitCalls).toEqual([]);
+    expect(applied).toEqual([
+      { dir: join(root, 'db', 'migrations'), url: 'postgresql://prod.example/app' },
+    ]);
+    expect(trace.indexOf('migrate-gate')).toBeLessThan(trace.indexOf('postgres-migrate'));
+    expect(trace.indexOf('postgres-migrate')).toBeLessThan(trace.indexOf('wrangler:deploy'));
+    expect(wranglerArgs.some((a) => a[0] === 'd1')).toBe(false);
   });
 
   it('still deploys a pg app WITHOUT checked-in migrations (external schema — no false-reject)', async () => {
@@ -773,12 +793,10 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migration guard', () => 
     expect(wranglerArgs.some((a) => a[0] === 'd1' && a[2] === 'apply')).toBe(false);
   });
 
-  it('rejects a pg app whose BUILD writes checked-in migrations (post-build re-check)', async () => {
-    // Empty pre-build (the fail-fast guard passes), but the build plugin writes db/migrations/*.sql
-    // during `vite build`. The remote-migrate/apply gates are `desired.d1`-only, so without the
-    // post-build re-check these files would ship UNRUN and the worker would hit an unmigrated DB.
+  it('applies a pg migration added by the build before uploading', async () => {
+    process.env.DATABASE_URL = 'postgresql://prod.example/app';
     const root = pgProject();
-    const { deps, wranglerArgs, exitCalls } = harness({
+    const { deps, trace, wranglerArgs, exitCalls } = harness({
       runBuild: () => {
         mkdirSync(join(root, 'db', 'migrations'), { recursive: true });
         writeFileSync(
@@ -787,12 +805,10 @@ describe('runCloudflareDeploy — PostgreSQL checked-in migration guard', () => 
         );
       },
     });
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    // Rejected AFTER the build but BEFORE any remote mutation — nothing deployed, no D1 migrate.
-    expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(false);
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(exitCalls).toEqual([]);
+    expect(trace).toContain('postgres-migrate');
+    expect(wranglerArgs.some((a) => a[0] === 'deploy')).toBe(true);
     expect(wranglerArgs.some((a) => a[0] === 'd1' && a[2] === 'apply')).toBe(false);
   });
 
@@ -1128,19 +1144,24 @@ describe('runCloudflareDeploy — app-class guard (narrowed to full Void apps)',
     expect(trace).toEqual([]);
   });
 
-  it('rejects a PostgreSQL app with auth enabled (pg + auth) before any account op', async () => {
+  it('deploys a PostgreSQL app with auth after migrations and secret setup', async () => {
+    process.env.DATABASE_URL = 'postgresql://prod.example/app';
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'pgauth' }),
       'void.json': JSON.stringify({ database: 'pg', auth: {} }),
       'routes/index.ts': `export const GET = () => new Response('ok');`,
+      'db/migrations/0000_auth.sql': 'CREATE TABLE "user" (id text primary key);',
+      'wrangler.jsonc': JSON.stringify({
+        account_id: 'acc123',
+        name: 'pgauth',
+        hyperdrive: [{ binding: 'HYPERDRIVE', id: REAL_KV_ID }],
+      }),
     });
     const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    // Rejected at the pg+auth guard (after the desired set, before whoami/provision).
-    expect(trace).toEqual([]);
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(exitCalls).toEqual([]);
+    expect(trace.indexOf('auth-secret')).toBeLessThan(trace.indexOf('postgres-migrate'));
+    expect(trace.indexOf('postgres-migrate')).toBeLessThan(trace.indexOf('wrangler:deploy'));
   });
 
   it('rejects a pages app with output:"static" (SSG) — the signal the build itself branches on', async () => {

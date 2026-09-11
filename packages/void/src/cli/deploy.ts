@@ -40,6 +40,7 @@ import { discoverSchema } from '../drizzle/discover.ts';
 import { collectRevalidate, collectPages, hasRevalidate } from '../isr-config.ts';
 import { voidWarn } from '../log.ts';
 import { collectMigrations } from '../migrations/collect.ts';
+import { runPgMigrations } from '../migrations/runner-pg.ts';
 import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
 import { scanPages } from '../pages/scan.ts';
 import type { PageScanResult } from '../pages/types.ts';
@@ -1257,22 +1258,6 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
- * The reject shown when a PostgreSQL app ships checked-in `db/migrations/*.sql` through the
- * self-host Cloudflare backend. This backend applies ONLY remote D1 (SQLite) migrations; a pg
- * app desires Hyperdrive (never `desired.d1`), so its migrations would never run here and the
- * worker would hit an unmigrated database. Shared by the pre-build fail-fast guard and the
- * post-build re-check (a build plugin can write these files during `vite build`).
- */
-const PG_CHECKED_IN_MIGRATIONS_REJECT_MESSAGE = [
-  'deploy: --platform cloudflare will not run a PostgreSQL app’s checked-in migrations.',
-  'This backend applies only remote D1 (SQLite) migrations. A PostgreSQL app’s',
-  'db/migrations/*.sql are applied over Hyperdrive by the managed platform (`void deploy`);',
-  'this self-host backend does not run them, so your database would be left unmigrated.',
-  'Deploy this app with `void deploy`, or apply the migrations yourself against your',
-  'Postgres and remove them from db/migrations/, then rerun.',
-].join('\n');
-
-/**
  * Every queue NAME the emitted artifact binds — `queues.producers[].queue` +
  * `queues.consumers[].queue`. Non-throwing: a wrong-shaped `queues` field or an entry with no
  * readable `queue` string contributes no name (an unnamed queue binds nothing), so only real,
@@ -2112,6 +2097,8 @@ export interface CloudflareDeployDeps {
   assertMigrationsDeployable?: typeof assertRemoteMigrationsDeployable;
   /** Migration apply-set equality gate seam (default: {@link checkWranglerMigrationApplySet}). */
   checkMigrationApplySet?: typeof checkWranglerMigrationApplySet;
+  /** PostgreSQL migration runner (default: {@link runPgMigrations}). */
+  applyPostgresMigrations?: typeof runPgMigrations;
   /**
    * Auth-schema validation seam (default: {@link validateAuthMigrationSchema}).
    * Runs POST-build: reads the generated auth schema the build emitted
@@ -3616,7 +3603,7 @@ export async function runCloudflareDeploy(
 
   // 1. App-class narrowing — v1 of `--backend cloudflare` supports ONE well-understood
   // shape: a FULL VOID APP (worker-bearing, running `routingPlugin`) on the Cloudflare
-  // Workers target, with D1/KV/R2/Queues/Hyperdrive and — on D1/SQLite — auth + ISR.
+  // Workers target, with D1/KV/R2/Queues/Hyperdrive, auth, and ISR.
   // Everything else FAILS CLOSED here, BEFORE any account / preflight / provision / build
   // op, reusing the SAME classifiers the managed deploy path uses (`detectPreset` +
   // `detectFramework`) so this fork can never disagree with the build about what the app is.
@@ -3758,38 +3745,23 @@ export async function runCloudflareDeploy(
     expectedCrons,
   } = await computeDesiredCloudflareResources(root, voidConfig, configPath);
 
-  // 2a. Postgres + auth guard — reject before any account op. This backend applies only
-  // checked-in `db/migrations/*.sql` to REMOTE D1 (SQLite); a Postgres/Hyperdrive app runs
-  // no D1 migrate step here, so it can neither create NOR verify the Better Auth tables. v1
-  // supports Void-managed auth on D1/SQLite only. (A pg app WITHOUT auth is still supported.)
-  if (authEnabled && dialect === 'postgresql') {
+  // 2a. PostgreSQL migrations are applied directly by this orchestrator after every local gate
+  // passes and immediately before the Worker upload. A checked-in migration therefore requires
+  // the production DATABASE_URL in the deploy environment; the URL is also the source used when
+  // provisioning a missing Hyperdrive config and is never serialized into the Worker artifact.
+  if (dialect === 'postgresql' && preBuildMigrations.length > 0 && !process.env.DATABASE_URL) {
     log.error(
       [
-        'deploy: --platform cloudflare does not yet support Void-managed auth on a PostgreSQL app.',
-        'This backend verifies + applies auth tables through remote D1 (SQLite) migrations',
-        'only; it cannot provision or verify the Better Auth schema on Postgres/Hyperdrive.',
-        'Deploy this app with `void deploy` (the managed platform), or switch the app to D1.',
+        'deploy: PostgreSQL migrations require DATABASE_URL for --platform cloudflare.',
+        'Set the production connection string in the deploy environment. Void uses it only to',
+        'provision Hyperdrive and apply checked-in migrations before uploading the Worker; it is',
+        'never written to wrangler.jsonc or the generated Worker config.',
       ].join('\n'),
     );
     return exit(1);
   }
 
-  // 2b. Postgres + checked-in migrations guard — reject before any account op. This backend
-  // applies ONLY remote D1 (SQLite) migrations; the remote-migrate step (8d/9) is gated on
-  // `desired.d1`, which a PostgreSQL app never has (it desires `hyperdrive` instead). The managed
-  // platform DOES apply a pg app's `db/migrations/*.sql` over Hyperdrive at deploy (its runtime
-  // migration handler), so shipping them through this self-host backend would silently deploy
-  // against an UNMIGRATED database → a 500 on the first query. Keyed on migration PRESENCE, not
-  // dialect alone: a pg app with an externally-managed schema and ZERO checked-in migrations is
-  // legitimately deployable and MUST still pass. `preBuildMigrations` is the SAME pre-build
-  // `collectMigrations` set the desired-database gate counts, so this guard and `desired.hyperdrive`
-  // agree. (A pg app WITH auth is already rejected at 2a.)
-  if (dialect === 'postgresql' && preBuildMigrations.length > 0) {
-    log.error(PG_CHECKED_IN_MIGRATIONS_REJECT_MESSAGE);
-    return exit(1);
-  }
-
-  // 2c. Custom migrations_pattern guard — FAIL CLOSED before any account op. v1 supports ONLY
+  // 2b. Custom migrations_pattern guard — FAIL CLOSED before any account op. v1 supports ONLY
   // Void's default migration convention: `db/migrations/*.sql` with wrangler's default
   // `migrations_pattern` (unset). An explicit `migrations_pattern` makes wrangler enumerate its
   // remote-apply set through Minimatch over a custom glob, which can diverge from Void's
@@ -4265,16 +4237,13 @@ export async function runCloudflareDeploy(
   // the auth-schema check (8c) and the local migration gates (8d).
   const migrations = collectMigrations(migrationsDir);
 
-  // Re-run the PostgreSQL checked-in-migrations reject on the POST-build set. The pre-build guard
-  // (step 2b) saw an empty set, but a build plugin can WRITE `db/migrations/*.sql` during
-  // `vite build`; the local migration apply/validate (step 8d) is gated on `desired.d1`, which a
-  // pg app never has, so those files would ship UNRUN and the worker would hit an unmigrated
-  // database. Re-checking here — before the remote migrate (step 9) and the deploy (step 11), the
-  // first remote mutations — fails closed without leaving a half-deployed account. A pg app with
-  // ZERO checked-in migrations still passes (an externally-managed schema is legitimately
-  // deployable — never reject on dialect alone).
-  if (dialect === 'postgresql' && migrations.length > 0) {
-    log.error(PG_CHECKED_IN_MIGRATIONS_REJECT_MESSAGE);
+  // A build plugin can add migrations after the pre-build source scan. Require the production URL
+  // again against the post-build ground truth so no injected migration can be silently skipped.
+  if (dialect === 'postgresql' && migrations.length > 0 && !process.env.DATABASE_URL) {
+    log.error(
+      'deploy: the build added PostgreSQL migrations, but DATABASE_URL is not set. ' +
+        'Refusing to upload a Worker against an unmigrated database.',
+    );
     return exit(1);
   }
 
@@ -4407,9 +4376,10 @@ export async function runCloudflareDeploy(
   // it only applies checked-in `db/migrations/*.sql`. So verify the checked-in migrations
   // PRODUCE the required Better Auth schema (tables + columns, incl. configured renames + plugin
   // tables) by reading the schema the BUILD generated (`.void/better-auth-schema.ts` — ground
-  // truth) and applying the migrations to in-memory SQLite. `dialect` is guaranteed `'sqlite'`
-  // here (pg+auth was rejected at 2a).
-  if (authEnabled) {
+  // truth) and applying the migrations to in-memory SQLite. PostgreSQL uses the same generated
+  // schema as the drift gate below; applying its SQL to SQLite would be invalid, so only the D1
+  // dialect needs this additional structural simulation.
+  if (authEnabled && dialect === 'sqlite') {
     try {
       await (deps.validateAuthMigrations ?? validateAuthMigrationSchema)(root, migrations);
     } catch (err) {
@@ -4430,14 +4400,14 @@ export async function runCloudflareDeploy(
     }
   }
 
-  // 8d. Local migration gates (D1/SQLite apps only; pg/Hyperdrive skip) — run POST-build,
+  // 8d. Local migration gates — run POST-build,
   // immediately before the remote apply, against the RE-COLLECTED post-build migrations. Moving
   // them here (from pre-build) closes the window where a build plugin could add/rewrite migration
   // SQL that step 9 would then apply to remote D1 ungated: `wrangler d1 migrations apply` reads
   // the live post-build files, and these gates now validate exactly that set. Nothing between the
   // build and here mutates remote state, so a failed gate never leaves a half-migrated account.
   let d1MigrateToken: string | undefined;
-  if (desired.d1) {
+  if (desired.d1 || desired.hyperdrive) {
     // 8d-i. Run the SAME gates the managed deploy runs — schema drift, journal coherence,
     // destructive-op-without-pragma — for EVERY D1 app REGARDLESS of migration count. A
     // `db/schema.ts` with no generated migration is drift the old count-gated check silently
@@ -4456,10 +4426,10 @@ export async function runCloudflareDeploy(
       return exit(1);
     }
 
-    // Resolve + validate the migrate target ONLY when there ARE checked-in migrations: a D1
+    // Resolve + validate the D1 migrate target ONLY when there ARE checked-in migrations: a D1
     // desired purely from DB-use or auth can have no `db/migrations`, and wrangler 4.107
     // HARD-FAILS `d1 migrations apply` on a missing/empty folder (it never no-ops).
-    if (migrations.length > 0) {
+    if (desired.d1 && migrations.length > 0) {
       // `migrations_dir` must be present in the config: wrangler defaults a missing value to
       // `./migrations` (relative to the config) and would apply an unrelated folder.
       const migrateConfig = parseRootWranglerConfig(configPath);
@@ -4606,7 +4576,34 @@ export async function runCloudflareDeploy(
     }
   }
 
-  // 9. Apply pending migrations to remote D1 — AFTER all local + ground-truth gates pass, so a
+  // 9. Apply pending PostgreSQL migrations transactionally before the Worker upload. The
+  // production URL is intentionally provided by the deploy environment rather than recovered
+  // from Hyperdrive (Cloudflare never returns the database password). `runPgMigrations` records
+  // applied names in `_void_migrations`, so retries are idempotent.
+  if (dialect === 'postgresql' && migrations.length > 0) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      log.error('deploy: DATABASE_URL disappeared before PostgreSQL migrations could run.');
+      return exit(1);
+    }
+    try {
+      const applied = await (deps.applyPostgresMigrations ?? runPgMigrations)(
+        migrationsDir,
+        databaseUrl,
+      );
+      cliLog.info('cloudflare_postgres_migrations', { applied: applied.length });
+      if (applied.length > 0) {
+        log.success(
+          `Applied ${applied.length} PostgreSQL migration${applied.length === 1 ? '' : 's'}.`,
+        );
+      }
+    } catch (err) {
+      log.error(`deploy: PostgreSQL migrations failed — ${getErrorMessage(err)}`);
+      return exit(1);
+    }
+  }
+
+  // 10. Apply pending migrations to remote D1 — AFTER all local + ground-truth gates pass, so a
   // failed gate never mutates remote D1. Uses the token resolved + validated at step 8d, and the
   // pinned root config (`-c`), which targets the account already verified by provision/drift.
   if (d1MigrateToken) {
