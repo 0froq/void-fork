@@ -21,6 +21,13 @@ export {
   type RoutingRuleResult,
 } from './routing-rules.ts';
 export {
+  createStaticEdgeHandler,
+  type EdgeAssetFetcher,
+  type StaticEdgeConfig,
+  type StaticEdgeEnv,
+  type StaticEdgeHandler,
+} from './runtime.ts';
+export {
   getContentType,
   resolveAssetContentType,
   resolveStaticPath,
