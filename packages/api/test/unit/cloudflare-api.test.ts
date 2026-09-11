@@ -129,6 +129,21 @@ describe('Hyperdrive connection strings', () => {
     });
   });
 
+  it('parses MySQL connection strings and defaults to port 3306', () => {
+    expect(parseHyperdriveConnectionString('mysql://user:p%40ss@mysql.example.com/app_db')).toEqual(
+      {
+        origin: {
+          database: 'app_db',
+          host: 'mysql.example.com',
+          password: 'p@ss',
+          port: 3306,
+          scheme: 'mysql',
+          user: 'user',
+        },
+      },
+    );
+  });
+
   it('sends parsed origin fields when creating Hyperdrive configs', async () => {
     fetchMock.mockResolvedValueOnce(cfSuccess({ id: 'hd_1', name: 'proj-hyperdrive' }));
 
@@ -179,10 +194,17 @@ describe('Hyperdrive connection strings', () => {
     });
   });
 
-  it('rejects malformed PostgreSQL URLs before calling Cloudflare', async () => {
+  it('rejects malformed database URLs before calling Cloudflare', async () => {
     await expect(
       createHyperdrive(ACCOUNT, TOKEN, 'proj-hyperdrive', 'postgresql://user@db.example.com/app'),
     ).rejects.toThrow(/password/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported database URL schemes before calling Cloudflare', async () => {
+    await expect(
+      createHyperdrive(ACCOUNT, TOKEN, 'proj-hyperdrive', 'sqlite://user:pass@db.example.com/app'),
+    ).rejects.toThrow(/mysql:\/\//i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -1023,13 +1023,15 @@ const app = new Hono<ApiEnv>()
     if (
       requestedDialect !== undefined &&
       requestedDialect !== 'sqlite' &&
-      requestedDialect !== 'postgresql'
+      requestedDialect !== 'postgresql' &&
+      requestedDialect !== 'mysql'
     ) {
-      return context.json({ error: 'invalid dialect, must be sqlite or postgresql' }, 400);
+      return context.json({ error: 'invalid dialect, must be sqlite, postgresql, or mysql' }, 400);
     }
 
     if (
       requestedDialect === 'postgresql' ||
+      requestedDialect === 'mysql' ||
       (requestedDialect === undefined &&
         resources.some((r) => r.type === 'hyperdrive') &&
         !resources.some((r) => r.type === 'd1'))
@@ -2029,7 +2031,7 @@ const app = new Hono<ApiEnv>()
     });
   })
 
-  // Provision Hyperdrive for a PostgreSQL project
+  // Provision Hyperdrive for an external database project
   .post('/:id/database', async (context) => {
     const projectId = context.req.param('id');
     const project = await getProject(context.get('db'), projectId);
@@ -2052,10 +2054,6 @@ const app = new Hono<ApiEnv>()
     }
 
     const { connectionString } = await context.req.json<{ connectionString: string }>();
-    if (!connectionString?.startsWith('postgres')) {
-      return context.json({ error: 'Invalid connection string' }, 400);
-    }
-
     const { createHyperdrive, updateHyperdrive, getHyperdriveByName, deleteHyperdrive } =
       await import('../provisioning/cloudflare-api.ts');
     const { createResource, getProjectResources } = await import('../db.ts');
@@ -2168,7 +2166,7 @@ const app = new Hono<ApiEnv>()
     return context.json({ ok: true });
   })
 
-  // Update PostgreSQL connection string (updates Hyperdrive config)
+  // Update external database connection string (updates Hyperdrive config)
   .put('/:id/database-url', async (context) => {
     const projectId = context.req.param('id');
     const project = await getProject(context.get('db'), projectId);
@@ -2185,10 +2183,6 @@ const app = new Hono<ApiEnv>()
     }
 
     const { connectionString } = await context.req.json<{ connectionString: string }>();
-    if (!connectionString?.startsWith('postgres')) {
-      return context.json({ error: 'Invalid connection string' }, 400);
-    }
-
     const { createHyperdrive, updateHyperdrive, getHyperdriveByName, deleteHyperdrive } =
       await import('../provisioning/cloudflare-api.ts');
     const { createResource, getProjectResources } = await import('../db.ts');
@@ -2316,7 +2310,7 @@ const app = new Hono<ApiEnv>()
     return context.json({ ok: true });
   })
 
-  // Retrieve the stored (encrypted-at-rest) PostgreSQL connection string
+  // Retrieve the stored (encrypted-at-rest) external database connection string
   .get('/:id/database-url', async (context) => {
     const projectId = context.req.param('id');
     const project = await getProject(context.get('db'), projectId);

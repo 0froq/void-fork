@@ -1895,6 +1895,87 @@ describe('POST /projects/:id/deploy', () => {
       }
     });
 
+    it('negotiates protocol v2 and runs MySQL migrations', async () => {
+      const user = await createTestUser(env.db);
+      const project = await createTestProject(env.db, user.id, 'migrate-v2-mysql-test');
+      mockCfApi();
+
+      const calls: Array<string> = [];
+      const originalDispatch = env.DISPATCH;
+      env.DISPATCH = {
+        get: () => ({
+          fetch: async (req: Request) => {
+            const url = new URL(req.url);
+            calls.push(`${req.method} ${url.pathname}`);
+            if (url.pathname === '/__void/ready') {
+              return Response.json({ ready: true });
+            }
+            if (url.pathname === '/__void/migrate/capabilities') {
+              return Response.json({
+                protocolVersion: 2,
+                endpoints: {
+                  app: '/__void/migrate/app',
+                  reconcile: '/__void/migrate/app/attempt/:attemptId',
+                },
+                dialect: 'mysql',
+                classifierVersion: 1,
+                migrationListHash: 'sha256:mysql-list',
+                destructiveValidation: 'passed',
+              });
+            }
+            if (url.pathname === '/__void/migrate/app') {
+              return Response.json({
+                ok: true,
+                protocolVersion: 2,
+                attemptId: 'attempt_mysql',
+                confirmedApplied: ['001_create_table.sql'],
+                confirmedSkipped: [],
+                stability: 'stable',
+                migrations: [
+                  {
+                    name: '001_create_table.sql',
+                    applied: true,
+                    status: 'applied',
+                    stability: 'stable',
+                    durationMs: 2,
+                  },
+                ],
+              });
+            }
+            return new Response('unexpected', { status: 500 });
+          },
+        }),
+      } as unknown as DispatchNamespace;
+
+      try {
+        const res = await app.fetch(
+          await buildDeployRequest(env, project.id, user.jwt, {
+            manifest: {
+              version: 3,
+              bindings: {},
+              migrations: {
+                dialect: 'mysql',
+                pending: 1,
+                protocolVersion: 2,
+                classifierVersion: 1,
+                migrationListHash: 'sha256:mysql-list',
+                stability: 'stable',
+              },
+            },
+          }),
+          env,
+        );
+        expect(res.status).toBe(200);
+        const events = parseDeployStream(await res.text());
+        expect(events.at(-1)).toMatchObject({ event: 'done' });
+        expect(calls).toContain('GET /__void/migrate/capabilities');
+        expect(calls).toContain('POST /__void/migrate/app');
+        expect(calls).not.toContain('POST /__void/migrate');
+      } finally {
+        env.DISPATCH = originalDispatch;
+      }
+    });
+
     it('capability negotiation surfaces the classifierVersion skew reason', async () => {
       const user = await createTestUser(env.db);
       const project = await createTestProject(env.db, user.id, 'migrate-v2-skew-test');
@@ -3976,6 +4057,28 @@ describe('POST /projects/:id/deploy/preflight', () => {
       );
       expect(error).toBeUndefined();
     });
+  });
+});
+
+describe('validateManifestShape — migrations', () => {
+  const base = { version: 3, bindings: {} };
+
+  it('accepts MySQL migrations', () => {
+    expect(
+      validateManifestShape({
+        ...base,
+        migrations: { dialect: 'mysql', pending: 1 },
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects unsupported migration dialects', () => {
+    expect(
+      validateManifestShape({
+        ...base,
+        migrations: { dialect: 'oracle', pending: 1 },
+      }),
+    ).toMatch(/sqlite, postgresql, mysql/);
   });
 });
 

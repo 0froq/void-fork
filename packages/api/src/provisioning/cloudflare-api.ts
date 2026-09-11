@@ -473,7 +473,7 @@ type HyperdriveOrigin = Readonly<{
   host: string;
   password: string;
   port?: number;
-  scheme: 'postgres' | 'postgresql';
+  scheme: 'postgres' | 'postgresql' | 'mysql';
   user: string;
 }>;
 
@@ -488,7 +488,7 @@ function decodeUrlPart(value: string): string {
     return decodeURIComponent(value);
   } catch {
     throw new InvalidHyperdriveConnectionStringError(
-      'Invalid PostgreSQL connection string encoding.',
+      'Invalid Hyperdrive connection string encoding.',
     );
   }
 }
@@ -498,42 +498,42 @@ export function parseHyperdriveConnectionString(connectionString: string): Hyper
   try {
     url = new URL(connectionString);
   } catch {
-    throw new InvalidHyperdriveConnectionStringError('Invalid PostgreSQL connection string.');
+    throw new InvalidHyperdriveConnectionStringError('Invalid Hyperdrive connection string.');
   }
 
   const scheme = url.protocol.slice(0, -1);
-  if (scheme !== 'postgres' && scheme !== 'postgresql') {
+  if (scheme !== 'postgres' && scheme !== 'postgresql' && scheme !== 'mysql') {
     throw new InvalidHyperdriveConnectionStringError(
-      'Connection string must start with "postgres://" or "postgresql://".',
+      'Connection string must start with "postgres://", "postgresql://", or "mysql://".',
     );
   }
   if (!url.hostname) {
     throw new InvalidHyperdriveConnectionStringError(
-      'PostgreSQL connection string must include a host.',
+      'Hyperdrive connection string must include a host.',
     );
   }
   if (!url.username) {
     throw new InvalidHyperdriveConnectionStringError(
-      'PostgreSQL connection string must include a user.',
+      'Hyperdrive connection string must include a user.',
     );
   }
   if (!url.password) {
     throw new InvalidHyperdriveConnectionStringError(
-      'PostgreSQL connection string must include a password.',
+      'Hyperdrive connection string must include a password.',
     );
   }
 
   const database = decodeUrlPart(url.pathname.replace(/^\/+/, ''));
   if (!database) {
     throw new InvalidHyperdriveConnectionStringError(
-      'PostgreSQL connection string must include a database name.',
+      'Hyperdrive connection string must include a database name.',
     );
   }
 
-  const port = url.port ? Number(url.port) : 5432;
+  const port = url.port ? Number(url.port) : scheme === 'mysql' ? 3306 : 5432;
   if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
     throw new InvalidHyperdriveConnectionStringError(
-      'PostgreSQL connection string port is invalid.',
+      'Hyperdrive connection string port is invalid.',
     );
   }
 

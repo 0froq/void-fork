@@ -329,6 +329,74 @@ describe('PUT /projects/:id/database-url', () => {
     ]);
   });
 
+  it('creates Hyperdrive from a MySQL URL when no resource exists', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'mysql-app');
+    const hyperdriveName = `${project.id}-hyperdrive`.replaceAll('_', '-').toLowerCase();
+
+    mockCfApi({
+      createHyperdrive: (_url, init) => {
+        expect(JSON.parse(init?.body as string)).toEqual({
+          name: hyperdriveName,
+          origin: {
+            database: 'appdb',
+            host: 'mysql.example.com',
+            password: 'p@ss',
+            port: 3306,
+            scheme: 'mysql',
+            user: 'void_user',
+          },
+        });
+        return cfSuccess({ id: 'hd-mysql-created', name: hyperdriveName });
+      },
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString: 'mysql://void_user:p%40ss@mysql.example.com/appdb',
+        }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const rows = await env.db.select().from(resources).where(eq(resources.project_id, project.id));
+    expect(rows).toMatchObject([
+      { type: 'hyperdrive', cf_id: 'hd-mysql-created', binding_name: 'HYPERDRIVE' },
+    ]);
+  });
+
+  it('rejects unsupported database connection schemes', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'invalid-db-scheme');
+    const cf = mockCfApi();
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/database-url`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ connectionString: 'sqlite://user:pass@db.example.com/appdb' }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: 'Connection string must start with "postgres://", "postgresql://", or "mysql://".',
+    });
+    expect(cf).not.toHaveBeenCalled();
+  });
+
   it('updates the existing Hyperdrive config when the resource exists', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'pg-app-update');

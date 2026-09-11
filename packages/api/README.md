@@ -85,7 +85,7 @@ drizzle/
   - secrets
   - domains
   - usage
-  - PostgreSQL project database provisioning/update
+  - PostgreSQL and MySQL project database provisioning/update
   - `/projects/:id/github` — connect/inspect/update/disconnect the GitHub repo (POST/GET/PATCH/DELETE; auth + ownership)
 - `GET /usage`
 

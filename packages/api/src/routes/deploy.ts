@@ -174,7 +174,7 @@ type WorkerMigrationCapabilities = Readonly<{
     auth?: string;
     reconcile: string;
   };
-  dialect: 'sqlite';
+  dialect: 'sqlite' | 'postgresql' | 'mysql';
   classifierVersion: number;
   migrationListHash: string;
   destructiveValidation: 'passed';
@@ -229,7 +229,7 @@ async function probeWorkerMigrationCapabilities(
     }
     if (
       data?.protocolVersion !== 2 ||
-      data?.dialect !== 'sqlite' ||
+      (data?.dialect !== 'sqlite' && data?.dialect !== 'postgresql' && data?.dialect !== 'mysql') ||
       typeof data.classifierVersion !== 'number' ||
       typeof data.migrationListHash !== 'string' ||
       data.destructiveValidation !== 'passed'
@@ -585,7 +585,7 @@ export function validateManifestShape(parsed: unknown): string | null {
     // dispatch path (`manifest.migrations.pending > 0`). A wrong-typed value
     // would reach the CF migration runner and crash mid-deploy.
     if (mig.dialect !== undefined) {
-      const allowed = ['sqlite', 'postgresql'];
+      const allowed = ['sqlite', 'postgresql', 'mysql'];
       if (typeof mig.dialect !== 'string' || !allowed.includes(mig.dialect)) {
         return `invalid manifest shape: migrations.dialect must be one of ${allowed.join(', ')}`;
       }

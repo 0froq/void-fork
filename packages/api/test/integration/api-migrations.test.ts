@@ -381,7 +381,7 @@ describe('GET /projects/:id/migrations', () => {
     expect(await res.json()).toEqual({ applied: [] });
   });
 
-  it('returns applied migrations from platform metadata for PostgreSQL projects', async () => {
+  it('returns applied migrations from platform metadata for external database projects', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'pg-mig-status');
     await insertHyperdriveResource(env.db, project.id);
@@ -405,12 +405,14 @@ describe('GET /projects/:id/migrations', () => {
       ],
     };
 
-    const explicitDialect = await app.fetch(
-      authedReq(`/projects/${project.id}/migrations?dialect=postgresql`, user.jwt),
-      env,
-    );
-    expect(explicitDialect.status).toBe(200);
-    expect(await explicitDialect.json()).toEqual(expected);
+    for (const dialect of ['postgresql', 'mysql']) {
+      const explicitDialect = await app.fetch(
+        authedReq(`/projects/${project.id}/migrations?dialect=${dialect}`, user.jwt),
+        env,
+      );
+      expect(explicitDialect.status).toBe(200);
+      expect(await explicitDialect.json()).toEqual(expected);
+    }
 
     const inferredDialect = await app.fetch(
       authedReq(`/projects/${project.id}/migrations`, user.jwt),

@@ -17,6 +17,7 @@
 - Drizzle helpers: on `drizzle-orm@0.45.x`, use `drizzle-zod`, `drizzle-valibot`, and `drizzle-arktype`; infer validators from `db/schema.ts` via `void/drizzle-valibot` and import them from `@schema`.
 - SQLite PRAGMA: use bare names or single-quoted strings for `PRAGMA table_info(...)` and `PRAGMA index_list(...)`; do not use double-quoted identifiers.
 - Dual SQLite/Postgres paths: keep dialect-specific imports in dialect-specific modules so Workers bundles do not pull `pg` into SQLite/D1 code.
+- Database dialect support is end-to-end: widen framework manifests, platform validation and capability negotiation, migration status routing, Hyperdrive URL parsing, and integration tests together.
 - Schema deploy safety: migrations must be backward compatible while old code may still run. Additive changes are safe; renames, drops, and type changes need a two-phase rollout. Use `VOID_TEST_DATABASE_URL` for real-Postgres checks and keep `fileParallelism: false`.
 
 ## Cloudflare And Deploys
