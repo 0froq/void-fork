@@ -79,6 +79,11 @@ jobs:
       - run: vp check
         if: ${{ matrix.shard == 'unit' }}
 
+      # Unit suites import the core package through its public `void/*` exports and exercise
+      # generated CLI assets, so they need the core build even though they skip playground builds.
+      - run: vp run build:core
+        if: ${{ matrix.shard == 'unit' }}
+
       - run: vp test run --project unit
         if: ${{ matrix.shard == 'unit' }}
 

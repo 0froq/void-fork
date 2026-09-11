@@ -38,7 +38,7 @@ let configPath = '';
 let emittedPath = '';
 
 // Real-SHAPED ids the guard treats as genuine (`isRealD1Id` UUID / `isRealKvId` 32-hex). Because
-// `void deploy --provision` writes real ids into the root config before the build, and the build
+// Provisioning writes real ids into the root config before the build, and the build
 // merges the root config into the emitted artifact, an overlaid root `wrangler.jsonc` carrying
 // these ids yields an emitted artifact whose id-bearing bindings match the pinned snapshot — the
 // exact clean-deploy condition the guard authorizes.

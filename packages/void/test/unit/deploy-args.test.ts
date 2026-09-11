@@ -99,7 +99,7 @@ describe('parseDeployArgs', () => {
     expect(result.provision).toBeUndefined();
   });
 
-  it('parses --backend cloudflare --provision', () => {
+  it('accepts the legacy --provision flag for backwards compatibility', () => {
     const result = parseDeployArgs(['--backend', 'cloudflare', '--provision']);
     expect(result.backend).toBe('cloudflare');
     expect(result.provision).toBe(true);

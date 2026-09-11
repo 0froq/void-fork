@@ -48,6 +48,14 @@ export type IsolatedPlayground = {
   cleanup: () => void;
 };
 
+export function shouldCopyPlaygroundPath(sourceRoot: string, path: string): boolean {
+  const normalizedSourceRoot = sourceRoot.replaceAll('\\', '/');
+  const normalizedPath = path.replaceAll('\\', '/');
+  const relativePath = relative(normalizedSourceRoot, normalizedPath);
+  const topLevelEntry = relativePath.split('/')[0];
+  return relativePath === '' || !GENERATED_PLAYGROUND_ENTRIES.has(topLevelEntry);
+}
+
 /**
  * Copies a playground into the gitignored playground-local workspace so tests that rewrite configs,
  * source, or build output can run beside tests using the checked-in playground. Dependencies stay
@@ -65,9 +73,10 @@ export function createIsolatedPlayground(
   cpSync(sourceRoot, root, {
     recursive: true,
     filter(path) {
-      const relativePath = relative(sourceRoot, path);
-      const topLevelEntry = relativePath.split('/')[0];
-      return relativePath === '' || !GENERATED_PLAYGROUND_ENTRIES.has(topLevelEntry);
+      // `cpSync` reports native backslash paths on Windows, while these workspace paths are
+      // normalized to forward slashes. Normalize before using the POSIX path helpers or the
+      // top-level `node_modules` junction is copied and the replacement junction already exists.
+      return shouldCopyPlaygroundPath(sourceRoot, path);
     },
   });
 

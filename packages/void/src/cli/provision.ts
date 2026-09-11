@@ -82,9 +82,8 @@ export interface ProvisionDriftResult {
  * Queues are NAME-bearing (no id in the config), so they are NOT part of this
  * id-drift check. A missing config file yields every desired resource as missing.
  *
- * Used by the deploy orchestrator (Task 6) for BOTH the no-`--provision` DRIFT
- * CHECK (any `missing` → guidance error) and the CI `--provision` no-op gate
- * (`missing.length === 0` ⇒ a provable no-op the committed config already covers).
+ * Used by the deploy orchestrator to decide whether automatic provisioning is needed
+ * and to verify that every id-bearing resource was satisfied afterward.
  * A malformed/duplicate-binding config makes {@link readProvisionedBindingEntry}
  * throw — fail closed, exactly as the provisioner would.
  */
@@ -3405,8 +3404,8 @@ const RESOURCE_NAME_GRAMMARS: Record<
  * violation, before the account gate or any wrangler/REST call.
  *
  * Exported — like {@link isQueueConfirmedAbsent} — so the deploy orchestrator's
- * no-`--provision` queue probe (`cli/deploy.ts`) gates names on the SAME rules this
- * provisioner enforces, instead of only the `--provision` path being protected. Queue names
+ * pre-provision queue probe (`cli/deploy.ts`) gates names on the SAME rules this
+ * provisioner enforces. Queue names
  * are taken verbatim from filenames with no sanitization, so without this gate a name
  * beginning with `-` reaches wrangler as a FLAG rather than a positional.
  */

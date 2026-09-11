@@ -1237,44 +1237,6 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Recursively normalize every `Map` (at any depth) to a plain object keyed by its entries, so a
- * Map-shaped value can be compared with {@link deepEqual} — which is JSON-shaped and does NOT
- * handle `Map`. Handles the nested `Map<string, Map<…>>` {@link snapshotPassthroughIdentities}
- * returns, as well as the flat `Map<string, string>` / `Map<string, unknown>` the other snapshots
- * return. Arrays and plain objects pass through with their elements normalized.
- */
-function normalizeMapsForCompare(value: unknown): unknown {
-  if (value instanceof Map) {
-    const obj: Record<string, unknown> = {};
-    for (const [key, val] of value) {
-      obj[String(key)] = normalizeMapsForCompare(val);
-    }
-    return obj;
-  }
-  if (Array.isArray(value)) {
-    return value.map(normalizeMapsForCompare);
-  }
-  if (value !== null && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = normalizeMapsForCompare(val);
-    }
-    return out;
-  }
-  return value;
-}
-
-/**
- * Structural equality for the possibly-`Map`-shaped pre-build snapshots — normalizes every Map to
- * a plain object first (see {@link normalizeMapsForCompare}), then compares with the key-order-
- * independent {@link deepEqual}. Used to assert the step-6 binding/pass-through snapshots match the
- * pre-probe ones captured before any project code ran.
- */
-function snapshotsDeepEqual(a: unknown, b: unknown): boolean {
-  return deepEqual(normalizeMapsForCompare(a), normalizeMapsForCompare(b));
-}
-
-/**
  * The reject shown when a PostgreSQL app ships checked-in `db/migrations/*.sql` through the
  * self-host Cloudflare backend. This backend applies ONLY remote D1 (SQLite) migrations; a pg
  * app desires Hyperdrive (never `desired.d1`), so its migrations would never run here and the
@@ -2132,8 +2094,6 @@ export interface CloudflareDeployDeps {
    * validate.
    */
   readEmittedWorkerVars?: (root: string) => EmittedWorkerVarsResult;
-  /** Override CI / non-interactive detection (default: `!stdin.isTTY || getTokenSource()==='ci'`). */
-  isCI?: boolean;
   /** Override `process.exit` (tests assert the exit code without halting). */
   exit?: (code: number) => never;
 }
@@ -2444,7 +2404,7 @@ function assertDistinctKvNamespaces(
           `"${configPath}" both point at KV namespace id ${JSON.stringify(id)}. They resolved to a ` +
           `single namespace when they were provisioned, so the two bindings share one namespace ` +
           `and one quota slot. Give one of them a fresh namespace (create it, or drop its entry ` +
-          `from "${configPath}" and re-run with --provision), then retry.`,
+          `from "${configPath}" and rerun the deploy), then retry.`,
       );
     }
     bindingById.set(id, binding);
@@ -3430,7 +3390,7 @@ function createDeployWranglerRunner(
  * secret preflight (`cli/env-validation.ts`). Flow:
  *
  *   app-class guard → desired set (from source, pre-build) → preflight (auth +
- *   account pin + CI gate) → provision OR drift-check → ensure worker name →
+ *   account pin) → automatically ensure resources → ensure worker name →
  *   remote D1 migrate → secrets (warn + gate) → clean-env build → wrangler deploy
  *
  * ORDERING DECISION (documented): the secrets GATE runs AFTER provision + remote
@@ -3590,7 +3550,7 @@ export async function runCloudflareDeploy(
   // 1f. WebSocket / Durable Object guard — FAIL CLOSED before any account op. For a `.ws.ts`
   // route, the self-host `vite build` emits a `durable_objects` binding plus a DO migration
   // block keyed `new_classes` (index.ts `mergeBindings`, via the SAME `scanWebSocketRoutesSync`
-  // scan; also cli/wrangler.ts for --provision) — i.e. a KEY-VALUE-backed Durable Object
+  // scan; also cli/wrangler.ts for provisioning) — i.e. a KEY-VALUE-backed Durable Object
   // namespace. As of Cloudflare's 2026-07-09 change, a fresh account (every Workers Free
   // account, and any account with no pre-existing KV-backed namespace) REJECTS a `new_classes`
   // migration at `wrangler deploy` ("create a namespace using a new_sqlite_classes migration
@@ -3727,7 +3687,7 @@ export async function runCloudflareDeploy(
 
   // 3b-i. Pin the wrangler UPLOADER bundle NOW — at the START of the credentialed sequence, BEFORE
   // any project code runs and BEFORE any credentialed wrangler call. The env-schema probe (3c), the
-  // `whoami` auth check (3e), and — under `--provision` — the provisioner all run before the build,
+  // `whoami` auth check (3e), and the automatic provisioner all run before the build,
   // and the probe executes ARBITRARY project code (the user's Vite config + env.ts). That code runs
   // with the parent's Cloudflare creds scrubbed so it can only edit FILES — but that INCLUDES the
   // `wrangler-dist` bundle every credentialed wrangler run executes (whoami, the provisioner's own
@@ -3800,6 +3760,24 @@ export async function runCloudflareDeploy(
   }
   const schemaFacts: SelfHostSchemaFacts = schemaResult.facts;
 
+  // The schema probe above imports project code. Its child has no Cloudflare credentials, but it
+  // can still rewrite files — including the root Wrangler config that every authenticated command
+  // below consumes. Compare the full parsed config with the pre-probe value before `whoami` or the
+  // provisioner gets a chance to run. This placement cleanly distinguishes an illicit probe write
+  // from the provisioner's legitimate id/migrations_dir updates, so automatic provisioning does
+  // not create a laundering exception. Formatting-only JSONC rewrites remain harmless because the
+  // comparison is semantic and key-order-independent.
+  if (!deepEqual(rootConfig, parseRootWranglerConfig(configPath))) {
+    log.error(
+      [
+        'deploy: the root wrangler config changed during the pre-build env-schema probe.',
+        'Refusing to run an authenticated Cloudflare command with a config rewritten by project',
+        'code. Rebuild from a clean checkout, then rerun.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
   // 3e. Confirm wrangler auth. `whoami` gets the SAME `-c`/`--env=`/pinned-transport
   // context as migrate/deploy, so it authenticates against the exact endpoint they use.
   const runWrangler = deps.runWrangler ?? createDeployWranglerRunner(root, accountId, apiBaseUrl);
@@ -3816,55 +3794,19 @@ export async function runCloudflareDeploy(
       [
         'deploy: not authenticated with Cloudflare.',
         'Run `wrangler login`, or set CLOUDFLARE_API_TOKEN (a token with',
-        'Workers Scripts:Edit + read on your bound resources; --provision also needs',
-        'per-product *:Edit for D1/KV/R2/Queues/Hyperdrive). Then rerun.',
+        'Workers Scripts:Edit + read on your bound resources, plus per-product *:Edit',
+        'for any missing D1/KV/R2/Queue/Hyperdrive resource). Then rerun.',
       ].join('\n'),
     );
     return exit(1);
   }
 
-  // CI gate for --provision: fail closed in non-interactive shells unless the
-  // committed config already covers every desired resource (a provable no-op) —
-  // CI cannot commit back the ids a create would mint, so a re-run would dup.
-  const isCI = deps.isCI ?? (!process.stdin.isTTY || getTokenSource() === 'ci');
-  if (options.provision && isCI) {
-    const { missing } = provisionModule.checkCloudflareProvisionDrift(configPath, desired);
-    // Queues are name-bearing (no id in the committed config), so the id-drift check
-    // CANNOT prove a desired queue is already created — and `provisionCloudflareResources`
-    // would run `wrangler queues create` for it, mutating the account. That breaks the
-    // "CI --provision is a provable no-op" contract, so fail closed on ANY desired queue.
-    if (missing.length > 0 || desired.queues.length > 0) {
-      const lines = ['deploy: --provision is disabled in CI / non-interactive shells.'];
-      if (missing.length > 0) {
-        lines.push('', 'These id-bearing resources are not yet in your committed wrangler.jsonc:');
-        for (const entry of missing) {
-          const reason = reasons.get(entry.binding);
-          lines.push(
-            `  • ${entry.binding} (${CLOUDFLARE_RESOURCE_LABELS[entry.kind]})${reason ? ` — ${reason}` : ''}`,
-          );
-        }
-      }
-      if (desired.queues.length > 0) {
-        lines.push(
-          '',
-          'These queues cannot be proven already created (queues carry no id in the config):',
-        );
-        for (const name of desired.queues) {
-          lines.push(`  • ${name} (queue)`);
-        }
-      }
-      lines.push(
-        '',
-        'Provision them locally (`void deploy --backend cloudflare --provision`), commit the',
-        'updated wrangler.jsonc, then let CI run `void deploy --backend cloudflare`.',
-      );
-      log.error(lines.join('\n'));
-      return exit(1);
-    }
-  }
-
-  // 4. Provision (--provision) OR drift-check (no --provision).
-  if (options.provision) {
+  // 4. Ensure every inferred resource exists. Missing id-bearing bindings trigger this
+  // immediately; queues are probed below and trigger it when absent. `--provision` remains a
+  // backwards-compatible force switch, but normal local and CI deploys need no extra command.
+  // The provisioner is read-first and idempotent, and its local lock/config postconditions remain
+  // the single authority for resource creation.
+  const provisionAndVerify = async (): Promise<void> => {
     // Re-verify the uploader immediately before the credentialed provisioner, which runs
     // `wrangler <res> create` with the CF token. Nothing between `whoami` and here runs project
     // code, so this is defense-in-depth against the same probe-swap vector — against the one
@@ -3918,28 +3860,46 @@ export async function runCloudflareDeploy(
           missing,
           reasons,
           'deploy: provisioning did not satisfy every required resource:',
-          'Rerun `void deploy --backend cloudflare --provision`, or provision the listed resources manually.',
+          'Retry `void deploy --backend cloudflare`, or provision the listed resources manually.',
         ),
       );
       return exit(1);
     }
-  } else {
-    const { missing } = provisionModule.checkCloudflareProvisionDrift(configPath, desired);
-    if (missing.length > 0) {
+    if (
+      desired.d1 &&
+      readStoredResourceName(
+        parseRootWranglerConfig(configPath),
+        'd1_databases',
+        desired.d1.binding,
+        'migrations_dir',
+      ) !== desired.d1.migrationsDir
+    ) {
       log.error(
-        formatCloudflareDriftMessage(
-          missing,
-          reasons,
-          'Deploy blocked — resources not yet provisioned in your Cloudflare account:',
-          'Run:  void deploy --backend cloudflare --provision',
-        ),
+        `deploy: provisioning did not set migrations_dir for D1 binding ${desired.d1.binding}. Retry \`void deploy --backend cloudflare\`.`,
       );
       return exit(1);
     }
+  };
+
+  const { missing: initiallyMissing } = provisionModule.checkCloudflareProvisionDrift(
+    configPath,
+    desired,
+  );
+  const d1NeedsConfigReconciliation =
+    desired.d1 != null &&
+    readStoredResourceName(
+      parseRootWranglerConfig(configPath),
+      'd1_databases',
+      desired.d1.binding,
+      'migrations_dir',
+    ) !== desired.d1.migrationsDir;
+  if (options.provision || initiallyMissing.length > 0 || d1NeedsConfigReconciliation) {
+    await provisionAndVerify();
+  } else {
     // Queue names are taken VERBATIM from filenames (`queues/<name>.ts` → `<name>`, see
     // `queues/scan.ts`) with no sanitization, and the probe below passes each one to wrangler
     // as an ARGV positional. Gate them on the SAME `assertValidResourceName('queue', …)` the
-    // `--provision` path already applies, BEFORE the probe runs: a name beginning with `-` is
+    // provisioner applies, BEFORE the probe runs: a name beginning with `-` is
     // parsed by wrangler as a FLAG (`queues info --help` exits 0 printing usage), which the
     // probe would classify as inconclusive and wave through — silently forfeiting the
     // early-ordering guarantee this whole step exists to provide. Collect EVERY offending name
@@ -3971,7 +3931,7 @@ export async function runCloudflareDeploy(
     // desired queue that was never created is invisible to it. `wrangler deploy` (step 11)
     // does reject a missing queue before uploading, but only AFTER the build (step 7) and
     // the remote D1 apply (step 9) have run. Probe each desired queue by name HERE so that
-    // failure lands before either. `--provision` needs no probe: it creates the queues.
+    // an absent queue can trigger the provisioner before either.
     //
     // `queues list` is unusable (a human table with no `--json`, whose single un-looped
     // page-1 request silently truncates on large accounts), so this is N `queues info`
@@ -3989,18 +3949,7 @@ export async function runCloudflareDeploy(
       }
     }
     if (absentQueues.length > 0) {
-      log.error(
-        [
-          'Deploy blocked — these queues do not exist in your Cloudflare account:',
-          ...absentQueues.map((name) => `  • ${name} (queue)`),
-          '',
-          'Create them by rerunning with --provision:',
-          '  void deploy --backend cloudflare --provision',
-          'Or create each one yourself:',
-          ...absentQueues.map((name) => `  wrangler queues create ${name}`),
-        ].join('\n'),
-      );
-      return exit(1);
+      await provisionAndVerify();
     }
   }
 
@@ -4064,53 +4013,6 @@ export async function runCloudflareDeploy(
     preBuildRootConfig,
     needsSandbox,
   );
-
-  // 6a. Reject a PRE-BUILD PROBE that laundered the root bindings (NO-PROVISION path only). The
-  // step-3c env-schema probe runs project code BEFORE the step-6 snapshots above, so a probe that
-  // rewrote wrangler.jsonc — swapping a binding id, ADDING an id-bearing / pass-through binding, or
-  // changing unsafe / tail_consumers / routes / containers — would be captured HERE as the trusted
-  // baseline, emitted by the build, and waved through the step-10 verifier that pins against it.
-  // `rootConfig` was parsed at step 3, BEFORE any project code ran, so it is the pre-probe ground
-  // truth. Rebuild the same four snapshots from it and assert they deep-equal the step-6 ones.
-  //
-  // Only in the no-provision path: the ONLY config write between the pre-probe parse and step 6 is
-  // step 5's reconcile, which touches only top-level `name`/`account_id` — none of which any of
-  // these snapshots read (they cover d1/kv/r2/hyperdrive ids, pass-through binding entries,
-  // unsafe/tail/routes raw fields, and containers) — so absent laundering the two are identical and
-  // a clean deploy always passes. Under `--provision` the provisioner legitimately writes real ids
-  // into the config after the probe, so pre-probe ≠ step-6 by design; closing that path needs
-  // delta-authorization against a live-provision model and is a known residual tracked in #283.
-  if (!options.provision) {
-    const preProbeBindingIdentities = snapshotBindingIdentities(rootConfig);
-    const preProbePassthroughIdentities = snapshotPassthroughIdentities(rootConfig);
-    const preProbePassthroughRawFields = snapshotPassthroughRawFields(rootConfig);
-    const preProbeExpectedContainers = reconstructExpectedContainers(
-      voidConfig,
-      root,
-      rootConfig,
-      needsSandbox,
-    );
-    // `snapshotBindingIdentities` / `…PassthroughIdentities` / `…PassthroughRawFields` return Maps,
-    // which the JSON-shaped `deepEqual` cannot compare — use `snapshotsDeepEqual` (Map-aware).
-    // `expectedContainers` is a plain array, so `deepEqual` handles it directly.
-    const rootBindingsLaundered =
-      !snapshotsDeepEqual(preProbeBindingIdentities, bindingIdentitySnapshot) ||
-      !snapshotsDeepEqual(preProbePassthroughIdentities, passthroughIdentitySnapshot) ||
-      !snapshotsDeepEqual(preProbePassthroughRawFields, passthroughRawFields) ||
-      !deepEqual(preProbeExpectedContainers, expectedContainers);
-    if (rootBindingsLaundered) {
-      log.error(
-        [
-          'deploy: the root wrangler config’s bindings, pass-through entries, or containers changed',
-          'during the pre-build env-schema probe (the config differs from its state before any',
-          'project code ran). Refusing to deploy a config a pre-build step rewrote — the binding set',
-          'the deploy would ship no longer matches the one present before the probe. Rebuild from a',
-          'clean checkout, then rerun.',
-        ].join('\n'),
-      );
-      return exit(1);
-    }
-  }
 
   // (The LOCAL migration gates run POST-build at step 8d, immediately before the remote
   // apply — not here — so they validate the exact files on disk AFTER the build. See step 8d.)
@@ -4376,8 +4278,8 @@ export async function runCloudflareDeploy(
             `deploy: D1 binding ${desired.d1.binding} has no "migrations_dir" in ${configPath}.`,
             'Refusing to run `wrangler d1 migrations apply` — wrangler would default to',
             '`./migrations` (relative to the config) and apply an unrelated folder to your',
-            'remote database, or error. Run `void deploy --backend cloudflare --provision`',
-            'once to set `migrations_dir` (it writes `./db/migrations`), or add it yourself.',
+            'remote database, or error. Automatic provisioning should have set this field;',
+            'rerun `void deploy --backend cloudflare`, or add it yourself.',
           ].join('\n'),
         );
         return exit(1);

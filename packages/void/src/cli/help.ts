@@ -52,12 +52,7 @@ const HELP_TREE: HelpTree = {
       },
       {
         command: '--backend cloudflare',
-        description: 'Deploy to your own Cloudflare account instead of the Void platform',
-      },
-      {
-        command: '--provision',
-        description:
-          'Create missing D1/KV/R2/Queue/Hyperdrive resources (with --backend cloudflare)',
+        description: 'Provision and deploy to your own Cloudflare account',
       },
       {
         command: '--debug',
@@ -71,10 +66,6 @@ const HELP_TREE: HelpTree = {
       {
         command: 'void deploy --backend cloudflare',
         description: 'Deploy to your own Cloudflare account',
-      },
-      {
-        command: 'void deploy --backend cloudflare --provision',
-        description: 'Provision missing resources, then deploy to Cloudflare',
       },
     ],
   },

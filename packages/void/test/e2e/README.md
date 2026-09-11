@@ -9,12 +9,10 @@ they run on **pushes to `main`** (see [In CI](#in-ci)).
 Deploys `playground/spa` (D1 + KV + cron) to the target account via `void deploy --backend cloudflare`,
 verifies the live worker answers HTTP 200, then deletes the worker and every resource it created.
 
-It does **not** drive `--provision`: that path fails closed in non-interactive shells by design (a
-spawned CLI has no TTY, and CI cannot commit back the ids a create would mint). So the test plays the
-provisioner's role itself — it creates the id-bearing D1 + KV directly with `wrangler … create`,
-writes their real ids into the app's root config exactly as `--provision` would, then runs the
-CI-safe `void deploy --backend cloudflare` (no `--provision`). That exercises the real
-build → tamper-guard → remote-migrations → `wrangler deploy` pipeline end to end.
+The test starts with an intentionally incomplete root config and runs only
+`void deploy --backend cloudflare`. The deploy automatically creates D1 + KV, persists their real
+ids, builds, applies the checked migration, and uploads the worker. This exercises the complete
+one-command path in the same non-interactive environment used by CI.
 
 ### Prerequisites
 

@@ -250,7 +250,7 @@ If `--project` is provided, purges that project's cache instead of the linked pr
 
 ```
 void deploy [--project <name>] [--dir <path>] [--spa] [--skip-build] [--debug]
-void deploy --backend cloudflare [--provision]
+void deploy --backend cloudflare
 ```
 
 Auto-detects your project type and chooses the right pipeline. See [Supported App Types](../guide/app-types.md) and [Deployment](../guide/deployment.md) for details.
@@ -264,7 +264,6 @@ For Drizzle projects, deploy performs a read-only schema drift check. If a new m
 | `--spa`                | Use SPA mode instead of SSG for static deploys; not supported with `--backend cloudflare`    |
 | `--skip-build`         | Skip the build step (use existing build output); not supported with `--backend cloudflare`   |
 | `--backend cloudflare` | Deploy to your own Cloudflare account instead of the Void platform                           |
-| `--provision`          | Create missing bindings (D1/KV/R2/Queues/Hyperdrive); requires `--backend cloudflare`        |
 | `--debug`              | Mirror the structured deploy log to stderr (also written to `~/.void/logs/`)                 |
 
 Every deploy writes a structured JSONL trace to `~/.void/logs/deploy-<timestamp>.jsonl` regardless of `--debug`. On failure the path is printed at the end of the error message so you can attach it when reporting platform issues. `VOID_DEPLOY_DEBUG=1` is accepted as an alternate trigger for stderr mirroring.
@@ -308,26 +307,25 @@ That fallback is mainly for projects that skipped Void project setup during `voi
 Deploy the built worker straight to **your own** Cloudflare account instead of the Void platform. This path uses your local `wrangler` auth and your root `wrangler.jsonc` — no Void login or linked project is involved.
 
 ```
-void deploy --backend cloudflare              # deploy using resources already in wrangler.jsonc
-void deploy --backend cloudflare --provision  # create any missing resources first, then deploy
+void deploy --backend cloudflare
 ```
 
 Prerequisites:
 
 - A Cloudflare account must be **pinned**: set `account_id` in your root `wrangler.jsonc`, or export `CLOUDFLARE_ACCOUNT_ID`. A multi-account token otherwise makes wrangler prompt (or error in CI), which Void cannot intercept.
-- Authenticate wrangler (`wrangler login`, or set `CLOUDFLARE_API_TOKEN`). Deploy needs a token with `Workers Scripts:Edit` plus read on the resources you bind; `--provision` additionally needs per-product `*:Edit` (D1, KV, R2, Queues, Hyperdrive).
-- `CLOUDFLARE_API_TOKEN` is **required** to provision a Hyperdrive config for the first time — `wrangler login` covers every other resource, but wrangler exposes no machine-readable Hyperdrive list, so Void checks for an existing config over the Cloudflare REST API, which OAuth cannot authenticate. Without a token, `--provision` stops before touching your account. Alternatively create the Hyperdrive config yourself and put its id in `wrangler.jsonc` — deploying an already-provisioned Hyperdrive app needs no token.
+- Authenticate wrangler (`wrangler login`, or set `CLOUDFLARE_API_TOKEN`). Deploy needs `Workers Scripts:Edit` plus read on the resources you bind, and per-product `*:Edit` whenever it must create a missing D1 database, KV namespace, R2 bucket, Queue, or Hyperdrive config.
+- `CLOUDFLARE_API_TOKEN` is **required** to provision a Hyperdrive config for the first time — `wrangler login` covers every other resource, but wrangler exposes no machine-readable Hyperdrive list, so Void checks for an existing config over the Cloudflare REST API, which OAuth cannot authenticate. Without a token, automatic provisioning stops before touching your account. Alternatively create the Hyperdrive config yourself and put its id in `wrangler.jsonc` — deploying an already-provisioned Hyperdrive app needs no token.
 - `--skip-build` is **not supported** with `--backend cloudflare`: this backend validates the artifact the build emits (worker `vars` in `dist/ssr/wrangler.json`, the generated auth schema), so there is nothing to check without a fresh build.
 - `--project`, `--dir` and `--spa` are **not supported** with `--backend cloudflare` either, and are rejected rather than ignored: no Void project is resolved on this path, and it uploads the worker your build emits rather than a static directory.
 - Local Docker is required to build apps that use the sandbox.
 
-What it does, in order: settles the app class before any account op (v1 supports **full Void apps on the Cloudflare Workers target** -- worker-bearing apps running Void's routing, with D1/KV/R2/Queues/Hyperdrive and, on D1/SQLite, auth + ISR; framework SSR of every kind, static/SPA/SSG apps, node/bun/deno targets, and PostgreSQL apps with auth or with checked-in migrations all fail closed with guidance), pins the account and checks auth, provisions or drift-checks resources, **builds**, then gates on the artifact the build emitted — production secrets checked against the build's effective mode/envDir, the auth schema, and migration validation — then applies remote D1 migrations for SQLite apps (verifying the applied set equals the validated set and none remain pending), and finally runs `wrangler deploy` on exactly the verified artifact. Auth apps must ship checked-in migrations that produce the Better Auth schema — the managed platform's runtime auth-migration step does not run on this backend.
+What it does, in order: settles the app class before any account op (v1 supports **full Void apps on the Cloudflare Workers target** -- worker-bearing apps running Void's routing, with D1/KV/R2/Queues/Hyperdrive and, on D1/SQLite, auth + ISR; framework SSR of every kind, static/SPA/SSG apps, node/bun/deno targets, and PostgreSQL apps with auth or with checked-in migrations all fail closed with guidance), pins the account and checks auth, automatically provisions missing resources, **builds**, then gates on the artifact the build emitted — production secrets checked against the build's effective mode/envDir, the auth schema, and migration validation — then applies remote D1 migrations for SQLite apps (verifying the applied set equals the validated set and none remain pending), and finally runs `wrangler deploy` on exactly the verified artifact. Auth apps must ship checked-in migrations that produce the Better Auth schema — the managed platform's runtime auth-migration step does not run on this backend.
 
 The build deliberately comes **before** the secret, auth-schema, and migration gates, because those gates inspect the real emitted worker rather than a prediction of it. A missing secret or a bad migration surfaces after the build has run — relevant when a build is expensive or has side effects. Remote D1 migrations run only once every gate has passed, so a failed gate mutates nothing remote.
 
-`--provision` creates any D1 database, KV namespace, R2 bucket, Queues, Hyperdrive config, and the ISR cache namespace your source needs, then lets wrangler write the real ids into your root `wrangler.jsonc`. It is **idempotent** — re-running creates nothing that already exists (it reads existing ids first). Notes:
+Every deploy automatically ensures that the D1 database, KV namespaces, R2 bucket, Queues, Hyperdrive config, and ISR cache namespace inferred from your source exist, then lets wrangler write the real ids into your root `wrangler.jsonc`. Provisioning is **idempotent** — re-running creates nothing that already exists (it reads existing ids first). The former `--provision` flag is still accepted for backwards compatibility but is no longer needed. Notes:
 
-- **Provision is a single-operator, dev-machine action.** The lock that guards it is per local config path only; it does not coordinate across machines. Two people provisioning the same account at once could create duplicate resources. `--provision` also **fails closed in CI / non-interactive shells** unless your committed `wrangler.jsonc` already covers every resource (a provable no-op). Provision locally, commit the updated `wrangler.jsonc`, then let CI run `void deploy --backend cloudflare`.
+- **Avoid concurrent first deploys from different machines or CI runners.** The provisioning lock is per local config path and does not coordinate across hosts. Resource adoption makes later deploys idempotent, but two first deploys racing the same account could create duplicate resources whose names are not account-unique. Commit the updated `wrangler.jsonc` when practical so CI starts with the resolved ids.
 - **Your `wrangler.jsonc` is rewritten.** When wrangler writes the new ids, it preserves your comments but normalizes the whole file's indentation — expect that in the diff.
 - **Your `.env*` values ship as plaintext.** All four of `.env`, `.env.local`, `.env.production` and `.env.production.local` are loaded by this backend and baked into the worker's `vars` — the `.local` files included, unlike managed `void deploy`. A value also present in the shell environment is stripped back out. Move real secrets to `wrangler secret put <NAME>` so they are not committed into `wrangler.json`. Deploy warns on likely-plaintext secrets and hard-blocks on missing required secrets.
 - **First deploy of a not-yet-deployed worker:** its remote secrets can't be listed yet, so the secret gate prints the required key names and the `wrangler secret put <NAME>` commands to bootstrap them on the draft worker before deploying (or add a value to `.env` / `.env.production` and rerun).
