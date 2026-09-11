@@ -588,7 +588,7 @@ The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typ
 
 ## Database
 
-Imported from `"void/db"`. The `db` export is a [Drizzle ORM](https://orm.drizzle.team) instance for the configured database dialect: [Cloudflare D1](https://developers.cloudflare.com/d1/) by default, or PostgreSQL when `void.json` sets `"database": "pg"` / `"postgresql"`. See the [Database guide](../guide/database.md) for usage and the [Drizzle docs](https://orm.drizzle.team/docs/select) for the full query API.
+Imported from `"void/db"`. The `db` export is a [Drizzle ORM](https://orm.drizzle.team) instance for the configured database dialect: [Cloudflare D1](https://developers.cloudflare.com/d1/) by default, PostgreSQL with `"database": "pg"`, or MySQL with `"database": "mysql"`.
 
 ### `db`
 
@@ -605,6 +605,7 @@ When the Void plugin is active, `void/db` is served as a virtual module that aut
 
 - D1 projects resolve the `DB` binding and expose `DrizzleD1Database<Schema>`.
 - PostgreSQL projects use `DATABASE_URL` during local development and Hyperdrive's `connectionString` in production, exposing `NodePgDatabase<Schema>`.
+- MySQL projects use the same connection sources and expose `MySql2Database<Schema>`.
 
 The published npm fallback uses a lazy D1 proxy that resolves the `DB` binding at first access.
 
@@ -621,7 +622,7 @@ import { env } from 'cloudflare:workers';
 const db = createDb(env.MY_OTHER_DB);
 ```
 
-For PostgreSQL projects, pass a connection string.
+For PostgreSQL and MySQL projects, pass a connection string.
 
 ```ts
 import { createDb } from 'void/db';
@@ -637,6 +638,9 @@ function createDb(d1: D1Database): DrizzleD1Database<Schema>;
 
 // PostgreSQL
 function createDb(connectionString: string): NodePgDatabase<Schema>;
+
+// MySQL
+function createDb(connectionString: string): MySql2Database<Schema>;
 ```
 
 ### Query Operators
@@ -1164,7 +1168,8 @@ This table lists app-facing imports. Exported implementation subpaths such as `v
 | `void/drizzle-arktype`    | Re-exports [`drizzle-arktype`](https://orm.drizzle.team/docs/arktype) for schema-derived ArkType validators for Drizzle tables                                                                                                                                                                                                                                                                                                                                                                                           |
 | `void/schema-d1`          | Re-exports [`drizzle-orm/sqlite-core`](https://orm.drizzle.team/docs/column-types/sqlite) for D1 table and column builders                                                                                                                                                                                                                                                                                                                                                                                               |
 | `void/schema-pg`          | Re-exports [`drizzle-orm/pg-core`](https://orm.drizzle.team/docs/column-types/pg) for PostgreSQL table and column builders                                                                                                                                                                                                                                                                                                                                                                                               |
-| `void/db`                 | `db` (Drizzle D1 or PostgreSQL instance for the active dialect), `createDb`, query operators (`eq`, `and`, `or`, `desc`, `like`, `inArray`, etc.)                                                                                                                                                                                                                                                                                                                                                                        |
+| `void/schema-mysql`       | Re-exports `drizzle-orm/mysql-core` for MySQL table and column builders                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `void/db`                 | `db` (Drizzle D1, PostgreSQL, or MySQL instance for the active dialect), `createDb`, query operators (`eq`, `and`, `or`, `desc`, `like`, `inArray`, etc.)                                                                                                                                                                                                                                                                                                                                                                |
 | `void/seed`               | `defineSeed`, `SeedContext`, `SeedFn` for programmatic `void db seed` modules                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `void/kv`                 | `kv`, `createKV`, typed KV client/map types                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `void/storage`            | `storage`, `createStorage` for the inferred R2 binding or a specific `R2Bucket`                                                                                                                                                                                                                                                                                                                                                                                                                                          |

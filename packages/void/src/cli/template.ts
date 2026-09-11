@@ -10,7 +10,7 @@ export const SCAFFOLD_GITIGNORE_LINES = [
 ] as const;
 
 export type ScaffoldFramework = 'react' | 'vue' | 'svelte' | 'solid';
-export type ScaffoldStarterMode = 'sqlite' | 'postgresql' | 'static';
+export type ScaffoldStarterMode = 'sqlite' | 'postgresql' | 'mysql' | 'static';
 export type ScaffoldToolchain = 'vite-plus' | 'vite';
 
 export const SCAFFOLD_BASE_DEPENDENCIES = {
@@ -245,7 +245,8 @@ function getHelloRoute(
   frameworkLabel: string,
   starterMode: Exclude<ScaffoldStarterMode, 'static'>,
 ): string {
-  const databaseLabel = starterMode === 'postgresql' ? 'PostgreSQL' : 'D1';
+  const databaseLabel =
+    starterMode === 'postgresql' ? 'PostgreSQL' : starterMode === 'mysql' ? 'MySQL' : 'D1';
   return `import { defineHandler } from "void";
 
 export const GET = defineHandler(() => {
@@ -264,6 +265,17 @@ function getSchemaFile(starterMode: Exclude<ScaffoldStarterMode, 'static'>): str
 
 export const messages = pgTable("messages", {
   id: serial("id").primaryKey(),
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+`;
+  }
+
+  if (starterMode === 'mysql') {
+    return `import { int, mysqlTable, text, timestamp } from "void/schema-mysql";
+
+export const messages = mysqlTable("messages", {
+  id: int("id").autoincrement().primaryKey(),
   text: text("text").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

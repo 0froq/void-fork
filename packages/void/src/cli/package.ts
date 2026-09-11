@@ -528,7 +528,7 @@ export function buildVoidManifest(opts: {
   headerRules?: Array<HeaderRule>;
   redirectRules?: Array<DevRedirectRule>;
   fallbackRules?: Array<DevRedirectRule>;
-  dialect?: 'sqlite' | 'postgresql';
+  dialect?: 'sqlite' | 'postgresql' | 'mysql';
   webSockets?: Array<WebSocketRouteDefinition>;
 }): DeployManifest {
   const {
@@ -559,7 +559,7 @@ export function buildVoidManifest(opts: {
   }
   const hasMigrations = migrations && migrations.length > 0;
   if (bindings.needsD1 || bindings.needsAuth || hasMigrations) {
-    if (dialect === 'postgresql') {
+    if (dialect !== 'sqlite') {
       manifest.bindings.hyperdrive = ['HYPERDRIVE'];
     } else {
       manifest.bindings.d1 = [options?.bindingNames?.d1 ?? 'DB'];
@@ -588,7 +588,7 @@ export function buildVoidManifest(opts: {
   }
 
   if (migrations && migrations.length > 0) {
-    const planBundle = dialect === 'postgresql' ? undefined : buildMigrationPlanBundle(migrations);
+    const planBundle = dialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
     manifest.migrations = {
       dialect: dialect ?? 'sqlite',
       ...(planBundle
@@ -802,7 +802,7 @@ export function buildFrameworkManifest(opts: {
   headerRules?: Array<HeaderRule>;
   redirectRules?: Array<DevRedirectRule>;
   fallbackRules?: Array<DevRedirectRule>;
-  dialect?: 'sqlite' | 'postgresql';
+  dialect?: 'sqlite' | 'postgresql' | 'mysql';
   webSockets?: Array<WebSocketRouteDefinition>;
 }): DeployManifest {
   const po = opts.packageOptions;
@@ -810,7 +810,7 @@ export function buildFrameworkManifest(opts: {
   const manifest: DeployManifest = { version: 3, assetManifestVersion: 2, bindings: {} };
   const hasMigrations = opts.migrations && opts.migrations.length > 0;
   if (opts.bindings.needsD1 || opts.bindings.needsAuth || hasMigrations) {
-    if (opts.dialect === 'postgresql') {
+    if (opts.dialect !== 'sqlite') {
       manifest.bindings.hyperdrive = ['HYPERDRIVE'];
     } else {
       manifest.bindings.d1 = [po?.bindingNames?.d1 ?? 'DB'];
@@ -831,7 +831,7 @@ export function buildFrameworkManifest(opts: {
 
   if (opts.migrations && opts.migrations.length > 0) {
     const planBundle =
-      opts.dialect === 'postgresql' ? undefined : buildMigrationPlanBundle(opts.migrations);
+      opts.dialect === 'sqlite' ? buildMigrationPlanBundle(opts.migrations) : undefined;
     manifest.migrations = {
       dialect: opts.dialect ?? 'sqlite',
       ...(planBundle

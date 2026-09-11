@@ -41,6 +41,7 @@
     "#self/runtime/isr-cache": "./dist/runtime/isr-cache.mjs",
     "#self/runtime/migration-handler": "./dist/runtime/migration-handler.mjs",
     "#self/runtime/migration-handler-pg": "./dist/runtime/migration-handler-pg.mjs",
+    "#self/runtime/migration-handler-mysql": "./dist/runtime/migration-handler-mysql.mjs",
     "#self/runtime/ws-server": "./dist/runtime/ws-server.mjs"
   },
   "exports": {
@@ -173,6 +174,11 @@
       "import": "./dist/runtime/schema-pg.mjs",
       "require": "./dist/runtime/schema-pg.mjs"
     },
+    "./schema-mysql": {
+      "types": "./dist/runtime/schema-mysql.d.mts",
+      "import": "./dist/runtime/schema-mysql.mjs",
+      "require": "./dist/runtime/schema-mysql.mjs"
+    },
     "./kv": {
       "types": "./dist/runtime/kv.d.mts",
       "import": "./dist/runtime/kv.mjs",
@@ -227,6 +233,11 @@
       "types": "./dist/runtime/migration-handler-pg.d.mts",
       "import": "./dist/runtime/migration-handler-pg.mjs",
       "require": "./dist/runtime/migration-handler-pg.mjs"
+    },
+    "./runtime/migration-handler-mysql": {
+      "types": "./dist/runtime/migration-handler-mysql.d.mts",
+      "import": "./dist/runtime/migration-handler-mysql.mjs",
+      "require": "./dist/runtime/migration-handler-mysql.mjs"
     },
     "./runtime/ws-server": {
       "types": "./dist/runtime/ws-server.d.mts",
@@ -306,6 +317,11 @@
       "types": "./dist/runtime/db-pg.d.mts",
       "import": "./dist/runtime/db-pg.mjs",
       "require": "./dist/runtime/db-pg.mjs"
+    },
+    "./_db-mysql": {
+      "types": "./dist/runtime/db-mysql.d.mts",
+      "import": "./dist/runtime/db-mysql.mjs",
+      "require": "./dist/runtime/db-mysql.mjs"
     }
   },
   "scripts": {
@@ -331,6 +347,7 @@
     "hono": "^4.13.7",
     "ignore": "^7.0.9",
     "jsonc-parser": "3.3.1",
+    "mysql2": "3.24.4",
     "pg": "8.23.0",
     "proper-lockfile": "^4.1.2",
     "wrangler": "catalog:"

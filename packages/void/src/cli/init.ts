@@ -1650,7 +1650,7 @@ function clearConfiguredDatabase(
   const config = readConfig(root) as Record<string, unknown>;
   const configPath = join(root, VOID_CONFIG_FILE);
 
-  if (config.database !== 'pg') {
+  if (config.database !== 'pg' && config.database !== 'mysql') {
     log.info(messages.unchanged);
     return;
   }
@@ -1682,6 +1682,18 @@ function applyDatabaseDialect(root: string, dialect: DatabaseDialect): void {
     return;
   }
 
+  if (dialect === 'mysql') {
+    if (config.database === 'mysql') {
+      log.info('MySQL already configured in void.json');
+      return;
+    }
+
+    config.database = 'mysql';
+    writeVoidConfig(root, config);
+    log.success('Configured MySQL in void.json');
+    return;
+  }
+
   clearConfiguredDatabase(root, {
     unchanged: 'Using default D1 (SQLite) configuration',
     updated: 'Updated void.json to use the default D1 (SQLite) configuration',
@@ -1689,8 +1701,9 @@ function applyDatabaseDialect(root: string, dialect: DatabaseDialect): void {
 }
 
 function detectDatabaseSetup(root: string): DatabaseSetupChoice {
-  if (getDatabaseDialect(readConfig(root)) === 'postgresql') {
-    return 'postgresql';
+  const dialect = getDatabaseDialect(readConfig(root));
+  if (dialect !== 'sqlite') {
+    return dialect;
   }
   if (
     hasDrizzleSchema(root) ||
@@ -1727,6 +1740,11 @@ async function promptStarterMode(): Promise<ScaffoldStarterMode> {
         value: 'postgresql',
         label: 'PostgreSQL',
         hint: 'Scaffolds the same starter with PostgreSQL, a generated migration, a seed file, and writes "database": "pg" to void.json.',
+      },
+      {
+        value: 'mysql',
+        label: 'MySQL',
+        hint: 'Scaffolds the same starter with MySQL, a generated migration, a seed file, and writes "database": "mysql" to void.json.',
       },
       {
         value: 'static',
@@ -1792,9 +1810,14 @@ async function promptDatabaseSetup(root: string): Promise<DatabaseSetupChoice> {
         hint: 'Bring your own Postgres via Hyperdrive; best for write-heavy apps, complex queries, or existing infra.',
       },
       {
+        value: 'mysql',
+        label: currentSetup === 'mysql' ? 'MySQL [current]' : 'MySQL',
+        hint: 'Bring your own MySQL via Hyperdrive; ideal for existing MySQL infrastructure and compatible providers.',
+      },
+      {
         value: 'none',
         label: 'No Database Yet',
-        hint: 'Skip database setup for now. You can add D1 or PostgreSQL later as your app grows.',
+        hint: 'Skip database setup for now. You can add D1, PostgreSQL, or MySQL later as your app grows.',
       },
     ],
   });
@@ -2333,10 +2356,14 @@ export function generateStarterMigration(
   root: string,
   starterMode: Exclude<ScaffoldStarterMode, 'static'>,
 ): void {
-  const dialect = starterMode === 'postgresql' ? 'postgresql' : 'sqlite';
+  const dialect = starterMode;
   const configPath = writeDrizzleConfig(
     root,
-    dialect === 'postgresql' ? 'postgresql://dummy' : ':memory:',
+    dialect === 'postgresql'
+      ? 'postgresql://dummy'
+      : dialect === 'mysql'
+        ? 'mysql://dummy'
+        : ':memory:',
     dialect,
   );
 
@@ -2593,6 +2620,13 @@ function scaffoldPagesApp(
       `Add DATABASE_URL to .env.local before running \`${devCommand}\`.\n` +
         'Void uses that direct connection for local PostgreSQL development.',
       'PostgreSQL local dev',
+    );
+  } else if (starterMode === 'mysql') {
+    const devCommand = getDevCommand(root);
+    note(
+      `Add DATABASE_URL to .env.local before running \`${devCommand}\`.\n` +
+        'Void uses that direct connection for local MySQL development.',
+      'MySQL local dev',
     );
   }
 

@@ -257,7 +257,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
       authRuntimePath:
         dialect === 'postgresql'
           ? join(runtimeDir, 'better-auth-pg.mjs')
-          : join(runtimeDir, 'better-auth.mjs'),
+          : dialect === 'mysql'
+            ? join(runtimeDir, 'better-auth-mysql.mjs')
+            : join(runtimeDir, 'better-auth.mjs'),
       authConfigPath,
       authDatabasePath: null,
       authSchemaPath: null,
@@ -529,7 +531,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           compileOptions.migrationHandlerPath = resolveFile(
             dialect === 'postgresql'
               ? '#self/runtime/migration-handler-pg'
-              : '#self/runtime/migration-handler',
+              : dialect === 'mysql'
+                ? '#self/runtime/migration-handler-mysql'
+                : '#self/runtime/migration-handler',
           );
           compileOptions.migrations = migrations;
           compileOptions.migrationPlanBundle =

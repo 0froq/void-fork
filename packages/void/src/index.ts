@@ -1780,7 +1780,7 @@ export function voidPlugin(options?: {
   // Cloudflare's Sandbox SDK also imports Node built-ins.
   // Other apps only need nodejs_als for AsyncLocalStorage (isomorphic fetch context threading).
   const existingFlags = (workerConfig.compatibility_flags as Array<string> | undefined) ?? [];
-  const needsNodejsCompat = authEnabled || dialect === 'postgresql' || bindings.needsSandbox;
+  const needsNodejsCompat = authEnabled || dialect !== 'sqlite' || bindings.needsSandbox;
   const normalizedFlags = normalizeWranglerCompatibilityFlags(existingFlags, {
     needsNodejsCompat,
   });

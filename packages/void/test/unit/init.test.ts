@@ -1300,6 +1300,11 @@ describe('isScaffoldableEmptyProject', () => {
           hint: 'Scaffolds the same starter with PostgreSQL, a generated migration, a seed file, and writes "database": "pg" to void.json.',
         },
         {
+          value: 'mysql',
+          label: 'MySQL',
+          hint: 'Scaffolds the same starter with MySQL, a generated migration, a seed file, and writes "database": "mysql" to void.json.',
+        },
+        {
           value: 'static',
           label: 'Static Pages',
           hint: 'No database or server starter files yet. Good for content sites; add Void features later.',
@@ -2855,9 +2860,14 @@ export default config;
           hint: 'Bring your own Postgres via Hyperdrive; best for write-heavy apps, complex queries, or existing infra.',
         },
         {
+          value: 'mysql',
+          label: 'MySQL',
+          hint: 'Bring your own MySQL via Hyperdrive; ideal for existing MySQL infrastructure and compatible providers.',
+        },
+        {
           value: 'none',
           label: 'No Database Yet',
-          hint: 'Skip database setup for now. You can add D1 or PostgreSQL later as your app grows.',
+          hint: 'Skip database setup for now. You can add D1, PostgreSQL, or MySQL later as your app grows.',
         },
       ]);
     } finally {

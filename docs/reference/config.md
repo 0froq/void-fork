@@ -111,7 +111,7 @@ Supported values for `auth.providers`:
 
 ### `database`
 
-Database backend. Omit for D1/SQLite (default). Set to `"pg"` for PostgreSQL via Hyperdrive.
+Database backend. Omit for D1/SQLite (default). Set to `"pg"` or `"mysql"` for an external database through Hyperdrive.
 
 ```json
 {
@@ -123,13 +123,14 @@ Database backend. Omit for D1/SQLite (default). Set to `"pg"` for PostgreSQL via
 | ----------- | ------------------------------------------------------- |
 | _(omitted)_ | D1 (SQLite), fully managed by Void with no extra config |
 | `"pg"`      | PostgreSQL via Hyperdrive; bring your own database      |
+| `"mysql"`   | MySQL via Hyperdrive; bring your own database           |
 
-When using `"pg"`:
+When using an external database:
 
 - Add `DATABASE_URL` to `.env.local` for local development
-- Import schema helpers from `void/schema-pg` instead of `void/schema-d1`
+- Import schema helpers from `void/schema-pg` or `void/schema-mysql`
 - `void/db` connects via Hyperdrive in production, direct connection locally
-- `void gen model` generates `pgTable` with `serial`, `timestamp`, etc.
+- `void gen model` generates dialect-appropriate table and column builders
 
 ### `head`
 

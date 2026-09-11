@@ -209,6 +209,7 @@ export default extendConfig(
                   { text: 'Overview', link: '/guide/database' },
                   { text: 'D1 (SQLite)', link: '/guide/database/d1' },
                   { text: 'PostgreSQL', link: '/guide/database/postgresql' },
+                  { text: 'MySQL', link: '/guide/database/mysql' },
                 ],
               },
               { text: 'Typed Fetch', link: '/guide/typed-fetch' },

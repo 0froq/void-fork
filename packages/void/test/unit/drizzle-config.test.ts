@@ -43,6 +43,14 @@ describe('writeDrizzleConfig', () => {
     expect(config.dbCredentials.url).toBe('postgresql://localhost/test');
   });
 
+  it('generates MySQL config', () => {
+    const configPath = writeDrizzleConfig(root, 'mysql://localhost/test', 'mysql');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.dialect).toBe('mysql');
+    expect(config.schema).toBe('./db/schema.ts');
+    expect(config.dbCredentials.url).toBe('mysql://localhost/test');
+  });
+
   it('generates SQLite config with explicit dialect', () => {
     const configPath = writeDrizzleConfig(root, '/tmp/test.sqlite', 'sqlite');
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));

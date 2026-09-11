@@ -11,7 +11,7 @@ import {
 } from '../auth/providers.ts';
 import { authContext, type AuthState, type VoidAuthConfig } from './auth.ts';
 
-export type VoidAuthDialect = 'sqlite' | 'postgresql';
+export type VoidAuthDialect = 'sqlite' | 'postgresql' | 'mysql';
 
 export type VoidAuthRuntimeOptions = {
   dialect: VoidAuthDialect;

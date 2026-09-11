@@ -242,6 +242,30 @@ describe('generateWrapper with migrations', () => {
     expect(bundled).toContain('__voidPgpassNoop');
   });
 
+  it('uses the MySQL migration handler when dialect is mysql', async () => {
+    mkdirSync(workerDir, { recursive: true });
+    writeFileSync(
+      join(workerDir, 'index.mjs'),
+      'export default { fetch() { return new Response("ok"); } };',
+    );
+    mkdirSync(join(projectRoot, 'db', 'migrations'), { recursive: true });
+    writeFileSync(
+      join(projectRoot, 'db', 'migrations', '001_test.sql'),
+      'CREATE TABLE test (id INT);',
+    );
+
+    await generateWrapper(workerDir, 'index.mjs', projectRoot, {
+      ...base,
+      hasMigrations: true,
+      migrationDialect: 'mysql',
+    });
+
+    const wrapper = readFileSync(join(workerDir, 'index.mjs'), 'utf-8');
+    expect(wrapper).toContain('/__void/migrate');
+    expect(wrapper).toContain('"mysql"');
+    expect(existsSync(join(workerDir, '__void_migration_handler.mjs'))).toBe(true);
+  });
+
   it('intercepts GET /__void/ready with {ready:true} when wrapper is generated', async () => {
     // Platform's deploy-time readiness probe (packages/api/src/routes/deploy.ts)
     // expects a JSON 200 from GET /__void/ready before dispatching migrations.

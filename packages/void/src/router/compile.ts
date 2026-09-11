@@ -636,7 +636,7 @@ export type AuthCompileOptions = {
   authConfigPath: string | null;
   authDatabasePath: string | null;
   authSchemaPath: string | null;
-  dialect: 'sqlite' | 'postgresql';
+  dialect: 'sqlite' | 'postgresql' | 'mysql';
   providers: Array<VoidAuthProvider> | null;
 };
 
@@ -675,8 +675,8 @@ export type CompileOptions = {
   migrations?: Array<{ name: string; sql: string }>;
   /** Build-time migration execution plans for protocol v2 workers */
   migrationPlanBundle?: MigrationPlanBundle;
-  /** Migration dialect (sqlite or postgresql) */
-  migrationDialect?: 'sqlite' | 'postgresql';
+  /** Migration dialect. */
+  migrationDialect?: 'sqlite' | 'postgresql' | 'mysql';
   /** Custom binding names configured through inference.bindings. */
   bindingNames?: { d1?: string; kv?: string; r2?: string };
   /** Header rules from routing.headers config (node/bun/deno targets only) */

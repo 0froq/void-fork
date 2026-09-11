@@ -24,7 +24,7 @@ export type WrapperFeatures = {
   /** Whether migrations are present (framework deploys need a /__void/migrate endpoint). */
   hasMigrations?: boolean;
   /** Database dialect for migration handler. */
-  migrationDialect?: 'sqlite' | 'postgresql';
+  migrationDialect?: 'sqlite' | 'postgresql' | 'mysql';
 };
 
 export type WrapperResult = {
@@ -121,7 +121,11 @@ export async function generateWrapper(
     migrationPlanBundle =
       features.migrationDialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
     const handlerName =
-      features.migrationDialect === 'postgresql' ? 'migration-handler-pg' : 'migration-handler';
+      features.migrationDialect === 'postgresql'
+        ? 'migration-handler-pg'
+        : features.migrationDialect === 'mysql'
+          ? 'migration-handler-mysql'
+          : 'migration-handler';
     const handlerFilename_ = `${handlerName}.mjs`;
     let handlerPath = join(import.meta.dirname, '..', 'runtime', `${handlerName}.ts`);
     if (!existsSync(handlerPath)) {
@@ -162,12 +166,13 @@ async function bundleMigrationHandler(
   root: string,
   workerDir: string,
   handlerPath: string,
-  dialect: 'sqlite' | 'postgresql',
+  dialect: 'sqlite' | 'postgresql' | 'mysql',
 ): Promise<void> {
   const tmpDir = join(root, '.void', 'migration-handler');
   mkdirSync(tmpDir, { recursive: true });
   const outDir = join(tmpDir, 'out');
   const isPostgresql = dialect === 'postgresql';
+  const isMysql = dialect === 'mysql';
   await build({
     root: tmpDir,
     logLevel: 'silent',
@@ -187,7 +192,9 @@ async function bundleMigrationHandler(
             conditions: ['workerd', 'worker', 'browser', 'module', 'import', 'default'],
           },
         }
-      : undefined,
+      : isMysql
+        ? { noExternal: ['mysql2'] }
+        : undefined,
     build: {
       outDir,
       emptyOutDir: true,

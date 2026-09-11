@@ -40,6 +40,7 @@ import { discoverSchema } from '../drizzle/discover.ts';
 import { collectRevalidate, collectPages, hasRevalidate } from '../isr-config.ts';
 import { voidWarn } from '../log.ts';
 import { collectMigrations } from '../migrations/collect.ts';
+import { runMySqlMigrations } from '../migrations/runner-mysql.ts';
 import { runPgMigrations } from '../migrations/runner-pg.ts';
 import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
 import { scanPages } from '../pages/scan.ts';
@@ -372,7 +373,7 @@ export function resolveDeployWranglerCompat(
   const compatibilityFlags = normalizeWranglerCompatibilityFlags(compat.compatibilityFlags, {
     needsNodejsCompat:
       requirements?.authEnabled === true ||
-      requirements?.dialect === 'postgresql' ||
+      (requirements?.dialect !== undefined && requirements.dialect !== 'sqlite') ||
       requirements?.needsSandbox === true,
   });
   return compatibilityFlags === compat.compatibilityFlags
@@ -2099,6 +2100,8 @@ export interface CloudflareDeployDeps {
   checkMigrationApplySet?: typeof checkWranglerMigrationApplySet;
   /** PostgreSQL migration runner (default: {@link runPgMigrations}). */
   applyPostgresMigrations?: typeof runPgMigrations;
+  /** MySQL migration runner (default: {@link runMySqlMigrations}). */
+  applyMySqlMigrations?: typeof runMySqlMigrations;
   /**
    * Auth-schema validation seam (default: {@link validateAuthMigrationSchema}).
    * Runs POST-build: reads the generated auth schema the build emitted
@@ -2568,7 +2571,7 @@ export async function computeDesiredCloudflareResources(
 
   // Database — desired on source-use OR auth OR checked-in migrations (the SAME
   // predicate the managed manifest applies), with the dialect selecting D1 (sqlite)
-  // vs Hyperdrive (postgresql). This keeps provision/drift equivalent to the build:
+  // vs Hyperdrive (PostgreSQL/MySQL). This keeps provision/drift equivalent to the build:
   // a migration-only SQLite app still provisions D1, and an unused pg config does
   // not needlessly require Hyperdrive.
   const needsDatabase = bindings.needsD1 || authEnabled || hasMigrations;
@@ -2577,7 +2580,7 @@ export async function computeDesiredCloudflareResources(
     : authEnabled
       ? 'auth requires a D1 database'
       : 'checked-in migrations need a D1 database';
-  if (needsDatabase && dialect !== 'postgresql') {
+  if (needsDatabase && dialect === 'sqlite') {
     const binding = bindingNames?.d1 ?? 'DB';
     // Trust a stored `database_name` ONLY when the paired `database_id` is a REAL
     // (non-placeholder) id. A synced-but-unprovisioned entry carries the local
@@ -2617,17 +2620,20 @@ export async function computeDesiredCloudflareResources(
   // Queues (resource names — account-unique; the build binds them for native apps).
   desired.queues = scanQueuesSync(root, paths.queuesDir).map((q) => q.name);
 
-  // Hyperdrive (PostgreSQL apps) — same database gate as D1, dialect-selected. The
+  // Hyperdrive (PostgreSQL/MySQL apps) — same database gate as D1, dialect-selected. The
   // connection string is only consumed on a fresh create; a re-provision reads-first
   // from the config id and never needs it.
-  if (needsDatabase && dialect === 'postgresql') {
+  if (needsDatabase && dialect !== 'sqlite') {
     const binding = 'HYPERDRIVE';
     desired.hyperdrive = {
       binding,
       name: suffixedResourceName(workerName, 'hyperdrive'),
       connectionString: process.env.DATABASE_URL ?? '',
     };
-    reasons.set(binding, 'app uses PostgreSQL (needs a Hyperdrive config)');
+    reasons.set(
+      binding,
+      `app uses ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} (needs a Hyperdrive config)`,
+    );
   }
 
   // ISR_CACHE (a KV namespace) — self-host-only, not in the import walk. Desired
@@ -3745,14 +3751,14 @@ export async function runCloudflareDeploy(
     expectedCrons,
   } = await computeDesiredCloudflareResources(root, voidConfig, configPath);
 
-  // 2a. PostgreSQL migrations are applied directly by this orchestrator after every local gate
+  // 2a. External-database migrations are applied directly after every local gate
   // passes and immediately before the Worker upload. A checked-in migration therefore requires
   // the production DATABASE_URL in the deploy environment; the URL is also the source used when
   // provisioning a missing Hyperdrive config and is never serialized into the Worker artifact.
-  if (dialect === 'postgresql' && preBuildMigrations.length > 0 && !process.env.DATABASE_URL) {
+  if (dialect !== 'sqlite' && preBuildMigrations.length > 0 && !process.env.DATABASE_URL) {
     log.error(
       [
-        'deploy: PostgreSQL migrations require DATABASE_URL for --platform cloudflare.',
+        `deploy: ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} migrations require DATABASE_URL for --platform cloudflare.`,
         'Set the production connection string in the deploy environment. Void uses it only to',
         'provision Hyperdrive and apply checked-in migrations before uploading the Worker; it is',
         'never written to wrangler.jsonc or the generated Worker config.',
@@ -4239,9 +4245,9 @@ export async function runCloudflareDeploy(
 
   // A build plugin can add migrations after the pre-build source scan. Require the production URL
   // again against the post-build ground truth so no injected migration can be silently skipped.
-  if (dialect === 'postgresql' && migrations.length > 0 && !process.env.DATABASE_URL) {
+  if (dialect !== 'sqlite' && migrations.length > 0 && !process.env.DATABASE_URL) {
     log.error(
-      'deploy: the build added PostgreSQL migrations, but DATABASE_URL is not set. ' +
+      `deploy: the build added ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} migrations, but DATABASE_URL is not set. ` +
         'Refusing to upload a Worker against an unmigrated database.',
     );
     return exit(1);
@@ -4599,6 +4605,27 @@ export async function runCloudflareDeploy(
       }
     } catch (err) {
       log.error(`deploy: PostgreSQL migrations failed — ${getErrorMessage(err)}`);
+      return exit(1);
+    }
+  }
+
+  if (dialect === 'mysql' && migrations.length > 0) {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      log.error('deploy: DATABASE_URL disappeared before MySQL migrations could run.');
+      return exit(1);
+    }
+    try {
+      const applied = await (deps.applyMySqlMigrations ?? runMySqlMigrations)(
+        migrationsDir,
+        databaseUrl,
+      );
+      cliLog.info('cloudflare_mysql_migrations', { applied: applied.length });
+      if (applied.length > 0) {
+        log.success(`Applied ${applied.length} MySQL migration${applied.length === 1 ? '' : 's'}.`);
+      }
+    } catch (err) {
+      log.error(`deploy: MySQL migrations failed — ${getErrorMessage(err)}`);
       return exit(1);
     }
   }
@@ -5871,8 +5898,8 @@ async function runFrameworkDeploy(
     }
   }
 
-  // Pre-deploy: ensure Hyperdrive is provisioned for PostgreSQL projects
-  if (dialect === 'postgresql' && (bindings.needsD1 || rawMigrations.length > 0)) {
+  // Pre-deploy: ensure Hyperdrive is provisioned for external SQL projects.
+  if (dialect !== 'sqlite' && (bindings.needsD1 || rawMigrations.length > 0)) {
     let resources: Array<ResourceSummary> | null = null;
     try {
       resources = await client.getResources(config.projectId);
@@ -5886,11 +5913,20 @@ async function runFrameworkDeploy(
       if (!hasHyperdrive) {
         const { text: promptText, isCancel: isCancelPrompt } = await import('@clack/prompts');
         const connectionString = await promptText({
-          message: 'Your project uses PostgreSQL. Enter your connection string:',
-          placeholder: 'postgresql://user:pass@host:5432/dbname',
+          message: `Your project uses ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'}. Enter your connection string:`,
+          placeholder:
+            dialect === 'mysql'
+              ? 'mysql://user:pass@host:3306/dbname'
+              : 'postgresql://user:pass@host:5432/dbname',
           validate(value) {
-            if (!value?.startsWith('postgres://') && !value?.startsWith('postgresql://')) {
-              return 'Must start with "postgres://" or "postgresql://"';
+            const valid =
+              dialect === 'mysql'
+                ? value?.startsWith('mysql://')
+                : value?.startsWith('postgres://') || value?.startsWith('postgresql://');
+            if (!valid) {
+              return dialect === 'mysql'
+                ? 'Must start with "mysql://"'
+                : 'Must start with "postgres://" or "postgresql://"';
             }
           },
         });
@@ -6254,10 +6290,10 @@ async function runFullDeploy(
     }
   }
 
-  // Pre-deploy: ensure Hyperdrive is provisioned for PostgreSQL projects.
+  // Pre-deploy: ensure Hyperdrive is provisioned for external SQL projects.
   // Migrations on disk also gate this — even if inference says needsD1: false,
   // buildVoidManifest will add the hyperdrive binding when migrations are present.
-  if (dialect === 'postgresql' && (effectiveBindings.needsD1 || rawMigrations.length > 0)) {
+  if (dialect !== 'sqlite' && (effectiveBindings.needsD1 || rawMigrations.length > 0)) {
     let resources: Array<ResourceSummary> | null = null;
     try {
       resources = await client.getResources(config.projectId);
@@ -6271,11 +6307,20 @@ async function runFullDeploy(
       if (!hasHyperdrive) {
         const { text: promptText, isCancel: isCancelPrompt } = await import('@clack/prompts');
         const connectionString = await promptText({
-          message: 'Your project uses PostgreSQL. Enter your connection string:',
-          placeholder: 'postgresql://user:pass@host:5432/dbname',
+          message: `Your project uses ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'}. Enter your connection string:`,
+          placeholder:
+            dialect === 'mysql'
+              ? 'mysql://user:pass@host:3306/dbname'
+              : 'postgresql://user:pass@host:5432/dbname',
           validate(value) {
-            if (!value?.startsWith('postgres://') && !value?.startsWith('postgresql://')) {
-              return 'Must start with "postgres://" or "postgresql://"';
+            const valid =
+              dialect === 'mysql'
+                ? value?.startsWith('mysql://')
+                : value?.startsWith('postgres://') || value?.startsWith('postgresql://');
+            if (!valid) {
+              return dialect === 'mysql'
+                ? 'Must start with "mysql://"'
+                : 'Must start with "postgres://" or "postgresql://"';
             }
           },
         });
@@ -6674,7 +6719,11 @@ export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): bo
     const driftAuthSchemaPath = join(driftProjectRoot, '.void', 'better-auth-schema.ts');
     const driftConfigPath = writeDrizzleConfig(
       driftProjectRoot,
-      dialect === 'postgresql' ? 'postgresql://dummy' : ':memory:',
+      dialect === 'postgresql'
+        ? 'postgresql://dummy'
+        : dialect === 'mysql'
+          ? 'mysql://dummy'
+          : ':memory:',
       dialect,
       {
         additionalSchemas: existsSync(driftAuthSchemaPath) ? [driftAuthSchemaPath] : undefined,
