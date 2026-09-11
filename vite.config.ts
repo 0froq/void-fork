@@ -39,17 +39,6 @@ const sharedPlayground = [
   'packages/void/test/e2e/cloudflare-deploy-live.test.ts',
 ];
 
-const metaframeworks = [
-  'packages/void/test/integration/analog.test.ts',
-  'packages/void/test/integration/astro.test.ts',
-  'packages/void/test/integration/nuxt.test.ts',
-  'packages/void/test/integration/sveltekit.test.ts',
-  'packages/void/test/integration/tanstack-start.test.ts',
-  'packages/void/test/integration/vinext-pages.test.ts',
-  'packages/void/test/integration/vinext-app.test.ts',
-  'packages/void/test/integration/react-router.test.ts',
-];
-
 export default defineConfig({
   run: {
     tasks: {
@@ -357,8 +346,11 @@ export default defineConfig({
       },
       {
         test: {
-          name: 'core-markdown',
-          sequence: { groupOrder: 3 },
+          // Every integration file here owns its fixture directory, so one worker pool can
+          // schedule the longest files first and fill idle slots across package boundaries.
+          // Files that mutate a shared playground are excluded into the serialized project.
+          name: 'parallel-integration',
+          sequence: { groupOrder: 2 },
           testTimeout,
           hookTimeout,
           // Kept alongside the e2e glob below so a newly added e2e file gets its credentials
@@ -371,8 +363,12 @@ export default defineConfig({
             // (no token) rather than silently undiscovered; runs only when its env vars are set.
             'packages/void/test/e2e/**/*.test.ts',
             'packages/md/test/integration/**/*.test.ts',
+            'packages/react/test/integration/**/*.test.ts',
+            'packages/vue/test/integration/**/*.test.ts',
+            'packages/svelte/test/integration/**/*.test.ts',
+            'packages/solid/test/integration/**/*.test.ts',
           ],
-          exclude: [...metaframeworks, ...sharedPlayground],
+          exclude: sharedPlayground,
           maxWorkers,
         },
       },
@@ -383,7 +379,7 @@ export default defineConfig({
           // This needs its own group order: `fileParallelism: false` resolves to `maxWorkers: 1`,
           // and vitest rejects projects that share a group order but disagree on `maxWorkers`.
           name: 'shared-playground',
-          sequence: { groupOrder: 4 },
+          sequence: { groupOrder: 3 },
           include: sharedPlayground,
           // The live-e2e suite lives here, so this project — not core-markdown — is the one that
           // has to forward its credentials past vitest's worker env filter (see e2eWorkerEnv).
@@ -393,42 +389,6 @@ export default defineConfig({
           testTimeout,
           hookTimeout,
           fileParallelism: false,
-        },
-      },
-      {
-        test: {
-          name: 'metaframeworks',
-          sequence: { groupOrder: 2 },
-          include: metaframeworks,
-          maxWorkers,
-          testTimeout,
-          hookTimeout,
-        },
-      },
-      {
-        test: {
-          name: 'pages-react-vue',
-          sequence: { groupOrder: 2 },
-          include: [
-            'packages/react/test/integration/**/*.test.ts',
-            'packages/vue/test/integration/**/*.test.ts',
-          ],
-          maxWorkers,
-          testTimeout,
-          hookTimeout,
-        },
-      },
-      {
-        test: {
-          name: 'pages-svelte-solid',
-          sequence: { groupOrder: 2 },
-          include: [
-            'packages/svelte/test/integration/**/*.test.ts',
-            'packages/solid/test/integration/**/*.test.ts',
-          ],
-          maxWorkers,
-          testTimeout,
-          hookTimeout,
         },
       },
     ],
