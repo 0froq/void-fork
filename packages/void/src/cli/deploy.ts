@@ -37,6 +37,7 @@ import {
 import { scanJobsSync } from '../crons/scan.ts';
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { discoverSchema } from '../drizzle/discover.ts';
+import { scanDurableObjectModules } from '../durable/scan.ts';
 import { collectRevalidate, collectPages, hasRevalidate } from '../isr-config.ts';
 import { voidWarn } from '../log.ts';
 import { collectMigrations } from '../migrations/collect.ts';
@@ -203,6 +204,7 @@ import {
   ensureWranglerCompat,
   resolveLiveBindingConfig,
   syncWranglerBindings,
+  syncWranglerDurableObjects,
   writeProvisionedWranglerConfig,
   bindingEntriesForField,
   FRIENDLY_BINDING_NAMES,
@@ -3704,6 +3706,7 @@ export async function runCloudflareDeploy(
     assertNoRootSourceConventionConflicts(paths);
     validateSsrEntry(root, paths);
     scanJobsSync(root, paths.cronsDir);
+    syncWranglerDurableObjects(root, scanDurableObjectModules(root));
   } catch (err) {
     log.error(`deploy: ${getErrorMessage(err)}`);
     return exit(1);
@@ -6124,6 +6127,14 @@ async function runFrameworkDeploy(
   outro('Done!');
 }
 
+export function assertManagedDurableStateSupported(root: string): void {
+  if (scanDurableObjectModules(root).length > 0) {
+    throw new Error(
+      'deploy: typed Durable State modules in durable-objects/ are not yet supported by the Void managed platform. Deploy to your own Cloudflare account with `void deploy --platform cloudflare`.',
+    );
+  }
+}
+
 async function runFullDeploy(
   root: string,
   config: ProjectConfig,
@@ -6146,6 +6157,8 @@ async function runFullDeploy(
     mode: 'full',
     framework: detected?.name,
   });
+
+  assertManagedDurableStateSupported(root);
 
   // 3. Build (child process to avoid Vite API side effects on bundle output)
   if (!skipBuild) {

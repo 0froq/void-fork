@@ -14,6 +14,7 @@ import {
   readWranglerCompat,
   resolveLiveBindingConfig,
   syncWranglerBindings,
+  syncWranglerDurableObjects,
   writeProvisionedWranglerConfig,
 } from '../../src/cli/wrangler.ts';
 import type { VoidConfig } from '../../src/config.ts';
@@ -445,6 +446,31 @@ describe('syncWranglerBindings', () => {
     expect(parsed.containers[0].image).toContain('Dockerfile');
     expect(parsed.migrations).toEqual([
       { tag: 'void-sandbox-v1', new_sqlite_classes: ['Sandbox'] },
+    ]);
+  });
+
+  it('appends typed Durable Object migrations when new files sort earlier', () => {
+    setup('wrangler.jsonc', '{ "name": "test" }');
+    const zeta = {
+      filePath: join(tmpDir, 'durable-objects', 'zeta.ts'),
+      bindingName: 'ZETA',
+      className: 'ZetaDurableObject',
+      migrationTag: 'void-durable-zeta-v1',
+    };
+    const alpha = {
+      filePath: join(tmpDir, 'durable-objects', 'alpha.ts'),
+      bindingName: 'ALPHA',
+      className: 'AlphaDurableObject',
+      migrationTag: 'void-durable-alpha-v1',
+    };
+
+    expect(syncWranglerDurableObjects(tmpDir, [zeta])).toBe(true);
+    expect(syncWranglerDurableObjects(tmpDir, [alpha, zeta])).toBe(true);
+    const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
+
+    expect(parsed.migrations).toEqual([
+      { tag: 'void-durable-zeta-v1', new_sqlite_classes: ['ZetaDurableObject'] },
+      { tag: 'void-durable-alpha-v1', new_sqlite_classes: ['AlphaDurableObject'] },
     ]);
   });
 

@@ -149,6 +149,11 @@
       "import": "./dist/runtime/db.mjs",
       "require": "./dist/runtime/db.mjs"
     },
+    "./durable": {
+      "types": "./dist/runtime/durable.d.mts",
+      "import": "./dist/runtime/durable.mjs",
+      "require": "./dist/runtime/durable.mjs"
+    },
     "./seed": {
       "types": "./dist/runtime/seed.d.mts",
       "import": "./dist/runtime/seed.mjs",

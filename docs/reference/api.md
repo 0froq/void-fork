@@ -586,6 +586,31 @@ The typed client is built on [ofetch](https://github.com/unjs/ofetch) with a typ
 
 `headers` and `signal` are passed through to the underlying fetch unchanged.
 
+## Durable State
+
+Imported from `"void/durable"`. See [Durable State](../guide/durable-state.md) for the complete file convention and deployment support.
+
+### `defineDurableState(definition)`
+
+Defines a typed, persisted Durable Object state machine. The returned object must be the default export of a module under `durable-objects/`; named-export the same object for typed RPC calls elsewhere in the app.
+
+```ts
+function defineDurableState<TState, TEnv, TMethods>(definition: {
+  initialState: TState | ((env: TEnv) => TState | Promise<TState>);
+  version?: number;
+  migrations?: Array<{
+    version: number;
+    migrate(state: unknown): TState | Promise<TState>;
+  }>;
+  methods: TMethods;
+  fetch?: (context, request: Request) => Response | Promise<Response>;
+  alarm?: (context) => void | Promise<void>;
+  storageKey?: string;
+}): DurableStateApi<TMethods>;
+```
+
+`DurableStateApi` exposes `class`, `get(name)`, `get(namespace, name)`, `getById(id)`, and `getById(namespace, id)`. Stubs returned by the lookup helpers contain the definition's methods with their argument types preserved and return values wrapped in `Promise`.
+
 ## Database
 
 Imported from `"void/db"`. The `db` export is a [Drizzle ORM](https://orm.drizzle.team) instance for the configured database dialect: [Cloudflare D1](https://developers.cloudflare.com/d1/) by default, PostgreSQL with `"database": "pg"`, or MySQL with `"database": "mysql"`.
@@ -1157,6 +1182,7 @@ This table lists app-facing imports. Exported implementation subpaths such as `v
 | `void/client`             | `fetch`, `fetchStream`, `FetchError`, `auth`, `createAuthClient`, `AuthUser`, `AuthSession`, `AuthState`                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `void/client/{framework}` | Same as `void/client`, with framework-specific Better Auth clients for `react`, `vue`, `svelte`, and `solid`                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `void/ws`                 | `defineRoom`, `defineWebSocket`, `connect`, WebSocket context and connection types                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `void/durable`            | `defineDurableState`, typed state/RPC/context/migration types                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `void/sse`                | `eventStream`, `formatSse`, `formatSseText`, `getLastEventId`, `SseStreamClosedError`, SSE message and stream types                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `void/sse/client`         | `connectEventStream`, browser `EventSource` wrapper types                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `void/live`               | `defineLiveStream`, SSE topic fanout runtime types. Server-only.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |

@@ -2489,6 +2489,7 @@ export function compileWorkerEntry(
    * which emits the pre-existing helper byte-for-byte.
    */
   notFound: NotFoundHandling = 'none',
+  durableObjects: Array<{ bindingName: string; className: string; filePath: string }> = [],
 ): string {
   const remotePath = remote?.remotePath;
   const remoteBindingNames = JSON.stringify(remote?.bindingNames);
@@ -2524,6 +2525,18 @@ export function compileWorkerEntry(
       ? `export { VoidLiveStreamDurableObject };\n__setLiveBindingName(${JSON.stringify(liveBindingName)});\n`
       : `export { VoidLiveStreamDurableObject as ${liveClassName} };\n__setLiveBindingName(${JSON.stringify(liveBindingName)});\n`
     : '';
+  const durableObjectImports = durableObjects
+    .map(
+      ({ filePath }, index) =>
+        `import __voidDurableObject${index} from ${JSON.stringify(filePath)};`,
+    )
+    .join('\n');
+  const durableObjectExports = durableObjects
+    .map(
+      ({ bindingName, className }, index) =>
+        `__voidDurableObject${index}.__bind(${JSON.stringify(bindingName)});\nexport const ${className} = __voidDurableObject${index}.class;`,
+    )
+    .join('\n');
   const runtimeEnvImport = `import { withRuntimeEnv } from ${JSON.stringify(runtimeEnvPath)};\n`;
   const remoteImport = remote
     ? `import { createRemoteEnv } from ${JSON.stringify(remote.remotePath)};\n`
@@ -2674,7 +2687,7 @@ ${envValidateCall}${isrDeploymentStamp}  const userEnv = __filterInternalBinding
 
   if (hasQueues) {
     return `${sandboxImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __voidHandleWebSocket, __withRawEnv, __processQueue${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
-${runtimeEnvImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
+${durableObjectImports}\n${runtimeEnvImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}
 async function queue(batch, env, ctx) {
@@ -2701,15 +2714,17 @@ ${envValidateCall}${remotePath ? `  if (env.__VOID_REMOTE === "1") env = ${creat
 ${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}
 ${liveExport}
 ${sandboxExport}
+${durableObjectExports}
 export default { fetch: ${fetchHandler}, scheduled: handleScheduled, queue };`;
   }
   return `${sandboxImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __voidHandleWebSocket, __withRawEnv${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
-${runtimeEnvImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
+${durableObjectImports}\n${runtimeEnvImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${scheduledHandler}
 ${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}
 ${liveExport}
 ${sandboxExport}
+${durableObjectExports}
 export default { fetch: ${fetchHandler}, scheduled: handleScheduled };`;
 }
 

@@ -552,6 +552,7 @@ export function buildVoidManifest(opts: {
     dialect,
     webSockets,
   } = opts;
+  const resolvedDialect = dialect ?? 'sqlite';
 
   const manifest: DeployManifest = { version: 3, assetManifestVersion: 2, bindings: {} };
   if (bindings.needsAuth) {
@@ -559,7 +560,7 @@ export function buildVoidManifest(opts: {
   }
   const hasMigrations = migrations && migrations.length > 0;
   if (bindings.needsD1 || bindings.needsAuth || hasMigrations) {
-    if (dialect !== 'sqlite') {
+    if (resolvedDialect !== 'sqlite') {
       manifest.bindings.hyperdrive = ['HYPERDRIVE'];
     } else {
       manifest.bindings.d1 = [options?.bindingNames?.d1 ?? 'DB'];
@@ -588,9 +589,10 @@ export function buildVoidManifest(opts: {
   }
 
   if (migrations && migrations.length > 0) {
-    const planBundle = dialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
+    const planBundle =
+      resolvedDialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
     manifest.migrations = {
-      dialect: dialect ?? 'sqlite',
+      dialect: resolvedDialect,
       ...(planBundle
         ? {
             classifierVersion: planBundle.classifierVersion,
@@ -806,11 +808,12 @@ export function buildFrameworkManifest(opts: {
   webSockets?: Array<WebSocketRouteDefinition>;
 }): DeployManifest {
   const po = opts.packageOptions;
+  const dialect = opts.dialect ?? 'sqlite';
 
   const manifest: DeployManifest = { version: 3, assetManifestVersion: 2, bindings: {} };
   const hasMigrations = opts.migrations && opts.migrations.length > 0;
   if (opts.bindings.needsD1 || opts.bindings.needsAuth || hasMigrations) {
-    if (opts.dialect !== 'sqlite') {
+    if (dialect !== 'sqlite') {
       manifest.bindings.hyperdrive = ['HYPERDRIVE'];
     } else {
       manifest.bindings.d1 = [po?.bindingNames?.d1 ?? 'DB'];
@@ -830,10 +833,9 @@ export function buildFrameworkManifest(opts: {
   }
 
   if (opts.migrations && opts.migrations.length > 0) {
-    const planBundle =
-      opts.dialect === 'sqlite' ? buildMigrationPlanBundle(opts.migrations) : undefined;
+    const planBundle = dialect === 'sqlite' ? buildMigrationPlanBundle(opts.migrations) : undefined;
     manifest.migrations = {
-      dialect: opts.dialect ?? 'sqlite',
+      dialect,
       ...(planBundle
         ? {
             classifierVersion: planBundle.classifierVersion,

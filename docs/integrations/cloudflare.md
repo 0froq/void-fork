@@ -85,13 +85,14 @@ This augments the `Cloudflare.Env` interface with `DB`, `KV`, `STORAGE`, `AI`, a
 
 ### Available bindings
 
-| Binding   | Type          | Trigger                                                         |
-| --------- | ------------- | --------------------------------------------------------------- |
-| `DB`      | `D1Database`  | `env.DB` / `c.env.DB` or `import from "void/db"`                |
-| `KV`      | `KVNamespace` | `env.KV` / `c.env.KV` or `import from "void/kv"`                |
-| `STORAGE` | `R2Bucket`    | `env.STORAGE` / `c.env.STORAGE` or `import from "void/storage"` |
-| `AI`      | `Ai`          | `env.AI` / `c.env.AI` or `import from "void/ai"`                |
-| `QUEUE_*` | `Queue<T>`    | `defineQueue()` or `import { queues } from "void/queues"`       |
+| Binding          | Type                     | Trigger                                                         |
+| ---------------- | ------------------------ | --------------------------------------------------------------- |
+| `DB`             | `D1Database`             | `env.DB` / `c.env.DB` or `import from "void/db"`                |
+| `KV`             | `KVNamespace`            | `env.KV` / `c.env.KV` or `import from "void/kv"`                |
+| `STORAGE`        | `R2Bucket`               | `env.STORAGE` / `c.env.STORAGE` or `import from "void/storage"` |
+| `AI`             | `Ai`                     | `env.AI` / `c.env.AI` or `import from "void/ai"`                |
+| `QUEUE_*`        | `Queue<T>`               | `defineQueue()` or `import { queues } from "void/queues"`       |
+| filename-derived | `DurableObjectNamespace` | module in `durable-objects/`                                    |
 
 Bindings are [inferred automatically](../reference/resource-inference.md) by scanning your source files for import and access patterns. You can also set them explicitly in `void.json`:
 
@@ -150,7 +151,7 @@ All other fields in your `wrangler.jsonc` -- `name`, `routes`, `services`, `vars
 
 Fields that Void always sets (`main`, `triggers`, `assets`) don't need to be in your wrangler config -- they're added programmatically based on your project structure.
 
-In this mode, Void does **not** modify your `wrangler.jsonc` file on disk. The merge is purely in-memory.
+In this mode, normal inferred bindings are merged purely in memory. Typed state modules in `durable-objects/` are the exception: Void persists their bindings and `new_sqlite_classes` entries to `wrangler.jsonc` because Cloudflare Durable Object migration history must remain append-only across builds. Commit those entries.
 
 ### Adapter-based frameworks (SvelteKit, Nuxt, Astro)
 
@@ -249,10 +250,10 @@ Provisioning is automatic and **idempotent**. Void reads existing ids first, ado
 
 #### Scope and limitations
 
-- **Supported apps (v1): full Void apps on the Cloudflare Workers target only** -- worker-bearing apps that run Void's routing (`routes/` and/or `pages/`), with D1 (SQLite) and/or KV, R2, Queues, and PostgreSQL or MySQL through Hyperdrive, plus auth and ISR. Everything else fails closed **before** any account operation, with guidance:
+- **Supported apps (v1): full Void apps on the Cloudflare Workers target only** -- worker-bearing apps that run Void's routing (`routes/` and/or `pages/`), with D1 (SQLite) and/or KV, R2, Queues, typed SQLite-backed state from `durable-objects/`, and PostgreSQL or MySQL through Hyperdrive, plus auth and ISR. Everything else fails closed **before** any account operation, with guidance:
   - **Framework SSR is not supported here (yet).** The whole framework path -- TanStack Start, React Router, vinext (and SvelteKit, Nuxt, Analog, Astro) -- is deferred in v1. Deploy them with `void deploy` (the managed platform) or the framework's own Cloudflare adapter. Framework SSR support for this backend is a follow-up.
   - **Static-only / SPA / SSG apps are not supported here** -- including unconfigured ones, `output: "static"` in `void.json`, and `--dir` / `--spa` deploys. Deploy those with `void deploy` (the managed platform) or host the built assets on Cloudflare Pages / any static host.
-  - **WebSocket / Durable Object routes (`*.ws.ts`) are not supported here (yet).** A WebSocket route makes the build emit a key-value-backed Durable Object namespace (a `new_classes` migration), which a fresh Cloudflare account -- and every Workers Free account -- refuses to create. Deploy those with `void deploy`. SQLite-backed WebSocket support for this backend is a follow-up.
+  - **WebSocket routes (`*.ws.ts`) are not supported here (yet).** A WebSocket route makes the build emit a legacy key-value-backed Durable Object namespace (a `new_classes` migration), which a fresh Cloudflare account -- and every Workers Free account -- refuses to create. This limitation does not apply to [`durable-objects/` typed state modules](../guide/durable-state.md), which use `new_sqlite_classes` and are supported on this path. Deploy `*.ws.ts` routes with `void deploy`. SQLite-backed WebSocket support for this backend is a follow-up.
   - **Custom `migrations_pattern` is not supported here.** v1 deploys only Void's default migration convention -- `db/migrations/*.sql` with wrangler's default pattern (leave `migrations_pattern` unset). Remove a custom `migrations_pattern` from the D1 binding, or deploy with `void deploy`. Supporting custom patterns is a follow-up.
   - **Non-Cloudflare targets (`node` / `bun` / `deno`) are not supported here** -- this backend deploys Cloudflare Workers only.
   - **`--skip-build` is not supported here.** Every check on this path validates the artifact the build emits -- the worker `vars` in `dist/ssr/wrangler.json` and the generated auth schema -- so skipping the build would leave them reading a stale or missing artifact instead of the worker being uploaded. Drop `--skip-build`, or use `void deploy` (the managed platform), which supports it.

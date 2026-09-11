@@ -93,6 +93,7 @@ type RoutingPluginOptions = {
   sandboxBindingName?: string;
   sandboxClassName?: string;
   live?: { bindingName: string; className: string };
+  durableObjects?: Array<{ bindingName: string; className: string; filePath: string }>;
   onDevAssetRoutingPolicyChange?: (policy: AssetRoutingPolicy) => boolean;
 };
 
@@ -447,6 +448,9 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           : false,
         undefined,
         options.live,
+        undefined,
+        undefined,
+        options.durableObjects,
       ),
     );
   }
@@ -589,6 +593,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
             options.live,
             isr,
             currentNotFoundHandling(),
+            options.durableObjects,
           ),
         );
       }
@@ -726,6 +731,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
               options.live,
               undefined,
               currentNotFoundHandling(),
+              options.durableObjects,
             ),
           );
         }

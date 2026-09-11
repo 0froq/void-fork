@@ -45,6 +45,8 @@ src/
     websocket.ts            # .ws.ts scanner + DO class metadata extraction
     scan.ts                 # Filesystem scanner using tinyglobby + export detection
     compile.ts              # Generates Hono app code + worker entry + websocket wiring
+  durable/
+    scan.ts                 # durable-objects/* convention → binding/class/migration metadata
   codegen/
     route-types.ts          # Generates .void/routes.d.ts (RouteMap + WebSocketRouteMap)
     db-types.ts             # (removed — Drizzle schema is now the type source)
@@ -62,6 +64,7 @@ src/
     ws-server.ts            # DO runtime helpers for generated websocket routes
     ai.ts                   # AI proxy — auto-detects backend (service binding / HTTPS / direct binding)
     db.ts                   # Drizzle D1 instance (auto-wired with user schema via virtual module)
+    durable.ts              # defineDurableState(), typed RPC stubs, persistence + state migrations
   inference/
     walk.ts                 # AST walking with vite's parseSync + estree-walker
   migrations/
@@ -88,6 +91,7 @@ src/
 - **Migration DB path**: Miniflare stores D1 data at a deterministic path computed from the `database_id` using HMAC-SHA256. The `getMiniflareDatabasePath()` function in `migrations/runner.ts` replicates this algorithm so migrations target `<persist-root>/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite` (for example `.void/v3/...` in default/class-A mode and `.wrangler/state/v3/...` in class-B/C framework mode).
 - **Drizzle-first database**: Schema is defined in `db/schema.ts` (Drizzle table definitions). `void/db` exports a dialect-aware Drizzle instance for D1, PostgreSQL, or MySQL. `@schema` is an auto-configured alias for `db/schema.ts`. Migrations live in `db/migrations/`. CLI commands: `void db push` (prototype), `void db generate` (create migration files), `void db migrate` (apply locally). When auth is enabled, `void db generate` runs codegen in production mode and adds `.void/better-auth-schema.ts` to Drizzle Kit's schema inputs. Direct Cloudflare deploy applies PostgreSQL or MySQL migrations from the shell-provided production `DATABASE_URL`; PostgreSQL is transactional, while MySQL DDL is not. `drizzle-orm` and `drizzle-kit` ship with void.
 - **Database provisioning adapters**: `void db connect <url>` saves an external database URL to `.env.local` and syncs a linked Void project; `--local-only` skips the sync. `void db connect --provider neon` provisions through the built-in Neon adapter using `NEON_API_KEY`. Third-party packages or local modules can export a `DatabaseProviderAdapter` built with `void/database-provider`; runtime database code remains provider-neutral.
+- **Typed Durable State convention**: each default-exported `defineDurableState()` definition in `durable-objects/*.ts` becomes a filename-derived binding and worker class (`shopping-cart.ts` → `SHOPPING_CART` / `ShoppingCartDurableObject`). The generated entry calls the internal `__bind()` hook so named imports can use `State.get(name)` without touching `c.env`, exports `State.class`, and emits a stable `new_sqlite_classes` migration. `syncWranglerDurableObjects()` persists bindings and append-only class migration history in `wrangler.jsonc`; never regenerate migration order solely from the current sorted files. Runtime operations are serialized and persisted after successful typed RPC, `fetch`, or `alarm` handlers; versioned value migrations run on load. This is native-Void + Cloudflare only and is supported by direct Cloudflare deploys, unlike legacy KV-backed `*.ws.ts` classes.
 - **Journal coherence invariant**: `db/migrations/*.sql` and `db/migrations/meta/_journal.json` must stay in sync — every `.sql` file has a matching journal entry (by `tag`) and vice versa. `assertJournalCoherence` in `src/migrations/validate.ts` is the gate, called from `deploy`, `db status`, `db migrate`, and `db reset`. The two CLI commands that mutate migration state — `void gen migration` and `void db rename-migrations` — are responsible for keeping the journal coherent themselves: the first appends a new entry when writing a file (failing loud if the journal is missing — run `drizzle-kit generate` first), the second rewrites `tag` values alongside the file renames and also renames the matching `meta/<prefix>_snapshot.json` (with byte-level rollback on failure). `gen migration` additionally copies the previous `meta/<idx:04d>_snapshot.json` forward to the new idx so drizzle-kit's drop/rollback tooling keeps working on mixed hand-written + drizzle projects; projects without prior snapshots are skipped silently. Drift will fail loudly before touching any remote DB. Motivated by [void-sdk/void#6](https://github.com/void-sdk/void/issues/6), where an orphan scaffolded `.sql` file half-applied against D1 and wedged the deploy.
 
 ### Self-Host AI + ISR
@@ -109,6 +113,7 @@ Two features need extra wiring on a self-hosted `vite build && wrangler deploy` 
 | `void/routes`    | Empty `RouteMap` + `WebSocketRouteMap` stubs (augmented by generated `routes.d.ts`)                                                   |
 | `void/client`    | Typed `fetch()` client + `fetchStream()` SSE consumer + `FetchError`                                                                  |
 | `void/ws`        | `defineRoom()`, `defineWebSocket()`, typed `connect()`, and WebSocket context types                                                   |
+| `void/durable`   | `defineDurableState()`, typed RPC stubs, state context, and state migration types                                                     |
 | `void/db`        | `db` Drizzle D1 instance (auto-wired with user schema) + `createDb()` for custom D1 bindings                                          |
 | `void/queues`    | `queues` typed proxy + `QueueMap` stub interface (augmented by generated `queues.d.ts`)                                               |
 | `void/ai`        | `ai` proxy — `ai.run()`, `ai.stream()`, `ai.models()` with auto-detected backend (service binding / HTTPS / direct)                   |

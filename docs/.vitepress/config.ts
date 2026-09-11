@@ -229,6 +229,7 @@ export default extendConfig(
               { text: 'WebSockets', link: '/guide/websockets' },
               { text: 'Server-Sent Events', link: '/guide/sse' },
               { text: 'Live Event Streams', link: '/guide/live' },
+              { text: 'Durable State', link: '/guide/durable-state' },
               { text: 'Cron Jobs', link: '/guide/jobs' },
               { text: 'Queues', link: '/guide/queues' },
               { text: 'Remote Development', link: '/guide/remote-dev' },

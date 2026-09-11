@@ -25,6 +25,7 @@ import {
   readExistingLiveBindingConfig,
   resolveLiveBindingConfig,
   syncWranglerBindings,
+  syncWranglerDurableObjects,
 } from './cli/wrangler.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
 import {
@@ -35,6 +36,7 @@ import {
   type NotFoundHandling,
 } from './config.ts';
 import { scanJobsSync } from './crons/scan.ts';
+import { scanDurableObjectModules } from './durable/scan.ts';
 import { inferBindingsFromSource } from './inference/walk.ts';
 import { voidLog, voidWarn, voidError } from './log.ts';
 import { pagesDevCssAssetsPlugin } from './pages/dev-css-assets.ts';
@@ -730,6 +732,7 @@ export function voidPlugin(options?: {
       export const sandbox = { get: getSandbox };
     `,
     'void/live': '',
+    'void/durable': '',
   };
   const STUB_RESOLVE_FILTER = new RegExp(
     `^(${Object.keys(SERVER_ONLY_STUBS).join('|').replaceAll('/', '\\/')})$`,
@@ -744,9 +747,11 @@ export function voidPlugin(options?: {
       filter: { id: STUB_RESOLVE_FILTER },
       handler(id) {
         if (this.environment?.name === 'client') {
-          if (id === 'void/live') {
+          if (id === 'void/live' || id === 'void/durable') {
             this.error(
-              'void/live is server-only and cannot be imported by browser code. Import void/live/client instead.',
+              id === 'void/live'
+                ? 'void/live is server-only and cannot be imported by browser code. Import void/live/client instead.'
+                : 'void/durable is server-only and cannot be imported by browser code.',
             );
           }
           return STUB_PREFIX + id;
@@ -772,12 +777,43 @@ export function voidPlugin(options?: {
   // reserve names re-filter by `routeEnvironment` (see `mergeBindings` and
   // `resolveConfiguredAssetRoutingPolicy`).
   const websocketRoutes = framework ? [] : scanWebSocketRoutesSync(root, paths);
+  const durableObjects = scanDurableObjectModules(root);
+  if (detected && durableObjects.length > 0) {
+    throw new Error(
+      'durable: durable-objects/ is currently supported in Void apps only, not framework adapter mode.',
+    );
+  }
+  for (const module of durableObjects) {
+    const websocketCollision = websocketRoutes.find(
+      (route) => route.bindingName === module.bindingName || route.className === module.className,
+    );
+    if (websocketCollision) {
+      throw new Error(
+        `durable: durable-objects/${module.filePath.split('/').pop()} conflicts with WebSocket route '${websocketCollision.filePath}'. Rename one of the files.`,
+      );
+    }
+    if (
+      sandboxConfig &&
+      (sandboxConfig.binding === module.bindingName || sandboxConfig.className === module.className)
+    ) {
+      throw new Error(
+        `durable: durable-objects/${module.filePath.split('/').pop()} conflicts with the configured Sandbox binding or class. Rename the Durable Object file.`,
+      );
+    }
+  }
+  if (!isNodeTarget(config.target)) {
+    syncWranglerDurableObjects(root, durableObjects);
+  }
   const liveConfig = !isNodeTarget(config.target)
     ? bindings.needsLive
       ? resolveLiveBindingConfig(root, {
-          reservedBindings: websocketRoutes.map((route) => route.bindingName),
+          reservedBindings: [
+            ...websocketRoutes.map((route) => route.bindingName),
+            ...durableObjects.map((module) => module.bindingName),
+          ],
           reservedClasses: [
             ...websocketRoutes.map((route) => route.className),
+            ...durableObjects.map((module) => module.className),
             sandboxConfig?.className,
           ],
         })
@@ -1135,6 +1171,79 @@ export function voidPlugin(options?: {
             tag: 'void-ws-v1',
             new_classes: environmentWebsocketRoutes.map((route) => route.className),
           },
+        ];
+      }
+    }
+
+    if (durableObjects.length > 0) {
+      const currentDurableObjects =
+        ((result as Record<string, unknown>).durable_objects as
+          | { bindings?: Array<{ name: string; class_name: string }> }
+          | undefined) ??
+        ((resolved as Record<string, unknown>).durable_objects as
+          | { bindings?: Array<{ name: string; class_name: string }> }
+          | undefined);
+      const existingBindings = currentDurableObjects?.bindings ?? [];
+      for (const module of durableObjects) {
+        const conflict = existingBindings.find(
+          (binding) =>
+            binding.name === module.bindingName && binding.class_name !== module.className,
+        );
+        if (conflict) {
+          throw new Error(
+            `durable: binding '${module.bindingName}' is already configured for class '${conflict.class_name}', but durable-objects/ requires '${module.className}'.`,
+          );
+        }
+      }
+      const additions = durableObjects
+        .filter(
+          (module) => !existingBindings.some((binding) => binding.name === module.bindingName),
+        )
+        .map((module) => ({ name: module.bindingName, class_name: module.className }));
+      if (additions.length > 0) {
+        (result as Record<string, unknown>).durable_objects = {
+          bindings: [...existingBindings, ...additions],
+        };
+      }
+
+      const currentMigrations =
+        (result as Record<string, unknown>).migrations ??
+        (resolved as Record<string, unknown>).migrations;
+      const existingMigrations = Array.isArray(currentMigrations)
+        ? (currentMigrations as Array<{
+            tag?: string;
+            new_sqlite_classes?: Array<string>;
+          }>)
+        : [];
+      for (const module of durableObjects) {
+        const tagConflict = existingMigrations.find(
+          (migration) =>
+            migration.tag === module.migrationTag &&
+            !migration.new_sqlite_classes?.includes(module.className),
+        );
+        if (tagConflict) {
+          throw new Error(
+            `durable: migration tag '${module.migrationTag}' is already used by another Durable Object migration.`,
+          );
+        }
+      }
+      const migrationAdditions = durableObjects
+        .filter(
+          (module) =>
+            !existingMigrations.some(
+              (migration) =>
+                migration.tag === module.migrationTag ||
+                migration.new_sqlite_classes?.includes(module.className),
+            ),
+        )
+        .map((module) => ({
+          tag: module.migrationTag,
+          new_sqlite_classes: [module.className],
+        }));
+      if (migrationAdditions.length > 0) {
+        (result as Record<string, unknown>).migrations = [
+          ...existingMigrations,
+          ...migrationAdditions,
         ];
       }
     }
@@ -1744,6 +1853,11 @@ export function voidPlugin(options?: {
         `live: void/live requires target: "cloudflare". It is not available with target: '${config.target}'.`,
       );
     }
+    if (durableObjects.length > 0) {
+      throw new Error(
+        `durable: durable-objects/ requires target: "cloudflare". It is not available with target: '${config.target}'.`,
+      );
+    }
     if (config.routing?.revalidate) {
       voidWarn(
         '"routing.revalidate" in void.json is ignored with target: "' +
@@ -1886,6 +2000,7 @@ export function voidPlugin(options?: {
       sandboxBindingName: sandboxConfig?.binding,
       sandboxClassName: sandboxConfig?.className,
       live: liveConfig,
+      durableObjects,
       onDevAssetRoutingPolicyChange: updateDevAssetRoutingPolicy,
     }),
     drizzlePlugin(root, true, dialect, {

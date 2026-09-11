@@ -9,7 +9,7 @@ Vite plugin and CLI for building and deploying apps on Void.
 - typed Drizzle access via `void/db`
 - `crons/` and `queues/`
 - URL redirects, rewrites, and fallbacks (`void.json` / `public/_redirects`, plus `c.rewrite()` from middleware)
-- binding inference for D1, KV, R2, AI, auth, and queues
+- binding inference for D1, KV, R2, AI, auth, queues, and typed Durable Objects
 - remote bindings for local development
 - deploy packaging for Void-hosted apps, static sites, and supported meta-frameworks
 
@@ -54,6 +54,7 @@ Runtime helpers include:
 - `void/db`
 - `void/kv`
 - `void/storage`
+- `void/durable`
 - `void/ai`
 - `void/isr`
 - `void/client`
@@ -78,7 +79,7 @@ There is Vinext-specific source in the repo, but it is intentionally on hold and
 `void/db` is Drizzle-first.
 
 - D1 is the default managed database target
-- framework apps can opt into PostgreSQL mode
+- apps can opt into PostgreSQL or MySQL mode
 - route types, DB types, and queue types are generated into `.void/*.d.ts`
 
 ## Documentation

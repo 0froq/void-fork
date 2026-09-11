@@ -2,7 +2,7 @@
 
 Fullstack SDK for Cloudflare Workers, powered by [Vite](https://vite.dev).
 
-Add a single plugin to your `vite.config.ts` and get file-based API routing, server-rendered pages, URL rewrites and redirects, D1 database, KV storage, R2 object storage, AI inference, and one-command deploys — all auto-provisioned from your imports.
+Add a single plugin to your `vite.config.ts` and get file-based API routing, server-rendered pages, URL rewrites and redirects, D1/PostgreSQL/MySQL databases, typed Durable Object state, KV storage, R2 object storage, AI inference, and one-command deploys.
 
 ```ts
 // vite.config.ts
@@ -72,6 +72,7 @@ pnpm void deploy
 - **File-based routing** — drop a file in `routes/`, get an endpoint with method exports, dynamic params, middleware, and [Standard Schema](https://standardschema.dev/) validation
 - **Full-stack pages** — `pages/` directory for server-rendered UI with co-located data loading, SPA navigation, and typed forms (React, Vue, Svelte, Solid)
 - **End-to-end type safety** — SQL migrations generate DB types, route handlers infer return types, typed fetch client checks everything at the call site
+- **Typed durable state** — modules in `durable-objects/` get inferred SQLite-backed bindings and typed RPC methods
 - **Local dev parity** — `vite dev` runs handlers in the real `workerd` runtime with local D1, KV, and R2
 
 ## Documentation
