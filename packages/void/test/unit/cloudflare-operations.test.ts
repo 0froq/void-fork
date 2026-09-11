@@ -149,37 +149,17 @@ describe('Cloudflare version operations', () => {
     expect(status.versions.map((version) => version.id)).toEqual(['v1', 'v2']);
   });
 
-  it('activates the selected version and synchronizes triggers', async () => {
+  it('activates the selected version without rewriting non-versioned triggers', async () => {
     const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue(ok());
-    await activateCloudflareExistingVersion(
-      context(runner),
-      {
-        id: 'v1',
-        createdAt: null,
-        message: null,
-        metadata: { schema: 1, migrations: ['0000_init.sql'] },
-      },
-      'v2',
-    );
+    await activateCloudflareExistingVersion(context(runner), {
+      id: 'v1',
+      createdAt: null,
+      message: null,
+      metadata: { schema: 1, migrations: ['0000_init.sql'] },
+    });
     expect(runner.mock.calls[0][0]).toContain('v1@100');
     expect(runner.mock.calls[0][0]).toContain('void:{"schema":1,"migrations":["0000_init.sql"]}');
-    expect(runner.mock.calls[1][0].slice(0, 2)).toEqual(['triggers', 'deploy']);
-  });
-
-  it('restores previous traffic when trigger synchronization fails', async () => {
-    const runner = vi
-      .fn<CloudflareOperationRunner>()
-      .mockReturnValueOnce(ok())
-      .mockReturnValueOnce({ status: 1, stdout: '', stderr: 'trigger failed' })
-      .mockReturnValueOnce(ok());
-    await expect(
-      activateCloudflareExistingVersion(
-        context(runner),
-        { id: 'v1', createdAt: null, message: null, metadata: null },
-        'v2',
-      ),
-    ).rejects.toThrow('production traffic was restored to v2');
-    expect(runner.mock.calls[2][0]).toContain('v2@100');
+    expect(runner).toHaveBeenCalledTimes(1);
   });
 
   it('maps search, version, and error filters to a live tail', async () => {

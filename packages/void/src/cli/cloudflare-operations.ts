@@ -331,7 +331,6 @@ export function parseActiveVersionId(value: string): string | null {
 export async function activateCloudflareExistingVersion(
   context: CloudflareOperationContext,
   target: CloudflareWorkerVersion,
-  previousVersionId: string | null,
 ): Promise<void> {
   const message = target.metadata
     ? encodeCloudflareVersionMessage(target.metadata.migrations)
@@ -349,36 +348,6 @@ export async function activateCloudflareExistingVersion(
     ],
     { capture: false },
   );
-  try {
-    await run(context, ['triggers', 'deploy', ...targetArgs(context)], { capture: false });
-  } catch (error) {
-    if (previousVersionId) {
-      try {
-        await run(
-          context,
-          [
-            'versions',
-            'deploy',
-            `${previousVersionId}@100`,
-            ...targetArgs(context),
-            '--message',
-            'Void automatic rollback after trigger activation failed.',
-            '--yes',
-          ],
-          { capture: false },
-        );
-      } catch {
-        throw new Error(
-          `Cloudflare trigger synchronization failed and restoring version ${previousVersionId} also failed. ${errorMessage(error)}`,
-        );
-      }
-    }
-    throw new Error(
-      previousVersionId
-        ? `Cloudflare trigger synchronization failed; production traffic was restored to ${previousVersionId}. ${errorMessage(error)}`
-        : `Cloudflare trigger synchronization failed. ${errorMessage(error)}`,
-    );
-  }
 }
 
 export async function tailCloudflareWorker(

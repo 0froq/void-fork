@@ -212,7 +212,7 @@ async function runCloudflareRollback(root: string, deployId?: string): Promise<v
   const spinner = createSpinner();
   spinner.start('Rolling back...');
   try {
-    await activateCloudflareExistingVersion(context, target, status.activeVersionId);
+    await activateCloudflareExistingVersion(context, target);
     spinner.stop('Rollback complete.');
   } catch (error) {
     spinner.stop('Rollback failed.');
