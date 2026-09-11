@@ -445,7 +445,7 @@ Explicitly control inferred Cloudflare bindings. If omitted, bindings are [autom
 Each binding accepts `true` (use default name), `false` (disable), or a string (custom binding name):
 
 ```json
-{ "inference": { "bindings": { "db": true, "kv": false, "storage": "MY_BUCKET" } } }
+{ "inference": { "bindings": { "db": true, "kv": false, "storage": "MY_BUCKET", "ai": "MY_AI" } } }
 ```
 
 | Key       | Default Binding | Type          | Custom Name              |
@@ -453,10 +453,10 @@ Each binding accepts `true` (use default name), `false` (disable), or a string (
 | `db`      | `DB`            | `D1Database`  | `"db": "MY_DB"`          |
 | `kv`      | `KV`            | `KVNamespace` | `"kv": "MY_KV"`          |
 | `storage` | `STORAGE`       | `R2Bucket`    | `"storage": "MY_BUCKET"` |
-| `ai`      | `AI`            | `Ai`          | Boolean only             |
+| `ai`      | `AI`            | `Ai`          | `"ai": "MY_AI"`          |
 | `email`   | —               | —             | Boolean only             |
 
-Custom names are used in deploy-manifest and Cloudflare-config generation, remote binding proxying, internal migrations, and generated runtime helpers such as `void/db`, `void/kv`, and `void/storage`.
+Custom resource binding names flow through deploy manifests, Cloudflare config generation, remote binding proxying, internal migrations, and generated runtime helpers such as `void/db`, `void/kv`, and `void/storage`. Custom AI names apply to generated Cloudflare configuration and `void/ai` runtime resolution for direct Cloudflare builds; managed Workers AI continues to use Void's service proxy.
 
 `email` is a feature switch rather than a Cloudflare binding, so it has no binding name or type. On the platform, outbound mail is sent through the Void proxy, which owns the `send_email` binding — none is written into your worker; on your own Cloudflare account, `void deploy --platform cloudflare` writes a `send_email` binding named `SEND_EMAIL` into `wrangler.jsonc` itself once email is set up (see [`email.from`](#email)). Set it to `true` to turn the [email integration](../guide/email.md) on — which registers the `void dev` inbox — even when no scanned file imports `void/email`, or `false` to turn it off.
 

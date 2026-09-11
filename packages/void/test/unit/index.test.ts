@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { shouldBindWorkersAi } from '../../src/index.ts';
+import { resolveWorkersAiBindingName, shouldBindWorkersAi } from '../../src/index.ts';
 
 // `shouldBindWorkersAi(...)` is the pure, testable surface of the destination
 // gate (the surrounding `mergeBindings`
@@ -26,5 +26,19 @@ describe('shouldBindWorkersAi', () => {
   it('does not bind Workers AI when the app does not use AI', () => {
     expect(shouldBindWorkersAi('build', false, undefined, undefined)).toBe(false);
     expect(shouldBindWorkersAi('serve', false, undefined, undefined, true)).toBe(false);
+  });
+});
+
+describe('resolveWorkersAiBindingName', () => {
+  it('uses a custom inference binding name', () => {
+    expect(resolveWorkersAiBindingName(undefined, 'MY_AI')).toBe('MY_AI');
+  });
+
+  it('preserves a root Wrangler binding over the inference name', () => {
+    expect(resolveWorkersAiBindingName({ binding: 'ROOT_AI' }, 'MY_AI')).toBe('ROOT_AI');
+  });
+
+  it('defaults to AI', () => {
+    expect(resolveWorkersAiBindingName(undefined)).toBe('AI');
   });
 });
