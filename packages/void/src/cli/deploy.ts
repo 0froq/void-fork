@@ -11,7 +11,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { basename, dirname, join, relative, resolve } from 'pathslash';
+import { Minimatch } from 'minimatch';
+import { basename, dirname, join, normalize, relative, resolve } from 'pathslash';
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
 const deployDriftCheckDir = join('.void', 'deploy-drift-check');
@@ -3393,6 +3394,61 @@ export function compareWranglerMigrationPaths(a: string, b: string): number {
   return aSegments.length - bSegments.length;
 }
 
+export function resolveWranglerMigrationPattern(
+  config: Record<string, unknown>,
+  binding: string,
+  migrationsDirRaw: string,
+): { ok: true; pattern: string } | { ok: false; reason: string } {
+  const field = readBindingFieldPresence(config, 'd1_databases', binding, 'migrations_pattern');
+  const migrationsDir = normalize(migrationsDirRaw.replace(/\\/g, '/')).replace(/\/$/, '');
+  if (!field.present) {
+    return { ok: true, pattern: '*.sql' };
+  }
+  if (typeof field.value !== 'string' || field.value.length === 0) {
+    return {
+      ok: false,
+      reason: `deploy: migrations_pattern for D1 binding ${binding} must be a non-empty string.`,
+    };
+  }
+  const normalized = normalize(field.value.replace(/\\/g, '/')).replace(/\/$/, '');
+  const prefix = migrationsDir === '.' ? '' : `${migrationsDir}/`;
+  if (prefix && !normalized.startsWith(prefix)) {
+    return {
+      ok: false,
+      reason:
+        `deploy: migrations_pattern ${JSON.stringify(field.value)} must start with ` +
+        `${JSON.stringify(`${migrationsDir}/`)} to match migrations_dir ${JSON.stringify(migrationsDirRaw)}.`,
+    };
+  }
+  const pattern = prefix ? normalized.slice(prefix.length) : normalized;
+  try {
+    new Minimatch(pattern, { dot: false });
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `deploy: invalid migrations_pattern ${JSON.stringify(field.value)} — ${getErrorMessage(error)}`,
+    };
+  }
+  return { ok: true, pattern };
+}
+
+function listWranglerMigrationFiles(directory: string, pattern: string): Array<string> {
+  const matcher = new Minimatch(pattern, { dot: false });
+  const files: Array<string> = [];
+  const visit = (absolute: string, relativeDirectory: string): void => {
+    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
+      const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        visit(join(absolute, entry.name), relativePath);
+      } else if (entry.isFile() && matcher.match(relativePath)) {
+        files.push(relativePath);
+      }
+    }
+  };
+  visit(directory, '');
+  return files.sort(compareWranglerMigrationPaths);
+}
+
 /**
  * Assert the migration files wrangler 4.107 will APPLY — in the ORDER it applies them — equal
  * the gated source set. wrangler resolves its OWN files from the D1 entry's `migrations_dir`
@@ -3428,31 +3484,11 @@ export async function checkWranglerMigrationApplySet(
         `Align "migrations_dir" with your db/migrations, then rerun.`,
     };
   }
-  // Defense in depth: a custom migrations_pattern is rejected pre-account (v1 = default
-  // convention only). If one reaches here, fail closed rather than assume the flat `*.sql`.
-  // Reject on PRESENCE (any defined value, incl. `""`): a present-but-empty pattern is
-  // still non-default to wrangler, and it would otherwise be indistinguishable from absent.
-  const migrationsPattern = readBindingFieldPresence(
-    config,
-    'd1_databases',
-    binding,
-    'migrations_pattern',
-  );
-  if (migrationsPattern.present) {
-    return {
-      ok: false,
-      reason:
-        `deploy: a custom migrations_pattern (${JSON.stringify(migrationsPattern.value)}) is not ` +
-        `supported — v1 deploys only the default db/migrations/*.sql convention. Remove it, then rerun.`,
-    };
+  const resolvedPattern = resolveWranglerMigrationPattern(config, binding, migrationsDirRaw);
+  if (!resolvedPattern.ok) {
+    return resolvedPattern;
   }
-  // wrangler's DEFAULT enumeration: top-level `.sql` files, dotfiles excluded (Minimatch
-  // `*.sql` with `{ dot:false }` never crosses `/`, so `meta/` is not walked), APPLIED in
-  // wrangler's numeric-prefix order.
-  const wranglerNames = readdirSync(absDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.sql') && !entry.name.startsWith('.'))
-    .map((entry) => entry.name.replace(/\\/g, '/'))
-    .sort(compareWranglerMigrationPaths);
+  const wranglerNames = listWranglerMigrationFiles(absDir, resolvedPattern.pattern);
   const wranglerContent = new Map(
     wranglerNames.map((name) => [name, readFileSync(join(absDir, name), 'utf-8')]),
   );
@@ -3755,32 +3791,18 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
 
-  // 2b. Custom migrations_pattern guard — FAIL CLOSED before any account op. v1 supports ONLY
-  // Void's default migration convention: `db/migrations/*.sql` with wrangler's default
-  // `migrations_pattern` (unset). An explicit `migrations_pattern` makes wrangler enumerate its
-  // remote-apply set through Minimatch over a custom glob, which can diverge from Void's
-  // `collectMigrations` (flat dir, `seed.sql` excluded) — so it would apply an unverifiable set
-  // to remote D1. Rejecting a custom pattern removes that divergence entirely; the default
-  // convention still gets ORDER-parity checked at 6b. (Only the DEPLOYED D1 entry matters.)
+  // 2b. Validate Wrangler's migration glob before any account operation. Custom patterns are
+  // supported, but they must follow Wrangler's migrations_dir prefix rule; the post-build gate
+  // later enumerates the exact Minimatch result and requires byte-for-byte set and order parity
+  // with Void's validated migrations before any remote D1 mutation.
   if (desired.d1) {
-    // Reject on PRESENCE (any defined value, incl. `""`) — a present-but-empty pattern is
-    // still non-default to wrangler, and readStoredResourceName can't tell absent from empty.
-    const migrationsPattern = readBindingFieldPresence(
+    const migrationsPattern = resolveWranglerMigrationPattern(
       parseRootWranglerConfig(configPath),
-      'd1_databases',
       desired.d1.binding,
-      'migrations_pattern',
+      desired.d1.migrationsDir ?? relative(dirname(configPath), migrationsDir),
     );
-    if (migrationsPattern.present) {
-      log.error(
-        [
-          `deploy: --platform cloudflare does not support a custom migrations_pattern (${JSON.stringify(migrationsPattern.value)}).`,
-          'v1 deploys only the default Void migration convention: db/migrations/*.sql with',
-          "wrangler's default pattern (leave `migrations_pattern` unset). A custom glob would",
-          'apply a set to remote D1 that Void cannot verify against its own db/migrations.',
-          `Remove "migrations_pattern" from the ${desired.d1.binding} D1 binding, then rerun.`,
-        ].join('\n'),
-      );
+    if (!migrationsPattern.ok) {
+      log.error(migrationsPattern.reason);
       return exit(1);
     }
   }

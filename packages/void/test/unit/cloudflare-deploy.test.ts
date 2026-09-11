@@ -1393,7 +1393,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(trace).toEqual(['wrangler:whoami', 'build', 'gate', 'wrangler:deploy']);
   });
 
-  it('A1: rejects a project whose D1 binding sets a custom migrations_pattern before any account op', async () => {
+  it('accepts a valid custom migrations_pattern', async () => {
     const root = d1Project({
       ...PROVISIONED_D1,
       d1_databases: [
@@ -1407,12 +1407,9 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       ],
     });
     const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    // Rejected at the custom-pattern guard (after the desired set, before whoami/provision).
-    expect(trace).toEqual([]);
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(exitCalls).toEqual([]);
+    expect(trace).toContain('wrangler:deploy');
   });
 
   it('A1: rejects a PRESENT-but-EMPTY migrations_pattern ("") before any account op', async () => {
@@ -6539,7 +6536,7 @@ describe('checkWranglerMigrationApplySet', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('A1: fails closed (defense in depth) if a custom migrations_pattern slips through', async () => {
+  it('accepts a custom pattern whose exact result matches the validated set', async () => {
     const root = makeProject({
       'wrangler.jsonc': '{}',
       'db/migrations/0000_init.sql': 'CREATE TABLE a (id integer);',
@@ -6551,10 +6548,7 @@ describe('checkWranglerMigrationApplySet', () => {
       './db/migrations',
       [{ name: '0000_init.sql', sql: 'CREATE TABLE a (id integer);' }],
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('custom migrations_pattern');
-    }
+    expect(result.ok).toBe(true);
   });
 
   it('A1: fails closed (defense in depth) on a PRESENT-but-EMPTY migrations_pattern ("")', async () => {
@@ -6571,7 +6565,47 @@ describe('checkWranglerMigrationApplySet', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toContain('custom migrations_pattern');
+      expect(result.reason).toContain('must be a non-empty string');
+    }
+  });
+
+  it('rejects a custom pattern whose exact result omits a validated migration', async () => {
+    const root = makeProject({
+      'wrangler.jsonc': '{}',
+      'db/migrations/0000_init.sql': 'CREATE TABLE a (id integer);',
+      'db/migrations/0001_more.sql': 'CREATE TABLE b (id integer);',
+    });
+    const result = await checkWranglerMigrationApplySet(
+      join(root, 'wrangler.jsonc'),
+      configFor('./db/migrations', 'db/migrations/0000_*.sql'),
+      'DB',
+      './db/migrations',
+      [
+        { name: '0000_init.sql', sql: 'CREATE TABLE a (id integer);' },
+        { name: '0001_more.sql', sql: 'CREATE TABLE b (id integer);' },
+      ],
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('0001_more.sql');
+    }
+  });
+
+  it('rejects a custom pattern outside migrations_dir before enumeration', async () => {
+    const root = makeProject({
+      'wrangler.jsonc': '{}',
+      'db/migrations/0000_init.sql': 'CREATE TABLE a (id integer);',
+    });
+    const result = await checkWranglerMigrationApplySet(
+      join(root, 'wrangler.jsonc'),
+      configFor('./db/migrations', 'other/*.sql'),
+      'DB',
+      './db/migrations',
+      [{ name: '0000_init.sql', sql: 'CREATE TABLE a (id integer);' }],
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('must start with');
     }
   });
 });

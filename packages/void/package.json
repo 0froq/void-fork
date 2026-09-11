@@ -365,6 +365,7 @@
     "hono": "^4.13.7",
     "ignore": "^7.0.9",
     "jsonc-parser": "3.3.1",
+    "minimatch": "^10.2.6",
     "mysql2": "3.24.4",
     "pg": "8.23.0",
     "proper-lockfile": "^4.1.2",
