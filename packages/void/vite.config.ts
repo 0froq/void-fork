@@ -70,6 +70,7 @@ export default defineConfig({
   pack: {
     entry: [
       'src/index.ts',
+      'src/database-provider.ts',
       'src/runtime/handler.ts',
       'src/runtime/response.ts',
       'src/runtime/validator.ts',

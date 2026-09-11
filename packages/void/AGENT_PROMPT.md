@@ -6,6 +6,8 @@ Database: define Drizzle tables in `db/schema.ts`, import `db` from `void/db` an
 
 Database dialects: omit `database` for D1, use `"database": "pg"` for PostgreSQL, or `"database": "mysql"` for MySQL. External databases use `DATABASE_URL` locally and Hyperdrive in production. Import builders from `void/schema-d1`, `void/schema-pg`, or `void/schema-mysql` to match. Direct Cloudflare deploy applies checked-in PostgreSQL/MySQL migrations using the shell-provided production URL; PostgreSQL is transactional, MySQL DDL is not.
 
+External database setup: use `void db connect <connection-string>` to update `.env.local` and a linked Void project, or `NEON_API_KEY=... void db connect --provider neon` to provision Neon. Pass `--local-only` to avoid remote sync. Custom provider modules export a `DatabaseProviderAdapter` from `void/database-provider`.
+
 Env: declare every env key in `env.ts` at the project root via `defineEnv({ KEY: string(), ... })` from `void/env`. Read values via `import { env } from "void/env"`. Schema validation runs at dev start (warns) and on `void deploy` (hard error on missing prod secrets). Use `VITE_*` prefix for keys that should be exposed to client code.
 
 CI/editor prep: run `void prepare` to generate `.void/routes.d.ts`, `.void/db.d.ts`, `.void/queues.d.ts`, `.void/env.d.ts`, and `.void/tsconfig.json` without booting Vite. Run it after `npm install` in CI or a fresh clone before typechecking; `vite dev` and `vite build` regenerate these during normal workflows.

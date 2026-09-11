@@ -1,14 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { confirm, intro, isCancel, outro, log } from '@clack/prompts';
-import { extname, join, relative, resolve } from 'pathslash';
+import { basename, extname, join, relative, resolve } from 'pathslash';
 import {
   readConfig,
   getDatabaseDialect,
   resolveBindingNames,
   type DatabaseDialect,
 } from '../config.ts';
+import type { DatabaseProviderAdapter, DatabaseProviderDialect } from '../database-provider.ts';
 import {
   collectMigrations,
   readJournal,
@@ -211,11 +213,160 @@ export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
     await runStudio(root, dialect, args.remote);
   } else if (args.action === 'set-url') {
     await runSetUrl(root);
+  } else if (args.action === 'connect') {
+    await runConnect(root, dialect, args);
   } else if (args.action === 'rename-migrations') {
     await runRenameMigrations(root, dialect);
   } else {
     await runExport(root, args, dialect);
   }
+}
+
+export function writeLocalDatabaseUrl(root: string, connectionString: string): void {
+  const envPath = join(root, '.env.local');
+  const original = existsSync(envPath) ? readFileSync(envPath, 'utf-8') : '';
+  const lines = original ? original.replace(/\r\n/g, '\n').split('\n') : [];
+  const assignment = `DATABASE_URL=${JSON.stringify(connectionString)}`;
+  const index = lines.findIndex((line) => /^\s*(?:export\s+)?DATABASE_URL\s*=/.test(line));
+  if (index === -1) {
+    while (lines.at(-1) === '') {
+      lines.pop();
+    }
+    if (lines.length > 0) {
+      lines.push('');
+    }
+    lines.push(assignment);
+  } else {
+    lines[index] = assignment;
+    for (let i = lines.length - 1; i > index; i--) {
+      if (/^\s*(?:export\s+)?DATABASE_URL\s*=/.test(lines[i])) {
+        lines.splice(i, 1);
+      }
+    }
+  }
+  while (lines.at(-1) === '') {
+    lines.pop();
+  }
+  writeFileSync(envPath, `${lines.join('\n')}\n`);
+}
+
+function assertDatabaseProvider(value: unknown, source: string): DatabaseProviderAdapter {
+  if (!value || typeof value !== 'object') {
+    throw new Error(`Database provider '${source}' did not export an adapter object.`);
+  }
+  const adapter = value as Partial<DatabaseProviderAdapter>;
+  if (
+    typeof adapter.id !== 'string' ||
+    typeof adapter.label !== 'string' ||
+    !Array.isArray(adapter.dialects) ||
+    typeof adapter.provision !== 'function'
+  ) {
+    throw new Error(`Database provider '${source}' does not implement DatabaseProviderAdapter.`);
+  }
+  return adapter as DatabaseProviderAdapter;
+}
+
+export async function loadDatabaseProvider(
+  root: string,
+  provider: string,
+): Promise<DatabaseProviderAdapter> {
+  if (provider === 'neon') {
+    const { createNeonDatabaseProvider } = await import('../database-providers/neon.ts');
+    return createNeonDatabaseProvider();
+  }
+
+  const requireFromProject = createRequire(join(root, 'package.json'));
+  let resolved: string;
+  try {
+    resolved =
+      provider.startsWith('.') || provider.startsWith('/')
+        ? resolve(root, provider)
+        : requireFromProject.resolve(provider);
+  } catch {
+    throw new Error(
+      `Could not resolve database provider adapter '${provider}' from this project. Install it first or pass a file path.`,
+    );
+  }
+  const mod = (await import(pathToFileURL(resolved).href)) as Record<string, unknown>;
+  return assertDatabaseProvider(mod.default ?? mod.databaseProvider, provider);
+}
+
+async function runConnect(
+  root: string,
+  dialect: DatabaseDialect,
+  args: {
+    url?: string;
+    provider?: string;
+    name?: string;
+    region?: string;
+    localOnly?: boolean;
+  },
+): Promise<void> {
+  if (dialect === 'sqlite') {
+    log.error(
+      'db: `void db connect` requires an external database. Set "database" to "pg" or "mysql" in void.json first.',
+    );
+    process.exit(1);
+  }
+
+  let connectionString = args.url;
+  if (args.provider) {
+    const adapter = await loadDatabaseProvider(root, args.provider);
+    if (!adapter.dialects.includes(dialect as DatabaseProviderDialect)) {
+      throw new Error(`${adapter.label} does not support the configured ${dialect} dialect.`);
+    }
+    log.info(`Provisioning ${adapter.label} database...`);
+    const result = await adapter.provision({
+      name: args.name ?? basename(root),
+      dialect,
+      region: args.region,
+    });
+    connectionString = result.connectionString;
+    log.success(`Provisioned ${adapter.label} database.`);
+    if (result.dashboardUrl) {
+      log.info(`Dashboard: ${result.dashboardUrl}`);
+    }
+  }
+
+  if (!connectionString) {
+    const { text: promptText, isCancel: isCancelCheck } = await import('@clack/prompts');
+    const answer = await promptText({
+      message: `Enter your ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} connection string:`,
+      placeholder:
+        dialect === 'mysql'
+          ? 'mysql://user:pass@host:3306/database'
+          : 'postgresql://user:pass@host:5432/database',
+    });
+    if (isCancelCheck(answer)) {
+      process.exit(0);
+    }
+    connectionString = answer as string;
+  }
+
+  const parsed = new URL(connectionString);
+  const allowedProtocols = dialect === 'mysql' ? ['mysql:'] : ['postgres:', 'postgresql:'];
+  if (!allowedProtocols.includes(parsed.protocol)) {
+    throw new Error(
+      `Connection string protocol '${parsed.protocol}' does not match the configured ${dialect} dialect.`,
+    );
+  }
+
+  writeLocalDatabaseUrl(root, connectionString);
+  log.success('Saved DATABASE_URL to .env.local.');
+
+  if (!args.localOnly) {
+    const token = getToken(root);
+    const projectConfig = readProjectConfig(root);
+    if (token && projectConfig) {
+      const client = new PlatformClient(token, { root });
+      await client.setDatabaseUrl(projectConfig.projectId, connectionString);
+      log.success('Updated the linked Void project database URL.');
+    } else {
+      log.info('No authenticated Void project is linked, so only local configuration was updated.');
+    }
+  }
+
+  outro('Database connected.');
 }
 
 async function runPush(root: string, dialect: DatabaseDialect): Promise<void> {

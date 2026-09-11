@@ -425,6 +425,20 @@ By default, targets the local database. Pass `--remote` to open Studio against t
 
 Rename existing migrations from the old numeric prefix format (`0001_name.sql`) to timestamp-based format (`20260410161500_name.sql`). Updates local tracking table and remote records if logged in with a linked project.
 
+### `void db connect`
+
+Connect an existing PostgreSQL/MySQL database or provision one through an adapter:
+
+```sh
+void db connect 'postgresql://user:password@host/database'
+NEON_API_KEY=... void db connect --provider neon --name my-app
+void db connect --provider @acme/void-db-provider --region region-id
+```
+
+The command saves `DATABASE_URL` in `.env.local`. When authenticated with a linked Void project, it also updates the encrypted deployment URL; pass `--local-only` to skip that sync. `neon` is built in. Other adapters are project dependencies or local modules exporting a `DatabaseProviderAdapter` from `void/database-provider`.
+
+Provider-created credentials are never printed. For direct Cloudflare deploys, configure the same URL as a protected `DATABASE_URL` in the shell or CI environment that runs deploy.
+
 ### `void db set-url`
 
 Update the PostgreSQL or MySQL connection string for deployment. Available for projects with `"database": "pg"` or `"database": "mysql"`.

@@ -215,7 +215,7 @@ if (helpPath) {
     },
     {
       name: 'db',
-      hint: 'status | reset | seed | execute | migrate | studio | export | rename-migrations',
+      hint: 'connect | status | reset | seed | execute | migrate | studio | export',
       description: 'Database migrations and management',
     },
     {

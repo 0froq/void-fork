@@ -420,7 +420,8 @@ const HELP_TREE: HelpTree = {
       { command: 'migrate', description: 'Apply pending migrations' },
       { command: 'studio', description: 'Open Drizzle Studio (--remote for deployed PG)' },
       { command: 'export', description: 'Export local database as SQL' },
-      { command: 'set-url', description: 'Update the PostgreSQL connection string' },
+      { command: 'connect', description: 'Connect or provision an external database' },
+      { command: 'set-url', description: 'Update the external database URL' },
       { command: 'rename-migrations', description: 'Rename migrations to timestamp format' },
     ],
     children: {
@@ -488,8 +489,31 @@ const HELP_TREE: HelpTree = {
           { command: '--table <name>', description: 'Export a single table' },
         ],
       },
+      connect: {
+        summary: 'Connect or provision an external PostgreSQL/MySQL database.',
+        usage: [
+          'void db connect [connection-string]',
+          'void db connect --provider <name-or-module> [options]',
+        ],
+        options: [
+          { command: '--provider <name-or-module>', description: 'Provision with an adapter' },
+          { command: '--name <name>', description: 'Provider project/database name' },
+          { command: '--region <region>', description: 'Provider region identifier' },
+          { command: '--local-only', description: 'Do not sync a linked Void project' },
+        ],
+        examples: [
+          {
+            command: 'void db connect "postgresql://user:pass@host/db"',
+            description: 'Connect an existing database',
+          },
+          {
+            command: 'void db connect --provider neon --name my-app',
+            description: 'Provision a Neon database using NEON_API_KEY',
+          },
+        ],
+      },
       'set-url': basicSubcommand(
-        'Update the PostgreSQL connection string for deployment.',
+        'Update the external database connection string for deployment.',
         'void db set-url',
       ),
       'rename-migrations': basicSubcommand(

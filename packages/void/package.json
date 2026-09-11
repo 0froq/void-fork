@@ -51,6 +51,11 @@
       "require": "./dist/index.mjs"
     },
     "./schema.json": "./schema.json",
+    "./database-provider": {
+      "types": "./dist/database-provider.d.mts",
+      "import": "./dist/database-provider.mjs",
+      "require": "./dist/database-provider.mjs"
+    },
     "./handler": {
       "types": "./dist/runtime/handler.d.mts",
       "import": "./dist/runtime/handler.mjs",

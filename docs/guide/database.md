@@ -400,6 +400,7 @@ npm install arktype
 | Command            | Purpose                                                         |
 | ------------------ | --------------------------------------------------------------- |
 | `void db push`     | Apply schema directly to local database (no migration files)    |
+| `void db connect`  | Connect or provision PostgreSQL/MySQL and save `DATABASE_URL`   |
 | `void db generate` | Generate app and Better Auth SQL migrations for production      |
 | `void db migrate`  | Apply pending migrations locally                                |
 | `void db status`   | Show schema drift and pending migrations                        |
