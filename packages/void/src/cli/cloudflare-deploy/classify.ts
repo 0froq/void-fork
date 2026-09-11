@@ -44,11 +44,6 @@ export function classifyCloudflareDeployApp(
         `deploy: --platform cloudflare has no deployment preset for framework ${framework.name}.`,
       );
     }
-    if (preset.cloudflareArtifact === 'worker-output') {
-      return unsupported(
-        `deploy: --platform cloudflare does not yet support ${framework.name}'s standalone Worker output.`,
-      );
-    }
   }
 
   const staticPreset = detectPreset(root, { dir: options.dir, spa: options.spa });

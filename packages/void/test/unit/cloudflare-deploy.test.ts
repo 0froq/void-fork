@@ -17,6 +17,7 @@ import {
   ensureCloudflareAuthSecret,
   hashWranglerUploader,
   parseRootWranglerConfig,
+  prepareCloudflareFrameworkArtifact,
   runCloudflareDeploy,
   syncCloudflareSchemaSecrets,
   snapshotBindingIdentities,
@@ -41,6 +42,7 @@ import {
   type SelfHostSchemaFacts,
 } from '../../src/cli/env-validation.ts';
 import type { CliLogger } from '../../src/cli/log-file.ts';
+import { FRAMEWORK_PRESETS } from '../../src/cli/preset.ts';
 import { provisionCloudflareResources, type ProvisionResult } from '../../src/cli/provision.ts';
 import { FRIENDLY_BINDING_NAMES } from '../../src/cli/wrangler.ts';
 import { readConfig } from '../../src/config.ts';
@@ -260,6 +262,9 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
     runWrangler,
     runBuild: () => {
       trace.push('build');
+    },
+    prepareFrameworkArtifact: async () => {
+      trace.push('prepare-framework');
     },
     // Stub the wrangler-uploader hash so orchestration tests never hash the real ~18MB bundle
     // twice; a constant means the pre-build and post-build snapshots match (an unchanged uploader).
@@ -4832,7 +4837,7 @@ describe('runCloudflareDeploy — managed path does not import the provision mod
 // ---------------------------------------------------------------------------
 
 describe('runCloudflareDeploy — framework artifact guard', () => {
-  it('rejects a Class B/C framework SSR app before any account operation', async () => {
+  it('deploys a Class B/C framework through its prepared Worker output', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({
         name: 'skapp',
@@ -4843,12 +4848,11 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
       'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'skapp' }, null, 2),
     });
     const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    // Rejected before preflight — no whoami, no build, no deploy.
-    expect(trace).toEqual([]);
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(exitCalls).toEqual([]);
+    expect(trace).toContain('build');
+    expect(trace).toContain('prepare-framework');
+    expect(trace).toContain('wrangler:deploy');
   });
 
   it('deploys a Class-A framework through its Cloudflare Vite artifact', async () => {
@@ -4866,6 +4870,157 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
     expect(exitCalls).toEqual([]);
     expect(trace).toContain('build');
     expect(trace).toContain('wrangler:deploy');
+  });
+
+  it('persists framework queue bindings before building', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({
+        name: 'skapp',
+        dependencies: { '@sveltejs/kit': '2.0.0' },
+      }),
+      'void.json': JSON.stringify({}),
+      'queues/email.ts': [
+        'export const maxBatchSize = 25;',
+        'export const maxBatchTimeout = 10;',
+        'export const maxRetries = 4;',
+        'export const retryDelay = 30;',
+        'export default async function email() {}',
+      ].join('\n'),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'skapp' }, null, 2),
+    });
+    const { deps } = harness();
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'))).toMatchObject({
+      queues: {
+        producers: [{ binding: 'QUEUE_EMAIL', queue: 'email' }],
+        consumers: [
+          {
+            queue: 'email',
+            max_batch_size: 25,
+            max_batch_timeout: 10,
+            max_retries: 4,
+            retry_delay: 30,
+          },
+        ],
+      },
+    });
+  });
+
+  it('prepares a standalone framework Worker with cron and queue handlers', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({
+        name: 'skapp',
+        dependencies: { '@sveltejs/kit': '2.0.0' },
+      }),
+      'void.json': JSON.stringify({}),
+      'wrangler.jsonc': `{
+  // keep this comment
+  "name": "skapp",
+  "account_id": "acc123",
+  "compatibility_flags": ["custom_flag"],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }]
+}\n`,
+      '.svelte-kit/cloudflare/_worker.js':
+        'export default { fetch() { return new Response("ok") } };\n',
+      '.svelte-kit/cloudflare/_app/immutable/app.js': 'console.log("client");\n',
+      'crons/hourly.ts': [
+        'export const cron = "0 * * * *";',
+        'export default async function hourly() {}',
+      ].join('\n'),
+      'queues/email.ts': 'export default async function email() {}\n',
+    });
+
+    await prepareCloudflareFrameworkArtifact(
+      root,
+      join(root, 'wrangler.jsonc'),
+      'acc123',
+      'skapp',
+      readConfig(root),
+      { name: 'sveltekit', class: 'b' },
+      FRAMEWORK_PRESETS.sveltekit,
+    );
+
+    const wrapper = readFileSync(join(root, '.svelte-kit/cloudflare/_worker.js'), 'utf-8');
+    expect(wrapper).toContain('import original from "./__original.js";');
+    expect(wrapper).toContain('scheduled: handleScheduled');
+    expect(wrapper).toContain('queue: handleQueue');
+    expect(existsSync(join(root, '.svelte-kit/cloudflare/__void_handlers.mjs'))).toBe(true);
+    expect(readFileSync(join(root, '.svelte-kit/cloudflare/.assetsignore'), 'utf-8')).toContain(
+      '__void_handlers.mjs',
+    );
+    const config = parseRootWranglerConfig(join(root, 'wrangler.jsonc'));
+    expect(config).toMatchObject({
+      main: '.svelte-kit/cloudflare/_worker.js',
+      no_bundle: false,
+      compatibility_flags: ['custom_flag', 'nodejs_als'],
+      migrations: [{ tag: 'v1', new_sqlite_classes: ['Room'] }],
+      assets: {
+        directory: '.svelte-kit/cloudflare',
+        binding: 'ASSETS',
+        run_worker_first: true,
+      },
+      triggers: { crons: ['0 * * * *'] },
+    });
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toContain('// keep this comment');
+  });
+
+  it('prepares Class A wrapper handlers without replacing its generated config pointer', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({
+        name: 'tanstack-app',
+        dependencies: { '@tanstack/react-start': '1.0.0' },
+      }),
+      'void.json': JSON.stringify({}),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'tanstack-app' }),
+      'dist/server/index.js': 'export default { fetch() { return new Response("ok") } };\n',
+      'dist/client/app.js': 'console.log("client");\n',
+      '.wrangler/deploy/config.json': '{"configPath":"../../../dist/server/wrangler.json"}\n',
+      'crons/hourly.ts': [
+        'export const cron = "0 * * * *";',
+        'export default async function hourly() {}',
+      ].join('\n'),
+    });
+    const pointerBefore = readFileSync(join(root, '.wrangler/deploy/config.json'), 'utf-8');
+
+    await prepareCloudflareFrameworkArtifact(
+      root,
+      join(root, 'wrangler.jsonc'),
+      'acc123',
+      'tanstack-app',
+      readConfig(root),
+      { name: 'tanstack-start', class: 'a' },
+      FRAMEWORK_PRESETS['tanstack-start'],
+    );
+
+    expect(readFileSync(join(root, '.wrangler/deploy/config.json'), 'utf-8')).toBe(pointerBefore);
+    expect(readFileSync(join(root, 'dist/server/index.js'), 'utf-8')).toContain(
+      'scheduled: handleScheduled',
+    );
+    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).not.toHaveProperty('main');
+  });
+
+  it('fails closed when a framework build omits its Worker or assets', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'nuxt-app', dependencies: { nuxt: '4.0.0' } }),
+      'void.json': JSON.stringify({}),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'nuxt-app' }),
+    });
+    const prepare = () =>
+      prepareCloudflareFrameworkArtifact(
+        root,
+        join(root, 'wrangler.jsonc'),
+        'acc123',
+        'nuxt-app',
+        readConfig(root),
+        { name: 'nuxt', class: 'c' },
+        FRAMEWORK_PRESETS.nuxt,
+      );
+    await expect(prepare()).rejects.toThrow('did not emit its Worker entry');
+
+    mkdirSync(join(root, '.output/server'), { recursive: true });
+    writeFileSync(join(root, '.output/server/index.mjs'), 'export default {};\n');
+    await expect(prepare()).rejects.toThrow('did not emit its asset directory');
   });
 });
 

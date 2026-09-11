@@ -25,6 +25,7 @@ import {
   readWranglerTopLevelString,
   renderCloudflareStaticEntry,
   resolveD1MigrateTarget,
+  writeCloudflareFrameworkDeployConfig,
   writeCloudflareStaticDeployConfig,
 } from '@void/deploy-cloudflare';
 import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
@@ -2316,6 +2317,8 @@ export interface CloudflareDeployDeps {
   runBuild?: (env: NodeJS.ProcessEnv) => void;
   /** Run a static/SPA/SSG preset build command. */
   runStaticBuild?: (command: string, env: NodeJS.ProcessEnv) => void;
+  /** Prepare a standalone framework Worker/config after its native build. */
+  prepareFrameworkArtifact?: typeof prepareCloudflareFrameworkArtifact;
   /**
    * Wrangler-uploader content-hash seam (default: {@link hashWranglerUploader}). Snapshotted
    * BEFORE the build and re-checked AFTER, so a build that overwrote the wrangler bundle the
@@ -3667,6 +3670,8 @@ export async function runCloudflareDeploy(
 ): Promise<void> {
   const exit = deps.exit ?? ((code: number): never => process.exit(code));
   const voidConfig = readConfig(root);
+  const detectedFramework = detectFramework(root);
+  const frameworkPreset = detectedFramework ? FRAMEWORK_PRESETS[detectedFramework.name] : undefined;
   cliLog.info('cloudflare_deploy_start', {
     provision: options.provision === true ? true : undefined,
   });
@@ -4091,7 +4096,36 @@ export async function runCloudflareDeploy(
   // below could never confirm the pin. Persisting it makes the documented env-only pin
   // deploy the verified account.
   const workerName = readWranglerTopLevelString(rootConfig, 'name') ?? deriveWorkerName(root);
-  writeProvisionedWranglerConfig(root, { name: workerName, accountId }, { configPath });
+  const frameworkQueues = detectedFramework
+    ? scanQueuesSync(root, resolveProjectPaths(root, voidConfig).queuesDir)
+    : [];
+  writeProvisionedWranglerConfig(
+    root,
+    {
+      name: workerName,
+      accountId,
+      ...(detectedFramework && frameworkQueues.length > 0
+        ? {
+            queues: {
+              producers: frameworkQueues.map((queue) => ({
+                queue: queue.name,
+                binding: queue.bindingName,
+              })),
+              consumers: frameworkQueues.map((queue) => ({
+                queue: queue.name,
+                ...(queue.maxBatchSize != null && { max_batch_size: queue.maxBatchSize }),
+                ...(queue.maxBatchTimeout != null && {
+                  max_batch_timeout: queue.maxBatchTimeout,
+                }),
+                ...(queue.maxRetries != null && { max_retries: queue.maxRetries }),
+                ...(queue.retryDelay != null && { retry_delay: queue.retryDelay }),
+              })),
+            },
+          }
+        : {}),
+    },
+    { configPath },
+  );
 
   // 6. Pin the id-bearing binding IDENTITIES across the build, mirroring the account_id pin.
   // Provision (step 4) wrote each real id into the root config via `wrangler <res> create
@@ -4193,7 +4227,10 @@ export async function runCloudflareDeploy(
   const runBuild =
     deps.runBuild ??
     ((env: NodeJS.ProcessEnv) => {
-      execSync(resolveProjectCommand(root, 'vite build'), { cwd: root, stdio: 'inherit', env });
+      const command = frameworkPreset
+        ? (voidConfig.inference?.build ?? resolveProjectCommand(root, frameworkPreset.buildCommand))
+        : resolveProjectCommand(root, 'vite build');
+      execSync(command, { cwd: root, stdio: 'inherit', env });
     });
   // The wrangler UPLOADER was pinned into `wranglerUploaderHashBefore` at the START of the deploy
   // (before the env-schema probe and the pre-build credentialed runs), and `assertUploaderStillPinned`
@@ -4207,6 +4244,24 @@ export async function runCloudflareDeploy(
   } catch (err) {
     log.error(`deploy: build failed — ${getErrorMessage(err)}`);
     return exit(getExitCode(err));
+  }
+  if (detectedFramework && frameworkPreset) {
+    try {
+      await (deps.prepareFrameworkArtifact ?? prepareCloudflareFrameworkArtifact)(
+        root,
+        configPath,
+        accountId,
+        workerName,
+        voidConfig,
+        detectedFramework,
+        frameworkPreset,
+      );
+    } catch (error) {
+      log.error(
+        `deploy: could not prepare ${detectedFramework.name} for Cloudflare — ${getErrorMessage(error)}`,
+      );
+      return exit(1);
+    }
   }
   // Early fail — re-check right after the build, before the ground-truth gates do any work. No
   // remote mutation has happened since the baseline was pinned, so a changed/unverifiable uploader
@@ -4820,6 +4875,72 @@ function discoverRootWranglerConfig(root: string): string {
     }
   }
   return join(root, 'wrangler.jsonc');
+}
+
+/** Build the trusted Wrangler pointer for a framework that emits Worker files directly. */
+export async function prepareCloudflareFrameworkArtifact(
+  root: string,
+  configPath: string,
+  accountId: string,
+  workerName: string,
+  voidConfig: VoidConfig,
+  framework: DetectedFramework,
+  preset: FrameworkPreset,
+): Promise<void> {
+  const workerMain = join(root, preset.workerDir, preset.workerMain);
+  const assetsDirectory = join(root, preset.assetsDir);
+  if (!existsSync(workerMain)) {
+    throw new Error(
+      `framework ${framework.name} did not emit its Worker entry at ${preset.workerDir}/${preset.workerMain}`,
+    );
+  }
+  if (!existsSync(assetsDirectory)) {
+    throw new Error(
+      `framework ${framework.name} did not emit its asset directory at ${preset.assetsDir}`,
+    );
+  }
+  const paths = resolveProjectPaths(root, voidConfig);
+  const crons = scanJobsSync(root, paths.cronsDir);
+  const queues = scanQueuesSync(root, paths.queuesDir);
+  await generateDeployWrapperIfNeeded(root, join(root, preset.workerDir), preset.workerMain, {
+    auth: null,
+    crons,
+    queues,
+    // Direct deployment applies migrations before upload; it does not need the
+    // hosted platform's internal migration endpoint in its framework wrapper.
+    hasMigrations: false,
+    migrationDialect: getDatabaseDialect(voidConfig),
+  });
+  if (preset.cloudflareArtifact === 'vite-plugin') {
+    return;
+  }
+  const rootConfig = parseRootWranglerConfig(configPath);
+  writeCloudflareFrameworkDeployConfig({
+    configPath,
+    deployPointerPath: deployPointerPath(root),
+    name: workerName,
+    accountId,
+    main: relative(dirname(configPath), workerMain),
+    assetsDirectory: relative(dirname(configPath), assetsDirectory),
+    compatibilityDate:
+      voidConfig.worker?.compatibility_date ??
+      readWranglerTopLevelString(rootConfig, 'compatibility_date') ??
+      '2026-09-11',
+    compatibilityFlags: preset.cloudflareCompatibilityFlags,
+    crons: crons.flatMap((job) => job.crons),
+    ...(preset.workerDir === preset.assetsDir
+      ? {
+          assetsIgnore: [
+            preset.workerMain,
+            '_routes.json',
+            '__original.js',
+            '__original.mjs',
+            '__void_handlers.mjs',
+            '__void_migration_handler*.mjs',
+          ],
+        }
+      : {}),
+  });
 }
 
 function resolveCloudflareStaticPreset(

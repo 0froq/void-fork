@@ -13,6 +13,10 @@ export {
   type CloudflareDeployExecution,
 } from './execute.ts';
 export {
+  writeCloudflareFrameworkDeployConfig,
+  type CloudflareFrameworkDeployConfig,
+} from './framework.ts';
+export {
   renderCloudflareStaticEntry,
   writeCloudflareStaticDeployConfig,
   type CloudflareStaticDeployConfig,
