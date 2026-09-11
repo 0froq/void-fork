@@ -12,3 +12,8 @@ export {
   type CloudflareCommandRunner,
   type CloudflareDeployExecution,
 } from './execute.ts';
+export {
+  renderCloudflareStaticEntry,
+  writeCloudflareStaticDeployConfig,
+  type CloudflareStaticDeployConfig,
+} from './static.ts';

@@ -29,6 +29,29 @@ describe('executeCloudflareDeploy', () => {
     expect(runWrangler).not.toHaveBeenCalled();
   });
 
+  it('can pin an explicit generated config', async () => {
+    const runWrangler = vi.fn(() => ({ stdout: '', stderr: '', status: 0 }));
+
+    await executeCloudflareDeploy({
+      runWrangler,
+      verifyUploader: () => true,
+      configPath: '/app/wrangler.jsonc',
+    });
+
+    expect(runWrangler).toHaveBeenCalledWith(
+      [
+        'deploy',
+        '-c',
+        '/app/wrangler.jsonc',
+        '--env=',
+        '--experimental-provision=false',
+        '--experimental-auto-create=false',
+        '--autoconfig=false',
+      ],
+      { capture: false },
+    );
+  });
+
   it('reports failed and interrupted Wrangler commands', async () => {
     const runWrangler = vi.fn(() => ({
       stdout: '',

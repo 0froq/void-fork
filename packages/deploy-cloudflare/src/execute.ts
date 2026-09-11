@@ -20,6 +20,7 @@ export type CloudflareDeployExecution =
 export async function executeCloudflareDeploy(options: {
   runWrangler: CloudflareCommandRunner;
   verifyUploader: () => boolean;
+  configPath?: string;
 }): Promise<CloudflareDeployExecution> {
   if (!options.verifyUploader()) {
     return { ok: false, reason: 'uploader-changed' };
@@ -29,6 +30,7 @@ export async function executeCloudflareDeploy(options: {
     options.runWrangler(
       [
         'deploy',
+        ...(options.configPath ? ['-c', options.configPath] : []),
         '--env=',
         '--experimental-provision=false',
         '--experimental-auto-create=false',

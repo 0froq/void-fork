@@ -296,13 +296,22 @@ importers:
 
   packages/deploy-cloudflare:
     dependencies:
+      '@void/deploy-core':
+        specifier: workspace:*
+        version: link:../deploy-core
       jsonc-parser:
         specifier: 3.3.1
         version: 3.3.1
     devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 4.20260702.1
       '@types/node':
         specifier: 'catalog:'
         version: 26.5.1
+      pathslash:
+        specifier: 'catalog:'
+        version: 0.1.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
