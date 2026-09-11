@@ -54,7 +54,7 @@ export function writeCloudflareFrameworkDeployConfig(
   upsert(['assets', 'binding'], 'ASSETS');
   upsert(['assets', 'run_worker_first'], true);
   upsert(['assets', 'not_found_handling'], 'none');
-  if (options.crons && options.crons.length > 0) {
+  if (options.crons !== undefined) {
     upsert(['triggers', 'crons'], [...options.crons]);
   }
 

@@ -64,4 +64,28 @@ describe('Cloudflare framework deployment', () => {
       '# framework rule\n.keep-out\n_worker.js\n_routes.json\n',
     );
   });
+
+  it('removes stale cron schedules when the current source has none', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-framework-config-'));
+    const configPath = join(root, 'wrangler.jsonc');
+    const pointerPath = join(root, '.wrangler/deploy/config.json');
+    mkdirSync(join(root, 'dist/assets'), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify({ triggers: { crons: ['0 * * * *'] } }, null, 2) + '\n',
+    );
+
+    writeCloudflareFrameworkDeployConfig({
+      configPath,
+      deployPointerPath: pointerPath,
+      name: 'framework-app',
+      accountId: 'account-id',
+      main: 'dist/worker.js',
+      assetsDirectory: 'dist/assets',
+      compatibilityDate: '2026-09-11',
+      crons: [],
+    });
+
+    expect(parseRootWranglerConfig(configPath)).toMatchObject({ triggers: { crons: [] } });
+  });
 });
