@@ -341,7 +341,10 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ['packages/*/test/unit/**/*.test.ts'],
-          sequence: { groupOrder: 1 },
+          // Share one worker pool with independent integrations. This lets long integration
+          // startups begin immediately while short unit files fill otherwise-idle workers.
+          sequence: { groupOrder: 2 },
+          maxWorkers,
         },
       },
       {
