@@ -1316,26 +1316,49 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(trace.indexOf('postgres-migrate')).toBeLessThan(trace.indexOf('wrangler:deploy'));
   });
 
-  it('rejects a pages app with output:"static" (SSG) — the signal the build itself branches on', async () => {
-    // Real-shape: the static-pages playground config — `output: "static"` + a `pages/` dir.
-    // `detectPreset` returns null (no SSG dep / no root index.html) and `pages/` satisfies
-    // `hasBackendFiles`, so without the `output === 'static'` signal this reaches account/build.
+  it('deploys a fully prerenderable output:"static" Pages app through the thin edge Worker', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'ssgapp' }),
       'void.json': JSON.stringify({
         output: 'static',
         worker: { compatibility_date: '2026-02-12' },
       }),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
       'pages/index.vue': `<template><div>hi</div></template>`,
       'pages/index.server.ts': `export const loader = () => ({});`,
     });
+    const { deps, trace, exitCalls } = harness({
+      runStaticBuild: () => {
+        trace.push('static-build');
+        mkdirSync(join(root, 'dist/client'), { recursive: true });
+        writeFileSync(join(root, 'dist/client/index.html'), '<h1>Prerendered</h1>');
+      },
+    });
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(exitCalls).toEqual([]);
+    expect(trace).toEqual(['wrangler:whoami', 'static-build', 'wrangler:deploy']);
+    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toMatchObject({
+      main: '.void/deploy/cloudflare/static-edge.mjs',
+      assets: { directory: 'dist/client', not_found_handling: '404-page' },
+    });
+  });
+
+  it('keeps an output:"static" app with a dynamic page on the full Worker path', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'hybrid-ssg' }),
+      'void.json': JSON.stringify({ output: 'static' }),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
+      'pages/[id].vue': `<template><div>dynamic</div></template>`,
+      'pages/[id].server.ts': `export const loader = ({ params }) => ({ id: params.id });`,
+    });
     const { deps, trace, exitCalls } = harness();
-    await expect(
-      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-    ).rejects.toBeInstanceOf(ExitError);
-    expect(exitCalls).toEqual([1]);
-    // NO account / build seam ran.
-    expect(trace).toEqual([]);
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(exitCalls).toEqual([]);
+    expect(trace).toEqual(['wrangler:whoami', 'build', 'gate', 'wrangler:deploy']);
   });
 
   it('A1: rejects a project whose D1 binding sets a custom migrations_pattern before any account op', async () => {

@@ -3672,7 +3672,9 @@ export async function runCloudflareDeploy(
   });
 
   const provisionModule = await loadProvisionModule();
-  const staticPreset = resolveCloudflareStaticPreset(root, voidConfig, options);
+  const staticPreset =
+    resolveCloudflareStaticPreset(root, voidConfig, options) ??
+    (await resolveCloudflareVoidStaticPreset(root, voidConfig));
   if (staticPreset) {
     return runCloudflareStaticDeploy(root, options, voidConfig, staticPreset, cliLog, deps);
   }
@@ -4846,6 +4848,67 @@ function resolveCloudflareStaticPreset(
         buildCommand: resolveStaticBuildCommand(detected, voidConfig.inference?.build, false),
       }
     : null;
+}
+
+/**
+ * Resolve a Void Pages `output: "static"` app to the thin static edge worker
+ * only when the same source-level conditions used by the managed deploy prove
+ * that no request can require the application worker at runtime. Hybrid SSG
+ * apps deliberately fall through to the normal Worker deploy path.
+ */
+export async function resolveCloudflareVoidStaticPreset(
+  root: string,
+  voidConfig: VoidConfig,
+): Promise<StaticPreset | null> {
+  if (voidConfig.output !== 'static') {
+    return null;
+  }
+
+  const paths = resolveProjectPaths(root, voidConfig);
+  if (!existsSync(paths.pagesDir) || validateSsrEntry(root, paths) !== null) {
+    return null;
+  }
+
+  const routeScan = await scanRoutes(root, {
+    output: voidConfig.output,
+    paths,
+    environment: 'prod',
+  });
+  const pageScan =
+    routeScan.pages.pages.length > 0
+      ? routeScan.pages
+      : await scanPages(root, { output: voidConfig.output, paths });
+  if (
+    pageScan.pages.length === 0 ||
+    !pageScan.pages.every(
+      (page) =>
+        page.shouldPrerender &&
+        ((page.params.length === 0 && !page.catchAll) || page.hasGetPrerenderPaths),
+    )
+  ) {
+    return null;
+  }
+
+  const bindings = inferProjectBindings(root, { paths });
+  const authEnabled =
+    bindings.needsAuth || findVoidAuthConfig(root, paths) !== null || voidConfig.auth !== undefined;
+  const hasRuntimeBackend =
+    routeScan.routes.length > 0 ||
+    routeScan.middleware.length > 0 ||
+    (routeScan.websockets?.length ?? 0) > 0 ||
+    authEnabled ||
+    bindings.needsLive ||
+    scanJobsSync(root, paths.cronsDir).length > 0 ||
+    scanQueuesSync(root, paths.queuesDir).length > 0;
+  if (hasRuntimeBackend) {
+    return null;
+  }
+
+  return {
+    buildCommand: resolveFullDeployBuildCommand(root, voidConfig.inference?.build).command,
+    outputDir: join(root, 'dist', 'client'),
+    appType: 'static',
+  };
 }
 
 async function runCloudflareStaticDeploy(

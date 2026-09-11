@@ -50,9 +50,7 @@ export function classifyCloudflareDeployApp(
 
   const staticPreset = detectPreset(root, { dir: options.dir, spa: options.spa });
   const configuredStatic =
-    voidConfig.inference?.appType === 'static' ||
-    voidConfig.inference?.appType === 'spa' ||
-    voidConfig.output === 'static';
+    voidConfig.inference?.appType === 'static' || voidConfig.inference?.appType === 'spa';
   if (staticPreset || configuredStatic || options.dir || options.spa) {
     const appType = staticPreset?.appType ?? (options.spa ? 'spa' : 'static');
     return unsupported(

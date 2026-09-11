@@ -260,14 +260,14 @@ Auto-detects your project type and chooses the right pipeline. See [Supported Ap
 
 For Drizzle projects, deploy performs a read-only schema drift check. If a new migration would be generated, deploy stops and tells you to run `void db generate`, review the migration, commit it yourself, and rerun `void deploy`.
 
-| Flag                            | Purpose                                                                                       |
-| ------------------------------- | --------------------------------------------------------------------------------------------- |
-| `--platform <cloudflare\|void>` | Override the platform stored in `.void/project.json`                                          |
-| `--project <name>`              | Target a specific Void project by slug; not supported with `--platform cloudflare`            |
-| `--dir <path>`                  | Deploy a pre-built static directory (skips build); not supported with `--platform cloudflare` |
-| `--spa`                         | Use SPA mode instead of SSG for static deploys; not supported with `--platform cloudflare`    |
-| `--skip-build`                  | Skip the build step (use existing build output); not supported with `--platform cloudflare`   |
-| `--debug`                       | Mirror the structured deploy log to stderr (also written to `~/.void/logs/`)                  |
+| Flag                            | Purpose                                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------ |
+| `--platform <cloudflare\|void>` | Override the platform stored in `.void/project.json`                                 |
+| `--project <name>`              | Target a specific Void project by slug; not supported with `--platform cloudflare`   |
+| `--dir <path>`                  | Deploy a pre-built static directory (skips build)                                    |
+| `--spa`                         | Use SPA mode instead of SSG for static deploys                                       |
+| `--skip-build`                  | Skip the build step; on Cloudflare this is supported for static/SPA/SSG deploys only |
+| `--debug`                       | Mirror the structured deploy log to stderr (also written to `~/.void/logs/`)         |
 
 The older `--backend cloudflare` spelling remains available as a compatibility alias for `--platform cloudflare`.
 
@@ -328,11 +328,13 @@ Prerequisites:
 - A Cloudflare account must be **pinned**: set `account_id` in your root `wrangler.jsonc`, or export `CLOUDFLARE_ACCOUNT_ID`. A multi-account token otherwise makes wrangler prompt (or error in CI), which Void cannot intercept.
 - Authenticate wrangler (`wrangler login`, or set `CLOUDFLARE_API_TOKEN`). Deploy needs `Workers Scripts:Edit` plus read on the resources you bind, and per-product `*:Edit` whenever it must create a missing D1 database, KV namespace, R2 bucket, Queue, or Hyperdrive config.
 - `CLOUDFLARE_API_TOKEN` is **required** to provision a Hyperdrive config for the first time — `wrangler login` covers every other resource, but wrangler exposes no machine-readable Hyperdrive list, so Void checks for an existing config over the Cloudflare REST API, which OAuth cannot authenticate. Without a token, automatic provisioning stops before touching your account. Alternatively create the Hyperdrive config yourself and put its id in `wrangler.jsonc` — deploying an already-provisioned Hyperdrive app needs no token.
-- `--skip-build` is **not supported** with `--platform cloudflare`: this path validates the artifact the build emits (worker `vars` in `dist/ssr/wrangler.json`, the generated auth schema), so there is nothing to check without a fresh build.
-- `--project`, `--dir` and `--spa` are **not supported** with `--platform cloudflare` either, and are rejected rather than ignored: no Void project is resolved on this path, and it uploads the worker your build emits rather than a static directory.
+- `--skip-build` is supported for static, SPA, and SSG deployment when the output directory already exists. It is **not supported for worker-bearing apps**, because that path validates the artifact the build emits (worker `vars` in `dist/ssr/wrangler.json` and the generated auth schema).
+- `--project` is **not supported** with `--platform cloudflare`, because no Void project is resolved. `--dir` and `--spa` are supported and deploy through a thin Worker in front of Cloudflare Workers Assets.
 - Local Docker is required to build apps that use the sandbox.
 
-What it does, in order: settles the app class, pins the account and checks auth, automatically provisions missing resources, **builds**, validates the emitted artifact and migrations, preserves or creates the auth secret, applies remote D1 migrations or checked-in PostgreSQL/MySQL migrations through the production `DATABASE_URL`, promotes explicit env schema `.secret()` values to encrypted Cloudflare Worker secrets, then runs `wrangler deploy` on exactly the verified artifact. PostgreSQL migrations are transactional; MySQL DDL is not. External database URLs are never written to the Worker config.
+For static, SPA, and SSG apps, Void builds when needed, merges `_headers`, `_redirects`, and `void.json` routing rules, writes a deterministic thin edge Worker, and deploys the asset directory with Workers Assets. A fully prerenderable `output: "static"` Pages app uses this path; a hybrid app with a dynamic page or another runtime feature keeps its generated application Worker.
+
+For worker-bearing apps, it settles the app class, pins the account and checks auth, automatically provisions missing resources, **builds**, validates the emitted artifact and migrations, preserves or creates the auth secret, applies remote D1 migrations or checked-in PostgreSQL/MySQL migrations through the production `DATABASE_URL`, promotes explicit env schema `.secret()` values to encrypted Cloudflare Worker secrets, then runs `wrangler deploy` on exactly the verified artifact. PostgreSQL migrations are transactional; MySQL DDL is not. External database URLs are never written to the Worker config.
 
 The build deliberately comes **before** the secret, auth-schema, and migration gates, because those gates inspect the real emitted worker rather than a prediction of it. A missing secret or a bad migration surfaces after the build has run — relevant when a build is expensive or has side effects. Remote D1 migrations run only once every gate has passed, so a failed gate mutates nothing remote.
 
