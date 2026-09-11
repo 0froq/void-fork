@@ -33,10 +33,6 @@ export type RedirectRule = {
   host?: string;
 };
 
-export const MANIFEST_REDIRECT_RULE_STATUSES: ReadonlySet<number> = new Set([
-  200, 301, 302, 303, 307, 308,
-]);
-
 export type AssetConfig = {
   not_found_handling?: 'none' | 'single-page-application' | '404-page';
   html_handling?: 'auto-trailing-slash' | 'force-trailing-slash' | 'drop-trailing-slash' | 'none';
@@ -166,3 +162,10 @@ export type DeployEvent =
       published?: boolean;
     }
   | { event: 'error'; message: string; step: string };
+
+export {
+  MANIFEST_REDIRECT_RULE_STATUSES,
+  MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES,
+  MAX_ROUTING_RULES,
+  validateManifestShape,
+} from './validate.ts';
