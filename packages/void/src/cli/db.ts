@@ -184,7 +184,7 @@ async function runPush(root: string, dialect: DatabaseDialect): Promise<void> {
     configPath = writeDrizzleConfig(root, url, 'postgresql');
   } else {
     const { mkdirSync } = await import('node:fs');
-    const { dirname } = await import('node:path');
+    const { dirname } = await import('pathslash');
     const { getMiniflareDatabasePath } = await import('../migrations/runner.ts');
     const persistRoot = getLocalD1PersistRoot(root);
     const dbPath = getMiniflareDatabasePath(persistRoot, 'local');

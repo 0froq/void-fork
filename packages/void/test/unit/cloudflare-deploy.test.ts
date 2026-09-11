@@ -6165,66 +6165,42 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
 
 describe('runCloudflareDeploy — envDir / mode narrowing (rejected pre-account)', () => {
   it('rejects a custom Vite envDir pre-account — no whoami / provision / build (REAL probe)', async () => {
-    const savedNodeOptions = process.env.NODE_OPTIONS;
-    process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, '--experimental-transform-types']
-      .filter(Boolean)
-      .join(' ');
-    try {
-      // A REAL vite.config sets a custom envDir; the facts probe resolves the config in the
-      // isolated subprocess, reads the effective envDir, and rejects before any account op.
-      const root = d1Project(PROVISIONED_D1, {
-        'package.json': JSON.stringify({ name: 'myapp', type: 'module' }),
-        'vite.config.ts': `export default { envDir: './cfg' };`,
-        'cfg/.gitkeep': '',
-      });
-      const { deps, trace, wranglerArgs, exitCalls } = harness({ resolveSchemaFacts: undefined });
-      await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-      ).rejects.toBeInstanceOf(ExitError);
-      expect(exitCalls).toEqual([1]);
-      // Pre-account: nothing ran — no whoami, no provision, no build, no deploy.
-      expect(trace).toEqual([]);
-      expect(wranglerArgs).toEqual([]);
-    } finally {
-      if (savedNodeOptions === undefined) {
-        delete process.env.NODE_OPTIONS;
-      } else {
-        process.env.NODE_OPTIONS = savedNodeOptions;
-      }
-    }
+    // A REAL vite.config sets a custom envDir; the facts probe resolves the config in the
+    // isolated subprocess, reads the effective envDir, and rejects before any account op.
+    const root = d1Project(PROVISIONED_D1, {
+      'package.json': JSON.stringify({ name: 'myapp', type: 'module' }),
+      'vite.config.ts': `export default { envDir: './cfg' };`,
+      'cfg/.gitkeep': '',
+    });
+    const { deps, trace, wranglerArgs, exitCalls } = harness({ resolveSchemaFacts: undefined });
+    await expect(
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(exitCalls).toEqual([1]);
+    // Pre-account: nothing ran — no whoami, no provision, no build, no deploy.
+    expect(trace).toEqual([]);
+    expect(wranglerArgs).toEqual([]);
   });
 
   it('rejects an ABSOLUTE envDir equal to the project root pre-account — the build mis-loads it (REAL probe)', async () => {
-    const savedNodeOptions = process.env.NODE_OPTIONS;
-    process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, '--experimental-transform-types']
-      .filter(Boolean)
-      .join(' ');
-    try {
-      // Vite normalizes `envDir` via `path.resolve(root, envDir)`, so an ABSOLUTE envDir equal
-      // to the root collapses to `resolved.root` and Vite's own view would ACCEPT. But the build
-      // loads worker vars with `join(root, rawEnvDir)`, which DUPLICATES an absolute path
-      // (`/proj/proj`) → the build reads vars from the wrong dir. The probe now reads the RAW
-      // envDir the `void:env` hook captured and rejects via the build's own computation, before
-      // any account op. `import.meta.dirname` in the config === the project root (absolute).
-      const root = d1Project(PROVISIONED_D1, {
-        'package.json': JSON.stringify({ name: 'myapp', type: 'module' }),
-        'vite.config.ts': viteConfigWithVoidEnvStub('import.meta.dirname'),
-      });
-      const { deps, trace, wranglerArgs, exitCalls } = harness({ resolveSchemaFacts: undefined });
-      await expect(
-        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
-      ).rejects.toBeInstanceOf(ExitError);
-      expect(exitCalls).toEqual([1]);
-      // Pre-account: nothing ran — no whoami, no provision, no build, no deploy.
-      expect(trace).toEqual([]);
-      expect(wranglerArgs).toEqual([]);
-    } finally {
-      if (savedNodeOptions === undefined) {
-        delete process.env.NODE_OPTIONS;
-      } else {
-        process.env.NODE_OPTIONS = savedNodeOptions;
-      }
-    }
+    // Vite normalizes `envDir` via `path.resolve(root, envDir)`, so an ABSOLUTE envDir equal
+    // to the root collapses to `resolved.root` and Vite's own view would ACCEPT. But the build
+    // loads worker vars with `join(root, rawEnvDir)`, which DUPLICATES an absolute path
+    // (`/proj/proj`) → the build reads vars from the wrong dir. The probe now reads the RAW
+    // envDir the `void:env` hook captured and rejects via the build's own computation, before
+    // any account op. `import.meta.dirname` in the config === the project root (absolute).
+    const root = d1Project(PROVISIONED_D1, {
+      'package.json': JSON.stringify({ name: 'myapp', type: 'module' }),
+      'vite.config.ts': viteConfigWithVoidEnvStub('import.meta.dirname'),
+    });
+    const { deps, trace, wranglerArgs, exitCalls } = harness({ resolveSchemaFacts: undefined });
+    await expect(
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(exitCalls).toEqual([1]);
+    // Pre-account: nothing ran — no whoami, no provision, no build, no deploy.
+    expect(trace).toEqual([]);
+    expect(wranglerArgs).toEqual([]);
   });
 
   it('rejects a non-production build mode pre-account — no whoami / provision / build', async () => {
@@ -6484,14 +6460,8 @@ describe('runCloudflareDeploy — migration gates re-checked post-build', () => 
 // ---------------------------------------------------------------------------
 
 describe('env-schema probe (real subprocess)', () => {
-  // The probe spawns a plain `node` on THIS repo's SOURCE `.ts`. `env-public.ts` (imported at
-  // runtime to read the registered schema) uses a TS parameter property, which Node's default
-  // strip-only mode rejects — so enable full type transform for the child, mirroring how
-  // production runs the compiled `dist`. `provisionEnv`/`deployChildEnv` never scrub NODE_OPTIONS.
-  const withTransform = (base: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
-    ...base,
-    NODE_OPTIONS: [base.NODE_OPTIONS, '--experimental-transform-types'].filter(Boolean).join(' '),
-  });
+  // The probe spawns a plain `node` on this repo's source `.ts`, so its runtime imports must use
+  // type-strippable syntax supported by Node without extra NODE_OPTIONS flags.
 
   it('derives required + `.secret()` facts and the fd-3 result survives noisy stdout', async () => {
     const root = makeProject({
@@ -6504,7 +6474,7 @@ describe('env-schema probe (real subprocess)', () => {
         `export default defineEnv({ STRIPE_KEY: string().secret(), API_URL: string() });`,
       ].join('\n'),
     });
-    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, withTransform({ ...process.env }));
+    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, { ...process.env });
     expect(r.kind).toBe('ok');
     if (r.kind === 'ok') {
       expect(r.facts.hasSchema).toBe(true);
@@ -6529,7 +6499,7 @@ describe('env-schema probe (real subprocess)', () => {
         `export default defineEnv({ FOO: string() });`,
       ].join('\n'),
     });
-    const env = withTransform({ ...process.env });
+    const env = { ...process.env };
     delete env.CLOUDFLARE_API_TOKEN;
     delete env.CF_ACCESS_CLIENT_ID;
     await resolveEnvSchemaFactsViaSubprocess({ root }, env);
@@ -6546,15 +6516,9 @@ describe('env-schema probe (real subprocess)', () => {
     const savedToken = process.env.CLOUDFLARE_API_TOKEN;
     const savedId = process.env.CF_ACCESS_CLIENT_ID;
     const savedSecret = process.env.CF_ACCESS_CLIENT_SECRET;
-    const savedNodeOptions = process.env.NODE_OPTIONS;
     process.env.CLOUDFLARE_API_TOKEN = 'super-secret-token';
     process.env.CF_ACCESS_CLIENT_ID = 'super-secret-id';
     process.env.CF_ACCESS_CLIENT_SECRET = 'super-secret-secret';
-    // The orchestrator copies process.env (unscrubbed NODE_OPTIONS) into the probe child env, so
-    // enable full type transform for the plain-node child running SOURCE .ts (see withTransform).
-    process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, '--experimental-transform-types']
-      .filter(Boolean)
-      .join(' ');
     const leakFile = join(tmpDir, 'orchestrator-leak.json');
     try {
       // The env.ts LEAKS the three parent creds to a file; the orchestrator spawns the REAL
@@ -6604,11 +6568,6 @@ describe('env-schema probe (real subprocess)', () => {
       } else {
         process.env.CF_ACCESS_CLIENT_SECRET = savedSecret;
       }
-      if (savedNodeOptions === undefined) {
-        delete process.env.NODE_OPTIONS;
-      } else {
-        process.env.NODE_OPTIONS = savedNodeOptions;
-      }
     }
   });
 
@@ -6617,7 +6576,7 @@ describe('env-schema probe (real subprocess)', () => {
       'package.json': JSON.stringify({ name: 'envapp', type: 'module' }),
       'env.ts': `throw new Error('SUPER_SECRET_LEAK_9999');\nexport default {};`,
     });
-    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, withTransform({ ...process.env }));
+    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, { ...process.env });
     expect(r.kind).toBe('schema-error');
     // The values-free boundary drops the original message, so the leak never reaches the result.
     expect(JSON.stringify(r)).not.toContain('SUPER_SECRET_LEAK_9999');
@@ -6658,7 +6617,7 @@ describe('env-schema probe (real subprocess)', () => {
       'vite.config.ts': `export default { envDir: './cfg' };`,
       'cfg/.gitkeep': '',
     });
-    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, withTransform({ ...process.env }));
+    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, { ...process.env });
     expect(r.kind).toBe('reject');
     if (r.kind === 'reject') {
       // Only the fixed reason code crosses the boundary — never the raw resolved envDir string.
@@ -6675,7 +6634,7 @@ describe('env-schema probe (real subprocess)', () => {
       // duplicates the path — the probe reads the RAW envDir and rejects via that computation.
       'vite.config.ts': viteConfigWithVoidEnvStub('import.meta.dirname'),
     });
-    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, withTransform({ ...process.env }));
+    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, { ...process.env });
     expect(r.kind).toBe('reject');
     if (r.kind === 'reject') {
       expect(r.reason).toBe('custom-envdir');
@@ -6695,7 +6654,7 @@ describe('env-schema probe (real subprocess)', () => {
       // `join(root, '.') === root` and `resolve(root, '.') === root` — both views accept.
       'vite.config.ts': viteConfigWithVoidEnvStub(`'.'`),
     });
-    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, withTransform({ ...process.env }));
+    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, { ...process.env });
     expect(r.kind).toBe('ok');
   });
 
@@ -6708,7 +6667,7 @@ describe('env-schema probe (real subprocess)', () => {
         `export default defineEnv({ API_URL: string() });`,
       ].join('\n'),
     });
-    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, withTransform({ ...process.env }));
+    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, { ...process.env });
     expect(r.kind).toBe('ok');
   });
 
@@ -6725,7 +6684,7 @@ describe('env-schema probe (real subprocess)', () => {
       ].join('\n'),
     });
     const under = async (nodeEnv: string): Promise<Array<string>> => {
-      const env = withTransform({ ...process.env, NODE_ENV: nodeEnv });
+      const env = { ...process.env, NODE_ENV: nodeEnv };
       const r = await resolveEnvSchemaFactsViaSubprocess({ root }, env);
       return r.kind === 'ok' ? [...r.facts.requiredKeys].sort() : [`<${r.kind}>`];
     };
@@ -6751,7 +6710,7 @@ describe('env-schema probe (real subprocess)', () => {
         vars: { PORT: 'not-a-number', API_URL: 'https://example.com' },
       }),
     });
-    const r = await validateEmittedVarsViaSubprocess({ root }, withTransform({ ...process.env }));
+    const r = await validateEmittedVarsViaSubprocess({ root }, { ...process.env });
     expect(r.kind).toBe('invalid-keys');
     if (r.kind === 'invalid-keys') {
       expect(r.invalidKeys).toEqual(['PORT']);
@@ -6771,7 +6730,7 @@ describe('env-schema probe (real subprocess)', () => {
       }),
       'dist/ssr/wrangler.json': JSON.stringify({ vars: { PORT: '8080' } }),
     });
-    const r = await validateEmittedVarsViaSubprocess({ root }, withTransform({ ...process.env }));
+    const r = await validateEmittedVarsViaSubprocess({ root }, { ...process.env });
     expect(r.kind).toBe('invalid-keys');
     if (r.kind === 'invalid-keys') {
       expect(r.invalidKeys).toEqual([]);
@@ -6779,7 +6738,6 @@ describe('env-schema probe (real subprocess)', () => {
   });
 
   it('the child env carries NONE of the full wrangler-auth credential set (all aliases scrubbed)', async () => {
-    const savedNodeOptions = process.env.NODE_OPTIONS;
     // The FULL wrangler-auth credential set + aliases set on the parent; a d1 app whose
     // env.ts leaks them.
     const authVars = WRANGLER_AUTH_VARS;
@@ -6788,9 +6746,6 @@ describe('env-schema probe (real subprocess)', () => {
       saved[name] = process.env[name];
       process.env[name] = `secret-${name}`;
     }
-    process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, '--experimental-transform-types']
-      .filter(Boolean)
-      .join(' ');
     const leakFile = join(tmpDir, 'auth-scrub-leak.json');
     try {
       const root = d1Project(PROVISIONED_D1, {
@@ -6824,11 +6779,6 @@ describe('env-schema probe (real subprocess)', () => {
           process.env[name] = saved[name];
         }
       }
-      if (savedNodeOptions === undefined) {
-        delete process.env.NODE_OPTIONS;
-      } else {
-        process.env.NODE_OPTIONS = savedNodeOptions;
-      }
     }
   });
 
@@ -6844,7 +6794,7 @@ describe('env-schema probe (real subprocess)', () => {
         `export default defineEnv({ API_URL: string() });`,
       ].join('\n'),
     });
-    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, withTransform({ ...process.env }));
+    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, { ...process.env });
     // fd 3 is a separate pipe, so the result parses cleanly despite the stdout/stderr noise…
     expect(r.kind).toBe('ok');
     if (r.kind === 'ok') {

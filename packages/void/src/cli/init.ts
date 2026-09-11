@@ -2439,7 +2439,7 @@ function scaffoldPagesApp(
     resolveWorkspaceDeferral(root, pkg) === undefined &&
     (!pkg.packageManager || typeof pkg.packageManager !== 'string')
   ) {
-    pkg.packageManager = 'pnpm@11.0.9';
+    pkg.packageManager = 'pnpm@^12.4.1';
   }
 
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');

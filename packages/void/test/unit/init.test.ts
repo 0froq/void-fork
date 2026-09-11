@@ -1278,7 +1278,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
       expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
-      expect(pkg.packageManager).toBe('pnpm@11.0.9');
+      expect(pkg.packageManager).toBe('pnpm@^12.4.1');
       expect(pkg.scripts.dev).toBe('vp dev');
 
       expect(readFileSync(join(root, 'pages', 'index.tsx'), 'utf-8')).toContain(
@@ -4382,7 +4382,7 @@ export default config;
       writeFileSync(
         join(wsroot, 'package.json'),
         JSON.stringify(
-          { name: 'workspace-root', private: true, packageManager: 'pnpm@11.0.9' },
+          { name: 'workspace-root', private: true, packageManager: 'pnpm@^12.4.1' },
           null,
           2,
         ) + '\n',
@@ -4425,7 +4425,7 @@ export default config;
       writeFileSync(
         join(wsroot, 'package.json'),
         JSON.stringify(
-          { name: 'workspace-root', private: true, packageManager: 'pnpm@11.0.9' },
+          { name: 'workspace-root', private: true, packageManager: 'pnpm@^12.4.1' },
           null,
           2,
         ) + '\n',
@@ -4469,7 +4469,7 @@ export default config;
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
       expectPnpmAllowBuilds(root);
-      expect(pkg.packageManager).toBe('pnpm@11.0.9');
+      expect(pkg.packageManager).toBe('pnpm@^12.4.1');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
