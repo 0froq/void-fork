@@ -114,7 +114,13 @@ export async function getPort(): Promise<number> {
 export async function waitForServer(
   url: string,
   timeoutMs: number,
-  options?: { expectBody?: string; isAlive?: () => boolean; requestTimeoutMs?: number },
+  options?: {
+    expectBody?: string;
+    rejectBody?: string;
+    expectStatus?: number;
+    isAlive?: () => boolean;
+    requestTimeoutMs?: number;
+  },
 ): Promise<void> {
   // Release the held port so the child process can bind to it.
   // This is called right after spawn(), minimizing the TOCTOU window.
@@ -137,12 +143,19 @@ export async function waitForServer(
       const response = await fetch(url, {
         signal: AbortSignal.timeout(Math.min(options?.requestTimeoutMs ?? 5_000, remainingMs)),
       });
-      if (response.status > 0) {
-        if (!options?.expectBody) {
+      const statusMatches =
+        options?.expectStatus === undefined
+          ? response.status > 0
+          : response.status === options.expectStatus;
+      if (statusMatches) {
+        if (!options?.expectBody && !options?.rejectBody) {
           return;
         }
         const body = await response.text();
-        if (body.includes(options.expectBody)) {
+        if (
+          (!options.expectBody || body.includes(options.expectBody)) &&
+          (!options.rejectBody || !body.includes(options.rejectBody))
+        ) {
           return;
         }
       }

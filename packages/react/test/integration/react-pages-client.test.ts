@@ -1078,7 +1078,7 @@ describe('react-pages client (dev)', () => {
 
       writeFileSync(REACT_PAGES_LAYOUT, originalLayout);
       originalLayout = undefined;
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await waitForServer(DEV_BASE, 10_000, { rejectBody: 'late-worker-dep-probe' });
     },
     process.platform === 'win32' ? 60_000 : 30_000,
   );
@@ -1384,7 +1384,7 @@ describe('react-pages client (dev)', () => {
       expect(lastBody).toContain('HMR New Route');
     } finally {
       rmSync(newPageFile, { force: true });
-      await new Promise((r) => setTimeout(r, 500));
+      await waitForServer(`${DEV_BASE}/hmr-new-route`, 10_000, { expectStatus: 404 });
     }
   });
 
@@ -1431,7 +1431,7 @@ describe('react-pages client (dev)', () => {
     } finally {
       await page.context().close();
       writeFileSync(counterFile, original);
-      await new Promise((r) => setTimeout(r, 500));
+      await waitForServer(`${DEV_BASE}/blog`, 10_000, { expectBody: 'Count:' });
     }
   });
 
@@ -1469,8 +1469,7 @@ describe('react-pages client (dev)', () => {
       expect(updatedHtml).toContain('data-island=');
     } finally {
       writeFileSync(islandFile, original);
-      // Wait for restore to be picked up
-      await new Promise((r) => setTimeout(r, 500));
+      await waitForServer(`${DEV_BASE}/blog`, 10_000, { expectBody: '<h1>Blog</h1>' });
     }
   });
 });

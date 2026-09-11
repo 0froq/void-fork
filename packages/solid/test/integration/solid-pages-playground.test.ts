@@ -909,7 +909,7 @@ describe('solid-pages client (dev)', () => {
     } finally {
       await page.context().close();
       writeFileSync(counterFile, original);
-      await new Promise((r) => setTimeout(r, 500));
+      await waitForServer(`${DEV_BASE}/blog`, 10_000, { expectBody: 'Count:' });
     }
   });
 
@@ -945,8 +945,7 @@ describe('solid-pages client (dev)', () => {
       expect(updatedHtml).toContain('data-island=');
     } finally {
       writeFileSync(islandFile, original);
-      // Wait for restore to be picked up
-      await new Promise((r) => setTimeout(r, 500));
+      await waitForServer(`${DEV_BASE}/blog`, 10_000, { expectBody: '<h1>Blog</h1>' });
     }
   });
 });

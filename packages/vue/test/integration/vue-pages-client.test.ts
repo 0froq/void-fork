@@ -929,7 +929,9 @@ describe('vue-pages client (dev)', () => {
       } finally {
         await page.context().close();
         writeFileSync(pageFile, original);
-        await new Promise((r) => setTimeout(r, 500));
+        await waitForServer(`${DEV_BASE}/deferred`, 10_000, {
+          expectBody: '<h1>Deferred Page</h1>',
+        });
       }
     },
   );
@@ -953,9 +955,6 @@ describe('vue-pages client (dev)', () => {
       await page.waitForFunction(
         () => document.querySelector('[data-testid="count"]')?.textContent === 'Count: 1',
       );
-
-      // Wait a bit for reactive state to stabilize before HMR (Windows can be slower)
-      await new Promise((r) => setTimeout(r, 200));
 
       // Set a window marker to detect full page reload
       await page.evaluate(() => {
@@ -982,7 +981,7 @@ describe('vue-pages client (dev)', () => {
     } finally {
       await page.context().close();
       writeFileSync(counterFile, original);
-      await new Promise((r) => setTimeout(r, 500));
+      await waitForServer(`${DEV_BASE}/blog`, 10_000, { expectBody: 'Count:' });
     }
   });
 
@@ -1020,8 +1019,7 @@ describe('vue-pages client (dev)', () => {
       expect(updatedHtml).toContain('data-island=');
     } finally {
       writeFileSync(islandFile, original);
-      // Wait for restore to be picked up
-      await new Promise((r) => setTimeout(r, 500));
+      await waitForServer(`${DEV_BASE}/blog`, 10_000, { expectBody: '<h1>Blog</h1>' });
     }
   });
 });

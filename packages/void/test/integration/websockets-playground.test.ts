@@ -95,6 +95,7 @@ describe('playground/websockets', () => {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           ...process.env,
+          VITE_VOID_NOTIFICATION_STREAM_DELAY_MS: '10',
           VOID_INSPECTOR_PORT: 'false',
         },
       },
