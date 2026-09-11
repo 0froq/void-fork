@@ -46,9 +46,14 @@ import { readConfig } from '../../src/config.ts';
 
 const tmpDir = join(import.meta.dirname, '.tmp-cf-deploy-test');
 
+function removeProjectFixture(): void {
+  // Windows can briefly retain handles opened by the real env-schema probe subprocesses.
+  rmSync(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
 /** Write a project fixture: a map of relative path → file contents. */
 function makeProject(files: Record<string, string>): string {
-  rmSync(tmpDir, { recursive: true, force: true });
+  removeProjectFixture();
   mkdirSync(tmpDir, { recursive: true });
   for (const [rel, content] of Object.entries(files)) {
     const abs = join(tmpDir, rel);
@@ -59,7 +64,7 @@ function makeProject(files: Record<string, string>): string {
 }
 
 afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+  removeProjectFixture();
   delete process.env.DATABASE_URL;
 });
 

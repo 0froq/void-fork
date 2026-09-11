@@ -485,7 +485,13 @@ function registerIslandTests(getBase: () => string) {
     const page = await newPage();
     try {
       await page.goto(BASE + '/blog');
-      await page.waitForSelector('[data-island][data-hydrated="true"]');
+      await page.waitForFunction(() => {
+        const islands = [...document.querySelectorAll('[data-island]')];
+        return (
+          islands.length >= 2 &&
+          islands.every((island) => island.getAttribute('data-hydrated') === 'true')
+        );
+      });
 
       const islands = await page.$$eval('[data-island]', (els) =>
         els.map((el) => ({

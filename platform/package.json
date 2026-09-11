@@ -22,7 +22,6 @@
     "health": "node packages/api/scripts/health.ts",
     "health:staging": "node packages/api/scripts/health.ts --staging",
     "lint": "vp lint",
-    "prepare": "vp config",
     "test": "vp test run"
   },
   "devDependencies": {

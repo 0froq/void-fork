@@ -70,11 +70,11 @@ jobs:
           node-version-file: .node-version
           cache: true
 
-      - run: vp exec playwright install --with-deps chromium
-        if: ${{ matrix.shard != 'unit' && !contains(matrix.os, 'windows') }}
-
+      # Both runner images already provide Chromium's shared-library dependencies. Avoid
+      # `--with-deps` here: it runs apt on Linux and makes test startup depend on the external
+      # Ubuntu mirrors even though no OS packages are needed by these runners.
       - run: vp exec playwright install chromium
-        if: ${{ matrix.shard != 'unit' && contains(matrix.os, 'windows') }}
+        if: ${{ matrix.shard != 'unit' }}
 
       - run: vp check
         if: ${{ matrix.shard == 'unit' }}
