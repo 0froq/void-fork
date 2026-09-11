@@ -2,6 +2,7 @@ import {
   denormalizeIsrPath,
   htmlEdgeKey,
   isrKey,
+  isrPrefix,
   jsonEdgeKey,
   listIsrHosts,
 } from '@void/isr/runtime';
@@ -45,7 +46,7 @@ export async function revalidate(options: RevalidateOptions): Promise<void> {
       return;
     }
     const requestHost = rawEnv.__VOID_ISR_HOST as string | undefined;
-    // Cache keys are host-scoped (`void-isr/<id>/<host>/<path>`), so a purge must
+    // Cache keys are deployment- and host-scoped, so a purge must
     // target a concrete (host, path). Delete KV first and unconditionally — the
     // authoritative purge must never depend on the Cache API — then best-effort
     // purge the per-host edge variants, guarded so a degraded `caches.default`
@@ -66,8 +67,8 @@ export async function revalidate(options: RevalidateOptions): Promise<void> {
     if (options.all) {
       // Enumerate the actual host-scoped cache keys (registry-independent, so it
       // is complete even for a host that was never registered). Split the host
-      // off the key tail BEFORE denormalizing: `void-isr/<id>/<host>/<path>`.
-      const prefix = `void-isr/${id}/`;
+      // off the key tail before denormalizing the remaining pathname.
+      const prefix = isrPrefix(id);
       let cursor: string | undefined;
       do {
         const list = await kv.list({ prefix, cursor });

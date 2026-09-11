@@ -1,4 +1,4 @@
-import { hostRegistryKey, htmlEdgeKey, isrKey, jsonEdgeKey } from '@void/isr/runtime';
+import { hostRegistryKey, htmlEdgeKey, isrKey, isrPrefix, jsonEdgeKey } from '@void/isr/runtime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { envContext } from '../../src/runtime/env-raw.ts';
 import { revalidate } from '../../src/runtime/isr.ts';
@@ -247,7 +247,7 @@ describe('revalidate — self-host (own ISR_CACHE + edge)', () => {
     expect(kvDelete).toHaveBeenCalledWith(isrKey(DPL, HOST, '/'));
   });
 
-  it('{ all: true } lists the void-isr/<id>/ prefix, SPLITS the host off each key, and purges every (host, path) — cursor-paginated', async () => {
+  it('{ all: true } lists the shared deployment prefix, splits each host, and purges every entry across pages', async () => {
     // pageSize 2 forces the cursor loop to iterate across multiple pages.
     const { store, kv, list } = createKvMock(2);
     const HOST2 = 'other.example';
@@ -284,7 +284,7 @@ describe('revalidate — self-host (own ISR_CACHE + edge)', () => {
     // EVERY list call is scoped to THIS deployment's prefix. An unscoped
     // `kv.list()` (or a wrong/missing prefix) would enumerate — and therefore
     // purge — other deployments' keys; assert the prefix on every page.
-    const listPrefix = `void-isr/${DPL}/`;
+    const listPrefix = isrPrefix(DPL);
     for (const [opts] of list.mock.calls) {
       expect((opts as { prefix?: string }).prefix).toBe(listPrefix);
     }

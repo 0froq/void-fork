@@ -31,7 +31,7 @@ function injectWorkersTypesReferencePlugin() {
 
 export default defineConfig({
   pack: {
-    entry: ['src/index.ts', 'src/runtime.ts'],
+    entry: ['src/index.ts', 'src/core.ts', 'src/runtime.ts'],
     format: 'esm',
     dts: true,
     clean: true,
