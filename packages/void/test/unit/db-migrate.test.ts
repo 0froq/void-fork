@@ -262,7 +262,9 @@ describe('void db migrate', () => {
     await runDbCommand(root, { action: 'status' });
 
     expect(mockGetPgAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
-    expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('remote: applied'));
+    expect(mockLog.info).toHaveBeenCalledWith(
+      '  001_create_users.sql  local: pending  remote: applied',
+    );
   });
 
   it('reads direct Cloudflare MySQL migration status from DATABASE_URL', async () => {
@@ -276,6 +278,8 @@ describe('void db migrate', () => {
     await runDbCommand(root, { action: 'status' });
 
     expect(mockGetMySqlAppliedMigrations).toHaveBeenCalledWith(process.env.DATABASE_URL);
-    expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('remote: applied'));
+    expect(mockLog.info).toHaveBeenCalledWith(
+      '  001_create_users.sql  local: pending  remote: applied',
+    );
   });
 });
