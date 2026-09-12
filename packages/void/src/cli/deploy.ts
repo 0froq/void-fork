@@ -91,6 +91,7 @@ import {
   resolveRemoteMode,
   stripInternalEnvKeys,
 } from '../shared/env.ts';
+import { buildEnv, WRANGLER_AUTH_CREDENTIAL_ENV_VARS } from '../shared/untrusted-env.ts';
 import { validateSsrEntry } from '../ssr/entry.ts';
 import { getApiUrl, getToken, getTokenSource } from './auth.ts';
 import {
@@ -531,34 +532,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
  * path and must not hand a dependency-shipped `node_modules/.bin/git` a child
  * process holding `VOID_TOKEN`.
  */
-export function buildEnv(
-  extra?: Record<string, string>,
-  options?: { localBinRoot?: string },
-): NodeJS.ProcessEnv {
-  const env = { ...process.env, ...extra };
-  scrubEnvironmentVariables(env, UNTRUSTED_PROJECT_CODE_ENV_VARS);
-  return options?.localBinRoot === undefined
-    ? env
-    : prependLocalBinToPath(env, options.localBinRoot);
-}
-
-/**
- * Prepend `<root>/node_modules/.bin` to the child env's PATH, preserving
- * whatever was already there.
- *
- * PATH is looked up case-insensitively and written back under the SAME key the
- * env already used: Windows reports it as `Path`, and `{ ...process.env }`
- * drops the case-insensitive lookup that `process.env` itself provides, so
- * hardcoding `PATH` would leave the real variable untouched and add a dead one.
- */
-function prependLocalBinToPath(env: NodeJS.ProcessEnv, root: string): NodeJS.ProcessEnv {
-  const binDir = join(root, 'node_modules', '.bin');
-  const delimiter = process.platform === 'win32' ? ';' : ':';
-  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
-  const existing = env[pathKey];
-  env[pathKey] = existing ? `${binDir}${delimiter}${existing}` : binDir;
-  return env;
-}
+export { buildEnv } from '../shared/untrusted-env.ts';
 
 /**
  * Marks a build child as driven by a MANAGED `void deploy`.
@@ -1372,40 +1346,6 @@ function deployPointerPath(root: string): string {
  * (`provisionEnv` already scrubs Void's own `CF_ACCESS_CLIENT_ID/SECRET` pair + the
  * account-id selector; this adds the wrangler-account credentials it does not.)
  */
-const WRANGLER_AUTH_CREDENTIAL_ENV_VARS = [
-  'CLOUDFLARE_API_TOKEN',
-  'CF_API_TOKEN',
-  'CLOUDFLARE_API_KEY',
-  'CF_API_KEY',
-  'CLOUDFLARE_EMAIL',
-  'CF_EMAIL',
-  'CLOUDFLARE_API_USER_SERVICE_KEY',
-  'WRANGLER_CF_AUTHORIZATION_TOKEN',
-  'WRANGLER_R2_SQL_AUTH_TOKEN',
-  'CLOUDFLARE_ACCESS_CLIENT_ID',
-  'CLOUDFLARE_ACCESS_CLIENT_SECRET',
-  'CF_ACCESS_TOKEN',
-];
-
-const UNTRUSTED_PROJECT_CODE_ENV_VARS = [
-  ...WRANGLER_AUTH_CREDENTIAL_ENV_VARS,
-  'CF_ACCESS_CLIENT_ID',
-  'CF_ACCESS_CLIENT_SECRET',
-  'VOID_TOKEN',
-  'DATABASE_URL',
-  'ACTIONS_ID_TOKEN_REQUEST_URL',
-  'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
-];
-
-function scrubEnvironmentVariables(env: NodeJS.ProcessEnv, names: ReadonlyArray<string>): void {
-  const blocked = new Set(names.map((name) => name.toLowerCase()));
-  for (const key of Object.keys(env)) {
-    if (blocked.has(key.toLowerCase())) {
-      delete env[key];
-    }
-  }
-}
-
 /**
  * Delete every {@link WRANGLER_AUTH_CREDENTIAL_ENV_VARS} entry from `env` IN PLACE and
  * return it, for a child that executes UNTRUSTED project code and needs no Cloudflare

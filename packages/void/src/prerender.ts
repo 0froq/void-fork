@@ -17,6 +17,7 @@ import { readConfig } from './config.ts';
 import { voidLog, voidWarn } from './log.ts';
 import { filterLoadedEnv, stripInternalEnvKeys } from './shared/env.ts';
 import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from './shared/proxy.ts';
+import { buildEnv } from './shared/untrusted-env.ts';
 
 const PRERENDER_PATHS_ENDPOINT = '/__void/prerender-paths';
 const STATIC_PAGE_DATA_DIR = '_void/pages';
@@ -550,7 +551,7 @@ if (mode === "collect") {
       execFile(
         process.execPath,
         [runnerPath, JSON.stringify(config)],
-        { env: { ...process.env, ...env }, cwd: root, maxBuffer: 10 * 1024 * 1024 },
+        { env: buildEnv(env), cwd: root, maxBuffer: 10 * 1024 * 1024 },
         (error, stdout, stderr) => {
           if (stderr) {
             process.stderr.write(stderr);
