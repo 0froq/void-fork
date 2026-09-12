@@ -7320,6 +7320,7 @@ async function runFullDeploy(
             // would be built from local bindings even for remote projects.
             remoteMode: resolveRemoteMode(deployConfig.remote),
             projectId: config.projectId,
+            voidToken: await client.createPrerenderToken(config.projectId),
           });
 
   // 8. Read wrangler compat settings for Cloudflare targets
