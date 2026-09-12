@@ -1416,6 +1416,11 @@ function scrubWranglerAuthCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv
   for (const name of WRANGLER_AUTH_CREDENTIAL_ENV_VARS) {
     deleteVar(env, name);
   }
+  // These are not Wrangler credentials, but native Cloudflare builds do not
+  // need either one: DATABASE_URL is consumed only by the parent-side
+  // provision/migration steps, and VOID_TOKEN belongs to the managed target.
+  deleteVar(env, 'DATABASE_URL');
+  deleteVar(env, 'VOID_TOKEN');
   return env;
 }
 

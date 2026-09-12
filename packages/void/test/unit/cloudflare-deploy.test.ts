@@ -7418,17 +7418,36 @@ describe('runCloudflareDeploy — schema probe runs under the build NODE_ENV', (
 describe('runCloudflareDeploy — wrangler credentials reach only the wrangler runner', () => {
   it('the BUILD child env carries none of the wrangler auth credentials', async () => {
     let buildEnvSeen: NodeJS.ProcessEnv = {};
-    await withWranglerCredentials(async () => {
-      const root = d1Project(PROVISIONED_D1);
-      const { deps } = harness({
-        runBuild: (env) => {
-          buildEnvSeen = { ...env };
-        },
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    const previousVoidToken = process.env.VOID_TOKEN;
+    try {
+      await withWranglerCredentials(async () => {
+        process.env.DATABASE_URL = 'postgres://production-secret';
+        process.env.VOID_TOKEN = 'managed-platform-token';
+        const root = d1Project(PROVISIONED_D1);
+        const { deps } = harness({
+          runBuild: (env) => {
+            buildEnvSeen = { ...env };
+          },
+        });
+        await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
       });
-      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
-    });
-    for (const name of WRANGLER_AUTH_VARS) {
-      expect(buildEnvSeen[name]).toBeUndefined();
+      for (const name of WRANGLER_AUTH_VARS) {
+        expect(buildEnvSeen[name]).toBeUndefined();
+      }
+      expect(buildEnvSeen.DATABASE_URL).toBeUndefined();
+      expect(buildEnvSeen.VOID_TOKEN).toBeUndefined();
+    } finally {
+      if (previousDatabaseUrl === undefined) {
+        delete process.env.DATABASE_URL;
+      } else {
+        process.env.DATABASE_URL = previousDatabaseUrl;
+      }
+      if (previousVoidToken === undefined) {
+        delete process.env.VOID_TOKEN;
+      } else {
+        process.env.VOID_TOKEN = previousVoidToken;
+      }
     }
   });
 
