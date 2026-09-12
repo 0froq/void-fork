@@ -3,6 +3,14 @@ import { matchLiteralPattern } from './pattern.ts';
 
 export type { HeaderRule } from '@void/deploy-core';
 
+export type HeaderRulePolicy = Readonly<{
+  /**
+   * Protect unrelated tenants that share one registrable domain. Direct
+   * deployments own their hostname and may safely use cookie header rules.
+   */
+  cookieIsolation?: 'shared-domain' | 'origin';
+}>;
+
 /**
  * Headers that user header rules may not set at all, because they are always a
  * cookie operation. On the shared *.void.app domain (not on the PSL) void.app
@@ -136,6 +144,7 @@ export function applyHeaderRules(
   response: Response,
   pathname: string,
   rules?: ReadonlyArray<HeaderRule>,
+  policy?: HeaderRulePolicy,
 ): Response {
   if (!rules || rules.length === 0) {
     return response;
@@ -161,15 +170,18 @@ export function applyHeaderRules(
   // cross-tenant cookie directive — not from a rule, and not from the origin
   // response either. (The origin's own header is otherwise ungated here; gating
   // it across the board is a separate dispatch-layer concern.)
-  const rawOriginClearSiteData = response.headers.get('clear-site-data');
+  const isolateSharedDomainCookies = policy?.cookieIsolation !== 'origin';
+  const rawOriginClearSiteData = isolateSharedDomainCookies
+    ? response.headers.get('clear-site-data')
+    : null;
   const originClearSiteData =
     rawOriginClearSiteData === null ? null : sanitizeClearSiteData(rawOriginClearSiteData);
   for (const [name, value] of matched) {
     const lowerName = name.toLowerCase();
-    if (BLOCKED_HEADERS.has(lowerName)) {
+    if (isolateSharedDomainCookies && BLOCKED_HEADERS.has(lowerName)) {
       continue;
     }
-    if (lowerName === 'clear-site-data') {
+    if (isolateSharedDomainCookies && lowerName === 'clear-site-data') {
       const safe = sanitizeClearSiteData(value);
       if (safe !== null) {
         newResponse.headers.set(name, safe);

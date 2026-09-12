@@ -4,6 +4,7 @@ export {
   sanitizeClearSiteData,
   type ClearSiteDataMember,
   type HeaderRule,
+  type HeaderRulePolicy,
 } from './headers.ts';
 export {
   compilePattern,

@@ -52,6 +52,7 @@ export function createStaticEdgeHandler(config: StaticEdgeConfig): StaticEdgeHan
           }),
           effectiveUrl.pathname,
           config.headerRules,
+          { cookieIsolation: 'origin' },
         );
       }
       if (route?.type === 'rewrite') {
@@ -73,7 +74,9 @@ export function createStaticEdgeHandler(config: StaticEdgeConfig): StaticEdgeHan
         }
       }
 
-      return applyHeaderRules(response, effectiveUrl.pathname, config.headerRules);
+      return applyHeaderRules(response, effectiveUrl.pathname, config.headerRules, {
+        cookieIsolation: 'origin',
+      });
     },
   };
 }

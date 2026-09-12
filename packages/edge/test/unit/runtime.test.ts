@@ -83,4 +83,22 @@ describe('createStaticEdgeHandler', () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('original');
   });
+
+  it('allows cookie header rules on a directly owned Cloudflare hostname', async () => {
+    const binding = assets({ '/': new Response('home') });
+    const response = await createStaticEdgeHandler({
+      headerRules: [
+        {
+          pattern: '/',
+          headers: [
+            ['set-cookie', 'theme=dark; Secure; SameSite=Lax'],
+            ['clear-site-data', '"cookies", "storage"'],
+          ],
+        },
+      ],
+    }).fetch(new Request('https://app.example.com/'), { ASSETS: binding });
+
+    expect(response.headers.get('set-cookie')).toBe('theme=dark; Secure; SameSite=Lax');
+    expect(response.headers.get('clear-site-data')).toBe('"cookies", "storage"');
+  });
 });
