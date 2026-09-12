@@ -665,6 +665,19 @@ function d1Project(
   });
 }
 
+/** A minimal worker-bearing app whose source inference enables `void/sandbox`. */
+function sandboxProject(): string {
+  return makeProject({
+    'package.json': JSON.stringify({ name: 'sandbox-app' }),
+    'void.json': JSON.stringify({}),
+    'routes/index.ts': [
+      `import { getSandbox } from 'void/sandbox';`,
+      `export const GET = () => Response.json({ sandbox: Boolean(getSandbox) });`,
+    ].join('\n'),
+    'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'sandbox-app' }, null, 2),
+  });
+}
+
 /**
  * A minimal `vite.config.ts` carrying a `void:env` plugin STUB that mirrors how the real
  * plugin (index.ts) captures the RAW (unnormalized) envDir and exposes it via
@@ -1724,6 +1737,96 @@ describe('runCloudflareDeploy — preflight', () => {
         process.env.CLOUDFLARE_ACCOUNT_ID = savedAccount;
       }
     }
+  });
+
+  it('verifies Cloudflare Containers before building a Sandbox app', async () => {
+    const root = sandboxProject();
+    const { deps, trace, wranglerArgs } = harness();
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(wranglerArgs).toContainEqual([
+      'containers',
+      'list',
+      '--json',
+      '-c',
+      join(root, 'wrangler.jsonc'),
+      '--env=',
+    ]);
+    expect(trace.indexOf('wrangler:whoami')).toBeLessThan(trace.indexOf('wrangler:containers'));
+    expect(trace.indexOf('wrangler:containers')).toBeLessThan(trace.indexOf('build'));
+  });
+
+  it('fails before provisioning or building when Sandbox Containers are unavailable', async () => {
+    const root = sandboxProject();
+    const errors: Array<string> = [];
+    const errorSpy = vi.spyOn(log, 'error').mockImplementation((message) => {
+      errors.push(String(message));
+    });
+    const { deps, trace, exitCalls } = harness({
+      runWrangler: (args) => {
+        trace.push(`wrangler:${args[0]}`);
+        if (args[0] === 'whoami') {
+          return { ...cleanExit, stdout: '{"loggedIn":true}' };
+        }
+        if (args[0] === 'containers') {
+          return { ...cleanExit, status: 1, stderr: 'HTTP 403' };
+        }
+        return cleanExit;
+      },
+    });
+
+    try {
+      await expect(
+        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      ).rejects.toBeInstanceOf(ExitError);
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    expect(exitCalls).toEqual([1]);
+    expect(trace).toEqual(['wrangler:whoami', 'wrangler:containers']);
+    expect(errors.join('\n')).toContain('Cloudflare Containers require the Workers Paid plan');
+    expect(errors.join('\n')).toContain('/:account/workers/plans');
+    expect(errors.join('\n')).toContain('Containers: Edit');
+    expect(errors.join('\n')).toContain('Cloudchamber: Edit');
+  });
+
+  it('does not probe Containers when the app does not use Sandbox', async () => {
+    const root = d1Project(PROVISIONED_D1);
+    const { deps, wranglerArgs } = harness();
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(wranglerArgs.some((args) => args[0] === 'containers')).toBe(false);
+  });
+
+  it('translates a Sandbox upload entitlement error into Workers Paid guidance', async () => {
+    const root = sandboxProject();
+    const errors: Array<string> = [];
+    const errorSpy = vi.spyOn(log, 'error').mockImplementation((message) => {
+      errors.push(String(message));
+    });
+    const { deps, exitCalls } = harness({
+      activateVersion: async () => ({
+        ok: false,
+        reason: 'upload-failed',
+        status: 1,
+        containersUnavailable: true,
+      }),
+    });
+
+    try {
+      await expect(
+        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      ).rejects.toBeInstanceOf(ExitError);
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    expect(exitCalls).toEqual([1]);
+    expect(errors.join('\n')).toContain('Cloudflare Containers require the Workers Paid plan');
+    expect(errors.join('\n')).toContain('The Sandbox container was not deployed');
   });
 });
 

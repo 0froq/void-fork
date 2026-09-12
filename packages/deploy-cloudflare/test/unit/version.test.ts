@@ -664,6 +664,62 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
   });
 
+  it('classifies a Containers entitlement failure during version upload', async () => {
+    const runWrangler = runner({
+      upload: {
+        stdout: '',
+        stderr:
+          'Authentication error [GET https://api.cloudflare.com/client/v4/accounts/acc/containers/me] status: 403',
+        status: 1,
+      },
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'sandbox-app',
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: 'upload-failed',
+      status: 1,
+      containersUnavailable: true,
+    });
+  });
+
+  it('classifies a Containers entitlement failure during first-deploy bootstrap', async () => {
+    const runWrangler = runner({
+      status: { stdout: '', stderr: 'This Worker does not exist. [code: 10007]', status: 1 },
+      upload: {
+        stdout: '',
+        stderr: 'Durable Object migrations require deploy. [code: 10211]',
+        status: 1,
+      },
+      bootstrap: {
+        stdout: '',
+        stderr:
+          'Authentication error [GET https://api.cloudflare.com/client/v4/accounts/acc/containers/me] status: 403',
+        status: 1,
+      },
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'sandbox-app',
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: 'bootstrap-failed',
+      status: 1,
+      containersUnavailable: true,
+    });
+  });
+
   it('bootstraps over the placeholder version created while provisioning a first secret', async () => {
     const runWrangler = runner({
       upload: {

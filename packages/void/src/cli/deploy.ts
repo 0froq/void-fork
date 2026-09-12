@@ -2454,6 +2454,38 @@ function isCleanWranglerExit(result: DeployWranglerRunResult): boolean {
   );
 }
 
+const CLOUDFLARE_WORKERS_PAID_URL = 'https://dash.cloudflare.com/?to=/:account/workers/plans';
+const CLOUDFLARE_CONTAINERS_PRICING_URL = 'https://developers.cloudflare.com/containers/pricing/';
+
+/**
+ * Actionable, output-independent guidance for the Sandbox entitlement probe.
+ *
+ * A nonzero `wrangler containers list` is intentionally not classified more narrowly: the
+ * Containers API uses the same failure surface when the account has no Workers Paid entitlement
+ * and when an API token lacks Containers / Cloudchamber permission. Claiming either one as fact
+ * would send some users down the wrong path, so the message gives both deterministic remedies.
+ */
+export function formatCloudflareSandboxUnavailable(options?: { preflight?: boolean }): string {
+  return [
+    options?.preflight
+      ? 'deploy: this app uses `void/sandbox`, but Void could not verify Cloudflare Containers with the current account and credentials.'
+      : "deploy: Cloudflare rejected access to Containers while deploying this app's Sandbox.",
+    'Cloudflare Containers require the Workers Paid plan and are not available on Workers Free.',
+    '',
+    `Enable Workers Paid: ${CLOUDFLARE_WORKERS_PAID_URL}`,
+    `Containers pricing: ${CLOUDFLARE_CONTAINERS_PRICING_URL}`,
+    '',
+    'If this account already has Workers Paid:',
+    '  • Run `wrangler login` again; or',
+    '  • Give CLOUDFLARE_API_TOKEN Account / Containers: Edit and Account / Cloudchamber: Edit.',
+    '',
+    'Confirm access with `wrangler containers list`, then rerun the deploy.',
+    options?.preflight
+      ? 'No resources were provisioned and the app was not built or deployed.'
+      : 'The Sandbox container was not deployed.',
+  ].join('\n');
+}
+
 /** The length cap {@link toValidWorkerName} applies (the CF plugin's own rule). */
 const MAX_WORKER_NAME_LENGTH = 63;
 
@@ -4026,6 +4058,28 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
 
+  // 3f. Sandbox is the one public Void feature whose native Cloudflare runtime has a hard
+  // Workers Paid dependency: `void/sandbox` emits a Cloudflare Container application. Verify the
+  // account entitlement + the active credential BEFORE provisioning any inferred resources or
+  // running the project build. `containers list --json` is a read-only account probe and succeeds
+  // even when the account has no existing containers. Its failure surface deliberately conflates
+  // a missing Workers Paid entitlement with insufficient API-token permissions, so the diagnostic
+  // explains both remedies instead of guessing from a 403. Apps that do not use Sandbox never run
+  // this probe and retain a Workers Free-compatible deploy path.
+  if (needsSandbox) {
+    if (!assertUploaderStillPinned()) {
+      return exit(1);
+    }
+    const containers = await Promise.resolve(
+      runWrangler(['containers', 'list', '--json', '-c', configPath, '--env='], { capture: true }),
+    );
+    if (!isCleanWranglerExit(containers)) {
+      log.error(formatCloudflareSandboxUnavailable({ preflight: true }));
+      return exit(1);
+    }
+    cliLog.info('cloudflare_sandbox_available');
+  }
+
   // 4. Ensure every inferred resource exists. Missing id-bearing bindings trigger this
   // immediately; queues are probed below and trigger it when absent. `--provision` remains a
   // backwards-compatible force switch, but normal local and CI deploys need no extra command.
@@ -4967,7 +5021,11 @@ export async function runCloudflareDeploy(
     workersDevSubdomain,
   });
   if (!execution.ok) {
-    log.error(formatCloudflareActivationError(execution));
+    log.error(
+      needsSandbox && execution.containersUnavailable
+        ? formatCloudflareSandboxUnavailable()
+        : formatCloudflareActivationError(execution),
+    );
     return exit(1);
   }
   rememberCloudflareWorkersDevSubdomain(root, execution.previewUrl);

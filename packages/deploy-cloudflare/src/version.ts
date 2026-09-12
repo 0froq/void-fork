@@ -39,6 +39,8 @@ export type CloudflareVersionActivation =
         | 'triggers-failed';
       status?: number;
       cloudflareErrorCode?: number;
+      /** Wrangler reached Cloudflare's Containers entitlement endpoint and received a 403. */
+      containersUnavailable?: boolean;
       versionId?: string;
       previousVersionId?: string | null;
       rollback?: 'not-needed' | 'succeeded' | 'failed' | 'unavailable' | 'unsafe';
@@ -150,6 +152,7 @@ export async function activateCloudflareVersion(options: {
       reason: 'upload-failed',
       status: upload.status,
       ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
+      ...(isContainersUnavailable(output) ? { containersUnavailable: true } : {}),
     };
   }
 
@@ -398,6 +401,7 @@ async function bootstrapFirstDeployment(
       reason: 'bootstrap-failed',
       status: bootstrap.status,
       ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
+      ...(isContainersUnavailable(output) ? { containersUnavailable: true } : {}),
     };
   }
   const versionId = output.match(VERSION_ID_RE)?.[1];
@@ -443,6 +447,16 @@ async function bootstrapFirstDeployment(
 function parseCloudflareErrorCode(output: string): number | undefined {
   const value = output.match(CLOUDFLARE_ERROR_CODE_RE)?.[1];
   return value === undefined ? undefined : Number(value);
+}
+
+/** Recognize the Containers account-entitlement failure Wrangler exposes during upload. */
+function isContainersUnavailable(output: string): boolean {
+  return (
+    (/\/containers\/me(?:\b|\?)/i.test(output) && /\b403\b/.test(output)) ||
+    /Cloudflare Containers[^\n]*(?:Workers Paid|not (?:enabled|available)|subscription)/i.test(
+      output,
+    )
+  );
 }
 
 async function readCurrentProductionVersion(
