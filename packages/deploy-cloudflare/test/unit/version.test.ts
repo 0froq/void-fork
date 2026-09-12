@@ -117,6 +117,80 @@ describe('Cloudflare version activation', () => {
     }
   });
 
+  it('removes queue consumers omitted from the desired trigger snapshot', async () => {
+    const calls: Array<Array<string>> = [];
+    const result = await deployCloudflareVersionTriggers({
+      runWrangler: async (args) => {
+        calls.push(args);
+        return ok();
+      },
+      workerName: 'app',
+      triggerConfig: {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: [],
+        queueConsumers: [],
+        workflows: [],
+      },
+      previousTriggerConfig: {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: [],
+        queueConsumers: [{ queue: 'jobs' }],
+        workflows: [],
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(calls[1]).toEqual([
+      'queues',
+      'consumer',
+      'remove',
+      'jobs',
+      'app',
+      '-c',
+      expect.any(String),
+      '--env=',
+    ]);
+  });
+
+  it('clears schedules without deleting removed workflow state', async () => {
+    let applied: Record<string, unknown> | undefined;
+    await deployCloudflareVersionTriggers({
+      runWrangler: async (args) => {
+        const configIndex = args.indexOf('-c');
+        applied = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf-8')) as Record<
+          string,
+          unknown
+        >;
+        return ok();
+      },
+      workerName: 'app',
+      triggerConfig: {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: [],
+        queueConsumers: [],
+        workflows: [],
+      },
+      previousTriggerConfig: {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: [],
+        queueConsumers: [],
+        workflows: [{ name: 'nightly', class_name: 'NightlyWorkflow', schedules: ['0 0 * * *'] }],
+      },
+    });
+
+    expect(applied?.workflows).toEqual([
+      { name: 'nightly', class_name: 'NightlyWorkflow', schedules: [] },
+    ]);
+  });
+
   it('normalizes and extracts workers.dev account subdomains', () => {
     expect(normalizeWorkersDevSubdomain('Developer-Platform-Experience.workers.dev/')).toBe(
       'developer-platform-experience',
@@ -184,7 +258,7 @@ describe('Cloudflare version activation', () => {
       'triggers',
       'deploy',
       '-c',
-      '/app/wrangler.jsonc',
+      expect.stringContaining('void-version-triggers-'),
       '--env=',
       '--name',
       'my-worker',

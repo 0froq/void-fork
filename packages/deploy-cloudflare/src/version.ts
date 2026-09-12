@@ -124,20 +124,98 @@ export async function deployCloudflareVersionTriggers(options: {
   workerName: string;
   configPath?: string;
   triggerConfig: CloudflareTriggerConfig;
+  /** Exact trigger state active before this transition, used to remove stale state. */
+  previousTriggerConfig?: CloudflareTriggerConfig;
 }): Promise<CloudflareCommandResult> {
   const base = options.configPath ? parseRootWranglerConfig(options.configPath) : {};
-  const config = triggerWranglerConfig(base, options.triggerConfig);
+  const config = triggerWranglerConfig(
+    base,
+    triggerConfigWithRemovedWorkflowSchedules(
+      options.workerName,
+      options.triggerConfig,
+      options.previousTriggerConfig,
+    ),
+  );
   const directory = mkdtempSync(join(tmpdir(), 'void-version-triggers-'));
   const configPath = join(directory, 'wrangler.json');
   try {
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-    return await options.runWrangler(
+    const deployed = await options.runWrangler(
       ['triggers', 'deploy', '-c', configPath, '--env=', '--name', options.workerName],
       { capture: false },
     );
+    if (!isCleanCommandExit(deployed)) {
+      return deployed;
+    }
+    for (const queue of removedQueueConsumers(
+      options.triggerConfig,
+      options.previousTriggerConfig,
+    )) {
+      const removed = await options.runWrangler(
+        ['queues', 'consumer', 'remove', queue, options.workerName, '-c', configPath, '--env='],
+        { capture: false },
+      );
+      if (!isCleanCommandExit(removed)) {
+        return removed;
+      }
+    }
+    return deployed;
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+function removedQueueConsumers(
+  desired: CloudflareTriggerConfig,
+  previous: CloudflareTriggerConfig | undefined,
+): Array<string> {
+  if (!previous) {
+    return [];
+  }
+  const desiredQueues = new Set(queueConsumerNames(desired.queueConsumers));
+  return queueConsumerNames(previous.queueConsumers)
+    .filter((queue) => !desiredQueues.has(queue))
+    .sort();
+}
+
+function queueConsumerNames(consumers: ReadonlyArray<unknown>): Array<string> {
+  return [
+    ...new Set(
+      consumers.flatMap((consumer) =>
+        isRecord(consumer) && typeof consumer.queue === 'string' ? [consumer.queue] : [],
+      ),
+    ),
+  ];
+}
+
+function triggerConfigWithRemovedWorkflowSchedules(
+  workerName: string,
+  desired: CloudflareTriggerConfig,
+  previous: CloudflareTriggerConfig | undefined,
+): CloudflareTriggerConfig {
+  if (!previous) {
+    return desired;
+  }
+  const desiredNames = new Set(
+    desired.workflows.flatMap((workflow) =>
+      isRecord(workflow) && typeof workflow.name === 'string' ? [workflow.name] : [],
+    ),
+  );
+  const removed = previous.workflows.flatMap((workflow) => {
+    if (
+      !isRecord(workflow) ||
+      typeof workflow.name !== 'string' ||
+      typeof workflow.class_name !== 'string' ||
+      desiredNames.has(workflow.name) ||
+      (typeof workflow.script_name === 'string' && workflow.script_name !== workerName)
+    ) {
+      return [];
+    }
+    return [{ ...workflow, schedules: [] }];
+  });
+  return removed.length === 0
+    ? desired
+    : { ...desired, workflows: [...desired.workflows, ...removed] };
 }
 
 function triggerConfigFromWrangler(config: Record<string, unknown>): CloudflareTriggerConfig {
@@ -248,6 +326,19 @@ export async function activateCloudflareVersion(options: {
   if (!options.verifyUploader()) {
     return { ok: false, reason: 'uploader-changed' };
   }
+  const desiredMetadata = parseCloudflareVersionMessage(options.message);
+  const desiredTriggerConfig =
+    desiredMetadata?.schema === 2
+      ? desiredMetadata.triggerConfig
+      : options.configPath
+        ? readCloudflareTriggerConfig(options.configPath)
+        : triggerConfigFromWrangler({});
+  const previousMetadata =
+    previous.versionId && desiredMetadata?.schema === 2
+      ? await readCloudflareVersionMetadata(options, commonArgs, previous.versionId)
+      : null;
+  const previousTriggerConfig =
+    previousMetadata?.schema === 2 ? previousMetadata.triggerConfig : undefined;
 
   const alias = `void-ready-${Date.now().toString(36)}`;
   const upload = await Promise.resolve(
@@ -469,17 +560,20 @@ export async function activateCloudflareVersion(options: {
       rollback: previous.versionId ? 'unsafe' : 'unavailable',
     };
   }
-  const triggers = await Promise.resolve(
-    options.runWrangler(['triggers', 'deploy', ...commonArgs, '--name', options.workerName], {
-      capture: false,
-    }),
-  );
+  const triggers = await deployCloudflareVersionTriggers({
+    runWrangler: options.runWrangler,
+    workerName: options.workerName,
+    configPath: options.configPath,
+    triggerConfig: desiredTriggerConfig,
+    previousTriggerConfig,
+  });
   if (!isCleanCommandExit(triggers)) {
     const rollback = await restorePreviousVersionAndTriggers(
       options,
       commonArgs,
       previous.versionId,
       'trigger activation failed',
+      desiredTriggerConfig,
     );
     return {
       ok: false,
@@ -508,6 +602,7 @@ async function restorePreviousVersionAndTriggers(
   commonArgs: Array<string>,
   previousVersionId: string | null,
   cause: string,
+  failedTriggerConfig: CloudflareTriggerConfig,
 ): Promise<'succeeded' | 'failed' | 'unavailable' | 'unsafe'> {
   const traffic = await restorePreviousVersion(options, commonArgs, previousVersionId, cause);
   if (traffic !== 'succeeded' || !previousVersionId) {
@@ -528,6 +623,7 @@ async function restorePreviousVersionAndTriggers(
     workerName: options.workerName,
     configPath: options.configPath,
     triggerConfig: metadata.triggerConfig,
+    previousTriggerConfig: failedTriggerConfig,
   });
   return isCleanCommandExit(triggers) ? 'succeeded' : 'failed';
 }

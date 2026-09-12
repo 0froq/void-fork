@@ -5327,7 +5327,7 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
     const { deps } = harness();
     await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
 
-    expect(JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'))).toMatchObject({
+    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toMatchObject({
       queues: {
         producers: [{ binding: 'QUEUE_EMAIL', queue: 'email' }],
         consumers: [
