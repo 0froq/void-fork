@@ -61,6 +61,7 @@ import {
   getBuild,
   ACTIVE_BUILD_STATUSES,
   CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES,
+  TERMINAL_DEPLOYMENT_STATUSES,
   type Db,
 } from '../db.ts';
 import { sendDeployFailedEmail } from '../email.ts';
@@ -551,7 +552,11 @@ function sanitizeDeployErrorMessage(message: string): string {
 
 async function assertDeploymentNotCanceled(db: Db, deploymentId: string): Promise<void> {
   const latest = await getDeployment(db, deploymentId);
-  if (latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status)) {
+  if (
+    !latest ||
+    CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status) ||
+    TERMINAL_DEPLOYMENT_STATUSES.includes(latest.status)
+  ) {
     throw new Error('deployment canceled');
   }
 }
@@ -1752,9 +1757,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     ? await getDeployment(context.get('db'), project.active_deployment_id)
     : null;
 
-  let preDeployment: Awaited<ReturnType<typeof createDeployment>>;
+  let precheckResult:
+    | { deployment: Awaited<ReturnType<typeof createDeployment>> }
+    | { canceling: string };
   try {
-    preDeployment = await context.get('db').transaction(async (tx) => {
+    precheckResult = await context.get('db').transaction(async (tx) => {
       await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
       const txDb = tx as unknown as Db;
       const lockedProject = await getProject(txDb, projectId);
@@ -1763,29 +1770,30 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       }
       const activeDeploy = await getActiveDeployment(txDb, projectId);
       if (activeDeploy) {
-        const createdAt = activeDeploy.created_at.includes('T')
-          ? activeDeploy.created_at
-          : activeDeploy.created_at.replace(' ', 'T') + 'Z';
-        const ageMs = Date.now() - new Date(createdAt).getTime();
+        const updatedAt = activeDeploy.updated_at.includes('T')
+          ? activeDeploy.updated_at
+          : activeDeploy.updated_at.replace(' ', 'T') + 'Z';
+        const ageMs = Date.now() - new Date(updatedAt).getTime();
         if (ageMs < 10 * 60 * 1000) {
           throw new ConcurrentDeployError(activeDeploy.id);
         }
-        const staleNext = activeDeploy.status === 'canceling' ? 'canceled' : 'failed';
+        const staleNext = activeDeploy.status === 'canceling' ? 'canceled' : 'canceling';
         logger.info('status_transition', 'status_change', {
           deploymentId: activeDeploy.id,
           from: activeDeploy.status,
           to: staleNext,
           reason: 'precheck_reap_timeout',
         });
-        await updateDeploymentStatus(
-          txDb,
-          activeDeploy.id,
-          staleNext,
-          'timed out',
-          activeDeploy.status === 'canceling' ? { force: true } : undefined,
-        );
+        await updateDeploymentStatus(txDb, activeDeploy.id, staleNext, 'timed out', {
+          force: true,
+        });
+        if (staleNext === 'canceling') {
+          return { canceling: activeDeploy.id } as const;
+        }
       }
-      return await createDeployment(txDb, projectId, null, null, null, { cliVersion });
+      return {
+        deployment: await createDeployment(txDb, projectId, null, null, null, { cliVersion }),
+      } as const;
     });
   } catch (err) {
     if (err instanceof ConcurrentDeployError) {
@@ -1796,6 +1804,13 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     }
     throw err;
   }
+  if ('canceling' in precheckResult) {
+    return context.json(
+      { error: 'deploy cancellation requested', deployment: precheckResult.canceling },
+      409,
+    );
+  }
+  const preDeployment = precheckResult.deployment;
 
   const planLimits = getPlanLimits(user.plan);
 
@@ -2389,6 +2404,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             if (!lockedProject || lockedProject.status === 'deleting') {
               throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
             }
+            await assertDeploymentNotCanceled(txDb, deployment.id);
             // Re-check the bound build under a row lock before going live. The
             // up-front guard can pass and then a newer GitHub Actions run
             // supersede (cancel) this build while we spent minutes building and
@@ -3418,6 +3434,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           if (!lockedProject || lockedProject.status === 'deleting') {
             throw new Error(PROJECT_DELETING_ERROR_MESSAGE);
           }
+          await assertDeploymentNotCanceled(txDb, deployment.id);
           // Re-check the bound build under a row lock before going live. The
           // up-front guard can pass and then a newer GitHub Actions run
           // supersede (cancel) this build while we spent minutes building and
@@ -3757,16 +3774,24 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               });
             }
           }
+          const latestAfterFailure = await getDeployment(context.get('db'), failedDeployment.id);
+          const wasCanceled =
+            latestAfterFailure !== null &&
+            CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latestAfterFailure.status);
           logger.info('status_transition', 'status_change', {
             deploymentId: failedDeployment.id,
             from: currentStatus,
-            to: 'failed',
+            to: wasCanceled ? 'canceled' : 'failed',
             reason: failureEvent,
           });
-          await updateDeploymentStatus(context.get('db'), failedDeployment.id, 'failed', msg).catch(
-            () => {},
-          );
-          currentStatus = 'failed';
+          await updateDeploymentStatus(
+            context.get('db'),
+            failedDeployment.id,
+            wasCanceled ? 'canceled' : 'failed',
+            msg,
+            wasCanceled ? { force: true } : undefined,
+          ).catch(() => {});
+          currentStatus = wasCanceled ? 'canceled' : 'failed';
           emit({ event: 'error', message: msg, step: currentStep });
         } else if (routingSwitched) {
           logger.error('catch', 'post_routing_step_failed', err, {

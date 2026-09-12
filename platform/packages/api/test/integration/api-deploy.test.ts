@@ -2637,31 +2637,46 @@ describe('Deploy serialization (concurrent deploy guard)', () => {
     expect(body.deployment).toBe('dpl_active');
   });
 
-  it('auto-fails stale deployment (>10 min) and allows new deploy', async () => {
+  it('fences a stale deployment before allowing a replacement deploy', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'stale-app');
     mockCfApi();
 
-    // Insert a stale active deployment (created 15 minutes ago)
+    // Insert a stale active deployment whose handler may still be running.
     const staleTime = new Date(Date.now() - 15 * 60 * 1000).toISOString();
     await env.db.insert(deployments).values({
       id: 'dpl_stale',
       project_id: project.id,
       status: 'uploading',
       created_at: staleTime,
+      updated_at: staleTime,
     });
 
     const res = await app.fetch(await buildDeployRequest(env, project.id, user.jwt), env);
-    expect(res.status).toBe(200);
-    await res.text();
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: 'deploy cancellation requested',
+      deployment: 'dpl_stale',
+    });
 
-    // Verify stale deployment was auto-failed
+    // The first request only fences the old handler; it does not admit a
+    // concurrent pipeline that could still mutate routing or triggers.
     const [stale] = await env.db
       .select({ status: deployments.status, error_message: deployments.error_message })
       .from(deployments)
       .where(eq(deployments.id, 'dpl_stale'));
-    expect(stale?.status).toBe('failed');
+    expect(stale?.status).toBe('canceling');
     expect(stale?.error_message).toBe('timed out');
+
+    const retry = await app.fetch(await buildDeployRequest(env, project.id, user.jwt), env);
+    expect(retry.status).toBe(409);
+
+    // Once the old handler acknowledges cancellation, a retry may claim and
+    // complete the deployment normally.
+    await updateDeploymentStatus(env.db, 'dpl_stale', 'canceled', 'timed out', { force: true });
+    const replacement = await app.fetch(await buildDeployRequest(env, project.id, user.jwt), env);
+    expect(replacement.status).toBe(200);
+    expect(parseDeployStream(await replacement.text()).at(-1)).toMatchObject({ event: 'done' });
   });
 
   it('keeps a canceling deployment active until the deploy handler observes cancellation', async () => {
