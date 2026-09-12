@@ -2418,14 +2418,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             projectId,
             deployment.id,
           );
-          for (const old of retained) {
-            await deleteDispatchScript(
-              context.env.CF_ACCOUNT_ID,
-              context.env.CF_API_TOKEN,
-              dispatchNamespace,
-              `user-${project.slug}-${old.id}`,
-            );
-          }
 
           markPhase('retention_cleanup');
           if (STATIC_RETENTION_LIMIT > 0) {
@@ -2460,6 +2452,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             }
 
             for (const old of toEvict) {
+              await deleteDispatchScript(
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
+                dispatchNamespace,
+                `user-${project.slug}-${old.id}`,
+              );
               if (old.asset_hashes) {
                 const evictedManifest = JSON.parse(old.asset_hashes) as Record<
                   string,

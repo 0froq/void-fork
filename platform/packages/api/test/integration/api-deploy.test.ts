@@ -10,7 +10,7 @@ import {
   vi,
 } from 'vite-plus/test';
 import { computeAssetHash } from '../../src/assets.ts';
-import { updateDeploymentStatus } from '../../src/db.ts';
+import { getDeployment, updateDeploymentStatus } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { validateManifestShape } from '../../src/routes/deploy.ts';
 import {
@@ -2856,6 +2856,41 @@ describe('POST /projects/:id/deploy (static)', () => {
       .from(projects)
       .where(eq(projects.id, project.id));
     expect(row?.type).toBe('static');
+  });
+
+  it('preserves retained Worker scripts for rollback after a static deploy', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'static-retains-worker');
+    const workerDeploymentId = 'dpl_retained_worker';
+    await env.db.insert(deployments).values({
+      id: workerDeploymentId,
+      project_id: project.id,
+      status: 'live',
+      manifest: JSON.stringify({ version: 4, type: 'void', bindings: {} }),
+      retained: true,
+      deployed_at: sql`now()`,
+    });
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: workerDeploymentId, type: 'void' })
+      .where(eq(projects.id, project.id));
+    const fetchMock = mockCfApi();
+
+    const res = await app.fetch(
+      await buildStaticDeployRequest(env, project.id, user.jwt, { type: 'static' }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(parseDeployStream(await res.text()).at(-1)).toMatchObject({ event: 'done' });
+
+    const retainedWorkerUrl = `/scripts/user-${project.slug}-${workerDeploymentId}`;
+    const retainedWorkerDeletes = fetchMock.mock.calls.filter((call: Array<unknown>) => {
+      const url = typeof call[0] === 'string' ? call[0] : '';
+      const init = call[1] as RequestInit | undefined;
+      return url.includes(retainedWorkerUrl) && init?.method === 'DELETE';
+    });
+    expect(retainedWorkerDeletes).toHaveLength(0);
+    expect((await getDeployment(env.db, workerDeploymentId))?.retained).toBe(true);
   });
 });
 
