@@ -57,6 +57,16 @@ describe('Cloudflare operational parsing', () => {
       ),
     ).toBe('active');
     expect(
+      parseActiveVersionId(
+        JSON.stringify({
+          versions: [
+            { version_id: 'stable', percentage: 90 },
+            { version_id: 'canary', percentage: 10 },
+          ],
+        }),
+      ),
+    ).toBeNull();
+    expect(
       parseCloudflareVersions(
         JSON.stringify([
           {

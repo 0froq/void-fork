@@ -309,13 +309,12 @@ export function parseActiveVersionId(value: string): string | null {
     throw new Error('Cloudflare deployment status returned an unexpected response.');
   }
   const versions = deployment.versions;
-  const active =
-    versions.find(
-      (entry) =>
-        typeof entry === 'object' &&
-        entry !== null &&
-        Number((entry as Record<string, unknown>).percentage) === 100,
-    ) ?? versions[0];
+  const active = versions.find(
+    (entry) =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      Number((entry as Record<string, unknown>).percentage) === 100,
+  );
   if (active === undefined) {
     return null;
   }
