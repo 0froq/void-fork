@@ -1445,6 +1445,34 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(wranglerArgs.at(-1)).toContain(join(root, 'wrangler.jsonc'));
   });
 
+  it('authenticates an env-pinned static deploy before its config file exists', async () => {
+    const saved = process.env.CLOUDFLARE_ACCOUNT_ID;
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'env-account';
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'static-env-app' }),
+      'void.json': JSON.stringify({}),
+      'public/index.html': '<h1>Static</h1>',
+    });
+    const { deps, wranglerArgs, exitCalls } = harness();
+    try {
+      await runCloudflareDeploy(root, { backend: 'cloudflare', dir: 'public' }, silentCliLog, deps);
+    } finally {
+      if (saved === undefined) {
+        delete process.env.CLOUDFLARE_ACCOUNT_ID;
+      } else {
+        process.env.CLOUDFLARE_ACCOUNT_ID = saved;
+      }
+    }
+
+    expect(exitCalls).toEqual([]);
+    expect(wranglerArgs.find((args) => args[0] === 'whoami')).toEqual([
+      'whoami',
+      '--json',
+      '--env=',
+    ]);
+    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(true);
+  });
+
   it('rejects a static build that rewrites the root Wrangler config', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'viteapp', dependencies: { vite: '6.0.0' } }),
@@ -1737,6 +1765,34 @@ describe('runCloudflareDeploy — preflight', () => {
         process.env.CLOUDFLARE_ACCOUNT_ID = savedAccount;
       }
     }
+  });
+
+  it('authenticates an env-pinned Worker deploy before its config file exists', async () => {
+    const saved = process.env.CLOUDFLARE_ACCOUNT_ID;
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'env-account';
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'worker-env-app' }),
+      'void.json': JSON.stringify({}),
+      'routes/index.ts': `export const GET = () => new Response('ok');`,
+    });
+    const { deps, wranglerArgs, exitCalls } = harness();
+    try {
+      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    } finally {
+      if (saved === undefined) {
+        delete process.env.CLOUDFLARE_ACCOUNT_ID;
+      } else {
+        process.env.CLOUDFLARE_ACCOUNT_ID = saved;
+      }
+    }
+
+    expect(exitCalls).toEqual([]);
+    expect(wranglerArgs.find((args) => args[0] === 'whoami')).toEqual([
+      'whoami',
+      '--json',
+      '--env=',
+    ]);
+    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc')).account_id).toBe('env-account');
   });
 
   it('verifies Cloudflare Containers before building a Sandbox app', async () => {

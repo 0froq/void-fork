@@ -4035,7 +4035,9 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
   const whoami = await Promise.resolve(
-    runWrangler(['whoami', '--json', '-c', configPath, '--env='], { capture: true }),
+    runWrangler(['whoami', '--json', ...existingWranglerConfigArgs(configPath), '--env='], {
+      capture: true,
+    }),
   );
   if (!isCleanWranglerExit(whoami)) {
     log.error(
@@ -4062,7 +4064,10 @@ export async function runCloudflareDeploy(
       return exit(1);
     }
     const containers = await Promise.resolve(
-      runWrangler(['containers', 'list', '--json', '-c', configPath, '--env='], { capture: true }),
+      runWrangler(
+        ['containers', 'list', '--json', ...existingWranglerConfigArgs(configPath), '--env='],
+        { capture: true },
+      ),
     );
     if (!isCleanWranglerExit(containers)) {
       log.error(formatCloudflareSandboxUnavailable({ preflight: true }));
@@ -5044,6 +5049,11 @@ function discoverRootWranglerConfig(root: string): string {
   return join(root, 'wrangler.jsonc');
 }
 
+/** Avoid making Wrangler open a config path that Void has not created yet. */
+function existingWranglerConfigArgs(configPath: string): Array<string> {
+  return existsSync(configPath) ? ['-c', configPath] : [];
+}
+
 export function formatCloudflareActivationError(
   result: Exclude<Awaited<ReturnType<typeof activateCloudflareVersion>>, { ok: true }>,
 ): string {
@@ -5374,7 +5384,9 @@ async function runCloudflareStaticDeploy(
     return exit(1);
   }
   const whoami = await Promise.resolve(
-    runWrangler(['whoami', '--json', '-c', configPath, '--env='], { capture: true }),
+    runWrangler(['whoami', '--json', ...existingWranglerConfigArgs(configPath), '--env='], {
+      capture: true,
+    }),
   );
   if (!isCleanWranglerExit(whoami)) {
     log.error('deploy: not authenticated with Cloudflare. Run `wrangler login` and retry.');
