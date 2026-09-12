@@ -94,6 +94,10 @@ import {
   type ManifestOnlyDeployPayload,
 } from './client.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
+import {
+  rememberCloudflareWorkersDevSubdomain,
+  resolveCloudflareWorkersDevSubdomain,
+} from './cloudflare-readiness.ts';
 export { parseRootWranglerConfig } from '@void/deploy-cloudflare';
 import { promptAndCreateProject } from './create-project.ts';
 import {
@@ -3745,12 +3749,28 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
 
+  let workersDevSubdomain: string | undefined;
+  try {
+    workersDevSubdomain = resolveCloudflareWorkersDevSubdomain(root);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    return exit(1);
+  }
+
   const provisionModule = await loadProvisionModule();
   const staticPreset =
     resolveCloudflareStaticPreset(root, voidConfig, options) ??
     (await resolveCloudflareVoidStaticPreset(root, voidConfig));
   if (staticPreset) {
-    return runCloudflareStaticDeploy(root, options, voidConfig, staticPreset, cliLog, deps);
+    return runCloudflareStaticDeploy(
+      root,
+      options,
+      voidConfig,
+      staticPreset,
+      workersDevSubdomain,
+      cliLog,
+      deps,
+    );
   }
 
   // 0. Flag guard — `--skip-build` cannot be honored by this backend, so REJECT the
@@ -4926,11 +4946,13 @@ export async function runCloudflareDeploy(
     message: encodeCloudflareVersionMessage(migrations.map((migration) => migration.name)),
     allowFirstDeploymentBootstrap: workerWasMissingBeforeSecretProvisioning,
     readinessHeaders: cloudflareWorkerReadinessHeaders(),
+    workersDevSubdomain,
   });
   if (!execution.ok) {
     log.error(formatCloudflareActivationError(execution));
     return exit(1);
   }
+  rememberCloudflareWorkersDevSubdomain(root, execution.previewUrl);
   cliLog.info('cloudflare_deploy_end', {
     ok: true,
     worker: workerName,
@@ -4980,8 +5002,11 @@ function formatCloudflareActivationError(
     case 'preview-unavailable':
       return [
         'deploy: the uploaded Worker Version has no preview URL, so Void cannot verify readiness.',
-        'Enable version preview URLs for this Worker in Cloudflare and retry; production traffic is unchanged.',
+        'Set CLOUDFLARE_WORKERS_SUBDOMAIN to your account subdomain (for example "my-team")',
+        'and retry. Void caches it after a successful workers.dev deployment; production traffic is unchanged.',
       ].join('\n');
+    case 'readiness-staging-failed':
+      return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.`;
     case 'readiness-failed':
       return [
         'deploy: the uploaded Worker Version did not pass /__void/ready.',
@@ -5197,6 +5222,7 @@ async function runCloudflareStaticDeploy(
   options: RunDeployOptions,
   voidConfig: VoidConfig,
   preset: StaticPreset,
+  workersDevSubdomain: string | undefined,
   cliLog: CliLogger,
   deps: CloudflareDeployDeps,
 ): Promise<void> {
@@ -5339,11 +5365,13 @@ async function runCloudflareStaticDeploy(
     message: encodeCloudflareVersionMessage([]),
     assetsDirectoryOverride: stagedAssetsDirectory,
     readinessHeaders: cloudflareWorkerReadinessHeaders(),
+    workersDevSubdomain,
   });
   if (!execution.ok) {
     log.error(formatCloudflareActivationError(execution));
     return exit(1);
   }
+  rememberCloudflareWorkersDevSubdomain(root, execution.previewUrl);
   cliLog.info('cloudflare_deploy_end', {
     ok: true,
     worker: workerName,

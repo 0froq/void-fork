@@ -76,7 +76,7 @@ Runtime helpers include:
 - static and SPA deploys
 - non-Cloudflare server targets (`node`, `bun`, `deno`)
 
-Direct Cloudflare deployments also support D1, KV, R2, Queues, Hyperdrive, auth, cron jobs, AI, ISR, typed SQLite Durable Objects, and WebSocket rooms. They upload an immutable Worker Version, probe it before activation, and retain version metadata for migration-aware rollback.
+Direct Cloudflare deployments also support D1, KV, R2, Queues, Hyperdrive, auth, cron jobs, AI, ISR, typed SQLite Durable Objects, and WebSocket rooms. They upload an immutable Worker Version, probe it before activation (using a 0%-traffic version override when Durable Objects disable preview URLs), and retain version metadata for migration-aware rollback.
 
 ## Database Model
 
