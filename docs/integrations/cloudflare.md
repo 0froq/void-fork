@@ -414,7 +414,9 @@ Notes:
 
 ### ISR (self-host)
 
-[Revalidation (ISR)](../guide/edge/revalidation.md) works self-hosted, but the cache KV is **not** auto-injected (a KV binding needs a real namespace id). Create a namespace and bind it as `ISR_CACHE`:
+[Revalidation (ISR)](../guide/edge/revalidation.md) works self-hosted. `void deploy --platform cloudflare` automatically creates or reuses the cache KV namespace and persists its `ISR_CACHE` binding in `wrangler.jsonc`, just like the other inferred resources.
+
+If you deploy the generated Worker manually instead, create the namespace and bind it yourself:
 
 ```bash
 wrangler kv namespace create ISR_CACHE
