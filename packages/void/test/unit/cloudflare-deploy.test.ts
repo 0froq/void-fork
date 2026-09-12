@@ -463,7 +463,7 @@ describe('ensureCloudflareAuthSecret', () => {
       },
     });
 
-    expect(result).toEqual({ created: true });
+    expect(result).toEqual({ created: true, workerWasMissing: true });
     expect(call).toBe(3);
   });
 
@@ -590,7 +590,11 @@ describe('syncCloudflareSchemaSecrets', () => {
       },
     });
 
-    expect(result).toEqual({ requiredSecretNames: ['API_TOKEN'], uploaded: 1 });
+    expect(result).toEqual({
+      requiredSecretNames: ['API_TOKEN'],
+      uploaded: 1,
+      workerWasMissing: true,
+    });
     expect(call).toBe(3);
   });
 
@@ -5286,6 +5290,43 @@ describe('runCloudflareDeploy — migrations dir / count / auth', () => {
     expect(trace).toContain('auth-secret');
     expect(trace.indexOf('auth-secret')).toBeLessThan(trace.indexOf('wrangler:d1'));
     expect(trace).toContain('wrangler:deploy');
+  });
+
+  it('allows the DO bootstrap when first-secret provisioning proved the Worker was absent', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'authapp' }),
+      'void.json': JSON.stringify({ auth: {} }),
+      'routes/index.ts': `export const GET = () => new Response('ok');`,
+      'db/migrations/0000_auth.sql': `CREATE TABLE "user" (id text primary key);`,
+      'wrangler.jsonc': JSON.stringify({
+        account_id: 'acc123',
+        name: 'authapp',
+        d1_databases: [
+          {
+            binding: 'DB',
+            database_name: 'authapp-db',
+            database_id: REAL_D1_ID,
+            migrations_dir: './db/migrations',
+          },
+        ],
+      }),
+    });
+    let allowed = false;
+    const { deps } = harness({
+      ensureAuthSecret: async () => ({ created: true, workerWasMissing: true }),
+      activateVersion: async (options) => {
+        allowed = options.allowFirstDeploymentBootstrap === true;
+        return {
+          ok: true,
+          versionId: '22222222-2222-4222-8222-222222222222',
+          previewUrl: 'https://preview.example.workers.dev',
+          previousVersionId: null,
+        };
+      },
+    });
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(allowed).toBe(true);
   });
 });
 

@@ -1562,7 +1562,11 @@ export async function syncCloudflareSchemaSecrets(options: {
   excludeKeys?: Array<string>;
   runWrangler: DeployWranglerRun;
   beforeWranglerRun?: () => boolean;
-}): Promise<{ requiredSecretNames: Array<string>; uploaded: number }> {
+}): Promise<{
+  requiredSecretNames: Array<string>;
+  uploaded: number;
+  workerWasMissing?: true;
+}> {
   const excluded = new Set(options.excludeKeys ?? []);
   const secretKeys = [...new Set(options.secretKeys)].filter((key) => !excluded.has(key));
   if (secretKeys.length === 0) {
@@ -1592,6 +1596,7 @@ export async function syncCloudflareSchemaSecrets(options: {
       throw new CloudflareSchemaSecretError('', 'uploader-changed');
     }
   };
+  let workerWasMissing = false;
   const list = async (allowMissingWorker: boolean): Promise<Array<string>> => {
     beforeRun();
     try {
@@ -1607,6 +1612,7 @@ export async function syncCloudflareSchemaSecrets(options: {
       );
     } catch (error) {
       if (allowMissingWorker && error instanceof SelfHostFirstDeployError) {
+        workerWasMissing = true;
         return [];
       }
       if (error instanceof SelfHostFirstDeployError || error instanceof SelfHostSecretListError) {
@@ -1705,7 +1711,11 @@ export async function syncCloudflareSchemaSecrets(options: {
     }
   }
 
-  return { requiredSecretNames, uploaded: entries.length };
+  return {
+    requiredSecretNames,
+    uploaded: entries.length,
+    ...(workerWasMissing ? { workerWasMissing: true as const } : {}),
+  };
 }
 
 /**
@@ -3603,7 +3613,8 @@ export async function ensureCloudflareAuthSecret(options: {
   workerName: string;
   runWrangler: DeployWranglerRun;
   beforeWranglerRun?: () => boolean;
-}): Promise<{ created: boolean }> {
+}): Promise<{ created: boolean; workerWasMissing?: true }> {
+  let workerWasMissing = false;
   const beforeRun = (): void => {
     if (options.beforeWranglerRun && !options.beforeWranglerRun()) {
       throw new CloudflareAuthSecretError('', 'uploader-changed');
@@ -3624,6 +3635,7 @@ export async function ensureCloudflareAuthSecret(options: {
       );
     } catch (error) {
       if (allowMissingWorker && error instanceof SelfHostFirstDeployError) {
+        workerWasMissing = true;
         return [];
       }
       if (error instanceof SelfHostSecretListError) {
@@ -3676,7 +3688,7 @@ export async function ensureCloudflareAuthSecret(options: {
       'verification-failed',
     );
   }
-  return { created: true };
+  return { created: true, ...(workerWasMissing ? { workerWasMissing: true as const } : {}) };
 }
 
 /**
@@ -4620,6 +4632,12 @@ export async function runCloudflareDeploy(
     }
   }
 
+  // Remember whether a secret operation proved the Worker was absent before it wrote anything.
+  // Wrangler creates an active placeholder version while attaching the first secret. The version
+  // activator needs this proof to distinguish that placeholder from an existing application when
+  // Cloudflare requires a one-time ordinary deploy for initial Durable Object migrations.
+  let workerWasMissingBeforeSecretProvisioning = false;
+
   // 8e. Persistent Better Auth secret — after every local/build-derived gate,
   // but before the first remote migration or worker upload. Existing secrets
   // are adopted unchanged; a missing value is generated once, sent over stdin,
@@ -4661,6 +4679,7 @@ export async function runCloudflareDeploy(
         runWrangler,
         beforeWranglerRun: assertUploaderStillPinned,
       });
+      workerWasMissingBeforeSecretProvisioning ||= authSecret.workerWasMissing === true;
       cliLog.info('cloudflare_auth_secret_ready', { created: authSecret.created });
     } catch (error) {
       if (error instanceof CloudflareAuthSecretError && error.reason === 'uploader-changed') {
@@ -4818,6 +4837,7 @@ export async function runCloudflareDeploy(
         runWrangler,
         beforeWranglerRun: assertUploaderStillPinned,
       });
+      workerWasMissingBeforeSecretProvisioning ||= synced.workerWasMissing === true;
       requiredSchemaSecretNames = synced.requiredSecretNames;
       cliLog.info('cloudflare_schema_secrets_ready', { uploaded: synced.uploaded });
     } catch (error) {
@@ -4902,6 +4922,7 @@ export async function runCloudflareDeploy(
     workerName,
     configPath: generatedConfigPath,
     message: encodeCloudflareVersionMessage(migrations.map((migration) => migration.name)),
+    allowFirstDeploymentBootstrap: workerWasMissingBeforeSecretProvisioning,
   });
   if (!execution.ok) {
     log.error(formatCloudflareActivationError(execution));

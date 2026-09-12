@@ -78,6 +78,12 @@ export async function activateCloudflareVersion(options: {
   workerName: string;
   configPath?: string;
   message: string;
+  /**
+   * The caller proved that the Worker did not exist before this deploy provisioned its secrets.
+   * Wrangler creates an active placeholder version when attaching the first secret, so the status
+   * read below can legitimately observe a version even though no application was ever deployed.
+   */
+  allowFirstDeploymentBootstrap?: boolean;
   fetch?: typeof globalThis.fetch;
   sleep?: (milliseconds: number) => Promise<void>;
   readinessAttempts?: number;
@@ -118,7 +124,10 @@ export async function activateCloudflareVersion(options: {
   if (!isCleanCommandExit(upload)) {
     const output = `${upload.stdout}\n${upload.stderr}`;
     const cloudflareErrorCode = parseCloudflareErrorCode(output);
-    if (previous.versionId === null && cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR) {
+    if (
+      cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR &&
+      (previous.versionId === null || options.allowFirstDeploymentBootstrap === true)
+    ) {
       return bootstrapFirstDurableObjectDeployment(options, commonArgs, previous.versionId);
     }
     return {
@@ -232,7 +241,7 @@ export async function activateCloudflareVersion(options: {
 async function bootstrapFirstDurableObjectDeployment(
   options: Parameters<typeof activateCloudflareVersion>[0],
   commonArgs: Array<string>,
-  previousVersionId: null,
+  previousVersionId: string | null,
 ): Promise<CloudflareVersionActivation> {
   if (!options.verifyUploader()) {
     return { ok: false, reason: 'uploader-changed' };

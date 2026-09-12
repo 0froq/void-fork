@@ -257,4 +257,27 @@ describe('Cloudflare version activation', () => {
     });
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
   });
+
+  it('bootstraps over the placeholder version created while provisioning a first secret', async () => {
+    const runWrangler = runner({
+      upload: {
+        stdout: '',
+        stderr: 'Durable Object migrations require deploy. [code: 10211]',
+        status: 1,
+      },
+      bootstrap: ok(`Current Version ID: ${NEXT}\nhttps://first.example.workers.dev`),
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'first-with-secret',
+        message: encodeCloudflareVersionMessage(['0001_state.sql']),
+        allowFirstDeploymentBootstrap: true,
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, previousVersionId: CURRENT });
+    expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(true);
+  });
 });
