@@ -16,6 +16,7 @@ function ok(stdout = ''): CloudflareCommandResult {
 function runner(overrides?: {
   status?: CloudflareCommandResult;
   upload?: CloudflareCommandResult;
+  bootstrap?: CloudflareCommandResult;
   activate?: CloudflareCommandResult;
   triggers?: CloudflareCommandResult;
   rollback?: CloudflareCommandResult;
@@ -39,6 +40,9 @@ function runner(overrides?: {
     if (args[0] === 'versions' && args[1] === 'deploy') {
       deployCalls++;
       return deployCalls === 1 ? (overrides?.activate ?? ok()) : (overrides?.rollback ?? ok());
+    }
+    if (args[0] === 'deploy') {
+      return overrides?.bootstrap ?? ok();
     }
     if (args[0] === 'triggers') {
       return overrides?.triggers ?? ok();
@@ -188,5 +192,69 @@ describe('Cloudflare version activation', () => {
         fetch: async () => Response.json({ ready: true }),
       }),
     ).resolves.toMatchObject({ ok: true, previousVersionId: null });
+  });
+
+  it('bootstraps first-deploy Durable Object migrations through a non-versioned deploy', async () => {
+    const runWrangler = runner({
+      status: { stdout: '', stderr: 'The Worker first has no deployments.', status: 1 },
+      upload: {
+        stdout: '',
+        stderr: 'Durable Object migrations require deploy. [code: 10211]',
+        status: 1,
+      },
+      bootstrap: ok(`Current Version ID: ${NEXT}\nhttps://first.example.workers.dev`),
+    });
+    const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'first',
+        configPath: '/app/wrangler.jsonc',
+        message: encodeCloudflareVersionMessage(['0001_init.sql']),
+        fetch: fetcher,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      versionId: NEXT,
+      previewUrl: 'https://first.example.workers.dev',
+      previousVersionId: null,
+    });
+    expect(runWrangler.mock.calls.map(([args]) => args.slice(0, 2))).toEqual([
+      ['deployments', 'status'],
+      ['versions', 'upload'],
+      ['deploy', '-c'],
+    ]);
+    expect(runWrangler.mock.calls[2]![0]).toContain('--autoconfig=false');
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://first.example.workers.dev/__void/ready',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('never falls back to non-versioned deployment for an existing Worker', async () => {
+    const runWrangler = runner({
+      upload: {
+        stdout: '',
+        stderr: 'Durable Object migrations require deploy. [code: 10211]',
+        status: 1,
+      },
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'existing',
+        message: encodeCloudflareVersionMessage(['0002_state.sql']),
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: 'upload-failed',
+      status: 1,
+      cloudflareErrorCode: 10211,
+    });
+    expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
   });
 });

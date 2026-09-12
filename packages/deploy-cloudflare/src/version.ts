@@ -1,7 +1,10 @@
 import type { CloudflareCommandResult, CloudflareCommandRunner } from './execute.ts';
 
-const VERSION_ID_RE = /Worker Version ID:\s*([0-9a-f]{8}-[0-9a-f-]{27})/i;
+const VERSION_ID_RE = /(?:Worker|Current) Version ID:\s*([0-9a-f]{8}-[0-9a-f-]{27})/i;
 const PREVIEW_URL_RE = /Version Preview(?: Alias)? URL:\s*(https:\/\/\S+)/i;
+const WORKERS_DEV_URL_RE = /(https:\/\/[a-z0-9.-]+\.workers\.dev(?:\/[^\s]*)?)/i;
+const CLOUDFLARE_ERROR_CODE_RE = /\[code:\s*(\d+)\]/i;
+const DURABLE_MIGRATION_VERSION_ERROR = 10211;
 
 export type CloudflareVersionMetadata = Readonly<{
   schema: 1;
@@ -25,9 +28,13 @@ export type CloudflareVersionActivation =
         | 'upload-output-invalid'
         | 'preview-unavailable'
         | 'readiness-failed'
+        | 'bootstrap-failed'
+        | 'bootstrap-output-invalid'
+        | 'bootstrap-readiness-failed'
         | 'activation-failed'
         | 'triggers-failed';
       status?: number;
+      cloudflareErrorCode?: number;
       versionId?: string;
       previousVersionId?: string | null;
       rollback?: 'not-needed' | 'succeeded' | 'failed' | 'unavailable';
@@ -109,7 +116,17 @@ export async function activateCloudflareVersion(options: {
     ),
   );
   if (!isCleanCommandExit(upload)) {
-    return { ok: false, reason: 'upload-failed', status: upload.status };
+    const output = `${upload.stdout}\n${upload.stderr}`;
+    const cloudflareErrorCode = parseCloudflareErrorCode(output);
+    if (previous.versionId === null && cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR) {
+      return bootstrapFirstDurableObjectDeployment(options, commonArgs, previous.versionId);
+    }
+    return {
+      ok: false,
+      reason: 'upload-failed',
+      status: upload.status,
+      ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
+    };
   }
 
   const output = `${upload.stdout}\n${upload.stderr}`;
@@ -204,6 +221,80 @@ export async function activateCloudflareVersion(options: {
   }
 
   return { ok: true, versionId, previewUrl, previousVersionId: previous.versionId };
+}
+
+/**
+ * Cloudflare cannot create Durable Object migration history through the Versions API. A Worker
+ * with no production deployment therefore needs one ordinary deploy before later releases can use
+ * preview-first version activation. This fallback is deliberately unavailable once production has
+ * a version: replacing an existing deployment without a readiness probe would be a traffic change.
+ */
+async function bootstrapFirstDurableObjectDeployment(
+  options: Parameters<typeof activateCloudflareVersion>[0],
+  commonArgs: Array<string>,
+  previousVersionId: null,
+): Promise<CloudflareVersionActivation> {
+  if (!options.verifyUploader()) {
+    return { ok: false, reason: 'uploader-changed' };
+  }
+  const bootstrap = await Promise.resolve(
+    options.runWrangler(
+      [
+        'deploy',
+        ...commonArgs,
+        '--name',
+        options.workerName,
+        '--message',
+        options.message,
+        '--strict',
+        '--experimental-provision=false',
+        '--experimental-auto-create=false',
+        '--autoconfig=false',
+      ],
+      { capture: true },
+    ),
+  );
+  const output = `${bootstrap.stdout}\n${bootstrap.stderr}`;
+  if (!isCleanCommandExit(bootstrap)) {
+    const cloudflareErrorCode = parseCloudflareErrorCode(output);
+    return {
+      ok: false,
+      reason: 'bootstrap-failed',
+      status: bootstrap.status,
+      ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
+    };
+  }
+  const versionId = output.match(VERSION_ID_RE)?.[1];
+  const previewUrl = output.match(PREVIEW_URL_RE)?.[1] ?? output.match(WORKERS_DEV_URL_RE)?.[1];
+  if (!versionId || !previewUrl) {
+    return {
+      ok: false,
+      reason: 'bootstrap-output-invalid',
+      previousVersionId,
+      ...(versionId ? { versionId } : {}),
+    };
+  }
+  const ready = await probeReadiness(
+    `${previewUrl.replace(/\/$/, '')}/__void/ready`,
+    options.fetch ?? globalThis.fetch,
+    options.sleep ?? defaultSleep,
+    options.readinessAttempts ?? 6,
+  );
+  if (!ready) {
+    return {
+      ok: false,
+      reason: 'bootstrap-readiness-failed',
+      versionId,
+      previousVersionId,
+      rollback: 'unavailable',
+    };
+  }
+  return { ok: true, versionId, previewUrl, previousVersionId };
+}
+
+function parseCloudflareErrorCode(output: string): number | undefined {
+  const value = output.match(CLOUDFLARE_ERROR_CODE_RE)?.[1];
+  return value === undefined ? undefined : Number(value);
 }
 
 async function readCurrentProductionVersion(

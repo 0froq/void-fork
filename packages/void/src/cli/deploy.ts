@@ -4934,6 +4934,10 @@ function formatCloudflareActivationError(
   result: Exclude<Awaited<ReturnType<typeof activateCloudflareVersion>>, { ok: true }>,
 ): string {
   const status = result.status === undefined ? '' : ` (exit ${String(result.status)})`;
+  const cloudflareCode =
+    result.cloudflareErrorCode === undefined
+      ? ''
+      : ` Cloudflare error code: ${String(result.cloudflareErrorCode)}.`;
   switch (result.reason) {
     case 'uploader-changed':
       return 'deploy: the verified Wrangler uploader changed before version activation.';
@@ -4946,7 +4950,7 @@ function formatCloudflareActivationError(
         'in Cloudflare, then retry; no version was uploaded.',
       ].join('\n');
     case 'upload-failed':
-      return `deploy: Cloudflare Worker Version upload failed${status}; production traffic is unchanged.`;
+      return `deploy: Cloudflare Worker Version upload failed${status}; production traffic is unchanged.${cloudflareCode}`;
     case 'upload-output-invalid':
       return 'deploy: Wrangler uploaded a version but did not report its version id; production traffic is unchanged.';
     case 'preview-unavailable':
@@ -4958,6 +4962,19 @@ function formatCloudflareActivationError(
       return [
         'deploy: the uploaded Worker Version did not pass /__void/ready.',
         'The failed version was left inactive for inspection; production traffic is unchanged.',
+      ].join('\n');
+    case 'bootstrap-failed':
+      return `deploy: Cloudflare could not bootstrap the first Durable Object migration deployment${status}.${cloudflareCode}`;
+    case 'bootstrap-output-invalid':
+      return [
+        'deploy: Cloudflare bootstrapped the first Durable Object migration deployment, but Wrangler',
+        'did not report its version id and workers.dev URL. Inspect `void project status` before retrying.',
+      ].join('\n');
+    case 'bootstrap-readiness-failed':
+      return [
+        'deploy: the first Durable Object migration deployment did not pass /__void/ready.',
+        'Cloudflare requires this bootstrap to be non-versioned, so the new Worker is already active;',
+        'inspect its logs and `void project status` before retrying.',
       ].join('\n');
     case 'activation-failed':
       return `deploy: the ready Worker Version could not be activated${status}; production traffic is unchanged.`;

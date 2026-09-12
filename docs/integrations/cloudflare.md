@@ -250,6 +250,8 @@ Provisioning is automatic and **idempotent**. Void reads existing ids first, ado
 
 Activation is deliberately separate from upload. Void records the exact migration filenames in the Worker Version annotation, probes the uploaded version before it receives traffic, and only then promotes it to 100%. If trigger synchronization fails, Void restores the previously active version. `void project status` lists available versions and `void project rollback [version]` activates one of them without rebuilding.
 
+Cloudflare has one first-deploy exception: the Versions API cannot establish a new Worker's initial Durable Object migration history. When a version upload returns Cloudflare error `10211` and Void has already proved that the Worker has no production deployment, Void performs one ordinary `wrangler deploy`, then verifies the active Worker through `/__void/ready`. This bootstrap is never used for an existing Worker, because an ordinary deploy would bypass the preview-first traffic guard. All later deployments return to immutable version upload, readiness probing, and explicit activation.
+
 If the Worker already has a gradual deployment that splits traffic across versions, deploy stops before upload instead of flattening that rollout to 100%. Finish or cancel the gradual rollout in Cloudflare first.
 
 #### Scope and limitations
