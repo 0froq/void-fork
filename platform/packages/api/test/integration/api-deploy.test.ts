@@ -451,6 +451,59 @@ describe('POST /projects/:id/deploy', () => {
     expect(payload.proxyToken.length).toBeGreaterThan(0);
   });
 
+  it('fails cutover and restores routing and cron state when cron sync is unavailable', async () => {
+    mockSetTimeout();
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'cron-sync-failure');
+    mockCfApi();
+    const previousRouting = JSON.stringify({
+      workerName: 'user-cron-sync-failure-dpl_live',
+      projectId: project.id,
+      version: 'dpl_live',
+      hasCrons: true,
+    });
+    await env.ROUTING.put(project.slug, previousRouting);
+    const previousCronState = {
+      workerName: 'user-cron-sync-failure-dpl_live',
+      schedules: [{ name: 'old', cron: '0 * * * *' }],
+      proxyToken: 'old-token',
+    };
+    const syncedStates: Array<typeof previousCronState> = [];
+    const cronSchedulerMock = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      get: (_id: unknown) => ({
+        fetch: async (request: Request) => {
+          if (new URL(request.url).pathname === '/snapshot') {
+            return Response.json({ state: previousCronState });
+          }
+          const state = (await request.json()) as typeof previousCronState;
+          syncedStates.push(state);
+          if (state.workerName !== previousCronState.workerName) {
+            return new Response('unavailable', { status: 503 });
+          }
+          return Response.json({ ok: true });
+        },
+      }),
+    } as unknown as DurableObjectNamespace;
+
+    const res = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: {
+          version: 3,
+          bindings: {},
+          schedules: [{ name: 'new', cron: '*/5 * * * *' }],
+        },
+      }),
+      { ...env, CRON_SCHEDULER: cronSchedulerMock },
+    );
+    const events = await readAllEvents(res);
+
+    expect(events.some((event) => (event as DeployEvent).event === 'done')).toBe(false);
+    expect(events.some((event) => (event as DeployEvent).event === 'error')).toBe(true);
+    expect(await env.ROUTING.get(project.slug)).toBe(previousRouting);
+    expect(syncedStates.at(-1)).toEqual(previousCronState);
+  });
+
   it('clears cron schedules when previous deploy had crons', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'no-cron-app');

@@ -4,6 +4,7 @@ import { hmacSignState } from '../auth/hmac.ts';
 import { buildManagerNamespace } from '../build-namespace.ts';
 import { isTerminalBuildStatus } from '../build-status.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
+import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client.ts';
 import type { Db } from '../db.ts';
 import {
   createProject,
@@ -886,30 +887,14 @@ const app = new Hono<ApiEnv>()
         // no pg manifest still mentions, and a guarded clear would let
         // that stale DO state persist across every future rollback.
         //
-        // Not migrated to clearCronScheduler/syncCronScheduler helpers: those
-        // helpers swallow errors (catch+log) because deploy/cleanup paths can
-        // self-heal on the next deploy. Rollback runs inside a DB transaction
-        // and must throw on cron failure so the txn aborts and the rollback
-        // is retried atomically; swallowing here would silently desync DO
-        // state from the rolled-back manifest.
         if (manifest?.schedules?.length) {
-          const cronId = context.env.CRON_SCHEDULER.idFromName(projectId);
-          await context.env.CRON_SCHEDULER.get(cronId).fetch(
-            new Request('https://do/sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                workerName,
-                schedules: manifest.schedules,
-                proxyToken: targetProxyToken!,
-              }),
-            }),
-          );
+          await syncCronScheduler(context.env, projectId, {
+            workerName,
+            schedules: manifest.schedules,
+            proxyToken: targetProxyToken!,
+          });
         } else {
-          const cronId = context.env.CRON_SCHEDULER.idFromName(projectId);
-          await context.env.CRON_SCHEDULER.get(cronId).fetch(
-            new Request('https://do/clear', { method: 'POST' }),
-          );
+          await clearCronScheduler(context.env, projectId);
         }
 
         // Update custom domain routing

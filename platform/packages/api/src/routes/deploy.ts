@@ -28,7 +28,13 @@ import { deleteDispatchScript, retryWithBackoff } from '../cf-api.ts';
 import { R2_CONCURRENCY, uploadPool } from '../concurrency.ts';
 import { SITE_DOMAIN } from '../constants.ts';
 import { DEFAULT_DASHBOARD_URL } from '../constants.ts';
-import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client.ts';
+import {
+  clearCronScheduler,
+  restoreCronScheduler,
+  snapshotCronScheduler,
+  syncCronScheduler,
+  type CronSyncState,
+} from '../cron-scheduler-client.ts';
 import {
   getProject,
   getDeployment,
@@ -1827,6 +1833,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     phaseName = 'json_validate';
     phaseStartMs = Date.now();
     let routingSwitched = false;
+    let cutoverCommitted = false;
     const writtenRoutingKeys: Array<string> = [];
     const routingValuesBeforeWrite = new Map<string, string | null>();
     const snapshotRoutingValue = async (key: string): Promise<void> => {
@@ -1850,6 +1857,18 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         } else {
           await context.env.ROUTING.put(key, previous);
         }
+      }
+    };
+    let cronStateBeforeWrite: CronSyncState | null | undefined;
+    let cronSchedulerWriteAttempted = false;
+    const snapshotCronState = async (): Promise<void> => {
+      if (cronStateBeforeWrite === undefined) {
+        cronStateBeforeWrite = await snapshotCronScheduler(context.env, projectId);
+      }
+    };
+    const restoreTrackedCronState = async (): Promise<void> => {
+      if (cronSchedulerWriteAttempted && cronStateBeforeWrite !== undefined) {
+        await restoreCronScheduler(context.env, projectId, cronStateBeforeWrite);
       }
     };
     let workerUploaded = false;
@@ -2272,6 +2291,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               `queue:${getProjectQueueName(projectId, previousQueue.name)}`,
             );
           }
+          await snapshotCronState();
           await assertDeploymentNotCanceled(context.get('db'), deployment.id);
           await assertProjectNotDeleting(context.get('db'), projectId);
           markPhase('routing_switch');
@@ -2294,6 +2314,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             }
           }
 
+          currentStep = 'cron_setup';
+          markPhase('cron_sync');
+          cronSchedulerWriteAttempted = true;
+          await clearCronScheduler(context.env, projectId);
+
+          currentStep = 'db_finalize';
           markPhase('db_finalize');
           logger.info('status_transition', 'status_change', {
             from: currentStatus,
@@ -2319,12 +2345,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               force: true,
             });
             await updateProjectType(txDb, projectId, type);
+            await setActiveDeployment(txDb, projectId, deployment.id);
+            await markDeploymentRetained(txDb, deployment.id, true);
           });
+          cutoverCommitted = true;
           currentStatus = 'live';
-          await setActiveDeployment(context.get('db'), projectId, deployment.id);
-          await markDeploymentRetained(context.get('db'), deployment.id, true);
-
-          await clearCronScheduler(context.env, projectId);
 
           const legacyName = `user-${project.slug}`;
           await deleteDispatchScript(
@@ -3272,6 +3297,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           assetManifestId: assetCount > 0 ? deployment.id : undefined,
           assetConfig: assetCount > 0 ? assetConfig : undefined,
         });
+        await snapshotCronState();
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
         markPhase('routing_switch');
@@ -3289,6 +3315,23 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           }
         }
 
+        currentStep = 'cron_setup';
+        markPhase('cron_sync');
+        cronSchedulerWriteAttempted = true;
+        if (hasCrons) {
+          const cronProxyToken = workerBindings.find(
+            (binding) => binding.name === '__VOID_PROXY_TOKEN',
+          )?.text;
+          await syncCronScheduler(context.env, projectId, {
+            workerName,
+            schedules: manifest.schedules!,
+            proxyToken: cronProxyToken,
+          });
+        } else {
+          await clearCronScheduler(context.env, projectId);
+        }
+
+        currentStep = 'db_finalize';
         markPhase('db_finalize');
         logger.info('status_transition', 'status_change', {
           from: currentStatus,
@@ -3316,37 +3359,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             projectId,
             manifest.type ?? (manifest.framework ? 'framework' : 'void'),
           );
+          await setActiveDeployment(txDb, projectId, deployment.id);
+          await markDeploymentRetained(txDb, deployment.id, true);
         });
+        cutoverCommitted = true;
         currentStatus = 'live';
-        await setActiveDeployment(context.get('db'), projectId, deployment.id);
-        await markDeploymentRetained(context.get('db'), deployment.id, true);
-
-        // Cron sync
-        currentStep = 'cron_setup';
-        markPhase('cron_sync');
-        const cronSyncPromise = (async () => {
-          try {
-            if (hasCrons) {
-              const cronProxyToken = workerBindings.find(
-                (b) => b.name === '__VOID_PROXY_TOKEN',
-              )?.text;
-              await syncCronScheduler(context.env, projectId, {
-                workerName,
-                schedules: manifest.schedules!,
-                proxyToken: cronProxyToken,
-              });
-            } else {
-              await clearCronScheduler(context.env, projectId);
-            }
-          } catch (err) {
-            logger.error('cron_sync', 'cron_sync_failed_post_routing', err);
-          }
-        })();
-        try {
-          context.executionCtx.waitUntil(cronSyncPromise);
-        } catch {
-          await cronSyncPromise;
-        }
 
         // Legacy + retention cleanup (mirror of multipart's WfP path)
         const legacyWorkerName = `user-${project.slug}`;
@@ -3597,13 +3614,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         // container state, then mark the deployment failed (never live).
         const supersededBuild = raw === SUPERSEDED_BUILD_ERROR_MESSAGE;
         const teardownRaceLost = routingSwitched && raw === PROJECT_DELETING_ERROR_MESSAGE;
-        if (teardownRaceLost || supersededBuild) {
-          logger.error('catch', supersededBuild ? 'superseded_build' : 'teardown_race_lost', err, {
+        const cutoverFailed = routingSwitched && !cutoverCommitted;
+        if (teardownRaceLost || supersededBuild || cutoverFailed) {
+          const failureEvent = supersededBuild
+            ? 'superseded_build'
+            : teardownRaceLost
+              ? 'teardown_race_lost'
+              : 'cutover_failed';
+          logger.error('catch', failureEvent, err, {
             workerName: failedWorkerName,
             writtenRoutingKeyCount: writtenRoutingKeys.length,
           });
           await restoreTrackedRouting().catch((e) =>
             logger.error('catch', 'routing_rollback_failed', e),
+          );
+          await restoreTrackedCronState().catch((e) =>
+            logger.error('catch', 'cron_rollback_failed', e),
           );
           if (workerUploaded && workerUploadUrl) {
             await fetch(workerUploadUrl, {
@@ -3656,7 +3682,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             deploymentId: failedDeployment.id,
             from: currentStatus,
             to: 'failed',
-            reason: supersededBuild ? 'superseded_build' : 'teardown_race_lost',
+            reason: failureEvent,
           });
           await updateDeploymentStatus(context.get('db'), failedDeployment.id, 'failed', msg).catch(
             () => {},

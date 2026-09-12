@@ -271,7 +271,11 @@ async function cleanupBestEffortResources(
   // (deleteAll + deleteAlarm). KV `hasCrons` is omitted when false and
   // missing on older entries; the PG manifest is the authoritative source,
   // and unconditional clear avoids a stale-KV gate.
-  cleanup.push(clearCronScheduler(context.env, projectId));
+  cleanup.push(
+    clearCronScheduler(context.env, projectId).catch(
+      warn(`Failed to clear cron scheduler for project ${projectId}`),
+    ),
+  );
 
   // KV routing entry
   cleanup.push(
