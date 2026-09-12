@@ -214,18 +214,18 @@ Enable and configure Cloudflare Sandboxes for Void apps. Importing from `void/sa
 }
 ```
 
-| Field               | Type     | Default                                  |
-| ------------------- | -------- | ---------------------------------------- |
-| `binding`           | `string` | `SANDBOX`                                |
-| `className`         | `string` | `Sandbox`                                |
-| `containerName`     | `string` | `void-sandbox`                           |
-| `image`             | `string` | Bundled `@cloudflare/sandbox` Dockerfile |
-| `imageBuildContext` | `string` | Directory of `image`                     |
-| `platformImage`     | `string` | Matching sandbox SDK registry image      |
-| `instanceType`      | `string` | `lite` on Void deploy                    |
-| `maxInstances`      | `number` | `20` on Void deploy                      |
+| Field               | Type     | Default                              |
+| ------------------- | -------- | ------------------------------------ |
+| `binding`           | `string` | `SANDBOX`                            |
+| `className`         | `string` | `Sandbox`                            |
+| `containerName`     | `string` | `void-sandbox`                       |
+| `image`             | `string` | Matching published sandbox SDK image |
+| `imageBuildContext` | `string` | Directory of `image`                 |
+| `platformImage`     | `string` | Matching sandbox SDK registry image  |
+| `instanceType`      | `string` | `lite` on Void deploy                |
+| `maxInstances`      | `number` | `20` on Void deploy                  |
 
-Sandbox support currently applies to Void apps on the Cloudflare target. `void deploy` supports registry images. If `sandbox.image` is a custom local Dockerfile path, set `sandbox.platformImage` to the pushed image that the platform should run.
+Sandbox support currently applies to Void apps on the Cloudflare target. The default registry image is pinned to the installed `@cloudflare/sandbox` version, so local Wrangler and native Cloudflare deploys run the same container as Void Platform. If `sandbox.image` is a custom local Dockerfile path, set `sandbox.platformImage` to the pushed image that the platform should run.
 
 ### `target`
 

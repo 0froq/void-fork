@@ -503,7 +503,7 @@ describe('syncWranglerBindings', () => {
       name: 'void-sandbox',
       class_name: 'Sandbox',
     });
-    expect(parsed.containers[0].image).toContain('Dockerfile');
+    expect(parsed.containers[0].image).toMatch(/^docker\.io\/cloudflare\/sandbox:/);
     expect(parsed.migrations).toEqual([
       { tag: 'void-sandbox-v1', new_sqlite_classes: ['Sandbox'] },
     ]);
