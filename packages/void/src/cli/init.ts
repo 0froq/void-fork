@@ -3809,7 +3809,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     await setupCloudflareDeployment(root);
   }
 
-  // Step 9: GitHub Actions (the built-in workflow currently targets Void).
+  // Step 9: GitHub Actions for either configured deployment target.
   // Skip when `root` is a workspace subpackage: `setupGithubActions` would
   // write `.github/workflows/deploy.yml` under the subpackage root, but
   // GitHub only reads `.github/workflows/*` from the repository root, so
@@ -3824,7 +3824,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   // subpackage-membership signal directly so both targeted and
   // interactive modes agree.
   const githubStepSkipForSubpackage = isInsideWorkspaceSubpackage(root);
-  const shouldSetupGithub = targeted ? initArgs?.github === true : deploymentPlatform === 'void';
+  const shouldSetupGithub = targeted ? initArgs?.github === true : deploymentPlatform !== 'none';
   if (shouldSetupGithub && !githubStepSkipForSubpackage) {
     // `setupGithubActions` writes `void-deploy.yml` (skipping with a warning if
     // it already exists). It does not touch any pre-existing `deploy.yml`.
@@ -3840,7 +3840,11 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
         process.exit(0);
       }
       if (setupGha) {
-        setupGithubActions(root, state);
+        setupGithubActions(
+          root,
+          state,
+          deploymentPlatform === 'cloudflare' ? 'cloudflare' : 'void',
+        );
       }
     }
   } else if (githubStepSkipForSubpackage && shouldSetupGithub) {

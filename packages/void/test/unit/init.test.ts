@@ -2610,7 +2610,7 @@ export default config;
     }
   });
 
-  it('defaults deployment setup to Cloudflare and skips Void-specific setup', async () => {
+  it('defaults deployment setup to Cloudflare and offers its GitHub workflow', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       writeExistingAstroProject(root);
@@ -2620,9 +2620,18 @@ export default config;
           ? { status: 1, stdout: '', stderr: 'Not authenticated' }
           : { status: 0, stdout: '', stderr: '' },
       );
-      mockConfirm.mockImplementation((options: { message?: string }) =>
-        options.message === 'Log in to Cloudflare with Wrangler now?' ? false : undefined,
-      );
+      mockConfirm.mockImplementation((options: { message?: string }) => {
+        if (options.message === 'Log in to Cloudflare with Wrangler now?') {
+          return false;
+        }
+        if (
+          options.message ===
+          'Create .github/workflows/void-deploy.yml to deploy on pushes to main?'
+        ) {
+          return true;
+        }
+        return undefined;
+      });
 
       await runInitCommand(root);
 
@@ -2653,7 +2662,9 @@ export default config;
       );
       expect(mockGetToken).not.toHaveBeenCalled();
       expect(mockListProjects).not.toHaveBeenCalled();
-      expect(existsSync(join(root, '.github', 'workflows', 'void-deploy.yml'))).toBe(false);
+      expect(
+        readFileSync(join(root, '.github', 'workflows', 'void-deploy.yml'), 'utf-8'),
+      ).toContain('void deploy --platform cloudflare');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
