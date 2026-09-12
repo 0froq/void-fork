@@ -495,22 +495,12 @@ export function syncWranglerBindings(
     const migrations = Array.isArray(parsed.migrations)
       ? (parsed.migrations as Array<DurableObjectMigration>)
       : [];
-    const historicalWebSocketClasses = new Set(
-      migrations
-        .filter((migration) => /^void-ws-v1(?:-\d+)?$/.test(migration.tag ?? ''))
-        .flatMap((migration) => [
-          ...(migration.new_classes ?? []),
-          ...(migration.new_sqlite_classes ?? []),
-        ]),
-    );
-    const desired = new Map(
-      options.websockets.map((route) => [route.bindingName, route.className] as const),
-    );
-    const retained = existing.filter(
-      (binding) =>
-        !historicalWebSocketClasses.has(binding.class_name) ||
-        desired.get(binding.name) === binding.class_name,
-    );
+    // Registered Durable Object classes are data-bearing identities. Removing a
+    // route must not remove its binding or emit `deleted_classes`: either action
+    // can make the next upload invalid or destroy the object's SQLite storage.
+    // Historical WebSocket bindings remain attached and the compiler exports a
+    // tombstone class until an explicit destructive lifecycle command exists.
+    const retained = existing;
     for (const route of options.websockets) {
       const conflict = retained.find(
         (binding) => binding.name === route.bindingName && binding.class_name !== route.className,
@@ -759,6 +749,51 @@ export function syncWranglerWebSockets(
     return false;
   }
   return syncWranglerBindings(root, NO_INFERRED_BINDINGS, { websockets });
+}
+
+/**
+ * Return registered WebSocket classes that no longer have a source route.
+ * These classes must remain exported while their data-bearing bindings remain
+ * in Wrangler configuration. Arbitrary user Durable Objects are excluded by
+ * requiring provenance from Void's WebSocket migration tag.
+ */
+export function readWranglerWebSocketTombstones(
+  root: string,
+  websockets: Array<WebSocketRouteDefinition>,
+): Array<string> {
+  const configPath = ['wrangler.jsonc', 'wrangler.json']
+    .map((name) => join(root, name))
+    .find((path) => existsSync(path));
+  if (!configPath) {
+    return [];
+  }
+  const parsed = parseJsonc(readFileSync(configPath, 'utf-8'));
+  const migrations = Array.isArray(parsed.migrations)
+    ? (parsed.migrations as Array<DurableObjectMigration>)
+    : [];
+  const historicalClasses = new Set(
+    migrations
+      .filter((migration) => /^void-ws-v1(?:-\d+)?$/.test(migration.tag ?? ''))
+      .flatMap((migration) => [
+        ...(migration.new_classes ?? []),
+        ...(migration.new_sqlite_classes ?? []),
+      ]),
+  );
+  const currentClasses = new Set(websockets.map((route) => route.className));
+  const bindings = (
+    parsed.durable_objects as { bindings?: Array<{ class_name?: unknown }> } | undefined
+  )?.bindings;
+  return [
+    ...new Set(
+      (Array.isArray(bindings) ? bindings : []).flatMap((binding) =>
+        typeof binding.class_name === 'string' &&
+        historicalClasses.has(binding.class_name) &&
+        !currentClasses.has(binding.class_name)
+          ? [binding.class_name]
+          : [],
+      ),
+    ),
+  ].sort();
 }
 
 /**

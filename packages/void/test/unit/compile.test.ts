@@ -537,6 +537,29 @@ describe('compileRouteTable', () => {
     expect(code).toContain('__forwardWebSocketRequest');
   });
 
+  it('exports tombstones for removed websocket Durable Object classes', () => {
+    const scan: ScanResult = {
+      routes: [],
+      websockets: [],
+      middleware: [],
+      jobs: [],
+      queues: [],
+      pages: { pages: [], layouts: [], namedLayouts: [] },
+    };
+    const code = compileRouteTable(scan, '/routes', '/middleware', '/crons', '/queues', null, {
+      ...testOptions,
+      webSocketTombstones: ['RemovedChatWs'],
+    });
+
+    expect(code).toContain('createWebSocketTombstoneDurableObject');
+    expect(code).toContain(
+      'export const RemovedChatWs = __createWebSocketTombstoneDurableObject("RemovedChatWs")',
+    );
+    expect(compileWorkerEntry(false, undefined, undefined, ['RemovedChatWs'])).toContain(
+      'export { RemovedChatWs };',
+    );
+  });
+
   it('generates the shared live durable object export when live is enabled', () => {
     const scan: ScanResult = {
       routes: [],

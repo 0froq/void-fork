@@ -94,6 +94,8 @@ type RoutingPluginOptions = {
   sandboxClassName?: string;
   live?: { bindingName: string; className: string };
   durableObjects?: Array<{ bindingName: string; className: string; filePath: string }>;
+  /** Data-preserving exports for removed WebSocket Durable Object routes. */
+  websocketTombstones?: Array<string>;
   onDevAssetRoutingPolicyChange?: (policy: AssetRoutingPolicy) => boolean;
 };
 
@@ -205,6 +207,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     webSocketRuntimePath: resolveFile('#self/runtime/ws-server'),
     liveRuntimePath: resolveFile('#self/runtime/live-server'),
     hasLive: options.live !== undefined,
+    webSocketTombstones: options.websocketTombstones,
     reactRefresh: false,
     dev: false,
     devTriggerToken: options.devTriggerToken,
@@ -436,7 +439,7 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         false,
         remote,
         undefined,
-        undefined,
+        options.websocketTombstones,
         compileOptions.runtimeEnvPath,
         getEnvSchemaModule(),
         options.hasSandbox
@@ -585,7 +588,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
             scan!.queues.length > 0,
             remote,
             resolvedConfig?.build.assetsDir,
-            (scan!.websockets ?? []).map((route) => route.className),
+            [
+              ...(scan!.websockets ?? []).map((route) => route.className),
+              ...(options.websocketTombstones ?? []),
+            ],
             compileOptions.runtimeEnvPath,
             getEnvSchemaModule(),
             options.hasSandbox
@@ -723,7 +729,10 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
               scan!.queues.length > 0,
               remote,
               resolvedConfig?.build.assetsDir,
-              (scan!.websockets ?? []).map((route) => route.className),
+              [
+                ...(scan!.websockets ?? []).map((route) => route.className),
+                ...(options.websocketTombstones ?? []),
+              ],
               compileOptions.runtimeEnvPath,
               getEnvSchemaModule(),
               options.hasSandbox

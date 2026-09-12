@@ -23,6 +23,7 @@ import {
   normalizeWranglerCompatibilityFlags,
   nextDurableObjectMigrationTag,
   readWranglerCompat,
+  readWranglerWebSocketTombstones,
   readExistingLiveBindingConfig,
   resolveLiveBindingConfig,
   syncWranglerBindings,
@@ -803,12 +804,14 @@ export function voidPlugin(options?: {
       );
     }
   }
+  let websocketTombstones: Array<string> = [];
   if (!isNodeTarget(config.target)) {
     syncWranglerDurableObjects(root, durableObjects);
-    syncWranglerWebSockets(
-      root,
-      websocketRoutes.filter((route) => isRouteEnabledForEnvironment(route, 'prod')),
+    const productionWebSocketRoutes = websocketRoutes.filter((route) =>
+      isRouteEnabledForEnvironment(route, 'prod'),
     );
+    syncWranglerWebSockets(root, productionWebSocketRoutes);
+    websocketTombstones = readWranglerWebSocketTombstones(root, productionWebSocketRoutes);
   }
   const liveConfig = !isNodeTarget(config.target)
     ? bindings.needsLive
@@ -2063,6 +2066,7 @@ export function voidPlugin(options?: {
       sandboxClassName: sandboxConfig?.className,
       live: liveConfig,
       durableObjects,
+      websocketTombstones,
       onDevAssetRoutingPolicyChange: updateDevAssetRoutingPolicy,
     }),
     drizzlePlugin(root, true, dialect, {

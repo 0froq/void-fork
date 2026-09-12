@@ -12,6 +12,7 @@ import {
   readExistingLiveBindingConfig,
   readProvisionedBindingEntry,
   readWranglerCompat,
+  readWranglerWebSocketTombstones,
   resolveLiveBindingConfig,
   syncWranglerBindings,
   syncWranglerDurableObjects,
@@ -493,7 +494,7 @@ describe('syncWranglerBindings', () => {
     ]);
   });
 
-  it('removes stale generated WebSocket bindings while preserving migration history', () => {
+  it('retains stale generated WebSocket bindings and reports tombstone exports', () => {
     setup(
       'wrangler.jsonc',
       JSON.stringify({
@@ -510,16 +511,18 @@ describe('syncWranglerBindings', () => {
       }),
     );
 
-    expect(syncWranglerWebSockets(tmpDir, [])).toBe(true);
+    expect(syncWranglerWebSockets(tmpDir, [])).toBe(false);
 
     const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
     expect(parsed.durable_objects.bindings).toEqual([
+      { name: 'OLD_CHAT', class_name: 'OldChatWs' },
       { name: 'CART', class_name: 'ShoppingCartDurableObject' },
     ]);
     expect(parsed.migrations).toEqual([
       { tag: 'void-ws-v1', new_sqlite_classes: ['OldChatWs'] },
       { tag: 'durable-shopping-cart-v1', new_sqlite_classes: ['ShoppingCartDurableObject'] },
     ]);
+    expect(readWranglerWebSocketTombstones(tmpDir, [])).toEqual(['OldChatWs']);
   });
 
   it('replaces a renamed generated WebSocket binding', () => {
@@ -547,11 +550,30 @@ describe('syncWranglerBindings', () => {
     ]);
 
     const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
-    expect(parsed.durable_objects.bindings).toEqual([{ name: 'CHAT', class_name: 'ChatWs' }]);
+    expect(parsed.durable_objects.bindings).toEqual([
+      { name: 'OLD_CHAT', class_name: 'OldChatWs' },
+      { name: 'CHAT', class_name: 'ChatWs' },
+    ]);
     expect(parsed.migrations).toEqual([
       { tag: 'void-ws-v1', new_sqlite_classes: ['OldChatWs'] },
       { tag: 'void-ws-v1-2', new_sqlite_classes: ['ChatWs'] },
     ]);
+    expect(
+      readWranglerWebSocketTombstones(tmpDir, [
+        {
+          pattern: '/chat',
+          methods: ['GET'],
+          params: [],
+          catchAll: false,
+          env: null,
+          filePath: 'chat.ws.ts',
+          className: 'ChatWs',
+          bindingName: 'CHAT',
+          mode: 'room',
+          hasAuthGate: false,
+        },
+      ]),
+    ).toEqual(['OldChatWs']);
   });
 
   it('adds sandbox durable object, container, and migration metadata', () => {
