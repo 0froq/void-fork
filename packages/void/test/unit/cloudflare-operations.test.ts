@@ -105,11 +105,19 @@ describe('Cloudflare operational parsing', () => {
       parseCloudflareDeployedVersionIds(
         JSON.stringify([
           { versions: [{ version_id: 'v1', percentage: 100 }] },
-          { versions: [{ version_id: 'v2', percentage: 100 }] },
+          {
+            versions: [
+              { version_id: 'v2', percentage: 100 },
+              { version_id: 'failed-readiness', percentage: 0 },
+            ],
+          },
         ]),
       ),
     ).toEqual(['v1', 'v2']);
     expect(() => parseCloudflareDeployedVersionIds('[{"versions":[{}]}]')).toThrow('malformed');
+    expect(() => parseCloudflareDeployedVersionIds('[{"versions":[{"version_id":"v3"}]}]')).toThrow(
+      'malformed',
+    );
   });
 });
 

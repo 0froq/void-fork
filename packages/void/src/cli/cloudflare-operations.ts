@@ -305,11 +305,20 @@ export function parseCloudflareDeployedVersionIds(value: string): Array<string> 
       if (
         typeof version !== 'object' ||
         version === null ||
-        typeof (version as Record<string, unknown>).version_id !== 'string'
+        typeof (version as Record<string, unknown>).version_id !== 'string' ||
+        typeof (version as Record<string, unknown>).percentage !== 'number' ||
+        !Number.isFinite((version as Record<string, number>).percentage) ||
+        (version as Record<string, number>).percentage < 0 ||
+        (version as Record<string, number>).percentage > 100
       ) {
         throw new Error(`Cloudflare deployment list entry ${deploymentIndex + 1} is malformed.`);
       }
-      ids.add((version as { version_id: string }).version_id);
+      // A version staged at 0% for readiness is present in deployment history
+      // even when its probe failed. It has never served production traffic and
+      // must not become a rollback candidate.
+      if ((version as { percentage: number }).percentage > 0) {
+        ids.add((version as { version_id: string }).version_id);
+      }
     }
   });
   return [...ids];
