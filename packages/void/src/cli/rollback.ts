@@ -135,9 +135,12 @@ async function runCloudflareRollback(root: string, deployId?: string): Promise<v
   } = await import('./cloudflare-operations.ts');
   const context = resolveCloudflareOperationContext(root);
   const status = await readCloudflareWorkerStatus(context);
+  const deployedVersionIds = new Set(status.deployedVersionIds);
   const candidates = [...status.versions]
     .reverse()
-    .filter((version) => version.id !== status.activeVersionId);
+    .filter(
+      (version) => version.id !== status.activeVersionId && deployedVersionIds.has(version.id),
+    );
   if (candidates.length === 0) {
     log.warn('No previous Cloudflare Worker Versions are available for rollback.');
     outro(dim('Deploy more versions to enable rollback.'));

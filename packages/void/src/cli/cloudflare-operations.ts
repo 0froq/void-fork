@@ -60,6 +60,7 @@ export type CloudflareWorkerVersion = {
 export type CloudflareWorkerStatus = {
   workerName: string;
   activeVersionId: string | null;
+  deployedVersionIds: Array<string>;
   versions: Array<CloudflareWorkerVersion>;
 };
 
@@ -266,15 +267,51 @@ export async function applyCloudflareD1Migrations(context: CloudflareD1Context):
 export async function readCloudflareWorkerStatus(
   context: CloudflareOperationContext,
 ): Promise<CloudflareWorkerStatus> {
-  const [deployment, versions] = await Promise.all([
+  const [deployment, deployments, versions] = await Promise.all([
     run(context, ['deployments', 'status', ...targetArgs(context), '--json']),
+    run(context, ['deployments', 'list', ...targetArgs(context), '--json']),
     run(context, ['versions', 'list', ...targetArgs(context), '--json']),
   ]);
+  const activeVersionId = parseActiveVersionId(deployment.stdout);
+  const deployedVersionIds = parseCloudflareDeployedVersionIds(deployments.stdout);
+  if (activeVersionId && !deployedVersionIds.includes(activeVersionId)) {
+    deployedVersionIds.push(activeVersionId);
+  }
   return {
     workerName: context.workerName,
-    activeVersionId: parseActiveVersionId(deployment.stdout),
+    activeVersionId,
+    deployedVersionIds,
     versions: parseCloudflareVersions(versions.stdout),
   };
+}
+
+/** Return only versions that Cloudflare records as members of a production deployment. */
+export function parseCloudflareDeployedVersionIds(value: string): Array<string> {
+  const parsed = parseJson(value, 'Cloudflare deployment list');
+  if (!Array.isArray(parsed)) {
+    throw new Error('Cloudflare deployment list returned an unexpected response.');
+  }
+  const ids = new Set<string>();
+  parsed.forEach((deployment, deploymentIndex) => {
+    if (
+      typeof deployment !== 'object' ||
+      deployment === null ||
+      !Array.isArray((deployment as Record<string, unknown>).versions)
+    ) {
+      throw new Error(`Cloudflare deployment list entry ${deploymentIndex + 1} is malformed.`);
+    }
+    for (const version of (deployment as { versions: Array<unknown> }).versions) {
+      if (
+        typeof version !== 'object' ||
+        version === null ||
+        typeof (version as Record<string, unknown>).version_id !== 'string'
+      ) {
+        throw new Error(`Cloudflare deployment list entry ${deploymentIndex + 1} is malformed.`);
+      }
+      ids.add((version as { version_id: string }).version_id);
+    }
+  });
+  return [...ids];
 }
 
 export function parseCloudflareVersions(value: string): Array<CloudflareWorkerVersion> {

@@ -11,6 +11,7 @@ import {
   listCloudflareDomains,
   listCloudflareSecrets,
   parseActiveVersionId,
+  parseCloudflareDeployedVersionIds,
   parseCloudflareVersions,
   putCloudflareSecret,
   readCloudflareWorkerStatus,
@@ -98,6 +99,18 @@ describe('Cloudflare operational parsing', () => {
     expect(() => parseCloudflareVersions('{}')).toThrow('unexpected response');
     expect(() => parseActiveVersionId('{')).toThrow('did not return valid JSON');
   });
+
+  it('accepts only versions recorded in deployment history as rollback candidates', () => {
+    expect(
+      parseCloudflareDeployedVersionIds(
+        JSON.stringify([
+          { versions: [{ version_id: 'v1', percentage: 100 }] },
+          { versions: [{ version_id: 'v2', percentage: 100 }] },
+        ]),
+      ),
+    ).toEqual(['v1', 'v2']);
+    expect(() => parseCloudflareDeployedVersionIds('[{"versions":[{}]}]')).toThrow('malformed');
+  });
 });
 
 describe('Cloudflare secret operations', () => {
@@ -150,8 +163,11 @@ describe('Cloudflare secret operations', () => {
 describe('Cloudflare version operations', () => {
   it('reads deployment status and recent versions', async () => {
     const runner = vi.fn<CloudflareOperationRunner>((args) => {
-      if (args[0] === 'deployments') {
+      if (args[0] === 'deployments' && args[1] === 'status') {
         return ok(JSON.stringify({ versions: [{ version_id: 'v2', percentage: 100 }] }));
+      }
+      if (args[0] === 'deployments' && args[1] === 'list') {
+        return ok(JSON.stringify([{ versions: [{ version_id: 'v1', percentage: 100 }] }]));
       }
       return ok(
         JSON.stringify([
@@ -162,6 +178,7 @@ describe('Cloudflare version operations', () => {
     });
     const status = await readCloudflareWorkerStatus(context(runner));
     expect(status.activeVersionId).toBe('v2');
+    expect(status.deployedVersionIds).toEqual(['v1', 'v2']);
     expect(status.versions.map((version) => version.id)).toEqual(['v1', 'v2']);
   });
 
