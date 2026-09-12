@@ -1565,6 +1565,101 @@ describe('POST /projects/:id/rollback', () => {
     expect(await env.ROUTING.get('domain:compensate.example.com')).toBe(previousDomainRouting);
   });
 
+  it('restores exact queue consumer settings when rollback fails mid-cutover', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-queue-compensate');
+    const queueId = '25832cb0ce3d4f60b1e538911a4629f4';
+    await env.db.insert(resources).values({
+      id: 'res_queue_compensate',
+      project_id: project.id,
+      type: 'queue',
+      cf_id: queueId,
+      binding_name: 'emails',
+    });
+
+    const target = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({
+        version: 4,
+        type: 'void',
+        bindings: {},
+        queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS', maxBatchSize: 20 }],
+      }),
+    );
+    await updateDeploymentStatus(env.db, target.id, 'live');
+    await markDeploymentRetained(env.db, target.id, true);
+    const current = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({
+        version: 4,
+        type: 'void',
+        bindings: {},
+        queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS', maxBatchSize: 5 }],
+      }),
+    );
+    await updateDeploymentStatus(env.db, current.id, 'live');
+    await markDeploymentRetained(env.db, current.id, true);
+    await setActiveDeployment(env.db, project.id, current.id);
+
+    const oldConsumer = {
+      consumer_id: 'consumer-1',
+      script: 'void-dispatch',
+      type: 'worker',
+      settings: { batch_size: 5, max_retries: 2 },
+    };
+    const newConsumer = { ...oldConsumer, settings: { batch_size: 20 } };
+    let listCalls = 0;
+    const updateBodies: Array<unknown> = [];
+    mockCfApi({
+      listWorkerBindings: () =>
+        cfSuccess([{ type: 'plain_text', name: '__VOID_PROXY_TOKEN', text: 'queue-proxy-token' }]),
+      addQueueConsumer: () => cfError('queue already has a consumer', 409),
+      listQueueConsumers: () => {
+        listCalls++;
+        return cfSuccess([listCalls < 3 ? oldConsumer : newConsumer]);
+      },
+      updateQueueConsumer: (_url, init) => {
+        updateBodies.push(JSON.parse(String(init?.body)));
+        return cfSuccess({ consumer_id: 'consumer-1' });
+      },
+    });
+
+    const queueRoutingKey = `queue:${project.id.replaceAll('_', '-')}-emails`;
+    const originalPut = env.ROUTING.put.bind(env.ROUTING);
+    let injected = false;
+    vi.spyOn(env.ROUTING, 'put').mockImplementation(async (key, value, options) => {
+      if (key === queueRoutingKey && !injected) {
+        injected = true;
+        throw new Error('injected queue routing failure');
+      }
+      return originalPut(key, value, options);
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deploymentId: target.id }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(500);
+    expect((await db.getProject(env.db, project.id))?.active_deployment_id).toBe(current.id);
+    expect(updateBodies).toHaveLength(2);
+    expect(updateBodies[0]).toMatchObject({ settings: { batch_size: 20 } });
+    expect(updateBodies[1]).toEqual({
+      script_name: 'void-dispatch',
+      type: 'worker',
+      settings: { batch_size: 5, max_retries: 2 },
+    });
+  });
+
   it('rollback resolves the proxy token once for both cron and queues (no duplicate CF fetch)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'cron-and-queue-roll');

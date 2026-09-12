@@ -56,6 +56,7 @@ import {
   getRetainedDeployments,
   getRetainedDeploymentsExcluding,
   getProjectSecrets,
+  getProjectResources,
   upsertProjectSecret,
   getBuild,
   ACTIVE_BUILD_STATUSES,
@@ -74,7 +75,13 @@ import {
   generateManagedAuthSecret,
   encryptProjectSecret,
 } from '../project-secrets.ts';
-import { addQueueConsumer } from '../provisioning/cloudflare-api.ts';
+import {
+  addQueueConsumer,
+  removeQueueConsumer,
+  restoreQueueConsumer,
+  snapshotQueueConsumer,
+  type QueueConsumerInfo,
+} from '../provisioning/cloudflare-api.ts';
 import {
   deleteContainerApplicationIdempotent,
   findContainerApplication,
@@ -1871,6 +1878,39 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         await restoreCronScheduler(context.env, projectId, cronStateBeforeWrite);
       }
     };
+    const queueConsumerSnapshots = new Map<
+      string,
+      { queueId: string; scriptName: string; state: QueueConsumerInfo | null }
+    >();
+    const snapshotTrackedQueueConsumer = async (
+      queueId: string,
+      scriptName: string,
+    ): Promise<void> => {
+      const key = `${queueId}\0${scriptName}`;
+      if (!queueConsumerSnapshots.has(key)) {
+        queueConsumerSnapshots.set(key, {
+          queueId,
+          scriptName,
+          state: await snapshotQueueConsumer(
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
+            queueId,
+            scriptName,
+          ),
+        });
+      }
+    };
+    const restoreTrackedQueueConsumers = async (): Promise<void> => {
+      for (const snapshot of [...queueConsumerSnapshots.values()].reverse()) {
+        await restoreQueueConsumer(
+          context.env.CF_ACCOUNT_ID,
+          context.env.CF_API_TOKEN,
+          snapshot.queueId,
+          snapshot.scriptName,
+          snapshot.state,
+        );
+      }
+    };
     let workerUploaded = false;
     let workerUploadUrl: string | undefined;
     let sandboxContainerAppId: string | undefined;
@@ -2286,7 +2326,21 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             manifest,
             suspended: existingEntry?.suspended,
           });
+          const dispatchWorkerName = context.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
+          const projectResources = await getProjectResources(context.get('db'), projectId);
           for (const previousQueue of previousManifest?.queues ?? []) {
+            const resource = projectResources.find(
+              (entry) => entry.type === 'queue' && entry.binding_name === previousQueue.name,
+            );
+            if (resource) {
+              await snapshotTrackedQueueConsumer(resource.cf_id, dispatchWorkerName);
+              await removeQueueConsumer(
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
+                resource.cf_id,
+                dispatchWorkerName,
+              );
+            }
             await deleteTrackedRouting(
               `queue:${getProjectQueueName(projectId, previousQueue.name)}`,
             );
@@ -3136,6 +3190,14 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         const dispatchWorkerName = context.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
         const queueProxyToken = workerBindings.find((b) => b.name === '__VOID_PROXY_TOKEN')?.text;
         const queueConflicts: Array<{ queue: string; ownerScript: string }> = [];
+        for (const q of manifest.queues ?? []) {
+          const queueBinding = workerBindings.find(
+            (binding) => binding.type === 'queue' && binding.name === q.bindingName,
+          );
+          if (queueBinding?.queue_id) {
+            await snapshotTrackedQueueConsumer(queueBinding.queue_id, dispatchWorkerName);
+          }
+        }
         const consumerOutcomes = await Promise.all(
           (manifest.queues ?? []).map(async (q) => {
             const queueBinding = workerBindings.find(
@@ -3191,8 +3253,21 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           );
         }
         const desiredQueueNames = new Set((manifest.queues ?? []).map((queue) => queue.name));
+        const projectResources = await getProjectResources(context.get('db'), projectId);
         for (const previousQueue of previousManifest?.queues ?? []) {
           if (!desiredQueueNames.has(previousQueue.name)) {
+            const resource = projectResources.find(
+              (entry) => entry.type === 'queue' && entry.binding_name === previousQueue.name,
+            );
+            if (resource) {
+              await snapshotTrackedQueueConsumer(resource.cf_id, dispatchWorkerName);
+              await removeQueueConsumer(
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
+                resource.cf_id,
+                dispatchWorkerName,
+              );
+            }
             await deleteTrackedRouting(
               `queue:${getProjectQueueName(projectId, previousQueue.name)}`,
             );
@@ -3605,6 +3680,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         const failedManifest = manifest!;
         const failedWorkerName = workerName!;
         const failedDispatchNamespace = dispatchNamespace!;
+
+        if (!cutoverCommitted) {
+          await restoreTrackedQueueConsumers().catch((e) =>
+            logger.error('catch', 'queue_consumer_rollback_failed', e),
+          );
+        }
 
         // SUPERSEDED is thrown only inside the go-live tx (by
         // `assertBoundBuildStillActive`), so the message alone identifies it.

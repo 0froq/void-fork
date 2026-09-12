@@ -52,7 +52,11 @@ import { encryptProjectSecret, decryptProjectSecret } from '../project-secrets.t
 import {
   CloudflareApiError,
   InvalidHyperdriveConnectionStringError,
+  addQueueConsumer,
   getDispatchWorkerProxyToken,
+  removeQueueConsumer,
+  restoreQueueConsumer,
+  snapshotQueueConsumer,
 } from '../provisioning/cloudflare-api.ts';
 import { buildRoutingJson, buildStaticRoutingJson, computeDispatchLimits } from '../routing.ts';
 import { tokenizeSql } from '../sql/tokenize.ts';
@@ -1024,6 +1028,72 @@ const app = new Hono<ApiEnv>()
           const targetQueueNames = new Set((manifest?.queues ?? []).map((q) => q.name));
           for (const name of targetQueueNames) {
             sweepQueueNames.add(name);
+          }
+          const queueResources = await getProjectResources(txDb, projectId);
+          const dispatchWorkerName = context.env.DISPATCH_WORKER_NAME ?? 'void-dispatch';
+          const queueResourceByName = new Map(
+            queueResources
+              .filter((resource) => resource.type === 'queue')
+              .map((resource) => [resource.binding_name, resource] as const),
+          );
+          for (const name of sweepQueueNames) {
+            const resource = queueResourceByName.get(name);
+            if (!resource) {
+              if (targetQueueNames.has(name)) {
+                throw new RollbackError(400, `target queue resource is missing: ${name}`);
+              }
+              continue;
+            }
+            const previousConsumer = await snapshotQueueConsumer(
+              context.env.CF_ACCOUNT_ID,
+              context.env.CF_API_TOKEN,
+              resource.cf_id,
+              dispatchWorkerName,
+            );
+            externalUndo.push(() =>
+              restoreQueueConsumer(
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
+                resource.cf_id,
+                dispatchWorkerName,
+                previousConsumer,
+              ),
+            );
+            const targetQueue = manifest?.queues?.find((queue) => queue.name === name);
+            if (targetQueue) {
+              const consumer = await addQueueConsumer(
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
+                resource.cf_id,
+                dispatchWorkerName,
+                {
+                  ...(targetQueue.maxBatchSize != null && {
+                    batch_size: targetQueue.maxBatchSize,
+                  }),
+                  ...(targetQueue.maxBatchTimeout != null && {
+                    max_wait_time_ms: targetQueue.maxBatchTimeout * 1000,
+                  }),
+                  ...(targetQueue.maxRetries != null && {
+                    max_retries: targetQueue.maxRetries,
+                  }),
+                  ...(targetQueue.retryDelay != null && {
+                    retry_delay: targetQueue.retryDelay,
+                  }),
+                },
+              );
+              if (consumer.status === 'conflict') {
+                throw new Error(
+                  `queue consumer conflict: ${name} owned by ${consumer.ownerScript}`,
+                );
+              }
+            } else {
+              await removeQueueConsumer(
+                context.env.CF_ACCOUNT_ID,
+                context.env.CF_API_TOKEN,
+                resource.cf_id,
+                dispatchWorkerName,
+              );
+            }
           }
           if (manifest?.queues?.length) {
             for (const q of manifest.queues) {

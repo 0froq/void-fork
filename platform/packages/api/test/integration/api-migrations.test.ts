@@ -4960,12 +4960,12 @@ describe('POST /projects/:id/migrations/rename', () => {
     );
     expect(rollbackRes.status).toBe(200);
 
-    // Rollback sees `currentActive.manifest.schedules` non-empty and
-    // target's manifest with no schedules, so it calls `/clear`
-    // regardless of the stale KV `hasCrons: false`.
-    expect(doCalls).toHaveLength(1);
-    expect(doCalls[0]!.url).toBe('/clear');
-    expect(doCalls[0]!.method).toBe('POST');
+    // Rollback snapshots the scheduler for compensation, then sees
+    // `currentActive.manifest.schedules` non-empty and the target's
+    // manifest with no schedules, so it calls `/clear` regardless of
+    // the stale KV `hasCrons: false`.
+    expect(doCalls.map((call) => call.url)).toEqual(['/snapshot', '/clear']);
+    expect(doCalls[1]!.method).toBe('POST');
   });
 
   it('rollback queue sweep unions manifests from activated deployments and deletes historical orphans', async () => {
@@ -4985,6 +4985,13 @@ describe('POST /projects/:id/migrations/rename', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'r15f1-queue-orphan');
     await insertD1Resource(env.db, project.id);
+    await env.db.insert(resources).values({
+      id: `res_${project.id}_q3`,
+      project_id: project.id,
+      type: 'queue',
+      cf_id: 'cf-q3',
+      binding_name: 'q3',
+    });
 
     // Queue names come from deployment manifests, not the resources
     // table. q1 must be attached to a deployment that was once `live`
@@ -5084,13 +5091,10 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(q1Entry).toBeNull();
   });
 
-  it('rollback queue sweep preserves queues owned by in-flight deploys', async () => {
-    // The sweep's candidate set unions manifests from deployments with
-    // `deployed_at IS NOT NULL`. An in-flight deploy D has
-    // `deployed_at = null` until its `setActiveDeployment` commits, so
-    // its manifest is excluded and its pre-staged KV writes survive —
-    // otherwise a concurrent rollback would nuke q4's KV route mid-deploy
-    // and break D's cutover once it finishes.
+  it('rollback rejects while a queue deployment is in flight', async () => {
+    // Rollback must not race an in-flight deployment. Rejecting before
+    // any cutover write protects both the current active routes and the
+    // in-flight deployment's pre-staged queue route.
     //
     // Scenario: rollback A→B with an in-flight D sitting in status
     // `uploading` that has pre-staged q4 into resources + KV. Assert
@@ -5178,20 +5182,18 @@ describe('POST /projects/:id/migrations/rename', () => {
       }),
       env,
     );
-    expect(rollbackRes.status).toBe(200);
+    expect(rollbackRes.status).toBe(409);
 
-    // q1 — A's queue. A was live, so the manifest-union sweep sees
-    // q1, it's not in target B, and the delete fires. Expected.
+    // No rollback writes occur: A remains routed, B is not staged by
+    // rollback, and D's own pre-staged route remains intact.
     const q1Entry = await env.ROUTING.get(queueKey('q1'));
-    expect(q1Entry).toBeNull();
+    expect(q1Entry).not.toBeNull();
 
-    // q5 — target B's queue. Written during the rollback cutover.
+    // q5 — target B's queue. The rejected rollback never writes it.
     const q5Entry = await env.ROUTING.get(queueKey('q5'));
-    expect(q5Entry).not.toBeNull();
+    expect(q5Entry).toBeNull();
 
-    // q4 — owned by in-flight D. D has `deployed_at = null`, so the
-    // sweep excludes its manifest and the KV route SURVIVES.
-    // Load-bearing assertion for the in-flight exclusion.
+    // q4 — owned by in-flight D. The active-deploy guard leaves it intact.
     const q4Entry = await env.ROUTING.get(queueKey('q4'));
     expect(q4Entry).not.toBeNull();
   });
@@ -5210,6 +5212,13 @@ describe('POST /projects/:id/migrations/rename', () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'r17f1-terminal-failed');
     await insertD1Resource(env.db, project.id);
+    await env.db.insert(resources).values({
+      id: `res_${project.id}_q2`,
+      project_id: project.id,
+      type: 'queue',
+      cf_id: 'cf-q2',
+      binding_name: 'q2',
+    });
 
     // currentActive A binds q1.
     const depA = await createTestDeployment(env.db, project.id, 'live');
@@ -5296,12 +5305,9 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(await env.ROUTING.get(queueKey('q3'))).toBeNull();
   });
 
-  it('rollback queue sweep preserves in-flight deploys even when terminal-failed are unioned in', async () => {
-    // The terminal-failed union MUST NOT regress the in-flight exclusion.
-    // `getTerminalFailedDeployments` filters `status IN (failed, canceled)`,
-    // so an in-flight deploy D with status `uploading` (or pending/
-    // migrating/etc.) stays out of the candidate set and its KV writes
-    // survive.
+  it('rollback remains blocked by in-flight deploys when terminal failures exist', async () => {
+    // Terminal-failed deployment history must not weaken the active-deploy
+    // guard. The request is rejected before changing A's or D's routes.
     //
     // Scenario: currentActive A binds q1, target B binds q2, in-flight D
     // (status=uploading, `deployed_at=null`) binds q4 and has pre-seeded
@@ -5376,10 +5382,10 @@ describe('POST /projects/:id/migrations/rename', () => {
       }),
       env,
     );
-    expect(rollbackRes.status).toBe(200);
+    expect(rollbackRes.status).toBe(409);
 
-    // q1 — A's queue, swept as expected.
-    expect(await env.ROUTING.get(queueKey('q1'))).toBeNull();
+    // q1 remains on A because the rollback never starts its cutover.
+    expect(await env.ROUTING.get(queueKey('q1'))).not.toBeNull();
 
     // q4 — in-flight D's queue. Neither activated nor terminal-failed,
     // so excluded from the sweep candidate set. MUST survive.
@@ -5495,13 +5501,11 @@ describe('POST /projects/:id/migrations/rename', () => {
     );
     expect(rollbackRes.status).toBe(200);
 
-    // Load-bearing: `/clear` fires even though neither manifest lists
-    // schedules — idempotent against an already-empty DO, healing
-    // against a stale DO carrying ghost schedules from a partial prior
-    // cutover.
-    expect(doCalls).toHaveLength(1);
-    expect(doCalls[0]!.url).toBe('/clear');
-    expect(doCalls[0]!.method).toBe('POST');
+    // Load-bearing: after taking a compensation snapshot, `/clear` fires
+    // even though neither manifest lists schedules — idempotent against
+    // an already-empty DO and healing stale schedules from a partial cutover.
+    expect(doCalls.map((call) => call.url)).toEqual(['/snapshot', '/clear']);
+    expect(doCalls[1]!.method).toBe('POST');
   });
 
   it('rollback destructive diff is rejected server-side without explicit override', async () => {
