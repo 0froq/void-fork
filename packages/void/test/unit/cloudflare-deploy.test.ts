@@ -15,6 +15,7 @@ import {
   DEPLOY_PASSTHROUGH_EXCLUDE_FIELDS,
   DEPLOY_WHOLE_OBJECT_PINNED_FIELDS,
   ensureCloudflareAuthSecret,
+  formatCloudflareActivationError,
   hashWranglerUploader,
   parseRootWranglerConfig,
   prepareCloudflareFrameworkArtifact,
@@ -102,6 +103,32 @@ const cleanExit: DeployWranglerRunResult = {
   error: null,
 };
 
+describe('Cloudflare activation diagnostics', () => {
+  it('reports readiness restoration outcomes without claiming uncertain traffic is unchanged', () => {
+    expect(
+      formatCloudflareActivationError({
+        ok: false,
+        reason: 'readiness-access-denied',
+        rollback: 'succeeded',
+      }),
+    ).toContain('traffic was restored to the previous version');
+    expect(
+      formatCloudflareActivationError({
+        ok: false,
+        reason: 'readiness-failed',
+        rollback: 'failed',
+      }),
+    ).toContain('Automatic traffic restoration failed');
+    expect(
+      formatCloudflareActivationError({
+        ok: false,
+        reason: 'readiness-failed',
+        rollback: 'unsafe',
+      }),
+    ).toContain('did not invoke the changed Wrangler binary');
+  });
+});
+
 /** No-schema (nothing-to-gate) env-insensitive facts. */
 const NO_SCHEMA_FACTS: SelfHostSchemaFacts = { hasSchema: false, requiredKeys: [], secretKeys: [] };
 
@@ -129,10 +156,11 @@ const srcEnvPublic = srcFileUrl('runtime', 'env-public.ts');
 const srcEnvHelpers = srcFileUrl('runtime', 'env-helpers.ts');
 
 /**
- * Wrangler's FULL credential env-var set, canonical names + deprecated `CF_*` aliases.
+ * Cloudflare credentials held by the parent, including Wrangler's canonical names +
+ * deprecated `CF_*` aliases and Void's readiness JWT.
  * Mirrors `WRANGLER_AUTH_CREDENTIAL_ENV_VARS` in deploy.ts. Every child that runs untrusted
  * project code (env-schema probes, `vite build`, `drizzle-kit generate`) must see NONE of
- * these; the wrangler runner must still see ALL of them.
+ * these; the Wrangler runner keeps only the credentials Wrangler itself needs.
  */
 const WRANGLER_AUTH_VARS = [
   'CLOUDFLARE_API_TOKEN',
@@ -146,9 +174,10 @@ const WRANGLER_AUTH_VARS = [
   'WRANGLER_R2_SQL_AUTH_TOKEN',
   'CLOUDFLARE_ACCESS_CLIENT_ID',
   'CLOUDFLARE_ACCESS_CLIENT_SECRET',
+  'CF_ACCESS_TOKEN',
 ];
 
-/** Set every wrangler credential on the parent for the duration of `run`, then restore. */
+/** Set every Cloudflare credential on the parent for the duration of `run`, then restore. */
 async function withWranglerCredentials(run: () => Promise<void>): Promise<void> {
   const saved: Record<string, string | undefined> = {};
   for (const name of WRANGLER_AUTH_VARS) {
@@ -1320,6 +1349,55 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
         'CF-Access-Client-Secret': 'service-secret',
       });
     } finally {
+      if (previousId === undefined) {
+        delete process.env.CF_ACCESS_CLIENT_ID;
+      } else {
+        process.env.CF_ACCESS_CLIENT_ID = previousId;
+      }
+      if (previousSecret === undefined) {
+        delete process.env.CF_ACCESS_CLIENT_SECRET;
+      } else {
+        process.env.CF_ACCESS_CLIENT_SECRET = previousSecret;
+      }
+    }
+  });
+
+  it('passes a short-lived Access user JWT to the guarded readiness probe', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'access-user-app' }),
+      'void.json': JSON.stringify({ inference: { appType: 'spa' } }),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
+      'dist/index.html': '<h1>Access</h1>',
+    });
+    const previousToken = process.env.CF_ACCESS_TOKEN;
+    const previousId = process.env.CF_ACCESS_CLIENT_ID;
+    const previousSecret = process.env.CF_ACCESS_CLIENT_SECRET;
+    delete process.env.CF_ACCESS_CLIENT_ID;
+    delete process.env.CF_ACCESS_CLIENT_SECRET;
+    process.env.CF_ACCESS_TOKEN = 'short-lived-user-jwt';
+    let readinessHeaders: Readonly<Record<string, string>> | undefined;
+    const { deps, exitCalls } = harness({
+      activateVersion: async (options) => {
+        readinessHeaders = options.readinessHeaders;
+        return {
+          ok: true,
+          versionId: '22222222-2222-4222-8222-222222222222',
+          previewUrl: 'https://preview.example.workers.dev',
+          previousVersionId: null,
+        };
+      },
+    });
+
+    try {
+      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      expect(exitCalls).toEqual([]);
+      expect(readinessHeaders).toEqual({ 'cf-access-token': 'short-lived-user-jwt' });
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.CF_ACCESS_TOKEN;
+      } else {
+        process.env.CF_ACCESS_TOKEN = previousToken;
+      }
       if (previousId === undefined) {
         delete process.env.CF_ACCESS_CLIENT_ID;
       } else {
@@ -7195,7 +7273,7 @@ describe('runCloudflareDeploy — wrangler credentials reach only the wrangler r
     }
   });
 
-  it('the wrangler runner env DOES still carry them (whoami / migrate / deploy need them)', async () => {
+  it('the wrangler runner keeps Wrangler auth but not Void readiness credentials', async () => {
     await withWranglerCredentials(async () => {
       // Run a deploy first so the fork's memoized provision module is loaded — the sync
       // `deployChildEnv` reads it, exactly as `createDeployWranglerRunner` does.
@@ -7205,7 +7283,11 @@ describe('runCloudflareDeploy — wrangler credentials reach only the wrangler r
 
       const runnerEnv = deployChildEnv('acc123', 'https://api.cloudflare.com/client/v4');
       for (const name of WRANGLER_AUTH_VARS) {
-        expect(runnerEnv[name]).toBe(`secret-${name}`);
+        if (name === 'CF_ACCESS_TOKEN') {
+          expect(runnerEnv[name]).toBeUndefined();
+        } else {
+          expect(runnerEnv[name]).toBe(`secret-${name}`);
+        }
       }
     });
   });

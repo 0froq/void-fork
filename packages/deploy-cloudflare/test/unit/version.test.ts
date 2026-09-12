@@ -206,7 +206,47 @@ describe('Cloudflare version activation', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('reports Cloudflare Access error 1050 without retrying or activating', async () => {
+  it('falls back from an Access-blocked preview alias to the stable Worker hostname', async () => {
+    const runWrangler = runner({
+      upload: ok(
+        `Worker Version ID: ${NEXT}\nVersion Preview Alias URL: https://void-ready-abc-my-worker.developer-platform-experience.workers.dev`,
+      ),
+    });
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('error code: 1050', { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ ready: true }));
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: fetcher,
+        sleep: async () => {},
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      versionId: NEXT,
+      previewUrl: 'https://my-worker.developer-platform-experience.workers.dev',
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      'https://my-worker.developer-platform-experience.workers.dev/__void/ready',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Cloudflare-Workers-Version-Overrides': `my-worker="${NEXT}"`,
+        }),
+      }),
+    );
+    expect(runWrangler.mock.calls[2]![0]).toEqual(
+      expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
+    );
+    expect(runWrangler.mock.calls[3]![0]).toContain(`${NEXT}@100`);
+  });
+
+  it('restores the prior deployment when Access blocks both readiness hostnames', async () => {
     const runWrangler = runner({
       upload: ok(
         `Worker Version ID: ${NEXT}\nVersion Preview Alias URL: https://void-ready-abc-my-worker.developer-platform-experience.workers.dev`,
@@ -223,8 +263,40 @@ describe('Cloudflare version activation', () => {
         fetch: fetcher,
         sleep: async () => {},
       }),
-    ).resolves.toMatchObject({ ok: false, reason: 'readiness-access-denied' });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'readiness-access-denied',
+      rollback: 'succeeded',
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(runWrangler.mock.calls[2]![0]).toEqual(
+      expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
+    );
+    expect(runWrangler.mock.calls[3]![0]).toContain(`${CURRENT}@100`);
+    expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
+  });
+
+  it('leaves a first uploaded version inactive when its preview alias is Access-blocked', async () => {
+    const runWrangler = runner({
+      status: { stdout: '', stderr: 'The Worker first has no deployments.', status: 1 },
+      upload: ok(
+        `Worker Version ID: ${NEXT}\nVersion Preview Alias URL: https://void-ready-abc-first.developer-platform-experience.workers.dev`,
+      ),
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'first',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => new Response('error code: 1050', { status: 403 }),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'readiness-access-denied',
+      rollback: 'not-needed',
+    });
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'deploy')).toBe(false);
   });
 

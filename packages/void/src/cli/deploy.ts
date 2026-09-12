@@ -505,8 +505,10 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
  * We scrub it on the CHILD env rather than mutating `process.env`: deleting it
  * from the parent also breaks interactive expired-token re-auth, which reads
  * `cfAccessHeaders(process.env)` / the cloudflared pair-guard AFTER the build
- * step. Only the service-token pair is scrubbed; the cloudflared
- * `CF_ACCESS_TOKEN` JWT (dev path) is left untouched.
+ * step. This base helper removes the service-token pair; Cloudflare deploy's
+ * `provisionEnv` removes the short-lived `CF_ACCESS_TOKEN` JWT from Wrangler,
+ * while `scrubWranglerAuthCredentials` removes it from every child that
+ * evaluates project code.
  *
  * `localBinRoot` is an explicit OPT-IN, not a default. Build commands are run
  * through a shell (`execSync`) and a user-configured `inference.build` (e.g.
@@ -1340,7 +1342,8 @@ function deployPointerPath(root: string): string {
 }
 
 /**
- * Wrangler 4.107's FULL credential env-var set, verified against
+ * Cloudflare credential env vars that must not reach untrusted project code. This includes
+ * Wrangler 4.107's full authentication set, verified against
  * `wrangler-dist/cli.js`. It covers every env var wrangler reads to authenticate —
  * the API-client auth inputs (`apiToken`/`apiKey`/`apiEmail`/`userServiceKey`) plus
  * the `getEnvironmentVariableFactory` auth tokens — each canonical name AND its
@@ -1353,6 +1356,7 @@ function deployPointerPath(root: string): string {
  *   - R2 SQL auth token:    `WRANGLER_R2_SQL_AUTH_TOKEN` (a Bearer credential wrangler
  *     reads via `getEnvironmentVariableFactory`, falling back to `CLOUDFLARE_API_TOKEN`)
  *   - Access service token: `CLOUDFLARE_ACCESS_CLIENT_ID` / `CLOUDFLARE_ACCESS_CLIENT_SECRET`
+ *   - Readiness user JWT:   `CF_ACCESS_TOKEN` (Void-only; Wrangler never receives it)
  * Scrubbed from EVERY child that runs untrusted project code — the env-schema probes, the
  * `vite build`, and `drizzle-kit generate` (which loads the user's schema). None of them
  * authenticates against Cloudflare, so a leaking `env.ts` / build plugin / schema module can
@@ -1373,6 +1377,7 @@ const WRANGLER_AUTH_CREDENTIAL_ENV_VARS = [
   'WRANGLER_R2_SQL_AUTH_TOKEN',
   'CLOUDFLARE_ACCESS_CLIENT_ID',
   'CLOUDFLARE_ACCESS_CLIENT_SECRET',
+  'CF_ACCESS_TOKEN',
 ];
 
 /**
@@ -4989,7 +4994,7 @@ function discoverRootWranglerConfig(root: string): string {
   return join(root, 'wrangler.jsonc');
 }
 
-function formatCloudflareActivationError(
+export function formatCloudflareActivationError(
   result: Exclude<Awaited<ReturnType<typeof activateCloudflareVersion>>, { ok: true }>,
 ): string {
   const status = result.status === undefined ? '' : ` (exit ${String(result.status)})`;
@@ -5035,14 +5040,14 @@ function formatCloudflareActivationError(
     case 'readiness-failed':
       return [
         'deploy: the uploaded Worker Version did not pass /__void/ready.',
-        'The failed version was left inactive for inspection; production traffic is unchanged.',
+        formatCloudflareReadinessRestoration(result),
       ].join('\n');
     case 'readiness-access-denied':
       return [
         'deploy: Cloudflare Access blocked the uploaded Worker Version readiness probe.',
-        'Set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to a service token admitted by',
-        "this Worker's Access policy, then retry. The version remains inactive and production",
-        'traffic is unchanged.',
+        'For CI, set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to an admitted service token.',
+        'For a local deploy, set CF_ACCESS_TOKEN to a short-lived user JWT from cloudflared.',
+        `Then retry. ${formatCloudflareReadinessRestoration(result)}`,
       ].join('\n');
     case 'bootstrap-failed':
       return `deploy: Cloudflare could not bootstrap the first Worker deployment${status}.${cloudflareCode}`;
@@ -5060,9 +5065,10 @@ function formatCloudflareActivationError(
     case 'bootstrap-readiness-access-denied':
       return [
         'deploy: Cloudflare Access blocked the first Worker deployment readiness probe.',
-        'Set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to a service token admitted by',
-        "this Worker's Access policy, then retry. Cloudflare requires the first deployment",
-        'to be non-versioned, so the new Worker is already active behind Access.',
+        'For CI, set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to an admitted service token;',
+        'for a local deploy, set CF_ACCESS_TOKEN to a short-lived user JWT from cloudflared.',
+        'Then retry. Cloudflare requires the first deployment to be non-versioned, so the new',
+        'Worker is already active behind Access.',
       ].join('\n');
     case 'activation-failed':
       return `deploy: the ready Worker Version could not be activated${status}; production traffic is unchanged.`;
@@ -5078,11 +5084,29 @@ function formatCloudflareActivationError(
   }
 }
 
-/** Capture only the complete service-token pair; never forward an unrelated Access user JWT. */
+function formatCloudflareReadinessRestoration(
+  result: Exclude<Awaited<ReturnType<typeof activateCloudflareVersion>>, { ok: true }>,
+): string {
+  switch (result.rollback) {
+    case 'succeeded':
+      return 'The failed version remains inactive, and traffic was restored to the previous version.';
+    case 'failed':
+      return 'Automatic traffic restoration failed; inspect `void project status` immediately.';
+    case 'unsafe':
+      return 'Void did not invoke the changed Wrangler binary to restore traffic; reinstall Wrangler from a trusted lockfile and inspect `void project status` immediately.';
+    case 'unavailable':
+      return 'No previous version was available to restore; inspect `void project status` immediately.';
+    default:
+      return 'The failed version remains inactive for inspection; production traffic is unchanged.';
+  }
+}
+
+/** Capture the Access credential used only by the guarded Worker readiness probe. */
 function cloudflareWorkerReadinessHeaders(): Record<string, string> {
   return cfAccessHeaders({
     CF_ACCESS_CLIENT_ID: process.env.CF_ACCESS_CLIENT_ID,
     CF_ACCESS_CLIENT_SECRET: process.env.CF_ACCESS_CLIENT_SECRET,
+    CF_ACCESS_TOKEN: process.env.CF_ACCESS_TOKEN,
   });
 }
 

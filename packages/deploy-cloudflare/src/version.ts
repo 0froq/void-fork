@@ -83,7 +83,7 @@ export async function activateCloudflareVersion(options: {
   configPath?: string;
   /** Override only the asset directory for this upload, leaving the persisted config intact. */
   assetsDirectoryOverride?: string;
-  /** Optional Cloudflare Access service-token headers used only by the readiness probe. */
+  /** Optional Cloudflare Access headers used only by the readiness probe. */
   readinessHeaders?: Readonly<Record<string, string>>;
   /** Account workers.dev subdomain used when this Worker cannot expose version preview URLs. */
   workersDevSubdomain?: string;
@@ -202,7 +202,7 @@ export async function activateCloudflareVersion(options: {
     stagedVersionOverride = true;
   }
 
-  const ready = await probeReadiness(
+  let ready = await probeReadiness(
     `${readinessUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
     options.readinessHeaders,
@@ -211,6 +211,58 @@ export async function activateCloudflareVersion(options: {
     options.sleep ?? defaultSleep,
     options.readinessAttempts ?? 6,
   );
+
+  // Account-wide Access default-deny commonly blocks Wrangler's generated preview alias even
+  // when the stable `<worker>.<account>.workers.dev` destination has an application admitting the
+  // operator or a service token. The preview response gives us the account subdomain, so preserve
+  // the same no-traffic readiness invariant by staging the uploaded version at 0% and selecting it
+  // explicitly through the stable, policy-covered hostname. This requires a prior active version
+  // whose traffic can remain untouched while the new version is staged; a truly empty first
+  // deployment has no safe zero-percent fallback.
+  if (ready === 'access-denied' && !stagedVersionOverride && previous.versionId !== null) {
+    const stableReadinessUrl = workersDevReadinessUrl(
+      options.workerName,
+      options.workersDevSubdomain ?? extractWorkersDevSubdomain(readinessUrl),
+    );
+    if (stableReadinessUrl && stableReadinessUrl !== readinessUrl) {
+      if (!options.verifyUploader()) {
+        return {
+          ok: false,
+          reason: 'uploader-changed',
+          versionId,
+          previousVersionId: previous.versionId,
+          rollback: 'not-needed',
+        };
+      }
+      const staged = await deployVersionPercentages(
+        options,
+        commonArgs,
+        [`${previous.versionId}@100`, `${versionId}@0`],
+        options.message,
+      );
+      if (!isCleanCommandExit(staged)) {
+        return {
+          ok: false,
+          reason: 'readiness-staging-failed',
+          status: staged.status,
+          versionId,
+          previousVersionId: previous.versionId,
+          rollback: 'not-needed',
+        };
+      }
+      readinessUrl = stableReadinessUrl;
+      stagedVersionOverride = true;
+      ready = await probeReadiness(
+        `${readinessUrl.replace(/\/$/, '')}/__void/ready`,
+        options.workerName,
+        options.readinessHeaders,
+        versionId,
+        options.fetch ?? globalThis.fetch,
+        options.sleep ?? defaultSleep,
+        options.readinessAttempts ?? 6,
+      );
+    }
+  }
   if (ready !== 'ready') {
     return {
       ok: false,
@@ -479,7 +531,7 @@ async function probeReadiness(
   return 'failed';
 }
 
-/** Never forward service-token headers to a hostname that cannot be this Worker. */
+/** Never forward Access headers to a hostname that cannot be this Worker. */
 function guardedReadinessHeaders(
   url: string,
   workerName: string,
