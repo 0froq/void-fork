@@ -997,7 +997,7 @@ describe('writeProvisionedWranglerConfig', () => {
     expect(readRaw('wrangler.jsonc')).toBe(dup);
   });
 
-  it('prunes stale Void-owned framework queues while preserving user queue entries', () => {
+  it('never infers queue ownership from a conventional QUEUE_* binding name', () => {
     setup(
       'wrangler.jsonc',
       `{
@@ -1018,23 +1018,47 @@ describe('writeProvisionedWranglerConfig', () => {
       queues: { producers: [], consumers: [], reconcileVoidOwned: true },
     });
 
-    expect(result.modified).toBe(true);
+    expect(result.modified).toBe(false);
     expect(parseRaw('wrangler.jsonc').queues).toEqual({
-      producers: [{ binding: 'CUSTOM', queue: 'custom' }],
-      consumers: [{ queue: 'custom', max_batch_size: 10 }],
+      producers: [
+        { binding: 'QUEUE_OLD', queue: 'old' },
+        { binding: 'CUSTOM', queue: 'custom' },
+      ],
+      consumers: [
+        { queue: 'old', max_batch_size: 5 },
+        { queue: 'custom', max_batch_size: 10 },
+      ],
     });
   });
 
+  it('prunes only queue entries that Void explicitly recorded as managed', () => {
+    setup('wrangler.jsonc', '{}');
+    writeProvisionedWranglerConfig(tmpDir, {
+      queues: {
+        producers: [{ binding: 'QUEUE_OLD', queue: 'old' }],
+        consumers: [{ queue: 'old', max_batch_size: 5 }],
+        reconcileVoidOwned: true,
+      },
+    });
+    expect(readRaw('wrangler.jsonc')).toContain('// void:managed-queues:v1:');
+
+    writeProvisionedWranglerConfig(tmpDir, {
+      queues: { producers: [], consumers: [], reconcileVoidOwned: true },
+    });
+
+    expect(parseRaw('wrangler.jsonc').queues).toEqual({ producers: [], consumers: [] });
+    expect(readRaw('wrangler.jsonc')).not.toContain('// void:managed-queues:v1:');
+  });
+
   it('reconciles a renamed framework queue without retaining the old binding', () => {
-    setup(
-      'wrangler.jsonc',
-      JSON.stringify({
-        queues: {
-          producers: [{ binding: 'QUEUE_OLD', queue: 'old' }],
-          consumers: [{ queue: 'old' }],
-        },
-      }),
-    );
+    setup('wrangler.jsonc', '{}');
+    writeProvisionedWranglerConfig(tmpDir, {
+      queues: {
+        producers: [{ binding: 'QUEUE_OLD', queue: 'old' }],
+        consumers: [{ queue: 'old' }],
+        reconcileVoidOwned: true,
+      },
+    });
 
     writeProvisionedWranglerConfig(tmpDir, {
       queues: {

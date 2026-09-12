@@ -17,7 +17,6 @@ import { join, normalize } from 'pathslash';
 import type { VoidConfig } from '../config.ts';
 import type { DurableObjectModule } from '../durable/scan.ts';
 import type { InferredBindings } from '../inference/walk.ts';
-import { deriveQueueBindingName } from '../queues/scan.ts';
 import type { WebSocketRouteDefinition } from '../router/websocket.ts';
 import {
   DEFAULT_SANDBOX_BINDING,
@@ -32,6 +31,7 @@ const UTF8_BOM = '﻿';
 const NODEJS_ALS_FLAG = 'nodejs_als';
 const NODEJS_COMPAT_FLAG = 'nodejs_compat';
 const VOID_CONFIG_FILE = 'void.json';
+const MANAGED_QUEUES_MARKER = /^\s*\/\/ void:managed-queues:v1:([A-Za-z0-9_-]+)\s*$/m;
 export const DEFAULT_LIVE_BINDING = 'VOID_LIVE';
 export const DEFAULT_LIVE_CLASS = 'VoidLiveStreamDurableObject';
 export const LIVE_MIGRATION_TAG = 'live-v1';
@@ -931,10 +931,62 @@ export type ProvisionedWranglerPatch = {
   queues?: {
     producers?: Array<WranglerQueueProducer>;
     consumers?: Array<WranglerQueueConsumer>;
-    /** Remove stale entries previously generated from framework queue files. */
+    /** Remove only stale entries carrying explicit Void-managed provenance. */
     reconcileVoidOwned?: boolean;
   };
 };
+
+type ManagedQueueProvenance = {
+  producerBindings: Array<string>;
+  consumerQueues: Array<string>;
+};
+
+function readManagedQueueProvenance(text: string): ManagedQueueProvenance {
+  const encoded = MANAGED_QUEUES_MARKER.exec(text)?.[1];
+  if (!encoded) {
+    return { producerBindings: [], consumerQueues: [] };
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as unknown;
+    if (!isRecord(parsed)) {
+      return { producerBindings: [], consumerQueues: [] };
+    }
+    return {
+      producerBindings: Array.isArray(parsed.producerBindings)
+        ? parsed.producerBindings.filter((value): value is string => typeof value === 'string')
+        : [],
+      consumerQueues: Array.isArray(parsed.consumerQueues)
+        ? parsed.consumerQueues.filter((value): value is string => typeof value === 'string')
+        : [],
+    };
+  } catch {
+    // A malformed marker proves no ownership. Fail safe by retaining every entry.
+    return { producerBindings: [], consumerQueues: [] };
+  }
+}
+
+function writeManagedQueueProvenance(text: string, provenance: ManagedQueueProvenance): string {
+  const normalized: ManagedQueueProvenance = {
+    producerBindings: [...new Set(provenance.producerBindings)].sort(),
+    consumerQueues: [...new Set(provenance.consumerQueues)].sort(),
+  };
+  const existing = MANAGED_QUEUES_MARKER.exec(text);
+  if (normalized.producerBindings.length === 0 && normalized.consumerQueues.length === 0) {
+    if (!existing) {
+      return text;
+    }
+    const start = existing.index;
+    const end = start + existing[0].length;
+    const trailingNewline = text.slice(end).match(/^(\r?\n)/)?.[1] ?? '';
+    return text.slice(0, start) + text.slice(end + trailingNewline.length);
+  }
+  const encoded = Buffer.from(JSON.stringify(normalized), 'utf8').toString('base64url');
+  const marker = `// void:managed-queues:v1:${encoded}`;
+  if (existing) {
+    return text.slice(0, existing.index) + marker + text.slice(existing.index + existing[0].length);
+  }
+  return `${marker}${text.includes('\r\n') ? '\r\n' : '\n'}${text}`;
+}
 
 export type WriteProvisionedWranglerResult = {
   /** Absolute path of the config file that was operated on. */
@@ -1300,6 +1352,10 @@ export function writeProvisionedWranglerConfig(
   //     so the queue name is the identity.
   // Framework self-host only (see the note on ProvisionedWranglerPatch); a native
   // app would duplicate the build's scanner queues.
+  const reconcileManagedQueues = patch.queues?.reconcileVoidOwned === true;
+  const managedQueueProvenance = readManagedQueueProvenance(text);
+  const managedProducerBindings = new Set(managedQueueProvenance.producerBindings);
+  const managedConsumerQueues = new Set(managedQueueProvenance.consumerQueues);
   const upsertQueueEntries = (
     section: 'producers' | 'consumers',
     entries: Array<Record<string, unknown>> | undefined,
@@ -1430,6 +1486,13 @@ export function writeProvisionedWranglerConfig(
           isArrayInsertion: true,
         });
         currentList.push(entry);
+        if (reconcileManagedQueues) {
+          if (section === 'producers' && typeof entry.binding === 'string') {
+            managedProducerBindings.add(entry.binding);
+          } else if (section === 'consumers' && typeof entry.queue === 'string') {
+            managedConsumerQueues.add(entry.queue);
+          }
+        }
       }
     }
   };
@@ -1443,18 +1506,16 @@ export function writeProvisionedWranglerConfig(
       const desiredBindings = new Set(
         (patch.queues.producers ?? []).map((producer) => producer.binding),
       );
-      const staleQueueNames = new Set<string>();
       const staleProducerIndexes: Array<number> = [];
       for (let index = 0; index < producers.length; index++) {
         const producer = producers[index];
         if (
-          typeof producer.queue === 'string' &&
           typeof producer.binding === 'string' &&
-          producer.binding === deriveQueueBindingName(producer.queue) &&
+          managedProducerBindings.has(producer.binding) &&
           !desiredBindings.has(producer.binding)
         ) {
-          staleQueueNames.add(producer.queue);
           staleProducerIndexes.push(index);
+          managedProducerBindings.delete(producer.binding);
         }
       }
       for (const index of staleProducerIndexes.reverse()) {
@@ -1464,9 +1525,20 @@ export function writeProvisionedWranglerConfig(
       const consumers = Array.isArray(queues?.consumers)
         ? (queues.consumers as Array<Record<string, unknown>>)
         : [];
-      const staleConsumerIndexes = consumers.flatMap((consumer, index) =>
-        typeof consumer.queue === 'string' && staleQueueNames.has(consumer.queue) ? [index] : [],
+      const desiredConsumerQueues = new Set(
+        (patch.queues.consumers ?? []).map((consumer) => consumer.queue),
       );
+      const staleConsumerIndexes = consumers.flatMap((consumer, index) => {
+        if (
+          typeof consumer.queue === 'string' &&
+          managedConsumerQueues.has(consumer.queue) &&
+          !desiredConsumerQueues.has(consumer.queue)
+        ) {
+          managedConsumerQueues.delete(consumer.queue);
+          return [index];
+        }
+        return [];
+      });
       for (const index of staleConsumerIndexes.reverse()) {
         set(['queues', 'consumers', index], undefined);
       }
@@ -1511,6 +1583,26 @@ export function writeProvisionedWranglerConfig(
         `(${droppedComment}); the writer refuses to corrupt the file — simplify the ` +
         `surrounding structure and retry.`,
     );
+  }
+
+  if (reconcileManagedQueues) {
+    const finalQueues = assertObjectContainer(parseJsonc(text).queues, 'queues');
+    const finalProducerBindings = new Set(
+      (Array.isArray(finalQueues?.producers) ? finalQueues.producers : []).flatMap((entry) =>
+        isRecord(entry) && typeof entry.binding === 'string' ? [entry.binding] : [],
+      ),
+    );
+    const finalConsumerQueues = new Set(
+      (Array.isArray(finalQueues?.consumers) ? finalQueues.consumers : []).flatMap((entry) =>
+        isRecord(entry) && typeof entry.queue === 'string' ? [entry.queue] : [],
+      ),
+    );
+    text = writeManagedQueueProvenance(text, {
+      producerBindings: [...managedProducerBindings].filter((binding) =>
+        finalProducerBindings.has(binding),
+      ),
+      consumerQueues: [...managedConsumerQueues].filter((queue) => finalConsumerQueues.has(queue)),
+    });
   }
 
   const finalText = hasBom ? `${UTF8_BOM}${text}` : text;
