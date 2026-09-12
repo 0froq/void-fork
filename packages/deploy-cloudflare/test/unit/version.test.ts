@@ -1,10 +1,15 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'pathslash';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import {
   activateCloudflareVersion,
+  deployCloudflareVersionTriggers,
   encodeCloudflareVersionMessage,
   extractWorkersDevSubdomain,
   normalizeWorkersDevSubdomain,
   parseCloudflareVersionMessage,
+  readCloudflareTriggerConfig,
   type CloudflareCommandResult,
 } from '../../src/index.ts';
 
@@ -56,6 +61,7 @@ function runner(overrides?: {
               annotations: {
                 'workers/message': encodeCloudflareVersionMessage([], {
                   workers_dev: true,
+                  preview_urls: true,
                   routes: [],
                   crons: ['0 * * * *'],
                   queueConsumers: [],
@@ -81,6 +87,36 @@ function runner(overrides?: {
 }
 
 describe('Cloudflare version activation', () => {
+  it('snapshots and restores effective workers.dev and preview URL defaults', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-version-defaults-'));
+    const configPath = join(directory, 'wrangler.json');
+    try {
+      writeFileSync(configPath, '{"name":"app"}\n');
+      const triggerConfig = readCloudflareTriggerConfig(configPath);
+      expect(triggerConfig.workers_dev).toBe(true);
+      expect(triggerConfig.preview_urls).toBe(true);
+
+      writeFileSync(configPath, '{"name":"app","workers_dev":false,"preview_urls":false}\n');
+      let applied: Record<string, unknown> | undefined;
+      await deployCloudflareVersionTriggers({
+        runWrangler: async (args) => {
+          const configIndex = args.indexOf('-c');
+          applied = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf-8')) as Record<
+            string,
+            unknown
+          >;
+          return ok();
+        },
+        workerName: 'app',
+        configPath,
+        triggerConfig,
+      });
+      expect(applied).toMatchObject({ workers_dev: true, preview_urls: true });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('normalizes and extracts workers.dev account subdomains', () => {
     expect(normalizeWorkersDevSubdomain('Developer-Platform-Experience.workers.dev/')).toBe(
       'developer-platform-experience',

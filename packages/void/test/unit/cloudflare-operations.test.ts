@@ -197,10 +197,11 @@ describe('Cloudflare version operations', () => {
       createdAt: null,
       message: null,
       metadata: {
-        schema: 1,
+        schema: 2,
         migrations: ['0000_init.sql'],
         triggerConfig: {
           workers_dev: true,
+          preview_urls: true,
           routes: [],
           crons: ['0 * * * *'],
           queueConsumers: [],
@@ -210,7 +211,7 @@ describe('Cloudflare version operations', () => {
     });
     expect(runner.mock.calls[0][0]).toContain('v1@100');
     expect(runner.mock.calls[0][0]).toContain(
-      'void:{"schema":1,"migrations":["0000_init.sql"],"triggerConfig":{"workers_dev":true,"routes":[],"crons":["0 * * * *"],"queueConsumers":[],"workflows":[]}}',
+      'void:{"schema":2,"migrations":["0000_init.sql"],"triggerConfig":{"workers_dev":true,"preview_urls":true,"routes":[],"crons":["0 * * * *"],"queueConsumers":[],"workflows":[]}}',
     );
     expect(runner.mock.calls[1][0].slice(0, 2)).toEqual(['triggers', 'deploy']);
     expect(runner).toHaveBeenCalledTimes(2);
@@ -225,6 +226,8 @@ describe('Cloudflare version operations', () => {
       return ok();
     });
     const triggerConfig = {
+      workers_dev: true,
+      preview_urls: true,
       routes: [],
       crons: [],
       queueConsumers: [],
@@ -238,13 +241,13 @@ describe('Cloudflare version operations', () => {
           id: 'v1',
           createdAt: null,
           message: null,
-          metadata: { schema: 1, migrations: [], triggerConfig },
+          metadata: { schema: 2, migrations: [], triggerConfig },
         },
         {
           id: 'v2',
           createdAt: null,
           message: null,
-          metadata: { schema: 1, migrations: [], triggerConfig },
+          metadata: { schema: 2, migrations: [], triggerConfig },
         },
       ),
     ).rejects.toThrow(/traffic and triggers were restored to v2/);

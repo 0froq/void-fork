@@ -386,19 +386,20 @@ export async function activateCloudflareExistingVersion(
   target: CloudflareWorkerVersion,
   current?: CloudflareWorkerVersion,
 ): Promise<void> {
-  if (!target.metadata?.triggerConfig) {
+  if (target.metadata?.schema !== 2) {
     throw new Error(
       `Cloudflare version ${target.id} predates Void trigger snapshots and cannot be rolled back safely. Deploy that revision again to create rollback metadata.`,
     );
   }
-  if (current && !current.metadata?.triggerConfig) {
+  if (current && current.metadata?.schema !== 2) {
     throw new Error(
       `The active Cloudflare version ${current.id} has no trigger snapshot, so Void cannot safely compensate a failed rollback. Deploy the current revision again first.`,
     );
   }
-  const message = target.metadata
-    ? encodeCloudflareVersionMessage(target.metadata.migrations, target.metadata.triggerConfig)
-    : `Void rollback to ${target.id}.`;
+  const message = encodeCloudflareVersionMessage(
+    target.metadata.migrations,
+    target.metadata.triggerConfig,
+  );
   await run(
     context,
     [
@@ -422,7 +423,7 @@ export async function activateCloudflareExistingVersion(
     return;
   }
 
-  if (!current?.metadata?.triggerConfig) {
+  if (current?.metadata?.schema !== 2) {
     throw new Error(
       `Cloudflare activated version ${target.id}, but trigger synchronization failed and no prior trigger snapshot was available. Inspect the Worker immediately.`,
     );

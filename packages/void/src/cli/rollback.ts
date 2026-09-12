@@ -178,13 +178,13 @@ async function runCloudflareRollback(root: string, deployId?: string): Promise<v
   }
 
   const current = status.versions.find((version) => version.id === status.activeVersionId);
-  if (!target.metadata?.triggerConfig) {
+  if (target.metadata?.schema !== 2) {
     log.error(
       'This version predates Void trigger snapshots and cannot be rolled back safely. Deploy that revision again to create complete rollback metadata.',
     );
     process.exit(1);
   }
-  if (!current?.metadata?.triggerConfig) {
+  if (current?.metadata?.schema !== 2) {
     log.error(
       'The active version has no trigger snapshot, so a failed rollback could not be compensated safely. Redeploy the current revision first.',
     );

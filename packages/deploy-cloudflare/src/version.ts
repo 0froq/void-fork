@@ -10,14 +10,20 @@ const WORKERS_DEV_URL_RE = /(https:\/\/[a-z0-9.-]+\.workers\.dev(?:\/[^\s]*)?)/i
 const CLOUDFLARE_ERROR_CODE_RE = /\[code:\s*(\d+)\]/i;
 const DURABLE_MIGRATION_VERSION_ERROR = 10211;
 
-export type CloudflareVersionMetadata = Readonly<{
-  schema: 1;
-  migrations: ReadonlyArray<string>;
-  triggerConfig?: CloudflareTriggerConfig;
-}>;
+export type CloudflareVersionMetadata =
+  | Readonly<{
+      schema: 1;
+      migrations: ReadonlyArray<string>;
+    }>
+  | Readonly<{
+      schema: 2;
+      migrations: ReadonlyArray<string>;
+      triggerConfig: CloudflareTriggerConfig;
+    }>;
 
 export type CloudflareTriggerConfig = Readonly<{
-  workers_dev?: boolean;
+  workers_dev: boolean;
+  preview_urls: boolean;
   routes: ReadonlyArray<unknown>;
   crons: ReadonlyArray<unknown>;
   queueConsumers: ReadonlyArray<unknown>;
@@ -68,7 +74,10 @@ export function encodeCloudflareVersionMessage(
   migrations: ReadonlyArray<string>,
   triggerConfig?: CloudflareTriggerConfig,
 ): string {
-  return `void:${JSON.stringify({ schema: 1, migrations, triggerConfig } satisfies CloudflareVersionMetadata)}`;
+  const metadata: CloudflareVersionMetadata = triggerConfig
+    ? { schema: 2, migrations, triggerConfig }
+    : { schema: 1, migrations };
+  return `void:${JSON.stringify(metadata)}`;
 }
 
 /** Read migration state written by {@link encodeCloudflareVersionMessage}. */
@@ -79,19 +88,26 @@ export function parseCloudflareVersionMessage(
     return null;
   }
   try {
-    const value = JSON.parse(message.slice(5)) as Partial<CloudflareVersionMetadata>;
+    const value = JSON.parse(message.slice(5)) as {
+      schema?: unknown;
+      migrations?: unknown;
+      triggerConfig?: unknown;
+    };
     if (
-      value.schema !== 1 ||
+      (value.schema !== 1 && value.schema !== 2) ||
       !Array.isArray(value.migrations) ||
       !value.migrations.every((migration): migration is string => typeof migration === 'string')
     ) {
       return null;
     }
-    const triggerConfig = parseTriggerConfig(value.triggerConfig);
-    if (value.triggerConfig !== undefined && triggerConfig === null) {
-      return null;
+    if (value.schema === 1) {
+      // Schema 1 did not capture preview_urls and represented an omitted
+      // workers_dev ambiguously. Keep its migration history, but never expose
+      // its incomplete trigger state to rollback.
+      return { schema: 1, migrations: value.migrations };
     }
-    return { schema: 1, migrations: value.migrations, ...(triggerConfig ? { triggerConfig } : {}) };
+    const triggerConfig = parseTriggerConfig(value.triggerConfig);
+    return triggerConfig ? { schema: 2, migrations: value.migrations, triggerConfig } : null;
   } catch {
     return null;
   }
@@ -133,7 +149,8 @@ function triggerConfigFromWrangler(config: Record<string, unknown>): CloudflareT
       ? []
       : [config.route];
   return {
-    ...(typeof config.workers_dev === 'boolean' ? { workers_dev: config.workers_dev } : {}),
+    workers_dev: typeof config.workers_dev === 'boolean' ? config.workers_dev : true,
+    preview_urls: typeof config.preview_urls === 'boolean' ? config.preview_urls : true,
     routes,
     crons: Array.isArray(triggers.crons) ? triggers.crons : [],
     queueConsumers: Array.isArray(queues.consumers) ? queues.consumers : [],
@@ -149,7 +166,8 @@ function parseTriggerConfig(value: unknown): CloudflareTriggerConfig | null {
     return null;
   }
   if (
-    (value.workers_dev !== undefined && typeof value.workers_dev !== 'boolean') ||
+    typeof value.workers_dev !== 'boolean' ||
+    typeof value.preview_urls !== 'boolean' ||
     !Array.isArray(value.routes) ||
     !Array.isArray(value.crons) ||
     !Array.isArray(value.queueConsumers) ||
@@ -158,7 +176,8 @@ function parseTriggerConfig(value: unknown): CloudflareTriggerConfig | null {
     return null;
   }
   return {
-    ...(typeof value.workers_dev === 'boolean' ? { workers_dev: value.workers_dev } : {}),
+    workers_dev: value.workers_dev,
+    preview_urls: value.preview_urls,
     routes: value.routes,
     crons: value.crons,
     queueConsumers: value.queueConsumers,
@@ -180,7 +199,8 @@ function triggerWranglerConfig(
     triggers,
     queues,
     workflows: [...triggerConfig.workflows],
-    ...(triggerConfig.workers_dev === undefined ? {} : { workers_dev: triggerConfig.workers_dev }),
+    workers_dev: triggerConfig.workers_dev,
+    preview_urls: triggerConfig.preview_urls,
   };
   delete config.route;
   return config;
@@ -497,7 +517,7 @@ async function restorePreviousVersionAndTriggers(
     return 'unsafe';
   }
   const metadata = await readCloudflareVersionMetadata(options, commonArgs, previousVersionId);
-  if (!metadata?.triggerConfig) {
+  if (metadata?.schema !== 2) {
     return 'unavailable';
   }
   if (!options.verifyUploader()) {
