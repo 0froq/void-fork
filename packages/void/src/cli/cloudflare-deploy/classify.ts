@@ -53,10 +53,9 @@ export function classifyCloudflareDeployApp(
     const appType = staticPreset?.appType ?? (options.spa ? 'spa' : 'static');
     return unsupported(
       [
-        `deploy: --platform cloudflare does not yet support ${appType} (static-asset) apps.`,
-        'The Cloudflare backend v1 deploys full Void apps (worker-bearing) on the Cloudflare',
-        'Workers target. Deploy this app with `void deploy` (the managed platform), or host',
-        'the built assets on Cloudflare Pages / any static host.',
+        `deploy: --platform cloudflare could not resolve the ${appType} output to deploy.`,
+        'Set inference.outputDir in void.json, pass --dir with an existing build directory,',
+        'or add a supported build tool so Void can locate the generated static assets.',
       ].join('\n'),
     );
   }
