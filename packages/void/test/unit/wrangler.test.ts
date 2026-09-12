@@ -3,6 +3,7 @@ import { parse as parseJsoncRaw, type ParseError } from 'jsonc-parser';
 import { join } from 'pathslash';
 import { describe, it, expect, afterEach } from 'vite-plus/test';
 import {
+  acknowledgeWranglerManagedQueueRemovals,
   bindingEntriesForField,
   bindingNamesForField,
   ensureWranglerCompat,
@@ -12,6 +13,7 @@ import {
   readExistingLiveBindingConfig,
   readProvisionedBindingEntry,
   readWranglerCompat,
+  readWranglerManagedQueueCleanupCandidates,
   readWranglerWebSocketTombstones,
   resolveLiveBindingConfig,
   syncWranglerBindings,
@@ -1069,6 +1071,12 @@ describe('writeProvisionedWranglerConfig', () => {
     });
 
     expect(parseRaw('wrangler.jsonc').queues).toEqual({ producers: [], consumers: [] });
+    const configPath = join(tmpDir, 'wrangler.jsonc');
+    expect(readRaw('wrangler.jsonc')).toContain('// void:managed-queues:v1:');
+    expect(readWranglerManagedQueueCleanupCandidates(configPath)).toEqual(['old']);
+
+    acknowledgeWranglerManagedQueueRemovals(configPath, ['old']);
+    expect(readWranglerManagedQueueCleanupCandidates(configPath)).toEqual([]);
     expect(readRaw('wrangler.jsonc')).not.toContain('// void:managed-queues:v1:');
   });
 
@@ -1094,6 +1102,28 @@ describe('writeProvisionedWranglerConfig', () => {
       producers: [{ binding: 'QUEUE_NEW', queue: 'new' }],
       consumers: [{ queue: 'new' }],
     });
+    expect(readWranglerManagedQueueCleanupCandidates(join(tmpDir, 'wrangler.jsonc'))).toEqual([
+      'new',
+      'old',
+    ]);
+  });
+
+  it('cancels a pending consumer removal when the queue is reintroduced before deploy', () => {
+    setup('wrangler.jsonc', '{}');
+    const queues = {
+      producers: [{ binding: 'QUEUE_JOBS', queue: 'jobs' }],
+      consumers: [{ queue: 'jobs' }],
+      reconcileVoidOwned: true,
+    };
+    writeProvisionedWranglerConfig(tmpDir, { queues });
+    writeProvisionedWranglerConfig(tmpDir, {
+      queues: { producers: [], consumers: [], reconcileVoidOwned: true },
+    });
+    writeProvisionedWranglerConfig(tmpDir, { queues });
+
+    expect(readWranglerManagedQueueCleanupCandidates(join(tmpDir, 'wrangler.jsonc'))).toEqual([
+      'jobs',
+    ]);
   });
 
   it('fails closed on a top-level duplicated key (account_id twice) — throws without writing', () => {

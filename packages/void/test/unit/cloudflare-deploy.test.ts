@@ -45,7 +45,10 @@ import {
 import type { CliLogger } from '../../src/cli/log-file.ts';
 import { FRAMEWORK_PRESETS } from '../../src/cli/preset.ts';
 import { provisionCloudflareResources, type ProvisionResult } from '../../src/cli/provision.ts';
-import { FRIENDLY_BINDING_NAMES } from '../../src/cli/wrangler.ts';
+import {
+  FRIENDLY_BINDING_NAMES,
+  readWranglerManagedQueueCleanupCandidates,
+} from '../../src/cli/wrangler.ts';
 import { readConfig } from '../../src/config.ts';
 
 const tmpDir = join(import.meta.dirname, '.tmp-cf-deploy-test');
@@ -5341,6 +5344,51 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
         ],
       },
     });
+  });
+
+  it('carries removed framework consumers through activation and acknowledges cleanup', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({
+        name: 'skapp',
+        dependencies: { '@sveltejs/kit': '2.0.0' },
+      }),
+      'void.json': JSON.stringify({}),
+      'queues/email.ts': 'export default async function email() {}',
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123', name: 'skapp' }, null, 2),
+    });
+    const cleanupSnapshots: Array<ReadonlyArray<string> | undefined> = [];
+    const { deps } = harness({
+      activateVersion: async (options) => {
+        cleanupSnapshots.push(options.queueConsumerCleanup);
+        if (cleanupSnapshots.length === 2) {
+          return {
+            ok: false,
+            reason: 'triggers-failed',
+            status: 1,
+            rollback: 'succeeded',
+          };
+        }
+        return {
+          ok: true,
+          versionId: '22222222-2222-4222-8222-222222222222',
+          previewUrl: 'https://preview.example.workers.dev',
+          previousVersionId: null,
+        };
+      },
+    });
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    rmSync(join(root, 'queues/email.ts'));
+    await expect(
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(readWranglerManagedQueueCleanupCandidates(join(root, 'wrangler.jsonc'))).toEqual([
+      'email',
+    ]);
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(cleanupSnapshots).toEqual([['email'], ['email'], ['email']]);
+    expect(readWranglerManagedQueueCleanupCandidates(join(root, 'wrangler.jsonc'))).toEqual([]);
   });
 
   it('prepares a standalone framework Worker with cron and queue handlers', async () => {

@@ -1036,17 +1036,19 @@ export type ProvisionedWranglerPatch = {
 type ManagedQueueProvenance = {
   producerBindings: Array<string>;
   consumerQueues: Array<string>;
+  /** Void-owned consumers removed locally but not yet confirmed removed remotely. */
+  pendingConsumerRemovals: Array<string>;
 };
 
 function readManagedQueueProvenance(text: string): ManagedQueueProvenance {
   const encoded = MANAGED_QUEUES_MARKER.exec(text)?.[1];
   if (!encoded) {
-    return { producerBindings: [], consumerQueues: [] };
+    return { producerBindings: [], consumerQueues: [], pendingConsumerRemovals: [] };
   }
   try {
     const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as unknown;
     if (!isRecord(parsed)) {
-      return { producerBindings: [], consumerQueues: [] };
+      return { producerBindings: [], consumerQueues: [], pendingConsumerRemovals: [] };
     }
     return {
       producerBindings: Array.isArray(parsed.producerBindings)
@@ -1055,10 +1057,15 @@ function readManagedQueueProvenance(text: string): ManagedQueueProvenance {
       consumerQueues: Array.isArray(parsed.consumerQueues)
         ? parsed.consumerQueues.filter((value): value is string => typeof value === 'string')
         : [],
+      pendingConsumerRemovals: Array.isArray(parsed.pendingConsumerRemovals)
+        ? parsed.pendingConsumerRemovals.filter(
+            (value): value is string => typeof value === 'string',
+          )
+        : [],
     };
   } catch {
     // A malformed marker proves no ownership. Fail safe by retaining every entry.
-    return { producerBindings: [], consumerQueues: [] };
+    return { producerBindings: [], consumerQueues: [], pendingConsumerRemovals: [] };
   }
 }
 
@@ -1066,9 +1073,14 @@ function writeManagedQueueProvenance(text: string, provenance: ManagedQueueProve
   const normalized: ManagedQueueProvenance = {
     producerBindings: [...new Set(provenance.producerBindings)].sort(),
     consumerQueues: [...new Set(provenance.consumerQueues)].sort(),
+    pendingConsumerRemovals: [...new Set(provenance.pendingConsumerRemovals)].sort(),
   };
   const existing = MANAGED_QUEUES_MARKER.exec(text);
-  if (normalized.producerBindings.length === 0 && normalized.consumerQueues.length === 0) {
+  if (
+    normalized.producerBindings.length === 0 &&
+    normalized.consumerQueues.length === 0 &&
+    normalized.pendingConsumerRemovals.length === 0
+  ) {
     if (!existing) {
       return text;
     }
@@ -1083,6 +1095,48 @@ function writeManagedQueueProvenance(text: string, provenance: ManagedQueueProve
     return text.slice(0, existing.index) + marker + text.slice(existing.index + existing[0].length);
   }
   return `${marker}${text.includes('\r\n') ? '\r\n' : '\n'}${text}`;
+}
+
+/**
+ * Return explicitly Void-owned consumer names that may need remote cleanup.
+ *
+ * Current managed consumers are included for schema-1 upgrades; the activation layer subtracts
+ * consumers still present in the desired config. Pending removals survive failed deploys so a
+ * later retry can finish cleanup without inferring ownership from queue naming conventions.
+ */
+export function readWranglerManagedQueueCleanupCandidates(configPath: string): Array<string> {
+  if (!existsSync(configPath)) {
+    return [];
+  }
+  const raw = readFileSync(configPath, 'utf-8');
+  const text = raw.startsWith(UTF8_BOM) ? raw.slice(UTF8_BOM.length) : raw;
+  const provenance = readManagedQueueProvenance(text);
+  return [...new Set([...provenance.consumerQueues, ...provenance.pendingConsumerRemovals])].sort();
+}
+
+/** Clear only cleanup tombstones confirmed by a successful trigger reconciliation. */
+export function acknowledgeWranglerManagedQueueRemovals(
+  configPath: string,
+  removedQueues: ReadonlyArray<string>,
+): void {
+  if (!existsSync(configPath) || removedQueues.length === 0) {
+    return;
+  }
+  const raw = readFileSync(configPath, 'utf-8');
+  const hasBom = raw.startsWith(UTF8_BOM);
+  const text = hasBom ? raw.slice(UTF8_BOM.length) : raw;
+  const provenance = readManagedQueueProvenance(text);
+  const removed = new Set(removedQueues);
+  const updated = writeManagedQueueProvenance(text, {
+    ...provenance,
+    pendingConsumerRemovals: provenance.pendingConsumerRemovals.filter(
+      (queue) => !removed.has(queue),
+    ),
+  });
+  const finalText = hasBom ? `${UTF8_BOM}${updated}` : updated;
+  if (finalText !== raw) {
+    writeFileSync(configPath, finalText);
+  }
 }
 
 export type WriteProvisionedWranglerResult = {
@@ -1453,6 +1507,7 @@ export function writeProvisionedWranglerConfig(
   const managedQueueProvenance = readManagedQueueProvenance(text);
   const managedProducerBindings = new Set(managedQueueProvenance.producerBindings);
   const managedConsumerQueues = new Set(managedQueueProvenance.consumerQueues);
+  const pendingConsumerRemovals = new Set(managedQueueProvenance.pendingConsumerRemovals);
   const upsertQueueEntries = (
     section: 'producers' | 'consumers',
     entries: Array<Record<string, unknown>> | undefined,
@@ -1632,6 +1687,7 @@ export function writeProvisionedWranglerConfig(
           !desiredConsumerQueues.has(consumer.queue)
         ) {
           managedConsumerQueues.delete(consumer.queue);
+          pendingConsumerRemovals.add(consumer.queue);
           return [index];
         }
         return [];
@@ -1642,6 +1698,9 @@ export function writeProvisionedWranglerConfig(
     }
     upsertQueueEntries('producers', patch.queues.producers);
     upsertQueueEntries('consumers', patch.queues.consumers);
+    for (const consumer of patch.queues.consumers ?? []) {
+      pendingConsumerRemovals.delete(consumer.queue);
+    }
   }
 
   // FINAL GATE — global comment-text-preservation invariant. The writer's
@@ -1699,6 +1758,7 @@ export function writeProvisionedWranglerConfig(
         finalProducerBindings.has(binding),
       ),
       consumerQueues: [...managedConsumerQueues].filter((queue) => finalConsumerQueues.has(queue)),
+      pendingConsumerRemovals: [...pendingConsumerRemovals],
     });
   }
 

@@ -227,7 +227,9 @@ import type {
   HeaderRule,
 } from './types.ts';
 import {
+  acknowledgeWranglerManagedQueueRemovals,
   readExistingLiveBindingConfig,
+  readWranglerManagedQueueCleanupCandidates,
   readWranglerPublishedTrafficSnapshot,
   normalizeWranglerCompatibilityFlags,
   ensureWranglerCompat,
@@ -4978,6 +4980,7 @@ export async function runCloudflareDeploy(
     deps.resolveGeneratedConfigPath ??
     ((projectRoot) => readGeneratedDeployConfig(projectRoot).path)
   )(root);
+  const queueConsumerCleanup = readWranglerManagedQueueCleanupCandidates(configPath);
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: assertUploaderStillPinned,
@@ -4998,6 +5001,7 @@ export async function runCloudflareDeploy(
       runWrangler,
     }),
     previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
+    queueConsumerCleanup,
   });
   if (!execution.ok) {
     log.error(
@@ -5007,6 +5011,7 @@ export async function runCloudflareDeploy(
     );
     return exit(1);
   }
+  acknowledgeWranglerManagedQueueRemovals(configPath, queueConsumerCleanup);
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
   const publishedTraffic = readCloudflareTriggerConfig(generatedConfigPath);
   writeWranglerPublishedTrafficSnapshot(
@@ -5477,6 +5482,7 @@ async function runCloudflareStaticDeploy(
     destinationDirectory: stagedAssetsDirectory,
   });
 
+  const queueConsumerCleanup = readWranglerManagedQueueCleanupCandidates(configPath);
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: uploaderIsPinned,
@@ -5494,11 +5500,13 @@ async function runCloudflareStaticDeploy(
       runWrangler,
     }),
     previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
+    queueConsumerCleanup,
   });
   if (!execution.ok) {
     log.error(formatCloudflareActivationError(execution));
     return exit(1);
   }
+  acknowledgeWranglerManagedQueueRemovals(configPath, queueConsumerCleanup);
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
   const publishedTraffic = readCloudflareTriggerConfig(staticConfigPath);
   writeWranglerPublishedTrafficSnapshot(

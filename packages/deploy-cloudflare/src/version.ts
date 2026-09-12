@@ -345,6 +345,29 @@ function queueConsumerNames(consumers: ReadonlyArray<unknown>): Array<string> {
   ];
 }
 
+function triggerConfigWithQueueConsumerCleanup(
+  previous: CloudflareTriggerConfig | undefined,
+  cleanup: ReadonlyArray<string> | undefined,
+): CloudflareTriggerConfig | undefined {
+  const queues = [...new Set((cleanup ?? []).filter((queue) => queue.length > 0))];
+  if (queues.length === 0) {
+    return previous;
+  }
+  return {
+    workers_dev: previous?.workers_dev ?? false,
+    preview_urls: previous?.preview_urls ?? false,
+    routes: previous?.routes ?? [],
+    crons: previous?.crons ?? [],
+    queueConsumers: [
+      ...(previous?.queueConsumers ?? []),
+      ...queues
+        .filter((queue) => !queueConsumerNames(previous?.queueConsumers ?? []).includes(queue))
+        .map((queue) => ({ queue })),
+    ],
+    workflows: previous?.workflows ?? [],
+  };
+}
+
 function triggerConfigWithRemovedWorkflowSchedules(
   workerName: string,
   desired: CloudflareTriggerConfig,
@@ -496,6 +519,8 @@ export async function activateCloudflareVersion(options: {
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
   /** Last successfully published traffic state, newer than immutable version annotations. */
   previousTrafficConfig?: CloudflareTrafficConfig;
+  /** Explicitly Void-owned queue consumers retained for schema-1 cleanup and failed retries. */
+  queueConsumerCleanup?: ReadonlyArray<string>;
   /**
    * The caller proved that the Worker did not exist before this deploy provisioned its secrets.
    * Wrangler creates an active placeholder version when attaching the first secret, so the status
@@ -534,10 +559,14 @@ export async function activateCloudflareVersion(options: {
       : null;
   const versionedPreviousTriggerConfig =
     previousMetadata?.schema === 2 ? previousMetadata.triggerConfig : undefined;
-  const previousTriggerConfig =
+  const versionedPreviousTriggerConfigWithTraffic =
     versionedPreviousTriggerConfig && options.previousTrafficConfig
       ? { ...versionedPreviousTriggerConfig, ...options.previousTrafficConfig }
       : versionedPreviousTriggerConfig;
+  const previousTriggerConfig = triggerConfigWithQueueConsumerCleanup(
+    versionedPreviousTriggerConfigWithTraffic,
+    options.queueConsumerCleanup,
+  );
 
   const alias = `void-ready-${Date.now().toString(36)}`;
   const upload = await Promise.resolve(

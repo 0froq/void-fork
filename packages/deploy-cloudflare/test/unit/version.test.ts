@@ -116,6 +116,9 @@ function runner(overrides?: {
         ? (overrides?.triggers ?? ok())
         : (overrides?.triggerRollback ?? ok());
     }
+    if (args[0] === 'queues') {
+      return ok();
+    }
     throw new Error(`Unexpected command: ${args.join(' ')}`);
   });
 }
@@ -425,6 +428,51 @@ describe('Cloudflare version activation', () => {
       triggers: { crons: ['concurrent'] },
       queues: { consumers: [{ queue: 'concurrent-jobs' }] },
     });
+  });
+
+  it('removes explicitly owned legacy consumers when the previous metadata is schema 1', async () => {
+    const runWrangler = runner({
+      versions: ok(
+        JSON.stringify([
+          {
+            id: CURRENT,
+            annotations: { 'workers/message': encodeCloudflareVersionMessage([]) },
+          },
+        ]),
+      ),
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([], {
+          workers_dev: true,
+          preview_urls: true,
+          routes: [],
+          crons: [],
+          queueConsumers: [],
+          workflows: [],
+        }),
+        queueConsumerCleanup: ['legacy-jobs'],
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(
+      runWrangler.mock.calls.find(
+        ([args]) => args[0] === 'queues' && args[1] === 'consumer' && args[2] === 'remove',
+      )?.[0],
+    ).toEqual([
+      'queues',
+      'consumer',
+      'remove',
+      'legacy-jobs',
+      'my-worker',
+      '-c',
+      expect.any(String),
+      '--env=',
+    ]);
   });
 
   it('uses newer published traffic provenance instead of a stale version annotation', async () => {
