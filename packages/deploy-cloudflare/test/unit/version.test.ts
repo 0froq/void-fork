@@ -191,6 +191,34 @@ describe('Cloudflare version activation', () => {
     ]);
   });
 
+  it('publishes an explicit empty set when removing the final custom domain', async () => {
+    const publishEmptyCustomDomains = vi.fn(async () => ok());
+    const result = await deployCloudflareVersionTriggers({
+      runWrangler: async () => ok(),
+      workerName: 'app',
+      triggerConfig: {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: [],
+        queueConsumers: [],
+        workflows: [],
+      },
+      previousTriggerConfig: {
+        workers_dev: false,
+        preview_urls: false,
+        routes: [{ pattern: 'app.example.com', custom_domain: true }],
+        crons: [],
+        queueConsumers: [],
+        workflows: [],
+      },
+      publishEmptyCustomDomains,
+    });
+
+    expect(result.status).toBe(0);
+    expect(publishEmptyCustomDomains).toHaveBeenCalledOnce();
+  });
+
   it('normalizes and extracts workers.dev account subdomains', () => {
     expect(normalizeWorkersDevSubdomain('Developer-Platform-Experience.workers.dev/')).toBe(
       'developer-platform-experience',

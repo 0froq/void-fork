@@ -554,7 +554,7 @@ export async function changeCloudflareDomain(
  * domain. Direct API access is deliberately limited to an explicit API token;
  * OAuth credential storage is Wrangler-private and must not be scraped.
  */
-async function publishEmptyCloudflareCustomDomainSet(
+export async function publishEmptyCloudflareCustomDomainSet(
   context: CloudflareOperationContext,
 ): Promise<void> {
   const token = resolveCloudflareApiToken();
@@ -597,6 +597,20 @@ async function publishEmptyCloudflareCustomDomainSet(
   ) {
     throw new Error(`Cloudflare rejected the empty custom-domain set (HTTP ${response.status}).`);
   }
+}
+
+/** Adapt the direct empty-domain API call to the deployment package's result contract. */
+export function createCloudflareEmptyDomainPublisher(
+  context: CloudflareOperationContext,
+): () => Promise<CloudflareOperationResult> {
+  return async () => {
+    try {
+      await publishEmptyCloudflareCustomDomainSet(context);
+      return { status: 0, stdout: '', stderr: '' };
+    } catch (error) {
+      return { status: 1, stdout: '', stderr: errorMessage(error), error: errorMessage(error) };
+    }
+  };
 }
 
 function resolveCloudflareApiToken(): string | undefined {

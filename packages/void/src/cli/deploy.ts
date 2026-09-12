@@ -100,6 +100,7 @@ import {
   type ManifestOnlyDeployPayload,
 } from './client.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
+import { createCloudflareEmptyDomainPublisher } from './cloudflare-operations.ts';
 import {
   rememberCloudflareWorkersDevSubdomain,
   resolveCloudflareWorkersDevSubdomain,
@@ -5047,6 +5048,13 @@ export async function runCloudflareDeploy(
     allowFirstDeploymentBootstrap: workerWasMissingBeforeSecretProvisioning,
     readinessHeaders: cloudflareWorkerReadinessHeaders(),
     workersDevSubdomain,
+    publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher({
+      accountId,
+      apiBaseUrl,
+      configPath: generatedConfigPath,
+      workerName,
+      runWrangler,
+    }),
   });
   if (!execution.ok) {
     log.error(
@@ -5521,6 +5529,13 @@ async function runCloudflareStaticDeploy(
     assetsDirectoryOverride: stagedAssetsDirectory,
     readinessHeaders: cloudflareWorkerReadinessHeaders(),
     workersDevSubdomain,
+    publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher({
+      accountId,
+      apiBaseUrl,
+      configPath: staticConfigPath,
+      workerName,
+      runWrangler,
+    }),
   });
   if (!execution.ok) {
     log.error(formatCloudflareActivationError(execution));

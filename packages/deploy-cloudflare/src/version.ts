@@ -126,6 +126,8 @@ export async function deployCloudflareVersionTriggers(options: {
   triggerConfig: CloudflareTriggerConfig;
   /** Exact trigger state active before this transition, used to remove stale state. */
   previousTriggerConfig?: CloudflareTriggerConfig;
+  /** Wrangler skips an empty Custom Domain set, so the caller may publish it directly. */
+  publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
 }): Promise<CloudflareCommandResult> {
   const base = options.configPath ? parseRootWranglerConfig(options.configPath) : {};
   const config = triggerWranglerConfig(
@@ -157,6 +159,23 @@ export async function deployCloudflareVersionTriggers(options: {
       );
       if (!isCleanCommandExit(removed)) {
         return removed;
+      }
+    }
+    if (
+      hasCustomDomains(options.previousTriggerConfig?.routes) &&
+      !hasCustomDomains(options.triggerConfig.routes)
+    ) {
+      if (!options.publishEmptyCustomDomains) {
+        return {
+          status: 1,
+          stdout: '',
+          stderr:
+            'Wrangler cannot publish an empty Custom Domain set and no direct publisher was available.',
+        };
+      }
+      const published = await options.publishEmptyCustomDomains();
+      if (!isCleanCommandExit(published)) {
+        return published;
       }
     }
     return deployed;
@@ -216,6 +235,10 @@ function triggerConfigWithRemovedWorkflowSchedules(
   return removed.length === 0
     ? desired
     : { ...desired, workflows: [...desired.workflows, ...removed] };
+}
+
+function hasCustomDomains(routes: ReadonlyArray<unknown> | undefined): boolean {
+  return routes?.some((route) => isRecord(route) && route.custom_domain === true) === true;
 }
 
 function triggerConfigFromWrangler(config: Record<string, unknown>): CloudflareTriggerConfig {
@@ -301,6 +324,8 @@ export async function activateCloudflareVersion(options: {
   /** Account workers.dev subdomain used when this Worker cannot expose version preview URLs. */
   workersDevSubdomain?: string;
   message: string;
+  /** Direct empty-domain publisher for the Wrangler reconciliation gap. */
+  publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
   /**
    * The caller proved that the Worker did not exist before this deploy provisioned its secrets.
    * Wrangler creates an active placeholder version when attaching the first secret, so the status
@@ -566,6 +591,7 @@ export async function activateCloudflareVersion(options: {
     configPath: options.configPath,
     triggerConfig: desiredTriggerConfig,
     previousTriggerConfig,
+    publishEmptyCustomDomains: options.publishEmptyCustomDomains,
   });
   if (!isCleanCommandExit(triggers)) {
     const rollback = await restorePreviousVersionAndTriggers(
@@ -597,7 +623,7 @@ export async function activateCloudflareVersion(options: {
 async function restorePreviousVersionAndTriggers(
   options: Pick<
     Parameters<typeof activateCloudflareVersion>[0],
-    'configPath' | 'runWrangler' | 'verifyUploader' | 'workerName'
+    'configPath' | 'runWrangler' | 'verifyUploader' | 'workerName' | 'publishEmptyCustomDomains'
   >,
   commonArgs: Array<string>,
   previousVersionId: string | null,
@@ -624,6 +650,7 @@ async function restorePreviousVersionAndTriggers(
     configPath: options.configPath,
     triggerConfig: metadata.triggerConfig,
     previousTriggerConfig: failedTriggerConfig,
+    publishEmptyCustomDomains: options.publishEmptyCustomDomains,
   });
   return isCleanCommandExit(triggers) ? 'succeeded' : 'failed';
 }
