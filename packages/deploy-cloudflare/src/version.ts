@@ -128,7 +128,7 @@ export async function activateCloudflareVersion(options: {
       cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR &&
       (previous.versionId === null || options.allowFirstDeploymentBootstrap === true)
     ) {
-      return bootstrapFirstDurableObjectDeployment(options, commonArgs, previous.versionId);
+      return bootstrapFirstDeployment(options, commonArgs, previous.versionId);
     }
     return {
       ok: false,
@@ -145,6 +145,9 @@ export async function activateCloudflareVersion(options: {
   }
   const previewUrl = output.match(PREVIEW_URL_RE)?.[1];
   if (!previewUrl) {
+    if (previous.versionId === null || options.allowFirstDeploymentBootstrap === true) {
+      return bootstrapFirstDeployment(options, commonArgs, previous.versionId);
+    }
     return {
       ok: false,
       reason: 'preview-unavailable',
@@ -233,12 +236,12 @@ export async function activateCloudflareVersion(options: {
 }
 
 /**
- * Cloudflare cannot create Durable Object migration history through the Versions API. A Worker
- * with no production deployment therefore needs one ordinary deploy before later releases can use
- * preview-first version activation. This fallback is deliberately unavailable once production has
- * a version: replacing an existing deployment without a readiness probe would be a traffic change.
+ * Cloudflare cannot create Durable Object migration history through the Versions API, and some
+ * accounts do not expose a version preview until their first ordinary deployment. A brand-new
+ * Worker can therefore need one ordinary deploy before later releases use preview-first version
+ * activation. This fallback requires prior proof that no application had been deployed.
  */
-async function bootstrapFirstDurableObjectDeployment(
+async function bootstrapFirstDeployment(
   options: Parameters<typeof activateCloudflareVersion>[0],
   commonArgs: Array<string>,
   previousVersionId: string | null,

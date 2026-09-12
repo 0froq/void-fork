@@ -160,6 +160,29 @@ describe('Cloudflare version activation', () => {
     ).resolves.toMatchObject({ ok: false, reason: 'preview-unavailable', versionId: NEXT });
   });
 
+  it('bootstraps a proven first deploy when account preview URLs are disabled', async () => {
+    const runWrangler = runner({
+      upload: ok(`Worker Version ID: ${NEXT}`),
+      bootstrap: ok(`Current Version ID: ${NEXT}\nhttps://first.example.workers.dev`),
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'first-with-secret',
+        message: encodeCloudflareVersionMessage([]),
+        allowFirstDeploymentBootstrap: true,
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, previewUrl: 'https://first.example.workers.dev' });
+    expect(runWrangler.mock.calls.map(([args]) => args[0])).toEqual([
+      'deployments',
+      'versions',
+      'deploy',
+    ]);
+  });
+
   it('rolls traffic back when trigger activation fails', async () => {
     const runWrangler = runner({ triggers: { ...ok(), status: 1 } });
     const result = await activateCloudflareVersion({
