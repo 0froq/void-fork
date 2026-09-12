@@ -22,6 +22,7 @@ import {
   getDomainsByProjectId,
   getDomainsByProjectIds,
   getDeployment,
+  getActiveDeployment,
   cancelDeployment,
   setActiveDeployment,
   appendAppliedMigrations,
@@ -130,7 +131,7 @@ const DESTRUCTIVE_PRAGMA = '-- void:allow-destructive';
  */
 class RollbackError extends Error {
   constructor(
-    public readonly status: 400 | 404,
+    public readonly status: 400 | 404 | 409,
     message: string,
     /**
      * For destructive-rollback rejections, we surface the server-computed
@@ -768,6 +769,13 @@ const app = new Hono<ApiEnv>()
         const lockedProject = await getProject(txDb, projectId);
         if (!lockedProject) {
           throw new RollbackError(404, 'project not found');
+        }
+        if (lockedProject.status === 'deleting') {
+          throw new RollbackError(409, 'project is being deleted');
+        }
+        const activeDeploy = await getActiveDeployment(txDb, projectId);
+        if (activeDeploy) {
+          throw new RollbackError(409, `deploy in progress: ${activeDeploy.id}`);
         }
 
         const targetMigrations: Array<string> = target.applied_migrations

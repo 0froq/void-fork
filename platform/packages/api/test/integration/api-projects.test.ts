@@ -1278,6 +1278,44 @@ describe('POST /projects/:id/rollback', () => {
     expect(await res.json()).toEqual({ error: 'deployment not retained (worker script evicted)' });
   });
 
+  it('rejects rollback while a deployment is in progress', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-busy-app');
+    const target = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, target.id, 'live');
+    await markDeploymentRetained(env.db, target.id, true);
+    const current = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, current.id, 'live');
+    await markDeploymentRetained(env.db, current.id, true);
+    await setActiveDeployment(env.db, project.id, current.id);
+    const pending = await createDeployment(env.db, project.id, null);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deploymentId: target.id }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: `deploy in progress: ${pending.id}` });
+    expect((await db.getProject(env.db, project.id))?.active_deployment_id).toBe(current.id);
+    expect(await env.ROUTING.get(project.slug)).toBeNull();
+  });
+
   it('returns 404 for deployment from another project', async () => {
     const alice = await createTestUser(env.db, 'alice');
     const bob = await createTestUser(env.db, 'bob');
