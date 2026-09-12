@@ -866,6 +866,43 @@ export async function activateCloudflareVersion(options: {
         rollback: 'unsafe',
       };
     }
+    const ownerBeforeCompensation = await readCurrentProductionVersion(options, commonArgs);
+    if (ownerBeforeCompensation.kind !== 'ok' || ownerBeforeCompensation.versionId === null) {
+      return {
+        ok: false,
+        reason: 'triggers-failed',
+        status: triggers.status,
+        versionId,
+        previousVersionId: previous.versionId,
+        rollback: 'unsafe',
+      };
+    }
+    if (ownerBeforeCompensation.versionId !== versionId) {
+      const repair = await stabilizeCloudflareVersionTriggers({
+        runWrangler: options.runWrangler,
+        workerName: options.workerName,
+        configPath: options.configPath,
+        targetVersionId: versionId,
+        targetTriggerConfig: desiredTriggerConfig,
+        previousTriggerConfig,
+        knownTriggerConfigs,
+        publishEmptyCustomDomains: options.publishEmptyCustomDomains,
+      });
+      return {
+        ok: false,
+        reason: 'deployment-changed',
+        status: triggers.status,
+        versionId,
+        previousVersionId: previous.versionId,
+        activeVersionId: repair.activeVersionId ?? ownerBeforeCompensation.versionId,
+        rollback: 'not-needed',
+        triggerRepair: repair.ok
+          ? 'succeeded'
+          : repair.reason === 'metadata-unavailable'
+            ? 'unavailable'
+            : 'failed',
+      };
+    }
     const rollback = await restorePreviousVersionAndTriggers(
       options,
       commonArgs,

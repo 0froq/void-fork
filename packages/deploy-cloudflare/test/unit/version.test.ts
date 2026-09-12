@@ -475,6 +475,91 @@ describe('Cloudflare version activation', () => {
     ]);
   });
 
+  it('does not compensate over a concurrent owner after trigger failure', async () => {
+    const failedTriggers = deferred<CloudflareCommandResult>();
+    const triggerStarted = deferred<void>();
+    let activeVersionId = CURRENT;
+    let triggerCalls = 0;
+    let repairedConfig: Record<string, unknown> | undefined;
+    const configFor = (cron: string) => ({
+      workers_dev: true,
+      preview_urls: true,
+      routes: [],
+      crons: [cron],
+      queueConsumers: [],
+      workflows: [],
+    });
+    const runWrangler = vi.fn(async (args: Array<string>) => {
+      if (args[0] === 'deployments') {
+        return ok(JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }));
+      }
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        return ok(
+          `Worker Version ID: ${NEXT}\nVersion Preview URL: https://ready.example.workers.dev`,
+        );
+      }
+      if (args[0] === 'versions' && args[1] === 'deploy') {
+        activeVersionId = NEXT;
+        return ok();
+      }
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return ok(
+          JSON.stringify(
+            [
+              [CURRENT, configFor('current')],
+              [CONCURRENT, configFor('concurrent')],
+            ].map(([id, triggerConfig]) => ({
+              id,
+              annotations: {
+                'workers/message': encodeCloudflareVersionMessage(
+                  [],
+                  triggerConfig as ReturnType<typeof configFor>,
+                ),
+              },
+            })),
+          ),
+        );
+      }
+      if (args[0] === 'triggers') {
+        triggerCalls++;
+        if (triggerCalls === 1) {
+          triggerStarted.resolve(undefined);
+          return failedTriggers.promise;
+        }
+        const configIndex = args.indexOf('-c');
+        repairedConfig = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf8')) as Record<
+          string,
+          unknown
+        >;
+        return ok();
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const pending = activateCloudflareVersion({
+      runWrangler,
+      verifyUploader: () => true,
+      workerName: 'my-worker',
+      message: encodeCloudflareVersionMessage([], configFor('next')),
+      fetch: async () => Response.json({ ready: true }),
+    });
+    await triggerStarted.promise;
+    activeVersionId = CONCURRENT;
+    failedTriggers.resolve({ ...ok(), status: 1 });
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      reason: 'deployment-changed',
+      activeVersionId: CONCURRENT,
+      rollback: 'not-needed',
+      triggerRepair: 'succeeded',
+    });
+    expect(repairedConfig).toMatchObject({ triggers: { crons: ['concurrent'] } });
+    expect(
+      runWrangler.mock.calls.filter(([args]) => args[0] === 'versions' && args[1] === 'deploy'),
+    ).toHaveLength(1);
+  });
+
   it('uses newer published traffic provenance instead of a stale version annotation', async () => {
     const staleTriggerConfig = {
       workers_dev: false,

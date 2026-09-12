@@ -474,6 +474,24 @@ export async function activateCloudflareExistingVersion(
       `Cloudflare activated version ${target.id}, but trigger synchronization failed and no prior trigger snapshot was available. Inspect the Worker immediately.`,
     );
   }
+  const ownerBeforeCompensation = await readActiveCloudflareVersionId(context);
+  if (ownerBeforeCompensation !== target.id) {
+    const repair = await stabilizeCloudflareVersionTriggers({
+      runWrangler: context.runWrangler,
+      workerName: context.workerName,
+      configPath: context.configPath,
+      targetVersionId: target.id,
+      targetTriggerConfig,
+      previousTriggerConfig: currentTriggerConfig,
+      knownTriggerConfigs,
+      publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(context),
+    });
+    throw new Error(
+      repair.ok
+        ? `Cloudflare rollback to ${target.id} was superseded by ${repair.activeVersionId}; Void restored the active version's triggers. Refresh deployment status before retrying.`
+        : `Cloudflare rollback to ${target.id} was superseded by ${ownerBeforeCompensation ?? 'an unknown version'}, but Void could not restore the active triggers (${repair.reason}). Inspect the Worker immediately.`,
+    );
+  }
   let recoveryFailure: string | null = null;
   try {
     await run(
