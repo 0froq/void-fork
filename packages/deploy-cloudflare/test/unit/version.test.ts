@@ -381,6 +381,27 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.at(-1)![0]).toContain(`${CURRENT}@100`);
   });
 
+  it('does not invoke a changed uploader to roll traffic back after activation', async () => {
+    const runWrangler = runner();
+    let verification = 0;
+    const result = await activateCloudflareVersion({
+      runWrangler,
+      verifyUploader: () => ++verification < 4,
+      workerName: 'my-worker',
+      message: encodeCloudflareVersionMessage([]),
+      fetch: async () => Response.json({ ready: true }),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'uploader-changed',
+      rollback: 'unsafe',
+      previousVersionId: CURRENT,
+    });
+    expect(runWrangler.mock.calls.at(-1)![0]).toContain(`${NEXT}@100`);
+    expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
+  });
+
   it('accepts the first deployment when status reports no deployments', async () => {
     const runWrangler = runner({
       status: { stdout: '', stderr: 'The Worker first has no deployments.', status: 1 },

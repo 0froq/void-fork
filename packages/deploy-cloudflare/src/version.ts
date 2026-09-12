@@ -41,7 +41,7 @@ export type CloudflareVersionActivation =
       cloudflareErrorCode?: number;
       versionId?: string;
       previousVersionId?: string | null;
-      rollback?: 'not-needed' | 'succeeded' | 'failed' | 'unavailable';
+      rollback?: 'not-needed' | 'succeeded' | 'failed' | 'unavailable' | 'unsafe';
     };
 
 type ProductionDeployment = Readonly<{
@@ -269,6 +269,10 @@ export async function activateCloudflareVersion(options: {
       reason: 'uploader-changed',
       versionId,
       previousVersionId: previous.versionId,
+      // Never invoke a binary that just failed integrity verification, even to
+      // restore traffic. The active version must be repaired with a trusted
+      // Wrangler installation instead.
+      rollback: previous.versionId ? 'unsafe' : 'unavailable',
     };
   }
   const triggers = await Promise.resolve(

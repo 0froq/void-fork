@@ -4986,6 +4986,18 @@ function formatCloudflareActivationError(
       : ` Cloudflare error code: ${String(result.cloudflareErrorCode)}.`;
   switch (result.reason) {
     case 'uploader-changed':
+      if (result.rollback === 'succeeded') {
+        return 'deploy: the verified Wrangler uploader changed after version activation. Traffic was restored to the previous version.';
+      }
+      if (result.rollback === 'unavailable') {
+        return 'deploy: the verified Wrangler uploader changed after the first version activated. No previous version is available; inspect `void project status` immediately.';
+      }
+      if (result.rollback === 'failed') {
+        return 'deploy: the verified Wrangler uploader changed after version activation, and automatic traffic restoration failed. Inspect `void project status` immediately.';
+      }
+      if (result.rollback === 'unsafe') {
+        return 'deploy: the verified Wrangler uploader changed after version activation. Void did not invoke the changed binary to restore traffic; reinstall Wrangler from a trusted lockfile and inspect `void project status` immediately.';
+      }
       return 'deploy: the verified Wrangler uploader changed before version activation.';
     case 'status-failed':
       return `deploy: could not snapshot the current Cloudflare deployment${status}; no version was uploaded.`;
