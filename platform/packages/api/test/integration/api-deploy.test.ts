@@ -421,7 +421,6 @@ describe('POST /projects/:id/deploy', () => {
         },
       }),
     } as unknown as DurableObjectNamespace;
-
     const testEnv = { ...env, CRON_SCHEDULER: cronSchedulerMock };
     // Cron sync runs in waitUntil — capture and await it before assertions.
     const { ctx, pending } = createWaitUntilTrackingCtx();
@@ -485,6 +484,16 @@ describe('POST /projects/:id/deploy', () => {
         },
       }),
     } as unknown as DurableObjectNamespace;
+    const originalDelete = env.ROUTING.delete.bind(env.ROUTING);
+    const projectAccountKey = `project:${project.id}`;
+    let projectAccountRestoreFailed = false;
+    vi.spyOn(env.ROUTING, 'delete').mockImplementation(async (key) => {
+      if (key === projectAccountKey && !projectAccountRestoreFailed) {
+        projectAccountRestoreFailed = true;
+        throw new Error('injected first compensation failure');
+      }
+      return originalDelete(key);
+    });
 
     const res = await app.fetch(
       await buildDeployRequest(env, project.id, user.jwt, {
@@ -500,6 +509,9 @@ describe('POST /projects/:id/deploy', () => {
 
     expect(events.some((event) => (event as DeployEvent).event === 'done')).toBe(false);
     expect(events.some((event) => (event as DeployEvent).event === 'error')).toBe(true);
+    expect(projectAccountRestoreFailed).toBe(true);
+    // The failed project-account undo is first in reverse order. The slug
+    // restoration must still run instead of being skipped after that error.
     expect(await env.ROUTING.get(project.slug)).toBe(previousRouting);
     expect(syncedStates.at(-1)).toEqual(previousCronState);
   });

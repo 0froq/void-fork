@@ -1873,12 +1873,20 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       await context.env.ROUTING.delete(key);
     };
     const restoreTrackedRouting = async (): Promise<void> => {
+      const errors: Array<unknown> = [];
       for (const [key, previous] of [...routingValuesBeforeWrite].reverse()) {
-        if (previous === null) {
-          await context.env.ROUTING.delete(key);
-        } else {
-          await context.env.ROUTING.put(key, previous);
+        try {
+          if (previous === null) {
+            await context.env.ROUTING.delete(key);
+          } else {
+            await context.env.ROUTING.put(key, previous);
+          }
+        } catch (error) {
+          errors.push(error);
         }
+      }
+      if (errors.length > 0) {
+        throw new AggregateError(errors, 'one or more routing entries could not be restored');
       }
     };
     let cronStateBeforeWrite: CronSyncState | null | undefined;
@@ -1916,14 +1924,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       }
     };
     const restoreTrackedQueueConsumers = async (): Promise<void> => {
+      const errors: Array<unknown> = [];
       for (const snapshot of [...queueConsumerSnapshots.values()].reverse()) {
-        await restoreQueueConsumer(
-          context.env.CF_ACCOUNT_ID,
-          context.env.CF_API_TOKEN,
-          snapshot.queueId,
-          snapshot.scriptName,
-          snapshot.state,
-        );
+        try {
+          await restoreQueueConsumer(
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
+            snapshot.queueId,
+            snapshot.scriptName,
+            snapshot.state,
+          );
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length > 0) {
+        throw new AggregateError(errors, 'one or more queue consumers could not be restored');
       }
     };
     let workerUploaded = false;
