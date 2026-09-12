@@ -254,9 +254,14 @@ function triggerConfigFromWrangler(config: Record<string, unknown>): CloudflareT
     : config.route === undefined
       ? []
       : [config.route];
+  // Wrangler disables workers.dev by default when an explicit route is
+  // configured. Persist the effective value so trigger publication and
+  // rollback do not accidentally reopen the public workers.dev hostname.
+  const workersDev =
+    typeof config.workers_dev === 'boolean' ? config.workers_dev : routes.length === 0;
   return {
-    workers_dev: typeof config.workers_dev === 'boolean' ? config.workers_dev : true,
-    preview_urls: typeof config.preview_urls === 'boolean' ? config.preview_urls : true,
+    workers_dev: workersDev,
+    preview_urls: typeof config.preview_urls === 'boolean' ? config.preview_urls : workersDev,
     routes,
     crons: Array.isArray(triggers.crons) ? triggers.crons : [],
     queueConsumers: Array.isArray(queues.consumers) ? queues.consumers : [],

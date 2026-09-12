@@ -117,6 +117,23 @@ describe('Cloudflare version activation', () => {
     }
   });
 
+  it('preserves Wrangler route-aware traffic defaults', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-version-route-defaults-'));
+    const configPath = join(directory, 'wrangler.json');
+    try {
+      writeFileSync(
+        configPath,
+        JSON.stringify({ name: 'app', routes: [{ pattern: 'app.example.com', zone_name: 'x' }] }),
+      );
+      expect(readCloudflareTriggerConfig(configPath)).toMatchObject({
+        workers_dev: false,
+        preview_urls: false,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('removes queue consumers omitted from the desired trigger snapshot', async () => {
     const calls: Array<Array<string>> = [];
     const result = await deployCloudflareVersionTriggers({
