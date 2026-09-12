@@ -60,6 +60,7 @@ import { sendDeployFailedEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
 import { generateId } from '../id.ts';
 import { checkCliVersionOrRespond } from '../middleware/cli-version.ts';
+import { getProjectQueueName } from '../naming.ts';
 import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
 import {
   BETTER_AUTH_SECRET_NAME,
@@ -1827,6 +1828,30 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     phaseStartMs = Date.now();
     let routingSwitched = false;
     const writtenRoutingKeys: Array<string> = [];
+    const routingValuesBeforeWrite = new Map<string, string | null>();
+    const snapshotRoutingValue = async (key: string): Promise<void> => {
+      if (!routingValuesBeforeWrite.has(key)) {
+        routingValuesBeforeWrite.set(key, await context.env.ROUTING.get(key));
+        writtenRoutingKeys.push(key);
+      }
+    };
+    const putTrackedRouting = async (key: string, value: string): Promise<void> => {
+      await snapshotRoutingValue(key);
+      await context.env.ROUTING.put(key, value);
+    };
+    const deleteTrackedRouting = async (key: string): Promise<void> => {
+      await snapshotRoutingValue(key);
+      await context.env.ROUTING.delete(key);
+    };
+    const restoreTrackedRouting = async (): Promise<void> => {
+      for (const [key, previous] of [...routingValuesBeforeWrite].reverse()) {
+        if (previous === null) {
+          await context.env.ROUTING.delete(key);
+        } else {
+          await context.env.ROUTING.put(key, previous);
+        }
+      }
+    };
     let workerUploaded = false;
     let workerUploadUrl: string | undefined;
     let sandboxContainerAppId: string | undefined;
@@ -2242,18 +2267,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             manifest,
             suspended: existingEntry?.suspended,
           });
+          for (const previousQueue of previousManifest?.queues ?? []) {
+            await deleteTrackedRouting(
+              `queue:${getProjectQueueName(projectId, previousQueue.name)}`,
+            );
+          }
           await assertDeploymentNotCanceled(context.get('db'), deployment.id);
           await assertProjectNotDeleting(context.get('db'), projectId);
           markPhase('routing_switch');
-          await context.env.ROUTING.put(project.slug, routingJson);
-          writtenRoutingKeys.push(project.slug);
+          await putTrackedRouting(project.slug, routingJson);
+          await snapshotRoutingValue(projectAccountKey(projectId));
           await writeProjectAccountEntry(
             context.env.ROUTING,
             projectId,
             project.user_id,
             user.plan,
           );
-          writtenRoutingKeys.push(projectAccountKey(projectId));
           routingSwitched = true;
           logger = logger.with({ routingSwitched: true });
           logger.info('routing_switch', 'slug_routed', { slug: project.slug });
@@ -2261,8 +2290,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           for (const domain of projectDomains) {
             if (domain.status === 'active') {
               const domainKey = `domain:${domain.hostname}`;
-              await context.env.ROUTING.put(domainKey, routingJson);
-              writtenRoutingKeys.push(domainKey);
+              await putTrackedRouting(domainKey, routingJson);
             }
           }
 
@@ -3127,7 +3155,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             continue;
           }
           const queueKey = `queue:${outcome.queueBinding.queue_name}`;
-          await context.env.ROUTING.put(
+          await putTrackedRouting(
             queueKey,
             JSON.stringify({
               workerName,
@@ -3136,7 +3164,14 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               proxyToken: queueProxyToken,
             }),
           );
-          writtenRoutingKeys.push(queueKey);
+        }
+        const desiredQueueNames = new Set((manifest.queues ?? []).map((queue) => queue.name));
+        for (const previousQueue of previousManifest?.queues ?? []) {
+          if (!desiredQueueNames.has(previousQueue.name)) {
+            await deleteTrackedRouting(
+              `queue:${getProjectQueueName(projectId, previousQueue.name)}`,
+            );
+          }
         }
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
@@ -3240,10 +3275,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
         markPhase('routing_switch');
-        await context.env.ROUTING.put(project.slug, routingJson);
-        writtenRoutingKeys.push(project.slug);
+        await putTrackedRouting(project.slug, routingJson);
+        await snapshotRoutingValue(projectAccountKey(projectId));
         await writeProjectAccountEntry(context.env.ROUTING, projectId, project.user_id, user.plan);
-        writtenRoutingKeys.push(projectAccountKey(projectId));
         routingSwitched = true;
         logger = logger.with({ routingSwitched: true });
         logger.info('routing_switch', 'slug_routed', { slug: project.slug });
@@ -3251,8 +3285,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         for (const domain of projectDomains) {
           if (domain.status === 'active') {
             const domainKey = `domain:${domain.hostname}`;
-            await context.env.ROUTING.put(domainKey, routingJson);
-            writtenRoutingKeys.push(domainKey);
+            await putTrackedRouting(domainKey, routingJson);
           }
         }
 
@@ -3569,11 +3602,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             workerName: failedWorkerName,
             writtenRoutingKeyCount: writtenRoutingKeys.length,
           });
-          for (const key of writtenRoutingKeys) {
-            await context.env.ROUTING.delete(key).catch((e) =>
-              logger.error('catch', 'routing_rollback_failed', e, { key }),
-            );
-          }
+          await restoreTrackedRouting().catch((e) =>
+            logger.error('catch', 'routing_rollback_failed', e),
+          );
           if (workerUploaded && workerUploadUrl) {
             await fetch(workerUploadUrl, {
               method: 'DELETE',
@@ -3672,11 +3703,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           const latest = await getDeployment(context.get('db'), failedDeployment.id);
           const wasCanceled =
             latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
-          for (const key of writtenRoutingKeys) {
-            await context.env.ROUTING.delete(key).catch((e) =>
-              logger.error('catch', 'routing_rollback_failed', e, { key }),
-            );
-          }
+          await restoreTrackedRouting().catch((e) =>
+            logger.error('catch', 'routing_rollback_failed', e),
+          );
           await deleteDispatchScript(
             context.env.CF_ACCOUNT_ID,
             context.env.CF_API_TOKEN,

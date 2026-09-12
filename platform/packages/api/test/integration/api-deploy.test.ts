@@ -1281,6 +1281,78 @@ describe('POST /projects/:id/deploy', () => {
     expect(queueRouting?.proxyToken.length ?? 0).toBeGreaterThan(0);
   });
 
+  it('removes queue routing entries omitted by the next deployment', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'queue-route-removal');
+    mockCfApi();
+
+    const first = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: {
+          version: 3,
+          bindings: {},
+          queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS' }],
+        },
+      }),
+      env,
+    );
+    await first.text();
+
+    const routingKey = `queue:${project.id.toLowerCase().replaceAll('_', '-')}-emails`;
+    expect(await env.ROUTING.get(routingKey)).not.toBeNull();
+
+    const second = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, {
+        manifest: { version: 3, bindings: {} },
+      }),
+      env,
+    );
+    const events = await readAllEvents(second);
+
+    expect(events.some((event) => (event as DeployEvent).event === 'done')).toBe(true);
+    expect(await env.ROUTING.get(routingKey)).toBeNull();
+  });
+
+  it('restores exact queue routing after a later routing switch fails', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'queue-route-restore');
+    mockCfApi();
+    const manifest = {
+      version: 3,
+      bindings: {},
+      queues: [{ name: 'emails', bindingName: 'QUEUE_EMAILS' }],
+    };
+
+    const first = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, { manifest }),
+      env,
+    );
+    await first.text();
+
+    const routingKey = `queue:${project.id.toLowerCase().replaceAll('_', '-')}-emails`;
+    const previousQueueRouting = await env.ROUTING.get(routingKey);
+    expect(previousQueueRouting).not.toBeNull();
+
+    const originalPut = env.ROUTING.put.bind(env.ROUTING);
+    let failedSlugWrite = false;
+    vi.spyOn(env.ROUTING, 'put').mockImplementation(async (key, value, options) => {
+      if (key === project.slug && !failedSlugWrite) {
+        failedSlugWrite = true;
+        throw new Error('injected routing switch failure');
+      }
+      return originalPut(key, value, options);
+    });
+
+    const second = await app.fetch(
+      await buildDeployRequest(env, project.id, user.jwt, { manifest }),
+      env,
+    );
+    const events = await readAllEvents(second);
+
+    expect(events.some((event) => (event as DeployEvent).event === 'done')).toBe(false);
+    expect(await env.ROUTING.get(routingKey)).toBe(previousQueueRouting);
+  });
+
   it('does not overwrite live queue KV when a conflicting deploy fails', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'queue-conflict-noclobber');
