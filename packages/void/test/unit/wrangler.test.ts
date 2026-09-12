@@ -493,6 +493,67 @@ describe('syncWranglerBindings', () => {
     ]);
   });
 
+  it('removes stale generated WebSocket bindings while preserving migration history', () => {
+    setup(
+      'wrangler.jsonc',
+      JSON.stringify({
+        durable_objects: {
+          bindings: [
+            { name: 'OLD_CHAT', class_name: 'OldChatWs' },
+            { name: 'CART', class_name: 'ShoppingCartDurableObject' },
+          ],
+        },
+        migrations: [
+          { tag: 'void-ws-v1', new_sqlite_classes: ['OldChatWs'] },
+          { tag: 'durable-shopping-cart-v1', new_sqlite_classes: ['ShoppingCartDurableObject'] },
+        ],
+      }),
+    );
+
+    expect(syncWranglerWebSockets(tmpDir, [])).toBe(true);
+
+    const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
+    expect(parsed.durable_objects.bindings).toEqual([
+      { name: 'CART', class_name: 'ShoppingCartDurableObject' },
+    ]);
+    expect(parsed.migrations).toEqual([
+      { tag: 'void-ws-v1', new_sqlite_classes: ['OldChatWs'] },
+      { tag: 'durable-shopping-cart-v1', new_sqlite_classes: ['ShoppingCartDurableObject'] },
+    ]);
+  });
+
+  it('replaces a renamed generated WebSocket binding', () => {
+    setup(
+      'wrangler.jsonc',
+      JSON.stringify({
+        durable_objects: { bindings: [{ name: 'OLD_CHAT', class_name: 'OldChatWs' }] },
+        migrations: [{ tag: 'void-ws-v1', new_sqlite_classes: ['OldChatWs'] }],
+      }),
+    );
+
+    syncWranglerWebSockets(tmpDir, [
+      {
+        pattern: '/chat',
+        methods: ['GET'],
+        params: [],
+        catchAll: false,
+        env: null,
+        filePath: 'chat.ws.ts',
+        className: 'ChatWs',
+        bindingName: 'CHAT',
+        mode: 'room',
+        hasAuthGate: false,
+      },
+    ]);
+
+    const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
+    expect(parsed.durable_objects.bindings).toEqual([{ name: 'CHAT', class_name: 'ChatWs' }]);
+    expect(parsed.migrations).toEqual([
+      { tag: 'void-ws-v1', new_sqlite_classes: ['OldChatWs'] },
+      { tag: 'void-ws-v1-2', new_sqlite_classes: ['ChatWs'] },
+    ]);
+  });
+
   it('adds sandbox durable object, container, and migration metadata', () => {
     setup('wrangler.jsonc', '{ "name": "test" }');
     const result = syncWranglerBindings(tmpDir, { ...noBindings, needsSandbox: true });

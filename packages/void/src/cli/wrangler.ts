@@ -484,15 +484,34 @@ export function syncWranglerBindings(
     }
   }
 
-  if (options?.websockets && options.websockets.length > 0) {
+  if (options?.websockets) {
     const existing =
       ((
         parsed.durable_objects as
           | { bindings?: Array<{ name: string; class_name: string }> }
           | undefined
       )?.bindings as Array<{ name: string; class_name: string }> | undefined) ?? [];
+    const migrations = Array.isArray(parsed.migrations)
+      ? (parsed.migrations as Array<DurableObjectMigration>)
+      : [];
+    const historicalWebSocketClasses = new Set(
+      migrations
+        .filter((migration) => /^void-ws-v1(?:-\d+)?$/.test(migration.tag ?? ''))
+        .flatMap((migration) => [
+          ...(migration.new_classes ?? []),
+          ...(migration.new_sqlite_classes ?? []),
+        ]),
+    );
+    const desired = new Map(
+      options.websockets.map((route) => [route.bindingName, route.className] as const),
+    );
+    const retained = existing.filter(
+      (binding) =>
+        !historicalWebSocketClasses.has(binding.class_name) ||
+        desired.get(binding.name) === binding.class_name,
+    );
     for (const route of options.websockets) {
-      const conflict = existing.find(
+      const conflict = retained.find(
         (binding) => binding.name === route.bindingName && binding.class_name !== route.className,
       );
       if (conflict) {
@@ -502,21 +521,29 @@ export function syncWranglerBindings(
       }
     }
     const additions = options.websockets
-      .filter((route) => !existing.some((binding) => binding.name === route.bindingName))
+      .filter((route) => !retained.some((binding) => binding.name === route.bindingName))
       .map((route) => ({ name: route.bindingName, class_name: route.className }));
-    if (additions.length > 0) {
-      parsed.durable_objects = { bindings: [...existing, ...additions] };
+    const nextBindings = [...retained, ...additions];
+    if (
+      nextBindings.length !== existing.length ||
+      nextBindings.some(
+        (binding, index) =>
+          binding.name !== existing[index]?.name ||
+          binding.class_name !== existing[index]?.class_name,
+      )
+    ) {
+      parsed.durable_objects = {
+        ...((parsed.durable_objects as Record<string, unknown> | undefined) ?? {}),
+        bindings: nextBindings,
+      };
       modified = true;
     }
 
-    const migrations = Array.isArray(parsed.migrations)
-      ? (parsed.migrations as Array<DurableObjectMigration>)
-      : [];
     const planned = appendSqliteClassMigration(
       migrations,
       options.websockets.map((route) => route.className),
       'void-ws-v1',
-      existing.map((binding) => binding.class_name),
+      retained.map((binding) => binding.class_name),
     );
     if (planned.added) {
       parsed.migrations = planned.migrations;
@@ -724,7 +751,10 @@ export function syncWranglerWebSockets(
   root: string,
   websockets: Array<WebSocketRouteDefinition>,
 ): boolean {
-  if (websockets.length === 0) {
+  if (
+    websockets.length === 0 &&
+    !['wrangler.jsonc', 'wrangler.json'].some((name) => existsSync(join(root, name)))
+  ) {
     return false;
   }
   return syncWranglerBindings(root, NO_INFERRED_BINDINGS, { websockets });
