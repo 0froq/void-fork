@@ -1289,6 +1289,7 @@ describe('POST /projects/:id/rollback', () => {
     );
     await updateDeploymentStatus(env.db, current.id, 'live');
     await markDeploymentRetained(env.db, current.id, true);
+    await env.db.update(projects).set({ type: 'void' }).where(eq(projects.id, project.id));
     await setActiveDeployment(env.db, project.id, current.id);
 
     const res = await app.fetch(
@@ -1496,6 +1497,72 @@ describe('POST /projects/:id/rollback', () => {
       workerName: string;
     };
     expect(domainRouting.workerName).toBe(`user-domain-roll-${d1.id}`);
+  });
+
+  it('compensates external routing writes when rollback fails mid-cutover', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-compensate-app');
+    await env.db.insert(domains).values({
+      id: 'dom_rollback_compensate',
+      project_id: project.id,
+      hostname: 'compensate.example.com',
+      cf_hostname_id: 'ch-rollback-compensate',
+      status: 'active',
+    });
+    const target = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, type: 'static', bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, target.id, 'live');
+    await markDeploymentRetained(env.db, target.id, true);
+    const current = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, type: 'void', bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, current.id, 'live');
+    await markDeploymentRetained(env.db, current.id, true);
+    await env.db.update(projects).set({ type: 'void' }).where(eq(projects.id, project.id));
+    await setActiveDeployment(env.db, project.id, current.id);
+
+    const previousSlugRouting = JSON.stringify({
+      workerName: 'current-worker',
+      version: current.id,
+    });
+    const previousDomainRouting = JSON.stringify({
+      workerName: 'current-worker',
+      version: current.id,
+    });
+    await env.ROUTING.put(project.slug, previousSlugRouting);
+    await env.ROUTING.put('domain:compensate.example.com', previousDomainRouting);
+    const originalPut = env.ROUTING.put.bind(env.ROUTING);
+    let injected = false;
+    vi.spyOn(env.ROUTING, 'put').mockImplementation(async (key, value, options) => {
+      if (key === 'domain:compensate.example.com' && !injected) {
+        injected = true;
+        throw new Error('injected domain write failure');
+      }
+      return originalPut(key, value, options);
+    });
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deploymentId: target.id }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(500);
+    expect((await db.getProject(env.db, project.id))?.active_deployment_id).toBe(current.id);
+    expect((await db.getProject(env.db, project.id))?.type).toBe('void');
+    expect(await env.ROUTING.get(project.slug)).toBe(previousSlugRouting);
+    expect(await env.ROUTING.get('domain:compensate.example.com')).toBe(previousDomainRouting);
   });
 
   it('rollback resolves the proxy token once for both cron and queues (no duplicate CF fetch)', async () => {

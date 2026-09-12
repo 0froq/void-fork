@@ -5,7 +5,12 @@ import { hmacSignState } from '../auth/hmac.ts';
 import { buildManagerNamespace } from '../build-namespace.ts';
 import { isTerminalBuildStatus } from '../build-status.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
-import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client.ts';
+import {
+  clearCronScheduler,
+  restoreCronScheduler,
+  snapshotCronScheduler,
+  syncCronScheduler,
+} from '../cron-scheduler-client.ts';
 import type { Db } from '../db.ts';
 import {
   createProject,
@@ -902,116 +907,159 @@ const app = new Hono<ApiEnv>()
         await updateProjectType(txDb, projectId, targetType);
         await setActiveDeployment(txDb, projectId, target.id);
 
-        // External writes SECOND, inside the same lock. A throw here
-        // rolls back the pg flip; some external writes may have
-        // already landed but subsequent external retries are
-        // idempotent (KV PUT is an overwrite; queue/domain routes are
-        // keyed by slug/hostname; cron DO sync is a replace).
-        await context.env.ROUTING.put(lockedProject.slug, routingJson);
-
-        // Resolve the target worker's baked __VOID_PROXY_TOKEN once if
-        // either cron or queues need it. Re-fetching on each path would
-        // double the CF API round-trips AND widen the failure window
-        // between cron DO sync and queue KV write: a transient CF 429
-        // on the second fetch would abort the transaction after cron
-        // state was already committed to the DO. The framework's
-        // /__void/scheduled and /__void/queue handlers both validate
-        // against the SAME __VOID_PROXY_TOKEN binding, so one lookup
-        // is authoritative for both.
-        const needsProxyToken = !!manifest?.schedules?.length || !!manifest?.queues?.length;
-        const targetProxyToken = needsProxyToken
-          ? await resolveRollbackProxyToken(context.env, workerName, projectId)
-          : null;
-
-        // Sync cron scheduler to point at the rollback target.
-        //
-        // When target has no schedules, `/clear` is called unconditionally
-        // (it's idempotent — see cron-scheduler.ts `handleClear`). A
-        // prior failed cutover could leave the DO holding schedules that
-        // no pg manifest still mentions, and a guarded clear would let
-        // that stale DO state persist across every future rollback.
-        //
-        if (manifest?.schedules?.length) {
-          await syncCronScheduler(context.env, projectId, {
-            workerName,
-            schedules: manifest.schedules,
-            proxyToken: targetProxyToken!,
+        const externalUndo: Array<() => Promise<void>> = [];
+        const snapshottedRoutingKeys = new Set<string>();
+        const snapshotRoutingKey = async (key: string): Promise<void> => {
+          if (snapshottedRoutingKeys.has(key)) {
+            return;
+          }
+          const previous = await context.env.ROUTING.get(key);
+          snapshottedRoutingKeys.add(key);
+          externalUndo.push(async () => {
+            if (previous === null) {
+              await context.env.ROUTING.delete(key);
+            } else {
+              await context.env.ROUTING.put(key, previous);
+            }
           });
-        } else {
-          await clearCronScheduler(context.env, projectId);
-        }
+        };
+        const putRouting = async (key: string, value: string): Promise<void> => {
+          await snapshotRoutingKey(key);
+          await context.env.ROUTING.put(key, value);
+        };
+        const deleteRouting = async (key: string): Promise<void> => {
+          await snapshotRoutingKey(key);
+          await context.env.ROUTING.delete(key);
+        };
 
-        // Update custom domain routing
-        const projectDomains = await getDomainsByProjectId(txDb, projectId);
-        for (const domain of projectDomains) {
-          if (domain.status === 'active') {
-            await context.env.ROUTING.put(`domain:${domain.hostname}`, routingJson);
-          }
-        }
+        // External writes SECOND, inside the same lock. Every write is
+        // preceded by an exact snapshot and compensated in reverse order
+        // before the transaction releases the project lock.
+        try {
+          await putRouting(lockedProject.slug, routingJson);
 
-        // Update queue routing. Rewrite every queue route that target
-        // binds AND delete any queue route left over from older
-        // deployments that target does not bind. Without the deletion
-        // pass, messages arriving on a queue A had bound but B does not
-        // would still hit `queue:<q>` in KV and dispatch would forward
-        // them to A's (now evicted) worker.
-        //
-        // Sweep source is the UNION of:
-        //   - Deployments that have ever been live (`deployed_at IS NOT NULL`).
-        //   - Terminal-failed/canceled deployments (`deployed_at = null`).
-        //
-        // The second set catches deploys that wrote `queue:<name>` KV
-        // routes at step 2b and then failed before the routing flip.
-        // In-flight deploys (status not in the terminal-failed set) are
-        // excluded, so rollback does not clobber KV routes an in-flight
-        // deploy is provisioning.
-        const [activatedDeployments, terminalFailedDeployments] = await Promise.all([
-          getActivatedDeployments(txDb, projectId),
-          getTerminalFailedDeployments(txDb, projectId),
-        ]);
-        const sweepQueueNames = new Set<string>();
-        const unionSource = [...activatedDeployments, ...terminalFailedDeployments];
-        for (const d of unionSource) {
-          if (!d.manifest) {
-            continue;
+          // Resolve the target worker's baked __VOID_PROXY_TOKEN once if
+          // either cron or queues need it. Re-fetching on each path would
+          // double the CF API round-trips AND widen the failure window
+          // between cron DO sync and queue KV write: a transient CF 429
+          // on the second fetch would abort the transaction after cron
+          // state was already committed to the DO. The framework's
+          // /__void/scheduled and /__void/queue handlers both validate
+          // against the SAME __VOID_PROXY_TOKEN binding, so one lookup
+          // is authoritative for both.
+          const needsProxyToken = !!manifest?.schedules?.length || !!manifest?.queues?.length;
+          const targetProxyToken = needsProxyToken
+            ? await resolveRollbackProxyToken(context.env, workerName, projectId)
+            : null;
+
+          // Sync cron scheduler to point at the rollback target.
+          //
+          // When target has no schedules, `/clear` is called unconditionally
+          // (it's idempotent — see cron-scheduler.ts `handleClear`). A
+          // prior failed cutover could leave the DO holding schedules that
+          // no pg manifest still mentions, and a guarded clear would let
+          // that stale DO state persist across every future rollback.
+          //
+          const previousCronState = await snapshotCronScheduler(context.env, projectId);
+          externalUndo.push(() => restoreCronScheduler(context.env, projectId, previousCronState));
+          if (manifest?.schedules?.length) {
+            await syncCronScheduler(context.env, projectId, {
+              workerName,
+              schedules: manifest.schedules,
+              proxyToken: targetProxyToken!,
+            });
+          } else {
+            await clearCronScheduler(context.env, projectId);
           }
-          let depManifest: DeployManifest | null = null;
-          try {
-            depManifest = JSON.parse(d.manifest);
-          } catch {
-            // Skip deployments with unparseable manifests rather than
-            // blowing up the whole rollback.
-            continue;
+
+          // Update custom domain routing
+          const projectDomains = await getDomainsByProjectId(txDb, projectId);
+          for (const domain of projectDomains) {
+            if (domain.status === 'active') {
+              await putRouting(`domain:${domain.hostname}`, routingJson);
+            }
           }
-          for (const q of depManifest?.queues ?? []) {
-            sweepQueueNames.add(q.name);
+
+          // Update queue routing. Rewrite every queue route that target
+          // binds AND delete any queue route left over from older
+          // deployments that target does not bind. Without the deletion
+          // pass, messages arriving on a queue A had bound but B does not
+          // would still hit `queue:<q>` in KV and dispatch would forward
+          // them to A's (now evicted) worker.
+          //
+          // Sweep source is the UNION of:
+          //   - Deployments that have ever been live (`deployed_at IS NOT NULL`).
+          //   - Terminal-failed/canceled deployments (`deployed_at = null`).
+          //
+          // The second set catches deploys that wrote `queue:<name>` KV
+          // routes at step 2b and then failed before the routing flip.
+          // In-flight deploys (status not in the terminal-failed set) are
+          // excluded, so rollback does not clobber KV routes an in-flight
+          // deploy is provisioning.
+          const [activatedDeployments, terminalFailedDeployments] = await Promise.all([
+            getActivatedDeployments(txDb, projectId),
+            getTerminalFailedDeployments(txDb, projectId),
+          ]);
+          const sweepQueueNames = new Set<string>();
+          const unionSource = [...activatedDeployments, ...terminalFailedDeployments];
+          for (const d of unionSource) {
+            if (!d.manifest) {
+              continue;
+            }
+            let depManifest: DeployManifest | null = null;
+            try {
+              depManifest = JSON.parse(d.manifest);
+            } catch {
+              // Skip deployments with unparseable manifests rather than
+              // blowing up the whole rollback.
+              continue;
+            }
+            for (const q of depManifest?.queues ?? []) {
+              sweepQueueNames.add(q.name);
+            }
           }
-        }
-        // Include target's own queue names in the union so the delete
-        // pass's complement is always `union \ target`, i.e. we never
-        // accidentally delete a route we're about to rewrite below.
-        const targetQueueNames = new Set((manifest?.queues ?? []).map((q) => q.name));
-        for (const name of targetQueueNames) {
-          sweepQueueNames.add(name);
-        }
-        if (manifest?.queues?.length) {
-          for (const q of manifest.queues) {
-            await context.env.ROUTING.put(
-              `queue:${getProjectQueueName(projectId, q.name)}`,
-              JSON.stringify({
-                workerName,
-                projectId,
-                queueName: q.name,
-                proxyToken: targetProxyToken!,
-              }),
+          // Include target's own queue names in the union so the delete
+          // pass's complement is always `union \ target`, i.e. we never
+          // accidentally delete a route we're about to rewrite below.
+          const targetQueueNames = new Set((manifest?.queues ?? []).map((q) => q.name));
+          for (const name of targetQueueNames) {
+            sweepQueueNames.add(name);
+          }
+          if (manifest?.queues?.length) {
+            for (const q of manifest.queues) {
+              await putRouting(
+                `queue:${getProjectQueueName(projectId, q.name)}`,
+                JSON.stringify({
+                  workerName,
+                  projectId,
+                  queueName: q.name,
+                  proxyToken: targetProxyToken!,
+                }),
+              );
+            }
+          }
+          for (const name of sweepQueueNames) {
+            if (targetQueueNames.has(name)) {
+              continue;
+            }
+            await deleteRouting(`queue:${getProjectQueueName(projectId, name)}`);
+          }
+        } catch (externalError) {
+          const compensationErrors: Array<unknown> = [];
+          for (const undo of externalUndo.reverse()) {
+            try {
+              await undo();
+            } catch (compensationError) {
+              compensationErrors.push(compensationError);
+            }
+          }
+          if (compensationErrors.length > 0) {
+            throw new AggregateError(
+              [externalError, ...compensationErrors],
+              'rollback failed and external state compensation was incomplete',
             );
           }
-        }
-        for (const name of sweepQueueNames) {
-          if (targetQueueNames.has(name)) {
-            continue;
-          }
-          await context.env.ROUTING.delete(`queue:${getProjectQueueName(projectId, name)}`);
+          throw externalError;
         }
 
         return { migrationDiff: diff };
