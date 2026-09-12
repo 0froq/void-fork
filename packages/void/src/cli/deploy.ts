@@ -1389,6 +1389,7 @@ const UNTRUSTED_PROJECT_CODE_ENV_VARS = [
   'CF_ACCESS_CLIENT_ID',
   'CF_ACCESS_CLIENT_SECRET',
   'VOID_TOKEN',
+  'DATABASE_URL',
 ];
 
 function scrubEnvironmentVariables(env: NodeJS.ProcessEnv, names: ReadonlyArray<string>): void {
