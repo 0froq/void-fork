@@ -25,6 +25,7 @@ import {
   getActiveDeployment,
   cancelDeployment,
   setActiveDeployment,
+  updateProjectType,
   appendAppliedMigrations,
   appendProjectMigrations,
   activeDeploymentContainsMigration,
@@ -853,13 +854,25 @@ const app = new Hono<ApiEnv>()
         const workerName = getProjectDeploymentWorkerName(lockedProject.slug, target.id);
         const existingRouting = await context.env.ROUTING.get(lockedProject.slug);
         const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
-        const isStaticDeployment = lockedProject.type === 'static' || lockedProject.type === 'spa';
+        const targetType = manifest?.type ?? (manifest?.framework ? 'framework' : 'void');
+        const isStaticDeployment = targetType === 'static' || targetType === 'spa';
+        let targetHasAssets = false;
+        if (target.asset_hashes) {
+          try {
+            const assetHashes = JSON.parse(target.asset_hashes) as unknown;
+            targetHasAssets =
+              typeof assetHashes === 'object' &&
+              assetHashes !== null &&
+              Object.keys(assetHashes).length > 0;
+          } catch {
+            throw new RollbackError(400, 'target deployment has invalid asset metadata');
+          }
+        }
 
         let routingJson: string;
         if (isStaticDeployment) {
           const assetConfig = manifest?.assetConfig ?? {
-            not_found_handling:
-              lockedProject.type === 'spa' ? 'single-page-application' : '404-page',
+            not_found_handling: targetType === 'spa' ? 'single-page-application' : '404-page',
           };
           routingJson = buildStaticRoutingJson({
             projectId,
@@ -879,11 +892,14 @@ const app = new Hono<ApiEnv>()
             dispatchLimits,
             suspended: existingEntry?.suspended,
             hasCrons: !!manifest?.schedules?.length,
+            assetManifestId: targetHasAssets ? target.id : undefined,
+            assetConfig: targetHasAssets ? manifest?.assetConfig : undefined,
           });
         }
 
         // PG flip FIRST. If this throws, no external state is mutated
         // yet — the tx rolls back cleanly and the caller can retry.
+        await updateProjectType(txDb, projectId, targetType);
         await setActiveDeployment(txDb, projectId, target.id);
 
         // External writes SECOND, inside the same lock. A throw here

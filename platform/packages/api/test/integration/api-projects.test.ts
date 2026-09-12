@@ -11,7 +11,13 @@ import {
 import * as db from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { users } from '../../src/schema.ts';
-import { domains, projects, resources, projectDatabaseCredentials } from '../../src/schema.ts';
+import {
+  deployments,
+  domains,
+  projects,
+  resources,
+  projectDatabaseCredentials,
+} from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -1253,6 +1259,57 @@ describe('POST /projects/:id/rollback', () => {
       limits: { cpuMs: number; subRequests: number };
     };
     expect(routing.limits).toEqual({ cpuMs: 10, subRequests: 50 });
+  });
+
+  it('restores the target deployment type and Worker asset metadata', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-assets-app');
+    const target = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({
+        version: 3,
+        type: 'framework',
+        framework: 'react-router',
+        bindings: {},
+        assetConfig: { not_found_handling: 'none' },
+      }),
+    );
+    await env.db
+      .update(deployments)
+      .set({ asset_hashes: JSON.stringify({ 'assets/app.js': { hash: 'abc', size: 3 } }) })
+      .where(eq(deployments.id, target.id));
+    await updateDeploymentStatus(env.db, target.id, 'live');
+    await markDeploymentRetained(env.db, target.id, true);
+
+    const current = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, type: 'void', bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, current.id, 'live');
+    await markDeploymentRetained(env.db, current.id, true);
+    await setActiveDeployment(env.db, project.id, current.id);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deploymentId: target.id }),
+      }),
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect((await db.getProject(env.db, project.id))?.type).toBe('framework');
+    expect(await env.ROUTING.get(project.slug, 'json')).toMatchObject({
+      type: 'framework',
+      assetManifestId: target.id,
+      assetConfig: { not_found_handling: 'none' },
+    });
   });
 
   it('returns 400 for non-retained deployment', async () => {
