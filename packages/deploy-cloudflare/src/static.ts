@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { AssetConfig, HeaderRule, RedirectRule } from '@void/deploy-core';
 import { applyEdits, modify } from 'jsonc-parser';
+import { dirname, join } from 'pathslash';
 
 export type CloudflareStaticDeployConfig = Readonly<{
   configPath: string;
@@ -57,9 +58,29 @@ export function writeCloudflareStaticDeployConfig(options: CloudflareStaticDeplo
   upsert(['assets', 'not_found_handling'], options.assetConfig.not_found_handling ?? 'none');
   upsert(['assets', 'html_handling'], options.assetConfig.html_handling ?? 'auto-trailing-slash');
 
-  if (content === initial) {
-    return false;
+  let changed = content !== initial;
+  if (changed) {
+    writeFileSync(options.configPath, content);
   }
-  writeFileSync(options.configPath, content);
-  return true;
+
+  // The thin edge Worker already implements these files through the canonical routing manifest.
+  // Exclude them from Workers Assets so Cloudflare does not parse and apply the same rules again.
+  const ignorePath = join(dirname(options.configPath), options.assetsDirectory, '.assetsignore');
+  const previousIgnore = existsSync(ignorePath) ? readFileSync(ignorePath, 'utf-8') : null;
+  const existingLines = new Set((previousIgnore ?? '').split(/\r?\n/));
+  let ignore = previousIgnore ?? '';
+  if (ignore.length > 0 && !ignore.endsWith('\n') && !ignore.endsWith('\r')) {
+    ignore += '\n';
+  }
+  for (const pattern of ['_headers', '_redirects']) {
+    if (!existingLines.has(pattern)) {
+      ignore += `${pattern}\n`;
+    }
+  }
+  if (ignore !== previousIgnore) {
+    writeFileSync(ignorePath, ignore);
+    changed = true;
+  }
+
+  return changed;
 }

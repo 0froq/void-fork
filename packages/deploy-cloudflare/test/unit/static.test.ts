@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
 import { describe, expect, it } from 'vite-plus/test';
@@ -23,6 +23,8 @@ describe('Cloudflare static deployment', () => {
   it('updates target fields while preserving comments and migration history', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-static-config-'));
     const configPath = join(root, 'wrangler.jsonc');
+    mkdirSync(join(root, 'dist'));
+    writeFileSync(join(root, 'dist/.assetsignore'), '# retain operator rules\ncustom/**\n');
     writeFileSync(
       configPath,
       `{
@@ -62,5 +64,8 @@ describe('Cloudflare static deployment', () => {
         experimental_serve_directly: false,
       },
     });
+    expect(readFileSync(join(root, 'dist/.assetsignore'), 'utf-8')).toBe(
+      '# retain operator rules\ncustom/**\n_headers\n_redirects\n',
+    );
   });
 });
