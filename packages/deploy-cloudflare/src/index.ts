@@ -31,6 +31,7 @@ export {
   parseCloudflareVersionMessage,
   readCloudflareTriggerConfig,
   type CloudflareTriggerConfig,
+  type CloudflareTrafficConfig,
   type CloudflareVersionActivation,
   type CloudflareVersionMetadata,
 } from './version.ts';

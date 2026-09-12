@@ -227,11 +227,13 @@ import type {
 } from './types.ts';
 import {
   readExistingLiveBindingConfig,
+  readWranglerPublishedTrafficSnapshot,
   normalizeWranglerCompatibilityFlags,
   ensureWranglerCompat,
   resolveLiveBindingConfig,
   syncWranglerBindings,
   writeProvisionedWranglerConfig,
+  writeWranglerPublishedTrafficSnapshot,
   bindingEntriesForField,
   FRIENDLY_BINDING_NAMES,
   type LiveBindingConfig,
@@ -5055,6 +5057,7 @@ export async function runCloudflareDeploy(
       workerName,
       runWrangler,
     }),
+    previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
   });
   if (!execution.ok) {
     log.error(
@@ -5065,6 +5068,16 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
+  const publishedTraffic = readCloudflareTriggerConfig(generatedConfigPath);
+  writeWranglerPublishedTrafficSnapshot(
+    configPath,
+    {
+      workers_dev: publishedTraffic.workers_dev,
+      preview_urls: publishedTraffic.preview_urls,
+      routes: [...publishedTraffic.routes],
+    },
+    { create: false },
+  );
   cliLog.info('cloudflare_deploy_end', {
     ok: true,
     worker: workerName,
@@ -5536,12 +5549,23 @@ async function runCloudflareStaticDeploy(
       workerName,
       runWrangler,
     }),
+    previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
   });
   if (!execution.ok) {
     log.error(formatCloudflareActivationError(execution));
     return exit(1);
   }
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
+  const publishedTraffic = readCloudflareTriggerConfig(staticConfigPath);
+  writeWranglerPublishedTrafficSnapshot(
+    configPath,
+    {
+      workers_dev: publishedTraffic.workers_dev,
+      preview_urls: publishedTraffic.preview_urls,
+      routes: [...publishedTraffic.routes],
+    },
+    { create: false },
+  );
   cliLog.info('cloudflare_deploy_end', {
     ok: true,
     worker: workerName,

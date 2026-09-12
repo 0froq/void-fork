@@ -32,6 +32,7 @@ const NODEJS_ALS_FLAG = 'nodejs_als';
 const NODEJS_COMPAT_FLAG = 'nodejs_compat';
 const VOID_CONFIG_FILE = 'void.json';
 const MANAGED_QUEUES_MARKER = /^\s*\/\/ void:managed-queues:v1:([A-Za-z0-9_-]+)\s*$/m;
+const PUBLISHED_TRAFFIC_MARKER = /^\s*\/\/ void:published-traffic:v1:([A-Za-z0-9_-]+)\s*$/m;
 export const DEFAULT_LIVE_BINDING = 'VOID_LIVE';
 export const DEFAULT_LIVE_CLASS = 'VoidLiveStreamDurableObject';
 export const LIVE_MIGRATION_TAG = 'live-v1';
@@ -46,6 +47,67 @@ export type WranglerCustomDomainUpdate = {
   domains: Array<WranglerCustomDomain>;
   modified: boolean;
 };
+
+export type WranglerPublishedTrafficSnapshot = {
+  workers_dev: boolean;
+  preview_urls: boolean;
+  routes: Array<unknown>;
+};
+
+/** Read the last traffic attachment state Void successfully published remotely. */
+export function readWranglerPublishedTrafficSnapshot(
+  configPath: string,
+): WranglerPublishedTrafficSnapshot | undefined {
+  if (!existsSync(configPath)) {
+    return undefined;
+  }
+  const encoded = PUBLISHED_TRAFFIC_MARKER.exec(readFileSync(configPath, 'utf-8'))?.[1];
+  if (!encoded) {
+    return undefined;
+  }
+  try {
+    const value = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as unknown;
+    if (
+      !isRecord(value) ||
+      typeof value.workers_dev !== 'boolean' ||
+      typeof value.preview_urls !== 'boolean' ||
+      !Array.isArray(value.routes)
+    ) {
+      return undefined;
+    }
+    return {
+      workers_dev: value.workers_dev,
+      preview_urls: value.preview_urls,
+      routes: value.routes,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist traffic attachment provenance without adding unsupported Wrangler fields. */
+export function writeWranglerPublishedTrafficSnapshot(
+  configPath: string,
+  snapshot: WranglerPublishedTrafficSnapshot,
+  options?: { create?: boolean },
+): void {
+  if (!existsSync(configPath)) {
+    return;
+  }
+  const raw = readFileSync(configPath, 'utf-8');
+  const encoded = Buffer.from(JSON.stringify(snapshot), 'utf8').toString('base64url');
+  const marker = `// void:published-traffic:v1:${encoded}`;
+  const existing = PUBLISHED_TRAFFIC_MARKER.exec(raw);
+  if (!existing && options?.create === false) {
+    return;
+  }
+  const next = existing
+    ? raw.slice(0, existing.index) + marker + raw.slice(existing.index + existing[0].length)
+    : `${marker}${raw.includes('\r\n') ? '\r\n' : '\n'}${raw}`;
+  if (next !== raw) {
+    writeFileSync(configPath, next);
+  }
+}
 
 export type LiveBindingConfig = {
   bindingName: string;

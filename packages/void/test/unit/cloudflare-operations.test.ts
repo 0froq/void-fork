@@ -22,7 +22,11 @@ import {
   type CloudflareOperationContext,
   type CloudflareOperationRunner,
 } from '../../src/cli/cloudflare-operations.ts';
-import { readWranglerCustomDomains, updateWranglerCustomDomain } from '../../src/cli/wrangler.ts';
+import {
+  readWranglerCustomDomains,
+  readWranglerPublishedTrafficSnapshot,
+  updateWranglerCustomDomain,
+} from '../../src/cli/wrangler.ts';
 
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '', signal: null, error: null });
 
@@ -418,6 +422,11 @@ describe('Cloudflare custom domains', () => {
       routes: [{ pattern: 'app.example.com', custom_domain: true }],
     });
     expect(runner).toHaveBeenCalledTimes(1);
+    expect(readWranglerPublishedTrafficSnapshot(join(root, 'wrangler.jsonc'))).toEqual({
+      workers_dev: false,
+      preview_urls: true,
+      routes: [{ pattern: 'app.example.com', custom_domain: true }],
+    });
   });
 
   it('restores the exact local and remote config on trigger failure', async () => {

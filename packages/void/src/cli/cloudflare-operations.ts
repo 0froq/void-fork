@@ -6,6 +6,7 @@ import {
   encodeCloudflareVersionMessage,
   parseCloudflareVersionMessage,
   parseRootWranglerConfig,
+  readCloudflareTriggerConfig,
   readBindingFieldPresence,
   readWranglerTopLevelString,
   resolveD1MigrateTarget,
@@ -22,6 +23,8 @@ import {
 } from './provision.ts';
 import {
   readWranglerCustomDomains,
+  readWranglerPublishedTrafficSnapshot,
+  writeWranglerPublishedTrafficSnapshot,
   updateWranglerCustomDomain,
   type WranglerCustomDomain,
 } from './wrangler.ts';
@@ -396,6 +399,13 @@ export async function activateCloudflareExistingVersion(
       `The active Cloudflare version ${current.id} has no trigger snapshot, so Void cannot safely compensate a failed rollback. Deploy the current revision again first.`,
     );
   }
+  const publishedTraffic = readWranglerPublishedTrafficSnapshot(context.configPath);
+  const currentTriggerConfig =
+    current?.metadata?.schema === 2
+      ? publishedTraffic
+        ? { ...current.metadata.triggerConfig, ...publishedTraffic }
+        : current.metadata.triggerConfig
+      : undefined;
   const message = encodeCloudflareVersionMessage(
     target.metadata.migrations,
     target.metadata.triggerConfig,
@@ -418,12 +428,19 @@ export async function activateCloudflareExistingVersion(
     workerName: context.workerName,
     configPath: context.configPath,
     triggerConfig: target.metadata.triggerConfig,
+    previousTriggerConfig: currentTriggerConfig,
+    publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(context),
   });
   if (isCleanOperationResult(triggers)) {
+    writeWranglerPublishedTrafficSnapshot(context.configPath, {
+      workers_dev: target.metadata.triggerConfig.workers_dev,
+      preview_urls: target.metadata.triggerConfig.preview_urls,
+      routes: [...target.metadata.triggerConfig.routes],
+    });
     return;
   }
 
-  if (current?.metadata?.schema !== 2) {
+  if (!currentTriggerConfig || !current) {
     throw new Error(
       `Cloudflare activated version ${target.id}, but trigger synchronization failed and no prior trigger snapshot was available. Inspect the Worker immediately.`,
     );
@@ -447,10 +464,18 @@ export async function activateCloudflareExistingVersion(
       runWrangler: context.runWrangler,
       workerName: context.workerName,
       configPath: context.configPath,
-      triggerConfig: current.metadata.triggerConfig,
+      triggerConfig: currentTriggerConfig,
+      previousTriggerConfig: target.metadata.triggerConfig,
+      publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(context),
     });
     if (!isCleanOperationResult(restoredTriggers)) {
       recoveryFailure = 'previous trigger synchronization failed';
+    } else {
+      writeWranglerPublishedTrafficSnapshot(context.configPath, {
+        workers_dev: currentTriggerConfig.workers_dev,
+        preview_urls: currentTriggerConfig.preview_urls,
+        routes: [...currentTriggerConfig.routes],
+      });
     }
   } catch (error) {
     recoveryFailure = errorMessage(error);
@@ -544,6 +569,12 @@ export async function changeCloudflareDomain(
   } finally {
     rmSync(triggerConfigDir, { recursive: true, force: true });
   }
+  const publishedTraffic = readCloudflareTriggerConfig(before.configPath);
+  writeWranglerPublishedTrafficSnapshot(before.configPath, {
+    workers_dev: publishedTraffic.workers_dev,
+    preview_urls: publishedTraffic.preview_urls,
+    routes: [...publishedTraffic.routes],
+  });
   return update;
 }
 

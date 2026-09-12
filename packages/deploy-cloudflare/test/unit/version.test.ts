@@ -293,6 +293,54 @@ describe('Cloudflare version activation', () => {
     ]);
   });
 
+  it('uses newer published traffic provenance instead of a stale version annotation', async () => {
+    const staleTriggerConfig = {
+      workers_dev: false,
+      preview_urls: false,
+      routes: [{ pattern: 'old.example.com', custom_domain: true }],
+      crons: [],
+      queueConsumers: [],
+      workflows: [],
+    };
+    const desiredTriggerConfig = {
+      ...staleTriggerConfig,
+      workers_dev: true,
+      preview_urls: true,
+      routes: [],
+    };
+    const runWrangler = runner({
+      versions: ok(
+        JSON.stringify([
+          {
+            id: CURRENT,
+            annotations: {
+              'workers/message': encodeCloudflareVersionMessage([], staleTriggerConfig),
+            },
+          },
+        ]),
+      ),
+    });
+    const publishEmptyCustomDomains = vi.fn(async () => ok());
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([], desiredTriggerConfig),
+        previousTrafficConfig: {
+          workers_dev: true,
+          preview_urls: true,
+          routes: [],
+        },
+        publishEmptyCustomDomains,
+        fetch: async () => Response.json({ ready: true }),
+        sleep: async () => {},
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(publishEmptyCustomDomains).not.toHaveBeenCalled();
+  });
+
   it('does not activate a version whose preview never becomes ready', async () => {
     const runWrangler = runner();
     const result = await activateCloudflareVersion({

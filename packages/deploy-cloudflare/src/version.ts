@@ -30,6 +30,11 @@ export type CloudflareTriggerConfig = Readonly<{
   workflows: ReadonlyArray<unknown>;
 }>;
 
+export type CloudflareTrafficConfig = Pick<
+  CloudflareTriggerConfig,
+  'workers_dev' | 'preview_urls' | 'routes'
+>;
+
 export type CloudflareVersionActivation =
   | {
       ok: true;
@@ -326,6 +331,8 @@ export async function activateCloudflareVersion(options: {
   message: string;
   /** Direct empty-domain publisher for the Wrangler reconciliation gap. */
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
+  /** Last successfully published traffic state, newer than immutable version annotations. */
+  previousTrafficConfig?: CloudflareTrafficConfig;
   /**
    * The caller proved that the Worker did not exist before this deploy provisioned its secrets.
    * Wrangler creates an active placeholder version when attaching the first secret, so the status
@@ -362,8 +369,12 @@ export async function activateCloudflareVersion(options: {
     previous.versionId && desiredMetadata?.schema === 2
       ? await readCloudflareVersionMetadata(options, commonArgs, previous.versionId)
       : null;
-  const previousTriggerConfig =
+  const versionedPreviousTriggerConfig =
     previousMetadata?.schema === 2 ? previousMetadata.triggerConfig : undefined;
+  const previousTriggerConfig =
+    versionedPreviousTriggerConfig && options.previousTrafficConfig
+      ? { ...versionedPreviousTriggerConfig, ...options.previousTrafficConfig }
+      : versionedPreviousTriggerConfig;
 
   const alias = `void-ready-${Date.now().toString(36)}`;
   const upload = await Promise.resolve(
