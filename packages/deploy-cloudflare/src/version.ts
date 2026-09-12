@@ -557,12 +557,12 @@ async function restorePreviousVersion(
   commonArgs: Array<string>,
   previousVersionId: string | null,
   cause: string,
-): Promise<'succeeded' | 'failed' | 'unavailable'> {
+): Promise<'succeeded' | 'failed' | 'unavailable' | 'unsafe'> {
   if (!previousVersionId) {
     return 'unavailable';
   }
   if (!options.verifyUploader()) {
-    return 'failed';
+    return 'unsafe';
   }
   const result = await deployVersionPercentages(
     options,

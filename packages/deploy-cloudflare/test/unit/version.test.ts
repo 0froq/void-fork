@@ -344,6 +344,34 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
   });
 
+  it('does not invoke a changed uploader to restore zero-percent staging', async () => {
+    const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
+    let verification = 0;
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => ++verification < 4,
+        workerName: 'my-worker',
+        workersDevSubdomain: 'developer-platform-experience',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => new Response('not ready', { status: 503 }),
+        sleep: async () => {},
+        readinessAttempts: 1,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'readiness-failed',
+      rollback: 'unsafe',
+    });
+
+    expect(runWrangler.mock.calls.map(([args]) => args[0])).toEqual([
+      'deployments',
+      'versions',
+      'versions',
+    ]);
+  });
+
   it('bootstraps a proven first deploy when account preview URLs are disabled', async () => {
     const runWrangler = runner({
       upload: ok(`Worker Version ID: ${NEXT}`),
