@@ -25,6 +25,8 @@ export {
 export {
   activateCloudflareVersion,
   encodeCloudflareVersionMessage,
+  extractWorkersDevSubdomain,
+  normalizeWorkersDevSubdomain,
   parseCloudflareVersionMessage,
   type CloudflareVersionActivation,
   type CloudflareVersionMetadata,

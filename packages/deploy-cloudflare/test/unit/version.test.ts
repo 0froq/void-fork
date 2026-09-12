@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 import {
   activateCloudflareVersion,
   encodeCloudflareVersionMessage,
+  extractWorkersDevSubdomain,
+  normalizeWorkersDevSubdomain,
   parseCloudflareVersionMessage,
   type CloudflareCommandResult,
 } from '../../src/index.ts';
@@ -52,6 +54,19 @@ function runner(overrides?: {
 }
 
 describe('Cloudflare version activation', () => {
+  it('normalizes and extracts workers.dev account subdomains', () => {
+    expect(normalizeWorkersDevSubdomain('Developer-Platform-Experience.workers.dev/')).toBe(
+      'developer-platform-experience',
+    );
+    expect(normalizeWorkersDevSubdomain('not valid')).toBeUndefined();
+    expect(
+      extractWorkersDevSubdomain(
+        'https://void-ready-abc-my-worker.developer-platform-experience.workers.dev/path',
+      ),
+    ).toBe('developer-platform-experience');
+    expect(extractWorkersDevSubdomain('https://example.com')).toBeUndefined();
+  });
+
   it('round-trips migration metadata and rejects unrelated annotations', () => {
     const message = encodeCloudflareVersionMessage(['0001_init.sql', '0002_users.sql']);
     expect(parseCloudflareVersionMessage(message)).toEqual({
@@ -81,6 +96,7 @@ describe('Cloudflare version activation', () => {
       versionId: NEXT,
       previewUrl: 'https://ready.example.workers.dev',
       previousVersionId: CURRENT,
+      workersDevSubdomain: 'example',
     });
     expect(fetcher).toHaveBeenCalledWith(
       'https://ready.example.workers.dev/__void/ready',
@@ -242,6 +258,73 @@ describe('Cloudflare version activation', () => {
     ).resolves.toMatchObject({ ok: false, reason: 'preview-unavailable', versionId: NEXT });
   });
 
+  it('probes a zero-percent Durable Object version through a production workers.dev URL', async () => {
+    const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
+    const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        workersDevSubdomain: 'developer-platform-experience',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: fetcher,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      versionId: NEXT,
+      previewUrl: 'https://my-worker.developer-platform-experience.workers.dev',
+    });
+
+    expect(runWrangler.mock.calls.map(([args]) => args.slice(0, 2))).toEqual([
+      ['deployments', 'status'],
+      ['versions', 'upload'],
+      ['versions', 'deploy'],
+      ['versions', 'deploy'],
+      ['triggers', 'deploy'],
+    ]);
+    expect(runWrangler.mock.calls[2]![0]).toEqual(
+      expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
+    );
+    expect(runWrangler.mock.calls[3]![0]).toContain(`${NEXT}@100`);
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://my-worker.developer-platform-experience.workers.dev/__void/ready',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Cloudflare-Workers-Version-Overrides': `my-worker="${NEXT}"`,
+        }),
+      }),
+    );
+  });
+
+  it('restores the prior deployment when a zero-percent version is not ready', async () => {
+    const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        workersDevSubdomain: 'developer-platform-experience',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => new Response('not ready', { status: 503 }),
+        sleep: async () => {},
+        readinessAttempts: 1,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'readiness-failed',
+      rollback: 'succeeded',
+    });
+
+    expect(runWrangler.mock.calls[2]![0]).toEqual(
+      expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
+    );
+    expect(runWrangler.mock.calls[3]![0]).toContain(`${CURRENT}@100`);
+    expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
+  });
+
   it('bootstraps a proven first deploy when account preview URLs are disabled', async () => {
     const runWrangler = runner({
       upload: ok(`Worker Version ID: ${NEXT}`),
@@ -346,6 +429,7 @@ describe('Cloudflare version activation', () => {
       versionId: NEXT,
       previewUrl: 'https://first.example.workers.dev',
       previousVersionId: null,
+      workersDevSubdomain: 'example',
     });
     expect(runWrangler.mock.calls.map(([args]) => args.slice(0, 2))).toEqual([
       ['deployments', 'status'],

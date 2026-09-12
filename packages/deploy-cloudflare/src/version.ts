@@ -17,6 +17,7 @@ export type CloudflareVersionActivation =
       versionId: string;
       previewUrl: string;
       previousVersionId: string | null;
+      workersDevSubdomain?: string;
     }
   | {
       ok: false;
@@ -27,6 +28,7 @@ export type CloudflareVersionActivation =
         | 'upload-failed'
         | 'upload-output-invalid'
         | 'preview-unavailable'
+        | 'readiness-staging-failed'
         | 'readiness-failed'
         | 'readiness-access-denied'
         | 'bootstrap-failed'
@@ -83,6 +85,8 @@ export async function activateCloudflareVersion(options: {
   assetsDirectoryOverride?: string;
   /** Optional Cloudflare Access service-token headers used only by the readiness probe. */
   readinessHeaders?: Readonly<Record<string, string>>;
+  /** Account workers.dev subdomain used when this Worker cannot expose version preview URLs. */
+  workersDevSubdomain?: string;
   message: string;
   /**
    * The caller proved that the Worker did not exist before this deploy provisioned its secrets.
@@ -151,23 +155,55 @@ export async function activateCloudflareVersion(options: {
   if (!versionId) {
     return { ok: false, reason: 'upload-output-invalid' };
   }
-  const previewUrl = output.match(PREVIEW_URL_RE)?.[1];
-  if (!previewUrl) {
+  const reportedPreviewUrl = output.match(PREVIEW_URL_RE)?.[1];
+  let readinessUrl = reportedPreviewUrl;
+  let stagedVersionOverride = false;
+  if (!readinessUrl) {
     if (previous.versionId === null || options.allowFirstDeploymentBootstrap === true) {
       return bootstrapFirstDeployment(options, commonArgs, previous.versionId);
     }
-    return {
-      ok: false,
-      reason: 'preview-unavailable',
-      versionId,
-      previousVersionId: previous.versionId,
-    };
+    readinessUrl = workersDevReadinessUrl(options.workerName, options.workersDevSubdomain);
+    if (!readinessUrl) {
+      return {
+        ok: false,
+        reason: 'preview-unavailable',
+        versionId,
+        previousVersionId: previous.versionId,
+      };
+    }
+    if (!options.verifyUploader()) {
+      return {
+        ok: false,
+        reason: 'uploader-changed',
+        versionId,
+        previousVersionId: previous.versionId,
+        rollback: 'not-needed',
+      };
+    }
+    const staged = await deployVersionPercentages(
+      options,
+      commonArgs,
+      [`${previous.versionId}@100`, `${versionId}@0`],
+      options.message,
+    );
+    if (!isCleanCommandExit(staged)) {
+      return {
+        ok: false,
+        reason: 'readiness-staging-failed',
+        status: staged.status,
+        versionId,
+        previousVersionId: previous.versionId,
+        rollback: 'not-needed',
+      };
+    }
+    stagedVersionOverride = true;
   }
 
   const ready = await probeReadiness(
-    `${previewUrl.replace(/\/$/, '')}/__void/ready`,
+    `${readinessUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
     options.readinessHeaders,
+    stagedVersionOverride ? versionId : undefined,
     options.fetch ?? globalThis.fetch,
     options.sleep ?? defaultSleep,
     options.readinessAttempts ?? 6,
@@ -178,7 +214,9 @@ export async function activateCloudflareVersion(options: {
       reason: ready === 'access-denied' ? 'readiness-access-denied' : 'readiness-failed',
       versionId,
       previousVersionId: previous.versionId,
-      rollback: 'not-needed',
+      rollback: stagedVersionOverride
+        ? await restorePreviousVersion(options, commonArgs, previous.versionId, 'readiness failed')
+        : 'not-needed',
     };
   }
   if (!options.verifyUploader()) {
@@ -187,24 +225,22 @@ export async function activateCloudflareVersion(options: {
       reason: 'uploader-changed',
       versionId,
       previousVersionId: previous.versionId,
+      rollback: stagedVersionOverride
+        ? await restorePreviousVersion(
+            options,
+            commonArgs,
+            previous.versionId,
+            'uploader verification failed',
+          )
+        : 'not-needed',
     };
   }
 
-  const activate = await Promise.resolve(
-    options.runWrangler(
-      [
-        'versions',
-        'deploy',
-        `${versionId}@100`,
-        ...commonArgs,
-        '--name',
-        options.workerName,
-        '--message',
-        options.message,
-        '--yes',
-      ],
-      { capture: false },
-    ),
+  const activate = await deployVersionPercentages(
+    options,
+    commonArgs,
+    [`${versionId}@100`],
+    options.message,
   );
   if (!isCleanCommandExit(activate)) {
     return {
@@ -213,7 +249,14 @@ export async function activateCloudflareVersion(options: {
       status: activate.status,
       versionId,
       previousVersionId: previous.versionId,
-      rollback: 'not-needed',
+      rollback: stagedVersionOverride
+        ? await restorePreviousVersion(
+            options,
+            commonArgs,
+            previous.versionId,
+            'version activation failed',
+          )
+        : 'not-needed',
     };
   }
 
@@ -231,7 +274,12 @@ export async function activateCloudflareVersion(options: {
     }),
   );
   if (!isCleanCommandExit(triggers)) {
-    const rollback = await rollbackAfterTriggerFailure(options, commonArgs, previous.versionId);
+    const rollback = await restorePreviousVersion(
+      options,
+      commonArgs,
+      previous.versionId,
+      'trigger activation failed',
+    );
     return {
       ok: false,
       reason: 'triggers-failed',
@@ -242,7 +290,13 @@ export async function activateCloudflareVersion(options: {
     };
   }
 
-  return { ok: true, versionId, previewUrl, previousVersionId: previous.versionId };
+  return {
+    ok: true,
+    versionId,
+    previewUrl: readinessUrl,
+    previousVersionId: previous.versionId,
+    ...workersDevSubdomainResult(readinessUrl),
+  };
 }
 
 /**
@@ -301,6 +355,7 @@ async function bootstrapFirstDeployment(
     `${previewUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
     options.readinessHeaders,
+    undefined,
     options.fetch ?? globalThis.fetch,
     options.sleep ?? defaultSleep,
     options.readinessAttempts ?? 6,
@@ -317,7 +372,13 @@ async function bootstrapFirstDeployment(
       rollback: 'unavailable',
     };
   }
-  return { ok: true, versionId, previewUrl, previousVersionId };
+  return {
+    ok: true,
+    versionId,
+    previewUrl,
+    previousVersionId,
+    ...workersDevSubdomainResult(previewUrl),
+  };
 }
 
 function parseCloudflareErrorCode(output: string): number | undefined {
@@ -369,6 +430,7 @@ async function probeReadiness(
   url: string,
   workerName: string,
   readinessHeaders: Readonly<Record<string, string>> | undefined,
+  versionOverride: string | undefined,
   fetcher: typeof globalThis.fetch,
   sleep: (milliseconds: number) => Promise<void>,
   attempts: number,
@@ -380,7 +442,15 @@ async function probeReadiness(
   for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
     try {
       const response = await fetcher(url, {
-        headers: { 'user-agent': 'void-deploy-readiness/1', ...headers },
+        headers: {
+          'user-agent': 'void-deploy-readiness/1',
+          ...headers,
+          ...(versionOverride
+            ? {
+                'Cloudflare-Workers-Version-Overrides': `${workerName}="${versionOverride}"`,
+              }
+            : {}),
+        },
         redirect: 'manual',
         signal: AbortSignal.timeout(10_000),
       });
@@ -450,13 +520,36 @@ async function isCloudflareAccessDenial(response: Response): Promise<boolean> {
   }
 }
 
-async function rollbackAfterTriggerFailure(
+async function deployVersionPercentages(
+  options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
+  commonArgs: Array<string>,
+  percentages: Array<string>,
+  message: string,
+): Promise<CloudflareCommandResult> {
+  return options.runWrangler(
+    [
+      'versions',
+      'deploy',
+      ...percentages,
+      ...commonArgs,
+      '--name',
+      options.workerName,
+      '--message',
+      message,
+      '--yes',
+    ],
+    { capture: false },
+  );
+}
+
+async function restorePreviousVersion(
   options: Pick<
     Parameters<typeof activateCloudflareVersion>[0],
     'runWrangler' | 'verifyUploader' | 'workerName'
   >,
   commonArgs: Array<string>,
   previousVersionId: string | null,
+  cause: string,
 ): Promise<'succeeded' | 'failed' | 'unavailable'> {
   if (!previousVersionId) {
     return 'unavailable';
@@ -464,23 +557,51 @@ async function rollbackAfterTriggerFailure(
   if (!options.verifyUploader()) {
     return 'failed';
   }
-  const result = await Promise.resolve(
-    options.runWrangler(
-      [
-        'versions',
-        'deploy',
-        `${previousVersionId}@100`,
-        ...commonArgs,
-        '--name',
-        options.workerName,
-        '--message',
-        'Void automatic rollback after trigger activation failed.',
-        '--yes',
-      ],
-      { capture: false },
-    ),
+  const result = await deployVersionPercentages(
+    options,
+    commonArgs,
+    [`${previousVersionId}@100`],
+    `Void automatic rollback after ${cause}.`,
   );
   return isCleanCommandExit(result) ? 'succeeded' : 'failed';
+}
+
+function workersDevReadinessUrl(workerName: string, value: string | undefined): string | undefined {
+  const subdomain = normalizeWorkersDevSubdomain(value);
+  if (!subdomain || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(workerName)) {
+    return undefined;
+  }
+  return `https://${workerName}.${subdomain}.workers.dev`;
+}
+
+/** Normalize an account workers.dev subdomain supplied by config or the environment. */
+export function normalizeWorkersDevSubdomain(value: string | undefined): string | undefined {
+  const normalized = value
+    ?.trim()
+    .toLowerCase()
+    .replace(/\.workers\.dev\/?$/, '');
+  if (!normalized || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(normalized)) {
+    return undefined;
+  }
+  return normalized;
+}
+
+/** Extract the account subdomain from a Wrangler-reported workers.dev URL. */
+export function extractWorkersDevSubdomain(url: string): string | undefined {
+  try {
+    const labels = new URL(url).hostname.toLowerCase().split('.');
+    if (labels.length !== 4 || labels[2] !== 'workers' || labels[3] !== 'dev') {
+      return undefined;
+    }
+    return normalizeWorkersDevSubdomain(labels[1]);
+  } catch {
+    return undefined;
+  }
+}
+
+function workersDevSubdomainResult(url: string): { workersDevSubdomain?: string } {
+  const workersDevSubdomain = extractWorkersDevSubdomain(url);
+  return workersDevSubdomain ? { workersDevSubdomain } : {};
 }
 
 function isCleanCommandExit(result: CloudflareCommandResult): boolean {
