@@ -241,6 +241,7 @@ async function createCloudflarePrerenderRunner(options: {
   clientDir?: string;
   remoteMode?: boolean;
   projectId?: string;
+  voidToken?: string;
 }) {
   const { root, workerDir, persistDir, clientDir, remoteMode } = options;
 
@@ -277,7 +278,10 @@ async function createCloudflarePrerenderRunner(options: {
   // A token is only useful alongside a project ID. Avoid touching the system
   // keychain for ordinary unlinked builds, which also keeps parallel prerenders
   // from contending on the platform credential store.
-  const voidToken = voidProjectId ? getToken(root) : null;
+  // Managed deploy passes a dedicated, short-lived prerender token explicitly.
+  // Self-hosted `vite build` keeps the existing linked-project credential
+  // fallback because it has no parent deploy orchestrator to mint one.
+  const voidToken = voidProjectId ? (options.voidToken ?? getToken(root)) : null;
   const voidStaging = isStagingMode(root);
 
   const bindings = buildPrerenderBindings({
@@ -390,6 +394,7 @@ export async function collectPrerenderPaths(options: {
   clientDir?: string;
   remoteMode?: boolean;
   projectId?: string;
+  voidToken?: string;
 }): Promise<Array<string>> {
   const runner = await createCloudflarePrerenderRunner(options);
   try {
@@ -411,6 +416,7 @@ export async function prerenderPages(options: {
   persistDir: string;
   remoteMode?: boolean;
   projectId?: string;
+  voidToken?: string;
 }): Promise<PrerenderRunResult> {
   const runner = await createCloudflarePrerenderRunner(options);
   try {

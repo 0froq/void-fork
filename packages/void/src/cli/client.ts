@@ -802,6 +802,22 @@ export class PlatformClient {
     return res.json();
   }
 
+  async createPrerenderToken(projectId: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/prerender-token`, {
+      method: 'POST',
+      headers: {
+        ...this.authHeaders,
+      },
+    });
+
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to create prerender token', res);
+    }
+
+    const body = (await res.json()) as { token: string };
+    return body.token;
+  }
+
   async provisionDatabase(projectId: string, connectionString: string): Promise<{ ok: boolean }> {
     const res = await fetch(`${this.baseUrl}/projects/${projectId}/database`, {
       method: 'POST',

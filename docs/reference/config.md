@@ -169,9 +169,9 @@ Output mode. Controls the default rendering strategy for pages.
 | Value                | Default prerender | Per-page override                | Prerender timing           |
 | -------------------- | ----------------- | -------------------------------- | -------------------------- |
 | `"server"` (default) | `false`           | `export const prerender = true`  | Deploy-time (platform ISR) |
-| `"static"`           | `true`            | `export const prerender = false` | Build-time (`vite build`)  |
+| `"static"`           | `true`            | `export const prerender = false` | Build or deploy post-build |
 
-When set to `"static"`, all pages are prerendered at build time as static HTML files written to `dist/client/`. Individual pages can opt out with `export const prerender = false`. Dynamic pages (with route params) without a `getPrerenderPaths()` export are implicitly not prerendered.
+When set to `"static"`, all pages are prerendered as static HTML files written to `dist/client/`. A standalone `vite build` renders them in the build; managed `void deploy` renders immediately afterward in the trusted deploy process so build plugins never receive platform credentials. Individual pages can opt out with `export const prerender = false`. Dynamic pages (with route params) without a `getPrerenderPaths()` export are implicitly not prerendered.
 
 When omitted or set to `"server"`, pages are server-rendered on request. Individual pages can opt into deploy-time prerendering with `export const prerender = true`, or opt out of server-rendered component HTML with `export const ssr = false`.
 

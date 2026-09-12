@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vite-plus/test';
+import { signDeployToken, verifyPrerenderToken } from '../../src/auth/deploy-token.ts';
 import {
   createDeployment,
   updateDeploymentStatus,
@@ -243,6 +244,62 @@ describe('GET /projects/:id', () => {
       env,
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe('POST /projects/:id/prerender-token', () => {
+  it('mints a proxy-only token for the project owner', async () => {
+    const user = await createTestUser(env.db, 'prerender-owner');
+    const project = await createTestProject(env.db, user.id, 'prerender-app');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/prerender-token`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as { token: string };
+    const payload = await verifyPrerenderToken(token, env.JWT_SECRET);
+    expect(payload).toMatchObject({
+      aud: 'prerender',
+      sub: user.id,
+      project: project.id,
+    });
+  });
+
+  it('allows the project-scoped deploy token to mint it', async () => {
+    const user = await createTestUser(env.db, 'prerender-ci');
+    const project = await createTestProject(env.db, user.id, 'prerender-ci-app');
+    const deployToken = await signDeployToken(
+      { projectId: project.id, userId: user.id, login: user.login },
+      env.JWT_SECRET,
+    );
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/prerender-token`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${deployToken}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("does not mint a token for another user's project", async () => {
+    const owner = await createTestUser(env.db, 'prerender-owner-two');
+    const attacker = await createTestUser(env.db, 'prerender-attacker');
+    const project = await createTestProject(env.db, owner.id, 'private-prerender');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/prerender-token`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${attacker.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
   });
 });
 

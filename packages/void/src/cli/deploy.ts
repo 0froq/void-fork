@@ -69,7 +69,12 @@ import {
   detectFramework,
   type DetectedFramework,
 } from '../plugin-inference.ts';
-import { collectPrerenderPaths, collectPrerenderPathsNode } from '../prerender.ts';
+import {
+  collectPrerenderPaths,
+  collectPrerenderPathsNode,
+  prerenderPages,
+  prerenderPagesNode,
+} from '../prerender.ts';
 import { readProjectPaths, resolveProjectPaths } from '../project-paths.ts';
 import { scanQueuesSync } from '../queues/scan.ts';
 import { scanRoutes } from '../router/scan.ts';
@@ -505,9 +510,10 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
  * We scrub it on the CHILD env rather than mutating `process.env`: deleting it
  * from the parent also breaks interactive expired-token re-auth, which reads
  * `cfAccessHeaders(process.env)` / the cloudflared pair-guard AFTER the build
- * step. Managed prerender retains only its project-scoped `VOID_TOKEN`;
- * Cloudflare, Access, and production database credentials never reach
- * arbitrary build scripts or plugins.
+ * step. Managed prerender runs later in this trusted parent process with a
+ * dedicated short-lived proxy credential. The deploy token, Cloudflare,
+ * Access, and production database credentials never reach arbitrary build
+ * scripts or plugins.
  *
  * `localBinRoot` is an explicit OPT-IN, not a default. Build commands are run
  * through a shell (`execSync`) and a user-configured `inference.build` (e.g.
@@ -1382,6 +1388,7 @@ const UNTRUSTED_PROJECT_CODE_ENV_VARS = [
   ...WRANGLER_AUTH_CREDENTIAL_ENV_VARS,
   'CF_ACCESS_CLIENT_ID',
   'CF_ACCESS_CLIENT_SECRET',
+  'VOID_TOKEN',
 ];
 
 function scrubEnvironmentVariables(env: NodeJS.ProcessEnv, names: ReadonlyArray<string>): void {
@@ -5653,17 +5660,10 @@ async function runManagedDeploy(
         cliLog.info('github_oidc_exchange_start', { slug });
         token = await exchangeGithubOidcForDeployToken(getApiUrl(root), slug);
         maskGithubActionsSecret(token);
-        // Export the minted token so the downstream build/prerender can reach
-        // it. Both prerender paths re-read credentials via `getToken()`, which
-        // reads `process.env.VOID_TOKEN` first: the in-process path
-        // (`collectPrerenderPaths` below) and the spawned `vite build` child
-        // (`plugin-prerender`'s closeBundle, which inherits `process.env` via
-        // `buildEnv`). A local variable can't reach either, so without this the
-        // prerender injects no `__VOID_TOKEN`/`__VOID_PROJECT_ID` and renders
-        // against local/empty bindings (AI, remote D1/KV/R2 break). This
-        // restores parity with the removed scaffold step that wrote
-        // `VOID_TOKEN` to `$GITHUB_ENV`. Guarded by the enclosing `!token`
-        // branch, so an explicit `VOID_TOKEN` is never overwritten.
+        // Keep source accounting and expired-token handling consistent with an
+        // explicit CI token. `buildEnv()` always removes this value before any
+        // project-controlled child starts; managed prerender obtains a separate
+        // proxy-only token from the authenticated platform client.
         process.env.VOID_TOKEN = token;
         cliLog.info('github_oidc_exchange_success', { slug });
       }
@@ -6971,6 +6971,7 @@ async function runFullDeploy(
     ? formatProjectCommand(root, fwPreset.buildCommand)
     : undefined;
   const distDir = resolveDistDir(root, fwPreset, frameworkBuildCmd);
+  const workerDirName = resolveWorkerDirName(distDir, fwPreset, frameworkBuildCmd);
 
   // Detect non-default assetsDir from Vite client manifest for _headers generation
   let assetsPrefix = 'assets';
@@ -6995,6 +6996,35 @@ async function runFullDeploy(
 
   // 6. Infer bindings (expanded scan dirs in framework mode, or custom from config)
   const deployConfig = voidConfig;
+
+  // Managed static prerender is deliberately outside the Vite subprocess. The
+  // build runs arbitrary project plugins with every platform credential
+  // scrubbed; only this trusted parent receives the proxy-only token and
+  // injects it into the built worker's Miniflare bindings.
+  if (deployConfig.output === 'static' && !isFrameworkMode) {
+    const result = isNodeTarget(deployConfig.target)
+      ? await prerenderPagesNode({
+          root,
+          ssrDir: join(distDir, 'ssr'),
+          clientDir: join(distDir, 'client'),
+        })
+      : await prerenderPages({
+          root,
+          workerDir: join(distDir, workerDirName),
+          clientDir: join(distDir, 'client'),
+          persistDir: join(root, '.void'),
+          remoteMode: resolveRemoteMode(deployConfig.remote),
+          projectId: config.projectId,
+          voidToken: await client.createPrerenderToken(config.projectId),
+        });
+
+    if (result.paths.length === 0) {
+      log.info('No pages to prerender');
+    } else if (result.failed.length > 0) {
+      voidWarn(`${result.failed.length} page(s) failed to prerender`);
+    }
+  }
+
   const paths = resolveProjectPaths(root, deployConfig);
   const dialect = getDatabaseDialect(deployConfig);
   const deployScanDirs =
@@ -7121,8 +7151,6 @@ async function runFullDeploy(
       }
     }
   }
-  const workerDirName = resolveWorkerDirName(distDir, fwPreset, frameworkBuildCmd);
-
   const rawJobs = scanJobsSync(root, paths.cronsDir);
   const rawQueues = scanQueuesSync(root, paths.queuesDir);
   const schedules = rawJobs.flatMap((job) =>

@@ -326,8 +326,8 @@ describe('runDeploy keeps the CF Access service token in process.env', () => {
   });
 });
 
-// The build child env must omit deploy credentials even though process.env
-// keeps them. Managed prerender retains only its project-scoped Void token.
+// The build child env must omit every deploy credential even though process.env
+// keeps them. Managed prerender obtains a separate proxy-only token afterward.
 describe('buildEnv', () => {
   it('omits Cloudflare and Access credentials while process.env keeps them', () => {
     const savedId = process.env.CF_ACCESS_CLIENT_ID;
@@ -349,7 +349,7 @@ describe('buildEnv', () => {
       expect(childEnv.CF_ACCESS_CLIENT_SECRET).toBeUndefined();
       expect(childEnv.CF_ACCESS_TOKEN).toBeUndefined();
       expect(childEnv.CLOUDFLARE_API_TOKEN).toBeUndefined();
-      expect(childEnv.VOID_TOKEN).toBe('project-token');
+      expect(childEnv.VOID_TOKEN).toBeUndefined();
       expect(childEnv.VOID_DEPLOY_PROJECT_ID).toBe('proj_1');
       // ...and process.env is untouched.
       expect(process.env.CF_ACCESS_CLIENT_ID).toBe('svc-id.access');

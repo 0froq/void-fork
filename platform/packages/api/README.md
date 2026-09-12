@@ -86,6 +86,7 @@ drizzle/
   - domains
   - usage
   - PostgreSQL and MySQL project database provisioning/update
+  - `POST /projects/:id/prerender-token` — mint a five-minute, project-scoped token accepted only by the remote-binding proxy
   - `/projects/:id/github` — connect/inspect/update/disconnect the GitHub repo (POST/GET/PATCH/DELETE; auth + ownership)
 - `GET /usage`
 

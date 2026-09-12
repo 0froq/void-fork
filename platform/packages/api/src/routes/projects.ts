@@ -1,5 +1,6 @@
 import { sql as drizzleSql } from 'drizzle-orm';
 import { Hono } from 'hono';
+import { signPrerenderToken } from '../auth/deploy-token.ts';
 import { hmacSignState } from '../auth/hmac.ts';
 import { buildManagerNamespace } from '../build-namespace.ts';
 import { isTerminalBuildStatus } from '../build-status.ts';
@@ -596,6 +597,25 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'forbidden' }, 403);
     }
     return context.json(project);
+  })
+
+  // Mint a narrowly scoped credential for deploy-time remote-binding access.
+  // The built application receives this token while it runs under Miniflare,
+  // so it must never inherit the caller's full API/deploy credential.
+  .post('/:id/prerender-token', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
+    if (!project) {
+      return context.json({ error: 'project not found' }, 404);
+    }
+    const user = context.get('user');
+    if (project.user_id !== user.id) {
+      return context.json({ error: 'forbidden' }, 403);
+    }
+    const token = await signPrerenderToken(
+      { projectId: project.id, userId: user.id, login: user.login },
+      context.env.JWT_SECRET,
+    );
+    return context.json({ token });
   })
 
   // List deployments for a project

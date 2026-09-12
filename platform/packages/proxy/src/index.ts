@@ -69,15 +69,24 @@ app.post('/*', async (context, next) => {
     if (!projectId) {
       return context.json({ error: 'projectId required' }, 400);
     }
-    // Verify the authenticated user owns this project
-    const owns = await verifyProjectOwner(
-      context.env.API,
-      context.env.JWT_SECRET,
-      projectId,
-      payload.sub,
-    );
-    if (!owns) {
-      return context.json({ error: 'forbidden' }, 403);
+    if (payload.aud === 'prerender') {
+      // Prerender credentials are short-lived and already pinned to one
+      // project by the API that minted them. Never turn one into a general
+      // owner token by accepting a caller-selected projectId.
+      if (!payload.project || payload.project !== projectId) {
+        return context.json({ error: 'forbidden' }, 403);
+      }
+    } else {
+      // Full API tokens retain the local-development ownership lookup.
+      const owns = await verifyProjectOwner(
+        context.env.API,
+        context.env.JWT_SECRET,
+        projectId,
+        payload.sub,
+      );
+      if (!owns) {
+        return context.json({ error: 'forbidden' }, 403);
+      }
     }
     context.set('projectId', projectId);
   } else {
@@ -183,7 +192,7 @@ async function verifyJwt(token: string, secret: string): Promise<JwtPayload | nu
       return null;
     }
 
-    if (payload.aud !== 'api') {
+    if (payload.aud !== 'api' && payload.aud !== 'prerender') {
       return null;
     }
 

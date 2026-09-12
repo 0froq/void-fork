@@ -14,7 +14,7 @@ function base64urlEncode(data: Uint8Array): string {
 }
 
 async function signJwt(
-  payload: { sub: string; login: string; aud?: string; exp?: number },
+  payload: { sub: string; login: string; aud?: string; exp?: number; project?: string },
   secret: string,
 ): Promise<string> {
   const encoder = new TextEncoder();
@@ -279,6 +279,54 @@ describe('proxy worker', () => {
 
       expect(res.status).toBe(200);
       expect(env.AI.run).toHaveBeenCalled();
+    });
+
+    it('accepts a prerender token only for its scoped project', async () => {
+      const token = await signJwt(
+        { sub: 'user_1', login: 'testuser', aud: 'prerender', project: 'proj_1' },
+        JWT_SECRET,
+      );
+      const api = createMockApi();
+      const apiFetch = vi.spyOn(api, 'fetch');
+      const env = createEnv(undefined, undefined, api);
+
+      const allowed = await worker.fetch(
+        post(
+          '/ai/run',
+          { model: 'test-model', inputs: {}, projectId: 'proj_1' },
+          { authorization: `Bearer ${token}` },
+        ),
+        env,
+      );
+      expect(allowed.status).toBe(200);
+      expect(apiFetch).not.toHaveBeenCalled();
+
+      const denied = await worker.fetch(
+        post(
+          '/ai/run',
+          { model: 'test-model', inputs: {}, projectId: 'proj_42' },
+          { authorization: `Bearer ${token}` },
+        ),
+        env,
+      );
+      expect(denied.status).toBe(403);
+      expect(await denied.json()).toEqual({ error: 'forbidden' });
+    });
+
+    it('rejects deploy tokens at the binding proxy', async () => {
+      const token = await signJwt(
+        { sub: 'user_1', login: 'testuser', aud: 'deploy', project: 'proj_1' },
+        JWT_SECRET,
+      );
+      const res = await worker.fetch(
+        post(
+          '/ai/run',
+          { model: 'test-model', inputs: {}, projectId: 'proj_1' },
+          { authorization: `Bearer ${token}` },
+        ),
+        createEnv(),
+      );
+      expect(res.status).toBe(401);
     });
 
     it('rejects access when user does not own the project', async () => {
