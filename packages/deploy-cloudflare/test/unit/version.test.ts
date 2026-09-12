@@ -217,6 +217,26 @@ describe('Cloudflare version activation', () => {
     ).resolves.toMatchObject({ ok: true, previousVersionId: null });
   });
 
+  it('accepts Wrangler error 10007 as a Worker that has not been created yet', async () => {
+    const runWrangler = runner({
+      status: {
+        stdout: '',
+        stderr: 'This Worker does not exist on your account. [code: 10007]',
+        status: 1,
+      },
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'first',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, previousVersionId: null });
+  });
+
   it('bootstraps first-deploy Durable Object migrations through a non-versioned deploy', async () => {
     const runWrangler = runner({
       status: { stdout: '', stderr: 'The Worker first has no deployments.', status: 1 },

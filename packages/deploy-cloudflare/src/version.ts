@@ -323,7 +323,10 @@ async function readCurrentProductionVersion(
   );
   if (!isCleanCommandExit(result)) {
     const output = `${result.stdout}\n${result.stderr}`;
-    if (/no deployments|worker .* (?:does not exist|not found)/i.test(output)) {
+    if (
+      parseCloudflareErrorCode(output) === 10007 ||
+      /no deployments|\bworker\b.*\b(?:does not exist|not found)\b/i.test(output)
+    ) {
       return { kind: 'ok', versionId: null };
     }
     return { kind: 'failed', status: result.status };
