@@ -246,6 +246,31 @@ function hasCustomDomains(routes: ReadonlyArray<unknown> | undefined): boolean {
   return routes?.some((route) => isRecord(route) && route.custom_domain === true) === true;
 }
 
+/** Select a configured HTTPS route that is guaranteed to cover /__void/ready. */
+function customRouteReadinessUrl(routes: ReadonlyArray<unknown>): string | undefined {
+  for (const route of routes) {
+    const pattern =
+      typeof route === 'string'
+        ? route
+        : isRecord(route) && typeof route.pattern === 'string'
+          ? route.pattern
+          : undefined;
+    if (!pattern) {
+      continue;
+    }
+    const customDomain = isRecord(route) && route.custom_domain === true;
+    const withoutScheme = pattern.replace(/^https?:\/\//i, '');
+    const slash = withoutScheme.indexOf('/');
+    const hostname = (slash < 0 ? withoutScheme : withoutScheme.slice(0, slash)).trim();
+    const path = slash < 0 ? '' : withoutScheme.slice(slash);
+    if (!hostname || hostname.includes('*') || (!customDomain && path !== '/*' && path !== '*')) {
+      continue;
+    }
+    return `https://${hostname}`;
+  }
+  return undefined;
+}
+
 function triggerConfigFromWrangler(config: Record<string, unknown>): CloudflareTriggerConfig {
   const triggers = isRecord(config.triggers) ? config.triggers : {};
   const queues = isRecord(config.queues) ? config.queues : {};
@@ -431,12 +456,16 @@ export async function activateCloudflareVersion(options: {
     ? extractWorkersDevSubdomain(reportedPreviewUrl)
     : undefined;
   let readinessUrl = reportedPreviewUrl;
+  let readinessUsesCustomRoute = false;
   let stagedVersionOverride = false;
   if (!readinessUrl) {
     if (previous.versionId === null || options.allowFirstDeploymentBootstrap === true) {
       return bootstrapFirstDeployment(options, commonArgs, previous.versionId);
     }
-    readinessUrl = workersDevReadinessUrl(options.workerName, options.workersDevSubdomain);
+    readinessUrl = desiredTriggerConfig.workers_dev
+      ? workersDevReadinessUrl(options.workerName, options.workersDevSubdomain)
+      : customRouteReadinessUrl(desiredTriggerConfig.routes);
+    readinessUsesCustomRoute = !desiredTriggerConfig.workers_dev && readinessUrl !== undefined;
     if (!readinessUrl) {
       return {
         ok: false,
@@ -476,7 +505,7 @@ export async function activateCloudflareVersion(options: {
   let ready = await probeReadiness(
     `${readinessUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
-    options.readinessHeaders,
+    readinessUsesCustomRoute ? undefined : options.readinessHeaders,
     authenticatedWorkersDevSubdomain,
     stagedVersionOverride ? versionId : undefined,
     options.fetch ?? globalThis.fetch,
@@ -492,10 +521,12 @@ export async function activateCloudflareVersion(options: {
   // whose traffic can remain untouched while the new version is staged; a truly empty first
   // deployment has no safe zero-percent fallback.
   if (ready === 'access-denied' && !stagedVersionOverride && previous.versionId !== null) {
-    const stableReadinessUrl = workersDevReadinessUrl(
-      options.workerName,
-      extractWorkersDevSubdomain(readinessUrl) ?? options.workersDevSubdomain,
-    );
+    const stableReadinessUrl = desiredTriggerConfig.workers_dev
+      ? workersDevReadinessUrl(
+          options.workerName,
+          extractWorkersDevSubdomain(readinessUrl) ?? options.workersDevSubdomain,
+        )
+      : customRouteReadinessUrl(desiredTriggerConfig.routes);
     if (stableReadinessUrl && stableReadinessUrl !== readinessUrl) {
       if (!options.verifyUploader()) {
         return {
@@ -524,11 +555,12 @@ export async function activateCloudflareVersion(options: {
       }
       readinessUrl = stableReadinessUrl;
       authenticatedWorkersDevSubdomain = extractWorkersDevSubdomain(stableReadinessUrl);
+      readinessUsesCustomRoute = !desiredTriggerConfig.workers_dev;
       stagedVersionOverride = true;
       ready = await probeReadiness(
         `${readinessUrl.replace(/\/$/, '')}/__void/ready`,
         options.workerName,
-        options.readinessHeaders,
+        readinessUsesCustomRoute ? undefined : options.readinessHeaders,
         authenticatedWorkersDevSubdomain,
         versionId,
         options.fetch ?? globalThis.fetch,
@@ -747,7 +779,19 @@ async function bootstrapFirstDeployment(
     };
   }
   const versionId = output.match(VERSION_ID_RE)?.[1];
-  const previewUrl = output.match(PREVIEW_URL_RE)?.[1] ?? output.match(WORKERS_DEV_URL_RE)?.[1];
+  const desiredMetadata = parseCloudflareVersionMessage(options.message);
+  const desiredTriggerConfig =
+    desiredMetadata?.schema === 2
+      ? desiredMetadata.triggerConfig
+      : options.configPath
+        ? readCloudflareTriggerConfig(options.configPath)
+        : triggerConfigFromWrangler({});
+  const reportedUrl = output.match(PREVIEW_URL_RE)?.[1] ?? output.match(WORKERS_DEV_URL_RE)?.[1];
+  const previewUrl =
+    reportedUrl ??
+    (desiredTriggerConfig.workers_dev
+      ? workersDevReadinessUrl(options.workerName, options.workersDevSubdomain)
+      : customRouteReadinessUrl(desiredTriggerConfig.routes));
   if (!versionId || !previewUrl) {
     return {
       ok: false,
@@ -759,7 +803,7 @@ async function bootstrapFirstDeployment(
   const ready = await probeReadiness(
     `${previewUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
-    options.readinessHeaders,
+    reportedUrl || desiredTriggerConfig.workers_dev ? options.readinessHeaders : undefined,
     extractWorkersDevSubdomain(previewUrl),
     undefined,
     options.fetch ?? globalThis.fetch,

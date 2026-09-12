@@ -826,6 +826,81 @@ describe('Cloudflare version activation', () => {
     ).resolves.toMatchObject({ ok: true, previousVersionId: null });
   });
 
+  it('probes a custom route when workers.dev and preview URLs are disabled', async () => {
+    const runWrangler = runner({
+      upload: ok(`Worker Version ID: ${NEXT}`),
+    });
+    const fetcher = vi.fn(async () => Response.json({ ready: true }));
+    const triggerConfig = {
+      workers_dev: false,
+      preview_urls: false,
+      routes: [{ pattern: 'app.example.com/*', zone_name: 'example.com' }],
+      crons: [],
+      queueConsumers: [],
+      workflows: [],
+    };
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'private-app',
+        workersDevSubdomain: 'account',
+        readinessHeaders: { 'CF-Access-Client-Secret': 'must-not-leak' },
+        message: encodeCloudflareVersionMessage([], triggerConfig),
+        fetch: fetcher,
+      }),
+    ).resolves.toMatchObject({ ok: true, previewUrl: 'https://app.example.com' });
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://app.example.com/__void/ready',
+      expect.objectContaining({
+        headers: {
+          'user-agent': 'void-deploy-readiness/1',
+          'Cloudflare-Workers-Version-Overrides': `private-app="${NEXT}"`,
+        },
+      }),
+    );
+  });
+
+  it('probes a custom route after first-deployment bootstrap', async () => {
+    const triggerConfig = {
+      workers_dev: false,
+      preview_urls: false,
+      routes: [{ pattern: 'bootstrap.example.com', custom_domain: true }],
+      crons: [],
+      queueConsumers: [],
+      workflows: [],
+    };
+    const runWrangler = runner({
+      status: { stdout: '', stderr: 'This Worker does not exist. [code: 10007]', status: 1 },
+      upload: {
+        stdout: '',
+        stderr: 'Durable Object migrations require deploy. [code: 10211]',
+        status: 1,
+      },
+      bootstrap: ok(`Current Version ID: ${NEXT}`),
+    });
+    const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'bootstrap-private',
+        message: encodeCloudflareVersionMessage([], triggerConfig),
+        fetch: fetcher,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      previewUrl: 'https://bootstrap.example.com',
+      previousVersionId: null,
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://bootstrap.example.com/__void/ready',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('bootstraps first-deploy Durable Object migrations through a non-versioned deploy', async () => {
     const runWrangler = runner({
       status: { stdout: '', stderr: 'The Worker first has no deployments.', status: 1 },
