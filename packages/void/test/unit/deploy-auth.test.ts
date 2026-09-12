@@ -336,6 +336,8 @@ describe('buildEnv', () => {
     const savedCloudflareToken = process.env.CLOUDFLARE_API_TOKEN;
     const savedVoidToken = process.env.VOID_TOKEN;
     const savedDatabaseUrl = process.env.DATABASE_URL;
+    const savedActionsOidcUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const savedActionsOidcToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
     try {
       process.env.CF_ACCESS_CLIENT_ID = 'svc-id.access';
       process.env.CF_ACCESS_CLIENT_SECRET = 'svc-secret';
@@ -343,6 +345,8 @@ describe('buildEnv', () => {
       process.env.CLOUDFLARE_API_TOKEN = 'cloudflare-token';
       process.env.VOID_TOKEN = 'project-token';
       process.env.DATABASE_URL = 'postgresql://production:secret@db.example.com/app';
+      process.env.ACTIONS_ID_TOKEN_REQUEST_URL = 'https://actions.example.com/oidc';
+      process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'actions-oidc-bearer';
 
       const childEnv = buildEnv({ VOID_DEPLOY_PROJECT_ID: 'proj_1' });
 
@@ -353,10 +357,13 @@ describe('buildEnv', () => {
       expect(childEnv.CLOUDFLARE_API_TOKEN).toBeUndefined();
       expect(childEnv.VOID_TOKEN).toBeUndefined();
       expect(childEnv.DATABASE_URL).toBeUndefined();
+      expect(childEnv.ACTIONS_ID_TOKEN_REQUEST_URL).toBeUndefined();
+      expect(childEnv.ACTIONS_ID_TOKEN_REQUEST_TOKEN).toBeUndefined();
       expect(childEnv.VOID_DEPLOY_PROJECT_ID).toBe('proj_1');
       // ...and process.env is untouched.
       expect(process.env.CF_ACCESS_CLIENT_ID).toBe('svc-id.access');
       expect(process.env.CF_ACCESS_CLIENT_SECRET).toBe('svc-secret');
+      expect(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN).toBe('actions-oidc-bearer');
     } finally {
       const restore = (key: string, value: string | undefined): void => {
         if (value === undefined) {
@@ -371,6 +378,8 @@ describe('buildEnv', () => {
       restore('CLOUDFLARE_API_TOKEN', savedCloudflareToken);
       restore('VOID_TOKEN', savedVoidToken);
       restore('DATABASE_URL', savedDatabaseUrl);
+      restore('ACTIONS_ID_TOKEN_REQUEST_URL', savedActionsOidcUrl);
+      restore('ACTIONS_ID_TOKEN_REQUEST_TOKEN', savedActionsOidcToken);
     }
   });
 
