@@ -3422,6 +3422,20 @@ export function resolveWranglerMigrationPattern(
   if (!field.present) {
     return { ok: true, pattern: '*.sql' };
   }
+  const directoryField = readBindingFieldPresence(
+    config,
+    'd1_databases',
+    binding,
+    'migrations_dir',
+  );
+  if (!directoryField.present) {
+    return {
+      ok: false,
+      reason:
+        `deploy: migrations_pattern for D1 binding ${binding} requires an explicit ` +
+        'migrations_dir in the same binding.',
+    };
+  }
   if (typeof field.value !== 'string' || field.value.length === 0) {
     return {
       ok: false,
@@ -3470,9 +3484,8 @@ function listWranglerMigrationFiles(directory: string, pattern: string): Array<s
 /**
  * Assert the migration files wrangler 4.107 will APPLY — in the ORDER it applies them — equal
  * the gated source set. wrangler resolves its OWN files from the D1 entry's `migrations_dir`
- * (relative to the config-file dir) with the DEFAULT pattern `<dir>/*.sql` (a custom
- * `migrations_pattern` is rejected pre-account, so only the default flat `*.sql` enumeration —
- * top-level, `{ dot:false }` — reaches here), tracks each by its `.sql` name, and applies them
+ * (relative to the config-file dir) with either the default `<dir>/*.sql` pattern or the
+ * configured `migrations_pattern`, tracks each by its relative `.sql` name, and applies them
  * sorted by its numeric-prefix comparator ({@link compareWranglerMigrationPaths}) — the exact
  * sequence `d1 migrations apply` runs against REMOTE D1. This backend VALIDATES the set
  * `collectMigrations` reads (flat dir, `seed.sql` excluded, sorted lexicographically). Two
@@ -3482,8 +3495,8 @@ function listWranglerMigrationFiles(directory: string, pattern: string): Array<s
  * order wrangler applies must equal Void's gated order position-for-position, so the local
  * runner + deploy gates validate the exact order remote D1 receives (an unpadded prefix like
  * `2_` vs `10_` sorts differently lexicographically-vs-numerically and diverges — reject). A
- * defensive custom-pattern check fails closed if one slips past the pre-account guard. Exported
- * for unit testing.
+ * custom patterns are accepted only when their exact result matches that gated set. Exported for
+ * unit testing.
  */
 export async function checkWranglerMigrationApplySet(
   configPath: string,

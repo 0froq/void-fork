@@ -1545,6 +1545,27 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(wranglerArgs).toEqual([]);
   });
 
+  it('rejects migrations_pattern without an explicit migrations_dir before any account op', async () => {
+    const root = d1Project({
+      ...PROVISIONED_D1,
+      d1_databases: [
+        {
+          binding: 'DB',
+          database_name: 'myapp-db',
+          database_id: REAL_D1_ID,
+          migrations_pattern: 'db/migrations/**/*.sql',
+        },
+      ],
+    });
+    const { deps, trace, wranglerArgs, exitCalls } = harness();
+    await expect(
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(exitCalls).toEqual([1]);
+    expect(trace).toEqual([]);
+    expect(wranglerArgs).toEqual([]);
+  });
+
   it('deploys a WebSocket app with a SQLite Durable Object migration', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'wsapp' }),
@@ -6711,6 +6732,31 @@ describe('checkWranglerMigrationApplySet', () => {
       [{ name: '0000_init.sql', sql: 'CREATE TABLE a (id integer);' }],
     );
     expect(result.ok).toBe(true);
+  });
+
+  it('rejects a custom pattern when migrations_dir is implicit', async () => {
+    const root = makeProject({
+      'wrangler.jsonc': '{}',
+      'db/migrations/0000_init.sql': 'CREATE TABLE a (id integer);',
+    });
+    const result = await checkWranglerMigrationApplySet(
+      join(root, 'wrangler.jsonc'),
+      {
+        d1_databases: [
+          {
+            binding: 'DB',
+            migrations_pattern: 'db/migrations/**/*.sql',
+          },
+        ],
+      },
+      'DB',
+      './db/migrations',
+      [{ name: '0000_init.sql', sql: 'CREATE TABLE a (id integer);' }],
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('requires an explicit migrations_dir');
+    }
   });
 
   it('A1: fails closed (defense in depth) on a PRESENT-but-EMPTY migrations_pattern ("")', async () => {
