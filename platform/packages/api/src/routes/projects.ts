@@ -28,8 +28,11 @@ import {
   getDomainsByProjectIds,
   getDeployment,
   getActiveDeployment,
+  createDeployment,
+  deleteRollbackLease,
   cancelDeployment,
   setActiveDeployment,
+  updateDeploymentStatus,
   updateProjectType,
   appendAppliedMigrations,
   appendProjectMigrations,
@@ -731,6 +734,16 @@ const app = new Hono<ApiEnv>()
 
     const planLimits = getPlanLimits(context.get('user').plan);
 
+    // A committed rollback lease blocks deploys and other rollbacks while
+    // the cutover transaction commits or external compensation runs. Keeping
+    // this fence outside the cutover transaction is essential: if PostgreSQL
+    // rejects COMMIT after the callback returns, the lease still exists while
+    // we restore KV, cron, and queue state from the callback's undo log.
+    let rollbackLeaseId: string | undefined;
+    const externalUndo: Array<() => Promise<void>> = [];
+    let externalCompensated = false;
+    let rollbackCommitted = false;
+
     // The entire rollback cutover runs inside a single row-locked tx so
     // concurrent rollbacks / applies / renames serialize and no external
     // state is written before the pg flip. Ordering invariants:
@@ -751,6 +764,24 @@ const app = new Hono<ApiEnv>()
     // renameAppliedMigrationsForProject.
     let rollbackResult: { migrationDiff: ReadonlyArray<string> };
     try {
+      rollbackLeaseId = await context.get('db').transaction(async (tx) => {
+        await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
+        const txDb = tx as unknown as Db;
+        const lockedProject = await getProject(txDb, projectId);
+        if (!lockedProject) {
+          throw new RollbackError(404, 'project not found');
+        }
+        if (lockedProject.status === 'deleting') {
+          throw new RollbackError(409, 'project is being deleted');
+        }
+        const activeDeploy = await getActiveDeployment(txDb, projectId);
+        if (activeDeploy) {
+          throw new RollbackError(409, `deploy in progress: ${activeDeploy.id}`);
+        }
+        const lease = await createDeployment(txDb, projectId, null, 'rollback-lease');
+        return lease.id;
+      });
+
       rollbackResult = await context.get('db').transaction(async (tx) => {
         // Lock the project row via `SELECT … FOR UPDATE` — per-project,
         // collision-free, released automatically at tx end. MUST be the
@@ -784,7 +815,7 @@ const app = new Hono<ApiEnv>()
           throw new RollbackError(409, 'project is being deleted');
         }
         const activeDeploy = await getActiveDeployment(txDb, projectId);
-        if (activeDeploy) {
+        if (activeDeploy && activeDeploy.id !== rollbackLeaseId) {
           throw new RollbackError(409, `deploy in progress: ${activeDeploy.id}`);
         }
 
@@ -911,7 +942,6 @@ const app = new Hono<ApiEnv>()
         await updateProjectType(txDb, projectId, targetType);
         await setActiveDeployment(txDb, projectId, target.id);
 
-        const externalUndo: Array<() => Promise<void>> = [];
         const snapshottedRoutingKeys = new Set<string>();
         const snapshotRoutingKey = async (key: string): Promise<void> => {
           if (snapshottedRoutingKeys.has(key)) {
@@ -1129,12 +1159,30 @@ const app = new Hono<ApiEnv>()
               'rollback failed and external state compensation was incomplete',
             );
           }
+          externalCompensated = true;
           throw externalError;
         }
 
         return { migrationDiff: diff };
       });
+      rollbackCommitted = true;
     } catch (err) {
+      if (!rollbackCommitted && !externalCompensated && externalUndo.length > 0) {
+        const compensationErrors: Array<unknown> = [];
+        for (const undo of [...externalUndo].reverse()) {
+          try {
+            await undo();
+          } catch (compensationError) {
+            compensationErrors.push(compensationError);
+          }
+        }
+        if (compensationErrors.length > 0) {
+          throw new AggregateError(
+            [err, ...compensationErrors],
+            'rollback transaction failed and external state compensation was incomplete',
+          );
+        }
+      }
       if (err instanceof RollbackError) {
         if (err.destructiveMigrations) {
           return context.json(
@@ -1145,6 +1193,20 @@ const app = new Hono<ApiEnv>()
         return context.json({ error: err.message }, err.status);
       }
       throw err;
+    } finally {
+      if (rollbackLeaseId) {
+        await deleteRollbackLease(context.get('db'), rollbackLeaseId).catch(async () => {
+          // A terminal fallback still releases the fence if deleting the
+          // internal row encounters a transient database failure.
+          await updateDeploymentStatus(
+            context.get('db'),
+            rollbackLeaseId!,
+            'canceled',
+            rollbackCommitted ? 'rollback completed' : 'rollback aborted',
+            { force: true },
+          );
+        });
+      }
     }
 
     return context.json({

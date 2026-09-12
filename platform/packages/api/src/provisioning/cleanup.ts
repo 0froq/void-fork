@@ -8,6 +8,7 @@ import {
   type Db,
   deleteProjectCascade,
   getAllProjectDeployments,
+  getActiveDeployment,
   getDomainsByProjectId,
   getProject,
   getProjectResources,
@@ -360,6 +361,10 @@ async function lockAndMarkDeleting(
     if (!lockedProject) {
       throw new Error('project disappeared during deletion');
     }
+    const activeDeployment = await getActiveDeployment(txDb, projectId);
+    if (activeDeployment?.source === 'rollback-lease') {
+      throw new ProjectOperationInProgressError();
+    }
     if (lockedProject.status !== 'deleting') {
       await tx
         .update(projectsTable)
@@ -389,6 +394,13 @@ async function lockAndMarkDeleting(
     // on replay (already-terminal builds are not re-matched by the CAS).
     return await terminateBuildsForProject(txDb, projectId, { reason: 'project deleted' });
   });
+}
+
+export class ProjectOperationInProgressError extends Error {
+  constructor() {
+    super('project operation in progress');
+    this.name = 'ProjectOperationInProgressError';
+  }
 }
 
 /**

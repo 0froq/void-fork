@@ -529,6 +529,13 @@ export async function getDeployment(db: Db, id: string): Promise<Deployment | nu
   return row ?? null;
 }
 
+/** Remove the internal deployment row used only to fence a rollback cutover. */
+export async function deleteRollbackLease(db: Db, id: string): Promise<void> {
+  await db
+    .delete(deployments)
+    .where(and(eq(deployments.id, id), eq(deployments.source, 'rollback-lease')));
+}
+
 export async function getProjectDeployments(
   db: Db,
   projectId: string,
