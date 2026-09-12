@@ -6,11 +6,13 @@ const STATE_FILE = join('.void', 'cloudflare.json');
 
 type CloudflareLocalState = {
   workersDevSubdomain?: unknown;
+  workersDevSubdomains?: unknown;
 };
 
 /** Resolve the account subdomain without exposing Cloudflare credentials to project code. */
 export function resolveCloudflareWorkersDevSubdomain(
   root: string,
+  accountId: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string | undefined {
   const configured = env.CLOUDFLARE_WORKERS_SUBDOMAIN;
@@ -24,23 +26,48 @@ export function resolveCloudflareWorkersDevSubdomain(
     return normalized;
   }
 
-  const cached = readCloudflareLocalState(root).workersDevSubdomain;
+  const cachedByAccount = readCloudflareLocalState(root).workersDevSubdomains;
+  const cached =
+    cachedByAccount && typeof cachedByAccount === 'object' && !Array.isArray(cachedByAccount)
+      ? (cachedByAccount as Record<string, unknown>)[accountId]
+      : undefined;
   return typeof cached === 'string' ? normalizeWorkersDevSubdomain(cached) : undefined;
 }
 
 /** Cache a Wrangler-reported account subdomain for later no-preview version probes. */
-export function rememberCloudflareWorkersDevSubdomain(root: string, url: string): boolean {
+export function rememberCloudflareWorkersDevSubdomain(
+  root: string,
+  accountId: string,
+  url: string,
+): boolean {
   const workersDevSubdomain = extractWorkersDevSubdomain(url);
   if (!workersDevSubdomain) {
     return false;
   }
   const current = readCloudflareLocalState(root);
-  if (current.workersDevSubdomain === workersDevSubdomain) {
+  const currentByAccount =
+    current.workersDevSubdomains &&
+    typeof current.workersDevSubdomains === 'object' &&
+    !Array.isArray(current.workersDevSubdomains)
+      ? (current.workersDevSubdomains as Record<string, unknown>)
+      : {};
+  if (currentByAccount[accountId] === workersDevSubdomain) {
     return false;
   }
+  const { workersDevSubdomain: _legacy, ...state } = current;
   const filePath = join(root, STATE_FILE);
   mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, JSON.stringify({ ...current, workersDevSubdomain }, null, 2) + '\n');
+  writeFileSync(
+    filePath,
+    JSON.stringify(
+      {
+        ...state,
+        workersDevSubdomains: { ...currentByAccount, [accountId]: workersDevSubdomain },
+      },
+      null,
+      2,
+    ) + '\n',
+  );
   return true;
 }
 

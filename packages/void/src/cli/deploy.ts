@@ -3799,28 +3799,12 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
 
-  let workersDevSubdomain: string | undefined;
-  try {
-    workersDevSubdomain = resolveCloudflareWorkersDevSubdomain(root);
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    return exit(1);
-  }
-
   const provisionModule = await loadProvisionModule();
   const staticPreset =
     resolveCloudflareStaticPreset(root, voidConfig, options) ??
     (await resolveCloudflareVoidStaticPreset(root, voidConfig));
   if (staticPreset) {
-    return runCloudflareStaticDeploy(
-      root,
-      options,
-      voidConfig,
-      staticPreset,
-      workersDevSubdomain,
-      cliLog,
-      deps,
-    );
+    return runCloudflareStaticDeploy(root, options, voidConfig, staticPreset, cliLog, deps);
   }
 
   // 0. Flag guard — `--skip-build` cannot be honored by this backend, so REJECT the
@@ -3939,6 +3923,13 @@ export async function runCloudflareDeploy(
         'void cannot intercept — so the account must be pinned before deploying.',
       ].join('\n'),
     );
+    return exit(1);
+  }
+  let workersDevSubdomain: string | undefined;
+  try {
+    workersDevSubdomain = resolveCloudflareWorkersDevSubdomain(root, accountId);
+  } catch (error) {
+    log.error(getErrorMessage(error));
     return exit(1);
   }
 
@@ -5029,7 +5020,7 @@ export async function runCloudflareDeploy(
     );
     return exit(1);
   }
-  rememberCloudflareWorkersDevSubdomain(root, execution.previewUrl);
+  rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
   cliLog.info('cloudflare_deploy_end', {
     ok: true,
     worker: workerName,
@@ -5330,7 +5321,6 @@ async function runCloudflareStaticDeploy(
   options: RunDeployOptions,
   voidConfig: VoidConfig,
   preset: StaticPreset,
-  workersDevSubdomain: string | undefined,
   cliLog: CliLogger,
   deps: CloudflareDeployDeps,
 ): Promise<void> {
@@ -5351,6 +5341,13 @@ async function runCloudflareStaticDeploy(
     log.error(
       'deploy: no Cloudflare account is pinned. Set account_id in wrangler.jsonc or CLOUDFLARE_ACCOUNT_ID.',
     );
+    return exit(1);
+  }
+  let workersDevSubdomain: string | undefined;
+  try {
+    workersDevSubdomain = resolveCloudflareWorkersDevSubdomain(root, accountId);
+  } catch (error) {
+    log.error(getErrorMessage(error));
     return exit(1);
   }
 
@@ -5479,7 +5476,7 @@ async function runCloudflareStaticDeploy(
     log.error(formatCloudflareActivationError(execution));
     return exit(1);
   }
-  rememberCloudflareWorkersDevSubdomain(root, execution.previewUrl);
+  rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
   cliLog.info('cloudflare_deploy_end', {
     ok: true,
     worker: workerName,
