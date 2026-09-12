@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
-import { describe, expect, it, vi } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   activateCloudflareExistingVersion,
   changeCloudflareDomain,
@@ -25,9 +25,15 @@ import { readWranglerCustomDomains, updateWranglerCustomDomain } from '../../src
 
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '', signal: null, error: null });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
 function context(runWrangler: CloudflareOperationRunner): CloudflareOperationContext {
   return {
     accountId: 'account-1',
+    apiBaseUrl: 'https://api.cloudflare.com/client/v4',
     configPath: '/app/wrangler.jsonc',
     workerName: 'my-worker',
     runWrangler,
@@ -338,7 +344,9 @@ describe('Cloudflare custom domains', () => {
   });
 
   it('restores the exact local and remote config on trigger failure', async () => {
-    const root = project();
+    const root = project(
+      '{"name":"my-worker","account_id":"account-1","routes":[{"pattern":"existing.example.com","custom_domain":true}]}',
+    );
     const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
     const runner = vi
       .fn<CloudflareOperationRunner>()
@@ -352,7 +360,9 @@ describe('Cloudflare custom domains', () => {
   });
 
   it('reports uncertain remote route state when automatic restore also fails', async () => {
-    const root = project();
+    const root = project(
+      '{"name":"my-worker","account_id":"account-1","routes":[{"pattern":"existing.example.com","custom_domain":true}]}',
+    );
     const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
     const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue({
       status: 1,
@@ -364,6 +374,74 @@ describe('Cloudflare custom domains', () => {
       'remote route state may be partially applied',
     );
     expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(before);
+  });
+
+  it('removes the final domain through the authenticated API', async () => {
+    const root = project(
+      '{"name":"my-worker","account_id":"account-1","routes":[{"pattern":"app.example.com","custom_domain":true}]}',
+    );
+    const runner = vi.fn<CloudflareOperationRunner>();
+    const publishEmpty = vi.fn(async () => undefined);
+
+    await expect(
+      changeCloudflareDomain(root, 'app.example.com', 'delete', runner, publishEmpty),
+    ).resolves.toMatchObject({ modified: true, domains: [] });
+
+    expect(publishEmpty).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: 'account-1', workerName: 'my-worker' }),
+    );
+    expect(runner).not.toHaveBeenCalled();
+    expect(readWranglerCustomDomains(root).domains).toEqual([]);
+  });
+
+  it('publishes an empty final domain set to the pinned Cloudflare API', async () => {
+    const root = project(
+      '{"name":"my-worker","account_id":"account-1","routes":[{"pattern":"app.example.com","custom_domain":true}]}',
+    );
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', 'test-token');
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ success: true, errors: [], messages: [], result: null }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await changeCloudflareDomain(root, 'app.example.com', 'delete', vi.fn());
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/account-1/workers/scripts/my-worker/domains/records',
+    );
+    expect(init).toMatchObject({
+      method: 'PUT',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        override_scope: true,
+        override_existing_origin: false,
+        override_existing_dns_record: false,
+        origins: [],
+      }),
+      redirect: 'error',
+    });
+  });
+
+  it('fails closed before deleting the final domain without an API token', async () => {
+    const root = project(
+      '{"name":"my-worker","account_id":"account-1","routes":[{"pattern":"app.example.com","custom_domain":true}]}',
+    );
+    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
+    const runner = vi.fn<CloudflareOperationRunner>();
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', '');
+    vi.stubEnv('CF_API_TOKEN', '');
+
+    await expect(changeCloudflareDomain(root, 'app.example.com', 'delete', runner)).rejects.toThrow(
+      'No local or remote state changed',
+    );
+
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(before);
+    expect(runner).not.toHaveBeenCalled();
   });
 
   it('lists configured domains without an account mutation', () => {
