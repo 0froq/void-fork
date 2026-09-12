@@ -48,6 +48,7 @@ export type CloudflareVersionActivation =
       reason:
         | 'uploader-changed'
         | 'status-failed'
+        | 'deployment-changed'
         | 'traffic-split-unsupported'
         | 'upload-failed'
         | 'upload-output-invalid'
@@ -68,6 +69,10 @@ export type CloudflareVersionActivation =
       versionId?: string;
       previousVersionId?: string | null;
       rollback?: 'not-needed' | 'succeeded' | 'failed' | 'unavailable' | 'unsafe';
+      /** Version that owned production after a concurrent operation superseded this command. */
+      activeVersionId?: string | null;
+      /** Whether Void restored the active version's immutable trigger snapshot. */
+      triggerRepair?: 'succeeded' | 'failed' | 'unavailable';
     };
 
 type ProductionDeployment = Readonly<{
@@ -187,6 +192,134 @@ export async function deployCloudflareVersionTriggers(options: {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+export type CloudflareTriggerStabilization =
+  | Readonly<{
+      ok: true;
+      activeVersionId: string;
+      targetOwnsTraffic: boolean;
+    }>
+  | Readonly<{
+      ok: false;
+      reason: 'status-failed' | 'traffic-split' | 'metadata-unavailable' | 'triggers-failed';
+      status?: number;
+      activeVersionId?: string | null;
+    }>;
+
+/**
+ * Reconcile triggers to the version that actually owns production traffic.
+ *
+ * Worker Version activation and `wrangler triggers deploy` are separate Cloudflare operations.
+ * Another deploy or rollback can therefore take ownership between them. Re-read ownership before
+ * and after every trigger publication and, when it changes, repair the new owner's immutable
+ * schema-2 snapshot. The bounded loop fails closed if traffic never stabilizes.
+ */
+export async function stabilizeCloudflareVersionTriggers(options: {
+  runWrangler: CloudflareCommandRunner;
+  workerName: string;
+  configPath?: string;
+  targetVersionId: string;
+  targetTriggerConfig: CloudflareTriggerConfig;
+  previousTriggerConfig?: CloudflareTriggerConfig;
+  knownTriggerConfigs?: Readonly<Record<string, CloudflareTriggerConfig>>;
+  publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
+  attempts?: number;
+}): Promise<CloudflareTriggerStabilization> {
+  const commonArgs = [...(options.configPath ? ['-c', options.configPath] : []), '--env='];
+  let cleanupBaseline = mergeTriggerCleanupBaselines(
+    options.previousTriggerConfig,
+    options.targetTriggerConfig,
+  );
+  const attempts = Math.max(1, options.attempts ?? 4);
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const owner = await readCurrentProductionVersion(options, commonArgs);
+    if (owner.kind === 'failed') {
+      return { ok: false, reason: 'status-failed', status: owner.status };
+    }
+    if (owner.kind === 'split') {
+      return { ok: false, reason: 'traffic-split' };
+    }
+    if (!owner.versionId) {
+      return { ok: false, reason: 'metadata-unavailable', activeVersionId: null };
+    }
+
+    const activeVersionId = owner.versionId;
+    let activeTriggerConfig =
+      activeVersionId === options.targetVersionId
+        ? options.targetTriggerConfig
+        : options.knownTriggerConfigs?.[activeVersionId];
+    if (!activeTriggerConfig && activeVersionId !== options.targetVersionId) {
+      const metadata = await readCloudflareVersionMetadata(options, commonArgs, activeVersionId);
+      activeTriggerConfig = metadata?.schema === 2 ? metadata.triggerConfig : undefined;
+    }
+    if (!activeTriggerConfig) {
+      return { ok: false, reason: 'metadata-unavailable', activeVersionId };
+    }
+
+    const triggers = await deployCloudflareVersionTriggers({
+      runWrangler: options.runWrangler,
+      workerName: options.workerName,
+      configPath: options.configPath,
+      triggerConfig: activeTriggerConfig,
+      previousTriggerConfig: cleanupBaseline,
+      publishEmptyCustomDomains: options.publishEmptyCustomDomains,
+    });
+    if (!isCleanCommandExit(triggers)) {
+      return {
+        ok: false,
+        reason: 'triggers-failed',
+        status: triggers.status,
+        activeVersionId,
+      };
+    }
+
+    cleanupBaseline = mergeTriggerCleanupBaselines(cleanupBaseline, activeTriggerConfig);
+    const after = await readCurrentProductionVersion(options, commonArgs);
+    if (after.kind === 'failed') {
+      return { ok: false, reason: 'status-failed', status: after.status };
+    }
+    if (after.kind === 'split') {
+      return { ok: false, reason: 'traffic-split' };
+    }
+    if (after.versionId === activeVersionId) {
+      return {
+        ok: true,
+        activeVersionId,
+        targetOwnsTraffic: activeVersionId === options.targetVersionId,
+      };
+    }
+  }
+
+  return { ok: false, reason: 'status-failed' };
+}
+
+function mergeTriggerCleanupBaselines(
+  ...configs: Array<CloudflareTriggerConfig | undefined>
+): CloudflareTriggerConfig {
+  const present = configs.filter(
+    (config): config is CloudflareTriggerConfig => config !== undefined,
+  );
+  const unique = (values: ReadonlyArray<unknown>): Array<unknown> => {
+    const seen = new Set<string>();
+    return values.filter((value) => {
+      const key = JSON.stringify(value);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  };
+  return {
+    workers_dev: present.some((config) => config.workers_dev),
+    preview_urls: present.some((config) => config.preview_urls),
+    routes: unique(present.flatMap((config) => config.routes)),
+    crons: unique(present.flatMap((config) => config.crons)),
+    queueConsumers: unique(present.flatMap((config) => config.queueConsumers)),
+    workflows: unique(present.flatMap((config) => config.workflows)),
+  };
 }
 
 function removedQueueConsumers(
@@ -597,6 +730,38 @@ export async function activateCloudflareVersion(options: {
     };
   }
 
+  // Readiness can take long enough for another deploy or rollback to finish. Never flatten that
+  // newer operation using the stale `previous` snapshot captured before this upload began.
+  const ownerBeforeActivation = await readCurrentProductionVersion(options, commonArgs);
+  if (ownerBeforeActivation.kind === 'failed') {
+    return {
+      ok: false,
+      reason: 'status-failed',
+      status: ownerBeforeActivation.status,
+      versionId,
+      previousVersionId: previous.versionId,
+    };
+  }
+  if (ownerBeforeActivation.kind === 'split') {
+    return {
+      ok: false,
+      reason: 'traffic-split-unsupported',
+      versionId,
+      previousVersionId: previous.versionId,
+    };
+  }
+  if (ownerBeforeActivation.versionId !== previous.versionId) {
+    return {
+      ok: false,
+      reason: 'deployment-changed',
+      versionId,
+      previousVersionId: previous.versionId,
+      activeVersionId: ownerBeforeActivation.versionId,
+      rollback: 'not-needed',
+      triggerRepair: 'succeeded',
+    };
+  }
+
   const activate = await deployVersionPercentages(
     options,
     commonArgs,
@@ -633,15 +798,45 @@ export async function activateCloudflareVersion(options: {
       rollback: previous.versionId ? 'unsafe' : 'unavailable',
     };
   }
-  const triggers = await deployCloudflareVersionTriggers({
+  const knownTriggerConfigs: Record<string, CloudflareTriggerConfig> = {
+    [versionId]: desiredTriggerConfig,
+  };
+  if (previous.versionId && previousTriggerConfig) {
+    knownTriggerConfigs[previous.versionId] = previousTriggerConfig;
+  }
+  const triggers = await stabilizeCloudflareVersionTriggers({
     runWrangler: options.runWrangler,
     workerName: options.workerName,
     configPath: options.configPath,
-    triggerConfig: desiredTriggerConfig,
+    targetVersionId: versionId,
+    targetTriggerConfig: desiredTriggerConfig,
     previousTriggerConfig,
+    knownTriggerConfigs,
     publishEmptyCustomDomains: options.publishEmptyCustomDomains,
   });
-  if (!isCleanCommandExit(triggers)) {
+  if (!triggers.ok) {
+    if (triggers.activeVersionId && triggers.activeVersionId !== versionId) {
+      return {
+        ok: false,
+        reason: 'deployment-changed',
+        status: triggers.status,
+        versionId,
+        previousVersionId: previous.versionId,
+        activeVersionId: triggers.activeVersionId,
+        rollback: 'not-needed',
+        triggerRepair: triggers.reason === 'metadata-unavailable' ? 'unavailable' : 'failed',
+      };
+    }
+    if (!triggers.activeVersionId) {
+      return {
+        ok: false,
+        reason: 'triggers-failed',
+        status: triggers.status,
+        versionId,
+        previousVersionId: previous.versionId,
+        rollback: 'unsafe',
+      };
+    }
     const rollback = await restorePreviousVersionAndTriggers(
       options,
       commonArgs,
@@ -656,6 +851,18 @@ export async function activateCloudflareVersion(options: {
       versionId,
       previousVersionId: previous.versionId,
       rollback,
+    };
+  }
+
+  if (!triggers.targetOwnsTraffic) {
+    return {
+      ok: false,
+      reason: 'deployment-changed',
+      versionId,
+      previousVersionId: previous.versionId,
+      activeVersionId: triggers.activeVersionId,
+      rollback: 'not-needed',
+      triggerRepair: 'succeeded',
     };
   }
 
@@ -692,15 +899,17 @@ async function restorePreviousVersionAndTriggers(
   if (!options.verifyUploader()) {
     return 'unsafe';
   }
-  const triggers = await deployCloudflareVersionTriggers({
+  const triggers = await stabilizeCloudflareVersionTriggers({
     runWrangler: options.runWrangler,
     workerName: options.workerName,
     configPath: options.configPath,
-    triggerConfig: metadata.triggerConfig,
+    targetVersionId: previousVersionId,
+    targetTriggerConfig: metadata.triggerConfig,
     previousTriggerConfig: failedTriggerConfig,
+    knownTriggerConfigs: { [previousVersionId]: metadata.triggerConfig },
     publishEmptyCustomDomains: options.publishEmptyCustomDomains,
   });
-  return isCleanCommandExit(triggers) ? 'succeeded' : 'failed';
+  return triggers.ok && triggers.targetOwnsTraffic ? 'succeeded' : 'failed';
 }
 
 async function readCloudflareVersionMetadata(

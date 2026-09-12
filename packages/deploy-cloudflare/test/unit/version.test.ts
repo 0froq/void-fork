@@ -15,9 +15,18 @@ import {
 
 const CURRENT = '11111111-1111-4111-8111-111111111111';
 const NEXT = '22222222-2222-4222-8222-222222222222';
+const CONCURRENT = '33333333-3333-4333-8333-333333333333';
 
 function ok(stdout = ''): CloudflareCommandResult {
   return { stdout, stderr: '', status: 0 };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
 }
 
 function runner(overrides?: {
@@ -32,11 +41,21 @@ function runner(overrides?: {
 }) {
   let deployCalls = 0;
   let triggerCalls = 0;
+  let statusCalls = 0;
+  let activeVersionId: string | null = CURRENT;
   return vi.fn((args: Array<string>) => {
     if (args[0] === 'deployments') {
-      return (
-        overrides?.status ??
-        ok(JSON.stringify({ versions: [{ version_id: CURRENT, percentage: 100 }] }))
+      statusCalls++;
+      if (statusCalls === 1 && overrides?.status) {
+        if (overrides.status.status !== 0) {
+          activeVersionId = null;
+        }
+        return overrides.status;
+      }
+      return ok(
+        JSON.stringify({
+          versions: activeVersionId ? [{ version_id: activeVersionId, percentage: 100 }] : [],
+        }),
       );
     }
     if (args[0] === 'versions' && args[1] === 'upload') {
@@ -49,7 +68,15 @@ function runner(overrides?: {
     }
     if (args[0] === 'versions' && args[1] === 'deploy') {
       deployCalls++;
-      return deployCalls === 1 ? (overrides?.activate ?? ok()) : (overrides?.rollback ?? ok());
+      const result =
+        deployCalls === 1 ? (overrides?.activate ?? ok()) : (overrides?.rollback ?? ok());
+      if (result.status === 0) {
+        const active = args.find((argument) => /@100$/.test(argument));
+        if (active) {
+          activeVersionId = active.slice(0, -4);
+        }
+      }
+      return result;
     }
     if (args[0] === 'versions' && args[1] === 'list') {
       return (
@@ -74,7 +101,14 @@ function runner(overrides?: {
       );
     }
     if (args[0] === 'deploy') {
-      return overrides?.bootstrap ?? ok();
+      const result = overrides?.bootstrap ?? ok();
+      if (result.status === 0) {
+        activeVersionId =
+          `${result.stdout}\n${result.stderr}`.match(
+            /(?:Worker|Current) Version ID:\s*([0-9a-f-]+)/i,
+          )?.[1] ?? activeVersionId;
+      }
+      return result;
     }
     if (args[0] === 'triggers') {
       triggerCalls++;
@@ -292,14 +326,17 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.map(([args]) => args.slice(0, 2))).toEqual([
       ['deployments', 'status'],
       ['versions', 'upload'],
+      ['deployments', 'status'],
       ['versions', 'deploy'],
+      ['deployments', 'status'],
       ['triggers', 'deploy'],
+      ['deployments', 'status'],
     ]);
     expect(runWrangler.mock.calls[1]![0]).toContain('--strict');
     expect(runWrangler.mock.calls[1]![0]).toContain('--assets');
     expect(runWrangler.mock.calls[1]![0]).toContain('/app/.void/deploy/cloudflare/assets');
-    expect(runWrangler.mock.calls[2]![0]).toContain(`${NEXT}@100`);
-    expect(runWrangler.mock.calls[3]![0]).toEqual([
+    expect(runWrangler.mock.calls[3]![0]).toContain(`${NEXT}@100`);
+    expect(runWrangler.mock.calls[5]![0]).toEqual([
       'triggers',
       'deploy',
       '-c',
@@ -308,6 +345,86 @@ describe('Cloudflare version activation', () => {
       '--name',
       'my-worker',
     ]);
+  });
+
+  it('repairs triggers for a rollback that wins while deployment activation is in flight', async () => {
+    const activation = deferred<CloudflareCommandResult>();
+    const activationStarted = deferred<void>();
+    let activeVersionId = CURRENT;
+    let appliedTriggerConfig: Record<string, unknown> | undefined;
+    const concurrentTriggerConfig = {
+      workers_dev: true,
+      preview_urls: true,
+      routes: [],
+      crons: ['concurrent'],
+      queueConsumers: [{ queue: 'concurrent-jobs' }],
+      workflows: [],
+    };
+    const runWrangler = vi.fn(async (args: Array<string>) => {
+      if (args[0] === 'deployments') {
+        return ok(JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }));
+      }
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        return ok(
+          `Worker Version ID: ${NEXT}\nVersion Preview URL: https://ready.example.workers.dev`,
+        );
+      }
+      if (args[0] === 'versions' && args[1] === 'deploy') {
+        activeVersionId = NEXT;
+        activationStarted.resolve(undefined);
+        return activation.promise;
+      }
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return ok(
+          JSON.stringify([
+            {
+              id: CONCURRENT,
+              annotations: {
+                'workers/message': encodeCloudflareVersionMessage([], concurrentTriggerConfig),
+              },
+            },
+          ]),
+        );
+      }
+      if (args[0] === 'triggers') {
+        const configIndex = args.indexOf('-c');
+        appliedTriggerConfig = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf8')) as Record<
+          string,
+          unknown
+        >;
+        return ok();
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const pending = activateCloudflareVersion({
+      runWrangler,
+      verifyUploader: () => true,
+      workerName: 'my-worker',
+      message: encodeCloudflareVersionMessage([], {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: ['deploy'],
+        queueConsumers: [],
+        workflows: [],
+      }),
+      fetch: async () => Response.json({ ready: true }),
+    });
+    await activationStarted.promise;
+    activeVersionId = CONCURRENT;
+    activation.resolve(ok());
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      reason: 'deployment-changed',
+      activeVersionId: CONCURRENT,
+      triggerRepair: 'succeeded',
+    });
+    expect(appliedTriggerConfig).toMatchObject({
+      triggers: { crons: ['concurrent'] },
+      queues: { consumers: [{ queue: 'concurrent-jobs' }] },
+    });
   });
 
   it('uses newer published traffic provenance instead of a stale version annotation', async () => {
@@ -474,7 +591,7 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls[2]![0]).toEqual(
       expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
     );
-    expect(runWrangler.mock.calls[3]![0]).toContain(`${NEXT}@100`);
+    expect(runWrangler.mock.calls[4]![0]).toContain(`${NEXT}@100`);
   });
 
   it('never sends Access headers to an unverified cached workers.dev subdomain', async () => {
@@ -622,13 +739,16 @@ describe('Cloudflare version activation', () => {
       ['deployments', 'status'],
       ['versions', 'upload'],
       ['versions', 'deploy'],
+      ['deployments', 'status'],
       ['versions', 'deploy'],
+      ['deployments', 'status'],
       ['triggers', 'deploy'],
+      ['deployments', 'status'],
     ]);
     expect(runWrangler.mock.calls[2]![0]).toEqual(
       expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
     );
-    expect(runWrangler.mock.calls[3]![0]).toContain(`${NEXT}@100`);
+    expect(runWrangler.mock.calls[4]![0]).toContain(`${NEXT}@100`);
     expect(fetcher).toHaveBeenCalledWith(
       'https://my-worker.developer-platform-experience.workers.dev/__void/ready',
       expect.objectContaining({
@@ -738,7 +858,7 @@ describe('Cloudflare version activation', () => {
         args.some((argument) => argument === `${CURRENT}@100`),
       ),
     ).toBe(true);
-    expect(runWrangler.mock.calls.at(-1)![0].slice(0, 2)).toEqual(['triggers', 'deploy']);
+    expect(runWrangler.mock.calls.filter(([args]) => args[0] === 'triggers')).toHaveLength(2);
   });
 
   it('does not claim trigger rollback succeeded without prior trigger metadata', async () => {

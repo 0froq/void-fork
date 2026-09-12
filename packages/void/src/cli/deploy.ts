@@ -5071,6 +5071,10 @@ export function formatCloudflareActivationError(
       return 'deploy: the verified Wrangler uploader changed before version activation.';
     case 'status-failed':
       return `deploy: could not snapshot the current Cloudflare deployment${status}; no version was uploaded.`;
+    case 'deployment-changed':
+      return result.triggerRepair === 'succeeded'
+        ? `deploy: another Cloudflare operation superseded this deployment. Void restored triggers for the active version ${result.activeVersionId ?? '(unknown)'}; retry from fresh deployment status.`
+        : `deploy: another Cloudflare operation superseded this deployment, but its trigger state could not be verified. Inspect the active Worker version ${result.activeVersionId ?? '(unknown)'} immediately.`;
     case 'traffic-split-unsupported':
       return [
         'deploy: the current Cloudflare deployment splits traffic across multiple Worker Versions.',

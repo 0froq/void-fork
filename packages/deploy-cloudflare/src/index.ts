@@ -30,6 +30,8 @@ export {
   normalizeWorkersDevSubdomain,
   parseCloudflareVersionMessage,
   readCloudflareTriggerConfig,
+  stabilizeCloudflareVersionTriggers,
+  type CloudflareTriggerStabilization,
   type CloudflareTriggerConfig,
   type CloudflareTrafficConfig,
   type CloudflareVersionActivation,

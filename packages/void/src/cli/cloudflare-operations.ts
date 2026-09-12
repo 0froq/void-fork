@@ -2,11 +2,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
-  deployCloudflareVersionTriggers,
   encodeCloudflareVersionMessage,
   parseCloudflareVersionMessage,
   parseRootWranglerConfig,
   readCloudflareTriggerConfig,
+  stabilizeCloudflareVersionTriggers,
   readBindingFieldPresence,
   readWranglerTopLevelString,
   resolveD1MigrateTarget,
@@ -399,6 +399,7 @@ export async function activateCloudflareExistingVersion(
       `The active Cloudflare version ${current.id} has no trigger snapshot, so Void cannot safely compensate a failed rollback. Deploy the current revision again first.`,
     );
   }
+  const targetTriggerConfig = target.metadata.triggerConfig;
   const publishedTraffic = readWranglerPublishedTrafficSnapshot(context.configPath);
   const currentTriggerConfig =
     current?.metadata?.schema === 2
@@ -406,10 +407,14 @@ export async function activateCloudflareExistingVersion(
         ? { ...current.metadata.triggerConfig, ...publishedTraffic }
         : current.metadata.triggerConfig
       : undefined;
-  const message = encodeCloudflareVersionMessage(
-    target.metadata.migrations,
-    target.metadata.triggerConfig,
-  );
+  const message = encodeCloudflareVersionMessage(target.metadata.migrations, targetTriggerConfig);
+  const expectedVersionId = current?.id ?? (await readActiveCloudflareVersionId(context));
+  const ownerBeforeActivation = await readActiveCloudflareVersionId(context);
+  if (ownerBeforeActivation !== expectedVersionId) {
+    throw new Error(
+      `Cloudflare production changed from ${expectedVersionId ?? 'no active version'} to ${ownerBeforeActivation ?? 'no active version'} before rollback activation. Retry from fresh deployment status.`,
+    );
+  }
   await run(
     context,
     [
@@ -423,21 +428,45 @@ export async function activateCloudflareExistingVersion(
     ],
     { capture: false },
   );
-  const triggers = await deployCloudflareVersionTriggers({
+  const knownTriggerConfigs: Record<string, typeof targetTriggerConfig> = {
+    [target.id]: targetTriggerConfig,
+  };
+  if (currentTriggerConfig && current) {
+    knownTriggerConfigs[current.id] = currentTriggerConfig;
+  }
+  const triggers = await stabilizeCloudflareVersionTriggers({
     runWrangler: context.runWrangler,
     workerName: context.workerName,
     configPath: context.configPath,
-    triggerConfig: target.metadata.triggerConfig,
+    targetVersionId: target.id,
+    targetTriggerConfig,
     previousTriggerConfig: currentTriggerConfig,
+    knownTriggerConfigs,
     publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(context),
   });
-  if (isCleanOperationResult(triggers)) {
+  if (triggers.ok && triggers.targetOwnsTraffic) {
     writeWranglerPublishedTrafficSnapshot(context.configPath, {
-      workers_dev: target.metadata.triggerConfig.workers_dev,
-      preview_urls: target.metadata.triggerConfig.preview_urls,
-      routes: [...target.metadata.triggerConfig.routes],
+      workers_dev: targetTriggerConfig.workers_dev,
+      preview_urls: targetTriggerConfig.preview_urls,
+      routes: [...targetTriggerConfig.routes],
     });
     return;
+  }
+
+  if (triggers.ok) {
+    throw new Error(
+      `Cloudflare rollback to ${target.id} was superseded by ${triggers.activeVersionId}; Void restored the active version's triggers. Refresh deployment status before retrying.`,
+    );
+  }
+  if (triggers.activeVersionId && triggers.activeVersionId !== target.id) {
+    throw new Error(
+      `Cloudflare rollback to ${target.id} was superseded by ${triggers.activeVersionId}, but Void could not restore that version's triggers (${triggers.reason}). Inspect the Worker immediately.`,
+    );
+  }
+  if (!triggers.activeVersionId) {
+    throw new Error(
+      `Cloudflare activated ${target.id}, but Void could not verify which version owns production while synchronizing triggers (${triggers.reason}). Inspect the Worker immediately.`,
+    );
   }
 
   if (!currentTriggerConfig || !current) {
@@ -460,16 +489,20 @@ export async function activateCloudflareExistingVersion(
       ],
       { capture: false },
     );
-    const restoredTriggers = await deployCloudflareVersionTriggers({
+    const restoredTriggers = await stabilizeCloudflareVersionTriggers({
       runWrangler: context.runWrangler,
       workerName: context.workerName,
       configPath: context.configPath,
-      triggerConfig: currentTriggerConfig,
-      previousTriggerConfig: target.metadata.triggerConfig,
+      targetVersionId: current.id,
+      targetTriggerConfig: currentTriggerConfig,
+      previousTriggerConfig: targetTriggerConfig,
+      knownTriggerConfigs,
       publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(context),
     });
-    if (!isCleanOperationResult(restoredTriggers)) {
+    if (!restoredTriggers.ok) {
       recoveryFailure = 'previous trigger synchronization failed';
+    } else if (!restoredTriggers.targetOwnsTraffic) {
+      recoveryFailure = `recovery was superseded by ${restoredTriggers.activeVersionId}`;
     } else {
       writeWranglerPublishedTrafficSnapshot(context.configPath, {
         workers_dev: currentTriggerConfig.workers_dev,
@@ -485,6 +518,13 @@ export async function activateCloudflareExistingVersion(
       ? `Cloudflare trigger synchronization failed after activating ${target.id}, and automatic recovery also failed: ${recoveryFailure}`
       : `Cloudflare trigger synchronization failed after activating ${target.id}; traffic and triggers were restored to ${current.id}.`,
   );
+}
+
+async function readActiveCloudflareVersionId(
+  context: CloudflareOperationContext,
+): Promise<string | null> {
+  const result = await run(context, ['deployments', 'status', ...targetArgs(context), '--json']);
+  return parseActiveVersionId(result.stdout);
 }
 
 export async function tailCloudflareWorker(
@@ -682,14 +722,6 @@ function writeDomainTriggerConfig(
 
 function targetArgs(context: CloudflareOperationContext): Array<string> {
   return ['-c', context.configPath, '--env=', '--name', context.workerName];
-}
-
-function isCleanOperationResult(result: CloudflareOperationResult): boolean {
-  return (
-    result.status === 0 &&
-    result.signal == null &&
-    (result.error === undefined || result.error === null || result.error === '')
-  );
 }
 
 async function run(

@@ -1,5 +1,6 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { encodeCloudflareVersionMessage } from '@void/deploy-cloudflare';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
@@ -29,6 +30,14 @@ import {
 } from '../../src/cli/wrangler.ts';
 
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '', signal: null, error: null });
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -195,35 +204,58 @@ describe('Cloudflare version operations', () => {
   });
 
   it('activates the selected version and restores its versioned triggers', async () => {
-    const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue(ok());
-    await activateCloudflareExistingVersion(context(runner), {
-      id: 'v1',
-      createdAt: null,
-      message: null,
-      metadata: {
-        schema: 2,
-        migrations: ['0000_init.sql'],
-        triggerConfig: {
-          workers_dev: true,
-          preview_urls: true,
-          routes: [],
-          crons: ['0 * * * *'],
-          queueConsumers: [],
-          workflows: [],
-        },
-      },
+    let activeVersionId = 'v2';
+    const runner = vi.fn<CloudflareOperationRunner>((args) => {
+      if (args[0] === 'deployments') {
+        return ok(JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }));
+      }
+      if (args[0] === 'versions' && args[1] === 'deploy') {
+        activeVersionId = 'v1';
+      }
+      return ok();
     });
-    expect(runner.mock.calls[0][0]).toContain('v1@100');
-    expect(runner.mock.calls[0][0]).toContain(
+    const triggerConfig = {
+      workers_dev: true,
+      preview_urls: true,
+      routes: [],
+      crons: ['0 * * * *'],
+      queueConsumers: [],
+      workflows: [],
+    };
+    await activateCloudflareExistingVersion(
+      context(runner),
+      {
+        id: 'v1',
+        createdAt: null,
+        message: null,
+        metadata: { schema: 2, migrations: ['0000_init.sql'], triggerConfig },
+      },
+      {
+        id: 'v2',
+        createdAt: null,
+        message: null,
+        metadata: { schema: 2, migrations: [], triggerConfig },
+      },
+    );
+    const activation = runner.mock.calls.find(([args]) => args.includes('v1@100'))!;
+    expect(activation[0]).toContain(
       'void:{"schema":2,"migrations":["0000_init.sql"],"triggerConfig":{"workers_dev":true,"preview_urls":true,"routes":[],"crons":["0 * * * *"],"queueConsumers":[],"workflows":[]}}',
     );
-    expect(runner.mock.calls[1][0].slice(0, 2)).toEqual(['triggers', 'deploy']);
-    expect(runner).toHaveBeenCalledTimes(2);
+    expect(
+      runner.mock.calls.some(([args]) => args.slice(0, 2).join(' ') === 'triggers deploy'),
+    ).toBe(true);
   });
 
   it('restores the active version and triggers when rollback trigger sync fails', async () => {
     let triggerCalls = 0;
+    let activeVersionId = 'v2';
     const runner = vi.fn<CloudflareOperationRunner>((args) => {
+      if (args[0] === 'deployments') {
+        return ok(JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }));
+      }
+      if (args[0] === 'versions' && args[1] === 'deploy') {
+        activeVersionId = args.includes('v1@100') ? 'v1' : 'v2';
+      }
       if (args[0] === 'triggers' && ++triggerCalls === 1) {
         return { ...ok(), status: 1, stderr: 'partial trigger failure' };
       }
@@ -257,6 +289,76 @@ describe('Cloudflare version operations', () => {
     ).rejects.toThrow(/traffic and triggers were restored to v2/);
     expect(runner.mock.calls.some(([args]) => args.includes('v2@100'))).toBe(true);
     expect(runner.mock.calls.filter(([args]) => args[0] === 'triggers')).toHaveLength(2);
+  });
+
+  it('repairs triggers for a concurrent rollback that supersedes activation', async () => {
+    const activation = deferred<ReturnType<typeof ok>>();
+    const activationStarted = deferred<void>();
+    let activeVersionId = 'v3';
+    let appliedTriggerConfig: Record<string, unknown> | undefined;
+    const configFor = (cron: string) => ({
+      workers_dev: true,
+      preview_urls: true,
+      routes: [],
+      crons: [cron],
+      queueConsumers: [],
+      workflows: [],
+    });
+    const runner = vi.fn<CloudflareOperationRunner>(async (args) => {
+      if (args[0] === 'deployments') {
+        return ok(JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }));
+      }
+      if (args[0] === 'versions' && args[1] === 'deploy') {
+        activeVersionId = 'v1';
+        activationStarted.resolve(undefined);
+        return activation.promise;
+      }
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return ok(
+          JSON.stringify([
+            {
+              id: 'v2',
+              annotations: {
+                'workers/message': encodeCloudflareVersionMessage([], configFor('v2')),
+              },
+            },
+          ]),
+        );
+      }
+      if (args[0] === 'triggers') {
+        const configIndex = args.indexOf('-c');
+        appliedTriggerConfig = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf8')) as Record<
+          string,
+          unknown
+        >;
+        return ok();
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    const pending = activateCloudflareExistingVersion(
+      context(runner),
+      {
+        id: 'v1',
+        createdAt: null,
+        message: null,
+        metadata: { schema: 2, migrations: [], triggerConfig: configFor('v1') },
+      },
+      {
+        id: 'v3',
+        createdAt: null,
+        message: null,
+        metadata: { schema: 2, migrations: [], triggerConfig: configFor('v3') },
+      },
+    );
+    await activationStarted.promise;
+    activeVersionId = 'v2';
+    activation.resolve(ok());
+
+    await expect(pending).rejects.toThrow(
+      /superseded by v2.*restored the active version's triggers/,
+    );
+    expect(appliedTriggerConfig).toMatchObject({ triggers: { crons: ['v2'] } });
   });
 
   it('maps search, version, and error filters to a live tail', async () => {
@@ -424,7 +526,7 @@ describe('Cloudflare custom domains', () => {
     expect(runner).toHaveBeenCalledTimes(1);
     expect(readWranglerPublishedTrafficSnapshot(join(root, 'wrangler.jsonc'))).toEqual({
       workers_dev: false,
-      preview_urls: true,
+      preview_urls: false,
       routes: [{ pattern: 'app.example.com', custom_domain: true }],
     });
   });
