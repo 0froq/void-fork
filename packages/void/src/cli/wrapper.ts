@@ -9,6 +9,7 @@ import {
   readdirSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { dirname, join, extname } from 'pathslash';
 import { build } from 'vite';
 import type { MigrationPlanBundle } from '../migrations/plan.ts';
@@ -95,6 +96,18 @@ export async function generateWrapper(
     await build({
       root: tmpDir,
       logLevel: 'silent',
+      resolve: {
+        // Cron/queue scaffolds intentionally import their lightweight runtime helpers from the
+        // public `void` entry. This focused build does not run voidPlugin(), so reproduce its
+        // exact bare-import redirect here; otherwise Vite follows the plugin/CLI entry and pulls
+        // Wrangler (including native keyring binaries) into the Worker handler bundle.
+        alias: [
+          {
+            find: /^void$/,
+            replacement: fileURLToPath(import.meta.resolve('void/handler')),
+          },
+        ],
+      },
       build: {
         outDir,
         emptyOutDir: true,

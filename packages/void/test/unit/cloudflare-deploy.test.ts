@@ -5059,10 +5059,14 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
         'export default { fetch() { return new Response("ok") } };\n',
       '.svelte-kit/cloudflare/_app/immutable/app.js': 'console.log("client");\n',
       'crons/hourly.ts': [
+        'import { defineScheduled } from "void";',
         'export const cron = "0 * * * *";',
-        'export default async function hourly() {}',
+        'export default defineScheduled(async function hourly() {});',
       ].join('\n'),
-      'queues/email.ts': 'export default async function email() {}\n',
+      'queues/email.ts': [
+        'import { defineQueue } from "void";',
+        'export default defineQueue(async function email() {});',
+      ].join('\n'),
     });
 
     await prepareCloudflareFrameworkArtifact(
@@ -5111,8 +5115,13 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
       'dist/client/app.js': 'console.log("client");\n',
       '.wrangler/deploy/config.json': '{"configPath":"../../../dist/server/wrangler.json"}\n',
       'crons/hourly.ts': [
+        'import { defineScheduled } from "void";',
         'export const cron = "0 * * * *";',
-        'export default async function hourly() {}',
+        'export default defineScheduled(async function hourly() {});',
+      ].join('\n'),
+      'queues/email.ts': [
+        'import { defineQueue } from "void";',
+        'export default defineQueue(async function email() {});',
       ].join('\n'),
     });
     const pointerBefore = readFileSync(join(root, '.wrangler/deploy/config.json'), 'utf-8');
@@ -5131,6 +5140,12 @@ describe('runCloudflareDeploy — framework artifact guard', () => {
     expect(readFileSync(join(root, 'dist/server/index.js'), 'utf-8')).toContain(
       'scheduled: handleScheduled',
     );
+    expect(readFileSync(join(root, 'dist/server/index.js'), 'utf-8')).toContain(
+      'queue: handleQueue',
+    );
+    const handlers = readFileSync(join(root, 'dist/server/__void_handlers.mjs'), 'utf-8');
+    expect(handlers).not.toContain('@napi-rs/keyring');
+    expect(handlers).not.toContain('@cloudflare/vite-plugin');
     expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).not.toHaveProperty('main');
   });
 
