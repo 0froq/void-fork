@@ -998,6 +998,12 @@ export function voidPlugin(options?: {
   // Core worker config — always set by voidPlugin (main, triggers, assets).
   // Bindings are handled separately in the config function below.
   const workerConfig: Record<string, unknown> = {};
+  const jobs = scanJobsSync(root, paths.cronsDir);
+  if (jobs.length > 0) {
+    workerConfig.triggers = {
+      crons: jobs.flatMap((job) => job.crons),
+    };
+  }
   let assetRouting: AssetRoutingPolicy;
   if (config.worker?.vars) {
     workerConfig.vars = { ...config.worker.vars };
@@ -1962,7 +1968,6 @@ export function voidPlugin(options?: {
     workerConfig.compatibility_flags = normalizedFlags;
   }
 
-  const jobs = scanJobsSync(root, paths.cronsDir);
   const ssrEntry = validateSsrEntry(root, paths);
   const hasPages = existsSync(paths.pagesDir);
   const hasMiddleware = scanMiddlewareSync(root, paths).length > 0;
@@ -1996,12 +2001,6 @@ export function voidPlugin(options?: {
   assetRouting = resolveConfiguredAssetRoutingPolicy();
 
   workerConfig.main = join(root, '.void', 'entry.ts');
-
-  if (jobs.length > 0) {
-    workerConfig.triggers = {
-      crons: jobs.flatMap((job) => job.crons),
-    };
-  }
 
   function applyAssetRoutingPolicy(policy: AssetRoutingPolicy): void {
     workerConfig.assets = {
