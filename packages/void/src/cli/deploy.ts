@@ -5486,12 +5486,19 @@ async function runCloudflareStaticDeploy(
   );
 
   const workerName = readWranglerTopLevelString(rootConfig, 'name') ?? deriveWorkerName(root);
+  // Static deployment needs a fetch-only entry and must detach Worker-only
+  // bindings/triggers, but those are deployment-artifact concerns. Preserve the
+  // user's canonical Wrangler source byte-for-byte so switching back to the
+  // Worker app does not lose hand-authored DOs, workflows, containers, queues,
+  // or comments.
+  const staticConfigPath = join(dirname(entryPath), 'wrangler-static.json');
+  writeFileSync(staticConfigPath, `${JSON.stringify(rootConfig, null, 2)}\n`, { mode: 0o600 });
   writeCloudflareStaticDeployConfig({
-    configPath,
+    configPath: staticConfigPath,
     name: workerName,
     accountId,
-    main: relative(dirname(configPath), entryPath),
-    assetsDirectory: relative(dirname(configPath), preset.outputDir),
+    main: relative(dirname(staticConfigPath), entryPath),
+    assetsDirectory: relative(dirname(staticConfigPath), preset.outputDir),
     compatibilityDate:
       voidConfig.worker?.compatibility_date ??
       readWranglerTopLevelString(rootConfig, 'compatibility_date') ??
@@ -5508,9 +5515,9 @@ async function runCloudflareStaticDeploy(
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: uploaderIsPinned,
-    configPath,
+    configPath: staticConfigPath,
     workerName,
-    message: encodeCloudflareVersionMessage([], readCloudflareTriggerConfig(configPath)),
+    message: encodeCloudflareVersionMessage([], readCloudflareTriggerConfig(staticConfigPath)),
     assetsDirectoryOverride: stagedAssetsDirectory,
     readinessHeaders: cloudflareWorkerReadinessHeaders(),
     workersDevSubdomain,

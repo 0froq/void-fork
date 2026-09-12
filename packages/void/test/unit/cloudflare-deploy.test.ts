@@ -1283,6 +1283,9 @@ describe('computeDesiredCloudflareResources — provisioned resources are never 
 // ---------------------------------------------------------------------------
 
 describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
+  const generatedStaticConfig = (root: string) =>
+    join(root, '.void/deploy/cloudflare/wrangler-static.json');
+
   it('rejects a static-looking non-Cloudflare runtime before any account operation', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'node-static', dependencies: { vite: '6.0.0' } }),
@@ -1312,13 +1315,16 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
 
     expect(exitCalls).toEqual([]);
     expect(wranglerArgs.map((args) => args[0])).toEqual(['whoami', 'deploy']);
-    const config = parseRootWranglerConfig(join(root, 'wrangler.jsonc'));
+    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toEqual({
+      account_id: 'acc123',
+    });
+    const config = parseRootWranglerConfig(generatedStaticConfig(root));
     expect(config).toMatchObject({
       name: 'spaapp',
       account_id: 'acc123',
-      main: '.void/deploy/cloudflare/static-edge.mjs',
+      main: 'static-edge.mjs',
       assets: {
-        directory: 'dist',
+        directory: '../../../dist',
         binding: 'ASSETS',
         run_worker_first: true,
         not_found_handling: 'single-page-application',
@@ -1328,6 +1334,37 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       'void/edge',
     );
     expect(wranglerArgs.at(-1)).toContain(join(root, '.void/deploy/cloudflare/assets'));
+  });
+
+  it('preserves canonical Worker configuration when deploying static assets', async () => {
+    const canonical = `{
+  // Hand-authored Worker configuration must survive a temporary static deploy.
+  "account_id": "acc123",
+  "name": "switchable-app",
+  "main": "src/worker.ts",
+  "durable_objects": { "bindings": [{ "name": "STATE", "class_name": "State" }] },
+  "queues": {
+    "producers": [{ "binding": "BILLING", "queue": "billing" }],
+    "consumers": [{ "queue": "billing" }]
+  },
+  "workflows": [{ "name": "billing-flow", "class_name": "BillingFlow" }]
+}\n`;
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'switchable-app' }),
+      'void.json': JSON.stringify({ inference: { appType: 'spa' } }),
+      'wrangler.jsonc': canonical,
+      'dist/index.html': '<h1>Static</h1>',
+    });
+    const { deps, exitCalls } = harness();
+
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+    expect(exitCalls).toEqual([]);
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(canonical);
+    const generated = parseRootWranglerConfig(generatedStaticConfig(root));
+    expect(generated.durable_objects).toEqual({ bindings: [] });
+    expect(generated.queues).toEqual({ producers: [], consumers: [] });
+    expect(generated.workflows).toEqual([]);
   });
 
   it('passes a complete Access service-token pair to the readiness probe', async () => {
@@ -1442,7 +1479,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
 
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'static-build', 'wrangler:deploy']);
-    expect(wranglerArgs.at(-1)).toContain(join(root, 'wrangler.jsonc'));
+    expect(wranglerArgs.at(-1)).toContain(generatedStaticConfig(root));
   });
 
   it('authenticates an env-pinned static deploy before its config file exists', async () => {
@@ -1470,7 +1507,8 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       '--json',
       '--env=',
     ]);
-    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(true);
+    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
+    expect(existsSync(generatedStaticConfig(root))).toBe(true);
   });
 
   it('rejects a static build that rewrites the root Wrangler config', async () => {
@@ -1530,8 +1568,11 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
 
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'wrangler:deploy']);
-    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toMatchObject({
-      assets: { directory: 'public', not_found_handling: '404-page' },
+    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toEqual({
+      account_id: 'acc123',
+    });
+    expect(parseRootWranglerConfig(generatedStaticConfig(root))).toMatchObject({
+      assets: { directory: '../../../public', not_found_handling: '404-page' },
     });
     const stagedAssets = join(root, '.void/deploy/cloudflare/assets');
     expect(readFileSync(join(stagedAssets, 'index.html'), 'utf-8')).toBe('<h1>Static</h1>');
@@ -1596,9 +1637,12 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
 
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'static-build', 'wrangler:deploy']);
-    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toMatchObject({
-      main: '.void/deploy/cloudflare/static-edge.mjs',
-      assets: { directory: 'dist/client', not_found_handling: '404-page' },
+    expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toEqual({
+      account_id: 'acc123',
+    });
+    expect(parseRootWranglerConfig(generatedStaticConfig(root))).toMatchObject({
+      main: 'static-edge.mjs',
+      assets: { directory: '../../../dist/client', not_found_handling: '404-page' },
     });
   });
 
