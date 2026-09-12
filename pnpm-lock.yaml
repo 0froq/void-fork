@@ -346,13 +346,13 @@ importers:
 
   packages/isr:
     dependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 4.20260702.1
       '@void/edge':
         specifier: workspace:*
         version: link:../edge
     devDependencies:
-      '@cloudflare/workers-types':
-        specifier: 'catalog:'
-        version: 4.20260702.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
