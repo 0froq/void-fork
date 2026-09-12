@@ -27,6 +27,7 @@ import {
   readWranglerTopLevelString,
   renderCloudflareStaticEntry,
   resolveD1MigrateTarget,
+  stageCloudflareStaticAssets,
   writeCloudflareFrameworkDeployConfig,
   writeCloudflareStaticDeployConfig,
 } from '@void/deploy-cloudflare';
@@ -4985,15 +4986,15 @@ function formatCloudflareActivationError(
         'The failed version was left inactive for inspection; production traffic is unchanged.',
       ].join('\n');
     case 'bootstrap-failed':
-      return `deploy: Cloudflare could not bootstrap the first Durable Object migration deployment${status}.${cloudflareCode}`;
+      return `deploy: Cloudflare could not bootstrap the first Worker deployment${status}.${cloudflareCode}`;
     case 'bootstrap-output-invalid':
       return [
-        'deploy: Cloudflare bootstrapped the first Durable Object migration deployment, but Wrangler',
+        'deploy: Cloudflare bootstrapped the first Worker deployment, but Wrangler',
         'did not report its version id and workers.dev URL. Inspect `void project status` before retrying.',
       ].join('\n');
     case 'bootstrap-readiness-failed':
       return [
-        'deploy: the first Durable Object migration deployment did not pass /__void/ready.',
+        'deploy: the first Worker deployment did not pass /__void/ready.',
         'Cloudflare requires this bootstrap to be non-versioned, so the new Worker is already active;',
         'inspect its logs and `void project status` before retrying.',
       ].join('\n');
@@ -5300,12 +5301,19 @@ async function runCloudflareStaticDeploy(
     assetConfig: manifest.assetConfig ?? { not_found_handling: 'none' },
   });
 
+  const stagedAssetsDirectory = join(root, '.void', 'deploy', 'cloudflare', 'assets');
+  stageCloudflareStaticAssets({
+    sourceDirectory: preset.outputDir,
+    destinationDirectory: stagedAssetsDirectory,
+  });
+
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: uploaderIsPinned,
     configPath,
     workerName,
     message: encodeCloudflareVersionMessage([]),
+    assetsDirectoryOverride: stagedAssetsDirectory,
   });
   if (!execution.ok) {
     log.error(formatCloudflareActivationError(execution));

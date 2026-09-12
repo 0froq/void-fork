@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { AssetConfig, HeaderRule, RedirectRule } from '@void/deploy-core';
 import { applyEdits, modify } from 'jsonc-parser';
-import { dirname, join } from 'pathslash';
+import { dirname, join, relative, resolve } from 'pathslash';
 
 export type CloudflareStaticDeployConfig = Readonly<{
   configPath: string;
@@ -33,6 +33,47 @@ export function renderCloudflareStaticEntry(options: {
 }
 
 /**
+ * Copy static assets into Void's deploy area without Cloudflare's reserved routing files.
+ *
+ * Void has already compiled the root `_headers` and `_redirects` files into the thin edge
+ * Worker. Wrangler parses those files independently of `.assetsignore`, so uploading the source
+ * directory would apply every rule twice and can reject valid Void fallbacks as redirect loops.
+ */
+export function stageCloudflareStaticAssets(options: {
+  sourceDirectory: string;
+  destinationDirectory: string;
+}): void {
+  const sourceDirectory = resolve(options.sourceDirectory);
+  const destinationDirectory = resolve(options.destinationDirectory);
+  if (sourceDirectory === destinationDirectory) {
+    throw new Error(
+      'Cloudflare static asset staging requires distinct source and destination directories.',
+    );
+  }
+
+  const reserved = new Set([
+    join(sourceDirectory, '_headers'),
+    join(sourceDirectory, '_redirects'),
+  ]);
+  const isInsideDestination = (path: string): boolean => {
+    const fromDestination = relative(destinationDirectory, resolve(path));
+    return (
+      fromDestination === '' || (fromDestination !== '..' && !fromDestination.startsWith('../'))
+    );
+  };
+
+  rmSync(destinationDirectory, { recursive: true, force: true });
+  mkdirSync(dirname(destinationDirectory), { recursive: true });
+  cpSync(sourceDirectory, destinationDirectory, {
+    recursive: true,
+    filter(path) {
+      const absolute = resolve(path);
+      return !reserved.has(absolute) && !isInsideDestination(absolute);
+    },
+  });
+}
+
+/**
  * Persist the mutable Cloudflare target state without replacing comments,
  * Durable Object migrations, resource ids, or unrelated user configuration.
  */
@@ -58,29 +99,9 @@ export function writeCloudflareStaticDeployConfig(options: CloudflareStaticDeplo
   upsert(['assets', 'not_found_handling'], options.assetConfig.not_found_handling ?? 'none');
   upsert(['assets', 'html_handling'], options.assetConfig.html_handling ?? 'auto-trailing-slash');
 
-  let changed = content !== initial;
-  if (changed) {
+  if (content !== initial) {
     writeFileSync(options.configPath, content);
+    return true;
   }
-
-  // The thin edge Worker already implements these files through the canonical routing manifest.
-  // Exclude them from Workers Assets so Cloudflare does not parse and apply the same rules again.
-  const ignorePath = join(dirname(options.configPath), options.assetsDirectory, '.assetsignore');
-  const previousIgnore = existsSync(ignorePath) ? readFileSync(ignorePath, 'utf-8') : null;
-  const existingLines = new Set((previousIgnore ?? '').split(/\r?\n/));
-  let ignore = previousIgnore ?? '';
-  if (ignore.length > 0 && !ignore.endsWith('\n') && !ignore.endsWith('\r')) {
-    ignore += '\n';
-  }
-  for (const pattern of ['_headers', '_redirects']) {
-    if (!existingLines.has(pattern)) {
-      ignore += `${pattern}\n`;
-    }
-  }
-  if (ignore !== previousIgnore) {
-    writeFileSync(ignorePath, ignore);
-    changed = true;
-  }
-
-  return changed;
+  return false;
 }

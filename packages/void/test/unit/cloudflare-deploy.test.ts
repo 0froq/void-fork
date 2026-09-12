@@ -275,6 +275,9 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
           [
             'deploy',
             ...(options.configPath ? ['-c', options.configPath] : []),
+            ...(options.assetsDirectoryOverride
+              ? ['--assets', options.assetsDirectoryOverride]
+              : []),
             '--env=',
             '--experimental-provision=false',
             '--experimental-auto-create=false',
@@ -1282,6 +1285,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(readFileSync(join(root, '.void/deploy/cloudflare/static-edge.mjs'), 'utf-8')).toContain(
       'void/edge',
     );
+    expect(wranglerArgs.at(-1)).toContain(join(root, '.void/deploy/cloudflare/assets'));
   });
 
   it('builds and deploys an unconfigured Vite SPA', async () => {
@@ -1353,9 +1357,11 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       'void.json': JSON.stringify({}),
       'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
       'public/index.html': '<h1>Static</h1>',
+      'public/_headers': '/*\n  X-Test: yes\n',
+      'public/_redirects': '/* /index.html 200\n',
       'routes/index.ts': `export const GET = () => new Response('ok');`,
     });
-    const { deps, trace, exitCalls } = harness();
+    const { deps, trace, wranglerArgs, exitCalls } = harness();
     await runCloudflareDeploy(root, { backend: 'cloudflare', dir: 'public' }, silentCliLog, deps);
 
     expect(exitCalls).toEqual([]);
@@ -1363,6 +1369,11 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc'))).toMatchObject({
       assets: { directory: 'public', not_found_handling: '404-page' },
     });
+    const stagedAssets = join(root, '.void/deploy/cloudflare/assets');
+    expect(readFileSync(join(stagedAssets, 'index.html'), 'utf-8')).toBe('<h1>Static</h1>');
+    expect(existsSync(join(stagedAssets, '_headers'))).toBe(false);
+    expect(existsSync(join(stagedAssets, '_redirects'))).toBe(false);
+    expect(wranglerArgs.at(-1)).toContain(stagedAssets);
   });
 
   it('rejects a bare project with no Void backend files (positive full-Void assertion)', async () => {

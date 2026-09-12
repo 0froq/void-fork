@@ -70,6 +70,7 @@ describe('Cloudflare version activation', () => {
       verifyUploader: () => true,
       workerName: 'my-worker',
       configPath: '/app/wrangler.jsonc',
+      assetsDirectoryOverride: '/app/.void/deploy/cloudflare/assets',
       message: encodeCloudflareVersionMessage(['0001_init.sql']),
       fetch: fetcher,
       sleep: async () => {},
@@ -92,6 +93,8 @@ describe('Cloudflare version activation', () => {
       ['triggers', 'deploy'],
     ]);
     expect(runWrangler.mock.calls[1]![0]).toContain('--strict');
+    expect(runWrangler.mock.calls[1]![0]).toContain('--assets');
+    expect(runWrangler.mock.calls[1]![0]).toContain('/app/.void/deploy/cloudflare/assets');
     expect(runWrangler.mock.calls[2]![0]).toContain(`${NEXT}@100`);
     expect(runWrangler.mock.calls[3]![0]).toEqual([
       'triggers',
@@ -255,6 +258,7 @@ describe('Cloudflare version activation', () => {
         verifyUploader: () => true,
         workerName: 'first',
         configPath: '/app/wrangler.jsonc',
+        assetsDirectoryOverride: '/app/.void/deploy/cloudflare/assets',
         message: encodeCloudflareVersionMessage(['0001_init.sql']),
         fetch: fetcher,
       }),
@@ -270,6 +274,8 @@ describe('Cloudflare version activation', () => {
       ['deploy', '-c'],
     ]);
     expect(runWrangler.mock.calls[2]![0]).toContain('--autoconfig=false');
+    expect(runWrangler.mock.calls[2]![0]).toContain('--assets');
+    expect(runWrangler.mock.calls[2]![0]).toContain('/app/.void/deploy/cloudflare/assets');
     expect(fetcher).toHaveBeenCalledWith(
       'https://first.example.workers.dev/__void/ready',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),

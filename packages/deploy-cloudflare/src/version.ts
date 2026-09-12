@@ -77,6 +77,8 @@ export async function activateCloudflareVersion(options: {
   verifyUploader: () => boolean;
   workerName: string;
   configPath?: string;
+  /** Override only the asset directory for this upload, leaving the persisted config intact. */
+  assetsDirectoryOverride?: string;
   message: string;
   /**
    * The caller proved that the Worker did not exist before this deploy provisioned its secrets.
@@ -112,6 +114,7 @@ export async function activateCloudflareVersion(options: {
         options.workerName,
         '--message',
         options.message,
+        ...(options.assetsDirectoryOverride ? ['--assets', options.assetsDirectoryOverride] : []),
         '--preview-alias',
         alias,
         '--strict',
@@ -259,6 +262,7 @@ async function bootstrapFirstDeployment(
         options.workerName,
         '--message',
         options.message,
+        ...(options.assetsDirectoryOverride ? ['--assets', options.assetsDirectoryOverride] : []),
         '--strict',
         '--experimental-provision=false',
         '--experimental-auto-create=false',

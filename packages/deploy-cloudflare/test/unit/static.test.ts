@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   parseRootWranglerConfig,
   renderCloudflareStaticEntry,
+  stageCloudflareStaticAssets,
   writeCloudflareStaticDeployConfig,
 } from '../../src/index.ts';
 
@@ -24,7 +25,6 @@ describe('Cloudflare static deployment', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-static-config-'));
     const configPath = join(root, 'wrangler.jsonc');
     mkdirSync(join(root, 'dist'));
-    writeFileSync(join(root, 'dist/.assetsignore'), '# retain operator rules\ncustom/**\n');
     writeFileSync(
       configPath,
       `{
@@ -64,8 +64,31 @@ describe('Cloudflare static deployment', () => {
         experimental_serve_directly: false,
       },
     });
-    expect(readFileSync(join(root, 'dist/.assetsignore'), 'utf-8')).toBe(
-      '# retain operator rules\ncustom/**\n_headers\n_redirects\n',
+  });
+
+  it('stages assets without routing files that the thin Worker already consumed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-static-assets-'));
+    const sourceDirectory = join(root, 'public');
+    const destinationDirectory = join(root, '.void/deploy/cloudflare/assets');
+    mkdirSync(join(sourceDirectory, 'nested'), { recursive: true });
+    writeFileSync(join(sourceDirectory, 'index.html'), '<h1>Home</h1>');
+    writeFileSync(join(sourceDirectory, '_headers'), '/*\n  X-Test: yes\n');
+    writeFileSync(join(sourceDirectory, '_redirects'), '/* /index.html 200\n');
+    writeFileSync(join(sourceDirectory, '.assetsignore'), 'private/**\n');
+    writeFileSync(join(sourceDirectory, 'nested/_redirects'), 'ordinary nested asset');
+
+    stageCloudflareStaticAssets({ sourceDirectory, destinationDirectory });
+
+    expect(readFileSync(join(destinationDirectory, 'index.html'), 'utf-8')).toBe('<h1>Home</h1>');
+    expect(readFileSync(join(destinationDirectory, '.assetsignore'), 'utf-8')).toBe('private/**\n');
+    expect(readFileSync(join(destinationDirectory, 'nested/_redirects'), 'utf-8')).toBe(
+      'ordinary nested asset',
     );
+    expect(existsSync(join(destinationDirectory, '_headers'))).toBe(false);
+    expect(existsSync(join(destinationDirectory, '_redirects'))).toBe(false);
+
+    writeFileSync(join(destinationDirectory, 'stale.txt'), 'stale');
+    stageCloudflareStaticAssets({ sourceDirectory, destinationDirectory });
+    expect(existsSync(join(destinationDirectory, 'stale.txt'))).toBe(false);
   });
 });

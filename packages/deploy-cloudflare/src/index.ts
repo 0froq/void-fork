@@ -18,6 +18,7 @@ export {
 } from './framework.ts';
 export {
   renderCloudflareStaticEntry,
+  stageCloudflareStaticAssets,
   writeCloudflareStaticDeployConfig,
   type CloudflareStaticDeployConfig,
 } from './static.ts';
