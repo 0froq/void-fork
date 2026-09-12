@@ -178,6 +178,18 @@ async function runCloudflareRollback(root: string, deployId?: string): Promise<v
   }
 
   const current = status.versions.find((version) => version.id === status.activeVersionId);
+  if (!target.metadata?.triggerConfig) {
+    log.error(
+      'This version predates Void trigger snapshots and cannot be rolled back safely. Deploy that revision again to create complete rollback metadata.',
+    );
+    process.exit(1);
+  }
+  if (!current?.metadata?.triggerConfig) {
+    log.error(
+      'The active version has no trigger snapshot, so a failed rollback could not be compensated safely. Redeploy the current revision first.',
+    );
+    process.exit(1);
+  }
   if (!current?.metadata || !target.metadata) {
     log.warn(
       'Void migration metadata is unavailable for one of these versions. Database migrations are forward-only and will not be reverted.',
@@ -215,7 +227,7 @@ async function runCloudflareRollback(root: string, deployId?: string): Promise<v
   const spinner = createSpinner();
   spinner.start('Rolling back...');
   try {
-    await activateCloudflareExistingVersion(context, target);
+    await activateCloudflareExistingVersion(context, target, current);
     spinner.stop('Rollback complete.');
   } catch (error) {
     spinner.stop('Rollback failed.');

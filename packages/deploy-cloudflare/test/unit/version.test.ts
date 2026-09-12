@@ -21,9 +21,12 @@ function runner(overrides?: {
   bootstrap?: CloudflareCommandResult;
   activate?: CloudflareCommandResult;
   triggers?: CloudflareCommandResult;
+  triggerRollback?: CloudflareCommandResult;
   rollback?: CloudflareCommandResult;
+  versions?: CloudflareCommandResult;
 }) {
   let deployCalls = 0;
+  let triggerCalls = 0;
   return vi.fn((args: Array<string>) => {
     if (args[0] === 'deployments') {
       return (
@@ -43,11 +46,35 @@ function runner(overrides?: {
       deployCalls++;
       return deployCalls === 1 ? (overrides?.activate ?? ok()) : (overrides?.rollback ?? ok());
     }
+    if (args[0] === 'versions' && args[1] === 'list') {
+      return (
+        overrides?.versions ??
+        ok(
+          JSON.stringify([
+            {
+              id: CURRENT,
+              annotations: {
+                'workers/message': encodeCloudflareVersionMessage([], {
+                  workers_dev: true,
+                  routes: [],
+                  crons: ['0 * * * *'],
+                  queueConsumers: [],
+                  workflows: [],
+                }),
+              },
+            },
+          ]),
+        )
+      );
+    }
     if (args[0] === 'deploy') {
       return overrides?.bootstrap ?? ok();
     }
     if (args[0] === 'triggers') {
-      return overrides?.triggers ?? ok();
+      triggerCalls++;
+      return triggerCalls === 1
+        ? (overrides?.triggers ?? ok())
+        : (overrides?.triggerRollback ?? ok());
     }
     throw new Error(`Unexpected command: ${args.join(' ')}`);
   });
@@ -483,7 +510,41 @@ describe('Cloudflare version activation', () => {
       rollback: 'succeeded',
       previousVersionId: CURRENT,
     });
-    expect(runWrangler.mock.calls.at(-1)![0]).toContain(`${CURRENT}@100`);
+    expect(
+      runWrangler.mock.calls.some(([args]) =>
+        args.some((argument) => argument === `${CURRENT}@100`),
+      ),
+    ).toBe(true);
+    expect(runWrangler.mock.calls.at(-1)![0].slice(0, 2)).toEqual(['triggers', 'deploy']);
+  });
+
+  it('does not claim trigger rollback succeeded without prior trigger metadata', async () => {
+    const runWrangler = runner({
+      triggers: { ...ok(), status: 1 },
+      versions: ok(
+        JSON.stringify([
+          {
+            id: CURRENT,
+            annotations: { 'workers/message': encodeCloudflareVersionMessage([]) },
+          },
+        ]),
+      ),
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'triggers-failed',
+      rollback: 'unavailable',
+    });
+    expect(runWrangler.mock.calls.filter(([args]) => args[0] === 'triggers')).toHaveLength(1);
   });
 
   it('does not invoke a changed uploader to roll traffic back after activation', async () => {

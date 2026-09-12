@@ -24,10 +24,13 @@ export {
 } from './static.ts';
 export {
   activateCloudflareVersion,
+  deployCloudflareVersionTriggers,
   encodeCloudflareVersionMessage,
   extractWorkersDevSubdomain,
   normalizeWorkersDevSubdomain,
   parseCloudflareVersionMessage,
+  readCloudflareTriggerConfig,
+  type CloudflareTriggerConfig,
   type CloudflareVersionActivation,
   type CloudflareVersionMetadata,
 } from './version.ts';

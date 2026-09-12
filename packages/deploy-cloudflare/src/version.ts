@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'pathslash';
+import { parseRootWranglerConfig } from './config.ts';
 import type { CloudflareCommandResult, CloudflareCommandRunner } from './execute.ts';
 
 const VERSION_ID_RE = /(?:Worker|Current) Version ID:\s*([0-9a-f]{8}-[0-9a-f-]{27})/i;
@@ -9,6 +13,15 @@ const DURABLE_MIGRATION_VERSION_ERROR = 10211;
 export type CloudflareVersionMetadata = Readonly<{
   schema: 1;
   migrations: ReadonlyArray<string>;
+  triggerConfig?: CloudflareTriggerConfig;
+}>;
+
+export type CloudflareTriggerConfig = Readonly<{
+  workers_dev?: boolean;
+  routes: ReadonlyArray<unknown>;
+  crons: ReadonlyArray<unknown>;
+  queueConsumers: ReadonlyArray<unknown>;
+  workflows: ReadonlyArray<unknown>;
 }>;
 
 export type CloudflareVersionActivation =
@@ -51,8 +64,11 @@ type ProductionDeployment = Readonly<{
 }>;
 
 /** Encode migration state into Cloudflare's version annotation for safe rollback diagnostics. */
-export function encodeCloudflareVersionMessage(migrations: ReadonlyArray<string>): string {
-  return `void:${JSON.stringify({ schema: 1, migrations } satisfies CloudflareVersionMetadata)}`;
+export function encodeCloudflareVersionMessage(
+  migrations: ReadonlyArray<string>,
+  triggerConfig?: CloudflareTriggerConfig,
+): string {
+  return `void:${JSON.stringify({ schema: 1, migrations, triggerConfig } satisfies CloudflareVersionMetadata)}`;
 }
 
 /** Read migration state written by {@link encodeCloudflareVersionMessage}. */
@@ -71,10 +87,107 @@ export function parseCloudflareVersionMessage(
     ) {
       return null;
     }
-    return { schema: 1, migrations: value.migrations };
+    const triggerConfig = parseTriggerConfig(value.triggerConfig);
+    if (value.triggerConfig !== undefined && triggerConfig === null) {
+      return null;
+    }
+    return { schema: 1, migrations: value.migrations, ...(triggerConfig ? { triggerConfig } : {}) };
   } catch {
     return null;
   }
+}
+
+/** Capture every configuration surface mutated by `wrangler triggers deploy`. */
+export function readCloudflareTriggerConfig(configPath: string): CloudflareTriggerConfig {
+  return triggerConfigFromWrangler(parseRootWranglerConfig(configPath));
+}
+
+/** Apply a version's persisted trigger state using an isolated temporary Wrangler config. */
+export async function deployCloudflareVersionTriggers(options: {
+  runWrangler: CloudflareCommandRunner;
+  workerName: string;
+  configPath?: string;
+  triggerConfig: CloudflareTriggerConfig;
+}): Promise<CloudflareCommandResult> {
+  const base = options.configPath ? parseRootWranglerConfig(options.configPath) : {};
+  const config = triggerWranglerConfig(base, options.triggerConfig);
+  const directory = mkdtempSync(join(tmpdir(), 'void-version-triggers-'));
+  const configPath = join(directory, 'wrangler.json');
+  try {
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    return await options.runWrangler(
+      ['triggers', 'deploy', '-c', configPath, '--env=', '--name', options.workerName],
+      { capture: false },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function triggerConfigFromWrangler(config: Record<string, unknown>): CloudflareTriggerConfig {
+  const triggers = isRecord(config.triggers) ? config.triggers : {};
+  const queues = isRecord(config.queues) ? config.queues : {};
+  const routes = Array.isArray(config.routes)
+    ? config.routes
+    : config.route === undefined
+      ? []
+      : [config.route];
+  return {
+    ...(typeof config.workers_dev === 'boolean' ? { workers_dev: config.workers_dev } : {}),
+    routes,
+    crons: Array.isArray(triggers.crons) ? triggers.crons : [],
+    queueConsumers: Array.isArray(queues.consumers) ? queues.consumers : [],
+    workflows: Array.isArray(config.workflows) ? config.workflows : [],
+  };
+}
+
+function parseTriggerConfig(value: unknown): CloudflareTriggerConfig | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (
+    (value.workers_dev !== undefined && typeof value.workers_dev !== 'boolean') ||
+    !Array.isArray(value.routes) ||
+    !Array.isArray(value.crons) ||
+    !Array.isArray(value.queueConsumers) ||
+    !Array.isArray(value.workflows)
+  ) {
+    return null;
+  }
+  return {
+    ...(typeof value.workers_dev === 'boolean' ? { workers_dev: value.workers_dev } : {}),
+    routes: value.routes,
+    crons: value.crons,
+    queueConsumers: value.queueConsumers,
+    workflows: value.workflows,
+  };
+}
+
+function triggerWranglerConfig(
+  base: Record<string, unknown>,
+  triggerConfig: CloudflareTriggerConfig,
+): Record<string, unknown> {
+  const triggers = isRecord(base.triggers) ? { ...base.triggers } : {};
+  const queues = isRecord(base.queues) ? { ...base.queues } : {};
+  triggers.crons = [...triggerConfig.crons];
+  queues.consumers = [...triggerConfig.queueConsumers];
+  const config: Record<string, unknown> = {
+    ...base,
+    routes: [...triggerConfig.routes],
+    triggers,
+    queues,
+    workflows: [...triggerConfig.workflows],
+    ...(triggerConfig.workers_dev === undefined ? {} : { workers_dev: triggerConfig.workers_dev }),
+  };
+  delete config.route;
+  return config;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Upload, probe, and atomically activate a verified Worker Version. */
@@ -336,7 +449,7 @@ export async function activateCloudflareVersion(options: {
     }),
   );
   if (!isCleanCommandExit(triggers)) {
-    const rollback = await restorePreviousVersion(
+    const rollback = await restorePreviousVersionAndTriggers(
       options,
       commonArgs,
       previous.versionId,
@@ -359,6 +472,70 @@ export async function activateCloudflareVersion(options: {
     previousVersionId: previous.versionId,
     ...workersDevSubdomainResult(readinessUrl),
   };
+}
+
+async function restorePreviousVersionAndTriggers(
+  options: Pick<
+    Parameters<typeof activateCloudflareVersion>[0],
+    'configPath' | 'runWrangler' | 'verifyUploader' | 'workerName'
+  >,
+  commonArgs: Array<string>,
+  previousVersionId: string | null,
+  cause: string,
+): Promise<'succeeded' | 'failed' | 'unavailable' | 'unsafe'> {
+  const traffic = await restorePreviousVersion(options, commonArgs, previousVersionId, cause);
+  if (traffic !== 'succeeded' || !previousVersionId) {
+    return traffic;
+  }
+  if (!options.verifyUploader()) {
+    return 'unsafe';
+  }
+  const metadata = await readCloudflareVersionMetadata(options, commonArgs, previousVersionId);
+  if (!metadata?.triggerConfig) {
+    return 'unavailable';
+  }
+  if (!options.verifyUploader()) {
+    return 'unsafe';
+  }
+  const triggers = await deployCloudflareVersionTriggers({
+    runWrangler: options.runWrangler,
+    workerName: options.workerName,
+    configPath: options.configPath,
+    triggerConfig: metadata.triggerConfig,
+  });
+  return isCleanCommandExit(triggers) ? 'succeeded' : 'failed';
+}
+
+async function readCloudflareVersionMetadata(
+  options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
+  commonArgs: Array<string>,
+  versionId: string,
+): Promise<CloudflareVersionMetadata | null> {
+  const result = await Promise.resolve(
+    options.runWrangler(
+      ['versions', 'list', ...commonArgs, '--name', options.workerName, '--json'],
+      { capture: true },
+    ),
+  );
+  if (!isCleanCommandExit(result)) {
+    return null;
+  }
+  try {
+    const versions = JSON.parse(result.stdout) as Array<unknown>;
+    if (!Array.isArray(versions)) {
+      return null;
+    }
+    for (const entry of versions) {
+      if (!isRecord(entry) || entry.id !== versionId || !isRecord(entry.annotations)) {
+        continue;
+      }
+      const message = entry.annotations['workers/message'];
+      return typeof message === 'string' ? parseCloudflareVersionMessage(message) : null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**

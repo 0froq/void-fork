@@ -182,17 +182,66 @@ describe('Cloudflare version operations', () => {
     expect(status.versions.map((version) => version.id)).toEqual(['v1', 'v2']);
   });
 
-  it('activates the selected version without rewriting non-versioned triggers', async () => {
+  it('activates the selected version and restores its versioned triggers', async () => {
     const runner = vi.fn<CloudflareOperationRunner>().mockReturnValue(ok());
     await activateCloudflareExistingVersion(context(runner), {
       id: 'v1',
       createdAt: null,
       message: null,
-      metadata: { schema: 1, migrations: ['0000_init.sql'] },
+      metadata: {
+        schema: 1,
+        migrations: ['0000_init.sql'],
+        triggerConfig: {
+          workers_dev: true,
+          routes: [],
+          crons: ['0 * * * *'],
+          queueConsumers: [],
+          workflows: [],
+        },
+      },
     });
     expect(runner.mock.calls[0][0]).toContain('v1@100');
-    expect(runner.mock.calls[0][0]).toContain('void:{"schema":1,"migrations":["0000_init.sql"]}');
-    expect(runner).toHaveBeenCalledTimes(1);
+    expect(runner.mock.calls[0][0]).toContain(
+      'void:{"schema":1,"migrations":["0000_init.sql"],"triggerConfig":{"workers_dev":true,"routes":[],"crons":["0 * * * *"],"queueConsumers":[],"workflows":[]}}',
+    );
+    expect(runner.mock.calls[1][0].slice(0, 2)).toEqual(['triggers', 'deploy']);
+    expect(runner).toHaveBeenCalledTimes(2);
+  });
+
+  it('restores the active version and triggers when rollback trigger sync fails', async () => {
+    let triggerCalls = 0;
+    const runner = vi.fn<CloudflareOperationRunner>((args) => {
+      if (args[0] === 'triggers' && ++triggerCalls === 1) {
+        return { ...ok(), status: 1, stderr: 'partial trigger failure' };
+      }
+      return ok();
+    });
+    const triggerConfig = {
+      routes: [],
+      crons: [],
+      queueConsumers: [],
+      workflows: [],
+    };
+
+    await expect(
+      activateCloudflareExistingVersion(
+        context(runner),
+        {
+          id: 'v1',
+          createdAt: null,
+          message: null,
+          metadata: { schema: 1, migrations: [], triggerConfig },
+        },
+        {
+          id: 'v2',
+          createdAt: null,
+          message: null,
+          metadata: { schema: 1, migrations: [], triggerConfig },
+        },
+      ),
+    ).rejects.toThrow(/traffic and triggers were restored to v2/);
+    expect(runner.mock.calls.some(([args]) => args.includes('v2@100'))).toBe(true);
+    expect(runner.mock.calls.filter(([args]) => args[0] === 'triggers')).toHaveLength(2);
   });
 
   it('maps search, version, and error filters to a live tail', async () => {

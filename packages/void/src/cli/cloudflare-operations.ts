@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
+  deployCloudflareVersionTriggers,
   encodeCloudflareVersionMessage,
   parseCloudflareVersionMessage,
   parseRootWranglerConfig,
@@ -374,9 +375,20 @@ export function parseActiveVersionId(value: string): string | null {
 export async function activateCloudflareExistingVersion(
   context: CloudflareOperationContext,
   target: CloudflareWorkerVersion,
+  current?: CloudflareWorkerVersion,
 ): Promise<void> {
+  if (!target.metadata?.triggerConfig) {
+    throw new Error(
+      `Cloudflare version ${target.id} predates Void trigger snapshots and cannot be rolled back safely. Deploy that revision again to create rollback metadata.`,
+    );
+  }
+  if (current && !current.metadata?.triggerConfig) {
+    throw new Error(
+      `The active Cloudflare version ${current.id} has no trigger snapshot, so Void cannot safely compensate a failed rollback. Deploy the current revision again first.`,
+    );
+  }
   const message = target.metadata
-    ? encodeCloudflareVersionMessage(target.metadata.migrations)
+    ? encodeCloudflareVersionMessage(target.metadata.migrations, target.metadata.triggerConfig)
     : `Void rollback to ${target.id}.`;
   await run(
     context,
@@ -390,6 +402,53 @@ export async function activateCloudflareExistingVersion(
       '--yes',
     ],
     { capture: false },
+  );
+  const triggers = await deployCloudflareVersionTriggers({
+    runWrangler: context.runWrangler,
+    workerName: context.workerName,
+    configPath: context.configPath,
+    triggerConfig: target.metadata.triggerConfig,
+  });
+  if (isCleanOperationResult(triggers)) {
+    return;
+  }
+
+  if (!current?.metadata?.triggerConfig) {
+    throw new Error(
+      `Cloudflare activated version ${target.id}, but trigger synchronization failed and no prior trigger snapshot was available. Inspect the Worker immediately.`,
+    );
+  }
+  let recoveryFailure: string | null = null;
+  try {
+    await run(
+      context,
+      [
+        'versions',
+        'deploy',
+        `${current.id}@100`,
+        ...targetArgs(context),
+        '--message',
+        `Void automatic rollback after trigger synchronization failed.`,
+        '--yes',
+      ],
+      { capture: false },
+    );
+    const restoredTriggers = await deployCloudflareVersionTriggers({
+      runWrangler: context.runWrangler,
+      workerName: context.workerName,
+      configPath: context.configPath,
+      triggerConfig: current.metadata.triggerConfig,
+    });
+    if (!isCleanOperationResult(restoredTriggers)) {
+      recoveryFailure = 'previous trigger synchronization failed';
+    }
+  } catch (error) {
+    recoveryFailure = errorMessage(error);
+  }
+  throw new Error(
+    recoveryFailure
+      ? `Cloudflare trigger synchronization failed after activating ${target.id}, and automatic recovery also failed: ${recoveryFailure}`
+      : `Cloudflare trigger synchronization failed after activating ${target.id}; traffic and triggers were restored to ${current.id}.`,
   );
 }
 
@@ -568,6 +627,14 @@ function writeDomainTriggerConfig(
 
 function targetArgs(context: CloudflareOperationContext): Array<string> {
   return ['-c', context.configPath, '--env=', '--name', context.workerName];
+}
+
+function isCleanOperationResult(result: CloudflareOperationResult): boolean {
+  return (
+    result.status === 0 &&
+    result.signal == null &&
+    (result.error === undefined || result.error === null || result.error === '')
+  );
 }
 
 async function run(
