@@ -43,6 +43,11 @@ describe('GitHub Actions deployment workflows', () => {
     expect(yaml).toContain('name: Deploy to Cloudflare');
     expect(yaml).toContain('CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}');
     expect(yaml).toContain('DATABASE_URL: ${{ secrets.DATABASE_URL }}');
+    expect(yaml).toContain(
+      'CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}',
+    );
+    expect(yaml).toContain('CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}');
+    expect(yaml).toContain('CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}');
     expect(yaml).toContain('npx void deploy --platform cloudflare');
     expect(yaml).toContain('contents: read');
     expect(yaml).not.toContain('id-token: write');

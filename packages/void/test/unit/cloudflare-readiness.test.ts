@@ -26,6 +26,13 @@ describe('Cloudflare readiness state', () => {
     ).toThrow('CLOUDFLARE_WORKERS_SUBDOMAIN');
   });
 
+  it('treats an unset GitHub Actions variable as absent', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-readiness-'));
+    expect(
+      resolveCloudflareWorkersDevSubdomain(root, { CLOUDFLARE_WORKERS_SUBDOMAIN: '' }),
+    ).toBeUndefined();
+  });
+
   it('caches a Wrangler-reported subdomain and preserves unrelated state', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-readiness-'));
     expect(

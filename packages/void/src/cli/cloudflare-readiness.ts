@@ -14,7 +14,7 @@ export function resolveCloudflareWorkersDevSubdomain(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string | undefined {
   const configured = env.CLOUDFLARE_WORKERS_SUBDOMAIN;
-  if (configured !== undefined) {
+  if (configured !== undefined && configured.trim().length > 0) {
     const normalized = normalizeWorkersDevSubdomain(configured);
     if (!normalized) {
       throw new Error(

@@ -67,7 +67,7 @@ If your CI pipeline runs typechecking or other static analysis before deploy, ru
 
 You can deploy from a GitHub repo on every push to `main`. Running `void init --github` generates `.github/workflows/void-deploy.yml` for the platform saved in `.void/project.json`.
 
-For Cloudflare targets, the workflow runs `void deploy --platform cloudflare` and authenticates with `CLOUDFLARE_API_TOKEN`; scope that repository secret to the pinned account and only the products the application deploy needs. PostgreSQL/MySQL apps also need a `DATABASE_URL` repository secret, while SQLite and database-free apps can leave it unset. For Void targets, the generated workflow uses GitHub OIDC and needs no long-lived `VOID_TOKEN`.
+For Cloudflare targets, the workflow runs `void deploy --platform cloudflare` and authenticates with `CLOUDFLARE_API_TOKEN`; scope that repository secret to the pinned account and only the products the application deploy needs. PostgreSQL/MySQL apps also need a `DATABASE_URL` repository secret, while SQLite and database-free apps can leave it unset. Set the `CLOUDFLARE_WORKERS_SUBDOMAIN` repository variable when versions lack preview URLs, and add `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` repository secrets only when Access protects Worker readiness. For Void targets, the generated workflow uses GitHub OIDC and needs no long-lived `VOID_TOKEN`.
 
 ### Void GitHub App (recommended)
 
