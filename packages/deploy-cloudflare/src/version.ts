@@ -100,6 +100,9 @@ export async function activateCloudflareVersion(options: {
 }): Promise<CloudflareVersionActivation> {
   const configArgs = options.configPath ? ['-c', options.configPath] : [];
   const commonArgs = [...configArgs, '--env='];
+  if (!options.verifyUploader()) {
+    return { ok: false, reason: 'uploader-changed' };
+  }
   const previous = await readCurrentProductionVersion(options, commonArgs);
   if (previous.kind === 'failed') {
     return { ok: false, reason: 'status-failed', status: previous.status };

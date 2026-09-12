@@ -246,6 +246,20 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler).toHaveBeenCalledTimes(1);
   });
 
+  it('verifies the uploader before reading credentialed deployment status', async () => {
+    const runWrangler = runner();
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => false,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toEqual({ ok: false, reason: 'uploader-changed' });
+    expect(runWrangler).not.toHaveBeenCalled();
+  });
+
   it('fails closed when Wrangler does not return a preview URL', async () => {
     const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
     await expect(
