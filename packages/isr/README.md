@@ -8,7 +8,7 @@ The package is public so the Void SDK, the hosted platform, and deployment adapt
 
 When a request is served via a dispatch-side rewrite (`routing.rewrites` or `routing.fallbacks`), the ISR slot splits per original-request URL via the `#rw=` variant suffix — so user code that branches on `c.isRewritten()` / `c.originalUrl()` doesn't share a cache entry with the direct-hit path to the same destination.
 
-ISR cache entries are written by `packages/dispatch` and purged by `packages/api`. The two workers must produce byte-identical keys and URLs — if the purger and the writer disagree on a single character, purges silently miss and stale HTML survives revalidation. This package centralizes every helper that constructs an ISR KV key or an edge-cache URL so the two sides cannot drift.
+ISR cache entries are written by `platform/packages/dispatch` and purged by `platform/packages/api`. The two workers must produce byte-identical keys and URLs — if the purger and the writer disagree on a single character, purges silently miss and stale HTML survives revalidation. This package centralizes every helper that constructs an ISR KV key or an edge-cache URL so the two sides cannot drift.
 
 Any new helper that touches the key or URL format belongs here, not in `api/` or `dispatch/`. Duplication is the failure mode this package exists to prevent.
 
