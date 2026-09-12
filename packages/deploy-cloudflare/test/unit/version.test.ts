@@ -189,6 +189,7 @@ describe('Cloudflare version activation', () => {
         runWrangler,
         verifyUploader: () => true,
         workerName: 'my-worker',
+        workersDevSubdomain: 'attacker-account',
         message: encodeCloudflareVersionMessage([]),
         readinessHeaders: {
           'CF-Access-Client-Id': 'service-id',
@@ -271,6 +272,25 @@ describe('Cloudflare version activation', () => {
       expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
     );
     expect(runWrangler.mock.calls[3]![0]).toContain(`${NEXT}@100`);
+  });
+
+  it('never sends Access headers to an unverified cached workers.dev subdomain', async () => {
+    const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
+    const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        workersDevSubdomain: 'stale-or-attacker',
+        message: encodeCloudflareVersionMessage([]),
+        readinessHeaders: { 'CF-Access-Token': 'secret' },
+        fetch: fetcher,
+        readinessAttempts: 1,
+      }),
+    ).resolves.toMatchObject({ ok: false, reason: 'readiness-failed' });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('restores the prior deployment when Access blocks both readiness hostnames', async () => {

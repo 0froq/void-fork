@@ -275,6 +275,9 @@ export async function activateCloudflareVersion(options: {
     return { ok: false, reason: 'upload-output-invalid' };
   }
   const reportedPreviewUrl = output.match(PREVIEW_URL_RE)?.[1];
+  let authenticatedWorkersDevSubdomain = reportedPreviewUrl
+    ? extractWorkersDevSubdomain(reportedPreviewUrl)
+    : undefined;
   let readinessUrl = reportedPreviewUrl;
   let stagedVersionOverride = false;
   if (!readinessUrl) {
@@ -322,6 +325,7 @@ export async function activateCloudflareVersion(options: {
     `${readinessUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
     options.readinessHeaders,
+    authenticatedWorkersDevSubdomain,
     stagedVersionOverride ? versionId : undefined,
     options.fetch ?? globalThis.fetch,
     options.sleep ?? defaultSleep,
@@ -338,7 +342,7 @@ export async function activateCloudflareVersion(options: {
   if (ready === 'access-denied' && !stagedVersionOverride && previous.versionId !== null) {
     const stableReadinessUrl = workersDevReadinessUrl(
       options.workerName,
-      options.workersDevSubdomain ?? extractWorkersDevSubdomain(readinessUrl),
+      extractWorkersDevSubdomain(readinessUrl) ?? options.workersDevSubdomain,
     );
     if (stableReadinessUrl && stableReadinessUrl !== readinessUrl) {
       if (!options.verifyUploader()) {
@@ -367,11 +371,13 @@ export async function activateCloudflareVersion(options: {
         };
       }
       readinessUrl = stableReadinessUrl;
+      authenticatedWorkersDevSubdomain = extractWorkersDevSubdomain(stableReadinessUrl);
       stagedVersionOverride = true;
       ready = await probeReadiness(
         `${readinessUrl.replace(/\/$/, '')}/__void/ready`,
         options.workerName,
         options.readinessHeaders,
+        authenticatedWorkersDevSubdomain,
         versionId,
         options.fetch ?? globalThis.fetch,
         options.sleep ?? defaultSleep,
@@ -595,6 +601,7 @@ async function bootstrapFirstDeployment(
     `${previewUrl.replace(/\/$/, '')}/__void/ready`,
     options.workerName,
     options.readinessHeaders,
+    extractWorkersDevSubdomain(previewUrl),
     undefined,
     options.fetch ?? globalThis.fetch,
     options.sleep ?? defaultSleep,
@@ -680,12 +687,18 @@ async function probeReadiness(
   url: string,
   workerName: string,
   readinessHeaders: Readonly<Record<string, string>> | undefined,
+  authenticatedWorkersDevSubdomain: string | undefined,
   versionOverride: string | undefined,
   fetcher: typeof globalThis.fetch,
   sleep: (milliseconds: number) => Promise<void>,
   attempts: number,
 ): Promise<'ready' | 'failed' | 'access-denied'> {
-  const headers = guardedReadinessHeaders(url, workerName, readinessHeaders);
+  const headers = guardedReadinessHeaders(
+    url,
+    workerName,
+    readinessHeaders,
+    authenticatedWorkersDevSubdomain,
+  );
   if (headers === null) {
     return 'failed';
   }
@@ -727,6 +740,7 @@ function guardedReadinessHeaders(
   url: string,
   workerName: string,
   headers: Readonly<Record<string, string>> | undefined,
+  authenticatedWorkersDevSubdomain: string | undefined,
 ): Readonly<Record<string, string>> | null {
   if (!headers || Object.keys(headers).length === 0) {
     return {};
@@ -736,9 +750,11 @@ function guardedReadinessHeaders(
     const hostname = parsed.hostname.toLowerCase();
     const firstLabel = hostname.split('.')[0] ?? '';
     const normalizedWorkerName = workerName.toLowerCase();
+    const subdomain = extractWorkersDevSubdomain(url);
     if (
       parsed.protocol !== 'https:' ||
-      !hostname.endsWith('.workers.dev') ||
+      !subdomain ||
+      subdomain !== authenticatedWorkersDevSubdomain ||
       (firstLabel !== normalizedWorkerName && !firstLabel.endsWith(`-${normalizedWorkerName}`))
     ) {
       return null;
