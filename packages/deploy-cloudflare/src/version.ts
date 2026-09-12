@@ -587,7 +587,7 @@ export function normalizeWorkersDevSubdomain(value: string | undefined): string 
     ?.trim()
     .toLowerCase()
     .replace(/\.workers\.dev\/?$/, '');
-  if (!normalized || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(normalized)) {
+  if (!normalized || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.fed)?$/.test(normalized)) {
     return undefined;
   }
   return normalized;
@@ -597,10 +597,16 @@ export function normalizeWorkersDevSubdomain(value: string | undefined): string 
 export function extractWorkersDevSubdomain(url: string): string | undefined {
   try {
     const labels = new URL(url).hostname.toLowerCase().split('.');
-    if (labels.length !== 4 || labels[2] !== 'workers' || labels[3] !== 'dev') {
+    if (labels.at(-2) !== 'workers' || labels.at(-1) !== 'dev') {
       return undefined;
     }
-    return normalizeWorkersDevSubdomain(labels[1]);
+    if (labels.length === 4) {
+      return normalizeWorkersDevSubdomain(labels[1]);
+    }
+    if (labels.length === 5 && labels[2] === 'fed') {
+      return normalizeWorkersDevSubdomain(`${labels[1]}.fed`);
+    }
+    return undefined;
   } catch {
     return undefined;
   }

@@ -59,12 +59,17 @@ describe('Cloudflare version activation', () => {
       'developer-platform-experience',
     );
     expect(normalizeWorkersDevSubdomain('not valid')).toBeUndefined();
+    expect(normalizeWorkersDevSubdomain('My-Team.fed.workers.dev')).toBe('my-team.fed');
     expect(
       extractWorkersDevSubdomain(
         'https://void-ready-abc-my-worker.developer-platform-experience.workers.dev/path',
       ),
     ).toBe('developer-platform-experience');
+    expect(
+      extractWorkersDevSubdomain('https://void-ready-abc-my-worker.my-team.fed.workers.dev/path'),
+    ).toBe('my-team.fed');
     expect(extractWorkersDevSubdomain('https://example.com')).toBeUndefined();
+    expect(extractWorkersDevSubdomain('https://worker.my-team.other.workers.dev')).toBeUndefined();
   });
 
   it('round-trips migration metadata and rejects unrelated annotations', () => {

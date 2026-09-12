@@ -17,6 +17,15 @@ describe('Cloudflare readiness state', () => {
     ).toBe('developer-platform-experience');
   });
 
+  it('accepts the FedRAMP workers.dev subdomain form', () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-readiness-'));
+    expect(
+      resolveCloudflareWorkersDevSubdomain(root, {
+        CLOUDFLARE_WORKERS_SUBDOMAIN: 'my-team.fed.workers.dev',
+      }),
+    ).toBe('my-team.fed');
+  });
+
   it('rejects an invalid environment override', () => {
     const root = mkdtempSync(join(tmpdir(), 'void-readiness-'));
     expect(() =>
