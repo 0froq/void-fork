@@ -78,6 +78,7 @@ import {
   requiresSandboxPlatformImage,
   resolveSandboxConfig,
 } from '../sandbox/config.ts';
+import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { mergeAndExpand, parseDotenvFile, scanWranglerDotenvKeys } from '../shared/dotenv.ts';
 import {
   CLOUDFLARE_DEPLOY_BUILD_ENV,
@@ -4924,6 +4925,7 @@ export async function runCloudflareDeploy(
     configPath: generatedConfigPath,
     message: encodeCloudflareVersionMessage(migrations.map((migration) => migration.name)),
     allowFirstDeploymentBootstrap: workerWasMissingBeforeSecretProvisioning,
+    readinessHeaders: cloudflareWorkerReadinessHeaders(),
   });
   if (!execution.ok) {
     log.error(formatCloudflareActivationError(execution));
@@ -4985,6 +4987,13 @@ function formatCloudflareActivationError(
         'deploy: the uploaded Worker Version did not pass /__void/ready.',
         'The failed version was left inactive for inspection; production traffic is unchanged.',
       ].join('\n');
+    case 'readiness-access-denied':
+      return [
+        'deploy: Cloudflare Access blocked the uploaded Worker Version readiness probe.',
+        'Set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to a service token admitted by',
+        "this Worker's Access policy, then retry. The version remains inactive and production",
+        'traffic is unchanged.',
+      ].join('\n');
     case 'bootstrap-failed':
       return `deploy: Cloudflare could not bootstrap the first Worker deployment${status}.${cloudflareCode}`;
     case 'bootstrap-output-invalid':
@@ -4998,6 +5007,13 @@ function formatCloudflareActivationError(
         'Cloudflare requires this bootstrap to be non-versioned, so the new Worker is already active;',
         'inspect its logs and `void project status` before retrying.',
       ].join('\n');
+    case 'bootstrap-readiness-access-denied':
+      return [
+        'deploy: Cloudflare Access blocked the first Worker deployment readiness probe.',
+        'Set CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET to a service token admitted by',
+        "this Worker's Access policy, then retry. Cloudflare requires the first deployment",
+        'to be non-versioned, so the new Worker is already active behind Access.',
+      ].join('\n');
     case 'activation-failed':
       return `deploy: the ready Worker Version could not be activated${status}; production traffic is unchanged.`;
     case 'triggers-failed': {
@@ -5010,6 +5026,14 @@ function formatCloudflareActivationError(
       return `deploy: the Worker activated, but Cloudflare trigger synchronization failed${status}. ${rollback}`;
     }
   }
+}
+
+/** Capture only the complete service-token pair; never forward an unrelated Access user JWT. */
+function cloudflareWorkerReadinessHeaders(): Record<string, string> {
+  return cfAccessHeaders({
+    CF_ACCESS_CLIENT_ID: process.env.CF_ACCESS_CLIENT_ID,
+    CF_ACCESS_CLIENT_SECRET: process.env.CF_ACCESS_CLIENT_SECRET,
+  });
 }
 
 /** Build the trusted Wrangler pointer for a framework that emits Worker files directly. */
@@ -5314,6 +5338,7 @@ async function runCloudflareStaticDeploy(
     workerName,
     message: encodeCloudflareVersionMessage([]),
     assetsDirectoryOverride: stagedAssetsDirectory,
+    readinessHeaders: cloudflareWorkerReadinessHeaders(),
   });
   if (!execution.ok) {
     log.error(formatCloudflareActivationError(execution));

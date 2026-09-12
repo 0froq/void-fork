@@ -1288,6 +1288,51 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(wranglerArgs.at(-1)).toContain(join(root, '.void/deploy/cloudflare/assets'));
   });
 
+  it('passes a complete Access service-token pair to the readiness probe', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'access-app' }),
+      'void.json': JSON.stringify({ inference: { appType: 'spa' } }),
+      'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
+      'dist/index.html': '<h1>Access</h1>',
+    });
+    const previousId = process.env.CF_ACCESS_CLIENT_ID;
+    const previousSecret = process.env.CF_ACCESS_CLIENT_SECRET;
+    process.env.CF_ACCESS_CLIENT_ID = 'service-id';
+    process.env.CF_ACCESS_CLIENT_SECRET = 'service-secret';
+    let readinessHeaders: Readonly<Record<string, string>> | undefined;
+    const { deps, exitCalls } = harness({
+      activateVersion: async (options) => {
+        readinessHeaders = options.readinessHeaders;
+        return {
+          ok: true,
+          versionId: '22222222-2222-4222-8222-222222222222',
+          previewUrl: 'https://preview.example.workers.dev',
+          previousVersionId: null,
+        };
+      },
+    });
+
+    try {
+      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+      expect(exitCalls).toEqual([]);
+      expect(readinessHeaders).toEqual({
+        'CF-Access-Client-Id': 'service-id',
+        'CF-Access-Client-Secret': 'service-secret',
+      });
+    } finally {
+      if (previousId === undefined) {
+        delete process.env.CF_ACCESS_CLIENT_ID;
+      } else {
+        process.env.CF_ACCESS_CLIENT_ID = previousId;
+      }
+      if (previousSecret === undefined) {
+        delete process.env.CF_ACCESS_CLIENT_SECRET;
+      } else {
+        process.env.CF_ACCESS_CLIENT_SECRET = previousSecret;
+      }
+    }
+  });
+
   it('builds and deploys an unconfigured Vite SPA', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'viteapp', dependencies: { vite: '6.0.0' } }),

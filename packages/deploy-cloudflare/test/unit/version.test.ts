@@ -128,6 +128,85 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'deploy')).toBe(false);
   });
 
+  it('sends Access service-token headers only to the matching Workers preview host', async () => {
+    const runWrangler = runner({
+      upload: ok(
+        `Worker Version ID: ${NEXT}\nVersion Preview Alias URL: https://void-ready-abc-my-worker.developer-platform-experience.workers.dev`,
+      ),
+    });
+    const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([]),
+        readinessHeaders: {
+          'CF-Access-Client-Id': 'service-id',
+          'CF-Access-Client-Secret': 'service-secret',
+        },
+        fetch: fetcher,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://void-ready-abc-my-worker.developer-platform-experience.workers.dev/__void/ready',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'CF-Access-Client-Id': 'service-id',
+          'CF-Access-Client-Secret': 'service-secret',
+        }),
+        redirect: 'manual',
+      }),
+    );
+  });
+
+  it('never forwards Access service-token headers to an unrelated readiness host', async () => {
+    const runWrangler = runner({
+      upload: ok(`Worker Version ID: ${NEXT}\nVersion Preview Alias URL: https://attacker.example`),
+    });
+    const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([]),
+        readinessHeaders: {
+          'CF-Access-Client-Id': 'service-id',
+          'CF-Access-Client-Secret': 'service-secret',
+        },
+        fetch: fetcher,
+        sleep: async () => {},
+      }),
+    ).resolves.toMatchObject({ ok: false, reason: 'readiness-failed' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('reports Cloudflare Access error 1050 without retrying or activating', async () => {
+    const runWrangler = runner({
+      upload: ok(
+        `Worker Version ID: ${NEXT}\nVersion Preview Alias URL: https://void-ready-abc-my-worker.developer-platform-experience.workers.dev`,
+      ),
+    });
+    const fetcher = vi.fn(async () => new Response('error code: 1050', { status: 403 }));
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: fetcher,
+        sleep: async () => {},
+      }),
+    ).resolves.toMatchObject({ ok: false, reason: 'readiness-access-denied' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(runWrangler.mock.calls.some(([args]) => args[1] === 'deploy')).toBe(false);
+  });
+
   it('refuses to flatten an existing gradual traffic split', async () => {
     const runWrangler = runner({
       status: ok(
@@ -280,6 +359,32 @@ describe('Cloudflare version activation', () => {
       'https://first.example.workers.dev/__void/ready',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('reports Access blocking the already-active first Worker bootstrap', async () => {
+    const runWrangler = runner({
+      status: { stdout: '', stderr: 'The Worker first has no deployments.', status: 1 },
+      upload: {
+        stdout: '',
+        stderr: 'Durable Object migrations require deploy. [code: 10211]',
+        status: 1,
+      },
+      bootstrap: ok(`Current Version ID: ${NEXT}\nhttps://first.example.workers.dev`),
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'first',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => new Response('error code: 1050', { status: 403 }),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'bootstrap-readiness-access-denied',
+      rollback: 'unavailable',
+    });
   });
 
   it('bootstraps a Worker that the Versions API cannot create', async () => {

@@ -28,9 +28,11 @@ export type CloudflareVersionActivation =
         | 'upload-output-invalid'
         | 'preview-unavailable'
         | 'readiness-failed'
+        | 'readiness-access-denied'
         | 'bootstrap-failed'
         | 'bootstrap-output-invalid'
         | 'bootstrap-readiness-failed'
+        | 'bootstrap-readiness-access-denied'
         | 'activation-failed'
         | 'triggers-failed';
       status?: number;
@@ -79,6 +81,8 @@ export async function activateCloudflareVersion(options: {
   configPath?: string;
   /** Override only the asset directory for this upload, leaving the persisted config intact. */
   assetsDirectoryOverride?: string;
+  /** Optional Cloudflare Access service-token headers used only by the readiness probe. */
+  readinessHeaders?: Readonly<Record<string, string>>;
   message: string;
   /**
    * The caller proved that the Worker did not exist before this deploy provisioned its secrets.
@@ -162,14 +166,16 @@ export async function activateCloudflareVersion(options: {
 
   const ready = await probeReadiness(
     `${previewUrl.replace(/\/$/, '')}/__void/ready`,
+    options.workerName,
+    options.readinessHeaders,
     options.fetch ?? globalThis.fetch,
     options.sleep ?? defaultSleep,
     options.readinessAttempts ?? 6,
   );
-  if (!ready) {
+  if (ready !== 'ready') {
     return {
       ok: false,
-      reason: 'readiness-failed',
+      reason: ready === 'access-denied' ? 'readiness-access-denied' : 'readiness-failed',
       versionId,
       previousVersionId: previous.versionId,
       rollback: 'not-needed',
@@ -293,14 +299,19 @@ async function bootstrapFirstDeployment(
   }
   const ready = await probeReadiness(
     `${previewUrl.replace(/\/$/, '')}/__void/ready`,
+    options.workerName,
+    options.readinessHeaders,
     options.fetch ?? globalThis.fetch,
     options.sleep ?? defaultSleep,
     options.readinessAttempts ?? 6,
   );
-  if (!ready) {
+  if (ready !== 'ready') {
     return {
       ok: false,
-      reason: 'bootstrap-readiness-failed',
+      reason:
+        ready === 'access-denied'
+          ? 'bootstrap-readiness-access-denied'
+          : 'bootstrap-readiness-failed',
       versionId,
       previousVersionId,
       rollback: 'unavailable',
@@ -356,21 +367,30 @@ async function readCurrentProductionVersion(
 
 async function probeReadiness(
   url: string,
+  workerName: string,
+  readinessHeaders: Readonly<Record<string, string>> | undefined,
   fetcher: typeof globalThis.fetch,
   sleep: (milliseconds: number) => Promise<void>,
   attempts: number,
-): Promise<boolean> {
+): Promise<'ready' | 'failed' | 'access-denied'> {
+  const headers = guardedReadinessHeaders(url, workerName, readinessHeaders);
+  if (headers === null) {
+    return 'failed';
+  }
   for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
     try {
       const response = await fetcher(url, {
-        headers: { 'user-agent': 'void-deploy-readiness/1' },
+        headers: { 'user-agent': 'void-deploy-readiness/1', ...headers },
+        redirect: 'manual',
         signal: AbortSignal.timeout(10_000),
       });
       if (response.ok) {
         const body = (await response.json()) as { ready?: unknown };
         if (body.ready === true) {
-          return true;
+          return 'ready';
         }
+      } else if (await isCloudflareAccessDenial(response)) {
+        return 'access-denied';
       }
     } catch {
       // Preview propagation is eventually consistent; retry below.
@@ -379,7 +399,55 @@ async function probeReadiness(
       await sleep(Math.min(250 * 2 ** attempt, 2_000));
     }
   }
-  return false;
+  return 'failed';
+}
+
+/** Never forward service-token headers to a hostname that cannot be this Worker. */
+function guardedReadinessHeaders(
+  url: string,
+  workerName: string,
+  headers: Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, string>> | null {
+  if (!headers || Object.keys(headers).length === 0) {
+    return {};
+  }
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    const firstLabel = hostname.split('.')[0] ?? '';
+    const normalizedWorkerName = workerName.toLowerCase();
+    if (
+      parsed.protocol !== 'https:' ||
+      !hostname.endsWith('.workers.dev') ||
+      (firstLabel !== normalizedWorkerName && !firstLabel.endsWith(`-${normalizedWorkerName}`))
+    ) {
+      return null;
+    }
+    return headers;
+  } catch {
+    return null;
+  }
+}
+
+async function isCloudflareAccessDenial(response: Response): Promise<boolean> {
+  if (
+    response.status >= 300 &&
+    response.status < 400 &&
+    response.headers.get('location')?.includes('/cdn-cgi/access/')
+  ) {
+    return true;
+  }
+  if (response.status !== 403) {
+    return false;
+  }
+  if (response.headers.get('cf-mitigated') === 'challenge') {
+    return true;
+  }
+  try {
+    return /(?:error\s+code:\s*)?1050\b/i.test(await response.text());
+  } catch {
+    return false;
+  }
 }
 
 async function rollbackAfterTriggerFailure(
