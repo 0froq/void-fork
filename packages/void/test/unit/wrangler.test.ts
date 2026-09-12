@@ -997,6 +997,59 @@ describe('writeProvisionedWranglerConfig', () => {
     expect(readRaw('wrangler.jsonc')).toBe(dup);
   });
 
+  it('prunes stale Void-owned framework queues while preserving user queue entries', () => {
+    setup(
+      'wrangler.jsonc',
+      `{
+  "queues": {
+    "producers": [
+      { "binding": "QUEUE_OLD", "queue": "old" },
+      { "binding": "CUSTOM", "queue": "custom" }
+    ],
+    "consumers": [
+      { "queue": "old", "max_batch_size": 5 },
+      { "queue": "custom", "max_batch_size": 10 }
+    ]
+  }
+}`,
+    );
+
+    const result = writeProvisionedWranglerConfig(tmpDir, {
+      queues: { producers: [], consumers: [], reconcileVoidOwned: true },
+    });
+
+    expect(result.modified).toBe(true);
+    expect(parseRaw('wrangler.jsonc').queues).toEqual({
+      producers: [{ binding: 'CUSTOM', queue: 'custom' }],
+      consumers: [{ queue: 'custom', max_batch_size: 10 }],
+    });
+  });
+
+  it('reconciles a renamed framework queue without retaining the old binding', () => {
+    setup(
+      'wrangler.jsonc',
+      JSON.stringify({
+        queues: {
+          producers: [{ binding: 'QUEUE_OLD', queue: 'old' }],
+          consumers: [{ queue: 'old' }],
+        },
+      }),
+    );
+
+    writeProvisionedWranglerConfig(tmpDir, {
+      queues: {
+        producers: [{ binding: 'QUEUE_NEW', queue: 'new' }],
+        consumers: [{ queue: 'new' }],
+        reconcileVoidOwned: true,
+      },
+    });
+
+    expect(parseRaw('wrangler.jsonc').queues).toEqual({
+      producers: [{ binding: 'QUEUE_NEW', queue: 'new' }],
+      consumers: [{ queue: 'new' }],
+    });
+  });
+
   it('fails closed on a top-level duplicated key (account_id twice) — throws without writing', () => {
     const dup = `{
   "account_id": "aaa",

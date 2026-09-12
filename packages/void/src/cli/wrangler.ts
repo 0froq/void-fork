@@ -17,6 +17,7 @@ import { join, normalize } from 'pathslash';
 import type { VoidConfig } from '../config.ts';
 import type { DurableObjectModule } from '../durable/scan.ts';
 import type { InferredBindings } from '../inference/walk.ts';
+import { deriveQueueBindingName } from '../queues/scan.ts';
 import type { WebSocketRouteDefinition } from '../router/websocket.ts';
 import {
   DEFAULT_SANDBOX_BINDING,
@@ -930,6 +931,8 @@ export type ProvisionedWranglerPatch = {
   queues?: {
     producers?: Array<WranglerQueueProducer>;
     consumers?: Array<WranglerQueueConsumer>;
+    /** Remove stale entries previously generated from framework queue files. */
+    reconcileVoidOwned?: boolean;
   };
 };
 
@@ -1431,6 +1434,43 @@ export function writeProvisionedWranglerConfig(
     }
   };
   if (patch.queues) {
+    if (patch.queues.reconcileVoidOwned) {
+      const queues = assertObjectContainer(parseJsonc(text).queues, 'queues');
+      assertValidQueueProducers(queues?.producers);
+      const producers = Array.isArray(queues?.producers)
+        ? (queues.producers as Array<Record<string, unknown>>)
+        : [];
+      const desiredBindings = new Set(
+        (patch.queues.producers ?? []).map((producer) => producer.binding),
+      );
+      const staleQueueNames = new Set<string>();
+      const staleProducerIndexes: Array<number> = [];
+      for (let index = 0; index < producers.length; index++) {
+        const producer = producers[index];
+        if (
+          typeof producer.queue === 'string' &&
+          typeof producer.binding === 'string' &&
+          producer.binding === deriveQueueBindingName(producer.queue) &&
+          !desiredBindings.has(producer.binding)
+        ) {
+          staleQueueNames.add(producer.queue);
+          staleProducerIndexes.push(index);
+        }
+      }
+      for (const index of staleProducerIndexes.reverse()) {
+        set(['queues', 'producers', index], undefined);
+      }
+
+      const consumers = Array.isArray(queues?.consumers)
+        ? (queues.consumers as Array<Record<string, unknown>>)
+        : [];
+      const staleConsumerIndexes = consumers.flatMap((consumer, index) =>
+        typeof consumer.queue === 'string' && staleQueueNames.has(consumer.queue) ? [index] : [],
+      );
+      for (const index of staleConsumerIndexes.reverse()) {
+        set(['queues', 'consumers', index], undefined);
+      }
+    }
     upsertQueueEntries('producers', patch.queues.producers);
     upsertQueueEntries('consumers', patch.queues.consumers);
   }

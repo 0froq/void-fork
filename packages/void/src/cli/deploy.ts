@@ -4251,7 +4251,7 @@ export async function runCloudflareDeploy(
     {
       name: workerName,
       accountId,
-      ...(detectedFramework && frameworkQueues.length > 0
+      ...(detectedFramework
         ? {
             queues: {
               producers: frameworkQueues.map((queue) => ({
@@ -4267,6 +4267,7 @@ export async function runCloudflareDeploy(
                 ...(queue.maxRetries != null && { max_retries: queue.maxRetries }),
                 ...(queue.retryDelay != null && { retry_delay: queue.retryDelay }),
               })),
+              reconcileVoidOwned: true,
             },
           }
         : {}),
