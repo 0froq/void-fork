@@ -276,6 +276,34 @@ describe('Cloudflare version activation', () => {
     );
   });
 
+  it('bootstraps a Worker that the Versions API cannot create', async () => {
+    const runWrangler = runner({
+      status: { stdout: '', stderr: 'This Worker does not exist. [code: 10007]', status: 1 },
+      upload: {
+        stdout: '',
+        stderr:
+          'You cannot upload a new version of a Worker that does not yet exist. Please run the `deploy` command first.',
+        status: 1,
+      },
+      bootstrap: ok(`Current Version ID: ${NEXT}\nhttps://first.example.workers.dev`),
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'first-static',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, previousVersionId: null });
+    expect(runWrangler.mock.calls.map(([args]) => args[0])).toEqual([
+      'deployments',
+      'versions',
+      'deploy',
+    ]);
+  });
+
   it('never falls back to non-versioned deployment for an existing Worker', async () => {
     const runWrangler = runner({
       upload: {

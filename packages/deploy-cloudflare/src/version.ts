@@ -125,8 +125,9 @@ export async function activateCloudflareVersion(options: {
     const output = `${upload.stdout}\n${upload.stderr}`;
     const cloudflareErrorCode = parseCloudflareErrorCode(output);
     if (
-      cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR &&
-      (previous.versionId === null || options.allowFirstDeploymentBootstrap === true)
+      (previous.versionId === null || options.allowFirstDeploymentBootstrap === true) &&
+      (cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR ||
+        /cannot upload a new version of a worker that does not yet exist/i.test(output))
     ) {
       return bootstrapFirstDeployment(options, commonArgs, previous.versionId);
     }
@@ -236,10 +237,10 @@ export async function activateCloudflareVersion(options: {
 }
 
 /**
- * Cloudflare cannot create Durable Object migration history through the Versions API, and some
- * accounts do not expose a version preview until their first ordinary deployment. A brand-new
- * Worker can therefore need one ordinary deploy before later releases use preview-first version
- * activation. This fallback requires prior proof that no application had been deployed.
+ * The Versions API cannot create a Worker or its initial Durable Object migration history, and
+ * some accounts do not expose a version preview until their first ordinary deployment. A
+ * brand-new Worker can therefore need one ordinary deploy before later releases use preview-first
+ * version activation. This fallback requires prior proof that no application had been deployed.
  */
 async function bootstrapFirstDeployment(
   options: Parameters<typeof activateCloudflareVersion>[0],
