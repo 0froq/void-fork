@@ -326,26 +326,30 @@ describe('runDeploy keeps the CF Access service token in process.env', () => {
   });
 });
 
-// The build child env must omit the CF Access service-token pair even though
-// process.env still carries it, so untrusted build code can't read the shared
-// staging credential.
+// The build child env must omit deploy credentials even though process.env
+// keeps them. Managed prerender retains only its project-scoped Void token.
 describe('buildEnv', () => {
-  it('omits CF_ACCESS_CLIENT_ID/SECRET while process.env keeps them', () => {
+  it('omits Cloudflare and Access credentials while process.env keeps them', () => {
     const savedId = process.env.CF_ACCESS_CLIENT_ID;
     const savedSecret = process.env.CF_ACCESS_CLIENT_SECRET;
     const savedToken = process.env.CF_ACCESS_TOKEN;
+    const savedCloudflareToken = process.env.CLOUDFLARE_API_TOKEN;
+    const savedVoidToken = process.env.VOID_TOKEN;
     try {
       process.env.CF_ACCESS_CLIENT_ID = 'svc-id.access';
       process.env.CF_ACCESS_CLIENT_SECRET = 'svc-secret';
-      process.env.CF_ACCESS_TOKEN = 'jwt-keep-me';
+      process.env.CF_ACCESS_TOKEN = 'access-jwt';
+      process.env.CLOUDFLARE_API_TOKEN = 'cloudflare-token';
+      process.env.VOID_TOKEN = 'project-token';
 
       const childEnv = buildEnv({ VOID_DEPLOY_PROJECT_ID: 'proj_1' });
 
       // Pair scrubbed from the CHILD env...
       expect(childEnv.CF_ACCESS_CLIENT_ID).toBeUndefined();
       expect(childEnv.CF_ACCESS_CLIENT_SECRET).toBeUndefined();
-      // ...the cloudflared JWT (dev path) and extras pass through...
-      expect(childEnv.CF_ACCESS_TOKEN).toBe('jwt-keep-me');
+      expect(childEnv.CF_ACCESS_TOKEN).toBeUndefined();
+      expect(childEnv.CLOUDFLARE_API_TOKEN).toBeUndefined();
+      expect(childEnv.VOID_TOKEN).toBe('project-token');
       expect(childEnv.VOID_DEPLOY_PROJECT_ID).toBe('proj_1');
       // ...and process.env is untouched.
       expect(process.env.CF_ACCESS_CLIENT_ID).toBe('svc-id.access');
@@ -361,6 +365,8 @@ describe('buildEnv', () => {
       restore('CF_ACCESS_CLIENT_ID', savedId);
       restore('CF_ACCESS_CLIENT_SECRET', savedSecret);
       restore('CF_ACCESS_TOKEN', savedToken);
+      restore('CLOUDFLARE_API_TOKEN', savedCloudflareToken);
+      restore('VOID_TOKEN', savedVoidToken);
     }
   });
 });

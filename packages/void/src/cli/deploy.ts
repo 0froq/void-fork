@@ -492,8 +492,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
 }
 
 /**
- * Build a child-process environment with the CF Access service-token PAIR
- * removed.
+ * Build a child-process environment with deployment credentials removed.
  *
  * The deploy flow spawns UNTRUSTED user build code (`vite build`, framework
  * preset builds, drizzle-kit loading the user schema) which inherits the
@@ -506,10 +505,9 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
  * We scrub it on the CHILD env rather than mutating `process.env`: deleting it
  * from the parent also breaks interactive expired-token re-auth, which reads
  * `cfAccessHeaders(process.env)` / the cloudflared pair-guard AFTER the build
- * step. This base helper removes the service-token pair; Cloudflare deploy's
- * `provisionEnv` removes the short-lived `CF_ACCESS_TOKEN` JWT from Wrangler,
- * while `scrubWranglerAuthCredentials` removes it from every child that
- * evaluates project code.
+ * step. Managed prerender retains only its project-scoped `VOID_TOKEN`;
+ * Cloudflare, Access, and production database credentials never reach
+ * arbitrary build scripts or plugins.
  *
  * `localBinRoot` is an explicit OPT-IN, not a default. Build commands are run
  * through a shell (`execSync`) and a user-configured `inference.build` (e.g.
@@ -529,8 +527,7 @@ export function buildEnv(
   options?: { localBinRoot?: string },
 ): NodeJS.ProcessEnv {
   const env = { ...process.env, ...extra };
-  delete env.CF_ACCESS_CLIENT_ID;
-  delete env.CF_ACCESS_CLIENT_SECRET;
+  scrubEnvironmentVariables(env, UNTRUSTED_PROJECT_CODE_ENV_VARS);
   return options?.localBinRoot === undefined
     ? env
     : prependLocalBinToPath(env, options.localBinRoot);
@@ -1380,6 +1377,21 @@ const WRANGLER_AUTH_CREDENTIAL_ENV_VARS = [
   'CLOUDFLARE_ACCESS_CLIENT_SECRET',
   'CF_ACCESS_TOKEN',
 ];
+
+const UNTRUSTED_PROJECT_CODE_ENV_VARS = [
+  ...WRANGLER_AUTH_CREDENTIAL_ENV_VARS,
+  'CF_ACCESS_CLIENT_ID',
+  'CF_ACCESS_CLIENT_SECRET',
+];
+
+function scrubEnvironmentVariables(env: NodeJS.ProcessEnv, names: ReadonlyArray<string>): void {
+  const blocked = new Set(names.map((name) => name.toLowerCase()));
+  for (const key of Object.keys(env)) {
+    if (blocked.has(key.toLowerCase())) {
+      delete env[key];
+    }
+  }
+}
 
 /**
  * Delete every {@link WRANGLER_AUTH_CREDENTIAL_ENV_VARS} entry from `env` IN PLACE and
