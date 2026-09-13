@@ -5617,6 +5617,10 @@ async function runDeployInner(
     );
   }
 
+  const targetLabel = platform === 'cloudflare' ? 'Cloudflare' : 'Void';
+  log.info(`Deployment target: ${targetLabel}`);
+  cliLog.info('deploy_target', { target: platform });
+
   return deployTargets[platform].deploy(root, options ?? {}, cliLog);
 }
 

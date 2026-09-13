@@ -112,6 +112,22 @@ describe('runDeploy auth failures', () => {
     );
   });
 
+  it('prints the resolved Void deployment target before authentication', async () => {
+    await expect(
+      runDeploy(process.cwd(), { platform: 'void', projectSlug: 'my-app' }),
+    ).rejects.toThrow();
+
+    expect(mockInfo).toHaveBeenCalledWith('Deployment target: Void');
+  });
+
+  it('prints the resolved Cloudflare deployment target before target validation', async () => {
+    await expect(
+      runDeploy(process.cwd(), { platform: 'cloudflare', projectSlug: 'my-app' }),
+    ).rejects.toThrow('--project is not supported with platform cloudflare');
+
+    expect(mockInfo).toHaveBeenCalledWith('Deployment target: Cloudflare');
+  });
+
   it('reauthenticates and retries once for expired local auth tokens in interactive mode', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
     mockListProjects
