@@ -102,6 +102,9 @@ vp run check           # typecheck all packages
 vp run dev:docs        # local docs dev server
 ```
 
+See [TESTING.md](./TESTING.md) for targeted verification and the account-neutral, non-destructive
+native Cloudflare live E2E procedure.
+
 ### Project Structure
 
 | Path                         | Purpose                                                           |
