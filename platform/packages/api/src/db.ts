@@ -554,11 +554,51 @@ export async function getDeployment(db: Db, id: string): Promise<Deployment | nu
   return row ?? null;
 }
 
-/** Remove the internal deployment row used only to fence a rollback cutover. */
-export async function deleteRollbackLease(db: Db, id: string): Promise<void> {
-  await db
+/** Remove an internal rollback fence only when this request still owns it. */
+export async function deleteRollbackLease(db: Db, id: string, ownerId: string): Promise<boolean> {
+  const deleted = await db
     .delete(deployments)
-    .where(and(eq(deployments.id, id), eq(deployments.source, 'rollback-lease')));
+    .where(
+      and(
+        eq(deployments.id, id),
+        eq(deployments.source, 'rollback-lease'),
+        sql`${deployments.manifest}::jsonb ->> 'ownerId' = ${ownerId}`,
+      ),
+    )
+    .returning({ id: deployments.id });
+  return deleted.length === 1;
+}
+
+export async function updateRollbackLeaseState(
+  db: Db,
+  id: string,
+  targetDeploymentId: string,
+  state: 'running' | 'retryable' | 'applied',
+  ownerId: string,
+  expectedOwnerId: string,
+  migrationDiff?: ReadonlyArray<string>,
+): Promise<boolean> {
+  const updated = await db
+    .update(deployments)
+    .set({
+      manifest: JSON.stringify({
+        version: 1,
+        targetDeploymentId,
+        state,
+        ownerId,
+        ...(migrationDiff ? { migrationDiff } : {}),
+      }),
+      updated_at: sql`now()`,
+    })
+    .where(
+      and(
+        eq(deployments.id, id),
+        eq(deployments.source, 'rollback-lease'),
+        sql`${deployments.manifest}::jsonb ->> 'ownerId' = ${expectedOwnerId}`,
+      ),
+    )
+    .returning({ id: deployments.id });
+  return updated.length === 1;
 }
 
 export async function getProjectDeployments(
@@ -569,7 +609,12 @@ export async function getProjectDeployments(
   return db
     .select()
     .from(deployments)
-    .where(eq(deployments.project_id, projectId))
+    .where(
+      and(
+        eq(deployments.project_id, projectId),
+        or(isNull(deployments.source), ne(deployments.source, 'rollback-lease')),
+      ),
+    )
     .orderBy(desc(deployments.created_at))
     .limit(limit);
 }

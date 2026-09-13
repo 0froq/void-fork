@@ -233,6 +233,8 @@ export type DeployManifest = {
   ssr?: boolean;
   framework?: string;
   type?: 'void' | 'spa' | 'static' | 'framework';
+  /** @deprecated Legacy v1 static deployment discriminator. */
+  static?: 'spa' | 'ssg';
   revalidate?: number | Record<string, number>;
   revalidateQueryAllowlist?: Record<string, Array<string>>;
   pages?: Array<{ pattern: string; revalidate?: number }>;

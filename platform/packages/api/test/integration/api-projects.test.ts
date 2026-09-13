@@ -31,6 +31,7 @@ import {
   cfError,
   type TestEnv,
 } from './helpers.ts';
+import { setTestDb } from './setup.ts';
 
 let env: TestEnv;
 
@@ -1372,6 +1373,91 @@ describe('POST /projects/:id/rollback', () => {
     });
   });
 
+  it('keeps legacy static targets static when their manifest predates type', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-legacy-static');
+    const legacyStaticManifest = JSON.stringify({
+      version: 3,
+      bindings: {},
+      assetConfig: { not_found_handling: '404-page' },
+    });
+    const target = await createDeployment(env.db, project.id, legacyStaticManifest);
+    await env.db
+      .update(deployments)
+      .set({ asset_hashes: JSON.stringify({ '/index.html': { hash: 'legacy', size: 6 } }) })
+      .where(eq(deployments.id, target.id));
+    await updateDeploymentStatus(env.db, target.id, 'live');
+    await markDeploymentRetained(env.db, target.id, true);
+    const current = await createDeployment(env.db, project.id, legacyStaticManifest);
+    await updateDeploymentStatus(env.db, current.id, 'live');
+    await markDeploymentRetained(env.db, current.id, true);
+    await env.db.update(projects).set({ type: 'static' }).where(eq(projects.id, project.id));
+    await setActiveDeployment(env.db, project.id, current.id);
+
+    const response = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deploymentId: target.id }),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await db.getProject(env.db, project.id))?.type).toBe('static');
+    expect(await env.ROUTING.get(project.slug, 'json')).toMatchObject({
+      staticDeploymentId: target.id,
+      type: 'static',
+    });
+  });
+
+  it('keeps legacy Worker targets as Workers after a static deployment', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-legacy-worker');
+    // The original v1 Worker manifest had no type, workerMain, or
+    // bundle_stored discriminator. In contrast, v1 static manifests carried
+    // `static`, so an otherwise ambiguous historical manifest is a Worker.
+    const target = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 1, bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, target.id, 'live');
+    await markDeploymentRetained(env.db, target.id, true);
+
+    const current = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 1, bindings: {}, static: 'spa' }),
+    );
+    await updateDeploymentStatus(env.db, current.id, 'live');
+    await markDeploymentRetained(env.db, current.id, true);
+    await env.db.update(projects).set({ type: 'spa' }).where(eq(projects.id, project.id));
+    await setActiveDeployment(env.db, project.id, current.id);
+
+    const response = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/rollback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${user.jwt}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ deploymentId: target.id }),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect((await db.getProject(env.db, project.id))?.type).toBe('void');
+    expect(await env.ROUTING.get(project.slug, 'json')).toMatchObject({
+      type: 'void',
+      workerName: `user-${project.slug}-${target.id}`,
+    });
+  });
+
   it('returns 400 for non-retained deployment', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'evicted-app');
@@ -1622,6 +1708,66 @@ describe('POST /projects/:id/rollback', () => {
     expect((await db.getProject(env.db, project.id))?.type).toBe('void');
     expect(await env.ROUTING.get(project.slug)).toBe(previousSlugRouting);
     expect(await env.ROUTING.get('domain:compensate.example.com')).toBe(previousDomainRouting);
+  });
+
+  it('uses the lease witness to compensate a failed same-target rollback commit', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-same-target-witness');
+    const target = await createDeployment(
+      env.db,
+      project.id,
+      JSON.stringify({ version: 3, type: 'void', bindings: {} }),
+    );
+    await updateDeploymentStatus(env.db, target.id, 'live');
+    await markDeploymentRetained(env.db, target.id, true);
+    await setActiveDeployment(env.db, project.id, target.id);
+    const previousRouting = JSON.stringify({ workerName: 'previous-route', version: target.id });
+    await env.ROUTING.put(project.slug, previousRouting);
+
+    const realDb = env.db;
+    const realTransaction = realDb.transaction.bind(realDb);
+    let transactionCount = 0;
+    let injected = false;
+    const wrappedDb = new Proxy(realDb, {
+      get(targetDb, property, receiver) {
+        if (property === 'transaction') {
+          return (async (callback: Parameters<typeof realTransaction>[0]) => {
+            transactionCount++;
+            return realTransaction(async (tx) => {
+              const result = await callback(tx);
+              if (transactionCount === 2 && !injected) {
+                injected = true;
+                throw new Error('injected pre-commit rollback');
+              }
+              return result;
+            });
+          }) as typeof realDb.transaction;
+        }
+        return Reflect.get(targetDb, property, receiver);
+      },
+    }) as db.Db;
+    setTestDb(wrappedDb);
+
+    try {
+      const response = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/rollback`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${user.jwt}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ deploymentId: target.id }),
+        }),
+        env,
+      );
+      expect(response.status).toBe(500);
+      expect(injected).toBe(true);
+      expect((await db.getProject(realDb, project.id))?.active_deployment_id).toBe(target.id);
+      expect(await env.ROUTING.get(project.slug)).toBe(previousRouting);
+      expect((await db.getActiveDeployment(realDb, project.id))?.source).not.toBe('rollback-lease');
+    } finally {
+      setTestDb(realDb);
+    }
   });
 
   it('restores exact queue consumer settings when rollback fails mid-cutover', async () => {
