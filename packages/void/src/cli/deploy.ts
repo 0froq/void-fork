@@ -5031,7 +5031,7 @@ export async function runCloudflareDeploy(
     worker: workerName,
     versionId: execution.versionId,
   });
-  log.success(`Deployed "${workerName}" to your Cloudflare account.`);
+  log.success(`Deployed "${workerName}" to your Cloudflare account.\n${execution.previewUrl}`);
 }
 
 /**
@@ -5529,7 +5529,7 @@ async function runCloudflareStaticDeploy(
     worker: workerName,
     versionId: execution.versionId,
   });
-  log.success(`Deployed "${workerName}" to your Cloudflare account.`);
+  log.success(`Deployed "${workerName}" to your Cloudflare account.\n${execution.previewUrl}`);
 }
 
 type RunDeployTargetAdapter = DeployTargetAdapter<RunDeployOptions, CliLogger>;

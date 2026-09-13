@@ -84,6 +84,21 @@ const silentCliLog: CliLogger = {
   close: async () => {},
 };
 
+/** Run a deploy while capturing its user-facing success output. */
+async function captureSuccessMessages(run: () => Promise<void>): Promise<Array<string>> {
+  const messages: Array<string> = [];
+  const restore = log.success;
+  log.success = (message: string) => {
+    messages.push(message);
+  };
+  try {
+    await run();
+  } finally {
+    log.success = restore;
+  }
+  return messages;
+}
+
 /** Synthetic real ids (shape-valid) for drift/provision fixtures. */
 const REAL_D1_ID = '52b3bbc7-c473-4b26-9486-1345f5de61c4';
 /** A second shape-valid D1 id, so a tampered config can point at a DIFFERENT database. */
@@ -1360,7 +1375,9 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     const { deps, exitCalls } = harness();
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    const successMessages = await captureSuccessMessages(() =>
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    );
 
     expect(exitCalls).toEqual([]);
     expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(canonical);
@@ -1368,6 +1385,9 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(generated.durable_objects).toEqual({ bindings: [] });
     expect(generated.queues).toEqual({ producers: [], consumers: [] });
     expect(generated.workflows).toEqual([]);
+    expect(successMessages).toContain(
+      'Deployed "switchable-app" to your Cloudflare account.\nhttps://preview.example.workers.dev',
+    );
   });
 
   it('passes a complete Access service-token pair to the readiness probe', async () => {
@@ -1969,12 +1989,17 @@ describe('runCloudflareDeploy — resource provisioning', () => {
       }) as CloudflareDeployDeps['provision'],
     });
 
-    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    const successMessages = await captureSuccessMessages(() =>
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    );
 
     expect(capturedDesired?.d1).toMatchObject({ binding: 'DB', name: 'myapp-db' });
     expect(provisionTrace).toEqual(['provision']);
     expect(trace).toContain('build');
     expect(trace).toContain('wrangler:deploy');
+    expect(successMessages).toContain(
+      'Deployed "myapp" to your Cloudflare account.\nhttps://preview.example.workers.dev',
+    );
   });
 
   it('proceeds through whoami → build → gate → migrate-gate → remote-migrate → deploy when fully provisioned', async () => {
