@@ -5,7 +5,7 @@ import { asString, isProxyBody } from './body.ts';
 import { d1 } from './d1.ts';
 import { kv } from './kv.ts';
 import { r2 } from './r2.ts';
-import { verifyProjectOwner } from './resolve.ts';
+import { verifyPrerenderBuild, verifyProjectOwner } from './resolve.ts';
 import { revalidate } from './revalidate.ts';
 import { sandbox } from './sandbox.ts';
 import type { JwtPayload, ProxyBody, ProxyEnv } from './types.ts';
@@ -75,6 +75,17 @@ app.post('/*', async (context, next) => {
       // owner token by accepting a caller-selected projectId.
       if (!payload.project || payload.project !== projectId) {
         return context.json({ error: 'forbidden' }, 403);
+      }
+      if (
+        payload.build &&
+        !(await verifyPrerenderBuild(
+          context.env.API,
+          context.env.JWT_SECRET,
+          projectId,
+          payload.build,
+        ))
+      ) {
+        return context.json({ error: 'prerender token build is no longer active' }, 403);
       }
     } else {
       // Full API tokens retain the local-development ownership lookup.

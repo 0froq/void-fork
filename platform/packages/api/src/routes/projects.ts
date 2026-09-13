@@ -1,6 +1,6 @@
 import { sql as drizzleSql } from 'drizzle-orm';
 import { Hono } from 'hono';
-import { signPrerenderToken } from '../auth/deploy-token.ts';
+import { deployTokenTtlSecondsForBuildMinutes, signPrerenderToken } from '../auth/deploy-token.ts';
 import { hmacSignState } from '../auth/hmac.ts';
 import { buildManagerNamespace } from '../build-namespace.ts';
 import { isTerminalBuildStatus } from '../build-status.ts';
@@ -46,6 +46,7 @@ import {
   invalidateMigrationRenamesForOldName,
   upsertProjectDatabaseUrl,
   getProjectDatabaseUrl,
+  ACTIVE_BUILD_STATUSES,
 } from '../db.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
 import { validateSubmittedExecutionPlans } from '../migrations/execution-plan.ts';
@@ -625,10 +626,57 @@ const app = new Hono<ApiEnv>()
     if (project.user_id !== user.id) {
       return context.json({ error: 'forbidden' }, 403);
     }
-    const token = await signPrerenderToken(
-      { projectId: project.id, userId: user.id, login: user.login },
-      context.env.JWT_SECRET,
-    );
+    const deployBuild = context.get('deployBuild');
+    const signToken = (buildId?: string) =>
+      signPrerenderToken(
+        { projectId: project.id, userId: user.id, login: user.login, buildId },
+        context.env.JWT_SECRET,
+        {
+          // A manual CLI prerender can legitimately run longer than five
+          // minutes because path discovery and rendering are sequential. It
+          // has no build row whose plan timeout can size the token, so give it
+          // the same bounded 65-minute ceiling as an unlimited build. This
+          // remains a proxy-only, single-project credential and avoids
+          // restoring the caller's broad platform token inside Miniflare.
+          ttlSeconds: deployTokenTtlSecondsForBuildMinutes(
+            buildId ? getPlanLimits(user.plan).buildTimeoutMinutes : 0,
+          ),
+        },
+      );
+
+    let token: string;
+    if (deployBuild) {
+      // The auth middleware checked this build before entering the route, but a
+      // supersede can race that check and token signing. Lock project first
+      // (the platform-wide lock order), then the build row, and revalidate while
+      // minting. Once this transaction releases, the proxy checks the same row
+      // on every request, so a later terminal transition revokes the derived
+      // credential immediately rather than merely waiting for JWT expiry.
+      const minted = await context.get('db').transaction(async (tx) => {
+        await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${project.id} FOR SHARE`);
+        await tx.execute(drizzleSql`SELECT id FROM builds WHERE id = ${deployBuild} FOR UPDATE`);
+        const txDb = tx as unknown as Db;
+        const lockedProject = await getProject(txDb, project.id);
+        const boundBuild = await getBuild(txDb, deployBuild);
+        if (
+          !lockedProject ||
+          lockedProject.status === 'deleting' ||
+          lockedProject.user_id !== user.id ||
+          !boundBuild ||
+          boundBuild.project_id !== project.id ||
+          !ACTIVE_BUILD_STATUSES.includes(boundBuild.status)
+        ) {
+          return null;
+        }
+        return signToken(deployBuild);
+      });
+      if (!minted) {
+        return context.json({ error: 'deploy token build is no longer active' }, 403);
+      }
+      token = minted;
+    } else {
+      token = await signToken();
+    }
     return context.json({ token });
   })
 

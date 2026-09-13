@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vite-plus/test';
 import { signDeployToken, verifyPrerenderToken } from '../../src/auth/deploy-token.ts';
+import { hmacSignState } from '../../src/auth/hmac.ts';
 import {
   createDeployment,
   updateDeploymentStatus,
@@ -254,7 +255,7 @@ describe('GET /projects/:id', () => {
 });
 
 describe('POST /projects/:id/prerender-token', () => {
-  it('mints a proxy-only token for the project owner', async () => {
+  it('mints a bounded proxy-only token long enough for a manual prerender', async () => {
     const user = await createTestUser(env.db, 'prerender-owner');
     const project = await createTestProject(env.db, user.id, 'prerender-app');
 
@@ -273,6 +274,7 @@ describe('POST /projects/:id/prerender-token', () => {
       sub: user.id,
       project: project.id,
     });
+    expect(payload!.exp - payload!.iat).toBe(65 * 60);
   });
 
   it('allows the project-scoped deploy token to mint it', async () => {
@@ -291,6 +293,63 @@ describe('POST /projects/:id/prerender-token', () => {
       env,
     );
     expect(res.status).toBe(200);
+  });
+
+  it('binds a derived token to its active build and revokes it with that build', async () => {
+    const user = await createTestUser(env.db, 'prerender-bound-ci');
+    const project = await createTestProject(env.db, user.id, 'prerender-bound-ci-app');
+    const build = await db.createBuild(env.db, {
+      projectId: project.id,
+      userId: user.id,
+      status: 'building',
+    });
+    const deployToken = await signDeployToken(
+      {
+        projectId: project.id,
+        userId: user.id,
+        login: user.login,
+        buildId: build.id,
+      },
+      env.JWT_SECRET,
+    );
+
+    const mint = () =>
+      app.fetch(
+        new Request(`http://localhost/projects/${project.id}/prerender-token`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${deployToken}` },
+        }),
+        env,
+      );
+    const minted = await mint();
+    expect(minted.status).toBe(200);
+    const { token } = (await minted.json()) as { token: string };
+    expect(await verifyPrerenderToken(token, env.JWT_SECRET)).toMatchObject({
+      aud: 'prerender',
+      project: project.id,
+      build: build.id,
+    });
+    const payload = await verifyPrerenderToken(token, env.JWT_SECRET);
+    expect(payload!.exp - payload!.iat).toBe(15 * 60);
+
+    const internalAuth = await hmacSignState(project.id, env.JWT_SECRET);
+    const verifyBuild = () =>
+      app.fetch(
+        new Request(`http://localhost/internal/verify-prerender-build/${project.id}`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-void-internal': internalAuth,
+          },
+          body: JSON.stringify({ buildId: build.id }),
+        }),
+        env,
+      );
+    expect((await verifyBuild()).status).toBe(200);
+
+    await db.markBuildTerminalIfActive(env.db, build.id, 'cancelled');
+    expect((await verifyBuild()).status).toBe(403);
+    expect((await mint()).status).toBe(403);
   });
 
   it("does not mint a token for another user's project", async () => {

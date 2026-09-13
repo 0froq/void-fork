@@ -54,6 +54,7 @@ import internalResolveResource from './routes/internal-resolve-resource.ts';
 import internalResolveWorker from './routes/internal-resolve-worker.ts';
 import internalRevalidate from './routes/internal-revalidate.ts';
 import internalVerifyOwner from './routes/internal-verify-owner.ts';
+import internalVerifyPrerenderBuild from './routes/internal-verify-prerender-build.ts';
 import me from './routes/me.ts';
 import projects from './routes/projects.ts';
 import revalidate from './routes/revalidate.ts';
@@ -131,6 +132,7 @@ const app = new Hono<ApiEnv>()
   .route('/internal/resolve-resource', internalResolveResource)
   .route('/internal/resolve-worker', internalResolveWorker)
   .route('/internal/verify-owner', internalVerifyOwner)
+  .route('/internal/verify-prerender-build', internalVerifyPrerenderBuild)
   .route('/webhooks', webhookRoutes)
   .route('/github', githubRoutes)
   .use('/me', authMiddleware)

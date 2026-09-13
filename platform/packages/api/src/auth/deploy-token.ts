@@ -86,8 +86,14 @@ export async function verifyDeployToken(token: string, secret: string): Promise<
 
 /** Mint a short-lived token accepted only by the remote-binding proxy. */
 export async function signPrerenderToken(
-  { projectId, userId, login }: { projectId: string; userId: string; login: string },
+  {
+    projectId,
+    userId,
+    login,
+    buildId,
+  }: { projectId: string; userId: string; login: string; buildId?: string },
   secret: string,
+  opts?: { ttlSeconds?: number },
 ): Promise<string> {
   return signJwt(
     {
@@ -95,9 +101,10 @@ export async function signPrerenderToken(
       login,
       aud: 'prerender',
       project: projectId,
+      ...(buildId !== undefined ? { build: buildId } : {}),
     },
     secret,
-    { ttlSeconds: PRERENDER_TOKEN_TTL_SECONDS },
+    { ttlSeconds: opts?.ttlSeconds ?? PRERENDER_TOKEN_TTL_SECONDS },
   );
 }
 
