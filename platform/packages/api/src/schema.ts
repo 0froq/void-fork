@@ -102,6 +102,8 @@ export const deployments = pgTable(
         | 'uploading'
         | 'migrating'
         | 'prerendering'
+        | 'cutover'
+        | 'compensating'
         | 'canceling'
         | 'live'
         | 'failed'

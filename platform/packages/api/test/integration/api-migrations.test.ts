@@ -10,10 +10,10 @@ import {
   afterEach,
   vi,
 } from 'vite-plus/test';
-import type { Db } from '../../src/db.ts';
+import { deleteRollbackLease, type Db } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { canonicalJson } from '../../src/migrations/canonical-json.ts';
-import { deployments, projectMigrations, projects, resources } from '../../src/schema.ts';
+import { deployments, domains, projectMigrations, projects, resources } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -4781,18 +4781,117 @@ describe('POST /projects/:id/migrations/rename', () => {
     const realDb = env.db;
     const realTransaction = realDb.transaction.bind(realDb);
     let transactionCount = 0;
+    const lateHostname = 'late-rollback-domain.example.com';
+    const commitRejection = new Error('injected commit rejection');
     const wrappedDb: Db = new Proxy(realDb, {
       get(targetDb, prop, receiver) {
         if (prop === 'transaction') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return (async (fn: any) => {
             transactionCount++;
+            const rejectsCutover = transactionCount === 2;
+            try {
+              return await realTransaction(async (tx) => {
+                const result = await fn(tx);
+                if (rejectsCutover) {
+                  // The cutover callback completed and wrote external state,
+                  // but PostgreSQL rejects before committing its project flip.
+                  throw commitRejection;
+                }
+                return result;
+              });
+            } catch (error) {
+              if (error === commitRejection) {
+                // Model domain activation winning the gap between the failed
+                // rollback tx releasing the project lock and outer
+                // compensation reacquiring it. It copies target routing that
+                // the rollback wrote externally even though PostgreSQL stayed
+                // on current.
+                await realTransaction(async (tx) => {
+                  await tx.insert(domains).values({
+                    id: 'dom_late_rollback_compensation',
+                    project_id: project.id,
+                    hostname: lateHostname,
+                    cf_hostname_id: 'ch-late-rollback-compensation',
+                    status: 'active',
+                  });
+                  const temporaryTargetRouting = await env.ROUTING.get(project.slug);
+                  expect(temporaryTargetRouting).toContain(target.id);
+                  await env.ROUTING.put(`domain:${lateHostname}`, temporaryTargetRouting!);
+                });
+              }
+              throw error;
+            }
+          }) as unknown as typeof realDb.transaction;
+        }
+        return Reflect.get(targetDb, prop, receiver);
+      },
+    }) as Db;
+    setTestDb(wrappedDb);
+
+    try {
+      const response = await app.fetch(
+        authedReq(`/projects/${project.id}/rollback`, user.jwt, {
+          method: 'POST',
+          body: JSON.stringify({ deploymentId: target.id }),
+        }),
+        env,
+      );
+      expect(response.status).toBe(500);
+      expect((await env.ROUTING.get(project.slug))!).toBe(previousRouting);
+      expect(await env.ROUTING.get(`domain:${lateHostname}`)).toBe(previousRouting);
+      const restored = await env.db
+        .select({ activeDeploymentId: projects.active_deployment_id })
+        .from(projects)
+        .where(eq(projects.id, project.id));
+      expect(restored[0]?.activeDeploymentId).toBe(current.id);
+      const leases = await env.db
+        .select({ id: deployments.id })
+        .from(deployments)
+        .where(eq(deployments.source, 'rollback-lease'));
+      expect(leases).toHaveLength(0);
+    } finally {
+      setTestDb(realDb);
+    }
+  });
+
+  it('preserves the rollback lease when the outer compensation transaction fails', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-compensation-tx-failure');
+    await insertD1Resource(env.db, project.id);
+    const current = await createTestDeployment(env.db, project.id, 'live');
+    await env.db
+      .update(deployments)
+      .set({ retained: true, manifest: JSON.stringify({ version: 4, type: 'void' }) })
+      .where(eq(deployments.id, current.id));
+    const target = await createTestDeployment(env.db, project.id, 'failed');
+    await env.db
+      .update(deployments)
+      .set({ retained: true, manifest: JSON.stringify({ version: 4, type: 'void' }) })
+      .where(eq(deployments.id, target.id));
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: `user-${project.slug}-${current.id}`, version: current.id }),
+    );
+
+    const realDb = env.db;
+    const realTransaction = realDb.transaction.bind(realDb);
+    let transactionCount = 0;
+    const wrappedDb: Db = new Proxy(realDb, {
+      get(targetDb, prop, receiver) {
+        if (prop === 'transaction') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (async (fn: any) => {
+            transactionCount++;
+            if (transactionCount === 3) {
+              // Lease creation is #1, rollback cutover is #2, and the guarded
+              // outer compensation lock is #3.
+              throw new Error('injected compensation transaction failure');
+            }
             return realTransaction(async (tx) => {
               const result = await fn(tx);
               if (transactionCount === 2) {
-                // The cutover callback completed and wrote external state, but
-                // PostgreSQL rejects before committing its project flip.
-                throw new Error('injected commit rejection');
+                throw new Error('injected rollback commit rejection');
               }
               return result;
             });
@@ -4812,12 +4911,89 @@ describe('POST /projects/:id/migrations/rename', () => {
         env,
       );
       expect(response.status).toBe(500);
-      expect((await env.ROUTING.get(project.slug))!).toBe(previousRouting);
-      const restored = await env.db
+    } finally {
+      setTestDb(realDb);
+    }
+
+    const [lease] = await env.db
+      .select({ id: deployments.id, manifest: deployments.manifest })
+      .from(deployments)
+      .where(eq(deployments.source, 'rollback-lease'));
+    expect(lease).toBeDefined();
+    expect(JSON.parse(lease!.manifest!)).toMatchObject({
+      targetDeploymentId: target.id,
+      state: 'retryable',
+    });
+    const [storedProject] = await env.db
+      .select({ activeDeploymentId: projects.active_deployment_id })
+      .from(projects)
+      .where(eq(projects.id, project.id));
+    expect(storedProject?.activeDeploymentId).toBe(current.id);
+  });
+
+  it('preserves a rollback whose COMMIT succeeded when its acknowledgement is lost', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-lost-commit-ack');
+    await insertD1Resource(env.db, project.id);
+    const current = await createTestDeployment(env.db, project.id, 'live');
+    await env.db
+      .update(deployments)
+      .set({ retained: true, manifest: JSON.stringify({ version: 4, type: 'void' }) })
+      .where(eq(deployments.id, current.id));
+    const target = await createTestDeployment(env.db, project.id, 'failed');
+    await env.db
+      .update(deployments)
+      .set({ retained: true, manifest: JSON.stringify({ version: 4, type: 'void' }) })
+      .where(eq(deployments.id, target.id));
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: current.id })
+      .where(eq(projects.id, project.id));
+    const previousRouting = JSON.stringify({
+      workerName: `user-${project.slug}-${current.id}`,
+      version: current.id,
+    });
+    await env.ROUTING.put(project.slug, previousRouting);
+
+    const realDb = env.db;
+    const realTransaction = realDb.transaction.bind(realDb);
+    let transactionCount = 0;
+    const wrappedDb: Db = new Proxy(realDb, {
+      get(targetDb, prop, receiver) {
+        if (prop === 'transaction') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (async (fn: any) => {
+            transactionCount++;
+            const result = await realTransaction(fn);
+            if (transactionCount === 2) {
+              throw new Error('database connection lost after COMMIT');
+            }
+            return result;
+          }) as unknown as typeof realDb.transaction;
+        }
+        return Reflect.get(targetDb, prop, receiver);
+      },
+    }) as Db;
+    setTestDb(wrappedDb);
+
+    try {
+      const response = await app.fetch(
+        authedReq(`/projects/${project.id}/rollback`, user.jwt, {
+          method: 'POST',
+          body: JSON.stringify({ deploymentId: target.id }),
+        }),
+        env,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, deploymentId: target.id });
+
+      const routing = await env.ROUTING.get(project.slug);
+      expect(routing).toContain(target.id);
+      const [updatedProject] = await env.db
         .select({ activeDeploymentId: projects.active_deployment_id })
         .from(projects)
         .where(eq(projects.id, project.id));
-      expect(restored[0]?.activeDeploymentId).toBe(current.id);
+      expect(updatedProject?.activeDeploymentId).toBe(target.id);
       const leases = await env.db
         .select({ id: deployments.id })
         .from(deployments)
@@ -4826,6 +5002,90 @@ describe('POST /projects/:id/migrations/rename', () => {
     } finally {
       setTestDb(realDb);
     }
+  });
+
+  it('keeps an adopted rollback lease when its retry fails before a durable commit', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'rollback-adopted-lease-failure');
+    await insertD1Resource(env.db, project.id);
+    const current = await createTestDeployment(env.db, project.id, 'live');
+    await env.db
+      .update(deployments)
+      .set({ retained: true, manifest: JSON.stringify({ version: 4, type: 'void' }) })
+      .where(eq(deployments.id, current.id));
+    const target = await createTestDeployment(env.db, project.id, 'failed');
+    await env.db
+      .update(deployments)
+      .set({ retained: true, manifest: JSON.stringify({ version: 4, type: 'void' }) })
+      .where(eq(deployments.id, target.id));
+
+    // Model the result of an earlier rollback whose COMMIT outcome was
+    // unreadable: PostgreSQL still points at `current`, external routing may
+    // already point at `target`, and a retryable lease fences that divergence.
+    const lease = await createTestDeployment(env.db, project.id, 'pending', 'rollback-lease');
+    await env.db
+      .update(deployments)
+      .set({
+        manifest: JSON.stringify({
+          version: 1,
+          targetDeploymentId: target.id,
+          state: 'retryable',
+          ownerId: 'abandoned-owner',
+        }),
+      })
+      .where(eq(deployments.id, lease.id));
+    const divergentRouting = JSON.stringify({
+      workerName: `user-${project.slug}-${target.id}`,
+      version: target.id,
+    });
+    await env.ROUTING.put(project.slug, divergentRouting);
+
+    // The same-target retry adopts the lease, then fails on its first
+    // external write. Its compensation snapshot is already the divergent
+    // target route, so releasing the adopted lease here would make the split
+    // brain permanent and allow unrelated operations through.
+    const putSpy = vi
+      .spyOn(env.ROUTING, 'put')
+      .mockRejectedValueOnce(new Error('injected KV failure'));
+    const response = await app.fetch(
+      authedReq(`/projects/${project.id}/rollback`, user.jwt, {
+        method: 'POST',
+        body: JSON.stringify({ deploymentId: target.id }),
+      }),
+      env,
+    );
+    expect(response.status).toBe(500);
+    expect(await env.ROUTING.get(project.slug)).toBe(divergentRouting);
+    putSpy.mockRestore();
+
+    const [preservedLease] = await env.db
+      .select({ id: deployments.id, manifest: deployments.manifest })
+      .from(deployments)
+      .where(eq(deployments.id, lease.id));
+    expect(preservedLease?.id).toBe(lease.id);
+    expect(JSON.parse(preservedLease!.manifest!)).toMatchObject({
+      targetDeploymentId: target.id,
+      state: 'retryable',
+    });
+
+    // A different rollback target must still observe the fence rather than
+    // making either side of the unresolved split brain authoritative.
+    const blocked = await app.fetch(
+      authedReq(`/projects/${project.id}/rollback`, user.jwt, {
+        method: 'POST',
+        body: JSON.stringify({ deploymentId: current.id }),
+      }),
+      env,
+    );
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toMatchObject({ error: `deploy in progress: ${lease.id}` });
+
+    // The abandoned request's `finally` is owner-scoped and cannot delete the
+    // fence after this retry atomically adopted it.
+    expect(await deleteRollbackLease(env.db, lease.id, 'abandoned-owner')).toBe(false);
+    expect(
+      await env.db.select().from(deployments).where(eq(deployments.id, lease.id)),
+    ).toHaveLength(1);
   });
 
   it('rollback deletes stale queue KV routes that only the previous active deployment bound', async () => {
@@ -5941,8 +6201,8 @@ describe('POST /projects/:id/migrations/rename', () => {
       /SELECT id FROM projects WHERE id = \$\{projectId\} FOR UPDATE/g,
     );
     expect(rowLockMatches).not.toBeNull();
-    // apply, rename, and rollback's lease + cutover transactions all use the
-    // collision-free project row lock.
-    expect(rowLockMatches!.length).toBe(4);
+    // Apply, rename, rollback lease/cutover, and rollback's post-transaction
+    // compensation all use the collision-free project row lock.
+    expect(rowLockMatches!.length).toBe(5);
   });
 });

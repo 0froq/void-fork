@@ -192,6 +192,8 @@ function deployAttentionScore(status: string | null | undefined): number {
     status === 'uploading' ||
     status === 'migrating' ||
     status === 'prerendering' ||
+    status === 'cutover' ||
+    status === 'compensating' ||
     status === 'canceling'
   ) {
     return 3;
