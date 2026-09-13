@@ -746,6 +746,33 @@ describe('Cloudflare version activation', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it('sends Access headers to an explicitly trusted workers.dev fallback', async () => {
+    const runWrangler = runner({ upload: ok(`Worker Version ID: ${NEXT}`) });
+    const fetcher = vi.fn(async () => Response.json({ ready: true }));
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        workersDevSubdomain: 'developer-platform-experience',
+        readinessHeadersWorkersDevSubdomain: 'developer-platform-experience',
+        message: encodeCloudflareVersionMessage([]),
+        readinessHeaders: { 'cf-access-token': 'short-lived-user-jwt' },
+        fetch: fetcher,
+      }),
+    ).resolves.toMatchObject({ ok: true, versionId: NEXT });
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://my-worker.developer-platform-experience.workers.dev/__void/ready',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'cf-access-token': 'short-lived-user-jwt',
+          'Cloudflare-Workers-Version-Overrides': `my-worker="${NEXT}"`,
+        }),
+      }),
+    );
+  });
+
   it('restores the prior deployment when Access blocks both readiness hostnames', async () => {
     const runWrangler = runner({
       upload: ok(

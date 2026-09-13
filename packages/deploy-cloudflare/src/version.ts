@@ -514,6 +514,11 @@ export async function activateCloudflareVersion(options: {
   readinessHeaders?: Readonly<Record<string, string>>;
   /** Account workers.dev subdomain used when this Worker cannot expose version preview URLs. */
   workersDevSubdomain?: string;
+  /**
+   * Operator-provided workers.dev subdomain that may receive readiness credentials even when
+   * Wrangler cannot report a preview URL. Cached/project-controlled values must not be used here.
+   */
+  readinessHeadersWorkersDevSubdomain?: string;
   message: string;
   /** Direct empty-domain publisher for the Wrangler reconciliation gap. */
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
@@ -635,6 +640,10 @@ export async function activateCloudflareVersion(options: {
         versionId,
         previousVersionId: previous.versionId,
       };
+    }
+    const fallbackSubdomain = extractWorkersDevSubdomain(readinessUrl);
+    if (fallbackSubdomain && fallbackSubdomain === options.readinessHeadersWorkersDevSubdomain) {
+      authenticatedWorkersDevSubdomain = fallbackSubdomain;
     }
     if (!options.verifyUploader()) {
       return {

@@ -1425,13 +1425,17 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     const previousToken = process.env.CF_ACCESS_TOKEN;
     const previousId = process.env.CF_ACCESS_CLIENT_ID;
     const previousSecret = process.env.CF_ACCESS_CLIENT_SECRET;
+    const previousSubdomain = process.env.CLOUDFLARE_WORKERS_SUBDOMAIN;
     delete process.env.CF_ACCESS_CLIENT_ID;
     delete process.env.CF_ACCESS_CLIENT_SECRET;
     process.env.CF_ACCESS_TOKEN = 'short-lived-user-jwt';
+    process.env.CLOUDFLARE_WORKERS_SUBDOMAIN = 'developer-platform-experience';
     let readinessHeaders: Readonly<Record<string, string>> | undefined;
+    let readinessHeadersWorkersDevSubdomain: string | undefined;
     const { deps, exitCalls } = harness({
       activateVersion: async (options) => {
         readinessHeaders = options.readinessHeaders;
+        readinessHeadersWorkersDevSubdomain = options.readinessHeadersWorkersDevSubdomain;
         return {
           ok: true,
           versionId: '22222222-2222-4222-8222-222222222222',
@@ -1445,6 +1449,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
       expect(exitCalls).toEqual([]);
       expect(readinessHeaders).toEqual({ 'cf-access-token': 'short-lived-user-jwt' });
+      expect(readinessHeadersWorkersDevSubdomain).toBe('developer-platform-experience');
     } finally {
       if (previousToken === undefined) {
         delete process.env.CF_ACCESS_TOKEN;
@@ -1460,6 +1465,11 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
         delete process.env.CF_ACCESS_CLIENT_SECRET;
       } else {
         process.env.CF_ACCESS_CLIENT_SECRET = previousSecret;
+      }
+      if (previousSubdomain === undefined) {
+        delete process.env.CLOUDFLARE_WORKERS_SUBDOMAIN;
+      } else {
+        process.env.CLOUDFLARE_WORKERS_SUBDOMAIN = previousSubdomain;
       }
     }
   });

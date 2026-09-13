@@ -4993,6 +4993,9 @@ export async function runCloudflareDeploy(
     allowFirstDeploymentBootstrap: workerWasMissingBeforeSecretProvisioning,
     readinessHeaders: cloudflareWorkerReadinessHeaders(),
     workersDevSubdomain,
+    readinessHeadersWorkersDevSubdomain: process.env.CLOUDFLARE_WORKERS_SUBDOMAIN?.trim()
+      ? workersDevSubdomain
+      : undefined,
     publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher({
       accountId,
       apiBaseUrl,
@@ -5492,6 +5495,9 @@ async function runCloudflareStaticDeploy(
     assetsDirectoryOverride: stagedAssetsDirectory,
     readinessHeaders: cloudflareWorkerReadinessHeaders(),
     workersDevSubdomain,
+    readinessHeadersWorkersDevSubdomain: process.env.CLOUDFLARE_WORKERS_SUBDOMAIN?.trim()
+      ? workersDevSubdomain
+      : undefined,
     publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher({
       accountId,
       apiBaseUrl,
