@@ -128,12 +128,30 @@ describe('Cloudflare version activation', () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-version-defaults-'));
     const configPath = join(directory, 'wrangler.json');
     try {
-      writeFileSync(configPath, '{"name":"app"}\n');
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          name: 'app',
+          account_id: 'account',
+          assets: { directory: '/already-removed/client' },
+          main: '/already-removed/worker.js',
+        }),
+      );
       const triggerConfig = readCloudflareTriggerConfig(configPath);
       expect(triggerConfig.workers_dev).toBe(true);
       expect(triggerConfig.preview_urls).toBe(true);
 
-      writeFileSync(configPath, '{"name":"app","workers_dev":false,"preview_urls":false}\n');
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          name: 'app',
+          account_id: 'account',
+          assets: { directory: '/already-removed/client' },
+          main: '/already-removed/worker.js',
+          workers_dev: false,
+          preview_urls: false,
+        }),
+      );
       let applied: Record<string, unknown> | undefined;
       await deployCloudflareVersionTriggers({
         runWrangler: async (args) => {
@@ -149,6 +167,9 @@ describe('Cloudflare version activation', () => {
         triggerConfig,
       });
       expect(applied).toMatchObject({ workers_dev: true, preview_urls: true });
+      expect(applied).toMatchObject({ name: 'app', account_id: 'account' });
+      expect(applied).not.toHaveProperty('assets');
+      expect(applied).not.toHaveProperty('main');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

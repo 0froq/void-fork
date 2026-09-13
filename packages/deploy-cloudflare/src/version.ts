@@ -139,7 +139,11 @@ export async function deployCloudflareVersionTriggers(options: {
   /** Wrangler skips an empty Custom Domain set, so the caller may publish it directly. */
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
 }): Promise<CloudflareCommandResult> {
-  const base = options.configPath ? parseRootWranglerConfig(options.configPath) : {};
+  const source = options.configPath ? parseRootWranglerConfig(options.configPath) : {};
+  // `triggers deploy` still validates unrelated upload configuration. Build a trigger-only
+  // config so an ephemeral assets directory (or another bundle-only field) cannot break the
+  // post-activation reconciliation after `versions upload` has already consumed it.
+  const base = pickWranglerTriggerContext(source);
   const config = triggerWranglerConfig(
     base,
     triggerConfigWithRemovedWorkflowSchedules(
@@ -192,6 +196,16 @@ export async function deployCloudflareVersionTriggers(options: {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+function pickWranglerTriggerContext(source: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of ['account_id', 'name', 'legacy_env', 'send_metrics', 'compliance_region']) {
+    if (Object.hasOwn(source, key)) {
+      result[key] = source[key];
+    }
+  }
+  return result;
 }
 
 export type CloudflareTriggerStabilization =
