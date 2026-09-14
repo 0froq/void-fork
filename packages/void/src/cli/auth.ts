@@ -94,7 +94,10 @@ export function getSiteDomain(root: string = process.cwd()): string {
   const domain =
     readProjectApplicationDomain(root) ??
     (isStagingMode(root) ? VOID_CLOUD_STAGING_PLATFORM.applicationDomain : undefined) ??
-    (isLegacyVoidCloudProject(root) ? VOID_CLOUD_PLATFORM.applicationDomain : undefined) ??
+    (isLegacyVoidCloudProject(root) ||
+    (process.env.VOID_TOKEN && process.env.VOID_API_URL === undefined)
+      ? VOID_CLOUD_PLATFORM.applicationDomain
+      : undefined) ??
     getActivePlatformConnection()?.applicationDomain ??
     legacySelection?.applicationDomain;
   if (!domain) {
@@ -344,6 +347,10 @@ export function getApiUrl(root: string = process.cwd()): string {
     getActivePlatformConnection()?.apiUrl ??
     config.api ??
     legacySelection?.apiUrl;
+  // VOID_TOKEN predates explicit platform selection and has always meant Void
+  // Cloud when VOID_API_URL is absent. Preserve that contract for clean CI
+  // runners while still requiring new interactive users to select a platform.
+  apiUrl ??= process.env.VOID_TOKEN ? DEFAULT_API_URL : undefined;
   if (!apiUrl) {
     apiUrl = keyringGet('token')
       ? DEFAULT_API_URL

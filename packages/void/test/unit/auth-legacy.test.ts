@@ -48,12 +48,26 @@ afterEach(() => {
   delete process.env.VOID_API_URL;
   delete process.env.VOID_PLATFORM_REGISTRY_DIR;
   delete process.env.VOID_PROXY_URL;
+  delete process.env.VOID_TOKEN;
   for (const directory of directories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
 });
 
 describe('legacy Void Cloud authentication', () => {
+  it('preserves token-only Void Cloud CI on clean runners', async () => {
+    const root = mkdtempSync('/tmp/void-auth-legacy-ci-');
+    directories.push(root);
+    process.env.VOID_TOKEN = 'ci-token';
+    const { getApiUrl, getProxyUrl, getSiteDomain, getToken } =
+      await import('../../src/cli/auth.ts');
+
+    expect(getApiUrl(root)).toBe('https://api.void.cloud');
+    expect(getProxyUrl(root)).toBe('https://proxy.void.cloud');
+    expect(getSiteDomain(root)).toBe('void.app');
+    expect(getToken(root)).toBe('ci-token');
+  });
+
   it('preserves a token-only platform selection while migrating to the keychain', async () => {
     const root = mkdtempSync('/tmp/void-auth-legacy-project-');
     directories.push(root);
