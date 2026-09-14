@@ -165,8 +165,29 @@ export async function createPlatformInstallPlan(
     ? await readRemoteOwnership(client, account.id, routingKv, existing)
     : null;
   const intentProofs = new Set<string>();
+  const ambiguousResources = new Set<string>();
   if (existing) {
     const bucket = r2Buckets.find((resource) => resource.name === names.assetsBucket);
+    const recordedBucket = existing.resources.find(
+      (resource) =>
+        resource.key === 'assets-bucket' &&
+        resource.kind === 'r2-bucket' &&
+        resource.ownership === 'created' &&
+        resource.state === 'ready',
+    );
+    if (bucket && recordedBucket?.id === bucket.id && recordedBucket.name === bucket.name) {
+      const marker = await client.getR2Object(
+        account.id,
+        bucket.name,
+        PLATFORM_R2_OWNERSHIP_MARKER_KEY,
+      );
+      if (
+        !matchesResourceMarker(marker, existing, 'assets-bucket', 'r2-bucket', bucket) ||
+        !matchesRecordedR2Fingerprint(recordedBucket.configHash, bucket)
+      ) {
+        ambiguousResources.add('assets-bucket');
+      }
+    }
     if (
       bucket &&
       hasUnrecordedProvisionIntent(existing, 'assets-bucket', 'r2-bucket', bucket.name)
@@ -349,6 +370,7 @@ export async function createPlatformInstallPlan(
     options,
     remoteOwnership,
     intentProofs,
+    ambiguousResources,
   );
   addNamedPlan(
     actions,
@@ -609,6 +631,7 @@ function addNamedPlan(
   options?: { authoritativeProvisionIntents?: boolean; repairMissing?: boolean },
   remoteOwnership?: PlatformInstallationManifest | null,
   intentProofs: ReadonlySet<string> = new Set(),
+  ambiguousResources: ReadonlySet<string> = new Set(),
 ): void {
   if (matches.length > 1) {
     throw new Error(`platform: More than one ${kind} named ${JSON.stringify(name)} exists.`);
@@ -616,6 +639,18 @@ function addNamedPlan(
   const remote = matches[0];
   const recorded = existing?.resources.find((resource) => resource.key === key);
   if (remote) {
+    if (existing && ambiguousResources.has(key)) {
+      actions.push({
+        action: 'create',
+        id: null,
+        key,
+        kind,
+        name: interruptedProvisionRetryName(existing, key, kind, name),
+        reason:
+          'Retain the ambiguously owned resource and create a fresh installer-scoped replacement.',
+      });
+      return;
+    }
     const remotelyOwned = remoteOwnership?.resources.some(
       (resource) =>
         resource.key === key &&
@@ -752,8 +787,30 @@ function interruptedProvisionRetryName(
   const suffix = `-retry-${createHash('sha256')
     .update(JSON.stringify({ key, kind, name, ownershipNonce: manifest.ownershipNonce }))
     .digest('hex')
-    .slice(0, 10)}`;
+    .slice(0, 32)}`;
   return `${name.slice(0, 63 - suffix.length).replace(/-+$/, '')}${suffix}`;
+}
+
+function matchesRecordedR2Fingerprint(
+  configHash: string,
+  resource: CloudflareNamedResource,
+): boolean {
+  if (!resource.fingerprint) {
+    return false;
+  }
+  const liveHash = createHash('sha256')
+    .update(
+      JSON.stringify({
+        fingerprint: resource.fingerprint,
+        kind: 'r2-bucket',
+        name: resource.name,
+      }),
+    )
+    .digest('hex');
+  const legacyHash = createHash('sha256')
+    .update(JSON.stringify({ kind: 'r2-bucket', name: resource.name }))
+    .digest('hex');
+  return configHash === liveHash || configHash === legacyHash;
 }
 
 function matchesResourceMarker(

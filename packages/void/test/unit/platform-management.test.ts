@@ -92,7 +92,17 @@ function installedManifest(zoneOwnership: ResourceOwnership = 'created') {
                   }),
                 )
                 .digest('hex')
-            : 'hash',
+            : kind === 'r2-bucket'
+              ? createHash('sha256')
+                  .update(
+                    JSON.stringify({
+                      fingerprint: '2026-09-14T00:00:00.000Z',
+                      kind: 'r2-bucket',
+                      name: key,
+                    }),
+                  )
+                  .digest('hex')
+              : 'hash',
         id: kind === 'worker' ? `void-example-${key.replace('-worker', '')}` : `${key}-id`,
         key,
         kind,
@@ -416,6 +426,20 @@ describe('platform lifecycle management', () => {
         allowMissingRoutingCheckpoint: true,
       }),
     ).rejects.toThrow('r2-bucket assets-bucket has no ownership marker');
+  });
+
+  it('rejects an R2 bucket whose live creation fingerprint changed', async () => {
+    const manifest = installedManifest();
+    const fake = client(manifest);
+    fake.listR2Buckets = async () =>
+      namedResources(manifest, 'r2-bucket').map((resource) => ({
+        ...resource,
+        fingerprint: '2026-09-14T00:00:02.000Z',
+      }));
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).rejects.toThrow(
+      'r2-bucket assets-bucket changed creation fingerprint',
+    );
   });
 
   it('accepts a live immutable resource recorded ahead of stale routing KV', async () => {

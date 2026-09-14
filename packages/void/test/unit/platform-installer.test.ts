@@ -10,7 +10,6 @@ import {
   createPlatformResourceOwnershipMarker,
   PLATFORM_DISABLED_KEY,
   PLATFORM_DISABLED_VALUE,
-  PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   recordInstallationResource,
   recordInstallationStep,
   setInstallationDesiredState,
@@ -46,7 +45,7 @@ import {
   r2BucketConfigHash,
   readPlatformDatabaseLifecycleManifestConnection,
   readActivePlatformWorkerSnapshot,
-  repairInterruptedR2OwnershipMarker,
+  retainReplacedInstallationResource,
   resolvePlatformPreviousTriggerConfig,
   resolveBootstrapGitHubId,
   stablePublicEndpointState,
@@ -1448,7 +1447,7 @@ describe('platform installer', () => {
     expect(failed.status).toBe('failed');
   });
 
-  it('repairs a checkpointed R2 ownership marker after its first write failed', async () => {
+  it('retains an ambiguous resource before recording its replacement', async () => {
     const plan = await createPlatformInstallPlan(
       planningClient(),
       {
@@ -1484,61 +1483,29 @@ describe('platform installer', () => {
       },
       '2026-09-14T00:00:01.000Z',
     );
-    const writes: Array<{ key: string; value: string }> = [];
-    const client = {
-      createAiGateway: async () => ({ id: 'unused', name: 'unused' }),
-      createDispatchNamespace: async () => ({ id: 'unused', name: 'unused' }),
-      createDnsRecord: async () => ({
-        content: '100::',
-        id: 'unused',
-        name: 'unused',
-        proxied: true,
-        type: 'AAAA',
-      }),
-      createHyperdrive: async () => ({ id: 'unused', name: 'unused' }),
-      createKvNamespace: async () => ({ id: 'unused', name: 'unused' }),
-      createQueue: async () => ({ id: 'unused', name: 'unused' }),
-      createR2Bucket: async () => ({ id: 'unused', name: 'unused' }),
-      createZone: async () => ({ id: 'unused', name: 'unused', nameServers: [], status: 'active' }),
-      getR2Object: async () => null,
-      listR2Buckets: async () => [
-        {
-          fingerprint,
-          id: plan.deployment.resources.assetsBucket,
-          name: plan.deployment.resources.assetsBucket,
-        },
-      ],
-      putKvValue: async () => {},
-      putR2Object: async (_account: string, _bucket: string, key: string, value: string) => {
-        writes.push({ key, value });
-      },
+    const replacement = {
+      action: 'create' as const,
+      id: null,
+      key: 'assets-bucket',
+      kind: 'r2-bucket' as const,
+      name: `${plan.deployment.resources.assetsBucket}-replacement`,
+      reason: 'Replace ambiguous bucket.',
     };
-
-    await repairInterruptedR2OwnershipMarker(client, plan, manifest);
-
-    expect(writes).toHaveLength(1);
-    expect(writes[0]!.key).toBe(PLATFORM_R2_OWNERSHIP_MARKER_KEY);
-    expect(JSON.parse(writes[0]!.value)).toMatchObject({
-      installationId: manifest.id,
-      ownershipNonce: manifest.ownershipNonce,
-      resourceKey: 'assets-bucket',
-    });
-
-    await repairInterruptedR2OwnershipMarker(
-      {
-        ...client,
-        listR2Buckets: async () => [
-          {
-            fingerprint: 'new',
-            id: plan.deployment.resources.assetsBucket,
-            name: plan.deployment.resources.assetsBucket,
-          },
-        ],
-      },
-      plan,
+    const retained = retainReplacedInstallationResource(
       manifest,
+      replacement,
+      '2026-09-14T00:00:02.000Z',
     );
-    expect(writes).toHaveLength(1);
+    expect(retained.resources).not.toContainEqual(
+      expect.objectContaining({ key: 'assets-bucket' }),
+    );
+    expect(retained.resources).toContainEqual(
+      expect.objectContaining({
+        id: plan.deployment.resources.assetsBucket,
+        kind: 'r2-bucket',
+        state: 'retained',
+      }),
+    );
   });
 
   it('stops after a newly-created zone until nameservers become active', async () => {
@@ -1683,9 +1650,24 @@ describe('platform installer', () => {
       hyperdriveOriginConfigHash(hyperdriveOriginFromConnectionString(secrets.databaseUrl)),
     );
     const deployment = installed.manifest.deployment;
+    const assetsBucket = installed.manifest.resources.find(
+      (resource) => resource.key === 'assets-bucket',
+    )!;
     const upgradedPlan = await createPlatformInstallPlan(
       {
         ...planningClient(),
+        getR2Object: async () =>
+          JSON.stringify(
+            createPlatformResourceOwnershipMarker({
+              accountId: installed.manifest.account.id,
+              installationId: installed.manifest.id,
+              ownershipNonce: installed.manifest.ownershipNonce,
+              resourceId: assetsBucket.id,
+              resourceKey: assetsBucket.key,
+              resourceKind: assetsBucket.kind,
+              resourceName: assetsBucket.name,
+            }),
+          ),
         listAiGateways: async () => [named('ai-gateway')],
         listDnsRecords: async () => [
           {
@@ -1701,7 +1683,9 @@ describe('platform installer', () => {
           );
           return match ? [{ id: match.id, name: match.name }] : [];
         },
-        listR2Buckets: async () => [named('assets-bucket')],
+        listR2Buckets: async () => [
+          { ...named('assets-bucket'), fingerprint: '2026-09-14T00:00:00.000Z' },
+        ],
         listQueues: async (_account: string, name: string) => {
           const match = installed.manifest.resources.find(
             (resource) => resource.kind === 'queue' && resource.name === name,

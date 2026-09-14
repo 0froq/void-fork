@@ -129,8 +129,6 @@ type InstallerClient = Pick<
       PlatformCloudflareClient,
       | 'deleteKvValue'
       | 'getWorkerPlainTextBindings'
-      | 'getR2Object'
-      | 'listR2Buckets'
       | 'listWorkerDomains'
       | 'listWorkerNames'
       | 'listWorkerServiceRoutes'
@@ -392,7 +390,6 @@ export async function installPlatform(
   }
   try {
     if (existing) {
-      await repairInterruptedR2OwnershipMarker(dependencies.client, plan, manifest);
       await dependencies.verifyExistingOwnership?.(
         manifest,
         authoritative !== null && authoritative !== undefined,
@@ -478,6 +475,12 @@ export async function installPlatform(
     for (const action of plan.actions.filter(
       (entry) => entry.key !== 'routing-kv' && entry.kind !== 'zone' && entry.kind !== 'worker',
     )) {
+      const retainedManifest = retainReplacedInstallationResource(manifest, action, now());
+      if (retainedManifest !== manifest) {
+        manifest = retainedManifest;
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      }
       if (action.action === 'adopt') {
         if (!action.id) {
           throw new Error(`platform: Adopted ${action.kind} ${action.name} has no id.`);
@@ -1034,52 +1037,6 @@ async function writeR2OwnershipMarkerIfNeeded(
   );
 }
 
-export async function repairInterruptedR2OwnershipMarker(
-  client: InstallerClient,
-  plan: PlatformInstallPlan,
-  manifest: PlatformInstallationManifest,
-): Promise<void> {
-  const recorded = manifest.resources.find(
-    (resource) =>
-      resource.key === 'assets-bucket' &&
-      resource.kind === 'r2-bucket' &&
-      resource.ownership === 'created' &&
-      resource.state === 'ready',
-  );
-  if (!recorded || !client.getR2Object || !client.listR2Buckets) {
-    return;
-  }
-  const marker = await client.getR2Object(
-    plan.account.id,
-    recorded.name,
-    PLATFORM_R2_OWNERSHIP_MARKER_KEY,
-  );
-  // Never replace an invalid or foreign marker. Only the missing-marker state
-  // is recoverable, and only when the live bucket generation is the one whose
-  // creation fingerprint was durably checkpointed before the failed write.
-  if (marker !== null) {
-    return;
-  }
-  const matches = (await client.listR2Buckets(plan.account.id)).filter(
-    (bucket) => bucket.id === recorded.id && bucket.name === recorded.name,
-  );
-  const live = matches.length === 1 ? matches[0] : undefined;
-  if (
-    !live?.fingerprint ||
-    recorded.configHash !== r2BucketConfigHash(recorded.name, live.fingerprint)
-  ) {
-    return;
-  }
-  await writeR2OwnershipMarkerIfNeeded(client, plan, manifest, {
-    action: 'reuse',
-    id: recorded.id,
-    key: recorded.key,
-    kind: recorded.kind,
-    name: recorded.name,
-    reason: 'Resume the interrupted ownership-marker write.',
-  });
-}
-
 function saveInstalledPlatformConnection(
   plan: PlatformInstallPlan,
   manifest: PlatformInstallationManifest,
@@ -1253,6 +1210,28 @@ function recordResource(
 
 export function r2BucketConfigHash(name: string, fingerprint: string): string {
   return hash(JSON.stringify({ fingerprint, kind: 'r2-bucket', name }));
+}
+
+export function retainReplacedInstallationResource(
+  manifest: PlatformInstallationManifest,
+  action: PlatformInstallPlanAction,
+  now: string,
+): PlatformInstallationManifest {
+  const previous = manifest.resources.find((resource) => resource.key === action.key);
+  if (
+    action.action !== 'create' ||
+    !previous ||
+    previous.state !== 'ready' ||
+    previous.name === action.name
+  ) {
+    return manifest;
+  }
+  const retainedKey = `retained:${action.key}:${hash(previous.id).slice(0, 16)}`;
+  const resources = manifest.resources
+    .filter((resource) => resource.key !== action.key && resource.key !== retainedKey)
+    .concat({ ...previous, key: retainedKey, state: 'retained' as const })
+    .sort((left, right) => left.key.localeCompare(right.key));
+  return { ...manifest, resources, updatedAt: now };
 }
 
 function validateReplannedWorkerActions(

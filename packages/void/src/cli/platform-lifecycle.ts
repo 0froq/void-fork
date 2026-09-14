@@ -272,9 +272,18 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         revalidatePlatformInstallAction(client, plan, manifest, action),
       verifyExistingOwnership: async (manifest, databaseCheckpointExists) => {
         const { verifyPlatformInstallationOwnership } = await import('./platform-management.ts');
+        const retainedReplacementKeys = new Set(
+          plan.actions
+            .filter((action) => {
+              const previous = manifest.resources.find((resource) => resource.key === action.key);
+              return action.action === 'create' && previous && previous.name !== action.name;
+            })
+            .map((action) => action.key),
+        );
         await verifyPlatformInstallationOwnership(client, manifest, {
           allowUninitializedRoutingCheckpoint: databaseCheckpointExists,
           databaseUrl: secrets.databaseUrl,
+          retainedReplacementKeys,
         });
       },
     });

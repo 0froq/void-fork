@@ -96,10 +96,14 @@ export async function verifyPlatformInstallationOwnership(
     allowMissingRoutingCheckpoint?: boolean;
     allowUninitializedRoutingCheckpoint?: boolean;
     databaseUrl?: string;
+    retainedReplacementKeys?: ReadonlySet<string>;
   } = {},
 ): Promise<void> {
   const ready = manifest.resources.filter(
-    (resource) => resource.state === 'ready' && isOwnershipVerifiableKind(resource.kind),
+    (resource) =>
+      resource.state === 'ready' &&
+      isOwnershipVerifiableKind(resource.kind) &&
+      !options.retainedReplacementKeys?.has(resource.key),
   );
   const routing = ready.find((resource) => resource.key === 'routing-kv');
   if (!routing) {
@@ -236,7 +240,16 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       manifest,
       new Set(
         manifest.resources
-          .filter((resource) => isOwnershipVerifiableKind(resource.kind))
+          .filter(
+            (resource) =>
+              isOwnershipVerifiableKind(resource.kind) &&
+              !plan.actions.some(
+                (action) =>
+                  action.key === resource.key &&
+                  action.action === 'create' &&
+                  action.name !== resource.name,
+              ),
+          )
           .map((resource) => resource.key),
       ),
       {
@@ -1043,8 +1056,23 @@ async function verifyPlatformMutationOwnership(
         verifyResourceMarker(bindings.PLATFORM_OWNERSHIP_MARKER, manifest, resource);
       }
     } else if (resource.kind === 'r2-bucket') {
-      exists = hasNamedResource(r2Buckets, resource);
-      if (exists) {
+      const live = r2Buckets.find(
+        (entry) => entry.id === resource.id && entry.name === resource.name,
+      );
+      exists = live !== undefined;
+      if (live) {
+        const liveHash = live.fingerprint
+          ? r2BucketConfigHash(resource.name, live.fingerprint)
+          : null;
+        const legacyHash = createHash('sha256')
+          .update(JSON.stringify({ kind: resource.kind, name: resource.name }))
+          .digest('hex');
+        if (
+          liveHash === null ||
+          (resource.configHash !== liveHash && resource.configHash !== legacyHash)
+        ) {
+          throw ownershipError(`r2-bucket ${resource.name} changed creation fingerprint`);
+        }
         const marker = await client.getR2Object(
           accountId,
           resource.name,
@@ -1164,6 +1192,12 @@ function dnsRecordConfigHash(
 ): string {
   return createHash('sha256')
     .update(JSON.stringify({ content, kind: 'dns-record', name, proxied, type }))
+    .digest('hex');
+}
+
+function r2BucketConfigHash(name: string, fingerprint: string): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ fingerprint, kind: 'r2-bucket', name }))
     .digest('hex');
 }
 

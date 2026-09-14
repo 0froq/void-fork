@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
@@ -45,6 +46,12 @@ const input = {
   installationSlug: 'example',
   zoneName: 'example.com',
 };
+
+function r2ConfigHash(name: string, fingerprint: string): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ fingerprint, kind: 'r2-bucket', name }))
+    .digest('hex');
+}
 
 describe('platform installation planning', () => {
   it('builds a read-only core plan without containers', async () => {
@@ -301,6 +308,107 @@ describe('platform installation planning', () => {
     const retry = resumed.actions.find((action) => action.key === 'routing-kv');
     expect(retry).toMatchObject({ action: 'create', id: null });
     expect(retry?.name).not.toBe(resourceName);
+  });
+
+  it('retains a recorded R2 bucket whose ownership marker is missing', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null, {
+      provisioningSuffix: '0123456789ab',
+    });
+    const bucketName = initial.deployment.resources.assetsBucket;
+    const fingerprint = '2026-09-14T00:00:00.000Z';
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      createdAt: fingerprint,
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: r2ConfigHash(bucketName, fingerprint),
+        id: bucketName,
+        key: 'assets-bucket',
+        kind: 'r2-bucket',
+        name: bucketName,
+        ownership: 'created',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+
+    const resumed = await createPlatformInstallPlan(
+      client({
+        listR2Buckets: async () => [{ fingerprint, id: bucketName, name: bucketName }],
+      }),
+      input,
+      manifest,
+    );
+    const replacement = resumed.actions.find((action) => action.key === 'assets-bucket');
+    expect(replacement).toMatchObject({
+      action: 'create',
+      id: null,
+      reason:
+        'Retain the ambiguously owned resource and create a fresh installer-scoped replacement.',
+    });
+    expect(replacement?.name).toMatch(/-retry-[a-f0-9]{32}$/);
+    expect(resumed.deployment.resources.assetsBucket).toBe(replacement?.name);
+  });
+
+  it('retains a marked R2 bucket whose creation fingerprint changed', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null, {
+      provisioningSuffix: '0123456789ab',
+    });
+    const bucketName = initial.deployment.resources.assetsBucket;
+    const fingerprint = '2026-09-14T00:00:00.000Z';
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      createdAt: fingerprint,
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: r2ConfigHash(bucketName, fingerprint),
+        id: bucketName,
+        key: 'assets-bucket',
+        kind: 'r2-bucket',
+        name: bucketName,
+        ownership: 'created',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const marker = JSON.stringify(
+      createPlatformResourceOwnershipMarker({
+        accountId: manifest.account.id,
+        installationId: manifest.id,
+        ownershipNonce: manifest.ownershipNonce,
+        resourceId: bucketName,
+        resourceKey: 'assets-bucket',
+        resourceKind: 'r2-bucket',
+        resourceName: bucketName,
+      }),
+    );
+
+    const resumed = await createPlatformInstallPlan(
+      client({
+        getR2Object: async () => marker,
+        listR2Buckets: async () => [
+          { fingerprint: '2026-09-14T00:00:02.000Z', id: bucketName, name: bucketName },
+        ],
+      }),
+      input,
+      manifest,
+    );
+    expect(resumed.actions.find((action) => action.key === 'assets-bucket')).toMatchObject({
+      action: 'create',
+      id: null,
+    });
   });
 
   it('recovers only an intent-only Worker with its matching durable marker', async () => {

@@ -106,7 +106,17 @@ function remoteManifest() {
                   scheme: 'postgresql',
                   user: 'user',
                 })
-              : 'hash',
+              : kind === 'r2-bucket'
+                ? createHash('sha256')
+                    .update(
+                      JSON.stringify({
+                        fingerprint: '2026-09-14T00:00:00.000Z',
+                        kind: 'r2-bucket',
+                        name,
+                      }),
+                    )
+                    .digest('hex')
+                : 'hash',
         id,
         key,
         kind,
@@ -195,6 +205,7 @@ function client(manifest = remoteManifest()) {
     },
     listR2Buckets: async () => [
       {
+        fingerprint: '2026-09-14T00:00:00.000Z',
         id: manifest.deployment.resources.assetsBucket,
         name: manifest.deployment.resources.assetsBucket,
       },
