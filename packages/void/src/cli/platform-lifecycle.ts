@@ -173,6 +173,9 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         checkpoint?.githubClientSecret ||
         process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET ||
         (await promptSecret('GitHub OAuth client secret:')),
+      existingInstallation: existing !== null,
+      jwtSecret: process.env.VOID_PLATFORM_JWT_SECRET || '',
+      projectSecretKey: process.env.VOID_PLATFORM_PROJECT_SECRET_KEY || '',
       r2AccessKeyId:
         checkpoint?.r2AccessKeyId ||
         process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID ||

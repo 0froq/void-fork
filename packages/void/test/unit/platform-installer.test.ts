@@ -204,6 +204,35 @@ describe('platform installer', () => {
     expect(requests).toEqual(['https://api.github.com/users/Octocat']);
   });
 
+  it('never rotates runtime keys while resuming an existing installation', () => {
+    const input = {
+      bootstrapGitHubId: '583231',
+      bootstrapGitHubLogin: 'octocat',
+      cloudflareApiToken: 'cf-token',
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      existingInstallation: true,
+      githubClientId: 'github-id',
+      githubClientSecret: 'github-secret',
+      r2AccessKeyId: 'r2-id',
+      r2SecretAccessKey: 'r2-secret',
+    };
+    expect(() => createPlatformInstallationSecrets(input)).toThrow(
+      'VOID_PLATFORM_JWT_SECRET is required',
+    );
+    expect(() =>
+      createPlatformInstallationSecrets({ ...input, jwtSecret: 'existing-jwt-secret' }),
+    ).toThrow('VOID_PLATFORM_PROJECT_SECRET_KEY is required');
+
+    const projectSecretKey = Buffer.alloc(32, 7).toString('base64');
+    expect(
+      createPlatformInstallationSecrets({
+        ...input,
+        jwtSecret: 'existing-jwt-secret',
+        projectSecretKey,
+      }),
+    ).toMatchObject({ jwtSecret: 'existing-jwt-secret', projectSecretKey });
+  });
+
   it('does not checkpoint failure when another host owns the lifecycle lock', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-lock-contender-test-'));
     directories.push(directory);

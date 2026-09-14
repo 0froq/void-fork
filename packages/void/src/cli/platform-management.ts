@@ -241,8 +241,11 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       cloudflareApiToken: token,
       checkpoint: recovery,
       databaseUrl: process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || '',
+      existingInstallation: true,
       githubClientId: process.env.VOID_PLATFORM_GITHUB_CLIENT_ID || '',
       githubClientSecret: process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET || '',
+      jwtSecret: process.env.VOID_PLATFORM_JWT_SECRET || '',
+      projectSecretKey: process.env.VOID_PLATFORM_PROJECT_SECRET_KEY || '',
       r2AccessKeyId: process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID || '',
       r2SecretAccessKey: process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY || '',
     });

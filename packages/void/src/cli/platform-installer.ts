@@ -110,6 +110,9 @@ export function createPlatformInstallationSecrets(input: {
   databaseUrl: string;
   githubClientId: string;
   githubClientSecret: string;
+  existingInstallation?: boolean;
+  jwtSecret?: string;
+  projectSecretKey?: string;
   r2AccessKeyId: string;
   r2SecretAccessKey: string;
   checkpoint?: Record<string, string> | null;
@@ -121,6 +124,19 @@ export function createPlatformInstallationSecrets(input: {
     }
     return value;
   };
+  const jwtSecret = input.jwtSecret || checkpoint.jwtSecret || '';
+  const projectSecretKey = input.projectSecretKey || checkpoint.projectSecretKey || '';
+  const resolvedJwtSecret = input.existingInstallation
+    ? required(jwtSecret, 'VOID_PLATFORM_JWT_SECRET')
+    : jwtSecret || randomBytes(32).toString('base64url');
+  const resolvedProjectSecretKey = input.existingInstallation
+    ? required(projectSecretKey, 'VOID_PLATFORM_PROJECT_SECRET_KEY')
+    : projectSecretKey || randomBytes(32).toString('base64');
+  if (Buffer.from(resolvedProjectSecretKey, 'base64').byteLength !== 32) {
+    throw new Error(
+      'platform: VOID_PLATFORM_PROJECT_SECRET_KEY must be a base64-encoded 32-byte key.',
+    );
+  }
   return {
     bootstrapGitHubId: required(
       input.bootstrapGitHubId || checkpoint.bootstrapGitHubId || '',
@@ -140,8 +156,8 @@ export function createPlatformInstallationSecrets(input: {
       input.githubClientSecret || checkpoint.githubClientSecret || '',
       'VOID_PLATFORM_GITHUB_CLIENT_SECRET',
     ),
-    jwtSecret: checkpoint.jwtSecret || randomBytes(32).toString('base64url'),
-    projectSecretKey: checkpoint.projectSecretKey || randomBytes(32).toString('base64'),
+    jwtSecret: resolvedJwtSecret,
+    projectSecretKey: resolvedProjectSecretKey,
     r2AccessKeyId: required(
       input.r2AccessKeyId || checkpoint.r2AccessKeyId || '',
       'VOID_PLATFORM_R2_ACCESS_KEY_ID',
