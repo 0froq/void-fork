@@ -17,6 +17,8 @@ void deploy # builds and deploys to the saved platform
 
 `void init` stores the selection as `platform` in `.void/project.json`. Choosing Cloudflare creates or updates `wrangler.jsonc`, offers Wrangler login if necessary, and saves the selected Cloudflare `account_id`. Choosing Void continues into optional Void login and project linking. Choosing Skip stores `"platform": "none"`, and `void deploy` waits for an explicit `--platform cloudflare` or `--platform void` override.
 
+New Void-managed projects require an explicit platform connection; there is no implicit public default. Connect to an existing platform with `void platform connect <url>`, or [install a company platform in your own Cloudflare account](./self-hosted-platform.md). Existing projects created before platform URLs were recorded continue to resolve to Void Cloud for compatibility.
+
 ### Migrations
 
 If your app uses Drizzle, `void deploy` runs migrations as part of the deploy flow:

@@ -1,0 +1,176 @@
+---
+outline: deep
+---
+
+# Self-host a Void platform
+
+A self-hosted Void platform gives a company one shared control plane in its own Cloudflare account. Developers connect the normal `void` CLI to it, log in with GitHub, create projects, and run `void deploy --platform void`. This is different from `void deploy --platform cloudflare`, which deploys one app directly and does not install a control plane.
+
+The core installation intentionally excludes the user dashboard, Deploy on GitHub, GitHub App webhooks, build Containers, email, Google OAuth, custom project domains, and sandbox orchestration. Those are optional platform modules, not prerequisites for deploying an app. GitHub OAuth login, CLI deploys, D1, KV, R2, Queues, cron jobs, Workers AI, WebSockets, SSE, ISR, routing, logs, and rollback use the same platform components as Void Cloud.
+
+## Prerequisites
+
+You need:
+
+- A Cloudflare account with Workers for Platforms and the products represented in the footprint below.
+- A scoped Cloudflare API token. The installer and installed control plane use it to manage Workers scripts, Workers for Platforms, Worker routes and custom domains, KV, R2, Queues, Hyperdrive, AI Gateway, DNS, and zones. Scope it to the selected account and only the zones the platform will use. The exact permission labels can vary in Cloudflare's token UI; the installation plan is read-only and is a useful permission check before applying anything.
+- An external PostgreSQL database reachable through Cloudflare Hyperdrive. Void never creates or deletes this database.
+- An application base domain such as `apps.example.com`. Its containing Cloudflare zone may already exist or the installer can create it.
+- A GitHub OAuth App for login. The installer prints the exact callback URL before asking for its client credentials.
+- An R2 API token with Object Read & Write access. This is separate from the Cloudflare management API token and is used to sign direct asset uploads.
+
+Workers for Platforms is a platform-level Cloudflare product. This requirement does not change native single-app deploys: ordinary `void deploy --platform cloudflare` apps remain Workers Free-compatible unless the app explicitly uses a paid-only product such as Containers.
+
+## Preview the installation
+
+Run the interactive installer with `--plan` first:
+
+```sh
+export CLOUDFLARE_API_TOKEN=your-scoped-management-token
+void platform install --plan
+```
+
+The plan performs reads only. It selects an account, normalizes the installation name, shows every resource it would create, reuse, update, or adopt, and prints the future API URL. With the default control plane that URL is the API Worker's `workers.dev` hostname.
+
+For a repeatable non-interactive plan:
+
+```sh
+void platform install --plan \
+  --name company \
+  --display-name "Company Void" \
+  --account 0123456789abcdef0123456789abcdef \
+  --application-domain apps.example.com \
+  --zone example.com
+```
+
+Use `--control-plane-domain platform.example.net` when you want a custom API hostname. The hostname must be in a zone the selected account and token can manage. Omitting it keeps the control plane on `workers.dev` and avoids requiring another domain.
+
+Use `--dedicated-zone` only when the application domain is the entire zone and every unmatched hostname in that zone belongs to Void. Without it, Void installs only the explicit `*.application-domain` routes. It never assumes a domain is shaped like `apps.company.com`.
+
+## Configure GitHub OAuth
+
+Create a GitHub OAuth App using the API URL from the plan:
+
+- Homepage URL: the API origin, for example `https://void-company-api.example.workers.dev`
+- Authorization callback URL: `<API origin>/auth/callback`
+
+Keep its client ID and client secret for the installer. The first person who completes GitHub login on a self-hosted installation becomes its administrator. Later users are normal platform users. This first-owner behavior is serialized in PostgreSQL so concurrent first logins cannot create multiple owners.
+
+## Install
+
+The interactive command asks for every missing value:
+
+```sh
+void platform install
+```
+
+For non-interactive installation, provide the plan flags above and these environment variables:
+
+```sh
+export CLOUDFLARE_API_TOKEN=your-scoped-management-token
+export VOID_PLATFORM_DATABASE_URL='postgresql://user:password@host/database?sslmode=require'
+export VOID_PLATFORM_GITHUB_CLIENT_ID=your-github-oauth-client-id
+export VOID_PLATFORM_GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
+export VOID_PLATFORM_R2_ACCESS_KEY_ID=your-r2-access-key-id
+export VOID_PLATFORM_R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+
+void platform install \
+  --name company \
+  --display-name "Company Void" \
+  --account 0123456789abcdef0123456789abcdef \
+  --application-domain apps.example.com \
+  --zone example.com
+```
+
+Before changing Cloudflare, the installer shows the complete plan and defaults the confirmation to No. Every create operation is preceded by a durable local intent checkpoint. If a command exits after Cloudflare accepted a request but before the result was recorded, the next plan can safely recognize the resource as belonging to that attempt.
+
+If the requested zone does not exist, Void creates it and stops in a `waiting-for-dns` state. Update the domain at its registrar to use the printed Cloudflare nameservers, wait for the zone to become active, then resume:
+
+```sh
+void platform install --resume --name <installation-id>
+```
+
+For application traffic, Void creates one proxied wildcard DNS record at `*.application-domain` and the matching Worker routes. A compatible existing proxied record is adopted and is never deleted by Void.
+
+## Cloudflare footprint
+
+Every resource uses the deterministic `void-<installation-name>-*` prefix where Cloudflare permits names:
+
+| Resource                                  |  Count | Purpose                                                            |
+| ----------------------------------------- | -----: | ------------------------------------------------------------------ |
+| Workers                                   |      4 | API/control plane, proxy, tail ingestion, and application dispatch |
+| KV namespaces                             |      3 | Routing, ISR cache, and legacy/static asset compatibility          |
+| R2 buckets                                |      1 | Static and deployment assets                                       |
+| Queues                                    |      2 | Usage events and cron firing                                       |
+| Workers for Platforms dispatch namespaces |      1 | User application Workers                                           |
+| Hyperdrive configurations                 |      1 | External platform PostgreSQL                                       |
+| AI Gateways                               |      1 | Installation-isolated AI routing and metering                      |
+| Proxied wildcard DNS records              |      1 | Application hostname resolution                                    |
+| Zones                                     | 0 or 1 | Created only when the requested application zone is absent         |
+
+The API Worker declares four Durable Object classes for usage, cron scheduling, error monitoring, and concurrency coordination. Analytics Engine datasets for request and log telemetry are established by Worker bindings rather than separate installer API calls. Core installation creates no Container application, GitHub App, dashboard Worker, or build Worker.
+
+## Connect and deploy an app
+
+A successful installation is selected automatically. On another workstation, connect by API URL:
+
+```sh
+void platform connect https://void-company-api.example.workers.dev
+void auth login
+void project link
+void deploy --platform void
+```
+
+There is no implicit public Void platform for new projects. One configured platform is selected automatically; multiple platforms produce an interactive picker. Non-interactive use with multiple platforms must select one first with `void platform use <id-or-url>`. Existing project files created before platform URLs were recorded continue to resolve to Void Cloud for compatibility.
+
+Use these commands to inspect connections and installations:
+
+```sh
+void platform list
+void platform use [id]
+void platform status [id]
+```
+
+## Resume, repair, recover, and upgrade
+
+Local state lives under `~/.void/platforms/`. Manifests and recovery material are written atomically; secret recovery files use owner-only mode (`0600`). Keep this directory secure and back it up like any other local credential store.
+
+- Resume an interrupted install with `void platform install --resume --name <id>`.
+- Inspect drift without changes with `void platform repair [id] --plan`.
+- Recreate only missing installer-owned resources with `void platform repair [id]`. Missing adopted or external resources fail closed.
+- Deploy the packaged current platform runtime and pending database migrations with `void platform upgrade [id]`.
+- Recover a lost local manifest from the installation marker in Cloudflare with `void platform discover [--account <id>]`.
+
+Discovery verifies the account, every recorded Cloudflare resource, the routing namespace ownership marker, and the live endpoint identity before writing local state. Cloudflare does not contain the PostgreSQL, GitHub OAuth, or R2 secret values; after losing local recovery material, provide those `VOID_PLATFORM_*` variables again before repair, upgrade, or uninstall.
+
+## Disable and safely uninstall
+
+Disable traffic without deleting resources or data:
+
+```sh
+void platform disable [id] --plan
+void platform disable [id]
+```
+
+Preview uninstall first:
+
+```sh
+void platform uninstall [id] --plan
+```
+
+The default uninstall policy is ownership-aware:
+
+- Adopted or external resources are never deleted.
+- Workers, transient Queues, installer-created routes, and installer-created DNS are removed.
+- If PostgreSQL contains no apps, installer-owned KV, R2, Hyperdrive, dispatch, and AI Gateway resources are removed.
+- If apps exist, those data-bearing resources are retained and recorded in the final manifest.
+- External PostgreSQL is never deleted.
+- An installer-created zone is kept by default. Interactive uninstall asks separately and defaults to No; use `--delete-zone` or `--keep-zone` to make the choice explicit.
+
+To delete installer-owned data even when apps exist:
+
+```sh
+void platform uninstall [id] --purge-data
+```
+
+`--purge-data` is destructive, but still never deletes external PostgreSQL, adopted resources, or a zone unless zone deletion is selected separately. Uninstall checkpoints each deletion, so rerunning after a failure skips completed work and continues safely.

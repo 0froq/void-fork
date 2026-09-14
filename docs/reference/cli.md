@@ -30,6 +30,8 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void env types`                  | Regenerate .void/env.d.ts from env.ts                           |
 | `void env example`                | Refresh the void-managed block in .env.example                  |
 | `void auth login`                 | Authenticate with Void                                          |
+| `void platform install`           | Install a company Void platform in Cloudflare                   |
+| `void platform connect <url>`     | Connect the CLI to a Void platform                              |
 | `void project link`               | Link directory to a project                                     |
 | `void project logs`               | Show runtime logs from deployed project                         |
 | `void project requests`           | Show request-level traffic (status, method, timing)             |
@@ -254,6 +256,63 @@ Purge all cached pages for the linked project. The edge cache will clear within 
 If `--project` is provided, purges that project's cache instead of the linked project.
 
 This command is currently hosted-only. Direct Cloudflare cache purge fails closed with guidance.
+
+## Platform management
+
+Void-managed projects deploy to an explicitly selected platform. Connections are stored per API origin, and credentials are scoped to that origin.
+
+### Connection commands
+
+```sh
+void platform connect [url]
+void platform list
+void platform use [id]
+void platform status [id]
+```
+
+`connect` fetches and validates `/.well-known/void-platform` before saving anything. If the URL is omitted it prompts interactively. `use` and `status` auto-select the only configured platform; with multiple platforms they show a picker interactively and require an id or URL in non-interactive use.
+
+### `void platform install`
+
+```sh
+void platform install [options]
+```
+
+| Option                            | Purpose                                                                          |
+| --------------------------------- | -------------------------------------------------------------------------------- |
+| `--name <slug>`                   | Deterministic installation/resource prefix                                       |
+| `--display-name <name>`           | Human-readable platform name                                                     |
+| `--account <id>`                  | Cloudflare account id                                                            |
+| `--application-domain <domain>`   | Base domain for deployed apps                                                    |
+| `--zone <domain>`                 | Cloudflare zone containing the application domain                                |
+| `--dedicated-zone`                | Add zone-wide catch-all routes; valid only when the app domain is the whole zone |
+| `--control-plane-domain <domain>` | Optional API custom hostname; defaults to `workers.dev`                          |
+| `--plan`                          | Resolve and print a read-only plan                                               |
+| `--resume`                        | Continue the matching checkpointed installation                                  |
+
+The installer requires `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) and prompts for PostgreSQL, GitHub OAuth, and R2 credentials. Non-interactive use supplies `VOID_PLATFORM_DATABASE_URL`, `VOID_PLATFORM_GITHUB_CLIENT_ID`, `VOID_PLATFORM_GITHUB_CLIENT_SECRET`, `VOID_PLATFORM_R2_ACCESS_KEY_ID`, and `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`.
+
+If a newly created zone is waiting for registrar delegation, resume after it becomes active:
+
+```sh
+void platform install --resume --name <installation-id>
+```
+
+See [Self-host a Void platform](../guide/self-hosted-platform.md) for prerequisites, token scope, exact footprint, domain behavior, and an end-to-end walkthrough.
+
+### Lifecycle commands
+
+```sh
+void platform discover [--account <id>]
+void platform upgrade [id] [--plan]
+void platform repair [id] [--plan]
+void platform disable [id] [--plan]
+void platform uninstall [id] [--plan] [--purge-data] [--delete-zone|--keep-zone]
+```
+
+An omitted id auto-selects one local installation and prompts when several exist. Non-interactive use with multiple installations requires an id. `discover` verifies remote ownership and endpoint identity before recovering local metadata. `repair` recreates missing installer-owned resources only. `disable` removes traffic routes without deleting data.
+
+Uninstall deletes only installer-owned resources. Data resources are retained when PostgreSQL still contains apps unless `--purge-data` is present. External PostgreSQL and adopted resources are never deleted. Installer-created zones are kept by default and have a separate default-No prompt.
 
 ## Deploy
 

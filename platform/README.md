@@ -2,6 +2,8 @@
 
 The hosted Void platform lives in `platform/` inside the main Void monorepo. Public SDK packages live in the repository-level `packages/` directory. Both surfaces share one pnpm workspace, lockfile, Vite+ configuration, and commit history.
 
+The same core API, dispatch, proxy, and tail sources are also packaged into the public `@void/platform` runtime. `void platform install` deploys those bundles as an ownership-tracked company control plane without the hosted dashboard, GitHub App, or Container build subsystem. The checked-in `../platform/deployments/void-cloud.json` describes hosted Void Cloud using only public resource names and capability metadata; parity tests keep its historical defaults intact without storing account ids, zone ids, credentials, or other private deployment state.
+
 Paths in this file are relative to `platform/` unless they begin with `../`. For example, `packages/api` is the hosted control plane and `../packages/void` is the public SDK package. The bare `vp run deploy*` commands in this file are `platform/package.json` scripts and run from `platform/`; from the repository root, the equivalent is `vp run --filter @voidcloud/platform <script>`.
 
 ## Context Overview
@@ -100,6 +102,7 @@ Void is one repository with an explicit dependency boundary:
 
 - Repository-level `packages/` — public SDK, CLI, runtime helpers, and framework adapters.
 - `../packages/deploy-core` — target-neutral deployment manifests and wire contracts shared by the SDK and platform.
+- `../packages/platform` — public deployment/installation manifests plus integrity-checked core Worker artifacts used by the platform installer.
 - `platform/packages/` — private hosted control plane, traffic router, proxy services, log pipeline, dashboard, and UI.
 - Platform packages may depend on public/shared packages. Public SDK packages must not depend on `platform/`.
 

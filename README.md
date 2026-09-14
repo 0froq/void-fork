@@ -68,6 +68,7 @@ pnpm void deploy
 ## Features
 
 - **One target-aware CLI** — deploy and operate the same app on your Cloudflare account or the hosted Void platform
+- **Company-owned platforms** — install a resumable, ownership-tracked Void control plane in your own Cloudflare account, then connect the same CLI to it
 - **Automatic provisioning** — import `db`, `kv`, `storage`, or `ai` from `void` and resources are created on either deployment target
 - **Typed secrets** — mark env schema keys with `.secret()`; direct Cloudflare deploys upload them as encrypted Worker secrets instead of plaintext vars
 - **File-based routing** — drop a file in `routes/`, get an endpoint with method exports, dynamic params, middleware, and [Standard Schema](https://standardschema.dev/) validation
@@ -79,6 +80,8 @@ pnpm void deploy
 ## Documentation
 
 Full docs at [void.cloud](https://void.cloud). Run `vp run dev:docs` in this repo to view the documentation locally.
+
+To install a shared company platform, start with `void platform install --plan`. It packages the core API, routing, proxy, and telemetry Workers without requiring the dashboard, GitHub App, or build Containers. See [Self-host a Void platform](./docs/guide/self-hosted-platform.md).
 
 ## Contributing
 
