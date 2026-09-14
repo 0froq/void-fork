@@ -25,8 +25,8 @@ export class PlatformCloudflareApiError extends Error {
 }
 
 export class PlatformWorkerCustomDomainsChangedError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'PlatformWorkerCustomDomainsChangedError';
   }
 }
@@ -252,9 +252,9 @@ export class PlatformCloudflareClient {
   }
 
   /**
-   * Replace one Worker's Custom Domain set without ever authorizing Cloudflare
-   * to take over another Worker origin or an existing DNS record. Wrangler
-   * enables both overrides automatically when it runs without a TTY, so the
+   * Add missing Custom Domains without replacing the Worker's existing set or
+   * authorizing takeover of another Worker origin or DNS record. Wrangler
+   * enables destructive overrides automatically without a TTY, so the
    * installer deliberately owns this mutation through the API instead.
    */
   async publishWorkerCustomDomainsSafely(
@@ -262,26 +262,46 @@ export class PlatformCloudflareClient {
     workerName: string,
     origins: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>,
   ): Promise<void> {
-    await this.request(
-      `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}/domains/records`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          override_scope: true,
-          override_existing_origin: false,
-          override_existing_dns_record: false,
-          origins: origins.map((origin) => ({
-            hostname: origin.hostname,
-            ...(origin.zoneId ? { zone_id: origin.zoneId } : {}),
-            ...(origin.zoneName ? { zone_name: origin.zoneName } : {}),
-            ...(origin.enabled === undefined ? {} : { enabled: origin.enabled }),
-            ...(origin.previewsEnabled === undefined
-              ? {}
-              : { previews_enabled: origin.previewsEnabled }),
-          })),
-        }),
-      },
-    );
+    const before = await this.listWorkerDomains(accountId);
+    const pending = origins.filter((origin) => {
+      const matches = before.filter((domain) => domain.hostname === origin.hostname);
+      if (matches.length > 1 || matches.some((domain) => domain.service !== workerName)) {
+        throw new PlatformWorkerCustomDomainsChangedError(
+          `platform: Custom Domain ${JSON.stringify(origin.hostname)} changed concurrently before publication; refusing to replace its traffic state.`,
+        );
+      }
+      return matches.length === 0;
+    });
+    if (pending.length === 0) {
+      return;
+    }
+    try {
+      await this.request(
+        `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}/domains/records`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            override_scope: false,
+            override_existing_origin: false,
+            override_existing_dns_record: false,
+            origins: pending.map((origin) => ({
+              hostname: origin.hostname,
+              ...(origin.zoneId ? { zone_id: origin.zoneId } : {}),
+              ...(origin.zoneName ? { zone_name: origin.zoneName } : {}),
+              ...(origin.enabled === undefined ? {} : { enabled: origin.enabled }),
+              ...(origin.previewsEnabled === undefined
+                ? {}
+                : { previews_enabled: origin.previewsEnabled }),
+            })),
+          }),
+        },
+      );
+    } catch (error) {
+      throw new PlatformWorkerCustomDomainsChangedError(
+        `platform: Custom Domain publication for Worker ${JSON.stringify(workerName)} had an ambiguous outcome; retaining live domains for safe reconciliation.`,
+        { cause: error },
+      );
+    }
 
     const expected = [...origins].map((origin) => origin.hostname).sort();
     const inventory = await this.listWorkerDomains(accountId);
@@ -296,8 +316,7 @@ export class PlatformCloudflareClient {
     );
     if (
       !everyExpectedDomainIsUniqueAndOwned ||
-      expected.length !== actual.length ||
-      expected.some((hostname, index) => hostname !== actual[index])
+      expected.some((hostname) => !actual.includes(hostname))
     ) {
       throw new PlatformWorkerCustomDomainsChangedError(
         `platform: Worker ${JSON.stringify(workerName)} Custom Domains changed concurrently after publication; refusing to overwrite the newer traffic state.`,

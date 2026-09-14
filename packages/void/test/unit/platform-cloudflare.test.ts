@@ -528,6 +528,7 @@ describe('platform Cloudflare client', () => {
 
   it('publishes Worker custom domains without takeover flags and verifies ownership', async () => {
     const requests: Array<{ body: unknown; method: string; url: string }> = [];
+    let inventories = 0;
     const client = new PlatformCloudflareClient('token', {
       fetcher: async (input, init) => {
         const url = String(input);
@@ -540,14 +541,22 @@ describe('platform Cloudflare client', () => {
           ? Response.json({ success: true, result: null })
           : Response.json({
               success: true,
-              result: [
-                {
-                  hostname: 'api.example.com',
-                  id: 'domain-id',
-                  service: 'void-api',
-                  zone_name: 'example.com',
-                },
-              ],
+              result:
+                inventories++ === 0
+                  ? []
+                  : [
+                      {
+                        hostname: 'api.example.com',
+                        id: 'domain-id',
+                        service: 'void-api',
+                        zone_name: 'example.com',
+                      },
+                      {
+                        hostname: 'concurrent.example.net',
+                        id: 'concurrent-domain-id',
+                        service: 'void-api',
+                      },
+                    ],
               result_info: { page: 1, per_page: 100, total_pages: 1 },
             });
       },
@@ -557,19 +566,60 @@ describe('platform Cloudflare client', () => {
       { hostname: 'api.example.com', zoneName: 'example.com' },
     ]);
 
-    expect(requests[0]).toMatchObject({
+    expect(requests[0]).toMatchObject({ method: 'GET' });
+    expect(requests[1]).toMatchObject({
       body: {
         origins: [{ hostname: 'api.example.com', zone_name: 'example.com' }],
         override_existing_dns_record: false,
         override_existing_origin: false,
-        override_scope: true,
+        override_scope: false,
       },
       method: 'PUT',
     });
-    expect(requests[0]!.url).toContain(
+    expect(requests[1]!.url).toContain(
       '/accounts/account/workers/scripts/void-api/domains/records',
     );
-    expect(requests[1]).toMatchObject({ method: 'GET' });
+    expect(requests[2]).toMatchObject({ method: 'GET' });
+  });
+
+  it('does not mutate a Worker when every custom domain is already attached', async () => {
+    const methods: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (_input, init) => {
+        methods.push(init?.method ?? 'GET');
+        return Response.json({
+          success: true,
+          result: [{ hostname: 'api.example.com', id: 'domain-id', service: 'void-api' }],
+          result_info: { page: 1, per_page: 100, total_pages: 1 },
+        });
+      },
+    });
+
+    await client.publishWorkerCustomDomainsSafely('account', 'void-api', [
+      { hostname: 'api.example.com' },
+    ]);
+    expect(methods).toEqual(['GET']);
+  });
+
+  it('treats an ambiguous custom-domain publication as unsafe', async () => {
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        if (String(input).endsWith('/domains/records')) {
+          throw new Error('connection reset');
+        }
+        return Response.json({
+          success: true,
+          result: [],
+          result_info: { page: 1, per_page: 100, total_pages: 1 },
+        });
+      },
+    });
+
+    await expect(
+      client.publishWorkerCustomDomainsSafely('account', 'void-api', [
+        { hostname: 'api.example.com' },
+      ]),
+    ).rejects.toBeInstanceOf(PlatformWorkerCustomDomainsChangedError);
   });
 
   it('fails closed when a published Worker custom domain changes ownership', async () => {
