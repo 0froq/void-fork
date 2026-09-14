@@ -305,7 +305,7 @@ export async function uninstallPlatform(
   const dataMessage = retainData
     ? 'Retain installer-owned storage, dispatch, AI logs, and Hyperdrive by default.'
     : args.purgeData
-      ? 'Delete installer-owned storage (--purge-data); external PostgreSQL is never deleted.'
+      ? 'Delete safely identifiable installer-owned storage (--purge-data); retain AI Gateway and external PostgreSQL.'
       : 'Retain installer-owned data; external PostgreSQL is never deleted.';
   note(
     `Disable all platform routes.\nDelete installer-owned Workers and Queues.\n${dataMessage}\n${
@@ -515,6 +515,12 @@ function shouldDeleteResource(
   }
   if (resource.kind === 'zone') {
     return deleteZone;
+  }
+  // AI Gateway ids are caller-selected and can be reused after deletion. The
+  // API exposes no durable ownership marker, so automatic deletion could
+  // remove a replacement gateway created by another installation.
+  if (resource.kind === 'ai-gateway') {
+    return false;
   }
   return !(retainData && DATA_RESOURCE_KINDS.has(resource.kind));
 }

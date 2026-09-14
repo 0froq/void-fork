@@ -309,7 +309,8 @@ describe('platform lifecycle management', () => {
         interactive: false,
       },
     );
-    expect(fake.deleted).toHaveLength(14);
+    expect(fake.deleted).toHaveLength(13);
+    expect(fake.deleted).not.toContainEqual(['ai-gateway', 'ai-gateway-id']);
     expect(fake.emptiedBuckets).toEqual(['assets-bucket']);
     expect(fake.preservedBucketKeys).toEqual([['__void/platform/ownership/v1']]);
     expect(fake.deletedBucketMarkers).toEqual(['assets-bucket']);
