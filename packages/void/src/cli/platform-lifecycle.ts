@@ -23,6 +23,20 @@ import {
   writeInstallationManifest,
 } from './platform-registry.ts';
 
+export function resolvePlatformInstallDatabaseUrl(
+  checkpoint: Record<string, string> | null,
+): string {
+  // An initial connection failure happens before the database can prove the
+  // checkpoint belongs to this installation. Keep explicit operator input
+  // authoritative so `--resume` can replace a mistyped or unavailable URL.
+  return (
+    process.env.VOID_PLATFORM_DATABASE_URL ||
+    process.env.DATABASE_URL ||
+    checkpoint?.databaseUrl ||
+    ''
+  );
+}
+
 export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<void> {
   if (args.subcommand === 'discover') {
     const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || '';
@@ -117,11 +131,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     const checkpoint = existing ? readPendingInstallationSecrets(existing) : null;
     let authoritativeProvisionIntents = false;
     if (existing) {
-      const databaseUrl =
-        checkpoint?.databaseUrl ||
-        process.env.VOID_PLATFORM_DATABASE_URL ||
-        process.env.DATABASE_URL ||
-        '';
+      const databaseUrl = resolvePlatformInstallDatabaseUrl(checkpoint);
       if (!databaseUrl) {
         throw new Error(
           'platform: DATABASE_URL is required to verify an interrupted installation before resuming it.',
@@ -191,9 +201,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       cloudflareApiToken: token,
       checkpoint,
       databaseUrl:
-        checkpoint?.databaseUrl ||
-        process.env.VOID_PLATFORM_DATABASE_URL ||
-        process.env.DATABASE_URL ||
+        resolvePlatformInstallDatabaseUrl(checkpoint) ||
         (await promptSecret('PostgreSQL DATABASE_URL:')),
       githubClientId:
         checkpoint?.githubClientId ||

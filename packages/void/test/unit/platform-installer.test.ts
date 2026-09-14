@@ -229,6 +229,11 @@ describe('platform installer', () => {
     const connection = {
       query: async <Row extends Record<string, unknown>>(sql: string) => {
         queries.push(sql);
+        if (sql.includes('to_regclass')) {
+          return {
+            rows: [{ relation: '__void_platform_installation' }] as unknown as ReadonlyArray<Row>,
+          };
+        }
         return {
           rows: [
             {
@@ -244,8 +249,28 @@ describe('platform installer', () => {
     await expect(
       readPlatformDatabaseLifecycleManifestConnection(connection, 'install-one', ownershipNonce),
     ).resolves.toEqual(manifest);
-    expect(queries).toHaveLength(1);
+    expect(queries).toHaveLength(2);
     expect(queries[0]).toMatch(/^SELECT/);
+  });
+
+  it('treats a missing database ownership table as an unclaimed install', async () => {
+    const queries: Array<string> = [];
+    const connection = {
+      query: async <Row extends Record<string, unknown>>(sql: string) => {
+        queries.push(sql);
+        return { rows: [{ relation: null }] as unknown as ReadonlyArray<Row> };
+      },
+    };
+
+    await expect(
+      readPlatformDatabaseLifecycleManifestConnection(
+        connection,
+        'install-one',
+        '0123456789abcdef0123456789abcdef',
+      ),
+    ).resolves.toBeNull();
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toContain('to_regclass');
   });
 
   it('reads and writes authoritative lifecycle state while holding the database lock', async () => {

@@ -1083,6 +1083,12 @@ export async function readPlatformDatabaseLifecycleManifestConnection(
   installationId: string,
   ownershipNonce: string,
 ): Promise<PlatformInstallationManifest | null> {
+  const relation = await client.query<{ relation: string | null }>(
+    `SELECT to_regclass('"__void_platform_installation"')::text AS "relation"`,
+  );
+  if (relation.rows[0]?.relation === null || relation.rows.length === 0) {
+    return null;
+  }
   const result = await client.query<{
     installation_id: string;
     lifecycle_manifest: unknown;
