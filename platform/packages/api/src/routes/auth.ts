@@ -51,7 +51,11 @@ const CLI_AUTH_CODE_TTL_SECONDS = 5 * 60;
 
 const app = new Hono<ApiEnv>();
 
-export function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
+export function isAllowedRedirect(
+  url: string,
+  dashboardUrl?: string,
+  platformInstallationId?: string,
+): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -68,7 +72,10 @@ export function isAllowedRedirect(url: string, dashboardUrl?: string): boolean {
   }
 
   // Dashboard: compare exact origin (protocol + hostname + port)
-  const origin = dashboardUrl ?? 'https://dash.void.cloud';
+  const origin = dashboardUrl ?? (platformInstallationId ? null : DEFAULT_DASHBOARD_URL);
+  if (!origin) {
+    return false;
+  }
   try {
     return parsed.origin === new URL(origin).origin;
   } catch {
@@ -87,7 +94,9 @@ app.get('/login', async (context) => {
     return context.json({ error: 'redirect parameter is required' }, 400);
   }
 
-  if (!isAllowedRedirect(redirect, context.env.DASHBOARD_URL)) {
+  if (
+    !isAllowedRedirect(redirect, context.env.DASHBOARD_URL, context.env.PLATFORM_INSTALLATION_ID)
+  ) {
     return context.json({ error: 'redirect must be a localhost or dashboard URL' }, 400);
   }
 
@@ -264,7 +273,9 @@ app.get('/callback', async (context) => {
   deleteCookie(context, 'oauth_nonce', { path: '/auth/callback' });
 
   // Re-validate redirect after decoding
-  if (!isAllowedRedirect(redirect, context.env.DASHBOARD_URL)) {
+  if (
+    !isAllowedRedirect(redirect, context.env.DASHBOARD_URL, context.env.PLATFORM_INSTALLATION_ID)
+  ) {
     return context.json({ error: 'invalid redirect' }, 400);
   }
 
