@@ -1586,6 +1586,15 @@ export function isolatePlatformWorkerCustomDomains(config: Record<string, unknow
   };
 }
 
+export function withoutPlatformWorkerTrafficAttachments(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const isolated = { ...config };
+  delete isolated.route;
+  delete isolated.routes;
+  return isolated;
+}
+
 function withoutPlatformCustomDomainTriggers(
   config: CloudflareTriggerConfig,
 ): CloudflareTriggerConfig {
@@ -2218,13 +2227,14 @@ async function deployPlatformWorker(
   let previousVersionId: string | null = null;
   const nextTraffic = isolatePlatformWorkerCustomDomains(config);
   const previousTraffic = isolatePlatformWorkerCustomDomains(options.previousConfig);
+  const uploadConfig = withoutPlatformWorkerTrafficAttachments(nextTraffic.wranglerConfig);
+  const nextTriggers = readTriggerConfigFromObject(nextTraffic.wranglerConfig);
   let previousTriggers = readTriggerConfigFromObject(previousTraffic.wranglerConfig);
   try {
     const configPath = join(directory, 'wrangler.json');
-    writeFileSync(configPath, `${JSON.stringify(nextTraffic.wranglerConfig, null, 2)}\n`, {
+    writeFileSync(configPath, `${JSON.stringify(uploadConfig, null, 2)}\n`, {
       mode: 0o600,
     });
-    const nextTriggers = readCloudflareTriggerConfig(configPath);
     if (options.workerExisted) {
       const previous = await readActivePlatformWorkerSnapshot(
         configPath,

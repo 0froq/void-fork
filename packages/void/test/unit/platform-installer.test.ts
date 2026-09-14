@@ -52,6 +52,7 @@ import {
   stablePublicEndpointState,
   verifyPlatformHealth,
   withConditionalPlatformWorkerCreate,
+  withoutPlatformWorkerTrafficAttachments,
 } from '../../src/cli/platform-installer.ts';
 import {
   createPlatformInstallPlan,
@@ -462,6 +463,17 @@ describe('platform installer', () => {
         routes: [{ pattern: 'apps.example.com/*', zone_name: 'example.com' }],
       },
     });
+
+    expect(
+      withoutPlatformWorkerTrafficAttachments({
+        name: 'void-dispatch',
+        route: 'legacy.example.com/*',
+        routes: [
+          { pattern: 'apps.example.com/*', zone_name: 'example.com' },
+          { pattern: 'manual.example.net/*', zone_name: 'example.net' },
+        ],
+      }),
+    ).toEqual({ name: 'void-dispatch' });
   });
 
   it('requires the installation ownership marker before managing a new Worker', async () => {
