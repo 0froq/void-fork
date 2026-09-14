@@ -138,6 +138,7 @@ export type ApiEnv = Env & {
     PLATFORM_INSTALLATION_ID?: string;
     PLATFORM_VERSION?: string;
     PLATFORM_CAPABILITIES?: string;
+    PROXY_URL?: string;
     PROJECT_SECRET_KEYS_JSON: string;
     PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
     /**

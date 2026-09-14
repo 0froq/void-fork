@@ -55,6 +55,7 @@ describe('promptDeployProjectConfig', () => {
       displayName: 'Void Cloud',
       installationId: null,
       kind: 'connected',
+      proxyUrl: 'https://proxy.void.cloud',
     });
     writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'test-app' }));
     mockSelect.mockReset();
@@ -91,6 +92,7 @@ describe('promptDeployProjectConfig', () => {
       applicationDomain: 'void.app',
       platform: 'void',
       platformUrl: 'https://api.void.cloud',
+      proxyUrl: 'https://proxy.void.cloud',
       ...config,
     });
   });

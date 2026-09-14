@@ -24,6 +24,7 @@ describe('GET /.well-known/void-platform', () => {
       apiUrl: 'https://api.void.cloud',
       applicationDomain: 'void.app',
       displayName: 'Void Cloud',
+      proxyUrl: 'https://proxy.void.cloud',
       schemaVersion: 1,
     });
     const serialized = JSON.stringify(document);
@@ -46,6 +47,7 @@ describe('GET /.well-known/void-platform', () => {
       PLATFORM_DISPLAY_NAME: 'Developer Platform Experience',
       PLATFORM_INSTALLATION_ID: 'dpx-a1b2c3d4',
       PLATFORM_VERSION: '0.10.13',
+      PROXY_URL: 'https://proxy.platform.example.com',
       SITE_DOMAIN: 'apps.example.com',
     };
     const response = await app.fetch(
@@ -59,6 +61,7 @@ describe('GET /.well-known/void-platform', () => {
       displayName: 'Developer Platform Experience',
       installationId: 'dpx-a1b2c3d4',
       platformVersion: '0.10.13',
+      proxyUrl: 'https://proxy.platform.example.com',
     });
 
     const google = await app.fetch(

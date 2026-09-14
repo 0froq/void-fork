@@ -101,7 +101,7 @@ function remoteManifest() {
     {
       apiUrl: 'https://void-example-api.example-workers.workers.dev',
       dashboardUrl: null,
-      proxyUrl: null,
+      proxyUrl: 'https://void-example-proxy.example-workers.workers.dev',
     },
     '2026-09-14T00:00:03.000Z',
   );

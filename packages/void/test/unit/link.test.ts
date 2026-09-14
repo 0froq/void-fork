@@ -76,6 +76,7 @@ describe('runLink', () => {
       displayName: 'Void Cloud',
       installationId: null,
       kind: 'connected',
+      proxyUrl: 'https://proxy.void.cloud',
     });
     mockCancel.mockReset();
     mockConfirm.mockReset();
@@ -108,6 +109,7 @@ describe('runLink', () => {
       applicationDomain: 'void.app',
       platform: 'void',
       platformUrl: 'https://api.void.cloud',
+      proxyUrl: 'https://proxy.void.cloud',
       projectId: 'proj_1',
       slug: 'existing-app',
     });

@@ -28,6 +28,7 @@ export type PlatformConnection = Readonly<{
   installationId: string | null;
   kind: 'connected' | 'installed';
   lastUsedAt: string;
+  proxyUrl: string | null;
 }>;
 
 type PlatformConnectionRegistry = Readonly<{
@@ -95,6 +96,13 @@ function parseConnection(value: unknown): PlatformConnection {
   }
   const optionalString = (input: unknown): string | null =>
     typeof input === 'string' && input !== '' ? input : null;
+  const proxyUrl =
+    optionalString(entry.proxyUrl) ??
+    (apiUrl === 'https://api.void.cloud'
+      ? 'https://proxy.void.cloud'
+      : apiUrl === 'https://api.staging.void.cloud'
+        ? 'https://proxy.staging.void.cloud'
+        : null);
   return {
     accountId: optionalString(entry.accountId),
     apiUrl,
@@ -107,6 +115,7 @@ function parseConnection(value: unknown): PlatformConnection {
     installationId: optionalString(entry.installationId),
     kind: entry.kind,
     lastUsedAt,
+    proxyUrl: proxyUrl === null ? null : normalizePlatformApiUrl(proxyUrl),
   };
 }
 

@@ -118,6 +118,7 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
       displayName: discovery.displayName,
       installationId: discovery.installationId,
       kind: discovery.installationId ? 'installed' : 'connected',
+      proxyUrl: discovery.proxyUrl,
     });
     log.success(`Connected to ${pc.bold(connection.displayName)} at ${connection.apiUrl}.`);
     log.info('Run `void auth login` to authenticate with this platform.');
@@ -148,6 +149,7 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
     const discovery = await discoverPlatform(connection.apiUrl);
     log.success(`${discovery.displayName} is reachable.`);
     console.log(`API: ${discovery.apiUrl}`);
+    console.log(`Proxy: ${discovery.proxyUrl}`);
     console.log(`Applications: *.${discovery.applicationDomain}`);
     console.log(`Version: ${discovery.platformVersion}`);
     console.log(

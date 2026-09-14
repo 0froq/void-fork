@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { Entry } from '@napi-rs/keyring';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
+import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from '../shared/proxy.ts';
 import { ensureCloudflaredToken } from './cf-access.ts';
 import { VOID_CLOUD_PLATFORM } from './hosted-platform.ts';
 import { pc } from './output.ts';
@@ -17,6 +18,7 @@ import {
   isVoidInternalStaging,
   readProjectApplicationDomain,
   readProjectPlatformUrl,
+  readProjectProxyUrl,
 } from './project.ts';
 
 const CONFIG_DIR = join(homedir(), '.void');
@@ -322,6 +324,31 @@ export function getApiUrl(root: string = process.cwd()): string {
     );
   }
   return apiUrl;
+}
+
+export function getProxyUrl(root: string = process.cwd()): string {
+  const explicitApiUrl = process.env.VOID_API_URL
+    ? normalizePlatformApiUrl(process.env.VOID_API_URL)
+    : null;
+  const explicitHostedProxy =
+    explicitApiUrl === STAGING_API_URL
+      ? STAGING_PROXY_URL
+      : explicitApiUrl === DEFAULT_API_URL
+        ? DEFAULT_PROXY_URL
+        : undefined;
+  const proxyUrl =
+    process.env.VOID_PROXY_URL ??
+    readProjectProxyUrl(root) ??
+    (isStagingMode(root) ? STAGING_PROXY_URL : undefined) ??
+    (isLegacyVoidCloudProject(root) ? DEFAULT_PROXY_URL : undefined) ??
+    explicitHostedProxy ??
+    (explicitApiUrl === null ? getActivePlatformConnection()?.proxyUrl : undefined);
+  if (!proxyUrl) {
+    throw new Error(
+      'platform: No Void platform proxy selected. Reconnect with `void platform connect <url>`.',
+    );
+  }
+  return normalizePlatformApiUrl(proxyUrl);
 }
 
 function page(title: string, message: string): string {

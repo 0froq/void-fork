@@ -30,7 +30,7 @@ export CLOUDFLARE_API_TOKEN=your-scoped-management-token
 void platform install --plan
 ```
 
-The plan performs reads only. It selects an account, normalizes the installation name, shows every resource it would create, reuse, update, or adopt, and prints the future API URL. With the default control plane that URL is the API Worker's `workers.dev` hostname.
+The plan performs reads only. It selects an account, normalizes the installation name, shows every resource it would create, reuse, update, or adopt, and prints the future API and resource-proxy URLs. By default both use their respective Workers' `workers.dev` hostnames.
 
 For a repeatable non-interactive plan:
 
@@ -112,7 +112,7 @@ The API Worker declares four Durable Object classes for usage, cron scheduling, 
 
 ## Connect and deploy an app
 
-A successful installation is selected automatically. On another workstation, connect by API URL:
+A successful installation is selected automatically. On another workstation, connect by API URL; its public discovery document pins both the API and resource-proxy origins so project credentials never cross platform boundaries:
 
 ```sh
 void platform connect https://void-company-api.example.workers.dev

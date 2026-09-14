@@ -14,6 +14,7 @@ describe('platform Worker configuration', () => {
       deployment,
       installationId: 'example-a1b2c3d4',
       platformVersion: '1.0.0',
+      proxyUrl: 'https://void-example-proxy.example.workers.dev',
       resources: {
         hyperdrive: 'hyperdrive',
         isrCacheKv: 'isr',

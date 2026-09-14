@@ -251,6 +251,7 @@ beforeEach(() => {
     displayName: 'Void Cloud',
     installationId: null,
     kind: 'connected',
+    proxyUrl: 'https://proxy.void.cloud',
   });
   mockSelect.mockImplementation((options: { message?: string }) =>
     options.message === 'Where should this project deploy?' ? 'void' : undefined,
@@ -1721,6 +1722,7 @@ describe('isScaffoldableEmptyProject', () => {
         applicationDomain: 'void.app',
         platform: 'void',
         platformUrl: 'https://api.void.cloud',
+        proxyUrl: 'https://proxy.void.cloud',
         projectId: 'proj_789',
         slug: 'linked-app',
       });
@@ -2542,6 +2544,7 @@ export default config;
         applicationDomain: 'void.app',
         platform: 'void',
         platformUrl: 'https://api.void.cloud',
+        proxyUrl: 'https://proxy.void.cloud',
         projectId: 'proj_live',
         slug: 'my-live-app',
       });
@@ -2622,6 +2625,7 @@ export default config;
         applicationDomain: 'void.app',
         platform: 'void',
         platformUrl: 'https://api.void.cloud',
+        proxyUrl: 'https://proxy.void.cloud',
         projectId: 'proj_456',
         slug: 'existing-app',
       });

@@ -158,6 +158,7 @@
   "vars": {
     "CRON_FIRES_QUEUE_NAME": "void-cron-fires",
     "PLATFORM_ENV": "production",
+    "PROXY_URL": "https://proxy.void.cloud",
     "REQUESTS_DATASET": "void_requests",
     "TAIL_SERVICE_NAME": "void-tail",
     // Bucket name plumbing for the presigned R2 PUT URL path. Must match the
@@ -290,6 +291,7 @@
       "vars": {
         "CRON_FIRES_QUEUE_NAME": "void-cron-fires",
         "PLATFORM_ENV": "production",
+        "PROXY_URL": "https://proxy.void.cloud",
         "REQUESTS_DATASET": "void_requests",
         "TAIL_SERVICE_NAME": "void-tail",
         "R2_STATIC_ASSETS_BUCKET": "void-static-assets-overflow",
@@ -417,6 +419,7 @@
         "LOGS_DATASET": "void_logs_staging",
         "REQUESTS_DATASET": "void_requests_staging",
         "PLATFORM_ENV": "staging",
+        "PROXY_URL": "https://proxy.staging.void.cloud",
         "TAIL_SERVICE_NAME": "void-tail-staging",
         "R2_STATIC_ASSETS_BUCKET": "void-static-assets-overflow-staging",
         "USAGE_EVENTS_QUEUE_NAME": "void-usage-events-staging",

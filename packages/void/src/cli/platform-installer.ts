@@ -255,6 +255,7 @@ export async function installPlatform(
       deployment: plan.deployment,
       installationId: manifest.id,
       platformVersion: version,
+      proxyUrl: plan.proxyUrl,
       resources: {
         hyperdrive: requireId(ids, 'hyperdrive'),
         isrCacheKv: requireId(ids, 'isr-cache-kv'),
@@ -282,7 +283,7 @@ export async function installPlatform(
 
     manifest = setInstallationEndpoints(
       manifest,
-      { apiUrl: plan.apiUrl, dashboardUrl: null, proxyUrl: null },
+      { apiUrl: plan.apiUrl, dashboardUrl: null, proxyUrl: plan.proxyUrl },
       now(),
     );
     manifest = transitionInstallation(manifest, 'verifying', now());
@@ -304,6 +305,7 @@ export async function installPlatform(
       displayName: plan.deployment.displayName,
       installationId: manifest.id,
       kind: 'installed',
+      proxyUrl: plan.proxyUrl,
     });
     return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
   } catch (error) {

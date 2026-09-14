@@ -10,24 +10,25 @@ export type PlatformDiscoveryDocument = Readonly<{
   displayName: string;
   installationId: string | null;
   platformVersion: string;
+  proxyUrl: string;
   schemaVersion: typeof PLATFORM_DISCOVERY_SCHEMA_VERSION;
 }>;
 
-function normalizeApiUrl(value: string): string {
+function normalizeOrigin(value: string, name: 'apiUrl' | 'proxyUrl'): string {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error('apiUrl must be an absolute URL.');
+    throw new Error(`${name} must be an absolute URL.`);
   }
   const localHttp =
     url.protocol === 'http:' &&
     (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1');
   if ((!localHttp && url.protocol !== 'https:') || url.username || url.password) {
-    throw new Error('apiUrl must be a credential-free HTTPS URL.');
+    throw new Error(`${name} must be a credential-free HTTPS URL.`);
   }
   if ((url.pathname !== '' && url.pathname !== '/') || url.search || url.hash) {
-    throw new Error('apiUrl must be an origin without a path, query, or fragment.');
+    throw new Error(`${name} must be an origin without a path, query, or fragment.`);
   }
   return url.origin;
 }
@@ -52,12 +53,13 @@ export function createPlatformDiscoveryDocument(
   }
   return {
     ...input,
-    apiUrl: normalizeApiUrl(input.apiUrl),
+    apiUrl: normalizeOrigin(input.apiUrl, 'apiUrl'),
     applicationDomain: normalizeApplicationDomain(input.applicationDomain),
     authenticationProviders: [...input.authenticationProviders],
     displayName: input.displayName.trim(),
     installationId: input.installationId?.trim() || null,
     platformVersion: input.platformVersion.trim(),
+    proxyUrl: normalizeOrigin(input.proxyUrl, 'proxyUrl'),
     schemaVersion: PLATFORM_DISCOVERY_SCHEMA_VERSION,
   };
 }
@@ -108,13 +110,23 @@ export function parsePlatformDiscoveryDocument(value: unknown): PlatformDiscover
     }
     return entry;
   };
+  const apiUrl = string('apiUrl');
+  const proxyUrl =
+    typeof document.proxyUrl === 'string' && document.proxyUrl.trim()
+      ? document.proxyUrl
+      : apiUrl === 'https://api.void.cloud'
+        ? 'https://proxy.void.cloud'
+        : apiUrl === 'https://api.staging.void.cloud'
+          ? 'https://proxy.staging.void.cloud'
+          : string('proxyUrl');
   return createPlatformDiscoveryDocument({
-    apiUrl: string('apiUrl'),
+    apiUrl,
     applicationDomain: string('applicationDomain'),
     authenticationProviders: providers as Array<'github' | 'google'>,
     capabilities: parsedCapabilities,
     displayName: string('displayName'),
     installationId: document.installationId === null ? null : string('installationId'),
     platformVersion: string('platformVersion'),
+    proxyUrl,
   });
 }

@@ -27,6 +27,7 @@ export type PlatformInstallPlan = Readonly<{
   actions: ReadonlyArray<PlatformInstallPlanAction>;
   apiUrl: string;
   deployment: PlatformDeploymentManifest;
+  proxyUrl: string;
   workersSubdomain: string;
   zone: CloudflareZone | null;
 }>;
@@ -260,7 +261,10 @@ export async function createPlatformInstallPlan(
   const apiUrl = deployment.controlPlane.apiHostname
     ? `https://${deployment.controlPlane.apiHostname}`
     : `https://${names.apiWorker}.${workersSubdomain}.workers.dev`;
-  return { account, actions, apiUrl, deployment, workersSubdomain, zone };
+  const proxyUrl = deployment.controlPlane.proxyHostname
+    ? `https://${deployment.controlPlane.proxyHostname}`
+    : `https://${names.proxyWorker}.${workersSubdomain}.workers.dev`;
+  return { account, actions, apiUrl, deployment, proxyUrl, workersSubdomain, zone };
 }
 
 function addDnsPlan(
@@ -431,6 +435,7 @@ export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {
     `${plan.deployment.displayName} in ${plan.account.name} (${plan.account.id})`,
     `Applications: *.${plan.deployment.application.baseDomain}`,
     `Control plane: ${plan.apiUrl}`,
+    `Resource proxy: ${plan.proxyUrl}`,
     '',
   ];
   for (const action of plan.actions) {

@@ -65,6 +65,7 @@ describe('platform registry', () => {
         displayName: 'One',
         installationId: null,
         kind: 'connected',
+        proxyUrl: 'https://proxy.one.example.com',
       },
       directory,
     );
@@ -77,6 +78,7 @@ describe('platform registry', () => {
         displayName: 'Two',
         installationId: null,
         kind: 'connected',
+        proxyUrl: 'https://proxy.two.example.com',
       },
       directory,
     );

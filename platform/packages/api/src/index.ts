@@ -108,6 +108,11 @@ const app = new Hono<ApiEnv>()
         displayName: context.env.PLATFORM_DISPLAY_NAME ?? 'Void Cloud',
         installationId: context.env.PLATFORM_INSTALLATION_ID ?? null,
         platformVersion: context.env.PLATFORM_VERSION ?? 'hosted',
+        proxyUrl:
+          context.env.PROXY_URL ??
+          (context.env.PLATFORM_ENV === 'staging'
+            ? 'https://proxy.staging.void.cloud'
+            : 'https://proxy.void.cloud'),
       }),
     );
   })

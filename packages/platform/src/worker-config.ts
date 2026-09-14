@@ -18,6 +18,7 @@ export function createPlatformWorkerConfigs(input: {
   deployment: PlatformDeploymentManifest;
   installationId: string;
   platformVersion: string;
+  proxyUrl: string;
   resources: PlatformProvisionedResourceIds;
   runtimeEntrypoints: Readonly<Record<'api' | 'dispatch' | 'proxy' | 'tail', string>>;
 }): PlatformWorkerConfigSet {
@@ -27,6 +28,7 @@ export function createPlatformWorkerConfigs(input: {
     deployment,
     installationId,
     platformVersion,
+    proxyUrl,
     resources,
     runtimeEntrypoints,
   } = input;
@@ -90,6 +92,7 @@ export function createPlatformWorkerConfigs(input: {
       PLATFORM_ENV: 'production',
       PLATFORM_INSTALLATION_ID: installationId,
       PLATFORM_VERSION: platformVersion,
+      PROXY_URL: proxyUrl,
       R2_STATIC_ASSETS_BUCKET: names.assetsBucket,
       REQUESTS_DATASET: names.requestsDataset,
       SITE_DOMAIN: deployment.application.baseDomain,

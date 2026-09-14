@@ -1,5 +1,6 @@
 import {
   parsePlatformInstallationManifest,
+  setInstallationEndpoints,
   type PlatformInstallationManifest,
 } from '@void/platform';
 import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
@@ -94,6 +95,15 @@ export async function recoverPlatformInstallations(
     if (manifest.endpoints.apiUrl !== plan.apiUrl) {
       throw new Error(`platform: Installation ${manifest.id} has inconsistent API metadata.`);
     }
+    if (manifest.endpoints.proxyUrl === null) {
+      manifest = setInstallationEndpoints(
+        manifest,
+        { ...manifest.endpoints, proxyUrl: plan.proxyUrl },
+        manifest.updatedAt,
+      );
+    } else if (manifest.endpoints.proxyUrl !== plan.proxyUrl) {
+      throw new Error(`platform: Installation ${manifest.id} has inconsistent proxy metadata.`);
+    }
     await verifyEndpoint(manifest);
     recovered.push(manifest);
   }
@@ -118,6 +128,7 @@ export async function recoverPlatformInstallations(
       displayName: manifest.deployment.displayName,
       installationId: manifest.id,
       kind: 'installed',
+      proxyUrl: manifest.endpoints.proxyUrl!,
     });
   }
   return recovered;

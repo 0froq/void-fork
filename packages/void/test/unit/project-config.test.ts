@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { getApiUrl, getSiteDomain } from '../../src/cli/auth.ts';
+import { getApiUrl, getProxyUrl, getSiteDomain } from '../../src/cli/auth.ts';
 import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 import {
   attachSelectedPlatform,
@@ -51,6 +51,7 @@ describe('project config', () => {
 
     expect(readDeploymentPlatform(root)).toBe('void');
     expect(getApiUrl(root)).toBe('https://api.void.cloud');
+    expect(getProxyUrl(root)).toBe('https://proxy.void.cloud');
   });
 
   it('keeps legacy Void Cloud projects pinned when another platform is active', () => {
@@ -65,10 +66,12 @@ describe('project config', () => {
       displayName: 'Example',
       installationId: null,
       kind: 'connected',
+      proxyUrl: 'https://proxy.example.test',
     });
 
     expect(getApiUrl(root)).toBe('https://api.void.cloud');
     expect(getSiteDomain(root)).toBe('void.app');
+    expect(getProxyUrl(root)).toBe('https://proxy.void.cloud');
   });
 
   it('stores a platform without requiring a Void project link', () => {
@@ -158,11 +161,14 @@ describe('project config', () => {
       displayName: 'Example',
       installationId: null,
       kind: 'connected',
+      proxyUrl: 'https://proxy.example.test',
     });
     expect(getApiUrl(root)).toBe('https://platform.example.test');
+    expect(getProxyUrl(root)).toBe('https://proxy.example.test');
 
     writeProjectJson(root, { voidInternalStaging: true });
     expect(getApiUrl(root)).toBe('https://api.staging.void.cloud');
+    expect(getProxyUrl(root)).toBe('https://proxy.staging.void.cloud');
   });
 
   it('requires a selected platform before creating a new project link', () => {
@@ -184,10 +190,12 @@ describe('project config', () => {
       displayName: 'Example',
       installationId: null,
       kind: 'connected',
+      proxyUrl: 'https://proxy.example.test',
     });
     expect(attachSelectedPlatform(root, { projectId: 'proj_new', slug: 'new-app' })).toEqual({
       applicationDomain: 'apps.example.test',
       platformUrl: 'https://platform.example.test',
+      proxyUrl: 'https://proxy.example.test',
       projectId: 'proj_new',
       slug: 'new-app',
     });
