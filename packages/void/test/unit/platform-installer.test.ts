@@ -2224,7 +2224,17 @@ describe('platform installer', () => {
     const recovered = await installPlatform(upgradedPlan, secrets, interruptedCutover, {
       acquireDatabaseLifecycleLock,
       claimDatabase,
-      client: upgradeClient,
+      client: {
+        ...upgradeClient,
+        deleteKvValue: async (_account, _namespace, key) => {
+          recoveryEvents.push(`delete:${key}`);
+        },
+        putKvValue: async (_account, _namespace, key) => {
+          if (key === PLATFORM_DISABLED_KEY) {
+            recoveryEvents.push(`put:${key}`);
+          }
+        },
+      },
       deployWorker: async (config) => {
         recoveryEvents.push(`deploy:${String(config.name)}`);
       },
@@ -2236,11 +2246,19 @@ describe('platform installer', () => {
       },
       revalidateBeforeWorkerDeploy: async () => {},
       verifyHealth: async () => {},
+      verifyWorkerCutover: async () => {
+        recoveryEvents.push('verify-cutover');
+      },
     });
-    expect(recoveryEvents.slice(0, 2)).toEqual([
+    expect(recoveryEvents.slice(0, 3)).toEqual([
+      `put:${PLATFORM_DISABLED_KEY}`,
       'recover:proxy:previous-proxy:staged-proxy:true',
       'recover:api:previous-api:staged-api:false',
     ]);
+    expect(recoveryEvents.filter((event) => event === 'verify-cutover')).toHaveLength(2);
+    expect(recoveryEvents.indexOf('verify-cutover')).toBeLessThan(
+      recoveryEvents.indexOf(`delete:${PLATFORM_DISABLED_KEY}`),
+    );
     expect(recovered.manifest.steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ key: 'worker-cutover:999:restored' }),
