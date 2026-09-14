@@ -57,6 +57,13 @@ export type CloudflareWorkerDomain = Readonly<{
   service: string;
   zoneName?: string;
 }>;
+export type CloudflareWorkerCustomDomainOrigin = Readonly<{
+  enabled?: boolean;
+  hostname: string;
+  previewsEnabled?: boolean;
+  zoneId?: string;
+  zoneName?: string;
+}>;
 export type CloudflareWorkerRoute = Readonly<{
   id: string;
   pattern: string;
@@ -235,6 +242,60 @@ export class PlatformCloudflareClient {
       service: requiredString(entry.service, 'Worker custom domain service'),
       ...(typeof entry.zone_name === 'string' ? { zoneName: entry.zone_name } : {}),
     }));
+  }
+
+  /**
+   * Replace one Worker's Custom Domain set without ever authorizing Cloudflare
+   * to take over another Worker origin or an existing DNS record. Wrangler
+   * enables both overrides automatically when it runs without a TTY, so the
+   * installer deliberately owns this mutation through the API instead.
+   */
+  async publishWorkerCustomDomainsSafely(
+    accountId: string,
+    workerName: string,
+    origins: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>,
+  ): Promise<void> {
+    await this.request(
+      `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}/domains/records`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          override_scope: true,
+          override_existing_origin: false,
+          override_existing_dns_record: false,
+          origins: origins.map((origin) => ({
+            hostname: origin.hostname,
+            ...(origin.zoneId ? { zone_id: origin.zoneId } : {}),
+            ...(origin.zoneName ? { zone_name: origin.zoneName } : {}),
+            ...(origin.enabled === undefined ? {} : { enabled: origin.enabled }),
+            ...(origin.previewsEnabled === undefined
+              ? {}
+              : { previews_enabled: origin.previewsEnabled }),
+          })),
+        }),
+      },
+    );
+
+    const expected = [...origins].map((origin) => origin.hostname).sort();
+    const inventory = await this.listWorkerDomains(accountId);
+    const actual = inventory
+      .filter((domain) => domain.service === workerName)
+      .map((domain) => domain.hostname)
+      .sort();
+    const everyExpectedDomainIsUniqueAndOwned = expected.every(
+      (hostname) =>
+        inventory.filter((domain) => domain.hostname === hostname && domain.service === workerName)
+          .length === 1,
+    );
+    if (
+      !everyExpectedDomainIsUniqueAndOwned ||
+      expected.length !== actual.length ||
+      expected.some((hostname, index) => hostname !== actual[index])
+    ) {
+      throw new Error(
+        `platform: Worker ${JSON.stringify(workerName)} Custom Domains changed concurrently after publication; refusing to overwrite the newer traffic state.`,
+      );
+    }
   }
 
   async #listWorkerDomainRecords(

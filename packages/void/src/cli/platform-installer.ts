@@ -50,6 +50,7 @@ import { join } from 'pathslash';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
+  type CloudflareWorkerCustomDomainOrigin,
   type PlatformCloudflareClient,
 } from './platform-cloudflare.ts';
 import {
@@ -131,6 +132,7 @@ type InstallerClient = Pick<
       | 'listWorkerNames'
       | 'listWorkerServiceRoutes'
       | 'listWorkerRoutes'
+      | 'publishWorkerCustomDomainsSafely'
       | 'removeRoutes'
     >
   >;
@@ -663,15 +665,19 @@ export async function installPlatform(
             workerName: snapshot.workerName,
           });
         } else {
+          const recoveryTraffic = isolatePlatformWorkerCustomDomains(recoveryConfig);
+          const previousRecoveryTraffic =
+            isolatePlatformWorkerCustomDomains(previousRecoveryConfig);
           await rollbackPlatformWorker({
             accountId: plan.account.id,
             activatedDeploymentId: null,
             activatedVersionId: snapshot.stagedVersionId,
             config: recoveryConfig,
-            nextTriggers: readTriggerConfigFromObject(recoveryConfig),
+            nextTriggers: readTriggerConfigFromObject(recoveryTraffic.wranglerConfig),
             previousConfig: previousRecoveryConfig,
+            previousCustomDomains: previousRecoveryTraffic.customDomains,
             previousTriggers: mergePreservedTriggerRoutes(
-              snapshot.previousTriggers,
+              withoutPlatformCustomDomainTriggers(snapshot.previousTriggers),
               preservedRoutes,
             ),
             previousVersionId: snapshot.previousVersionId,
@@ -693,6 +699,13 @@ export async function installPlatform(
                 trackedPlatformWorkerTraffic(manifest!, new Set([snapshot.workerName])),
               );
             },
+            publishCustomDomains: (workerName, origins) =>
+              publishPlatformWorkerCustomDomains(
+                dependencies.client,
+                plan.account.id,
+                workerName,
+                origins,
+              ),
             retainNewWorker: async () => {
               await dependencies.client.putKvValue(
                 plan.account.id,
@@ -798,6 +811,13 @@ export async function installPlatform(
               await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
             },
             preservedRoutes,
+            publishCustomDomains: (workerName, origins) =>
+              publishPlatformWorkerCustomDomains(
+                dependencies.client,
+                plan.account.id,
+                workerName,
+                origins,
+              ),
             previousConfig: previousWorkerConfig,
             previousPublicEndpoints,
             inspectNewWorker: () =>
@@ -1221,6 +1241,96 @@ export function mergePreservedTriggerRoutes(
   return preservedRoutes.length === 0
     ? config
     : { ...config, routes: uniqueTriggerRoutes([...config.routes, ...preservedRoutes]) };
+}
+
+export function isolatePlatformWorkerCustomDomains(config: Record<string, unknown>): {
+  customDomains: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>;
+  wranglerConfig: Record<string, unknown>;
+} {
+  if (config.routes === undefined) {
+    return { customDomains: [], wranglerConfig: config };
+  }
+  if (!Array.isArray(config.routes)) {
+    throw new Error('platform: Generated Worker routes must be an array.');
+  }
+  const customDomains: Array<CloudflareWorkerCustomDomainOrigin> = [];
+  const wranglerRoutes: Array<unknown> = [];
+  for (const route of config.routes) {
+    if (
+      typeof route !== 'object' ||
+      route === null ||
+      (route as Record<string, unknown>).custom_domain !== true
+    ) {
+      wranglerRoutes.push(route);
+      continue;
+    }
+    const entry = route as Record<string, unknown>;
+    const hostname = requiredNonEmptyString(entry.pattern, 'Worker Custom Domain hostname');
+    customDomains.push({
+      hostname,
+      ...(entry.zone_id === undefined
+        ? {}
+        : { zoneId: requiredNonEmptyString(entry.zone_id, `zone id for ${hostname}`) }),
+      ...(entry.zone_name === undefined
+        ? {}
+        : { zoneName: requiredNonEmptyString(entry.zone_name, `zone name for ${hostname}`) }),
+      ...(entry.enabled === undefined
+        ? {}
+        : { enabled: requiredBoolean(entry.enabled, `enabled for ${hostname}`) }),
+      ...(entry.previews_enabled === undefined
+        ? {}
+        : {
+            previewsEnabled: requiredBoolean(
+              entry.previews_enabled,
+              `previews_enabled for ${hostname}`,
+            ),
+          }),
+    });
+  }
+  return {
+    customDomains,
+    wranglerConfig: { ...config, routes: wranglerRoutes },
+  };
+}
+
+function withoutPlatformCustomDomainTriggers(
+  config: CloudflareTriggerConfig,
+): CloudflareTriggerConfig {
+  return {
+    ...config,
+    routes: config.routes.filter(
+      (route) =>
+        typeof route !== 'object' ||
+        route === null ||
+        (route as Record<string, unknown>).custom_domain !== true,
+    ),
+  };
+}
+
+function requiredNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`platform: ${field} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function requiredBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new Error(`platform: ${field} must be a boolean.`);
+  }
+  return value;
+}
+
+async function publishPlatformWorkerCustomDomains(
+  client: InstallerClient,
+  accountId: string,
+  workerName: string,
+  origins: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>,
+): Promise<void> {
+  if (!client.publishWorkerCustomDomainsSafely) {
+    throw new Error('platform: Safe Cloudflare Custom Domain publication is unavailable.');
+  }
+  await client.publishWorkerCustomDomainsSafely(accountId, workerName, origins);
 }
 
 function uniqueTriggerRoutes(routes: ReadonlyArray<unknown>): ReadonlyArray<unknown> {
@@ -1786,6 +1896,10 @@ type PlatformWorkerDeploymentOptions = Readonly<{
   previousConfig: Record<string, unknown>;
   previousPublicEndpoints: boolean;
   preservedRoutes: ReadonlyArray<unknown>;
+  publishCustomDomains: (
+    workerName: string,
+    origins: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>,
+  ) => Promise<void>;
   removeCustomDomains: () => Promise<void>;
   retainNewWorker: () => Promise<void>;
   workerExisted: boolean;
@@ -1804,10 +1918,14 @@ async function deployPlatformWorker(
   let uploadedVersionId: string | null = null;
   let previousDeploymentId: string | null = null;
   let previousVersionId: string | null = null;
-  let previousTriggers = readTriggerConfigFromObject(options.previousConfig);
+  const nextTraffic = isolatePlatformWorkerCustomDomains(config);
+  const previousTraffic = isolatePlatformWorkerCustomDomains(options.previousConfig);
+  let previousTriggers = readTriggerConfigFromObject(previousTraffic.wranglerConfig);
   try {
     const configPath = join(directory, 'wrangler.json');
-    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    writeFileSync(configPath, `${JSON.stringify(nextTraffic.wranglerConfig, null, 2)}\n`, {
+      mode: 0o600,
+    });
     const nextTriggers = readCloudflareTriggerConfig(configPath);
     if (options.workerExisted) {
       const previous = await readActivePlatformWorkerSnapshot(
@@ -1825,7 +1943,7 @@ async function deployPlatformWorker(
       }
       previousDeploymentId = deployments[0]!.id;
       previousTriggers = resolvePlatformPreviousTriggerConfig(
-        previous.triggerConfig,
+        withoutPlatformCustomDomainTriggers(previous.triggerConfig),
         previousTriggers,
         options.previousPublicEndpoints,
       );
@@ -1958,6 +2076,9 @@ async function deployPlatformWorker(
       workerName,
     });
     assertPlatformTriggerStabilization(triggers, workerName, uploadedVersionId, 'publish');
+    if (nextTraffic.customDomains.length > 0) {
+      await options.publishCustomDomains(workerName, nextTraffic.customDomains);
+    }
     await options.onTrafficPublished();
     const rollback = () =>
       rollbackPlatformWorker({
@@ -1967,10 +2088,12 @@ async function deployPlatformWorker(
         config,
         nextTriggers,
         previousConfig: options.previousConfig,
+        previousCustomDomains: previousTraffic.customDomains,
         previousTriggers,
         previousVersionId,
         inspectNewWorker: options.inspectNewWorker,
         removeCustomDomains: options.removeCustomDomains,
+        publishCustomDomains: options.publishCustomDomains,
         retainNewWorker: options.retainNewWorker,
         workerExisted: options.workerExisted,
         workerName,
@@ -1985,12 +2108,14 @@ async function deployPlatformWorker(
           activatedDeploymentId,
           activatedVersionId: uploadedVersionId,
           config,
-          nextTriggers: readTriggerConfigFromObject(config),
+          nextTriggers: readTriggerConfigFromObject(nextTraffic.wranglerConfig),
           previousConfig: options.previousConfig,
+          previousCustomDomains: previousTraffic.customDomains,
           previousTriggers,
           previousVersionId,
           inspectNewWorker: options.inspectNewWorker,
           removeCustomDomains: options.removeCustomDomains,
+          publishCustomDomains: options.publishCustomDomains,
           retainNewWorker: options.retainNewWorker,
           workerExisted: options.workerExisted,
           workerName,
@@ -2018,10 +2143,15 @@ async function rollbackPlatformWorker(input: {
   config: Record<string, unknown>;
   nextTriggers: ReturnType<typeof readCloudflareTriggerConfig>;
   previousConfig: Record<string, unknown>;
+  previousCustomDomains: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>;
   previousTriggers: ReturnType<typeof readCloudflareTriggerConfig>;
   previousVersionId: string | null;
   inspectNewWorker: () => Promise<'missing' | 'owned'>;
   removeCustomDomains: () => Promise<void>;
+  publishCustomDomains: (
+    workerName: string,
+    origins: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>,
+  ) => Promise<void>;
   retainNewWorker: () => Promise<void>;
   workerExisted: boolean;
   workerName: string;
@@ -2029,7 +2159,10 @@ async function rollbackPlatformWorker(input: {
   const directory = mkdtempSync(join(tmpdir(), 'void-platform-rollback-'));
   try {
     const configPath = join(directory, 'wrangler.json');
-    writeFileSync(configPath, `${JSON.stringify(input.config, null, 2)}\n`, { mode: 0o600 });
+    const currentTraffic = isolatePlatformWorkerCustomDomains(input.config);
+    writeFileSync(configPath, `${JSON.stringify(currentTraffic.wranglerConfig, null, 2)}\n`, {
+      mode: 0o600,
+    });
     if (!input.workerExisted) {
       if ((await input.inspectNewWorker()) === 'missing') {
         return;
@@ -2136,6 +2269,9 @@ async function rollbackPlatformWorker(input: {
       input.previousVersionId,
       'restore',
     );
+    if (input.previousCustomDomains.length > 0) {
+      await input.publishCustomDomains(input.workerName, input.previousCustomDomains);
+    }
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }

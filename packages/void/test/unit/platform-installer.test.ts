@@ -34,6 +34,7 @@ import {
   inspectNewPlatformWorker,
   inspectPlatformDatabaseStateConnection,
   inventoryUnmanagedPlatformWorkerTraffic,
+  isolatePlatformWorkerCustomDomains,
   mergePlatformWorkerTrafficConfig,
   mergePreservedTriggerRoutes,
   preparePlatformDatabaseConnection,
@@ -420,6 +421,20 @@ describe('platform installer', () => {
         dispatchTraffic,
       ).routes,
     ).toEqual(nextConfig.routes);
+
+    expect(
+      isolatePlatformWorkerCustomDomains({
+        routes: [
+          { pattern: 'api.example.com', custom_domain: true, zone_name: 'example.com' },
+          { pattern: 'apps.example.com/*', zone_name: 'example.com' },
+        ],
+      }),
+    ).toEqual({
+      customDomains: [{ hostname: 'api.example.com', zoneName: 'example.com' }],
+      wranglerConfig: {
+        routes: [{ pattern: 'apps.example.com/*', zone_name: 'example.com' }],
+      },
+    });
   });
 
   it('requires the installation ownership marker before managing a new Worker', async () => {
