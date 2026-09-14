@@ -18,6 +18,7 @@ export function createPlatformWorkerConfigs(input: {
   deployment: PlatformDeploymentManifest;
   installationId: string;
   platformVersion: string;
+  publicEndpoints?: boolean;
   proxyUrl: string;
   resources: PlatformProvisionedResourceIds;
   runtimeEntrypoints: Readonly<Record<'api' | 'dispatch' | 'proxy' | 'tail', string>>;
@@ -32,12 +33,14 @@ export function createPlatformWorkerConfigs(input: {
     resources,
     runtimeEntrypoints,
   } = input;
+  const publicEndpoints = input.publicEndpoints ?? true;
   const names = deployment.resources;
   const common = {
     account_id: accountId,
     compatibility_date: '2026-02-24',
     observability: { enabled: true },
-    workers_dev: true,
+    preview_urls: publicEndpoints,
+    workers_dev: publicEndpoints,
   };
   const kv = [
     { binding: 'ROUTING', id: resources.routingKv },
@@ -101,7 +104,7 @@ export function createPlatformWorkerConfigs(input: {
       VOID_PROXY_SERVICE: names.proxyWorker,
     },
   };
-  if (deployment.controlPlane.apiHostname) {
+  if (publicEndpoints && deployment.controlPlane.apiHostname) {
     api.routes = [{ pattern: deployment.controlPlane.apiHostname, custom_domain: true }];
   }
 
@@ -129,7 +132,7 @@ export function createPlatformWorkerConfigs(input: {
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
     },
   };
-  if (deployment.controlPlane.proxyHostname) {
+  if (publicEndpoints && deployment.controlPlane.proxyHostname) {
     proxy.routes = [{ pattern: deployment.controlPlane.proxyHostname, custom_domain: true }];
   }
 
@@ -149,10 +152,14 @@ export function createPlatformWorkerConfigs(input: {
       name: names.dispatchWorker,
       main: runtimeEntrypoints.dispatch,
       no_bundle: true,
-      routes: createApplicationRoutes(deployment.application).map((route) => ({
-        pattern: route.pattern,
-        zone_name: route.zoneName,
-      })),
+      ...(publicEndpoints
+        ? {
+            routes: createApplicationRoutes(deployment.application).map((route) => ({
+              pattern: route.pattern,
+              zone_name: route.zoneName,
+            })),
+          }
+        : {}),
       dispatch_namespaces: dispatchNamespace,
       kv_namespaces: kv,
       r2_buckets: r2,

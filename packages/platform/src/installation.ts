@@ -84,7 +84,7 @@ const STATUS_TRANSITIONS: Readonly<Record<InstallationStatus, ReadonlyArray<Inst
     // Re-enter provisioning after a hard interruption. Every provisioning and
     // deployment step is checkpointed/idempotent, so resume safely reconciles
     // resources before redeploying and verifying again.
-    deploying: ['provisioning', 'verifying', 'failed', 'uninstalling'],
+    deploying: ['provisioning', 'verifying', 'disabled', 'failed', 'uninstalling'],
     verifying: ['provisioning', 'installed', 'failed', 'uninstalling'],
     installed: ['provisioning', 'disabling', 'uninstalling', 'failed'],
     disabling: ['disabled', 'failed', 'uninstalling'],

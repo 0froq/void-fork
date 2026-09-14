@@ -146,6 +146,7 @@ export async function installPlatform(
 ): Promise<PlatformInstallationResult> {
   const now = dependencies.now ?? (() => new Date().toISOString());
   const version = readPlatformRuntimeManifest().platformVersion;
+  const preserveDisabled = existing?.status === 'disabled';
   let manifest = existing;
   if (!manifest) {
     const createdAt = now();
@@ -295,6 +296,7 @@ export async function installPlatform(
       deployment: plan.deployment,
       installationId: manifest.id,
       platformVersion: version,
+      publicEndpoints: !preserveDisabled,
       proxyUrl: plan.proxyUrl,
       resources: {
         hyperdrive: requireId(ids, 'hyperdrive'),
@@ -327,6 +329,14 @@ export async function installPlatform(
       { apiUrl: plan.apiUrl, dashboardUrl: null, proxyUrl: plan.proxyUrl },
       now(),
     );
+    if (preserveDisabled) {
+      manifest = transitionInstallation(manifest, 'disabled', now());
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      promoteInstallationSecrets(manifest);
+      saveInstalledPlatformConnection(plan, manifest);
+      return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
+    }
     manifest = transitionInstallation(manifest, 'verifying', now());
     writeInstallationManifest(manifest);
     await (dependencies.verifyHealth ?? verifyPlatformHealth)(plan.apiUrl, manifest.id);
@@ -334,15 +344,7 @@ export async function installPlatform(
     writeInstallationManifest(manifest);
     await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     promoteInstallationSecrets(manifest);
-    savePlatformConnection({
-      accountId: plan.account.id,
-      apiUrl: plan.apiUrl,
-      applicationDomain: plan.deployment.application.baseDomain,
-      displayName: plan.deployment.displayName,
-      installationId: manifest.id,
-      kind: 'installed',
-      proxyUrl: plan.proxyUrl,
-    });
+    saveInstalledPlatformConnection(plan, manifest);
     return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
   } catch (error) {
     if (manifest.status !== 'failed' && manifest.status !== 'uninstalled') {
@@ -356,6 +358,21 @@ export async function installPlatform(
     }
     throw error;
   }
+}
+
+function saveInstalledPlatformConnection(
+  plan: PlatformInstallPlan,
+  manifest: PlatformInstallationManifest,
+): void {
+  savePlatformConnection({
+    accountId: plan.account.id,
+    apiUrl: plan.apiUrl,
+    applicationDomain: plan.deployment.application.baseDomain,
+    displayName: plan.deployment.displayName,
+    installationId: manifest.id,
+    kind: 'installed',
+    proxyUrl: plan.proxyUrl,
+  });
 }
 
 async function writeRemoteInstallationCheckpoint(

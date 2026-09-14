@@ -49,4 +49,43 @@ describe('platform Worker configuration', () => {
       { pattern: '*.apps.example.com', zone_name: 'example.com' },
     ]);
   });
+
+  it('can deploy an upgrade without exposing a disabled installation', () => {
+    const deployment = createPlatformDeploymentManifest({
+      application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+      controlPlane: { apiHostname: 'api.example.com', proxyHostname: 'proxy.example.com' },
+      displayName: 'Example',
+      installationSlug: 'example',
+    });
+    const configs = createPlatformWorkerConfigs({
+      accountId: 'account',
+      apiUrl: 'https://api.example.com',
+      deployment,
+      installationId: 'example-a1b2c3d4',
+      platformVersion: '1.0.0',
+      proxyUrl: 'https://proxy.example.com',
+      publicEndpoints: false,
+      resources: {
+        hyperdrive: 'hyperdrive',
+        isrCacheKv: 'isr',
+        legacyAssetsKv: 'assets',
+        routingKv: 'routing',
+        zone: 'zone',
+      },
+      runtimeEntrypoints: {
+        api: '/runtime/api.js',
+        dispatch: '/runtime/dispatch.js',
+        proxy: '/runtime/proxy.js',
+        tail: '/runtime/tail.js',
+      },
+    });
+
+    for (const config of Object.values(configs)) {
+      expect(config.workers_dev).toBe(false);
+      expect(config.preview_urls).toBe(false);
+    }
+    expect(configs.api).not.toHaveProperty('routes');
+    expect(configs.proxy).not.toHaveProperty('routes');
+    expect(configs.dispatch).not.toHaveProperty('routes');
+  });
 });

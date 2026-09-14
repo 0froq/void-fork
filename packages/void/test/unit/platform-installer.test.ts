@@ -323,28 +323,29 @@ describe('platform installer', () => {
     const deployed: Array<string> = [];
     let migrations = 0;
     const upgradeKvWrites: Array<string> = [];
-    const upgraded = await installPlatform(upgradedPlan, secrets, installed.manifest, {
-      client: {
-        createAiGateway: create,
-        createDnsRecord: async (_zone, name) => ({
-          content: '100::',
-          id: name,
-          name,
-          proxied: true,
-          type: 'AAAA',
-        }),
-        createZone: async () => {
-          throw new Error('must reuse zone');
-        },
-        createKvNamespace: create,
-        createR2Bucket: create,
-        createQueue: create,
-        createDispatchNamespace: create,
-        createHyperdrive: async (account, name) => create(account, name),
-        putKvValue: async (_account, _namespace, key) => {
-          upgradeKvWrites.push(key);
-        },
+    const upgradeClient = {
+      createAiGateway: create,
+      createDnsRecord: async (_zone: string, name: string) => ({
+        content: '100::',
+        id: name,
+        name,
+        proxied: true,
+        type: 'AAAA' as const,
+      }),
+      createZone: async () => {
+        throw new Error('must reuse zone');
       },
+      createKvNamespace: create,
+      createR2Bucket: create,
+      createQueue: create,
+      createDispatchNamespace: create,
+      createHyperdrive: async (account: string, name: string) => create(account, name),
+      putKvValue: async (_account: string, _namespace: string, key: string) => {
+        upgradeKvWrites.push(key);
+      },
+    };
+    const upgraded = await installPlatform(upgradedPlan, secrets, installed.manifest, {
+      client: upgradeClient,
       deployWorker: async (config) => {
         deployed.push(String(config.name));
       },
@@ -364,6 +365,34 @@ describe('platform installer', () => {
     expect(new Set(upgradeKvWrites)).toEqual(new Set(['__void/platform/installation/v1']));
     expect(upgraded.manifest.status).toBe('installed');
     expect(upgraded.manifest.resources).toHaveLength(15);
+
+    const disabledConfigs: Array<Record<string, unknown>> = [];
+    let disabledHealthChecks = 0;
+    const disabledUpgrade = await installPlatform(
+      upgradedPlan,
+      secrets,
+      { ...upgraded.manifest, status: 'disabled' },
+      {
+        client: upgradeClient,
+        deployWorker: async (config) => {
+          disabledConfigs.push(config);
+        },
+        migrateDatabase: async () => {
+          migrations++;
+        },
+        verifyHealth: async () => {
+          disabledHealthChecks++;
+        },
+      },
+    );
+    expect(disabledUpgrade.manifest.status).toBe('disabled');
+    expect(disabledHealthChecks).toBe(0);
+    expect(disabledConfigs).toHaveLength(4);
+    for (const config of disabledConfigs) {
+      expect(config.workers_dev).toBe(false);
+      expect(config.preview_urls).toBe(false);
+      expect(config).not.toHaveProperty('routes');
+    }
 
     function named(key: string) {
       const resource = byKey.get(key)!;
