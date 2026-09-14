@@ -138,7 +138,7 @@ void build logs --follow
 
 ### GitHub Actions
 
-The workflow authenticates with [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) — there is **no long-lived `VOID_TOKEN` secret to store or rotate**. `void deploy` detects GitHub Actions and does the exchange itself: it requests a short-lived OIDC token from GitHub (audience `void`), exchanges it at `POST $VOID_API_URL/auth/github-oidc` for a short-lived project-scoped deploy token (about 15 minutes on the free tier; longer on higher plans, capped at ~60 minutes), and deploys — so the workflow is a single `void deploy` step. `permissions: id-token: write` is still required: it is what lets the job (and the CLI) mint the OIDC token.
+When the selected Void platform advertises GitHub Actions support, the generated workflow authenticates with [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) — there is **no long-lived `VOID_TOKEN` secret to store or rotate**. `void deploy` detects GitHub Actions and does the exchange itself: it requests a short-lived OIDC token from GitHub (audience `void`), exchanges it at `POST $VOID_API_URL/auth/github-oidc` for a short-lived project-scoped deploy token, and deploys. The generated `VOID_API_URL` defaults to the platform selected during init, not necessarily Void Cloud. `permissions: id-token: write` is still required: it is what lets the job (and thus the CLI) mint the OIDC token. Core self-hosted installations currently advertise GitHub Actions as unavailable, so `void init` does not offer this workflow for them.
 
 ```yaml
 name: Deploy to Void

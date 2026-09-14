@@ -60,9 +60,18 @@ describe('GitHub Actions deployment workflows', () => {
   });
 
   it('retains the GitHub OIDC workflow for managed deployments', () => {
-    const yaml = getWorkflowYaml('/project', 'npm', 'my-app', 'void');
+    const yaml = getWorkflowYaml(
+      '/project',
+      'npm',
+      'my-app',
+      'void',
+      'https://api.company.example',
+    );
     expect(yaml).toContain('name: Deploy to Void');
     expect(yaml).toContain('id-token: write');
+    expect(yaml).toContain(
+      "VOID_API_URL: ${{ vars.VOID_API_URL || 'https://api.company.example' }}",
+    );
     expect(yaml).toContain('npx void deploy --platform void --project "$VOID_PROJECT"');
   });
 });
@@ -287,11 +296,24 @@ beforeEach(() => {
   mockListProjects.mockResolvedValue([]);
   mockCreateProject.mockResolvedValue({ id: 'proj_123', slug: 'my-app' });
   mockDiscoverPlatform.mockResolvedValue({
-    apiUrl: 'https://platform.example.test',
-    applicationDomain: 'apps.example.test',
-    displayName: 'Company Void',
-    installationId: 'company-a1b2c3d4',
-    proxyUrl: 'https://proxy.example.test',
+    apiUrl: 'https://api.void.cloud',
+    applicationDomain: 'void.app',
+    authenticationProviders: ['github', 'google'],
+    capabilities: {
+      ai: true,
+      customDomains: true,
+      email: true,
+      githubActions: true,
+      githubOAuth: true,
+      googleOAuth: true,
+      managedBuilds: true,
+      sandbox: true,
+    },
+    displayName: 'Void Cloud',
+    installationId: null,
+    platformVersion: '0.10.14',
+    proxyUrl: 'https://proxy.void.cloud',
+    schemaVersion: 1,
   });
 });
 
@@ -302,6 +324,26 @@ describe('Void platform deployment setup', () => {
       throw new Error('No Void platform selected');
     });
     mockText.mockResolvedValue('https://platform.example.test');
+    mockDiscoverPlatform.mockResolvedValueOnce({
+      apiUrl: 'https://platform.example.test',
+      applicationDomain: 'apps.example.test',
+      authenticationProviders: ['github'],
+      capabilities: {
+        ai: true,
+        customDomains: true,
+        email: false,
+        githubActions: false,
+        githubOAuth: true,
+        googleOAuth: false,
+        managedBuilds: false,
+        sandbox: false,
+      },
+      displayName: 'Company Void',
+      installationId: 'company-a1b2c3d4',
+      platformVersion: '0.10.14',
+      proxyUrl: 'https://proxy.example.test',
+      schemaVersion: 1,
+    });
 
     await ensureVoidPlatformConnection('/project');
 
@@ -312,6 +354,43 @@ describe('Void platform deployment setup', () => {
       applicationDomain: 'apps.example.test',
       proxyUrl: 'https://proxy.example.test',
     });
+  });
+
+  it('refuses to scaffold unsupported platform GitHub Actions', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-no-github-actions-'));
+    try {
+      writeFileSync(
+        join(root, 'package.json'),
+        JSON.stringify({ name: 'existing-app', private: true }, null, 2) + '\n',
+      );
+      mockDiscoverPlatform.mockResolvedValueOnce({
+        apiUrl: 'https://platform.example.test',
+        applicationDomain: 'apps.example.test',
+        authenticationProviders: ['github'],
+        capabilities: {
+          ai: true,
+          customDomains: true,
+          email: false,
+          githubActions: false,
+          githubOAuth: true,
+          googleOAuth: false,
+          managedBuilds: false,
+          sandbox: false,
+        },
+        displayName: 'Company Void',
+        installationId: 'company-a1b2c3d4',
+        platformVersion: '0.10.14',
+        proxyUrl: 'https://proxy.example.test',
+        schemaVersion: 1,
+      });
+
+      await expect(
+        runInitCommand(root, { agents: false, github: true, tsconfig: false }),
+      ).rejects.toThrow('Company Void does not support GitHub Actions deployments');
+      expect(existsSync(join(root, '.github', 'workflows', 'void-deploy.yml'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { intro, outro, log, confirm, isCancel, cancel, note, select, text } from '@clack/prompts';
+import type { PlatformDiscoveryDocument } from '@void/platform';
 import { parse, type ParseError } from 'jsonc-parser';
 import MagicString from 'magic-string';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathslash';
@@ -1866,27 +1867,34 @@ async function promptDeploymentPlatform(root: string): Promise<DeploymentPlatfor
   return platform;
 }
 
-export async function ensureVoidPlatformConnection(root: string): Promise<void> {
+export async function ensureVoidPlatformConnection(
+  root: string,
+): Promise<PlatformDiscoveryDocument> {
+  let selectedApiUrl: string | null = null;
+  let promptedForPlatform = false;
   try {
     const { getApiUrl, getSiteDomain } = await import('./auth.ts');
-    getApiUrl(root);
+    selectedApiUrl = getApiUrl(root);
     getSiteDomain(root);
-    return;
   } catch (error) {
     if (!(error instanceof Error) || !error.message.includes('No Void platform selected')) {
       throw error;
     }
     // A genuinely new user must identify the company platform before login.
   }
-  const value = await text({
-    message: 'Void platform API URL:',
-    placeholder: 'https://platform.example.com',
-  });
-  if (isCancel(value) || typeof value === 'symbol') {
-    cancel('Setup cancelled.');
-    process.exit(0);
+  if (!selectedApiUrl) {
+    promptedForPlatform = true;
+    const value = await text({
+      message: 'Void platform API URL:',
+      placeholder: 'https://platform.example.com',
+    });
+    if (isCancel(value) || typeof value === 'symbol') {
+      cancel('Setup cancelled.');
+      process.exit(0);
+    }
+    selectedApiUrl = String(value);
   }
-  const discovery = await discoverPlatform(String(value));
+  const discovery = await discoverPlatform(selectedApiUrl);
   savePlatformConnection({
     accountId: null,
     apiUrl: discovery.apiUrl,
@@ -1896,7 +1904,10 @@ export async function ensureVoidPlatformConnection(root: string): Promise<void> 
     kind: discovery.installationId ? 'installed' : 'connected',
     proxyUrl: discovery.proxyUrl,
   });
-  log.success(`Connected to ${discovery.displayName} at ${discovery.apiUrl}.`);
+  if (promptedForPlatform) {
+    log.success(`Connected to ${discovery.displayName} at ${discovery.apiUrl}.`);
+  }
+  return discovery;
 }
 
 type CloudflareAccount = {
@@ -2126,6 +2137,7 @@ export function getWorkflowYaml(
   pm: ProjectState['packageManager'],
   slug: string | null,
   platform: 'cloudflare' | 'void' = 'void',
+  platformApiUrl: string = WORKFLOW_DEFAULT_API_URL,
 ): string {
   const { setup, install, runner } = getWorkflowSetupSteps(root, pm);
   if (platform === 'cloudflare') {
@@ -2191,8 +2203,8 @@ permissions:
   contents: read
 
 env:
-  # Override with a VOID_API_URL repository variable to target staging.
-  VOID_API_URL: \${{ vars.VOID_API_URL || '${WORKFLOW_DEFAULT_API_URL}' }}
+  # Override only when intentionally targeting another platform deployment.
+  VOID_API_URL: \${{ vars.VOID_API_URL || '${platformApiUrl}' }}
   ${projectLine}
 
 jobs:
@@ -2211,6 +2223,7 @@ function setupGithubActions(
   root: string,
   state: ProjectState,
   platform: 'cloudflare' | 'void' = 'void',
+  platformApiUrl: string = WORKFLOW_DEFAULT_API_URL,
 ): void {
   const workflowDir = join(root, '.github', 'workflows');
   const workflowPath = join(workflowDir, 'void-deploy.yml');
@@ -2223,7 +2236,10 @@ function setupGithubActions(
   const slug = readProjectConfig(root)?.slug ?? null;
 
   mkdirSync(workflowDir, { recursive: true });
-  writeFileSync(workflowPath, getWorkflowYaml(root, state.packageManager, slug, platform));
+  writeFileSync(
+    workflowPath,
+    getWorkflowYaml(root, state.packageManager, slug, platform, platformApiUrl),
+  );
   log.success('Created .github/workflows/void-deploy.yml');
 
   if (platform === 'cloudflare') {
@@ -3839,12 +3855,13 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   const deploymentPlatform = !targeted
     ? await promptDeploymentPlatform(root)
     : readDeploymentPlatform(root);
+  let voidPlatformDiscovery: PlatformDiscoveryDocument | null = null;
 
   if (!targeted && deploymentPlatform === 'cloudflare') {
     await setupCloudflareDeployment(root);
   }
   if (!targeted && deploymentPlatform === 'void') {
-    await ensureVoidPlatformConnection(root);
+    voidPlatformDiscovery = await ensureVoidPlatformConnection(root);
   }
 
   // Step 9: GitHub Actions for either configured deployment target.
@@ -3862,13 +3879,37 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   // subpackage-membership signal directly so both targeted and
   // interactive modes agree.
   const githubStepSkipForSubpackage = isInsideWorkspaceSubpackage(root);
-  const shouldSetupGithub = targeted ? initArgs?.github === true : deploymentPlatform !== 'none';
+  let shouldSetupGithub = targeted ? initArgs?.github === true : deploymentPlatform !== 'none';
+  if (
+    shouldSetupGithub &&
+    !githubStepSkipForSubpackage &&
+    deploymentPlatform !== 'cloudflare' &&
+    deploymentPlatform !== 'none'
+  ) {
+    if (!voidPlatformDiscovery) {
+      const { getApiUrl } = await import('./auth.ts');
+      voidPlatformDiscovery = await discoverPlatform(getApiUrl(root));
+    }
+    if (!voidPlatformDiscovery.capabilities.githubActions) {
+      const message = `${voidPlatformDiscovery.displayName} does not support GitHub Actions deployments.`;
+      if (targeted) {
+        throw new Error(`init: ${message}`);
+      }
+      log.info(`${message} Skipping workflow setup.`);
+      shouldSetupGithub = false;
+    }
+  }
   if (shouldSetupGithub && !githubStepSkipForSubpackage) {
     // `setupGithubActions` writes `void-deploy.yml` (skipping with a warning if
     // it already exists). It does not touch any pre-existing `deploy.yml`.
     if (targeted) {
       // --github flag: run directly without prompting
-      setupGithubActions(root, state, deploymentPlatform === 'cloudflare' ? 'cloudflare' : 'void');
+      setupGithubActions(
+        root,
+        state,
+        deploymentPlatform === 'cloudflare' ? 'cloudflare' : 'void',
+        voidPlatformDiscovery?.apiUrl,
+      );
     } else {
       const setupGha = await confirm({
         message: 'Create .github/workflows/void-deploy.yml to deploy on pushes to main?',
@@ -3882,6 +3923,7 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
           root,
           state,
           deploymentPlatform === 'cloudflare' ? 'cloudflare' : 'void',
+          voidPlatformDiscovery?.apiUrl,
         );
       }
     }
