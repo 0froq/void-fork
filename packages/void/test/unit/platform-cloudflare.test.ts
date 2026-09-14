@@ -260,4 +260,70 @@ describe('platform Cloudflare client', () => {
       { enabled: true, previews_enabled: true },
     ]);
   });
+
+  it('removes Worker routes and custom domains through the account domains API', async () => {
+    const requests: Array<{ method: string; pathname: string; service: string | null }> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          method: init?.method ?? 'GET',
+          pathname: url.pathname,
+          service: url.searchParams.get('service'),
+        });
+        if (url.pathname.endsWith('/workers/routes')) {
+          return Response.json({
+            success: true,
+            result: [
+              { id: 'route-api', script: 'void-team-api' },
+              { id: 'route-other', script: 'unrelated' },
+            ],
+          });
+        }
+        if (url.pathname.endsWith('/workers/domains')) {
+          const service = url.searchParams.get('service');
+          return Response.json({
+            success: true,
+            result: [{ id: `domain-${service}`, service }],
+          });
+        }
+        return Response.json({ success: true, result: null });
+      },
+    });
+
+    await client.removeRoutes('account', 'zone', new Set(['void-team-api', 'void-team-proxy']));
+
+    expect(requests).toEqual([
+      {
+        method: 'GET',
+        pathname: '/client/v4/zones/zone/workers/routes',
+        service: null,
+      },
+      {
+        method: 'DELETE',
+        pathname: '/client/v4/zones/zone/workers/routes/route-api',
+        service: null,
+      },
+      {
+        method: 'GET',
+        pathname: '/client/v4/accounts/account/workers/domains',
+        service: 'void-team-api',
+      },
+      {
+        method: 'DELETE',
+        pathname: '/client/v4/accounts/account/workers/domains/domain-void-team-api',
+        service: null,
+      },
+      {
+        method: 'GET',
+        pathname: '/client/v4/accounts/account/workers/domains',
+        service: 'void-team-proxy',
+      },
+      {
+        method: 'DELETE',
+        pathname: '/client/v4/accounts/account/workers/domains/domain-void-team-proxy',
+        service: null,
+      },
+    ]);
+  });
 });

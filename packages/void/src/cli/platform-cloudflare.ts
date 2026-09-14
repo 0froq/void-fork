@@ -543,19 +543,24 @@ export class PlatformCloudflareClient {
         );
       }
     }
-    const domains = await this.request<ReadonlyArray<{ id?: unknown; service?: unknown }>>(
-      `/accounts/${encodeURIComponent(accountId)}/workers/domains/records`,
-    );
-    for (const domain of domains) {
-      if (
-        typeof domain.id === 'string' &&
-        typeof domain.service === 'string' &&
-        workerNames.has(domain.service)
-      ) {
-        await this.request(
-          `/accounts/${encodeURIComponent(accountId)}/workers/domains/records/${encodeURIComponent(domain.id)}`,
-          { method: 'DELETE' },
-        );
+    const removedDomainIds = new Set<string>();
+    for (const workerName of workerNames) {
+      const query = new URLSearchParams({ service: workerName });
+      const domains = await this.request<ReadonlyArray<{ id?: unknown; service?: unknown }>>(
+        `/accounts/${encodeURIComponent(accountId)}/workers/domains?${query}`,
+      );
+      for (const domain of domains) {
+        if (
+          typeof domain.id === 'string' &&
+          domain.service === workerName &&
+          !removedDomainIds.has(domain.id)
+        ) {
+          removedDomainIds.add(domain.id);
+          await this.request(
+            `/accounts/${encodeURIComponent(accountId)}/workers/domains/${encodeURIComponent(domain.id)}`,
+            { method: 'DELETE' },
+          );
+        }
       }
     }
   }
