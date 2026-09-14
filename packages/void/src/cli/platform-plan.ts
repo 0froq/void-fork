@@ -497,11 +497,15 @@ function resourceSlugForInstallation(
   provisioningSuffix?: string,
 ): string {
   const suffix = provisioningSuffix ?? installationId.slice(installationSlug.length + 1);
-  if (!/^[a-f0-9]{12}$/.test(suffix)) {
+  if (!/^(?:[a-f0-9]{12}|[a-f0-9]{32})$/.test(suffix)) {
     // Existing schema-v1 installations used the human-readable slug directly.
     return installationSlug;
   }
-  const readablePrefix = installationSlug.slice(0, 26).replace(/-+$/, '');
+  // Keep every generated resource within Cloudflare's 63-character product-name
+  // ceiling even with the new 128-bit suffix and the longest (`-usage-events`) role.
+  const readablePrefix = installationSlug
+    .slice(0, suffix.length === 32 ? 12 : 26)
+    .replace(/-+$/, '');
   return `${readablePrefix}-${suffix}`;
 }
 
@@ -512,7 +516,7 @@ function resourceSlugForManifest(manifest: PlatformInstallationManifest): string
   }
   const resourceSlug = apiWorker.slice('void-'.length, -'-api'.length);
   const suffix = resourceSlug.slice(resourceSlug.lastIndexOf('-') + 1);
-  if (!/^[a-f0-9]{12}$/.test(suffix)) {
+  if (!/^(?:[a-f0-9]{12}|[a-f0-9]{32})$/.test(suffix)) {
     return manifest.deployment.installationSlug;
   }
   return resourceSlug;

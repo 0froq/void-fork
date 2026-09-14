@@ -333,7 +333,12 @@ async function createInitialPlatformInstallPlan(
     try {
       return await createPlatformInstallPlan(client, input, null, {
         authoritativeProvisionIntents,
-        provisioningSuffix: randomBytes(6).toString('hex'),
+        // A fresh apply receives a 128-bit resource namespace. Independent installers
+        // therefore cannot accidentally choose the same Worker name during the API's
+        // non-atomic create precondition window; installers resuming the SAME installation
+        // are serialized by the PostgreSQL lifecycle lock. An account principal deliberately
+        // targeting this exact random name already has authority to replace it after install.
+        provisioningSuffix: randomBytes(16).toString('hex'),
       });
     } catch (error) {
       if (!String(error).includes('already exists but is not owned by this installation')) {

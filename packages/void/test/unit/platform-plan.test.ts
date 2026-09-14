@@ -67,10 +67,17 @@ describe('platform installation planning', () => {
 
   it('uses an explicit unpredictable suffix for a provisioning plan', async () => {
     const plan = await createPlatformInstallPlan(client(), input, null, {
-      provisioningSuffix: '0123456789ab',
+      provisioningSuffix: '0123456789abcdef0123456789abcdef',
     });
-    expect(plan.deployment.resources.apiWorker).toBe('void-example-0123456789ab-api');
-    expect(plan.deployment.resources.dispatchWorker).toBe('void-example-0123456789ab-dispatch');
+    expect(plan.deployment.resources.apiWorker).toBe(
+      'void-example-0123456789abcdef0123456789abcdef-api',
+    );
+    expect(plan.deployment.resources.dispatchWorker).toBe(
+      'void-example-0123456789abcdef0123456789abcdef-dispatch',
+    );
+    expect(
+      Math.max(...Object.values(plan.deployment.resources).map((name) => name.length)),
+    ).toBeLessThanOrEqual(63);
   });
 
   it('fails closed on an unowned deterministic-name collision', async () => {
