@@ -71,6 +71,10 @@ export type TestEnv = {
   SITE_DOMAIN?: string;
   REQUESTS_DATASET?: string;
   TAIL_SERVICE_NAME?: string;
+  PLATFORM_CAPABILITIES?: string;
+  PLATFORM_DISPLAY_NAME?: string;
+  PLATFORM_INSTALLATION_ID?: string;
+  PLATFORM_VERSION?: string;
   USAGE_COUNTER: DurableObjectNamespace;
   CRON_SCHEDULER: DurableObjectNamespace;
   ERROR_ALERT_MONITOR: DurableObjectNamespace;

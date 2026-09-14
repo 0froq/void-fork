@@ -29,3 +29,9 @@ export {
   type PlatformInstallationEndpoints,
   type ResourceOwnership,
 } from './installation.ts';
+export {
+  PLATFORM_DISCOVERY_SCHEMA_VERSION,
+  createPlatformDiscoveryDocument,
+  parsePlatformDiscoveryDocument,
+  type PlatformDiscoveryDocument,
+} from './discovery.ts';

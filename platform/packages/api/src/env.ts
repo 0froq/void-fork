@@ -132,6 +132,10 @@ export type ApiEnv = Env & {
     LOGS_DATASET?: string;
     REQUESTS_DATASET?: string;
     PLATFORM_ENV?: string;
+    PLATFORM_DISPLAY_NAME?: string;
+    PLATFORM_INSTALLATION_ID?: string;
+    PLATFORM_VERSION?: string;
+    PLATFORM_CAPABILITIES?: string;
     PROJECT_SECRET_KEYS_JSON: string;
     PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
     /**

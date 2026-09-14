@@ -1,3 +1,4 @@
+import { createPlatformDiscoveryDocument, type PlatformCapabilities } from '@void/platform';
 import { Hono } from 'hono';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
 import adminBuilds from './admin/routes/builds.tsx';
@@ -92,6 +93,34 @@ const app = new Hono<ApiEnv>()
   })
 
   .get('/health', (context) => context.json({ status: 'ok' }))
+  .get('/.well-known/void-platform', (context) => {
+    const capabilities: PlatformCapabilities = context.env.PLATFORM_CAPABILITIES
+      ? (JSON.parse(context.env.PLATFORM_CAPABILITIES) as PlatformCapabilities)
+      : {
+          ai: true,
+          customDomains: true,
+          email: true,
+          githubActions: true,
+          githubOAuth: true,
+          googleOAuth: true,
+          managedBuilds: true,
+          sandbox: true,
+        };
+    return context.json(
+      createPlatformDiscoveryDocument({
+        apiUrl: new URL(context.req.url).origin,
+        applicationDomain: context.env.SITE_DOMAIN ?? 'void.app',
+        authenticationProviders: [
+          ...(capabilities.githubOAuth ? (['github'] as const) : []),
+          ...(capabilities.googleOAuth ? (['google'] as const) : []),
+        ],
+        capabilities,
+        displayName: context.env.PLATFORM_DISPLAY_NAME ?? 'Void Cloud',
+        installationId: context.env.PLATFORM_INSTALLATION_ID ?? null,
+        platformVersion: context.env.PLATFORM_VERSION ?? 'hosted',
+      }),
+    );
+  })
   .get('/capabilities', (context) =>
     context.json({
       acceptsExecutionPlans: true,
