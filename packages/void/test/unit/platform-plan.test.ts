@@ -581,6 +581,45 @@ describe('platform installation planning', () => {
     });
   });
 
+  it('revalidates a missing Worker with the approved repair policy', async () => {
+    let manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    const workerName = manifest.deployment.resources.apiWorker;
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: 'hash',
+        id: workerName,
+        key: 'api-worker',
+        kind: 'worker',
+        name: workerName,
+        ownership: 'created',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const plan = await createPlatformInstallPlan(client(), input, manifest, {
+      repairMissing: true,
+    });
+    const action = plan.actions.find((entry) => entry.key === 'api-worker')!;
+
+    await expect(
+      revalidatePlatformInstallAction(client(), plan, manifest, action, {
+        repairMissing: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('refuses to recreate a missing adopted resource', async () => {
     let manifest = createPlatformInstallationManifest({
       account: { id: 'account', name: 'Account' },

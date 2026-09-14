@@ -237,6 +237,25 @@ describe('platform lifecycle management', () => {
     expect(reads).toBe(2);
   });
 
+  it('allows authoritative repair to recreate a confirmed-missing routing checkpoint', async () => {
+    const manifest = installedManifest();
+    const fake = client(manifest);
+    fake.getKvValue = async () => null;
+    fake.listKvNamespaces = async () =>
+      namedResources(manifest, 'kv-namespace').filter(
+        (resource) => resource.id !== 'routing-kv-id',
+      );
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).rejects.toThrow(
+      'remote installation checkpoint is missing',
+    );
+    await expect(
+      verifyPlatformInstallationOwnership(fake, manifest, {
+        allowMissingRoutingCheckpoint: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('accepts a live immutable resource recorded ahead of stale routing KV', async () => {
     const manifest = installedManifest();
     const stale = {

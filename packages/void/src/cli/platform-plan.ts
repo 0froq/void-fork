@@ -431,6 +431,7 @@ export async function revalidatePlatformInstallAction(
   original: PlatformInstallPlan,
   manifest: PlatformInstallationManifest,
   action: PlatformInstallPlanAction,
+  options?: { repairMissing?: boolean },
 ): Promise<void> {
   const deployment = original.deployment;
   const refreshed = await createPlatformInstallPlan(
@@ -445,6 +446,7 @@ export async function revalidatePlatformInstallAction(
       zoneName: deployment.application.zoneName,
     },
     manifest,
+    options,
   );
   const current = refreshed.actions.find((entry) => entry.key === action.key);
   if (

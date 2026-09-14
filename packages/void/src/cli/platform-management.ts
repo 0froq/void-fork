@@ -77,6 +77,7 @@ export type PlatformOwnershipClient = Pick<
 export async function verifyPlatformInstallationOwnership(
   client: PlatformOwnershipClient,
   manifest: PlatformInstallationManifest,
+  options: { allowMissingRoutingCheckpoint?: boolean } = {},
 ): Promise<void> {
   const ready = manifest.resources.filter(
     (resource) => resource.state === 'ready' && isOwnershipVerifiableKind(resource.kind),
@@ -102,6 +103,7 @@ export async function verifyPlatformInstallationOwnership(
     client,
     manifest,
     new Set(ready.map((resource) => resource.key)),
+    options,
   );
 }
 
@@ -195,6 +197,11 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       outro('No Cloudflare or local installation state was changed.');
       return;
     }
+    const repairingMissingRoutingCheckpoint =
+      args.subcommand === 'repair' &&
+      plan.actions.some(
+        (action) => action.key === 'routing-kv' && action.action === 'create' && action.id === null,
+      );
     await verifyPlatformMutationOwnership(
       client,
       manifest,
@@ -203,6 +210,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
           .filter((resource) => isOwnershipVerifiableKind(resource.kind))
           .map((resource) => resource.key),
       ),
+      { allowMissingRoutingCheckpoint: repairingMissingRoutingCheckpoint },
     );
     const installation =
       args.subcommand === 'enable'
@@ -236,7 +244,9 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         Object.assign(async () => {}, { checkpoint: databaseCheckpoint }),
       client,
       revalidateBeforeWorkerDeploy: (manifest, action) =>
-        revalidatePlatformInstallAction(client, plan, manifest, action),
+        revalidatePlatformInstallAction(client, plan, manifest, action, {
+          repairMissing: args.subcommand === 'repair',
+        }),
     });
     if (result.waitingForDns) {
       note(
@@ -738,7 +748,10 @@ async function verifyPlatformMutationOwnership(
   client: PlatformOwnershipClient,
   manifest: PlatformInstallationManifest,
   targetKeys: ReadonlySet<string>,
-  options: { allowDeletedRoutingCheckpoint?: boolean } = {},
+  options: {
+    allowDeletedRoutingCheckpoint?: boolean;
+    allowMissingRoutingCheckpoint?: boolean;
+  } = {},
 ): Promise<ReadonlySet<string>> {
   const routing = requireResource(manifest, 'routing-kv');
   const targetResources = manifest.resources.filter(
@@ -774,6 +787,18 @@ async function verifyPlatformMutationOwnership(
     }
   }
   if (rawRemote === null) {
+    if (options.allowMissingRoutingCheckpoint && routing.ownership === 'created') {
+      const namespaces = await client.listKvNamespaces(manifest.account.id);
+      const routingStillExists = namespaces.some(
+        (entry) => entry.id === routing.id || entry.name === routing.name,
+      );
+      if (!routingStillExists) {
+        // The caller holds the authoritative PostgreSQL lifecycle lock. Repair
+        // may recreate this one missing checkpoint before any other resource
+        // mutation, after which normal remote proof checks resume.
+        return new Set([routing.key]);
+      }
+    }
     if (
       options.allowDeletedRoutingCheckpoint &&
       canResumeAfterRoutingCheckpointDeletion(manifest, targetKeys)
