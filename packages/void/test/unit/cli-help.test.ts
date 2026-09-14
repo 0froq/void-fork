@@ -1,7 +1,17 @@
-import { describe, expect, it } from 'vite-plus/test';
-import { getHelpPath, hasHelpPage } from '../../src/cli/help.ts';
+import { note } from '@clack/prompts';
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { getHelpPath, hasHelpPage, printHelpPage } from '../../src/cli/help.ts';
+
+vi.mock('@clack/prompts', () => ({
+  note: vi.fn(),
+  outro: vi.fn(),
+}));
 
 describe('CLI help resolver', () => {
+  beforeEach(() => {
+    vi.mocked(note).mockClear();
+  });
+
   it('resolves top-level help requests', () => {
     expect(getHelpPath(['help'])).toEqual([]);
     expect(getHelpPath(['--help'])).toEqual([]);
@@ -69,4 +79,15 @@ describe('CLI help resolver', () => {
     expect(hasHelpPage(['github', 'disconnect'])).toBe(true);
     expect(hasHelpPage(['github', 'missing'])).toBe(false);
   });
+
+  it.each(['upgrade', 'repair', 'disable', 'enable'] as const)(
+    'prints the correct platform %s usage',
+    (command) => {
+      printHelpPage(['platform', command]);
+
+      expect(vi.mocked(note).mock.calls[0]?.[0]).toContain(
+        `void platform ${command} [id] [--plan]`,
+      );
+    },
+  );
 });

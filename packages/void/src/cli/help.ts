@@ -132,10 +132,13 @@ const HELP_TREE: HelpTree = {
           { command: '--resume', description: 'Resume the matching local installation' },
         ],
       },
-      upgrade: lifecycleHelp('Upgrade an installed platform without deleting resources.'),
-      repair: lifecycleHelp('Reconcile drift using the installation ownership manifest.'),
-      disable: lifecycleHelp('Disable platform traffic without deleting data.'),
-      enable: lifecycleHelp('Restore configured traffic for a disabled platform.'),
+      upgrade: lifecycleHelp(
+        'upgrade',
+        'Upgrade an installed platform without deleting resources.',
+      ),
+      repair: lifecycleHelp('repair', 'Reconcile drift using the installation ownership manifest.'),
+      disable: lifecycleHelp('disable', 'Disable platform traffic without deleting data.'),
+      enable: lifecycleHelp('enable', 'Restore configured traffic for a disabled platform.'),
       uninstall: {
         summary: 'Safely remove installer-owned platform resources.',
         usage: ['void platform uninstall [id] [options]'],
@@ -693,12 +696,13 @@ function withProjectOption(summary: string, usage: string): HelpPage {
   };
 }
 
-function lifecycleHelp(summary: string): HelpPage {
+function lifecycleHelp(
+  command: 'upgrade' | 'repair' | 'disable' | 'enable',
+  summary: string,
+): HelpPage {
   return {
     summary,
-    usage: [
-      `void platform ${summary.startsWith('Upgrade') ? 'upgrade' : summary.startsWith('Reconcile') ? 'repair' : 'disable'} [id] [--plan]`,
-    ],
+    usage: [`void platform ${command} [id] [--plan]`],
     options: [{ command: '--plan', description: 'Print the exact plan without making changes' }],
   };
 }
