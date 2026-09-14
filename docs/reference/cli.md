@@ -307,12 +307,13 @@ void platform discover [--account <id>]
 void platform upgrade [id] [--plan]
 void platform repair [id] [--plan]
 void platform disable [id] [--plan]
+void platform enable [id] [--plan]
 void platform uninstall [id] [--plan] [--purge-data] [--delete-zone|--keep-zone]
 ```
 
-An omitted id auto-selects one local installation and prompts when several exist. Non-interactive use with multiple installations requires an id. `discover` verifies remote ownership and endpoint identity before recovering local metadata. `repair` recreates missing installer-owned resources only. `disable` removes traffic routes without deleting data.
+An omitted id auto-selects one local installation and prompts when several exist. Non-interactive use with multiple installations requires an id. `discover` verifies remote ownership and endpoint identity before recovering local metadata. `repair` recreates missing installer-owned resources only. `disable` removes traffic routes without deleting data; repair and upgrade preserve that state. `enable` explicitly restores the configured routes, custom domains, and `workers.dev` endpoints.
 
-Uninstall deletes only installer-owned resources. Data resources are always retained unless `--purge-data` is present, so uninstall does not depend on a live PostgreSQL connection or a potentially stale project count. External PostgreSQL and adopted resources are never deleted. Installer-created zones are kept by default and have a separate default-No prompt.
+Uninstall deletes only installer-owned resources. It re-reads the remote installation checkpoint, inventories Cloudflare, and checks per-Worker and R2 ownership markers before any mutation. Data resources are always retained unless `--purge-data` is present, so uninstall does not depend on a live PostgreSQL connection or a potentially stale project count. External PostgreSQL and adopted resources are never deleted. Installer-created zones are kept by default and have a separate default-No prompt.
 
 ## Deploy
 

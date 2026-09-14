@@ -12,6 +12,11 @@ describe('platform args', () => {
       selector: 'example-a1b2c3d4',
       plan: true,
     });
+    expect(parsePlatformArgs(['enable', 'example-a1b2c3d4'])).toEqual({
+      subcommand: 'enable',
+      selector: 'example-a1b2c3d4',
+      plan: false,
+    });
     expect(parsePlatformArgs(['discover', '--account', 'account-id'])).toEqual({
       subcommand: 'discover',
       account: 'account-id',

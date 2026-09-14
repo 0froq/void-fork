@@ -10,6 +10,7 @@ export const platformSubcommands: Array<SubcommandDef> = [
   { name: 'upgrade', arg: '[id]', description: 'Upgrade an installed Void platform' },
   { name: 'repair', arg: '[id]', description: 'Reconcile an installed Void platform' },
   { name: 'disable', arg: '[id]', description: 'Disable traffic without deleting data' },
+  { name: 'enable', arg: '[id]', description: 'Restore traffic for a disabled platform' },
   { name: 'uninstall', arg: '[id]', description: 'Safely remove an installed Void platform' },
 ];
 
@@ -31,7 +32,7 @@ export type PlatformArgs =
       resume: boolean;
       zone: string;
     }
-  | { subcommand: 'upgrade' | 'repair' | 'disable'; selector: string; plan: boolean }
+  | { subcommand: 'upgrade' | 'repair' | 'disable' | 'enable'; selector: string; plan: boolean }
   | {
       subcommand: 'uninstall';
       selector: string;
@@ -104,7 +105,12 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     }
     throw new Error('platform: Usage: void platform discover [--account <id>].');
   }
-  if (subcommand === 'upgrade' || subcommand === 'repair' || subcommand === 'disable') {
+  if (
+    subcommand === 'upgrade' ||
+    subcommand === 'repair' ||
+    subcommand === 'disable' ||
+    subcommand === 'enable'
+  ) {
     const { selector, plan } = parseSelector(rest, subcommand);
     return { subcommand, selector, plan };
   }
@@ -172,6 +178,6 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   }
 
   throw new Error(
-    'platform: Usage: void platform <connect|list|use|status|discover|install|upgrade|repair|disable|uninstall>.',
+    'platform: Usage: void platform <connect|list|use|status|discover|install|upgrade|repair|disable|enable|uninstall>.',
   );
 }

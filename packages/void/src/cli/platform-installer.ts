@@ -150,7 +150,7 @@ export async function installPlatform(
 ): Promise<PlatformInstallationResult> {
   const now = dependencies.now ?? (() => new Date().toISOString());
   const version = readPlatformRuntimeManifest().platformVersion;
-  const preserveDisabled = existing?.desiredState === 'disabled' || existing?.status === 'disabled';
+  const preserveDisabled = existing?.desiredState === 'disabled';
   let manifest = existing;
   if (!manifest) {
     const createdAt = now();

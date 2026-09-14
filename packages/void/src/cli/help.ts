@@ -98,6 +98,7 @@ const HELP_TREE: HelpTree = {
       { command: 'upgrade [id]', description: 'Upgrade an installed Void platform' },
       { command: 'repair [id]', description: 'Reconcile an installed Void platform' },
       { command: 'disable [id]', description: 'Disable traffic without deleting data' },
+      { command: 'enable [id]', description: 'Restore traffic for a disabled platform' },
       { command: 'uninstall [id]', description: 'Safely remove an installed Void platform' },
     ],
     children: {
@@ -134,6 +135,7 @@ const HELP_TREE: HelpTree = {
       upgrade: lifecycleHelp('Upgrade an installed platform without deleting resources.'),
       repair: lifecycleHelp('Reconcile drift using the installation ownership manifest.'),
       disable: lifecycleHelp('Disable platform traffic without deleting data.'),
+      enable: lifecycleHelp('Restore configured traffic for a disabled platform.'),
       uninstall: {
         summary: 'Safely remove installer-owned platform resources.',
         usage: ['void platform uninstall [id] [options]'],

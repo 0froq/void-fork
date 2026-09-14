@@ -1,5 +1,6 @@
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { setInstallationDesiredState } from '@void/platform';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
@@ -386,7 +387,10 @@ describe('platform installer', () => {
     const disabledUpgrade = await installPlatform(
       upgradedPlan,
       secrets,
-      { ...upgraded.manifest, status: 'disabled' },
+      {
+        ...setInstallationDesiredState(upgraded.manifest, 'disabled', '2026-09-14T00:00:04.000Z'),
+        status: 'disabled',
+      },
       {
         client: upgradeClient,
         deployWorker: async (config) => {
@@ -445,6 +449,39 @@ describe('platform installer', () => {
       expect(config.preview_urls).toBe(false);
       expect(config).not.toHaveProperty('routes');
     }
+
+    const enabledConfigs: Array<Record<string, unknown>> = [];
+    let enabledHealthChecks = 0;
+    const enabledUpgrade = await installPlatform(
+      upgradedPlan,
+      secrets,
+      setInstallationDesiredState(
+        resumedDisabledUpgrade.manifest,
+        'enabled',
+        '2026-09-14T00:00:05.000Z',
+      ),
+      {
+        client: upgradeClient,
+        deployWorker: async (config) => {
+          enabledConfigs.push(config);
+        },
+        migrateDatabase: async () => {},
+        verifyHealth: async () => {
+          enabledHealthChecks++;
+        },
+      },
+    );
+    expect(enabledUpgrade.manifest.status).toBe('installed');
+    expect(enabledUpgrade.manifest.desiredState).toBe('enabled');
+    expect(enabledHealthChecks).toBe(1);
+    expect(enabledConfigs).toHaveLength(4);
+    for (const config of enabledConfigs) {
+      expect(config.workers_dev).toBe(true);
+      expect(config.preview_urls).toBe(true);
+    }
+    expect(
+      enabledConfigs.find((config) => config.name === deployment.resources.dispatchWorker),
+    ).toHaveProperty('routes');
 
     function named(key: string) {
       const resource = byKey.get(key)!;

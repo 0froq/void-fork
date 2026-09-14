@@ -83,7 +83,7 @@ void platform install \
   --zone example.com
 ```
 
-Before changing Cloudflare, the installer shows the complete plan and defaults the confirmation to No. Every create operation is preceded by a durable local intent checkpoint, and ownership is continuously mirrored into the installer-owned routing namespace. A local intent alone is never accepted as remote ownership proof, so a concurrent or ambiguous same-name installation fails closed instead of claiming resources it might later delete.
+Before changing Cloudflare, the installer shows the complete plan and defaults the confirmation to No. Every create operation is preceded by a durable local intent checkpoint, and ownership is continuously mirrored into the installer-owned routing namespace. The installer also stamps installation-specific ownership markers into every platform Worker and the assets R2 bucket. A local intent alone is never accepted as remote ownership proof, so a concurrent or ambiguous same-name installation fails closed instead of claiming resources it might later delete.
 
 If the requested zone does not exist, Void creates it and stops in a `waiting-for-dns` state. Update the domain at its registrar to use the printed Cloudflare nameservers, wait for the zone to become active, then resume:
 
@@ -141,18 +141,20 @@ Local state lives under `~/.void/platforms/`. Manifests and recovery material ar
 - Resume an interrupted install with `void platform install --resume --name <id>`.
 - Inspect drift without changes with `void platform repair [id] --plan`.
 - Recreate only missing installer-owned resources with `void platform repair [id]`. Missing adopted or external resources fail closed.
-- Deploy the packaged current platform runtime and pending database migrations with `void platform upgrade [id]`.
+- Deploy the packaged current platform runtime and pending database migrations with `void platform upgrade [id]`. Upgrade and repair preserve whether traffic is currently enabled or disabled.
 - Recover a lost local manifest from the installation marker in Cloudflare with `void platform discover [--account <id>]`.
 
 Discovery verifies the account, every recorded Cloudflare resource, the routing namespace ownership marker, and the live endpoint identity before writing local state. Cloudflare does not contain the PostgreSQL, GitHub OAuth, or R2 secret values; after losing local recovery material, provide those `VOID_PLATFORM_*` variables again before repair, upgrade, or uninstall.
 
 ## Disable and safely uninstall
 
-Disable all routes, custom domains, and `workers.dev` endpoints without deleting resources or data. A later repair or upgrade restores the configured endpoints:
+Disable all routes, custom domains, and `workers.dev` endpoints without deleting resources or data. Repair and upgrade keep the installation private until traffic is restored explicitly:
 
 ```sh
 void platform disable [id] --plan
 void platform disable [id]
+void platform enable [id] --plan
+void platform enable [id]
 ```
 
 Preview uninstall first:
@@ -175,4 +177,4 @@ To delete installer-owned data:
 void platform uninstall [id] --purge-data
 ```
 
-`--purge-data` is destructive, but still never deletes external PostgreSQL, adopted resources, or a zone unless zone deletion is selected separately. It paginates through and deletes every object in the installer-owned R2 bucket before deleting the bucket. Uninstall checkpoints each resource deletion, so rerunning after a failure skips completed work and safely continues an interrupted bucket purge.
+`--purge-data` is destructive, but still never deletes external PostgreSQL, adopted resources, or a zone unless zone deletion is selected separately. Before any Cloudflare mutation, Void compares the remote installation checkpoint with fresh resource inventory and verifies the ownership markers on every Worker and the R2 bucket. A missing or changed proof stops the operation before it can affect a replacement resource. The R2 marker is preserved while bucket contents are emptied, and the routing namespace is deleted last, so rerunning after a failure skips completed work and safely continues an interrupted purge. A default data-retaining uninstall keeps a final `uninstalled` audit checkpoint in the retained routing namespace.

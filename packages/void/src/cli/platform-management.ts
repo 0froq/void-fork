@@ -59,6 +59,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     args.subcommand !== 'upgrade' &&
     args.subcommand !== 'repair' &&
     args.subcommand !== 'disable' &&
+    args.subcommand !== 'enable' &&
     args.subcommand !== 'uninstall'
   ) {
     throw new Error(`platform: Unsupported lifecycle command ${args.subcommand}.`);
@@ -81,6 +82,14 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       await uninstallPlatform(client, manifest, args);
       return;
     }
+    if (
+      args.subcommand === 'enable' &&
+      manifest.desiredState === 'enabled' &&
+      manifest.status === 'installed'
+    ) {
+      log.info(`${manifest.deployment.displayName} is already enabled.`);
+      return;
+    }
 
     const deployment = manifest.deployment;
     const plan = await createPlatformInstallPlan(
@@ -99,13 +108,33 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     );
     note(
       formatPlatformInstallPlan(plan),
-      args.subcommand === 'upgrade' ? 'Upgrade plan' : 'Repair plan',
+      args.subcommand === 'upgrade'
+        ? 'Upgrade plan'
+        : args.subcommand === 'enable'
+          ? 'Enable plan'
+          : 'Repair plan',
     );
     if (args.plan) {
       outro('No Cloudflare or local installation state was changed.');
       return;
     }
-    const recovery = readInstallationRecoverySecrets(manifest);
+    await verifyPlatformMutationOwnership(
+      client,
+      manifest,
+      new Set(
+        manifest.resources
+          .filter((resource) => isOwnershipVerifiableKind(resource.kind))
+          .map((resource) => resource.key),
+      ),
+    );
+    const installation =
+      args.subcommand === 'enable'
+        ? setInstallationDesiredState(manifest, 'enabled', new Date().toISOString())
+        : manifest;
+    if (installation !== manifest) {
+      writeInstallationManifest(installation);
+    }
+    const recovery = readInstallationRecoverySecrets(installation);
     const bootstrapGitHubLogin =
       process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN || recovery?.bootstrapGitHubLogin || '';
     const bootstrapGitHubId =
@@ -123,7 +152,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       r2AccessKeyId: process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID || '',
       r2SecretAccessKey: process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY || '',
     });
-    const result = await installPlatform(plan, secrets, manifest, { client });
+    const result = await installPlatform(plan, secrets, installation, { client });
     if (result.waitingForDns) {
       note(
         `Wait for ${deployment.application.zoneName} to become active, then rerun this command.`,
@@ -368,6 +397,20 @@ const DATA_RESOURCE_KINDS = new Set([
   'kv-namespace',
   'r2-bucket',
 ]);
+
+function isOwnershipVerifiableKind(kind: InstallationResource['kind']): boolean {
+  return (
+    kind === 'ai-gateway' ||
+    kind === 'dispatch-namespace' ||
+    kind === 'dns-record' ||
+    kind === 'hyperdrive' ||
+    kind === 'kv-namespace' ||
+    kind === 'queue' ||
+    kind === 'r2-bucket' ||
+    kind === 'worker' ||
+    kind === 'zone'
+  );
+}
 
 function shouldDeleteResource(
   resource: InstallationResource,
