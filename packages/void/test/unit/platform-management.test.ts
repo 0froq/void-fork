@@ -335,6 +335,18 @@ describe('platform lifecycle management', () => {
     expect(second.subdomains).toHaveLength(4);
   });
 
+  it('disables public Workers from an interrupted deployment', async () => {
+    const manifest = { ...installedManifest(), status: 'deploying' as const };
+    persist(manifest);
+    const fake = client(manifest);
+
+    await disablePlatform(fake, manifest, false);
+
+    expect(fake.removedRoutes).toBe(1);
+    expect(fake.subdomains).toHaveLength(4);
+    expect(listInstallationManifests()[0]?.status).toBe('disabled');
+  });
+
   it('retains installer-owned data and the zone by default', async () => {
     const manifest = installedManifest();
     persist(manifest);

@@ -92,14 +92,21 @@ const STATUS_TRANSITIONS: Readonly<Record<InstallationStatus, ReadonlyArray<Inst
   {
     draft: ['planned', 'failed', 'uninstalling'],
     planned: ['provisioning', 'failed', 'uninstalling'],
-    provisioning: ['waiting-for-dns', 'waiting-for-oauth', 'deploying', 'failed', 'uninstalling'],
-    'waiting-for-dns': ['provisioning', 'failed', 'uninstalling'],
-    'waiting-for-oauth': ['provisioning', 'deploying', 'failed', 'uninstalling'],
+    provisioning: [
+      'waiting-for-dns',
+      'waiting-for-oauth',
+      'deploying',
+      'disabling',
+      'failed',
+      'uninstalling',
+    ],
+    'waiting-for-dns': ['provisioning', 'disabling', 'failed', 'uninstalling'],
+    'waiting-for-oauth': ['provisioning', 'deploying', 'disabling', 'failed', 'uninstalling'],
     // Re-enter provisioning after a hard interruption. Every provisioning and
     // deployment step is checkpointed/idempotent, so resume safely reconciles
     // resources before redeploying and verifying again.
-    deploying: ['provisioning', 'verifying', 'disabled', 'failed', 'uninstalling'],
-    verifying: ['provisioning', 'installed', 'failed', 'uninstalling'],
+    deploying: ['provisioning', 'verifying', 'disabling', 'disabled', 'failed', 'uninstalling'],
+    verifying: ['provisioning', 'installed', 'disabling', 'failed', 'uninstalling'],
     installed: ['provisioning', 'disabling', 'uninstalling', 'failed'],
     disabling: ['disabled', 'failed', 'uninstalling'],
     disabled: ['provisioning', 'uninstalling', 'failed'],
