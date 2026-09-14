@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { confirm, isCancel, log, note, outro } from '@clack/prompts';
+import { confirm, isCancel, log, note, outro, select } from '@clack/prompts';
 import {
   createPlatformResourceOwnershipMarker,
   parsePlatformInstallationManifest,
@@ -30,6 +30,7 @@ import {
 } from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
+  listInstallationManifests,
   readInstallationRecoverySecrets,
   removeInstallationRecoverySecrets,
   removePlatformConnectionForInstallation,
@@ -148,7 +149,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   ) {
     throw new Error(`platform: Unsupported lifecycle command ${args.subcommand}.`);
   }
-  const manifest = resolveInstallationManifest(args.selector);
+  const manifest = await resolveInstalledPlatformManifest(args.selector);
   const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || '';
   if (!token) {
     throw new Error('platform: Export CLOUDFLARE_API_TOKEN to manage an installed platform.');
@@ -286,7 +287,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     manifest.deployment.installationSlug,
   );
   try {
-    const current = resolveInstallationManifest(args.selector);
+    const current = resolveInstallationManifest(manifest.id);
     const recovery = readInstallationRecoverySecrets(current);
     const databaseUrl =
       process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || recovery?.databaseUrl;
@@ -317,6 +318,43 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   } finally {
     release();
   }
+}
+
+export async function resolveInstalledPlatformManifest(
+  selector: string,
+  dependencies: {
+    interactive?: boolean;
+    selectInstallation?: (
+      manifests: ReadonlyArray<PlatformInstallationManifest>,
+    ) => Promise<string>;
+  } = {},
+): Promise<PlatformInstallationManifest> {
+  if (selector) {
+    return resolveInstallationManifest(selector);
+  }
+  const manifests = listInstallationManifests().filter(
+    (manifest) => manifest.status !== 'uninstalled',
+  );
+  if (manifests.length <= 1) {
+    return resolveInstallationManifest('');
+  }
+  if (!(dependencies.interactive ?? process.stdin.isTTY)) {
+    throw new Error('platform: Multiple local installations exist; specify an installation id.');
+  }
+  const picked = dependencies.selectInstallation
+    ? await dependencies.selectInstallation(manifests)
+    : await select({
+        message: 'Select an installed Void platform:',
+        options: manifests.map((manifest) => ({
+          hint: `${manifest.account.name} · ${manifest.id}`,
+          label: manifest.deployment.displayName,
+          value: manifest.id,
+        })),
+      });
+  if (isCancel(picked)) {
+    throw new Error('platform: Cancelled.');
+  }
+  return resolveInstallationManifest(String(picked));
 }
 
 export async function disablePlatform(

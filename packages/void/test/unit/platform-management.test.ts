@@ -15,6 +15,7 @@ import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
   disablePlatform,
+  resolveInstalledPlatformManifest,
   selectAuthoritativePlatformManifest,
   uninstallPlatform,
   verifyPlatformInstallationOwnership,
@@ -238,6 +239,37 @@ const uninstallArgs = {
 };
 
 describe('platform lifecycle management', () => {
+  it('prompts for an installation when a lifecycle selector is omitted', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-management-selection-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const first = installedManifest();
+    const second = {
+      ...installedManifest(),
+      deployment: {
+        ...installedManifest().deployment,
+        displayName: 'Second',
+        installationSlug: 'second',
+      },
+      id: 'second-b2c3d4e5',
+    };
+    writeInstallationManifest(first);
+    writeInstallationManifest(second);
+
+    await expect(
+      resolveInstalledPlatformManifest('', {
+        interactive: true,
+        selectInstallation: async (manifests) => {
+          expect(manifests.map((manifest) => manifest.id)).toEqual([first.id, second.id]);
+          return second.id;
+        },
+      }),
+    ).resolves.toMatchObject({ id: second.id });
+    await expect(resolveInstalledPlatformManifest('', { interactive: false })).rejects.toThrow(
+      'specify an installation id',
+    );
+  });
+
   it('retries an eventually consistent ownership checkpoint before mutation', async () => {
     const manifest = installedManifest();
     const stale = {
