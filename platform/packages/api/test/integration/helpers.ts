@@ -73,6 +73,7 @@ export type TestEnv = {
   TAIL_SERVICE_NAME?: string;
   PLATFORM_CAPABILITIES?: string;
   PLATFORM_DISPLAY_NAME?: string;
+  PLATFORM_BOOTSTRAP_GITHUB_LOGIN?: string;
   PLATFORM_INSTALLATION_ID?: string;
   PLATFORM_VERSION?: string;
   USAGE_COUNTER: DurableObjectNamespace;

@@ -27,12 +27,41 @@ describe('self-hosted first owner bootstrap', () => {
           `user-${id}`,
           null,
           'installation-a1b2c3d4',
+          { additionalSignupAllowed: true, bootstrapGitHubLogin: `user-${id}` },
         ),
       );
     const users = await Promise.all([create('one'), create('two')]);
     expect(users.filter((user) => user.role === 'admin')).toHaveLength(1);
     expect(users.filter((user) => user.role === 'user')).toHaveLength(1);
     expect(users.every((user) => user.plan === 'custom')).toBe(true);
+  });
+
+  it('allows only the configured GitHub identity to claim an empty installation', async () => {
+    await expect(
+      env.db.transaction((tx) =>
+        createUserForPlatform(
+          tx as unknown as typeof env.db,
+          'github',
+          'attacker',
+          'attacker',
+          null,
+          'installation-a1b2c3d4',
+          { additionalSignupAllowed: false, bootstrapGitHubLogin: 'owner' },
+        ),
+      ),
+    ).rejects.toThrow('signup is restricted');
+    const owner = await env.db.transaction((tx) =>
+      createUserForPlatform(
+        tx as unknown as typeof env.db,
+        'github',
+        'owner-id',
+        'owner',
+        null,
+        'installation-a1b2c3d4',
+        { additionalSignupAllowed: false, bootstrapGitHubLogin: 'owner' },
+      ),
+    );
+    expect(owner.role).toBe('admin');
   });
 
   it('preserves Void Cloud user defaults when no installation id is set', async () => {

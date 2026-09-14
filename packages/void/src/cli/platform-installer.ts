@@ -261,13 +261,7 @@ export async function installPlatform(
         plan.account.id,
         routingKv,
         'signup:allowlist',
-        JSON.stringify([
-          {
-            type: 'github',
-            pattern: secrets.bootstrapGitHubLogin,
-            note: 'Initial platform administrator',
-          },
-        ]),
+        JSON.stringify([]),
       );
       manifest = recordInstallationStep(
         manifest,
@@ -482,6 +476,7 @@ function apiWorkerSecrets(
     GITHUB_CLIENT_ID: secrets.githubClientId,
     GITHUB_CLIENT_SECRET: secrets.githubClientSecret,
     JWT_SECRET: secrets.jwtSecret,
+    PLATFORM_BOOTSTRAP_GITHUB_LOGIN: secrets.bootstrapGitHubLogin,
     PROJECT_SECRET_ACTIVE_KEY_VERSION: 'v1',
     PROJECT_SECRET_KEYS_JSON: JSON.stringify({ v1: secrets.projectSecretKey }),
     R2_ACCESS_KEY_ID: secrets.r2AccessKeyId,

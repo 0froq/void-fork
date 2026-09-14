@@ -112,13 +112,35 @@ export async function createUserForPlatform(
   login: string,
   email: string | null,
   installationId?: string,
+  options?: {
+    additionalSignupAllowed: boolean;
+    bootstrapGitHubLogin: string;
+  },
 ): Promise<User> {
   if (!installationId) {
     return createUser(db, provider, providerId, login, email);
   }
   await db.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
   const [existing] = await db.select({ id: users.id }).from(users).limit(1);
+  if (!existing) {
+    if (
+      provider !== 'github' ||
+      !options?.bootstrapGitHubLogin ||
+      login.toLowerCase() !== options.bootstrapGitHubLogin.toLowerCase()
+    ) {
+      throw new SelfHostedSignupRestrictedError();
+    }
+  } else if (!options?.additionalSignupAllowed) {
+    throw new SelfHostedSignupRestrictedError();
+  }
   return createUser(db, provider, providerId, login, email, existing ? 'user' : 'admin', 'custom');
+}
+
+export class SelfHostedSignupRestrictedError extends Error {
+  constructor() {
+    super('Self-hosted platform signup is restricted.');
+    this.name = 'SelfHostedSignupRestrictedError';
+  }
 }
 
 export async function getUserByProvider(

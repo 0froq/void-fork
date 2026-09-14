@@ -35,6 +35,7 @@ import {
   linkGitHubInstallationToUser,
   linkGitHubIdentity,
   GitHubIdentityAlreadyLinkedError,
+  SelfHostedSignupRestrictedError,
 } from '../db.ts';
 import { sendWelcomeEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
@@ -357,7 +358,9 @@ app.get('/callback', async (context) => {
   if (!user) {
     // Check signup allowlist (new users only)
     const enabled = await context.env.ROUTING.get('signup:enabled');
-    if (enabled === 'true') {
+    const selfHosted = Boolean(context.env.PLATFORM_INSTALLATION_ID);
+    let additionalSignupAllowed = !selfHosted || enabled === 'false';
+    if (enabled === 'true' || (selfHosted && enabled !== 'false')) {
       let allowedByRepoAccess = false;
       if (resolvedProvider === 'github' && previewRepo) {
         try {
@@ -368,26 +371,37 @@ app.get('/callback', async (context) => {
       }
 
       const entries = allowedByRepoAccess ? [] : await getAllowlist(context.env.ROUTING);
-      if (
-        !allowedByRepoAccess &&
-        !isSignupAllowed(resolvedProvider, login, emailVerified ? email : null, entries)
-      ) {
+      additionalSignupAllowed =
+        allowedByRepoAccess ||
+        isSignupAllowed(resolvedProvider, login, emailVerified ? email : null, entries);
+      if (!selfHosted && !additionalSignupAllowed) {
         return context.redirect('/signup-restricted');
       }
     }
-    user = await db.transaction(async (tx) => {
-      const txDb = tx as unknown as typeof db;
-      const newUser = await createUserForPlatform(
-        txDb,
-        resolvedProvider,
-        providerId,
-        login,
-        emailVerified ? email : null,
-        context.env.PLATFORM_INSTALLATION_ID,
-      );
-      await createOAuthAccount(txDb, newUser.id, resolvedProvider, providerId);
-      return newUser;
-    });
+    try {
+      user = await db.transaction(async (tx) => {
+        const txDb = tx as unknown as typeof db;
+        const newUser = await createUserForPlatform(
+          txDb,
+          resolvedProvider,
+          providerId,
+          login,
+          emailVerified ? email : null,
+          context.env.PLATFORM_INSTALLATION_ID,
+          {
+            additionalSignupAllowed,
+            bootstrapGitHubLogin: context.env.PLATFORM_BOOTSTRAP_GITHUB_LOGIN ?? '',
+          },
+        );
+        await createOAuthAccount(txDb, newUser.id, resolvedProvider, providerId);
+        return newUser;
+      });
+    } catch (error) {
+      if (error instanceof SelfHostedSignupRestrictedError) {
+        return context.redirect('/signup-restricted');
+      }
+      throw error;
+    }
     createdUser = true;
   }
 

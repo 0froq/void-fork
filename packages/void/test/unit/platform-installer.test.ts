@@ -65,6 +65,7 @@ describe('platform installer', () => {
       name,
     });
     const deployed: Array<string> = [];
+    let apiSecrets: Record<string, string> | null = null;
     const routingValues = new Map<string, string>();
     let remoteManifest = '';
     const result = await installPlatform(
@@ -104,8 +105,11 @@ describe('platform installer', () => {
             }
           },
         },
-        deployWorker: async (config) => {
+        deployWorker: async (config, secrets) => {
           deployed.push(String(config.name));
+          if (String(config.name).endsWith('-api')) {
+            apiSecrets = secrets;
+          }
         },
         migrateDatabase: async () => {},
         verifyHealth: async () => {},
@@ -120,18 +124,13 @@ describe('platform installer', () => {
       'void-example-tail',
       'void-example-dispatch',
     ]);
+    expect(apiSecrets).toMatchObject({ PLATFORM_BOOTSTRAP_GITHUB_LOGIN: 'octocat' });
     expect(JSON.parse(remoteManifest)).toMatchObject({
       id: result.manifest.id,
       status: 'installed',
     });
     expect(routingValues.get('signup:enabled')).toBe('true');
-    expect(JSON.parse(routingValues.get('signup:allowlist')!)).toEqual([
-      {
-        type: 'github',
-        pattern: 'octocat',
-        note: 'Initial platform administrator',
-      },
-    ]);
+    expect(JSON.parse(routingValues.get('signup:allowlist')!)).toEqual([]);
     expect(listInstallationManifests(directory)).toHaveLength(1);
     expect(readdirSync(join(directory, 'account')).some((name) => name.endsWith('.secrets'))).toBe(
       false,
