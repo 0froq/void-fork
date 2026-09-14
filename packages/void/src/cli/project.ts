@@ -163,6 +163,9 @@ export function attachSelectedPlatform(
       voidInternalStaging: true,
     };
   }
+  if (isLegacyVoidCloudProject(root)) {
+    return { ...config, ...legacyVoidCloudProjectMetadata() };
+  }
   const connection = getActivePlatformConnection();
   if (!connection?.applicationDomain || !connection.proxyUrl) {
     throw new Error(

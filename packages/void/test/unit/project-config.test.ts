@@ -247,6 +247,20 @@ describe('project config', () => {
     );
   });
 
+  it('preserves Void Cloud when relinking a legacy project without a registry connection', () => {
+    const root = makeRoot();
+    process.env.VOID_PLATFORM_REGISTRY_DIR = makeRoot();
+    writeProjectJson(root, { projectId: 'proj_legacy', slug: 'legacy-app' });
+
+    expect(attachSelectedPlatform(root, { projectId: 'proj_new', slug: 'new-app' })).toEqual({
+      applicationDomain: 'void.app',
+      platformUrl: 'https://api.void.cloud',
+      proxyUrl: 'https://proxy.void.cloud',
+      projectId: 'proj_new',
+      slug: 'new-app',
+    });
+  });
+
   it('attaches the selected platform identity to a new project link', () => {
     const root = makeRoot();
     const registry = makeRoot();
