@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   detectProjectState,
   ensureVoidDependency,
+  ensureVoidPlatformConnection,
   extractPnpmWorkspacePackages,
   generateStarterMigration,
   getWorkflowYaml,
@@ -32,11 +33,13 @@ const mockNote = vi.fn();
 const mockOutro = vi.fn();
 const mockLogWarn = vi.fn();
 const mockGetToken = vi.fn();
+const mockGetApiUrl = vi.fn();
 const mockRunLogin = vi.fn();
 const mockSaveToken = vi.fn();
 const mockIsStagingMode = vi.fn();
 const mockListProjects = vi.fn();
 const mockCreateProject = vi.fn();
+const mockDiscoverPlatform = vi.fn();
 let platformRegistryDirectory: string;
 
 describe('GitHub Actions deployment workflows', () => {
@@ -95,11 +98,16 @@ vi.mock('@clack/prompts', () => ({
 }));
 
 vi.mock('../../src/cli/auth', () => ({
+  getApiUrl: (...args: Array<unknown>) => mockGetApiUrl(...args),
   getToken: (...args: Array<unknown>) => mockGetToken(...args),
   runLogin: (...args: Array<unknown>) => mockRunLogin(...args),
   saveToken: (...args: Array<unknown>) => mockSaveToken(...args),
   isStagingMode: (...args: Array<unknown>) => mockIsStagingMode(...args),
   getSiteDomain: () => 'void.app',
+}));
+
+vi.mock('../../src/cli/platform-cmd', () => ({
+  discoverPlatform: (...args: Array<unknown>) => mockDiscoverPlatform(...args),
 }));
 
 vi.mock('../../src/cli/client', () => ({
@@ -234,11 +242,13 @@ afterEach(() => {
   mockOutro.mockReset();
   mockLogWarn.mockReset();
   mockGetToken.mockReset();
+  mockGetApiUrl.mockReset();
   mockRunLogin.mockReset();
   mockSaveToken.mockReset();
   mockIsStagingMode.mockReset();
   mockListProjects.mockReset();
   mockCreateProject.mockReset();
+  mockDiscoverPlatform.mockReset();
 });
 
 beforeEach(() => {
@@ -271,10 +281,38 @@ beforeEach(() => {
     return { status: 0, stdout: '', stderr: '' };
   });
   mockGetToken.mockReturnValue(null);
+  mockGetApiUrl.mockReturnValue('https://api.void.cloud');
   mockRunLogin.mockResolvedValue('token_123');
   mockIsStagingMode.mockReturnValue(false);
   mockListProjects.mockResolvedValue([]);
   mockCreateProject.mockResolvedValue({ id: 'proj_123', slug: 'my-app' });
+  mockDiscoverPlatform.mockResolvedValue({
+    apiUrl: 'https://platform.example.test',
+    applicationDomain: 'apps.example.test',
+    displayName: 'Company Void',
+    installationId: 'company-a1b2c3d4',
+    proxyUrl: 'https://proxy.example.test',
+  });
+});
+
+describe('Void platform deployment setup', () => {
+  it('connects a genuinely new user before attempting platform login', async () => {
+    rmSync(platformRegistryDirectory, { force: true, recursive: true });
+    mockGetApiUrl.mockImplementation(() => {
+      throw new Error('No Void platform selected');
+    });
+    mockText.mockResolvedValue('https://platform.example.test');
+
+    await ensureVoidPlatformConnection('/project');
+
+    expect(mockDiscoverPlatform).toHaveBeenCalledWith('https://platform.example.test');
+    const { getActivePlatformConnection } = await import('../../src/cli/platform-registry.ts');
+    expect(getActivePlatformConnection()).toMatchObject({
+      apiUrl: 'https://platform.example.test',
+      applicationDomain: 'apps.example.test',
+      proxyUrl: 'https://proxy.example.test',
+    });
+  });
 });
 
 describe('extractPnpmWorkspacePackages', () => {

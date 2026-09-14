@@ -77,4 +77,35 @@ describe('legacy Void Cloud authentication', () => {
     expect(getApiUrl(root)).toBe('https://api.void.cloud');
     expect(getToken(root)).toBe('legacy-token');
   });
+
+  it('lets an explicit platform connection supersede a legacy hosted selection', async () => {
+    const root = mkdtempSync('/tmp/void-auth-platform-selection-');
+    directories.push(root);
+    const configDirectory = join(state.home, '.void');
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(
+      join(configDirectory, 'config.json'),
+      JSON.stringify({ api: 'https://api.void.cloud', token: 'legacy-token' }),
+    );
+    const { getApiUrl, getSiteDomain } = await import('../../src/cli/auth.ts');
+    const { attachSelectedPlatform } = await import('../../src/cli/project.ts');
+    const { savePlatformConnection } = await import('../../src/cli/platform-registry.ts');
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://platform.example.test',
+      applicationDomain: 'apps.example.test',
+      displayName: 'Company Void',
+      installationId: null,
+      kind: 'connected',
+      proxyUrl: 'https://proxy.example.test',
+    });
+
+    expect(getApiUrl(root)).toBe('https://platform.example.test');
+    expect(getSiteDomain(root)).toBe('apps.example.test');
+    expect(attachSelectedPlatform(root, { projectId: 'project', slug: 'app' })).toMatchObject({
+      applicationDomain: 'apps.example.test',
+      platformUrl: 'https://platform.example.test',
+      proxyUrl: 'https://proxy.example.test',
+    });
+  });
 });

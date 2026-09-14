@@ -55,7 +55,7 @@ export function hostedPlatformForApiUrl(apiUrl: unknown): HostedPlatform | null 
   return HOSTED_PLATFORMS.find((platform) => platform.apiUrl === normalized) ?? null;
 }
 
-/** Resolve an old ~/.void/config.json API selection without reading its credential fields. */
+/** Resolve an old ~/.void/config.json selection without returning credential values. */
 export function readLegacyHostedPlatformSelection(
   configPath: string = join(homedir(), '.void', 'config.json'),
 ): HostedPlatformSelection | null {
@@ -63,7 +63,7 @@ export function readLegacyHostedPlatformSelection(
   try {
     value = JSON.parse(readFileSync(configPath, 'utf8')) as typeof value;
   } catch {
-    // A legacy keyring entry can outlive its config-file token migration.
+    return null;
   }
   if (value.api !== undefined) {
     const platform = hostedPlatformForApiUrl(value.api);

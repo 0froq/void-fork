@@ -168,14 +168,6 @@ export function attachSelectedPlatform(
     };
   }
   const legacySelection = readLegacyHostedPlatformSelection();
-  if (legacySelection?.source === 'configured-api') {
-    return {
-      ...config,
-      applicationDomain: legacySelection.applicationDomain,
-      platformUrl: legacySelection.apiUrl,
-      proxyUrl: legacySelection.proxyUrl,
-    };
-  }
   if (isLegacyVoidCloudProject(root)) {
     return { ...config, ...legacyVoidCloudProjectMetadata() };
   }

@@ -95,9 +95,6 @@ export function getSiteDomain(root: string = process.cwd()): string {
     readProjectApplicationDomain(root) ??
     (isStagingMode(root) ? VOID_CLOUD_STAGING_PLATFORM.applicationDomain : undefined) ??
     (isLegacyVoidCloudProject(root) ? VOID_CLOUD_PLATFORM.applicationDomain : undefined) ??
-    (legacySelection?.source === 'configured-api'
-      ? legacySelection.applicationDomain
-      : undefined) ??
     getActivePlatformConnection()?.applicationDomain ??
     legacySelection?.applicationDomain;
   if (!domain) {
@@ -343,9 +340,9 @@ export function getApiUrl(root: string = process.cwd()): string {
   const config = readConfig();
   const legacySelection = readLegacyHostedPlatformSelection();
   let apiUrl =
-    config.api ??
     (isLegacyVoidCloudProject(root) ? DEFAULT_API_URL : undefined) ??
     getActivePlatformConnection()?.apiUrl ??
+    config.api ??
     legacySelection?.apiUrl;
   if (!apiUrl) {
     apiUrl = keyringGet('token')

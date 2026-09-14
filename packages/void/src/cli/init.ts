@@ -24,6 +24,8 @@ import { detectAgents, getAgentById, getPackageDir, type AgentConfig } from './a
 import { maybeSetupDeployProject } from './deploy-setup.ts';
 import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { cliTitle } from './output.ts';
+import { discoverPlatform } from './platform-cmd.ts';
+import { savePlatformConnection } from './platform-registry.ts';
 import { formatProjectCommand, resolveWranglerArgv } from './preset.ts';
 import {
   readDeploymentPlatform,
@@ -1844,7 +1846,7 @@ async function promptDeploymentPlatform(root: string): Promise<DeploymentPlatfor
       {
         value: 'void',
         label: current === 'void' ? 'Void [current]' : 'Void',
-        hint: 'Deploy to the managed Void Platform.',
+        hint: "Deploy to your company's Void Platform.",
       },
       {
         value: 'none',
@@ -1862,6 +1864,39 @@ async function promptDeploymentPlatform(root: string): Promise<DeploymentPlatfor
   const platform = choice as DeploymentPlatform;
   writeDeploymentPlatform(root, platform);
   return platform;
+}
+
+export async function ensureVoidPlatformConnection(root: string): Promise<void> {
+  try {
+    const { getApiUrl, getSiteDomain } = await import('./auth.ts');
+    getApiUrl(root);
+    getSiteDomain(root);
+    return;
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('No Void platform selected')) {
+      throw error;
+    }
+    // A genuinely new user must identify the company platform before login.
+  }
+  const value = await text({
+    message: 'Void platform API URL:',
+    placeholder: 'https://platform.example.com',
+  });
+  if (isCancel(value) || typeof value === 'symbol') {
+    cancel('Setup cancelled.');
+    process.exit(0);
+  }
+  const discovery = await discoverPlatform(String(value));
+  savePlatformConnection({
+    accountId: null,
+    apiUrl: discovery.apiUrl,
+    applicationDomain: discovery.applicationDomain,
+    displayName: discovery.displayName,
+    installationId: discovery.installationId,
+    kind: discovery.installationId ? 'installed' : 'connected',
+    proxyUrl: discovery.proxyUrl,
+  });
+  log.success(`Connected to ${discovery.displayName} at ${discovery.apiUrl}.`);
 }
 
 type CloudflareAccount = {
@@ -3807,6 +3842,9 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   if (!targeted && deploymentPlatform === 'cloudflare') {
     await setupCloudflareDeployment(root);
+  }
+  if (!targeted && deploymentPlatform === 'void') {
+    await ensureVoidPlatformConnection(root);
   }
 
   // Step 9: GitHub Actions for either configured deployment target.
