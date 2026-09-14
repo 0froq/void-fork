@@ -284,6 +284,20 @@ export class PlatformCloudflareClient {
     return response.text();
   }
 
+  async deleteKvValue(accountId: string, namespaceId: string, key: string): Promise<void> {
+    try {
+      await this.request(
+        `/accounts/${encodeURIComponent(accountId)}/storage/kv/namespaces/${encodeURIComponent(namespaceId)}/values/${encodeURIComponent(key)}`,
+        { method: 'DELETE' },
+      );
+    } catch (error) {
+      if (error instanceof PlatformCloudflareApiError && error.status === 404) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   async deleteResource(accountId: string, kind: string, id: string): Promise<void> {
     const account = encodeURIComponent(accountId);
     const encoded = encodeURIComponent(id);

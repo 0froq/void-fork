@@ -83,7 +83,7 @@ const STATUS_TRANSITIONS: Readonly<Record<InstallationStatus, ReadonlyArray<Inst
     deploying: ['verifying', 'failed', 'uninstalling'],
     verifying: ['installed', 'failed', 'uninstalling'],
     installed: ['provisioning', 'disabling', 'uninstalling', 'failed'],
-    disabling: ['disabled', 'failed'],
+    disabling: ['disabled', 'failed', 'uninstalling'],
     disabled: ['provisioning', 'uninstalling', 'failed'],
     uninstalling: ['uninstalled', 'failed'],
     uninstalled: [],
