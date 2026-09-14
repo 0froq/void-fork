@@ -4,6 +4,7 @@ import { setInstallationDesiredState } from '@void/platform';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
+  acquirePlatformDatabaseLifecycleLockConnection,
   installPlatform,
   claimPlatformDatabaseConnection,
   createPlatformInstallationSecrets,
@@ -51,6 +52,43 @@ function planningClient() {
 
 describe('platform installer', () => {
   const claimDatabase = async () => {};
+  const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('serializes lifecycle changes with the claimed PostgreSQL database', async () => {
+    const queries: Array<{ sql: string; values?: ReadonlyArray<unknown> }> = [];
+    const connection = {
+      query: async <Row extends Record<string, unknown>>(
+        sql: string,
+        values?: ReadonlyArray<unknown>,
+      ) => {
+        queries.push({ sql, values });
+        if (sql.includes('FROM "__void_platform_installation"')) {
+          return {
+            rows: [
+              { installation_id: 'install-one', ownership_nonce: 'nonce-one' },
+            ] as unknown as ReadonlyArray<Row>,
+          };
+        }
+        if (sql.includes('pg_try_advisory_lock')) {
+          return { rows: [{ acquired: true }] as unknown as ReadonlyArray<Row> };
+        }
+        return { rows: [] as ReadonlyArray<Row> };
+      },
+    };
+    const release = await acquirePlatformDatabaseLifecycleLockConnection(
+      connection,
+      'install-one',
+      'nonce-one',
+    );
+    await release();
+    await release();
+
+    expect(queries.filter(({ sql }) => sql.includes('pg_try_advisory_lock'))).toHaveLength(1);
+    expect(queries.filter(({ sql }) => sql.includes('pg_advisory_unlock'))).toHaveLength(1);
+    expect(queries.find(({ sql }) => sql.includes('pg_try_advisory_lock'))?.values).toEqual([
+      'void-platform-lifecycle-v1:install-one:nonce-one',
+    ]);
+  });
 
   it('claims only an empty database or an existing matching claim', async () => {
     const queries: Array<string> = [];
@@ -138,6 +176,7 @@ describe('platform installer', () => {
       }),
       null,
       {
+        acquireDatabaseLifecycleLock,
         claimDatabase: async (_url, installationId, ownershipNonce) => {
           databaseClaims.push([installationId, ownershipNonce]);
         },
@@ -239,6 +278,7 @@ describe('platform installer', () => {
       }),
       null,
       {
+        acquireDatabaseLifecycleLock,
         claimDatabase,
         client: {
           createAiGateway: async () => {
@@ -316,6 +356,7 @@ describe('platform installer', () => {
       r2SecretAccessKey: 'r2-secret',
     });
     const installed = await installPlatform(initialPlan, secrets, null, {
+      acquireDatabaseLifecycleLock,
       claimDatabase,
       client: {
         createAiGateway: async (_account, name) => ({ id: name, name }),
@@ -415,6 +456,7 @@ describe('platform installer', () => {
       putR2Object: async () => {},
     };
     const upgraded = await installPlatform(upgradedPlan, secrets, installed.manifest, {
+      acquireDatabaseLifecycleLock,
       claimDatabase,
       client: upgradeClient,
       deployWorker: async (config) => {
@@ -448,6 +490,7 @@ describe('platform installer', () => {
         status: 'disabled',
       },
       {
+        acquireDatabaseLifecycleLock,
         claimDatabase,
         client: upgradeClient,
         deployWorker: async (config) => {
@@ -474,6 +517,7 @@ describe('platform installer', () => {
     let interrupted = false;
     await expect(
       installPlatform(upgradedPlan, secrets, disabledUpgrade.manifest, {
+        acquireDatabaseLifecycleLock,
         claimDatabase,
         client: upgradeClient,
         deployWorker: async () => {
@@ -495,6 +539,7 @@ describe('platform installer', () => {
       secrets,
       failedDisabledUpgrade,
       {
+        acquireDatabaseLifecycleLock,
         claimDatabase,
         client: upgradeClient,
         deployWorker: async (config) => {
@@ -523,6 +568,7 @@ describe('platform installer', () => {
         '2026-09-14T00:00:05.000Z',
       ),
       {
+        acquireDatabaseLifecycleLock,
         claimDatabase,
         client: upgradeClient,
         deployWorker: async (config) => {
@@ -550,6 +596,7 @@ describe('platform installer', () => {
     let replacedWorkerDeploys = 0;
     await expect(
       installPlatform(upgradedPlan, secrets, enabledUpgrade.manifest, {
+        acquireDatabaseLifecycleLock,
         claimDatabase,
         client: upgradeClient,
         deployWorker: async () => {

@@ -4,6 +4,7 @@ import { cliTitle } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import { PlatformCloudflareClient, type CloudflareAccount } from './platform-cloudflare.ts';
 import {
+  acquirePlatformDatabaseLifecycleLock,
   createPlatformInstallationSecrets,
   installPlatform,
   resolveBootstrapGitHubId,
@@ -184,6 +185,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         (await promptSecret('R2 secret access key:')),
     });
     const result = await installPlatform(plan, secrets, existing, {
+      acquireDatabaseLifecycleLock: acquirePlatformDatabaseLifecycleLock,
       client,
       revalidateBeforeWorkerDeploy: (manifest, action) =>
         revalidatePlatformInstallAction(client, plan, manifest, action),

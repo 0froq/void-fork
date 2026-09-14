@@ -62,6 +62,11 @@ type InstallerClient = Pick<
 >;
 
 export type PlatformInstallerDependencies = Readonly<{
+  acquireDatabaseLifecycleLock: (
+    databaseUrl: string,
+    installationId: string,
+    ownershipNonce: string,
+  ) => Promise<() => Promise<void>>;
   claimDatabase?: (
     databaseUrl: string,
     installationId: string,
@@ -186,8 +191,14 @@ export async function installPlatform(
   }
   writePendingInstallationSecrets(manifest, secretCheckpoint(secrets));
 
+  let releaseDatabaseLock: (() => Promise<void>) | null = null;
   try {
     await (dependencies.claimDatabase ?? claimPlatformDatabase)(
+      secrets.databaseUrl,
+      manifest.id,
+      manifest.ownershipNonce,
+    );
+    releaseDatabaseLock = await dependencies.acquireDatabaseLifecycleLock(
       secrets.databaseUrl,
       manifest.id,
       manifest.ownershipNonce,
@@ -415,6 +426,8 @@ export async function installPlatform(
       }
     }
     throw error;
+  } finally {
+    await releaseDatabaseLock?.();
   }
 }
 
@@ -677,12 +690,81 @@ export async function claimPlatformDatabase(
   }
 }
 
+export async function acquirePlatformDatabaseLifecycleLock(
+  databaseUrl: string,
+  installationId: string,
+  ownershipNonce: string,
+): Promise<() => Promise<void>> {
+  const { Pool } = await import('pg');
+  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+  const client = await pool.connect();
+  try {
+    const releaseConnectionLock = await acquirePlatformDatabaseLifecycleLockConnection(
+      client,
+      installationId,
+      ownershipNonce,
+    );
+    return async () => {
+      try {
+        await releaseConnectionLock();
+      } finally {
+        client.release();
+        await pool.end();
+      }
+    };
+  } catch (error) {
+    client.release();
+    await pool.end();
+    throw error;
+  }
+}
+
 type DatabaseClaimConnection = Readonly<{
   query: <Row extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
     values?: ReadonlyArray<unknown>,
   ) => Promise<{ rows: ReadonlyArray<Row> }>;
 }>;
+
+export async function acquirePlatformDatabaseLifecycleLockConnection(
+  client: DatabaseClaimConnection,
+  installationId: string,
+  ownershipNonce: string,
+): Promise<() => Promise<void>> {
+  const claim = await client.query<{ installation_id: string; ownership_nonce: string }>(
+    `SELECT "installation_id", "ownership_nonce"
+     FROM "__void_platform_installation"
+     WHERE "singleton" = true`,
+  );
+  const owner = claim.rows[0];
+  if (
+    !owner ||
+    owner.installation_id !== installationId ||
+    owner.ownership_nonce !== ownershipNonce
+  ) {
+    throw new Error(
+      'platform: The PostgreSQL database ownership claim does not match this installation.',
+    );
+  }
+  const lockIdentity = `void-platform-lifecycle-v1:${installationId}:${ownershipNonce}`;
+  const result = await client.query<{ acquired: boolean }>(
+    'SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS "acquired"',
+    [lockIdentity],
+  );
+  if (result.rows[0]?.acquired !== true) {
+    throw new Error(
+      `platform: Another lifecycle operation is active for installation ${installationId} on another host.`,
+    );
+  }
+  let released = false;
+  return async () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockIdentity]);
+  };
+}
 
 export async function claimPlatformDatabaseConnection(
   client: DatabaseClaimConnection,

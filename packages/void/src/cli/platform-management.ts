@@ -14,6 +14,7 @@ import {
 import type { PlatformArgs } from './platform-args.ts';
 import { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import {
+  acquirePlatformDatabaseLifecycleLock,
   createPlatformInstallationSecrets,
   installPlatform,
   REMOTE_INSTALLATION_MANIFEST_KEY,
@@ -206,6 +207,9 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       r2SecretAccessKey: process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY || '',
     });
     const result = await installPlatform(plan, secrets, installation, {
+      // runInstalledPlatformCommand holds the database session lock across the
+      // entire replan and mutation sequence.
+      acquireDatabaseLifecycleLock: async () => async () => {},
       client,
       revalidateBeforeWorkerDeploy: (manifest, action) =>
         revalidatePlatformInstallAction(client, plan, manifest, action),
@@ -229,7 +233,25 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     manifest.deployment.installationSlug,
   );
   try {
-    await execute(resolveInstallationManifest(args.selector));
+    const current = resolveInstallationManifest(args.selector);
+    const recovery = readInstallationRecoverySecrets(current);
+    const databaseUrl =
+      process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || recovery?.databaseUrl;
+    if (!databaseUrl) {
+      throw new Error(
+        'platform: DATABASE_URL is required to safely serialize lifecycle changes across hosts.',
+      );
+    }
+    const releaseDatabase = await acquirePlatformDatabaseLifecycleLock(
+      databaseUrl,
+      current.id,
+      current.ownershipNonce,
+    );
+    try {
+      await execute(current);
+    } finally {
+      await releaseDatabase();
+    }
   } finally {
     release();
   }
