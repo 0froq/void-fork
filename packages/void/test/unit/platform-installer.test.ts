@@ -206,7 +206,7 @@ describe('platform installer', () => {
             throw new Error('must wait for DNS');
           },
           createKvNamespace: async () => {
-            throw new Error('must wait for DNS');
+            return { id: 'routing-kv-id', name: plan.deployment.resources.routingKv };
           },
           createR2Bucket: async () => {
             throw new Error('must wait for DNS');
@@ -221,7 +221,7 @@ describe('platform installer', () => {
             throw new Error('must wait for DNS');
           },
           putKvValue: async () => {
-            throw new Error('must wait for DNS');
+            // The remote recovery checkpoint is established before waiting.
           },
           putR2Object: async () => {
             throw new Error('must wait for DNS');
@@ -231,7 +231,10 @@ describe('platform installer', () => {
     );
     expect(result.waitingForDns).toBe(true);
     expect(result.manifest.status).toBe('waiting-for-dns');
-    expect(result.manifest.resources).toHaveLength(1);
+    expect(result.manifest.resources.map((resource) => resource.key).sort()).toEqual([
+      'routing-kv',
+      'zone',
+    ]);
   });
 
   it('redeploys every Worker while reusing provisioned resources on upgrade', async () => {

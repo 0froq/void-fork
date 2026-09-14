@@ -270,6 +270,9 @@ export async function uninstallPlatform(
   dependencies: PlatformManagementDependencies = {},
 ): Promise<void> {
   const retainData = !args.purgeData;
+  const hasRoutingCheckpoint = manifest.resources.some(
+    (resource) => resource.key === 'routing-kv' && resource.state === 'ready',
+  );
   const createdZone = manifest.resources.find(
     (resource) => resource.key === 'zone' && resource.ownership === 'created',
   );
@@ -319,6 +322,7 @@ export async function uninstallPlatform(
       .filter(
         (resource) =>
           shouldDeleteResource(resource, retainData, deleteZone) &&
+          (hasRoutingCheckpoint || resource.kind === 'zone') &&
           !(
             resource.kind === 'dns-record' &&
             !manifest.resources.some((entry) => entry.key === 'zone')
@@ -327,19 +331,22 @@ export async function uninstallPlatform(
       .map((resource) => resource.key),
   );
   const ownershipTargets = new Set([
-    'routing-kv',
+    ...(hasRoutingCheckpoint ? ['routing-kv'] : []),
     'zone',
     ...manifest.resources
       .filter((resource) => resource.kind === 'worker')
       .map((resource) => resource.key),
     ...resourcesToDelete,
   ]);
-  const missingResources = await verifyPlatformMutationOwnership(
-    client,
-    manifest,
-    ownershipTargets,
-    { allowDeletedRoutingCheckpoint: args.purgeData },
-  );
+  let missingResources: ReadonlySet<string>;
+  if (hasRoutingCheckpoint) {
+    missingResources = await verifyPlatformMutationOwnership(client, manifest, ownershipTargets, {
+      allowDeletedRoutingCheckpoint: args.purgeData,
+    });
+  } else {
+    await verifyPlatformInstallationOwnership(client, manifest);
+    missingResources = new Set();
+  }
 
   let next = transitionInstallation(manifest, 'uninstalling', new Date().toISOString());
   writeInstallationManifest(next);
@@ -380,6 +387,11 @@ export async function uninstallPlatform(
     );
     for (const resource of resources) {
       if (resource.state !== 'ready') {
+        continue;
+      }
+      if (!hasRoutingCheckpoint && resource.kind !== 'zone') {
+        next = updateResourceState(next, resource.key, 'retained');
+        writeInstallationManifest(next);
         continue;
       }
       if (!shouldDeleteResource(resource, retainData, deleteZone)) {

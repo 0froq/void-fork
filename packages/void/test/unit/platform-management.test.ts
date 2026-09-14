@@ -459,6 +459,21 @@ describe('platform lifecycle management', () => {
     ).toBe('retained');
   });
 
+  it('safely uninstalls a DNS-wait checkpoint created before routing storage', async () => {
+    const manifest = {
+      ...installedManifest(),
+      endpoints: { apiUrl: null, dashboardUrl: null, proxyUrl: null },
+      resources: installedManifest().resources.filter((resource) => resource.key === 'zone'),
+      status: 'waiting-for-dns' as const,
+    };
+    persist(manifest);
+    const fake = client(manifest);
+    await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
+    expect(fake.deleted).toEqual([]);
+    expect(listInstallationManifests()[0]).toMatchObject({ status: 'uninstalled' });
+    expect(listInstallationManifests()[0]!.resources[0]).toMatchObject({ state: 'retained' });
+  });
+
   it('resumes after routes were removed but remote disable checkpointing failed', async () => {
     const manifest = installedManifest();
     persist(manifest);

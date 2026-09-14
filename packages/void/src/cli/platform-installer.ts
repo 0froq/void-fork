@@ -183,6 +183,35 @@ export async function installPlatform(
       writeInstallationManifest(manifest);
     }
 
+    // Establish the durable installation checkpoint before creating any
+    // resource that may need to be reconciled or removed after interruption.
+    const routingAction = plan.actions.find((action) => action.key === 'routing-kv')!;
+    if (routingAction.action === 'adopt') {
+      throw new Error('platform: The routing checkpoint cannot be adopted.');
+    }
+    if (routingAction.action === 'reuse') {
+      if (
+        !manifest.resources.some((resource) => resource.key === routingAction.key) &&
+        routingAction.id
+      ) {
+        manifest = recordResource(manifest, routingAction, routingAction.id, 'created', now());
+        writeInstallationManifest(manifest);
+      }
+    } else {
+      manifest = recordProvisionIntent(manifest, routingAction, now());
+      writeInstallationManifest(manifest);
+      const routing = await createResource(
+        dependencies.client,
+        plan,
+        routingAction,
+        secrets.databaseUrl,
+        '',
+      );
+      manifest = recordResource(manifest, routingAction, routing.id, 'created', now());
+      writeInstallationManifest(manifest);
+    }
+    await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+
     const zoneAction = plan.actions.find((action) => action.key === 'zone')!;
     let zone = plan.zone;
     if (zoneAction.action === 'create') {
@@ -213,7 +242,7 @@ export async function installPlatform(
     }
 
     for (const action of plan.actions.filter(
-      (entry) => entry.kind !== 'zone' && entry.kind !== 'worker',
+      (entry) => entry.key !== 'routing-kv' && entry.kind !== 'zone' && entry.kind !== 'worker',
     )) {
       if (action.action === 'adopt') {
         if (!action.id) {
@@ -228,6 +257,7 @@ export async function installPlatform(
         if (!manifest.resources.some((resource) => resource.key === action.key) && action.id) {
           manifest = recordResource(manifest, action, action.id, 'created', now());
           writeInstallationManifest(manifest);
+          await writeR2OwnershipMarkerIfNeeded(dependencies.client, plan, manifest, action);
           await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
         }
         continue;
@@ -243,29 +273,8 @@ export async function installPlatform(
       );
       manifest = recordResource(manifest, action, resource.id, 'created', now());
       writeInstallationManifest(manifest);
+      await writeR2OwnershipMarkerIfNeeded(dependencies.client, plan, manifest, action);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-    }
-
-    const assetsBucket = manifest.resources.find(
-      (resource) => resource.key === 'assets-bucket' && resource.state === 'ready',
-    );
-    if (assetsBucket?.ownership === 'created') {
-      await dependencies.client.putR2Object(
-        plan.account.id,
-        assetsBucket.name,
-        PLATFORM_R2_OWNERSHIP_MARKER_KEY,
-        JSON.stringify(
-          createPlatformResourceOwnershipMarker({
-            accountId: plan.account.id,
-            installationId: manifest.id,
-            ownershipNonce: manifest.ownershipNonce,
-            resourceId: assetsBucket.id,
-            resourceKey: assetsBucket.key,
-            resourceKind: assetsBucket.kind,
-            resourceName: assetsBucket.name,
-          }),
-        ),
-      );
     }
 
     const runtimeDirectory = getPlatformRuntimeDirectory();
@@ -389,6 +398,39 @@ export async function installPlatform(
     }
     throw error;
   }
+}
+
+async function writeR2OwnershipMarkerIfNeeded(
+  client: InstallerClient,
+  plan: PlatformInstallPlan,
+  manifest: PlatformInstallationManifest,
+  action: PlatformInstallPlanAction,
+): Promise<void> {
+  if (action.kind !== 'r2-bucket') {
+    return;
+  }
+  const bucket = manifest.resources.find(
+    (resource) => resource.key === action.key && resource.state === 'ready',
+  );
+  if (!bucket || bucket.ownership !== 'created') {
+    return;
+  }
+  await client.putR2Object(
+    plan.account.id,
+    bucket.name,
+    PLATFORM_R2_OWNERSHIP_MARKER_KEY,
+    JSON.stringify(
+      createPlatformResourceOwnershipMarker({
+        accountId: plan.account.id,
+        installationId: manifest.id,
+        ownershipNonce: manifest.ownershipNonce,
+        resourceId: bucket.id,
+        resourceKey: bucket.key,
+        resourceKind: bucket.kind,
+        resourceName: bucket.name,
+      }),
+    ),
+  );
 }
 
 function saveInstalledPlatformConnection(
