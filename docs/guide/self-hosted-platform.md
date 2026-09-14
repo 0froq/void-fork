@@ -182,7 +182,7 @@ void platform uninstall [id] --plan
 The default uninstall policy is ownership-aware:
 
 - Adopted or external resources are never deleted.
-- Transient Queues and installer-created DNS are removed. Routes and custom domains are retained for explicit dashboard cleanup.
+- Transient Queues are removed. DNS records, routes, and custom domains are retained for explicit dashboard cleanup because Cloudflare cannot condition deletion on the exact configuration the installer verified.
 - Installer-owned Workers, KV, R2, Hyperdrive, dispatch, and AI Gateway resources are retained and recorded in the final manifest by default.
 - External PostgreSQL is never deleted.
 - Zones are always retained. A zone can contain unrelated DNS, settings, and Cloudflare products that the installer cannot exhaustively prove ownership of, so inspect and delete an installer-created zone manually after uninstall if appropriate. The legacy `--delete-zone` flag fails before mutation with this guidance.

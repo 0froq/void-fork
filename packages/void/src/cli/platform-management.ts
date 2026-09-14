@@ -514,7 +514,7 @@ export async function uninstallPlatform(
       ? 'Delete safely identifiable installer-owned data (--purge-data); retain Workers, R2, AI Gateway, and external PostgreSQL for manual cleanup.'
       : 'Retain installer-owned data; external PostgreSQL is never deleted.';
   note(
-    `Disable all platform traffic through installation-owned routing storage.\nRetain routes and custom domains for explicit dashboard cleanup.\nDelete installer-owned Queues.\n${dataMessage}\n${
+    `Disable all platform traffic through installation-owned routing storage.\nRetain DNS records, routes, and custom domains for explicit dashboard cleanup.\nDelete installer-owned Queues.\n${dataMessage}\n${
       createdZone
         ? `Keep zone ${createdZone.name} for explicit manual cleanup.`
         : 'Never delete the adopted application zone.'
@@ -800,6 +800,13 @@ function shouldDeleteResource(resource: InstallationResource, retainData: boolea
   // API exposes no durable ownership marker, so automatic deletion could
   // remove a replacement gateway created by another installation.
   if (resource.kind === 'ai-gateway') {
+    return false;
+  }
+  // DNS record deletion is id-addressed but Cloudflare exposes no conditional
+  // delete tied to the exact type/content/proxy tuple we verified. A dashboard
+  // edit can retain the id while repurposing the record, so keep it for manual
+  // cleanup instead of racing an unrelated production record.
+  if (resource.kind === 'dns-record') {
     return false;
   }
   // Cloudflare exposes no server-enforced condition tying object deletion to

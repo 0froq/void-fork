@@ -719,7 +719,7 @@ describe('platform lifecycle management', () => {
     await uninstallPlatform(fake, manifest, uninstallArgs, {
       interactive: false,
     });
-    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual(['dns-record', 'queue', 'queue']);
+    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual(['queue', 'queue']);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
     const result = listInstallationManifests()[0]!;
     expect(result.status).toBe('uninstalled');
@@ -793,7 +793,7 @@ describe('platform lifecycle management', () => {
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
   });
 
-  it('refuses to delete an installer DNS record that was repurposed', async () => {
+  it('retains an installer DNS record even when it was repurposed', async () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client(manifest);
@@ -807,13 +807,15 @@ describe('platform lifecycle management', () => {
           type: 'CNAME',
         }));
 
-    await expect(
-      uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false }),
-    ).rejects.toThrow('changed configuration after installation');
+    await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
 
-    expect(fake.deleted).toEqual([]);
-    expect(fake.removedRoutes).toBe(0);
-    expect(listInstallationManifests()[0]?.status).toBe('installed');
+    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual(['queue', 'queue']);
+    expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
+    expect(
+      listInstallationManifests()[0]?.resources.find(
+        (resource) => resource.key === 'application-dns',
+      ),
+    ).toMatchObject({ state: 'retained' });
   });
 
   it('records the completed uninstall in retained routing storage', async () => {
@@ -823,12 +825,12 @@ describe('platform lifecycle management', () => {
     await uninstallPlatform(fake, manifest, uninstallArgs, {
       interactive: false,
     });
-    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual(['dns-record', 'queue', 'queue']);
+    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual(['queue', 'queue']);
     expect(fake.remoteWrites.map((value) => JSON.parse(value).status)).toContain('uninstalled');
     const retained = listInstallationManifests()[0]!.resources.filter(
       (resource) => resource.state === 'retained',
     );
-    expect(retained).toHaveLength(12);
+    expect(retained).toHaveLength(13);
   });
 
   it('refuses automatic deletion of an installer-created zone', async () => {
@@ -861,7 +863,7 @@ describe('platform lifecycle management', () => {
         interactive: false,
       },
     );
-    expect(fake.deleted).toHaveLength(8);
+    expect(fake.deleted).toHaveLength(7);
     expect(fake.deleted).not.toContainEqual(['ai-gateway', 'ai-gateway-id']);
     expect(fake.emptiedBuckets).toEqual([]);
     expect(fake.preservedBucketKeys).toEqual([]);
