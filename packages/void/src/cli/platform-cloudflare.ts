@@ -446,10 +446,18 @@ export class PlatformCloudflareClient {
       { method: 'POST', body: JSON.stringify({ name }) },
     );
     const resultName = typeof result.name === 'string' ? result.name : name;
+    const fingerprint =
+      typeof result.creation_date === 'string' && result.creation_date
+        ? result.creation_date
+        : (await this.listR2Buckets(accountId)).find((bucket) => bucket.name === resultName)
+            ?.fingerprint;
+    if (!fingerprint) {
+      throw new Error(
+        `platform: Cloudflare created R2 bucket ${JSON.stringify(resultName)} without returning a verifiable creation fingerprint.`,
+      );
+    }
     return {
-      ...(typeof result.creation_date === 'string' && result.creation_date
-        ? { fingerprint: result.creation_date }
-        : {}),
+      fingerprint,
       id: resultName,
       name: resultName,
     };

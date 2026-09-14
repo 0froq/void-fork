@@ -50,6 +50,7 @@ import { join } from 'pathslash';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
+  type CloudflareNamedResource,
   type CloudflareWorkerCustomDomainOrigin,
   type PlatformCloudflareClient,
 } from './platform-cloudflare.ts';
@@ -128,6 +129,8 @@ type InstallerClient = Pick<
       PlatformCloudflareClient,
       | 'deleteKvValue'
       | 'getWorkerPlainTextBindings'
+      | 'getR2Object'
+      | 'listR2Buckets'
       | 'listWorkerDomains'
       | 'listWorkerNames'
       | 'listWorkerServiceRoutes'
@@ -381,6 +384,7 @@ export async function installPlatform(
   }
   try {
     if (existing) {
+      await repairInterruptedR2OwnershipMarker(dependencies.client, plan, manifest);
       await dependencies.verifyExistingOwnership?.(
         manifest,
         authoritative !== null && authoritative !== undefined,
@@ -522,6 +526,7 @@ export async function installPlatform(
         'created',
         now(),
         secrets.databaseUrl,
+        resource.fingerprint,
       );
       writeInstallationManifest(manifest);
       await writeR2OwnershipMarkerIfNeeded(dependencies.client, plan, manifest, action);
@@ -1016,6 +1021,52 @@ async function writeR2OwnershipMarkerIfNeeded(
   );
 }
 
+export async function repairInterruptedR2OwnershipMarker(
+  client: InstallerClient,
+  plan: PlatformInstallPlan,
+  manifest: PlatformInstallationManifest,
+): Promise<void> {
+  const recorded = manifest.resources.find(
+    (resource) =>
+      resource.key === 'assets-bucket' &&
+      resource.kind === 'r2-bucket' &&
+      resource.ownership === 'created' &&
+      resource.state === 'ready',
+  );
+  if (!recorded || !client.getR2Object || !client.listR2Buckets) {
+    return;
+  }
+  const marker = await client.getR2Object(
+    plan.account.id,
+    recorded.name,
+    PLATFORM_R2_OWNERSHIP_MARKER_KEY,
+  );
+  // Never replace an invalid or foreign marker. Only the missing-marker state
+  // is recoverable, and only when the live bucket generation is the one whose
+  // creation fingerprint was durably checkpointed before the failed write.
+  if (marker !== null) {
+    return;
+  }
+  const matches = (await client.listR2Buckets(plan.account.id)).filter(
+    (bucket) => bucket.id === recorded.id && bucket.name === recorded.name,
+  );
+  const live = matches.length === 1 ? matches[0] : undefined;
+  if (
+    !live?.fingerprint ||
+    recorded.configHash !== r2BucketConfigHash(recorded.name, live.fingerprint)
+  ) {
+    return;
+  }
+  await writeR2OwnershipMarkerIfNeeded(client, plan, manifest, {
+    action: 'reuse',
+    id: recorded.id,
+    key: recorded.key,
+    kind: recorded.kind,
+    name: recorded.name,
+    reason: 'Resume the interrupted ownership-marker write.',
+  });
+}
+
 function saveInstalledPlatformConnection(
   plan: PlatformInstallPlan,
   manifest: PlatformInstallationManifest,
@@ -1134,7 +1185,7 @@ async function createResource(
   action: PlatformInstallPlanAction,
   databaseUrl: string,
   zoneId: string,
-): Promise<{ id: string; name: string }> {
+): Promise<CloudflareNamedResource> {
   switch (action.kind) {
     case 'ai-gateway':
       return client.createAiGateway(plan.account.id, action.name);
@@ -1162,6 +1213,7 @@ function recordResource(
   ownership: InstallationResource['ownership'] | undefined,
   now: string,
   databaseUrl?: string,
+  resourceFingerprint?: string,
 ): PlatformInstallationManifest {
   const previous = manifest.resources.find((resource) => resource.key === action.key);
   return recordInstallationResource(
@@ -1172,7 +1224,9 @@ function recordResource(
           ? dnsRecordConfigHash(action.name, 'AAAA', '100::', true)
           : action.kind === 'hyperdrive' && databaseUrl
             ? hyperdriveOriginConfigHash(hyperdriveOriginFromConnectionString(databaseUrl))
-            : hash(JSON.stringify({ kind: action.kind, name: action.name })),
+            : action.kind === 'r2-bucket' && resourceFingerprint
+              ? r2BucketConfigHash(action.name, resourceFingerprint)
+              : hash(JSON.stringify({ kind: action.kind, name: action.name })),
       id,
       key: action.key,
       kind: action.kind,
@@ -1182,6 +1236,10 @@ function recordResource(
     },
     now,
   );
+}
+
+export function r2BucketConfigHash(name: string, fingerprint: string): string {
+  return hash(JSON.stringify({ fingerprint, kind: 'r2-bucket', name }));
 }
 
 function validateReplannedWorkerActions(

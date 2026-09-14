@@ -10,6 +10,7 @@ import {
   createPlatformResourceOwnershipMarker,
   PLATFORM_DISABLED_KEY,
   PLATFORM_DISABLED_VALUE,
+  PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   recordInstallationResource,
   recordInstallationStep,
   setInstallationDesiredState,
@@ -40,8 +41,10 @@ import {
   mergePlatformWorkerTrafficConfig,
   mergePreservedTriggerRoutes,
   preparePlatformDatabaseConnection,
+  r2BucketConfigHash,
   readPlatformDatabaseLifecycleManifestConnection,
   readActivePlatformWorkerSnapshot,
+  repairInterruptedR2OwnershipMarker,
   resolvePlatformPreviousTriggerConfig,
   resolveBootstrapGitHubId,
   stablePublicEndpointState,
@@ -1344,6 +1347,99 @@ describe('platform installer', () => {
 
     expect(disabled).toBe(true);
     expect(listInstallationManifests(directory)[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('repairs a checkpointed R2 ownership marker after its first write failed', async () => {
+    const plan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      null,
+    );
+    const fingerprint = '2026-09-14T00:00:00.000Z';
+    let manifest = createPlatformInstallationManifest({
+      account: plan.account,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: plan.deployment,
+      id: plan.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '0.10.14',
+    });
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: r2BucketConfigHash(plan.deployment.resources.assetsBucket, fingerprint),
+        id: plan.deployment.resources.assetsBucket,
+        key: 'assets-bucket',
+        kind: 'r2-bucket',
+        name: plan.deployment.resources.assetsBucket,
+        ownership: 'created',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const writes: Array<{ key: string; value: string }> = [];
+    const client = {
+      createAiGateway: async () => ({ id: 'unused', name: 'unused' }),
+      createDispatchNamespace: async () => ({ id: 'unused', name: 'unused' }),
+      createDnsRecord: async () => ({
+        content: '100::',
+        id: 'unused',
+        name: 'unused',
+        proxied: true,
+        type: 'AAAA',
+      }),
+      createHyperdrive: async () => ({ id: 'unused', name: 'unused' }),
+      createKvNamespace: async () => ({ id: 'unused', name: 'unused' }),
+      createQueue: async () => ({ id: 'unused', name: 'unused' }),
+      createR2Bucket: async () => ({ id: 'unused', name: 'unused' }),
+      createZone: async () => ({ id: 'unused', name: 'unused', nameServers: [], status: 'active' }),
+      getR2Object: async () => null,
+      listR2Buckets: async () => [
+        {
+          fingerprint,
+          id: plan.deployment.resources.assetsBucket,
+          name: plan.deployment.resources.assetsBucket,
+        },
+      ],
+      putKvValue: async () => {},
+      putR2Object: async (_account: string, _bucket: string, key: string, value: string) => {
+        writes.push({ key, value });
+      },
+    };
+
+    await repairInterruptedR2OwnershipMarker(client, plan, manifest);
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.key).toBe(PLATFORM_R2_OWNERSHIP_MARKER_KEY);
+    expect(JSON.parse(writes[0]!.value)).toMatchObject({
+      installationId: manifest.id,
+      ownershipNonce: manifest.ownershipNonce,
+      resourceKey: 'assets-bucket',
+    });
+
+    await repairInterruptedR2OwnershipMarker(
+      {
+        ...client,
+        listR2Buckets: async () => [
+          {
+            fingerprint: 'new',
+            id: plan.deployment.resources.assetsBucket,
+            name: plan.deployment.resources.assetsBucket,
+          },
+        ],
+      },
+      plan,
+      manifest,
+    );
+    expect(writes).toHaveLength(1);
   });
 
   it('stops after a newly-created zone until nameservers become active', async () => {

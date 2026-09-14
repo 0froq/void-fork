@@ -22,6 +22,30 @@ describe('platform Cloudflare client', () => {
     );
   });
 
+  it('resolves an R2 creation fingerprint before returning a new bucket', async () => {
+    const methods: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (_input, init) => {
+        methods.push(init?.method ?? 'GET');
+        return init?.method === 'POST'
+          ? Response.json({ success: true, result: { name: 'assets' } })
+          : Response.json({
+              success: true,
+              result: {
+                buckets: [{ creation_date: '2026-09-14T00:00:00.000Z', name: 'assets' }],
+              },
+            });
+      },
+    });
+
+    await expect(client.createR2Bucket('account', 'assets')).resolves.toEqual({
+      fingerprint: '2026-09-14T00:00:00.000Z',
+      id: 'assets',
+      name: 'assets',
+    });
+    expect(methods).toEqual(['POST', 'GET']);
+  });
+
   it('preserves supported PostgreSQL TLS modes in Hyperdrive requests', async () => {
     let payload: unknown;
     const client = new PlatformCloudflareClient('token', {
