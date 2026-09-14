@@ -13,3 +13,17 @@ export {
   type PlatformDeploymentManifestInput,
   type PlatformResourceNames,
 } from './manifest.ts';
+export {
+  PLATFORM_INSTALLATION_SCHEMA_VERSION,
+  createPlatformInstallationManifest,
+  parsePlatformInstallationManifest,
+  recordInstallationResource,
+  recordInstallationStep,
+  transitionInstallation,
+  type InstallationResource,
+  type InstallationResourceKind,
+  type InstallationStatus,
+  type InstallationStep,
+  type PlatformInstallationManifest,
+  type ResourceOwnership,
+} from './installation.ts';
