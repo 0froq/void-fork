@@ -276,7 +276,7 @@ describe('platform recovery', () => {
     expect(endpointChecks).toBe(0);
   });
 
-  it('never overwrites divergent local lifecycle progress during discovery', async () => {
+  it('keeps locally advanced lifecycle progress during discovery', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
     directories.push(directory);
     process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
@@ -290,7 +290,7 @@ describe('platform recovery', () => {
 
     await expect(
       recoverPlatformInstallations(client(remote), 'account', async () => {}),
-    ).rejects.toThrow('differs from its remote checkpoint');
+    ).resolves.toEqual([local]);
     expect(listInstallationManifests()).toEqual([local]);
   });
 });

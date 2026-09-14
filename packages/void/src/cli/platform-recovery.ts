@@ -5,7 +5,10 @@ import {
 } from '@void/platform';
 import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import { REMOTE_INSTALLATION_MANIFEST_KEY } from './platform-installer.ts';
-import { verifyPlatformInstallationOwnership } from './platform-management.ts';
+import {
+  isPlatformManifestMonotonicExtension,
+  verifyPlatformInstallationOwnership,
+} from './platform-management.ts';
 import { createPlatformInstallPlan } from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
@@ -118,7 +121,9 @@ export async function recoverPlatformInstallations(
     recovered.push(manifest);
   }
 
-  for (const manifest of recovered) {
+  const resolved: Array<PlatformInstallationManifest> = [];
+  for (const recoveredManifest of recovered) {
+    let manifest = recoveredManifest;
     const release = acquirePlatformLifecycleLock(
       manifest.account.id,
       manifest.deployment.installationSlug,
@@ -133,9 +138,16 @@ export async function recoverPlatformInstallations(
         throw new Error(`platform: Local installation ${manifest.id} has conflicting ownership.`);
       }
       if (collision && JSON.stringify(collision) !== JSON.stringify(manifest)) {
-        throw new Error(
-          `platform: Local installation ${manifest.id} differs from its remote checkpoint. Resolve or remove the local record before discovery; it was not overwritten.`,
-        );
+        if (isPlatformManifestMonotonicExtension(manifest, collision)) {
+          await verifyPlatformInstallationOwnership(client, collision);
+          manifest = collision;
+        } else if (isPlatformManifestMonotonicExtension(collision, manifest)) {
+          writeInstallationManifest(manifest);
+        } else {
+          throw new Error(
+            `platform: Local installation ${manifest.id} differs from its remote checkpoint. Resolve or remove the local record before discovery; it was not overwritten.`,
+          );
+        }
       }
       if (!collision) {
         writeInstallationManifest(manifest);
@@ -149,11 +161,12 @@ export async function recoverPlatformInstallations(
         kind: 'installed',
         proxyUrl: manifest.endpoints.proxyUrl!,
       });
+      resolved.push(manifest);
     } finally {
       release();
     }
   }
-  return recovered;
+  return resolved;
 }
 
 async function verifyInstallationEndpoint(manifest: PlatformInstallationManifest): Promise<void> {

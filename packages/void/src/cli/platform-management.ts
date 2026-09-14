@@ -586,11 +586,38 @@ async function verifyPlatformMutationOwnership(
   options: { allowDeletedRoutingCheckpoint?: boolean } = {},
 ): Promise<ReadonlySet<string>> {
   const routing = requireResource(manifest, 'routing-kv');
-  const rawRemote = await client.getKvValue(
-    manifest.account.id,
-    routing.id,
-    REMOTE_INSTALLATION_MANIFEST_KEY,
+  const targetResources = manifest.resources.filter(
+    (resource) => targetKeys.has(resource.key) && resource.state === 'ready',
   );
+  let rawRemote: string | null = null;
+  let remote: PlatformInstallationManifest | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    rawRemote = await client.getKvValue(
+      manifest.account.id,
+      routing.id,
+      REMOTE_INSTALLATION_MANIFEST_KEY,
+    );
+    if (rawRemote !== null) {
+      try {
+        remote = parsePlatformInstallationManifest(JSON.parse(rawRemote) as unknown);
+      } catch {
+        throw ownershipError('the remote installation checkpoint is invalid');
+      }
+      if (
+        remote.id !== manifest.id ||
+        remote.ownershipNonce !== manifest.ownershipNonce ||
+        remote.account.id !== manifest.account.id
+      ) {
+        throw ownershipError('the remote installation identity does not match this installation');
+      }
+      if (targetResources.every((resource) => hasMatchingResourceProof(remote!, resource))) {
+        break;
+      }
+    }
+    if (attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
+    }
+  }
   if (rawRemote === null) {
     if (
       options.allowDeletedRoutingCheckpoint &&
@@ -603,33 +630,17 @@ async function verifyPlatformMutationOwnership(
     }
     throw ownershipError('the remote installation checkpoint is missing');
   }
-
-  let remote: PlatformInstallationManifest;
-  try {
-    remote = parsePlatformInstallationManifest(JSON.parse(rawRemote) as unknown);
-  } catch {
-    throw ownershipError('the remote installation checkpoint is invalid');
-  }
-  if (
-    remote.id !== manifest.id ||
-    remote.ownershipNonce !== manifest.ownershipNonce ||
-    remote.account.id !== manifest.account.id
-  ) {
-    throw ownershipError('the remote installation identity does not match this installation');
+  if (!remote) {
+    throw ownershipError('the remote installation checkpoint is missing');
   }
 
-  const targets = manifest.resources.filter(
-    (resource) => targetKeys.has(resource.key) && resource.state === 'ready',
-  );
-  for (const resource of targets) {
+  const localAdvancesRemote = isPlatformManifestMonotonicExtension(remote, manifest);
+  for (const resource of targetResources) {
     const proof = remote.resources.find((entry) => entry.key === resource.key);
-    if (
-      !proof ||
-      proof.id !== resource.id ||
-      proof.kind !== resource.kind ||
-      proof.name !== resource.name ||
-      proof.ownership !== resource.ownership
-    ) {
+    if (!hasMatchingResourceProof(remote, resource)) {
+      if (!proof && localAdvancesRemote && resource.kind !== 'ai-gateway') {
+        continue;
+      }
       throw ownershipError(`the remote checkpoint does not own ${resource.kind} ${resource.name}`);
     }
   }
@@ -648,7 +659,7 @@ async function verifyPlatformMutationOwnership(
   const [aiGateways, dispatchNamespaces, hyperdrives, kvNamespaces, r2Buckets, workerNames] =
     inventory;
 
-  for (const resource of targets) {
+  for (const resource of targetResources) {
     let exists = true;
     if (resource.kind === 'ai-gateway') {
       exists = hasNamedResource(aiGateways, resource);
@@ -692,6 +703,55 @@ async function verifyPlatformMutationOwnership(
     }
   }
   return missing;
+}
+
+function hasMatchingResourceProof(
+  manifest: PlatformInstallationManifest,
+  resource: InstallationResource,
+): boolean {
+  const proof = manifest.resources.find((entry) => entry.key === resource.key);
+  return (
+    proof?.id === resource.id &&
+    proof.kind === resource.kind &&
+    proof.name === resource.name &&
+    proof.ownership === resource.ownership
+  );
+}
+
+export function isPlatformManifestMonotonicExtension(
+  earlier: PlatformInstallationManifest,
+  later: PlatformInstallationManifest,
+): boolean {
+  if (
+    earlier.id !== later.id ||
+    earlier.ownershipNonce !== later.ownershipNonce ||
+    earlier.account.id !== later.account.id ||
+    earlier.createdAt !== later.createdAt ||
+    JSON.stringify(earlier.deployment) !== JSON.stringify(later.deployment) ||
+    Date.parse(later.updatedAt) < Date.parse(earlier.updatedAt)
+  ) {
+    return false;
+  }
+  const resourcesAdvance = earlier.resources.every((resource) => {
+    const next = later.resources.find((entry) => entry.key === resource.key);
+    return (
+      next?.id === resource.id &&
+      next.kind === resource.kind &&
+      next.name === resource.name &&
+      next.ownership === resource.ownership &&
+      (next.state === resource.state ||
+        (resource.state === 'ready' && (next.state === 'deleted' || next.state === 'retained')))
+    );
+  });
+  const stepsAdvance = earlier.steps.every((step) =>
+    later.steps.some(
+      (entry) =>
+        entry.key === step.key &&
+        entry.completedAt === step.completedAt &&
+        entry.resultHash === step.resultHash,
+    ),
+  );
+  return resourcesAdvance && stepsAdvance;
 }
 
 function hasNamedResource(

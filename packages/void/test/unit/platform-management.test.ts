@@ -215,6 +215,49 @@ const uninstallArgs = {
 };
 
 describe('platform lifecycle management', () => {
+  it('retries an eventually consistent ownership checkpoint before mutation', async () => {
+    const manifest = installedManifest();
+    const stale = {
+      ...manifest,
+      resources: manifest.resources.filter((resource) => resource.key !== 'api-worker'),
+      updatedAt: '2026-09-14T00:00:01.000Z',
+    };
+    const fake = client(manifest);
+    let reads = 0;
+    fake.getKvValue = async () => JSON.stringify(++reads === 1 ? stale : manifest);
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).resolves.toBeUndefined();
+    expect(reads).toBe(2);
+  });
+
+  it('accepts a live immutable resource recorded ahead of stale routing KV', async () => {
+    const manifest = installedManifest();
+    const stale = {
+      ...manifest,
+      resources: manifest.resources.filter((resource) => resource.key !== 'isr-cache-kv'),
+      updatedAt: '2026-09-14T00:00:01.000Z',
+    };
+    const fake = client(manifest);
+    fake.getKvValue = async () => JSON.stringify(stale);
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).resolves.toBeUndefined();
+  });
+
+  it('never recovers a reusable AI Gateway name from stale routing KV', async () => {
+    const manifest = installedManifest();
+    const stale = {
+      ...manifest,
+      resources: manifest.resources.filter((resource) => resource.key !== 'ai-gateway'),
+      updatedAt: '2026-09-14T00:00:01.000Z',
+    };
+    const fake = client(manifest);
+    fake.getKvValue = async () => JSON.stringify(stale);
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).rejects.toThrow(
+      'does not own ai-gateway',
+    );
+  });
+
   it('refuses to resume installation over a replacement Worker', async () => {
     const manifest = installedManifest();
     const fake = client(manifest);
