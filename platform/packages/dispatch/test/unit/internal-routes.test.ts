@@ -15,7 +15,7 @@ function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
-function createEnv(disabled = false, selfHosted = false): Env {
+function createEnv(disabled = false, selfHosted = false, healthProbeToken?: string): Env {
   const workerFetch = vi.fn(async () => new Response('worker'));
   return {
     ROUTING: {
@@ -39,6 +39,7 @@ function createEnv(disabled = false, selfHosted = false): Env {
       writeDataPoint: vi.fn(),
     },
     ...(selfHosted ? { PLATFORM_INSTALLATION_ID: 'installation-id' } : {}),
+    ...(healthProbeToken ? { PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken } : {}),
   } as unknown as Env;
 }
 
@@ -56,13 +57,24 @@ describe('internal route blocking', () => {
   it('admits installer health checks while public traffic is disabled', async () => {
     const response = await app.fetch(
       new Request('https://my-app.void.app/health', {
-        headers: { 'X-Health-Check': 'void-admin' },
+        headers: { 'X-Void-Platform-Probe': 'probe-token' },
       }),
-      createEnv(true, true),
+      createEnv(true, true, 'probe-token'),
       createCtx(),
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it('rejects the legacy public installer header while disabled', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/health', {
+        headers: { 'X-Health-Check': 'void-admin' },
+      }),
+      createEnv(true, true, 'probe-token'),
+      createCtx(),
+    );
+    expect(response.status).toBe(503);
   });
 
   it('does not add a lifecycle routing read for hosted Void Cloud', async () => {

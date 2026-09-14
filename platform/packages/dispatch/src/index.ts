@@ -588,7 +588,11 @@ export default {
     // The installer proves the complete cutover while the public routing gate
     // remains closed. This endpoint exposes no application data and is already
     // reserved for the installer's exact health-check header.
-    if (url.pathname === '/health' && request.headers.get('X-Health-Check') === 'void-admin') {
+    if (
+      env.PLATFORM_HEALTH_PROBE_TOKEN &&
+      url.pathname === '/health' &&
+      request.headers.get('X-Void-Platform-Probe') === env.PLATFORM_HEALTH_PROBE_TOKEN
+    ) {
       return Response.json({ ok: true });
     }
     if (

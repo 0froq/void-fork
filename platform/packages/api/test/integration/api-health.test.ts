@@ -58,14 +58,37 @@ describe('GET /health', () => {
     try {
       const res = await app.fetch(
         new Request('http://localhost/health', {
-          headers: { 'X-Health-Check': 'void-admin' },
+          headers: { 'X-Void-Platform-Probe': 'probe-token' },
         }),
-        { ...env, PLATFORM_INSTALLATION_ID: 'installation-id' },
+        {
+          ...env,
+          PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
+          PLATFORM_INSTALLATION_ID: 'installation-id',
+        },
       );
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ status: 'ok' });
     } finally {
       await dropInstallationClaim();
+      await env.ROUTING.delete(PLATFORM_DISABLED_KEY);
+    }
+  });
+
+  it('rejects the legacy public installer header while disabled', async () => {
+    await env.ROUTING.put(PLATFORM_DISABLED_KEY, 'disabled');
+    try {
+      const res = await app.fetch(
+        new Request('http://localhost/health', {
+          headers: { 'X-Health-Check': 'void-admin' },
+        }),
+        {
+          ...env,
+          PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
+          PLATFORM_INSTALLATION_ID: 'installation-id',
+        },
+      );
+      expect(res.status).toBe(503);
+    } finally {
       await env.ROUTING.delete(PLATFORM_DISABLED_KEY);
     }
   });

@@ -33,6 +33,7 @@ import {
   classifyPlatformWorkerDeploymentLineage,
   installPlatform,
   claimPlatformDatabaseConnection,
+  createPlatformHealthProbeToken,
   createPlatformInstallationSecrets,
   inspectNewPlatformWorker,
   inspectPlatformDatabaseStateConnection,
@@ -558,6 +559,7 @@ describe('platform installer', () => {
       'https://proxy.example.com',
       'apps.example.com',
       '1.2.3',
+      'probe-token',
       fetcher,
     );
 
@@ -567,9 +569,18 @@ describe('platform installer', () => {
       'https://proxy.example.com/health',
       'https://test.apps.example.com/health',
     ]);
-    expect(requests.every((entry) => entry.headers.get('X-Health-Check') === 'void-admin')).toBe(
-      true,
-    );
+    expect(
+      requests.every((entry) => entry.headers.get('X-Void-Platform-Probe') === 'probe-token'),
+    ).toBe(true);
+    expect(requests.every((entry) => !entry.headers.has('X-Health-Check'))).toBe(true);
+  });
+
+  it('derives an installation-specific high-entropy health probe token', () => {
+    const first = createPlatformHealthProbeToken('a'.repeat(43));
+    const second = createPlatformHealthProbeToken('b'.repeat(43));
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(first).not.toBe(second);
+    expect(first).not.toContain('a'.repeat(20));
   });
 
   it('rejects a cutover when the proxy is unhealthy', async () => {
@@ -592,6 +603,7 @@ describe('platform installer', () => {
         'https://proxy.example.com',
         'apps.example.com',
         '1.2.3',
+        'probe-token',
         fetcher,
       ),
     ).rejects.toThrow('Proxy health check failed');

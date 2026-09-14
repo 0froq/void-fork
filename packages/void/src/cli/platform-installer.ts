@@ -201,6 +201,7 @@ export type PlatformInstallerDependencies = Readonly<{
     proxyUrl: string,
     applicationBaseDomain: string,
     platformVersion: string,
+    healthProbeToken: string,
   ) => Promise<void>;
 }>;
 
@@ -636,6 +637,7 @@ export async function installPlatform(
       accountId: plan.account.id,
       apiUrl: plan.apiUrl,
       deployment: plan.deployment,
+      healthProbeToken: createPlatformHealthProbeToken(manifest.ownershipNonce),
       installationId: manifest.id,
       ownershipNonce: manifest.ownershipNonce,
       platformVersion: version,
@@ -908,6 +910,7 @@ export async function installPlatform(
       plan.proxyUrl,
       plan.deployment.application.baseDomain,
       version,
+      createPlatformHealthProbeToken(manifest.ownershipNonce),
     );
     if (dependencies.client.deleteKvValue) {
       await dependencies.client.deleteKvValue(
@@ -3219,11 +3222,12 @@ export async function verifyPlatformHealth(
   proxyUrl: string,
   applicationBaseDomain: string,
   platformVersion: string,
+  healthProbeToken: string,
   fetcher: typeof fetch = fetch,
 ): Promise<void> {
   const request = (url: string) =>
     fetcher(url, {
-      headers: { 'X-Health-Check': 'void-admin' },
+      headers: { 'X-Void-Platform-Probe': healthProbeToken },
       signal: AbortSignal.timeout(30_000),
     });
   const [health, discovery, proxy, dispatch] = await Promise.all([
@@ -3256,4 +3260,11 @@ export async function verifyPlatformHealth(
       `platform: Dispatch health check failed at https://test.${applicationBaseDomain} (HTTP ${dispatch.status}).`,
     );
   }
+}
+
+export function createPlatformHealthProbeToken(ownershipNonce: string): string {
+  return createHash('sha256')
+    .update('void-platform-health-probe:v1\0')
+    .update(ownershipNonce)
+    .digest('base64url');
 }

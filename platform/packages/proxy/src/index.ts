@@ -14,8 +14,12 @@ import type { JwtPayload, ProxyBody, ProxyEnv } from './types.ts';
 const app = new Hono<ProxyEnv>();
 
 app.use('/*', async (context, next) => {
+  const healthProbeToken = context.env.PLATFORM_HEALTH_PROBE_TOKEN;
   const installerProbe =
-    context.req.path === '/health' && context.req.header('X-Health-Check') === 'void-admin';
+    healthProbeToken !== undefined &&
+    healthProbeToken !== '' &&
+    context.req.path === '/health' &&
+    context.req.header('X-Void-Platform-Probe') === healthProbeToken;
   if (
     context.env.PLATFORM_INSTALLATION_ID &&
     !installerProbe &&

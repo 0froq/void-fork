@@ -12,6 +12,7 @@ describe('platform Worker configuration', () => {
       accountId: 'account',
       apiUrl: 'https://void-example-api.example.workers.dev',
       deployment,
+      healthProbeToken: 'probe-token',
       installationId: 'example-a1b2c3d4',
       ownershipNonce: '0123456789abcdef0123456789abcdef',
       platformVersion: '1.0.0',
@@ -53,6 +54,7 @@ describe('platform Worker configuration', () => {
       });
     }
     expect(configs.api.vars).toMatchObject({
+      PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
       LOGS_DATASET: deployment.resources.logsDataset,
       REQUESTS_DATASET: deployment.resources.requestsDataset,
     });
@@ -61,6 +63,7 @@ describe('platform Worker configuration', () => {
       { pattern: '*.apps.example.com', zone_name: 'example.com' },
     ]);
     expect(configs.dispatch.vars).toMatchObject({
+      PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
       PLATFORM_INSTALLATION_ID: 'example-a1b2c3d4',
     });
   });
@@ -76,6 +79,7 @@ describe('platform Worker configuration', () => {
       accountId: 'account',
       apiUrl: 'https://api.example.com',
       deployment,
+      healthProbeToken: 'probe-token',
       installationId: 'example-a1b2c3d4',
       ownershipNonce: '0123456789abcdef0123456789abcdef',
       platformVersion: '1.0.0',

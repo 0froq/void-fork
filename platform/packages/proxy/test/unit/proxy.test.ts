@@ -131,6 +131,7 @@ function createEnv(
   kvData?: Record<string, string>,
   apiOverride?: { fetch: ReturnType<typeof vi.fn> | ((req: Request) => Promise<Response>) },
   platformInstallationId?: string,
+  healthProbeToken?: string,
 ) {
   return {
     AI: {
@@ -151,6 +152,7 @@ function createEnv(
       }),
     },
     ...(platformInstallationId ? { PLATFORM_INSTALLATION_ID: platformInstallationId } : {}),
+    ...(healthProbeToken ? { PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken } : {}),
   };
 }
 
@@ -191,12 +193,34 @@ describe('proxy worker', () => {
   it('admits installer health checks while public traffic is disabled', async () => {
     const res = await worker.fetch(
       new Request('https://proxy.void.cloud/health', {
-        headers: { 'X-Health-Check': 'void-admin' },
+        headers: { 'X-Void-Platform-Probe': 'probe-token' },
       }),
-      createEnv(undefined, { [PLATFORM_DISABLED_KEY]: 'disabled' }, undefined, 'installation-id'),
+      createEnv(
+        undefined,
+        { [PLATFORM_DISABLED_KEY]: 'disabled' },
+        undefined,
+        'installation-id',
+        'probe-token',
+      ),
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true });
+  });
+
+  it('rejects the legacy public installer header while disabled', async () => {
+    const res = await worker.fetch(
+      new Request('https://proxy.void.cloud/health', {
+        headers: { 'X-Health-Check': 'void-admin' },
+      }),
+      createEnv(
+        undefined,
+        { [PLATFORM_DISABLED_KEY]: 'disabled' },
+        undefined,
+        'installation-id',
+        'probe-token',
+      ),
+    );
+    expect(res.status).toBe(503);
   });
 
   it('does not read the lifecycle gate for hosted Void Cloud', async () => {

@@ -90,12 +90,35 @@ describe('GET /.well-known/void-platform', () => {
     try {
       const response = await app.fetch(
         new Request('https://api.void.cloud/.well-known/void-platform', {
-          headers: { 'X-Health-Check': 'void-admin' },
+          headers: { 'X-Void-Platform-Probe': 'probe-token' },
         }),
-        { ...env, PLATFORM_INSTALLATION_ID: 'installation-id' },
+        {
+          ...env,
+          PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
+          PLATFORM_INSTALLATION_ID: 'installation-id',
+        },
       );
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ schemaVersion: 1 });
+    } finally {
+      await env.ROUTING.delete(PLATFORM_DISABLED_KEY);
+    }
+  });
+
+  it('rejects the legacy public installer header while disabled', async () => {
+    await env.ROUTING.put(PLATFORM_DISABLED_KEY, 'disabled');
+    try {
+      const response = await app.fetch(
+        new Request('https://api.void.cloud/.well-known/void-platform', {
+          headers: { 'X-Health-Check': 'void-admin' },
+        }),
+        {
+          ...env,
+          PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
+          PLATFORM_INSTALLATION_ID: 'installation-id',
+        },
+      );
+      expect(response.status).toBe(503);
     } finally {
       await env.ROUTING.delete(PLATFORM_DISABLED_KEY);
     }
