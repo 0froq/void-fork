@@ -514,8 +514,9 @@ describe('void db execute --remote (D1)', () => {
     expect(mockConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('includes CF Access service-token headers when env vars are set', async () => {
+  it('includes CF Access service-token headers for the staging proxy', async () => {
     const root = createProjectRoot();
+    mockIsStagingMode.mockReturnValue(true);
     const originalId = process.env.CF_ACCESS_CLIENT_ID;
     const originalSecret = process.env.CF_ACCESS_CLIENT_SECRET;
     process.env.CF_ACCESS_CLIENT_ID = 'test-client-id.access';
