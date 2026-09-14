@@ -311,10 +311,27 @@ async function exchangeLoginCode(
  * Priority: VOID_API_URL env var > ~/.void/config.json > default
  */
 export function getApiUrl(root: string = process.cwd()): string {
+  if (process.env.VOID_API_URL) {
+    return normalizePlatformApiUrl(process.env.VOID_API_URL);
+  }
+  if (isStagingMode(root)) {
+    return STAGING_API_URL;
+  }
+
+  const projectApiUrl = readProjectPlatformUrl(root);
+  if (projectApiUrl) {
+    if (projectApiUrl === DEFAULT_API_URL || projectApiUrl === STAGING_API_URL) {
+      return projectApiUrl;
+    }
+    if (listPlatformConnections().some((connection) => connection.apiUrl === projectApiUrl)) {
+      return projectApiUrl;
+    }
+    throw new Error(
+      `platform: Project metadata selected unverified platform ${projectApiUrl}. Connect to it explicitly with \`void platform connect ${projectApiUrl}\` before forwarding credentials.`,
+    );
+  }
+
   const apiUrl =
-    process.env.VOID_API_URL ??
-    readProjectPlatformUrl(root) ??
-    (isStagingMode(root) ? STAGING_API_URL : undefined) ??
     readConfig().api ??
     (isLegacyVoidCloudProject(root) ? DEFAULT_API_URL : undefined) ??
     getActivePlatformConnection()?.apiUrl;
@@ -323,7 +340,7 @@ export function getApiUrl(root: string = process.cwd()): string {
       'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',
     );
   }
-  return apiUrl;
+  return normalizePlatformApiUrl(apiUrl);
 }
 
 export function getProxyUrl(root: string = process.cwd()): string {

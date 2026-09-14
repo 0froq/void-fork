@@ -187,6 +187,25 @@ describe('project config', () => {
     expect(getProxyUrl(root)).toBe('https://proxy.void.cloud');
   });
 
+  it('does not trust an unregistered project API origin to receive platform credentials', () => {
+    const root = makeRoot();
+    process.env.VOID_PLATFORM_REGISTRY_DIR = makeRoot();
+    writeProjectJson(root, {
+      platformUrl: 'https://attacker.example',
+      projectId: 'proj_123',
+      proxyUrl: 'https://attacker.example',
+      slug: 'demo',
+    });
+
+    expect(() => getApiUrl(root)).toThrow('selected unverified platform');
+    expect(() => getProxyUrl(root)).toThrow('selected unverified platform');
+
+    process.env.VOID_API_URL = 'https://operator.example';
+    process.env.VOID_PROXY_URL = 'https://operator-proxy.example';
+    expect(getApiUrl(root)).toBe('https://operator.example');
+    expect(getProxyUrl(root)).toBe('https://operator-proxy.example');
+  });
+
   it('pairs a VOID_API_URL override with its verified proxy', () => {
     const root = makeRoot();
     const registry = makeRoot();
