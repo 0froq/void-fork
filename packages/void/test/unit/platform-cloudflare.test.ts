@@ -244,4 +244,20 @@ describe('platform Cloudflare client', () => {
       },
     ]);
   });
+
+  it('enables and disables the workers.dev endpoint for one Worker', async () => {
+    const bodies: Array<unknown> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ success: true, result: null });
+      },
+    });
+    await client.setWorkerSubdomain('account', 'void-company-api', false);
+    await client.setWorkerSubdomain('account', 'void-company-api', true);
+    expect(bodies).toEqual([
+      { enabled: false, previews_enabled: false },
+      { enabled: true, previews_enabled: true },
+    ]);
+  });
 });

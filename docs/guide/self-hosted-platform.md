@@ -148,7 +148,7 @@ Discovery verifies the account, every recorded Cloudflare resource, the routing 
 
 ## Disable and safely uninstall
 
-Disable traffic without deleting resources or data:
+Disable all routes, custom domains, and `workers.dev` endpoints without deleting resources or data. A later repair or upgrade restores the configured endpoints:
 
 ```sh
 void platform disable [id] --plan

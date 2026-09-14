@@ -22,7 +22,12 @@ import {
 
 type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
-  'deleteKvValue' | 'deleteResource' | 'emptyR2Bucket' | 'putKvValue' | 'removeRoutes'
+  | 'deleteKvValue'
+  | 'deleteResource'
+  | 'emptyR2Bucket'
+  | 'putKvValue'
+  | 'removeRoutes'
+  | 'setWorkerSubdomain'
 >;
 
 export type PlatformManagementDependencies = Readonly<{
@@ -111,7 +116,7 @@ export async function disablePlatform(
       .map((resource) => resource.name),
   );
   note(
-    `Remove routes and custom domains for:\n${[...workers].join('\n')}\n\nWorkers and all data remain installed.`,
+    `Remove routes and custom domains and disable workers.dev for:\n${[...workers].join('\n')}\n\nWorkers and all data remain installed.`,
     'Disable plan',
   );
   if (planOnly) {
@@ -127,6 +132,9 @@ export async function disablePlatform(
   try {
     const zone = requireResource(next, 'zone');
     await client.removeRoutes(next.account.id, zone.id, workers);
+    for (const worker of workers) {
+      await client.setWorkerSubdomain(next.account.id, worker, false);
+    }
     next = transitionInstallation(next, 'disabled', new Date().toISOString());
     writeInstallationManifest(next);
     await writeRemoteManifestIfPresent(client, next);

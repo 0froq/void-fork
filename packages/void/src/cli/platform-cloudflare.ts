@@ -559,6 +559,17 @@ export class PlatformCloudflareClient {
       }
     }
   }
+
+  async setWorkerSubdomain(accountId: string, workerName: string, enabled: boolean): Promise<void> {
+    await this.request(
+      `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}/subdomain`,
+      {
+        body: JSON.stringify({ enabled, previews_enabled: enabled }),
+        headers: { 'Cloudflare-Workers-Script-Api-Date': '2025-08-01' },
+        method: 'POST',
+      },
+    );
+  }
 }
 
 function requiredString(value: unknown, label: string): string {

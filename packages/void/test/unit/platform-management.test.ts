@@ -98,11 +98,13 @@ function client() {
   const deleted: Array<[string, string]> = [];
   const emptiedBuckets: Array<string> = [];
   const remoteWrites: Array<string> = [];
+  const subdomains: Array<[string, boolean]> = [];
   let removedRoutes = 0;
   return {
     deleted,
     emptiedBuckets,
     remoteWrites,
+    subdomains,
     get removedRoutes() {
       return removedRoutes;
     },
@@ -120,6 +122,9 @@ function client() {
     },
     removeRoutes: async () => {
       removedRoutes++;
+    },
+    setWorkerSubdomain: async (_account: string, worker: string, enabled: boolean) => {
+      subdomains.push([worker, enabled]);
     },
   };
 }
@@ -139,6 +144,12 @@ describe('platform lifecycle management', () => {
     const fake = client();
     await disablePlatform(fake, manifest, false);
     expect(fake.removedRoutes).toBe(1);
+    expect(fake.subdomains).toEqual([
+      ['api-worker', false],
+      ['dispatch-worker', false],
+      ['proxy-worker', false],
+      ['tail-worker', false],
+    ]);
     expect(fake.deleted).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
     expect(JSON.parse(fake.remoteWrites[0]!)).toMatchObject({ status: 'disabled' });
