@@ -52,9 +52,12 @@ export async function recoverPlatformInstallations(
   if (!accounts.some((account) => account.id === accountId)) {
     throw new Error(`platform: Cloudflare account ${JSON.stringify(accountId)} is unavailable.`);
   }
-  const namespaces = (await client.listKvNamespaces(accountId)).filter((namespace) =>
-    /^void-[a-z0-9-]+-routing$/.test(namespace.name),
-  );
+  // The routing namespace is the durable recovery root. Interrupted creates
+  // can intentionally move it to a deterministic `-retry-*` name, and future
+  // naming changes must not make an otherwise valid installation invisible.
+  // The reserved manifest key plus the manifest's exact id/name binding is the
+  // authoritative discriminator, not a human-readable namespace suffix.
+  const namespaces = await client.listKvNamespaces(accountId);
   const recovered: Array<{
     manifest: PlatformInstallationManifest;
     plan: PlatformInstallPlan;

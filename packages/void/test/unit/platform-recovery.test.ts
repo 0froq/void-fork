@@ -230,6 +230,31 @@ describe('platform recovery', () => {
     });
   });
 
+  it('discovers a routing namespace created under a retry name', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const base = remoteManifest();
+    const retryName = `${base.deployment.resources.routingKv}-retry-0123456789`;
+    const manifest = {
+      ...base,
+      deployment: {
+        ...base.deployment,
+        resources: { ...base.deployment.resources, routingKv: retryName },
+      },
+      resources: base.resources.map((resource) =>
+        resource.key === 'routing-kv' ? { ...resource, name: retryName } : resource,
+      ),
+    };
+
+    await expect(
+      recoverPlatformInstallations(client(manifest), 'account', async () => {}),
+    ).resolves.toHaveLength(1);
+    expect(listInstallationManifests(directory)[0]?.resources).toContainEqual(
+      expect.objectContaining({ key: 'routing-kv', name: retryName }),
+    );
+  });
+
   it('refuses ownership metadata from a different routing namespace', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
     directories.push(directory);
