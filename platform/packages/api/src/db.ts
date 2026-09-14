@@ -88,11 +88,12 @@ export async function createUser(
   login: string,
   email: string | null,
   role: 'user' | 'admin' = 'user',
+  plan: PlanId = 'free',
 ): Promise<User> {
   const id = generateId('user');
   const [row] = await db
     .insert(users)
-    .values({ id, provider, provider_id: providerId, login, email, role })
+    .values({ id, provider, provider_id: providerId, login, email, role, plan })
     .returning();
   return row;
 }
@@ -117,7 +118,7 @@ export async function createUserForPlatform(
   }
   await db.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
   const [existing] = await db.select({ id: users.id }).from(users).limit(1);
-  return createUser(db, provider, providerId, login, email, existing ? 'user' : 'admin');
+  return createUser(db, provider, providerId, login, email, existing ? 'user' : 'admin', 'custom');
 }
 
 export async function getUserByProvider(

@@ -32,6 +32,7 @@ describe('self-hosted first owner bootstrap', () => {
     const users = await Promise.all([create('one'), create('two')]);
     expect(users.filter((user) => user.role === 'admin')).toHaveLength(1);
     expect(users.filter((user) => user.role === 'user')).toHaveLength(1);
+    expect(users.every((user) => user.plan === 'custom')).toBe(true);
   });
 
   it('preserves Void Cloud user defaults when no installation id is set', async () => {
@@ -45,5 +46,6 @@ describe('self-hosted first owner bootstrap', () => {
       ),
     );
     expect(user.role).toBe('user');
+    expect(user.plan).toBe('free');
   });
 });
