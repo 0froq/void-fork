@@ -1,6 +1,7 @@
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
+  createPlatformResourceOwnershipMarker,
   recordInstallationResource,
   recordInstallationStep,
 } from '@void/platform';
@@ -20,6 +21,8 @@ function client(overrides: Record<string, unknown> = {}) {
     findZone: async () => null,
     findZoneForHostname: async () => null,
     listDnsRecords: async () => [],
+    getR2Object: async () => null,
+    getWorkerPlainTextBindings: async () => ({}),
     listKvNamespaces: async () => [],
     listR2Buckets: async () => [],
     listQueues: async () => [],
@@ -141,7 +144,7 @@ describe('platform installation planning', () => {
     ).rejects.toThrow('not owned');
   });
 
-  it('recovers a uniquely named resource after an ambiguous create response', async () => {
+  it('refuses an intent-only resource after an ambiguous create response', async () => {
     const initial = await createPlatformInstallPlan(client(), input, null);
     let manifest = createPlatformInstallationManifest({
       account: initial.account,
@@ -167,19 +170,72 @@ describe('platform installation planning', () => {
       '2026-09-14T00:00:01.000Z',
     );
 
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          listKvNamespaces: async (_account: string, title: string) =>
+            title === resourceName ? [{ id: 'created-before-crash', name: title }] : [],
+        }),
+        input,
+        manifest,
+      ),
+    ).rejects.toThrow('not owned');
+  });
+
+  it('recovers only an intent-only Worker with its matching durable marker', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null);
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    const workerName = manifest.deployment.resources.apiWorker;
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-09-14T00:00:01.000Z',
+        key: 'provision-intent:api-worker',
+        resultHash: platformProvisionIntentHash(manifest, 'api-worker', 'worker', workerName),
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const marker = JSON.stringify(
+      createPlatformResourceOwnershipMarker({
+        accountId: 'account',
+        installationId: manifest.id,
+        ownershipNonce: manifest.ownershipNonce,
+        resourceId: workerName,
+        resourceKey: 'api-worker',
+        resourceKind: 'worker',
+        resourceName: workerName,
+      }),
+    );
     const resumed = await createPlatformInstallPlan(
       client({
-        listKvNamespaces: async (_account: string, title: string) =>
-          title === resourceName ? [{ id: 'created-before-crash', name: title }] : [],
+        getWorkerPlainTextBindings: async () => ({ PLATFORM_OWNERSHIP_MARKER: marker }),
+        listWorkerNames: async () => [workerName],
       }),
       input,
       manifest,
     );
-
-    expect(resumed.actions.find((action) => action.key === 'routing-kv')).toMatchObject({
-      action: 'reuse',
-      id: 'created-before-crash',
+    expect(resumed.actions.find((action) => action.key === 'api-worker')).toMatchObject({
+      action: 'update',
+      id: workerName,
     });
+
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          getWorkerPlainTextBindings: async () => ({}),
+          listWorkerNames: async () => [workerName],
+        }),
+        input,
+        manifest,
+      ),
+    ).rejects.toThrow('not owned');
   });
 
   it('resumes resources proven by the remote ownership checkpoint', async () => {

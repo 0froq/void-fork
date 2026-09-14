@@ -1,10 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   createPlatformDeploymentManifest,
+  createPlatformResourceOwnershipMarker,
   createPlatformResourceNames,
   normalizeInstallationSlug,
   parsePlatformInstallationManifest,
+  parsePlatformResourceOwnershipMarker,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
+  PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   type InstallationResourceKind,
   type PlatformDeploymentManifest,
   type PlatformInstallationManifest,
@@ -52,6 +55,8 @@ type PlanningClient = Pick<
   | 'findZone'
   | 'findZoneForHostname'
   | 'getKvValue'
+  | 'getR2Object'
+  | 'getWorkerPlainTextBindings'
   | 'getWorkersSubdomain'
   | 'listAiGateways'
   | 'listAccounts'
@@ -167,6 +172,41 @@ export async function createPlatformInstallPlan(
   const remoteOwnership = existing
     ? await readRemoteOwnership(client, account.id, routingKv, existing)
     : null;
+  const intentProofs = new Set<string>();
+  if (existing) {
+    const bucket = r2Buckets.find((resource) => resource.name === names.assetsBucket);
+    if (
+      bucket &&
+      hasUnrecordedProvisionIntent(existing, 'assets-bucket', 'r2-bucket', bucket.name)
+    ) {
+      const marker = await client.getR2Object(
+        account.id,
+        bucket.name,
+        PLATFORM_R2_OWNERSHIP_MARKER_KEY,
+      );
+      if (matchesResourceMarker(marker, existing, 'assets-bucket', 'r2-bucket', bucket)) {
+        intentProofs.add('assets-bucket');
+      }
+    }
+    for (const [key, name] of [
+      ['api-worker', names.apiWorker],
+      ['proxy-worker', names.proxyWorker],
+      ['tail-worker', names.tailWorker],
+      ['dispatch-worker', names.dispatchWorker],
+    ] as const) {
+      if (workers.includes(name) && hasUnrecordedProvisionIntent(existing, key, 'worker', name)) {
+        const bindings = await client.getWorkerPlainTextBindings(account.id, name);
+        if (
+          matchesResourceMarker(bindings.PLATFORM_OWNERSHIP_MARKER, existing, key, 'worker', {
+            id: name,
+            name,
+          })
+        ) {
+          intentProofs.add(key);
+        }
+      }
+    }
+  }
   const actions: Array<PlatformInstallPlanAction> = [];
   const recordedZone = existing?.resources.find((resource) => resource.key === 'zone');
   const remotelyOwnedZone = remoteOwnership?.resources.some(
@@ -214,6 +254,7 @@ export async function createPlatformInstallPlan(
     'reuse',
     options,
     remoteOwnership,
+    intentProofs,
   );
   addNamedPlan(
     actions,
@@ -225,6 +266,7 @@ export async function createPlatformInstallPlan(
     'reuse',
     options,
     remoteOwnership,
+    intentProofs,
   );
   addNamedPlan(
     actions,
@@ -258,6 +300,7 @@ export async function createPlatformInstallPlan(
     'reuse',
     options,
     remoteOwnership,
+    intentProofs,
   );
   addNamedPlan(
     actions,
@@ -320,6 +363,7 @@ export async function createPlatformInstallPlan(
       'update',
       options,
       remoteOwnership,
+      intentProofs,
     );
   }
   const apiUrl = deployment.controlPlane.apiHostname
@@ -436,6 +480,7 @@ function addNamedPlan(
   existingAction: 'reuse' | 'update' = 'reuse',
   options?: { repairMissing?: boolean },
   remoteOwnership?: PlatformInstallationManifest | null,
+  intentProofs: ReadonlySet<string> = new Set(),
 ): void {
   if (matches.length > 1) {
     throw new Error(`platform: More than one ${kind} named ${JSON.stringify(name)} exists.`);
@@ -454,11 +499,8 @@ function addNamedPlan(
     const recoverableProvision =
       existing !== null &&
       isUniqueProvisionAttempt(existing, key, kind, name) &&
-      existing.steps.some(
-        (step) =>
-          step.key === `provision-intent:${key}` &&
-          step.resultHash === platformProvisionIntentHash(existing, key, kind, name),
-      );
+      hasUnrecordedProvisionIntent(existing, key, kind, name) &&
+      intentProofs.has(key);
     if (
       (!recorded || recorded.id !== remote.id || recorded.kind !== kind) &&
       !remotelyOwned &&
@@ -511,6 +553,49 @@ function addNamedPlan(
     name,
     reason: `Create an installer-owned ${kind}.`,
   });
+}
+
+function hasUnrecordedProvisionIntent(
+  manifest: PlatformInstallationManifest,
+  key: string,
+  kind: InstallationResourceKind,
+  name: string,
+): boolean {
+  return (
+    !manifest.resources.some((resource) => resource.key === key && resource.state === 'ready') &&
+    manifest.steps.some(
+      (step) =>
+        step.key === `provision-intent:${key}` &&
+        step.resultHash === platformProvisionIntentHash(manifest, key, kind, name),
+    )
+  );
+}
+
+function matchesResourceMarker(
+  value: string | null | undefined,
+  manifest: PlatformInstallationManifest,
+  key: string,
+  kind: InstallationResourceKind,
+  resource: CloudflareNamedResource,
+): boolean {
+  if (!value) {
+    return false;
+  }
+  try {
+    const actual = parsePlatformResourceOwnershipMarker(JSON.parse(value) as unknown);
+    const expected = createPlatformResourceOwnershipMarker({
+      accountId: manifest.account.id,
+      installationId: manifest.id,
+      ownershipNonce: manifest.ownershipNonce,
+      resourceId: resource.id,
+      resourceKey: key,
+      resourceKind: kind,
+      resourceName: resource.name,
+    });
+    return JSON.stringify(actual) === JSON.stringify(expected);
+  } catch {
+    return false;
+  }
 }
 
 function isUniqueProvisionAttempt(

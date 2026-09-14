@@ -26,6 +26,8 @@ function planningClient() {
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'workers-subdomain',
     getKvValue: async () => null,
+    getR2Object: async () => null,
+    getWorkerPlainTextBindings: async () => ({}),
     listAiGateways: async () => [],
     findZone: async () => ({
       id: 'zone-id',

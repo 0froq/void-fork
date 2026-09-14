@@ -217,6 +217,7 @@ export async function installPlatform(
     if (zoneAction.action === 'create') {
       manifest = recordProvisionIntent(manifest, zoneAction, now());
       writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       zone = await dependencies.client.createZone(plan.account.id, zoneAction.name);
     }
     if (!zone) {
@@ -264,6 +265,7 @@ export async function installPlatform(
       }
       manifest = recordProvisionIntent(manifest, action, now());
       writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       const resource = await createResource(
         dependencies.client,
         plan,
@@ -358,6 +360,7 @@ export async function installPlatform(
             : null;
       manifest = recordProvisionIntent(manifest, action, now());
       writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       await deployWorker(configs[key], workerSecrets);
       manifest = recordResource(manifest, action, action.name, 'created', now());
       writeInstallationManifest(manifest);
