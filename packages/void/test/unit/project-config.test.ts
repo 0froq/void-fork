@@ -30,6 +30,7 @@ function writeProjectJson(root: string, value: unknown): void {
 describe('project config', () => {
   afterEach(() => {
     delete process.env.VOID_API_URL;
+    delete process.env.VOID_PROXY_URL;
     delete process.env.VOID_PLATFORM_REGISTRY_DIR;
     while (roots.length > 0) {
       rmSync(roots.pop()!, { recursive: true, force: true });
@@ -169,6 +170,54 @@ describe('project config', () => {
     writeProjectJson(root, { voidInternalStaging: true });
     expect(getApiUrl(root)).toBe('https://api.staging.void.cloud');
     expect(getProxyUrl(root)).toBe('https://proxy.staging.void.cloud');
+  });
+
+  it('does not trust a project proxy origin to receive platform credentials', () => {
+    const root = makeRoot();
+    process.env.VOID_PLATFORM_REGISTRY_DIR = makeRoot();
+    writeProjectJson(root, {
+      applicationDomain: 'void.app',
+      platformUrl: 'https://api.void.cloud',
+      projectId: 'proj_123',
+      proxyUrl: 'https://attacker.example',
+      slug: 'demo',
+    });
+
+    expect(getApiUrl(root)).toBe('https://api.void.cloud');
+    expect(getProxyUrl(root)).toBe('https://proxy.void.cloud');
+  });
+
+  it('pairs a VOID_API_URL override with its verified proxy', () => {
+    const root = makeRoot();
+    const registry = makeRoot();
+    process.env.VOID_PLATFORM_REGISTRY_DIR = registry;
+    writeProjectJson(root, {
+      platformUrl: 'https://api.void.cloud',
+      projectId: 'proj_123',
+      proxyUrl: 'https://attacker.example',
+      slug: 'demo',
+    });
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://platform.example.test',
+      applicationDomain: 'apps.example.test',
+      displayName: 'Example',
+      installationId: null,
+      kind: 'connected',
+      proxyUrl: 'https://proxy.example.test',
+    });
+
+    process.env.VOID_API_URL = 'https://platform.example.test';
+    expect(getProxyUrl(root)).toBe('https://proxy.example.test');
+
+    process.env.VOID_API_URL = 'https://api.staging.void.cloud';
+    expect(getProxyUrl(root)).toBe('https://proxy.staging.void.cloud');
+
+    process.env.VOID_API_URL = 'https://unregistered.example.test';
+    expect(() => getProxyUrl(root)).toThrow('No verified proxy is registered');
+
+    process.env.VOID_PROXY_URL = 'https://operator-proxy.example.test';
+    expect(getProxyUrl(root)).toBe('https://operator-proxy.example.test');
   });
 
   it('requires a selected platform before creating a new project link', () => {

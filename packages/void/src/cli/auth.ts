@@ -10,6 +10,7 @@ import { VOID_CLOUD_PLATFORM } from './hosted-platform.ts';
 import { pc } from './output.ts';
 import {
   getActivePlatformConnection,
+  listPlatformConnections,
   normalizePlatformApiUrl,
   platformCredentialAccount,
 } from './platform-registry.ts';
@@ -18,7 +19,6 @@ import {
   isVoidInternalStaging,
   readProjectApplicationDomain,
   readProjectPlatformUrl,
-  readProjectProxyUrl,
 } from './project.ts';
 
 const CONFIG_DIR = join(homedir(), '.void');
@@ -327,28 +327,31 @@ export function getApiUrl(root: string = process.cwd()): string {
 }
 
 export function getProxyUrl(root: string = process.cwd()): string {
-  const explicitApiUrl = process.env.VOID_API_URL
-    ? normalizePlatformApiUrl(process.env.VOID_API_URL)
-    : null;
-  const explicitHostedProxy =
-    explicitApiUrl === STAGING_API_URL
-      ? STAGING_PROXY_URL
-      : explicitApiUrl === DEFAULT_API_URL
-        ? DEFAULT_PROXY_URL
-        : undefined;
-  const proxyUrl =
-    process.env.VOID_PROXY_URL ??
-    readProjectProxyUrl(root) ??
-    (isStagingMode(root) ? STAGING_PROXY_URL : undefined) ??
-    (isLegacyVoidCloudProject(root) ? DEFAULT_PROXY_URL : undefined) ??
-    explicitHostedProxy ??
-    (explicitApiUrl === null ? getActivePlatformConnection()?.proxyUrl : undefined);
-  if (!proxyUrl) {
+  // The project file is repository-controlled and therefore cannot be trusted
+  // to choose the origin that receives a user's platform credential. Resolve
+  // the proxy from the selected API's trusted local registry entry instead.
+  // VOID_PROXY_URL remains an explicit operator override for CI and recovery.
+  if (process.env.VOID_PROXY_URL) {
+    return normalizePlatformApiUrl(process.env.VOID_PROXY_URL);
+  }
+
+  const apiUrl = normalizePlatformApiUrl(getApiUrl(root));
+  if (apiUrl === STAGING_API_URL) {
+    return STAGING_PROXY_URL;
+  }
+  if (apiUrl === DEFAULT_API_URL) {
+    return DEFAULT_PROXY_URL;
+  }
+
+  const proxyUrl = listPlatformConnections().find(
+    (connection) => connection.apiUrl === apiUrl,
+  )?.proxyUrl;
+  if (proxyUrl === null || proxyUrl === undefined) {
     throw new Error(
-      'platform: No Void platform proxy selected. Reconnect with `void platform connect <url>`.',
+      `platform: No verified proxy is registered for ${apiUrl}. Reconnect with \`void platform connect ${apiUrl}\` or set VOID_PROXY_URL explicitly.`,
     );
   }
-  return normalizePlatformApiUrl(proxyUrl);
+  return proxyUrl;
 }
 
 function page(title: string, message: string): string {
