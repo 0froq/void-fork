@@ -96,7 +96,13 @@ const app = new Hono<ApiEnv>()
   // Lifecycle disablement lives in installation-owned KV, so it also gates
   // workers.dev without mutating a reusable Worker script name.
   .use('*', async (context, next) => {
-    if ((await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+    const installerProbe =
+      context.req.header('X-Health-Check') === 'void-admin' &&
+      (context.req.path === '/health' || context.req.path === '/.well-known/void-platform');
+    if (
+      !installerProbe &&
+      (await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+    ) {
       return context.json({ error: 'Platform disabled' }, 503);
     }
     await next();

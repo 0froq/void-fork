@@ -186,6 +186,17 @@ describe('proxy worker', () => {
     expect(await res.json()).toEqual({ error: 'Platform disabled' });
   });
 
+  it('admits installer health checks while public traffic is disabled', async () => {
+    const res = await worker.fetch(
+      new Request('https://proxy.void.cloud/health', {
+        headers: { 'X-Health-Check': 'void-admin' },
+      }),
+      createEnv(undefined, { [PLATFORM_DISABLED_KEY]: 'disabled' }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true });
+  });
+
   describe('CORS', () => {
     it('returns 204 with CORS headers on OPTIONS', async () => {
       const req = new Request('https://proxy.void.cloud/ai/run', { method: 'OPTIONS' });

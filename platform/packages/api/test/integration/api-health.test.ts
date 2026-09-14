@@ -32,6 +32,22 @@ describe('GET /health', () => {
     }
   });
 
+  it('admits installer health checks while public traffic is disabled', async () => {
+    await env.ROUTING.put(PLATFORM_DISABLED_KEY, 'disabled');
+    try {
+      const res = await app.fetch(
+        new Request('http://localhost/health', {
+          headers: { 'X-Health-Check': 'void-admin' },
+        }),
+        env,
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ status: 'ok' });
+    } finally {
+      await env.ROUTING.delete(PLATFORM_DISABLED_KEY);
+    }
+  });
+
   it('verifies a self-hosted installation through its database claim', async () => {
     await env.db.execute(sql`
       CREATE TABLE "__void_platform_installation" (

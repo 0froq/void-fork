@@ -51,6 +51,18 @@ describe('internal route blocking', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
+  it('admits installer health checks while public traffic is disabled', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/health', {
+        headers: { 'X-Health-Check': 'void-admin' },
+      }),
+      createEnv(true),
+      createCtx(),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
   it('blocks POST /__void/migrate with 404', async () => {
     const response = await app.fetch(
       new Request('https://my-app.void.app/__void/migrate', { method: 'POST' }),

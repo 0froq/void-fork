@@ -311,6 +311,7 @@ export async function installPlatform(
   let workerCutoverGeneration = 0;
   let workerRollbacks: Array<PlatformWorkerRollback> = [];
   let workerDeploymentCommitted = false;
+  let workerTrafficGuarded = false;
   let manifest = existing;
   if (!manifest) {
     const createdAt = now();
@@ -596,6 +597,15 @@ export async function installPlatform(
         join(runtimeDirectory, artifact.path),
       ]),
     ) as Record<'api' | 'dispatch' | 'proxy' | 'tail', string>;
+    if (!previousPublicEndpoints) {
+      await dependencies.client.putKvValue(
+        plan.account.id,
+        requireId(ids, 'routing-kv'),
+        PLATFORM_DISABLED_KEY,
+        PLATFORM_DISABLED_VALUE,
+      );
+      workerTrafficGuarded = true;
+    }
     if (!preserveDisabled) {
       const trafficGeneration = nextTrafficGeneration(manifest);
       manifest = recordInstallationStep(
@@ -878,15 +888,6 @@ export async function installPlatform(
       saveInstalledPlatformConnection(plan, manifest);
       return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
     }
-    if (dependencies.client.deleteKvValue) {
-      await dependencies.client.deleteKvValue(
-        plan.account.id,
-        requireId(ids, 'routing-kv'),
-        PLATFORM_DISABLED_KEY,
-      );
-    } else if (wasDisabled) {
-      throw new Error('platform: Routing disablement removal is unavailable.');
-    }
     manifest = transitionInstallation(manifest, 'verifying', now());
     writeInstallationManifest(manifest);
     await (dependencies.verifyHealth ?? verifyPlatformHealth)(
@@ -896,6 +897,16 @@ export async function installPlatform(
       plan.deployment.application.baseDomain,
       version,
     );
+    if (dependencies.client.deleteKvValue) {
+      await dependencies.client.deleteKvValue(
+        plan.account.id,
+        requireId(ids, 'routing-kv'),
+        PLATFORM_DISABLED_KEY,
+      );
+      workerTrafficGuarded = false;
+    } else if (wasDisabled || !previousPublicEndpoints) {
+      throw new Error('platform: Routing disablement removal is unavailable.');
+    }
     workerDeploymentCommitted = true;
     manifest = recordWorkerCutoverResolution(manifest, workerCutoverGeneration, 'committed', now());
     manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, true, now());
@@ -908,6 +919,24 @@ export async function installPlatform(
     return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
   } catch (error) {
     let failure: unknown = error;
+    if (workerTrafficGuarded) {
+      try {
+        await dependencies.client.putKvValue(
+          plan.account.id,
+          requireId(
+            Object.fromEntries(manifest.resources.map((resource) => [resource.key, resource.id])),
+            'routing-kv',
+          ),
+          PLATFORM_DISABLED_KEY,
+          PLATFORM_DISABLED_VALUE,
+        );
+      } catch (guardError) {
+        failure = new Error(
+          `platform: ${errorMessage(error)} The installation also failed to retain its routing safety gate: ${errorMessage(guardError)}`,
+          { cause: error },
+        );
+      }
+    }
     if (!workerDeploymentCommitted && workerRollbacks.length > 0) {
       const rollbackFailures: Array<string> = [];
       for (const rollback of workerRollbacks.reverse()) {
@@ -3124,15 +3153,16 @@ export async function verifyPlatformHealth(
   platformVersion: string,
   fetcher: typeof fetch = fetch,
 ): Promise<void> {
-  const request = (url: string, headers?: HeadersInit) =>
-    fetcher(url, { headers, signal: AbortSignal.timeout(30_000) });
+  const request = (url: string) =>
+    fetcher(url, {
+      headers: { 'X-Health-Check': 'void-admin' },
+      signal: AbortSignal.timeout(30_000),
+    });
   const [health, discovery, proxy, dispatch] = await Promise.all([
     request(`${apiUrl}/health`),
     request(`${apiUrl}/.well-known/void-platform`),
     request(`${proxyUrl}/health`),
-    request(`https://test.${applicationBaseDomain}/health`, {
-      'X-Health-Check': 'void-admin',
-    }),
+    request(`https://test.${applicationBaseDomain}/health`),
   ]);
   if (!health.ok) {
     throw new Error(`platform: Health check failed at ${apiUrl} (HTTP ${health.status}).`);

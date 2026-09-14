@@ -1,3 +1,4 @@
+import { PLATFORM_DISABLED_KEY } from '@void/platform';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import app from '../../src/index.ts';
 import { setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
@@ -82,5 +83,21 @@ describe('GET /.well-known/void-platform', () => {
     );
     expect(managedBuild.status).toBe(501);
     expect(await managedBuild.json()).toMatchObject({ capability: 'managedBuilds' });
+  });
+
+  it('admits installer discovery while public traffic is disabled', async () => {
+    await env.ROUTING.put(PLATFORM_DISABLED_KEY, 'disabled');
+    try {
+      const response = await app.fetch(
+        new Request('https://api.void.cloud/.well-known/void-platform', {
+          headers: { 'X-Health-Check': 'void-admin' },
+        }),
+        env,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ schemaVersion: 1 });
+    } finally {
+      await env.ROUTING.delete(PLATFORM_DISABLED_KEY);
+    }
   });
 });

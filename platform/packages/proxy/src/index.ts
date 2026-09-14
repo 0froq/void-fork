@@ -14,7 +14,12 @@ import type { JwtPayload, ProxyBody, ProxyEnv } from './types.ts';
 const app = new Hono<ProxyEnv>();
 
 app.use('/*', async (context, next) => {
-  if ((await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+  const installerProbe =
+    context.req.path === '/health' && context.req.header('X-Health-Check') === 'void-admin';
+  if (
+    !installerProbe &&
+    (await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+  ) {
     return context.json({ error: 'Platform disabled' }, 503);
   }
   await next();

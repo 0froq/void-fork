@@ -584,13 +584,19 @@ export function rebuildRequest(
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    // The installer proves the complete cutover while the public routing gate
+    // remains closed. This endpoint exposes no application data and is already
+    // reserved for the installer's exact health-check header.
+    if (url.pathname === '/health' && request.headers.get('X-Health-Check') === 'void-admin') {
+      return Response.json({ ok: true });
+    }
     if ((await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
       return createErrorResponse(request, 503, 'Platform disabled', {
         'Cache-Control': 'no-store',
       });
     }
     const startTime = Date.now();
-    const url = new URL(request.url);
     // Budget for the bounded hot paths (static-asset reads, primary dispatch).
     // Unset → the 10s default. An explicit `0`/negative/non-finite override is
     // passed through verbatim, disabling the timers via `withTimeout`'s escape
@@ -610,11 +616,6 @@ export default {
       url.pathname === '/__queue'
     ) {
       return createErrorResponse(request, 404, 'Not Found');
-    }
-
-    // Health check short-circuit — bypass KV lookup entirely
-    if (url.pathname === '/health' && request.headers.get('X-Health-Check') === 'void-admin') {
-      return Response.json({ ok: true });
     }
 
     const slug = extractSlug(url.hostname, env.BASE_HOSTNAME);

@@ -8,6 +8,8 @@ import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
+  PLATFORM_DISABLED_KEY,
+  PLATFORM_DISABLED_VALUE,
   recordInstallationResource,
   recordInstallationStep,
   setInstallationDesiredState,
@@ -561,7 +563,9 @@ describe('platform installer', () => {
       'https://proxy.example.com/health',
       'https://test.apps.example.com/health',
     ]);
-    expect(requests[3]!.headers.get('X-Health-Check')).toBe('void-admin');
+    expect(requests.every((entry) => entry.headers.get('X-Health-Check') === 'void-admin')).toBe(
+      true,
+    );
   });
 
   it('rejects a cutover when the proxy is unhealthy', async () => {
@@ -1160,6 +1164,7 @@ describe('platform installer', () => {
     let apiSecrets: Record<string, string> | null = null;
     let r2OwnershipMarker = '';
     const routingValues = new Map<string, string>();
+    const lifecycleEvents: Array<string> = [];
     let remoteManifest = '';
     const databaseClaims: Array<[string, string]> = [];
     const result = await installPlatform(
@@ -1197,8 +1202,15 @@ describe('platform installer', () => {
           createQueue: created,
           createDispatchNamespace: created,
           createHyperdrive: async (account, name) => created(account, name),
+          deleteKvValue: async (_account, _namespace, key) => {
+            lifecycleEvents.push(`delete:${key}`);
+            routingValues.delete(key);
+          },
           putKvValue: async (_account, _namespace, key, value) => {
             routingValues.set(key, value);
+            if (key === PLATFORM_DISABLED_KEY) {
+              lifecycleEvents.push(`put:${key}`);
+            }
             if (key === '__void/platform/installation/v1') {
               remoteManifest = value;
             }
@@ -1208,6 +1220,8 @@ describe('platform installer', () => {
           },
         },
         deployWorker: async (config, secrets) => {
+          expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+          lifecycleEvents.push(`deploy:${String(config.name)}`);
           deployed.push(String(config.name));
           if (String(config.name).endsWith('-api')) {
             apiSecrets = secrets;
@@ -1215,7 +1229,10 @@ describe('platform installer', () => {
         },
         migrateDatabase: async () => {},
         revalidateBeforeWorkerDeploy: async () => {},
-        verifyHealth: async () => {},
+        verifyHealth: async () => {
+          expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+          lifecycleEvents.push('verify');
+        },
       },
     );
 
@@ -1242,10 +1259,91 @@ describe('platform installer', () => {
     });
     expect(routingValues.get('signup:enabled')).toBe('true');
     expect(JSON.parse(routingValues.get('signup:allowlist')!)).toEqual([]);
+    expect(routingValues.has(PLATFORM_DISABLED_KEY)).toBe(false);
+    expect(lifecycleEvents[0]).toBe(`put:${PLATFORM_DISABLED_KEY}`);
+    expect(lifecycleEvents.at(-2)).toBe('verify');
+    expect(lifecycleEvents.at(-1)).toBe(`delete:${PLATFORM_DISABLED_KEY}`);
     expect(listInstallationManifests(directory)).toHaveLength(1);
     expect(readdirSync(join(directory, 'account')).some((name) => name.endsWith('.secrets'))).toBe(
       false,
     );
+  });
+
+  it('closes the routing gate before an ambiguous fresh Worker upload', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-worker-ambiguity-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const plan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      null,
+    );
+    let index = 0;
+    let disabled = false;
+    const create = async (_account: string, name: string) => ({ id: `id-${index++}`, name });
+
+    await expect(
+      installPlatform(
+        plan,
+        createPlatformInstallationSecrets({
+          bootstrapGitHubId: '583231',
+          bootstrapGitHubLogin: 'octocat',
+          cloudflareApiToken: 'cf-token',
+          databaseUrl: 'postgres://user:password@db.example.com/void',
+          githubClientId: 'github-id',
+          githubClientSecret: 'github-secret',
+          r2AccessKeyId: 'r2-id',
+          r2SecretAccessKey: 'r2-secret',
+        }),
+        null,
+        {
+          acquireDatabaseLifecycleLock,
+          claimDatabase,
+          client: {
+            createAiGateway: create,
+            createDispatchNamespace: create,
+            createDnsRecord: async (_zone, name) => ({
+              content: '100::',
+              id: `id-${index++}`,
+              name,
+              proxied: true,
+              type: 'AAAA',
+            }),
+            createHyperdrive: async (account, name) => create(account, name),
+            createKvNamespace: create,
+            createQueue: create,
+            createR2Bucket: create,
+            createZone: async () => {
+              throw new Error('existing zone must not be created');
+            },
+            putKvValue: async (_account, _namespace, key, value) => {
+              if (key === PLATFORM_DISABLED_KEY) {
+                expect(value).toBe(PLATFORM_DISABLED_VALUE);
+                disabled = true;
+              }
+            },
+            putR2Object: async () => {},
+          },
+          deployWorker: async () => {
+            expect(disabled).toBe(true);
+            throw new Error('Worker upload response was lost');
+          },
+          migrateDatabase: async () => {},
+          revalidateBeforeWorkerDeploy: async () => {},
+        },
+      ),
+    ).rejects.toThrow('Worker upload response was lost');
+
+    expect(disabled).toBe(true);
+    expect(listInstallationManifests(directory)[0]).toMatchObject({ status: 'failed' });
   });
 
   it('stops after a newly-created zone until nameservers become active', async () => {
@@ -1376,6 +1474,7 @@ describe('platform installer', () => {
         createQueue: create,
         createDispatchNamespace: create,
         createHyperdrive: async (account, name) => create(account, name),
+        deleteKvValue: async () => {},
         putKvValue: async () => {},
         putR2Object: async () => {},
       },
