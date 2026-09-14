@@ -146,6 +146,13 @@ type WorkerInspectionClient = Partial<
 
 type PlatformWorkerRollback = () => Promise<void>;
 
+export class PlatformWorkerRecoveryIncompleteError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'PlatformWorkerRecoveryIncompleteError';
+  }
+}
+
 export type PlatformInstallerDependencies = Readonly<{
   acquireDatabaseLifecycleLock: (
     databaseUrl: string,
@@ -924,6 +931,7 @@ export async function installPlatform(
     return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
   } catch (error) {
     let failure: unknown = error;
+    const currentWorkerRecoveryIncomplete = error instanceof PlatformWorkerRecoveryIncompleteError;
     if (workerTrafficGuarded) {
       try {
         await dependencies.client.putKvValue(
@@ -952,9 +960,11 @@ export async function installPlatform(
         }
       }
       workerRollbacks = [];
-      if (rollbackFailures.length > 0) {
+      if (rollbackFailures.length > 0 || currentWorkerRecoveryIncomplete) {
         failure = new Error(
-          `platform: ${errorMessage(error)} Automatic Worker rollback was incomplete: ${rollbackFailures.join('; ')} Inspect the installation before retrying.`,
+          rollbackFailures.length > 0
+            ? `platform: ${errorMessage(error)} Automatic Worker rollback was incomplete: ${rollbackFailures.join('; ')} Inspect the installation before retrying.`
+            : `platform: ${errorMessage(error)} The current Worker rollback was incomplete. The cutover remains unresolved and will be recovered on retry.`,
           { cause: error },
         );
       } else if (workerCutoverGeneration > 0) {
@@ -2212,7 +2222,7 @@ async function deployPlatformWorker(
       recoveryError = rollbackError;
     }
     if (recoveryError) {
-      throw new Error(
+      throw new PlatformWorkerRecoveryIncompleteError(
         `platform: ${errorMessage(error)} Automatic recovery for ${workerName} was incomplete: ${errorMessage(recoveryError)}`,
         { cause: error },
       );

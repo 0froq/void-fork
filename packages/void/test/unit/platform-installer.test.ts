@@ -41,6 +41,7 @@ import {
   mergePlatformWorkerTrafficConfig,
   mergePreservedTriggerRoutes,
   preparePlatformDatabaseConnection,
+  PlatformWorkerRecoveryIncompleteError,
   r2BucketConfigHash,
   readPlatformDatabaseLifecycleManifestConnection,
   readActivePlatformWorkerSnapshot,
@@ -1347,6 +1348,92 @@ describe('platform installer', () => {
 
     expect(disabled).toBe(true);
     expect(listInstallationManifests(directory)[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('keeps a cutover unresolved when the current Worker rollback is incomplete', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-incomplete-rollback-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const plan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      null,
+    );
+    let index = 0;
+    let deployments = 0;
+    let previousRollbackRan = false;
+    const create = async (_account: string, name: string) => ({ id: `id-${index++}`, name });
+
+    await expect(
+      installPlatform(
+        plan,
+        createPlatformInstallationSecrets({
+          bootstrapGitHubId: '583231',
+          bootstrapGitHubLogin: 'octocat',
+          cloudflareApiToken: 'cf-token',
+          databaseUrl: 'postgres://user:password@db.example.com/void',
+          githubClientId: 'github-id',
+          githubClientSecret: 'github-secret',
+          r2AccessKeyId: 'r2-id',
+          r2SecretAccessKey: 'r2-secret',
+        }),
+        null,
+        {
+          acquireDatabaseLifecycleLock,
+          claimDatabase,
+          client: {
+            createAiGateway: create,
+            createDispatchNamespace: create,
+            createDnsRecord: async (_zone, name) => ({
+              content: '100::',
+              id: `id-${index++}`,
+              name,
+              proxied: true,
+              type: 'AAAA',
+            }),
+            createHyperdrive: async (account, name) => create(account, name),
+            createKvNamespace: create,
+            createQueue: create,
+            createR2Bucket: create,
+            createZone: async () => {
+              throw new Error('existing zone must not be created');
+            },
+            putKvValue: async () => {},
+            putR2Object: async () => {},
+          },
+          deployWorker: async () => {
+            deployments++;
+            if (deployments === 1) {
+              return async () => {
+                previousRollbackRan = true;
+              };
+            }
+            throw new PlatformWorkerRecoveryIncompleteError(
+              'platform: Automatic recovery for proxy was incomplete.',
+            );
+          },
+          migrateDatabase: async () => {},
+          revalidateBeforeWorkerDeploy: async () => {},
+        },
+      ),
+    ).rejects.toThrow('cutover remains unresolved');
+
+    const failed = listInstallationManifests(directory)[0]!;
+    expect(previousRollbackRan).toBe(true);
+    expect(
+      failed.steps.some(
+        (step) => step.key.startsWith('worker-cutover:') && step.resultHash === 'restored',
+      ),
+    ).toBe(false);
+    expect(failed.status).toBe('failed');
   });
 
   it('repairs a checkpointed R2 ownership marker after its first write failed', async () => {
