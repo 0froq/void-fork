@@ -124,8 +124,15 @@ export function createPlatformInstallationSecrets(input: {
     }
     return value;
   };
-  const jwtSecret = input.jwtSecret || checkpoint.jwtSecret || '';
-  const projectSecretKey = input.projectSecretKey || checkpoint.projectSecretKey || '';
+  // Runtime signing/encryption keys are installation identity, not rotating
+  // configuration. Once recovery material exists, an unrelated exported key
+  // must never replace it during repair, upgrade, enable, or resume.
+  const jwtSecret = input.existingInstallation
+    ? checkpoint.jwtSecret || input.jwtSecret || ''
+    : input.jwtSecret || checkpoint.jwtSecret || '';
+  const projectSecretKey = input.existingInstallation
+    ? checkpoint.projectSecretKey || input.projectSecretKey || ''
+    : input.projectSecretKey || checkpoint.projectSecretKey || '';
   const resolvedJwtSecret = input.existingInstallation
     ? required(jwtSecret, 'VOID_PLATFORM_JWT_SECRET')
     : jwtSecret || randomBytes(32).toString('base64url');

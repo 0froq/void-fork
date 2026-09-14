@@ -231,6 +231,22 @@ describe('platform installer', () => {
         projectSecretKey,
       }),
     ).toMatchObject({ jwtSecret: 'existing-jwt-secret', projectSecretKey });
+
+    const recoveredProjectSecretKey = Buffer.alloc(32, 9).toString('base64');
+    expect(
+      createPlatformInstallationSecrets({
+        ...input,
+        checkpoint: {
+          jwtSecret: 'recovered-jwt-secret',
+          projectSecretKey: recoveredProjectSecretKey,
+        },
+        jwtSecret: 'wrong-exported-jwt-secret',
+        projectSecretKey: Buffer.alloc(32, 3).toString('base64'),
+      }),
+    ).toMatchObject({
+      jwtSecret: 'recovered-jwt-secret',
+      projectSecretKey: recoveredProjectSecretKey,
+    });
   });
 
   it('does not checkpoint failure when another host owns the lifecycle lock', async () => {
