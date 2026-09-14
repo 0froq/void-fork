@@ -17,6 +17,12 @@ const workers = [
   ['tail', join(repositoryRoot, 'platform', 'packages', 'tail', 'src', 'index.ts')],
   ['dispatch', join(repositoryRoot, 'platform', 'packages', 'dispatch', 'src', 'index.ts')],
 ];
+const sourceAliases = {
+  '@void/deploy-core': join(repositoryRoot, 'packages', 'deploy-core', 'src', 'index.ts'),
+  '@void/edge': join(repositoryRoot, 'packages', 'edge', 'src', 'index.ts'),
+  '@void/isr': join(repositoryRoot, 'packages', 'isr', 'src', 'index.ts'),
+  '@void/isr/core': join(repositoryRoot, 'packages', 'isr', 'src', 'core.ts'),
+};
 
 try {
   rmSync(runtimeRoot, { force: true, recursive: true });
@@ -31,6 +37,7 @@ try {
       JSON.stringify({
         name: `void-runtime-build-${name}`,
         main: entrypoint,
+        alias: sourceAliases,
         compatibility_date: '2026-02-24',
         compatibility_flags: name === 'api' || name === 'proxy' ? ['nodejs_compat'] : [],
       }),
