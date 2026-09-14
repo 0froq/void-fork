@@ -666,7 +666,8 @@ export async function recoverDurablyMarkedProvisionIntents(
       !manifest.resources.some((resource) => resource.key === key) &&
       manifest.steps.some(
         (step) =>
-          step.key === `provision-intent:${key}` &&
+          (step.key === `provision-intent:${key}` ||
+            step.key.startsWith(`provision-intent:${key}:`)) &&
           step.resultHash === platformProvisionIntentHash(manifest, key, kind, name),
       ),
   );
@@ -953,11 +954,20 @@ function hasMatchingResourceIntent(
   resource: InstallationResource,
 ): boolean {
   if (resource.ownership === 'created') {
+    const previousResourceId =
+      manifest.resources.find((entry) => entry.key === resource.key)?.id ?? null;
     return manifest.steps.some(
       (step) =>
-        step.key === `provision-intent:${resource.key}` &&
+        (step.key === `provision-intent:${resource.key}` ||
+          step.key.startsWith(`provision-intent:${resource.key}:`)) &&
         step.resultHash ===
-          platformProvisionIntentHash(manifest, resource.key, resource.kind, resource.name),
+          platformProvisionIntentHash(
+            manifest,
+            resource.key,
+            resource.kind,
+            resource.name,
+            previousResourceId,
+          ),
     );
   }
   if (resource.ownership === 'adopted') {

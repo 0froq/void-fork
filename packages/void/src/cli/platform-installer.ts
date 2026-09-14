@@ -257,6 +257,11 @@ export async function installPlatform(
         authoritative !== null && authoritative !== undefined,
       );
     }
+    if (JSON.stringify(manifest.deployment) !== JSON.stringify(plan.deployment)) {
+      manifest = { ...manifest, deployment: plan.deployment, updatedAt: now() };
+      writeInstallationManifest(manifest);
+      await releaseDatabaseLock.checkpoint?.(manifest);
+    }
     if (manifest.platformVersion !== version) {
       manifest = { ...manifest, platformVersion: version, updatedAt: now() };
       writeInstallationManifest(manifest);
@@ -592,12 +597,30 @@ function recordProvisionIntent(
   action: PlatformInstallPlanAction,
   now: string,
 ): PlatformInstallationManifest {
+  const previousResourceId =
+    manifest.resources.find((resource) => resource.key === action.key)?.id ?? null;
+  const resultHash = platformProvisionIntentHash(
+    manifest,
+    action.key,
+    action.kind,
+    action.name,
+    previousResourceId,
+  );
+  const existing = manifest.steps.find(
+    (step) =>
+      (step.key === `provision-intent:${action.key}` ||
+        step.key.startsWith(`provision-intent:${action.key}:`)) &&
+      step.resultHash === resultHash,
+  );
+  if (existing) {
+    return manifest;
+  }
   return recordInstallationStep(
     manifest,
     {
       completedAt: now,
-      key: `provision-intent:${action.key}`,
-      resultHash: platformProvisionIntentHash(manifest, action.key, action.kind, action.name),
+      key: `provision-intent:${action.key}:${resultHash.slice(0, 16)}`,
+      resultHash,
     },
     now,
   );
@@ -624,11 +647,20 @@ function hasProvisionIntent(
   manifest: PlatformInstallationManifest,
   action: PlatformInstallPlanAction,
 ): boolean {
+  const previousResourceId =
+    manifest.resources.find((resource) => resource.key === action.key)?.id ?? null;
   return manifest.steps.some(
     (step) =>
-      step.key === `provision-intent:${action.key}` &&
+      (step.key === `provision-intent:${action.key}` ||
+        step.key.startsWith(`provision-intent:${action.key}:`)) &&
       step.resultHash ===
-        platformProvisionIntentHash(manifest, action.key, action.kind, action.name),
+        platformProvisionIntentHash(
+          manifest,
+          action.key,
+          action.kind,
+          action.name,
+          previousResourceId,
+        ),
   );
 }
 

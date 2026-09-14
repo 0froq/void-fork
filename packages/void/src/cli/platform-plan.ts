@@ -408,17 +408,28 @@ export async function createPlatformInstallPlan(
       intentProofs,
     );
   }
-  const apiUrl = deployment.controlPlane.apiHostname
+  const resolvedResources = { ...deployment.resources };
+  for (const action of actions) {
+    const resourceKey = RESOURCE_NAME_KEY_BY_ACTION[action.key];
+    if (resourceKey && action.name !== resolvedResources[resourceKey]) {
+      resolvedResources[resourceKey] = action.name;
+    }
+  }
+  const resolvedDeployment = createPlatformDeploymentManifest({
+    ...deployment,
+    resources: resolvedResources,
+  });
+  const apiUrl = resolvedDeployment.controlPlane.apiHostname
     ? `https://${deployment.controlPlane.apiHostname}`
-    : `https://${names.apiWorker}.${workersSubdomain}.workers.dev`;
-  const proxyUrl = deployment.controlPlane.proxyHostname
+    : `https://${resolvedDeployment.resources.apiWorker}.${workersSubdomain}.workers.dev`;
+  const proxyUrl = resolvedDeployment.controlPlane.proxyHostname
     ? `https://${deployment.controlPlane.proxyHostname}`
-    : `https://${names.proxyWorker}.${workersSubdomain}.workers.dev`;
+    : `https://${resolvedDeployment.resources.proxyWorker}.${workersSubdomain}.workers.dev`;
   return {
     account,
     actions,
     apiUrl,
-    deployment,
+    deployment: resolvedDeployment,
     installationId,
     proxyUrl,
     workersSubdomain,
@@ -586,19 +597,37 @@ function addNamedPlan(
         resource.name === name &&
         resource.ownership === 'created',
     );
-    const recoverableProvision =
+    const markedProvision =
       existing !== null &&
       isUniqueProvisionAttempt(existing, key, kind, name) &&
       hasUnrecordedProvisionIntent(existing, key, kind, name) &&
-      (intentProofs.has(key) || options?.authoritativeProvisionIntents === true);
+      intentProofs.has(key);
+    const ambiguousProvision =
+      existing !== null &&
+      options?.authoritativeProvisionIntents === true &&
+      isUniqueProvisionAttempt(existing, key, kind, name) &&
+      hasAmbiguousProvisionIntent(existing, key, kind, remote.id, name);
     if (
       (!recorded || recorded.id !== remote.id || recorded.kind !== kind) &&
       !remotelyOwned &&
-      !recoverableProvision
+      !markedProvision &&
+      !ambiguousProvision
     ) {
       throw new Error(
         `platform: ${kind} ${JSON.stringify(name)} already exists but is not owned by this installation. Choose another installation name.`,
       );
+    }
+    if (ambiguousProvision && !markedProvision && !remotelyOwned) {
+      actions.push({
+        action: 'create',
+        id: null,
+        key,
+        kind,
+        name: interruptedProvisionRetryName(existing, key, kind, name),
+        reason:
+          'Leave the ambiguous same-name resource untouched and create a fresh installer-scoped replacement.',
+      });
+      return;
     }
     actions.push({
       action: existingAction,
@@ -606,7 +635,7 @@ function addNamedPlan(
       key,
       kind,
       name,
-      reason: recoverableProvision
+      reason: markedProvision
         ? 'Recover the uniquely named resource from an interrupted provisioning attempt.'
         : existingAction === 'update'
           ? 'Deploy the current platform version.'
@@ -655,10 +684,49 @@ function hasUnrecordedProvisionIntent(
     !manifest.resources.some((resource) => resource.key === key && resource.state === 'ready') &&
     manifest.steps.some(
       (step) =>
-        step.key === `provision-intent:${key}` &&
+        isProvisionIntentStep(step.key, key) &&
         step.resultHash === platformProvisionIntentHash(manifest, key, kind, name),
     )
   );
+}
+
+function hasAmbiguousProvisionIntent(
+  manifest: PlatformInstallationManifest,
+  key: string,
+  kind: InstallationResourceKind,
+  remoteId: string,
+  name: string,
+): boolean {
+  const recorded = manifest.resources.find((resource) => resource.key === key);
+  if (recorded?.id === remoteId && recorded.kind === kind && recorded.name === name) {
+    return false;
+  }
+  return manifest.steps.some(
+    (step) =>
+      isProvisionIntentStep(step.key, key) &&
+      step.resultHash ===
+        platformProvisionIntentHash(manifest, key, kind, name, recorded?.id ?? null),
+  );
+}
+
+function isProvisionIntentStep(stepKey: string, resourceKey: string): boolean {
+  return (
+    stepKey === `provision-intent:${resourceKey}` ||
+    stepKey.startsWith(`provision-intent:${resourceKey}:`)
+  );
+}
+
+function interruptedProvisionRetryName(
+  manifest: PlatformInstallationManifest,
+  key: string,
+  kind: InstallationResourceKind,
+  name: string,
+): string {
+  const suffix = `-retry-${createHash('sha256')
+    .update(JSON.stringify({ key, kind, name, ownershipNonce: manifest.ownershipNonce }))
+    .digest('hex')
+    .slice(0, 10)}`;
+  return `${name.slice(0, 63 - suffix.length).replace(/-+$/, '')}${suffix}`;
 }
 
 function matchesResourceMarker(
@@ -706,9 +774,11 @@ function isUniqueProvisionAttempt(
   if (!resourceKey) {
     return false;
   }
+  const expectedName = expectedNames[resourceKey];
+  const uniquePrefix = expectedName.slice(0, expectedName.lastIndexOf('-') + 1);
   return (
-    expectedNames[resourceKey] === name &&
     manifest.deployment.resources[resourceKey] === name &&
+    (name === expectedName || name.startsWith(uniquePrefix)) &&
     kind !== 'zone' &&
     kind !== 'dns-record'
   );
@@ -737,9 +807,18 @@ export function platformProvisionIntentHash(
   key: string,
   kind: InstallationResourceKind,
   name: string,
+  previousResourceId: string | null = null,
 ): string {
   return createHash('sha256')
-    .update(JSON.stringify({ key, kind, name, ownershipNonce: manifest.ownershipNonce }))
+    .update(
+      JSON.stringify({
+        key,
+        kind,
+        name,
+        ownershipNonce: manifest.ownershipNonce,
+        ...(previousResourceId ? { previousResourceId } : {}),
+      }),
+    )
     .digest('hex');
 }
 

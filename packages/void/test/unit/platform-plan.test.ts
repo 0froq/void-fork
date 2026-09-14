@@ -220,11 +220,70 @@ describe('platform installation planning', () => {
       manifest,
       { authoritativeProvisionIntents: true },
     );
-    expect(recovered.actions.find((action) => action.key === 'routing-kv')).toMatchObject({
-      action: 'reuse',
-      id: 'created-before-crash',
-      reason: 'Recover the uniquely named resource from an interrupted provisioning attempt.',
+    const retry = recovered.actions.find((action) => action.key === 'routing-kv');
+    expect(retry).toMatchObject({
+      action: 'create',
+      id: null,
+      reason:
+        'Leave the ambiguous same-name resource untouched and create a fresh installer-scoped replacement.',
     });
+    expect(retry?.name).not.toBe(resourceName);
+    expect(recovered.deployment.resources.routingKv).toBe(retry?.name);
+  });
+
+  it('uses a fresh name after an interrupted repair create', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null);
+    const resourceName = initial.deployment.resources.routingKv;
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: 'old',
+        id: 'missing-old-id',
+        key: 'routing-kv',
+        kind: 'kv-namespace',
+        name: resourceName,
+        ownership: 'created',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const resultHash = platformProvisionIntentHash(
+      manifest,
+      'routing-kv',
+      'kv-namespace',
+      resourceName,
+      'missing-old-id',
+    );
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-09-14T00:00:02.000Z',
+        key: `provision-intent:routing-kv:${resultHash.slice(0, 16)}`,
+        resultHash,
+      },
+      '2026-09-14T00:00:02.000Z',
+    );
+
+    const resumed = await createPlatformInstallPlan(
+      client({
+        listKvNamespaces: async (_account: string, title: string) =>
+          title === resourceName ? [{ id: 'replacement-before-crash', name: title }] : [],
+      }),
+      input,
+      manifest,
+      { authoritativeProvisionIntents: true, repairMissing: true },
+    );
+    const retry = resumed.actions.find((action) => action.key === 'routing-kv');
+    expect(retry).toMatchObject({ action: 'create', id: null });
+    expect(retry?.name).not.toBe(resourceName);
   });
 
   it('recovers only an intent-only Worker with its matching durable marker', async () => {
