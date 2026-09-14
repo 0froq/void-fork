@@ -21,6 +21,7 @@ import {
   REMOTE_INSTALLATION_MANIFEST_KEY,
   resolveBootstrapGitHubId,
 } from './platform-installer.ts';
+import { resolvePlatformInstallDatabaseUrl } from './platform-lifecycle.ts';
 import {
   createPlatformInstallPlan,
   formatPlatformInstallPlan,
@@ -237,6 +238,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       writeInstallationManifest(installation);
     }
     const recovery = readInstallationRecoverySecrets(installation);
+    const databaseUrl = resolvePlatformInstallDatabaseUrl(recovery, installation);
     const bootstrapGitHubLogin =
       process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN || recovery?.bootstrapGitHubLogin || '';
     const bootstrapGitHubId =
@@ -248,7 +250,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       bootstrapGitHubLogin,
       cloudflareApiToken: token,
       checkpoint: recovery,
-      databaseUrl: process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || '',
+      databaseUrl,
       existingInstallation: true,
       githubClientId: process.env.VOID_PLATFORM_GITHUB_CLIENT_ID || '',
       githubClientSecret: process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET || '',
@@ -289,8 +291,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   try {
     const current = resolveInstallationManifest(manifest.id);
     const recovery = readInstallationRecoverySecrets(current);
-    const databaseUrl =
-      process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || recovery?.databaseUrl;
+    const databaseUrl = resolvePlatformInstallDatabaseUrl(recovery, current);
     if (!databaseUrl) {
       throw new Error(
         'platform: DATABASE_URL is required to safely serialize lifecycle changes across hosts.',
