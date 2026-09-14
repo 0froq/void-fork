@@ -18,6 +18,7 @@ function client(overrides: Record<string, unknown> = {}) {
     getKvValue: async () => null,
     listAiGateways: async () => [],
     findZone: async () => null,
+    findZoneForHostname: async () => null,
     listDnsRecords: async () => [],
     listKvNamespaces: async () => [],
     listR2Buckets: async () => [],
@@ -25,6 +26,7 @@ function client(overrides: Record<string, unknown> = {}) {
     listDispatchNamespaces: async () => [],
     listHyperdriveConfigs: async () => [],
     listWorkerNames: async () => [],
+    listWorkerDomains: async () => [],
     ...overrides,
   };
 }
@@ -56,6 +58,48 @@ describe('platform installation planning', () => {
         title.endsWith('-routing') ? [{ id: 'someone-else', name: title }] : [],
     });
     await expect(createPlatformInstallPlan(fake, input, null)).rejects.toThrow('not owned');
+  });
+
+  it('refuses to replace an existing Worker custom domain or DNS record', async () => {
+    const customInput = { ...input, controlPlaneDomain: 'api.platform.example.com' };
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          listWorkerDomains: async () => [
+            { hostname: customInput.controlPlaneDomain, id: 'domain', service: 'other-worker' },
+          ],
+        }),
+        customInput,
+        null,
+      ),
+    ).rejects.toThrow('already assigned');
+
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          findZoneForHostname: async () => ({
+            id: 'control-zone',
+            name: 'example.com',
+            nameServers: [],
+            status: 'active',
+          }),
+          listDnsRecords: async (_zone: string, name: string) =>
+            name === customInput.controlPlaneDomain
+              ? [
+                  {
+                    content: '192.0.2.1',
+                    id: 'existing-dns',
+                    name,
+                    proxied: true,
+                    type: 'A',
+                  },
+                ]
+              : [],
+        }),
+        customInput,
+        null,
+      ),
+    ).rejects.toThrow('already has a DNS record');
   });
 
   it('does not treat a local provision intent as remote ownership proof', async () => {

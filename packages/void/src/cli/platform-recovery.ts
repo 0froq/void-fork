@@ -17,6 +17,7 @@ import {
 type RecoveryClient = Pick<
   PlatformCloudflareClient,
   | 'findZone'
+  | 'findZoneForHostname'
   | 'getKvValue'
   | 'getR2Object'
   | 'getWorkerPlainTextBindings'
@@ -30,6 +31,7 @@ type RecoveryClient = Pick<
   | 'listQueues'
   | 'listR2Buckets'
   | 'listWorkerNames'
+  | 'listWorkerDomains'
   | 'verifyToken'
 >;
 

@@ -33,6 +33,7 @@ function planningClient() {
       nameServers: [],
       status: 'active',
     }),
+    findZoneForHostname: async () => null,
     listDnsRecords: async () => [],
     listKvNamespaces: async () => [],
     listR2Buckets: async () => [],
@@ -40,6 +41,7 @@ function planningClient() {
     listDispatchNamespaces: async () => [],
     listHyperdriveConfigs: async () => [],
     listWorkerNames: async () => [],
+    listWorkerDomains: async () => [],
   };
 }
 

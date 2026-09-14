@@ -50,6 +50,7 @@ export type PlatformInstallPlanInput = Readonly<{
 type PlanningClient = Pick<
   PlatformCloudflareClient,
   | 'findZone'
+  | 'findZoneForHostname'
   | 'getKvValue'
   | 'getWorkersSubdomain'
   | 'listAiGateways'
@@ -61,6 +62,7 @@ type PlanningClient = Pick<
   | 'listQueues'
   | 'listR2Buckets'
   | 'listWorkerNames'
+  | 'listWorkerDomains'
   | 'verifyToken'
 >;
 
@@ -133,6 +135,35 @@ export async function createPlatformInstallPlan(
     client.listWorkerNames(account.id),
   ]);
   const dnsRecords = zone ? await client.listDnsRecords(zone.id, wildcardHostname) : [];
+  if (deployment.controlPlane.apiHostname) {
+    const apiHostname = deployment.controlPlane.apiHostname;
+    const [workerDomains, controlPlaneZone] = await Promise.all([
+      client.listWorkerDomains(account.id),
+      client.findZoneForHostname(account.id, apiHostname),
+    ]);
+    const matchingDomain = workerDomains.find((domain) => domain.hostname === apiHostname);
+    const expectedWorker = deployment.resources.apiWorker;
+    if (matchingDomain && matchingDomain.service !== expectedWorker) {
+      throw new Error(
+        `platform: Custom API hostname ${JSON.stringify(apiHostname)} is already assigned to Worker ${JSON.stringify(matchingDomain.service)}. Choose another hostname.`,
+      );
+    }
+    const records = controlPlaneZone
+      ? await client.listDnsRecords(controlPlaneZone.id, apiHostname)
+      : [];
+    const recordedApiWorker = existing?.resources.find(
+      (resource) =>
+        resource.key === 'api-worker' &&
+        resource.kind === 'worker' &&
+        resource.name === expectedWorker &&
+        resource.state === 'ready',
+    );
+    if (records.length > 0 && (!matchingDomain || !recordedApiWorker)) {
+      throw new Error(
+        `platform: Custom API hostname ${JSON.stringify(apiHostname)} already has a DNS record that installation would replace. Choose another hostname or remove the record explicitly.`,
+      );
+    }
+  }
   const remoteOwnership = existing
     ? await readRemoteOwnership(client, account.id, routingKv, existing)
     : null;

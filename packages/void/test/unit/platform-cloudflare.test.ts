@@ -386,4 +386,23 @@ describe('platform Cloudflare client', () => {
       },
     ]);
   });
+
+  it('inventories Worker custom domains before installer deployment', async () => {
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async () =>
+        Response.json({
+          success: true,
+          result: [
+            { hostname: 'api.platform.example.com', id: 'domain-id', service: 'existing-worker' },
+          ],
+        }),
+    });
+    await expect(client.listWorkerDomains('account')).resolves.toEqual([
+      {
+        hostname: 'api.platform.example.com',
+        id: 'domain-id',
+        service: 'existing-worker',
+      },
+    ]);
+  });
 });

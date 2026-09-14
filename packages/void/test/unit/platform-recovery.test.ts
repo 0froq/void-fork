@@ -127,6 +127,7 @@ function client(manifest = remoteManifest()) {
       nameServers: [],
       status: 'active',
     }),
+    findZoneForHostname: async () => null,
     listDnsRecords: async () => [
       {
         content: '100::',
@@ -179,6 +180,7 @@ function client(manifest = remoteManifest()) {
       manifest.deployment.resources.tailWorker,
       manifest.deployment.resources.dispatchWorker,
     ],
+    listWorkerDomains: async () => [],
   };
 }
 

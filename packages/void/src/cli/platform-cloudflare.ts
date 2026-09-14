@@ -31,6 +31,11 @@ export type CloudflareZone = Readonly<{
   nameServers: ReadonlyArray<string>;
   status: string;
 }>;
+export type CloudflareWorkerDomain = Readonly<{
+  hostname: string;
+  id: string;
+  service: string;
+}>;
 
 export class PlatformCloudflareClient {
   readonly #apiBase: string;
@@ -164,6 +169,28 @@ export class PlatformCloudflareClient {
         body: JSON.stringify({ account: { id: accountId }, name, type: 'full' }),
       }),
     );
+  }
+
+  async findZoneForHostname(accountId: string, hostname: string): Promise<CloudflareZone | null> {
+    const labels = hostname.split('.');
+    for (let index = 0; index <= labels.length - 2; index++) {
+      const zone = await this.findZone(accountId, labels.slice(index).join('.'));
+      if (zone) {
+        return zone;
+      }
+    }
+    return null;
+  }
+
+  async listWorkerDomains(accountId: string): Promise<ReadonlyArray<CloudflareWorkerDomain>> {
+    const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
+      `/accounts/${encodeURIComponent(accountId)}/workers/domains`,
+    );
+    return result.map((entry) => ({
+      hostname: requiredString(entry.hostname, 'Worker custom domain hostname'),
+      id: requiredString(entry.id, 'Worker custom domain id'),
+      service: requiredString(entry.service, 'Worker custom domain service'),
+    }));
   }
 
   async listDnsRecords(zoneId: string, name: string): Promise<ReadonlyArray<CloudflareDnsRecord>> {
