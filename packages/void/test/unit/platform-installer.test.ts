@@ -957,6 +957,132 @@ describe('platform installer', () => {
     ).rejects.toThrow('ownership marker changed after planning');
     expect(replacedWorkerDeploys).toBe(0);
 
+    const partialEvents: Array<string> = [];
+    let partialDeploys = 0;
+    await expect(
+      installPlatform(upgradedPlan, secrets, enabledUpgrade.manifest, {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: upgradeClient,
+        deployWorker: async (config) => {
+          const name = String(config.name);
+          partialDeploys++;
+          partialEvents.push(`deploy:${name}`);
+          if (partialDeploys === 3) {
+            throw new Error('third Worker failed');
+          }
+          return async () => {
+            partialEvents.push(`rollback:${name}`);
+          };
+        },
+        migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
+      }),
+    ).rejects.toThrow('third Worker failed');
+    expect(partialEvents).toEqual([
+      `deploy:${deployment.resources.apiWorker}`,
+      `deploy:${deployment.resources.proxyWorker}`,
+      `deploy:${deployment.resources.tailWorker}`,
+      `rollback:${deployment.resources.proxyWorker}`,
+      `rollback:${deployment.resources.apiWorker}`,
+    ]);
+
+    const healthEvents: Array<string> = [];
+    await expect(
+      installPlatform(upgradedPlan, secrets, enabledUpgrade.manifest, {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: upgradeClient,
+        deployWorker: async (config) => {
+          const name = String(config.name);
+          healthEvents.push(`deploy:${name}`);
+          return async () => {
+            healthEvents.push(`rollback:${name}`);
+          };
+        },
+        migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async () => {
+          throw new Error('health check failed');
+        },
+      }),
+    ).rejects.toThrow('health check failed');
+    expect(healthEvents.slice(-4)).toEqual([
+      `rollback:${deployment.resources.dispatchWorker}`,
+      `rollback:${deployment.resources.tailWorker}`,
+      `rollback:${deployment.resources.proxyWorker}`,
+      `rollback:${deployment.resources.apiWorker}`,
+    ]);
+
+    let rollbackIndex = 0;
+    await expect(
+      installPlatform(upgradedPlan, secrets, enabledUpgrade.manifest, {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: upgradeClient,
+        deployWorker: async () => async () => {
+          rollbackIndex++;
+          if (rollbackIndex === 2) {
+            throw new Error('rollback unavailable');
+          }
+        },
+        migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async () => {
+          throw new Error('health check failed');
+        },
+      }),
+    ).rejects.toThrow(
+      'health check failed Automatic Worker rollback was incomplete: rollback unavailable',
+    );
+    expect(rollbackIndex).toBe(4);
+
+    const interruptedCutover = {
+      ...enabledUpgrade.manifest,
+      status: 'failed' as const,
+      steps: [
+        ...enabledUpgrade.manifest.steps,
+        {
+          completedAt: '2026-09-14T00:00:06.000Z',
+          key: 'worker-cutover:999:staged:api',
+          resultHash: `${deployment.resources.apiWorker}|previous-api|staged-api`,
+        },
+        {
+          completedAt: '2026-09-14T00:00:06.000Z',
+          key: 'worker-cutover:999:staged:proxy',
+          resultHash: `${deployment.resources.proxyWorker}|previous-proxy|staged-proxy`,
+        },
+      ],
+    };
+    const recoveryEvents: Array<string> = [];
+    const recovered = await installPlatform(upgradedPlan, secrets, interruptedCutover, {
+      acquireDatabaseLifecycleLock,
+      claimDatabase,
+      client: upgradeClient,
+      deployWorker: async (config) => {
+        recoveryEvents.push(`deploy:${String(config.name)}`);
+      },
+      migrateDatabase: async () => {},
+      recoverWorkerCutover: async (snapshot) => {
+        recoveryEvents.push(
+          `recover:${snapshot.key}:${snapshot.previousVersionId}:${snapshot.stagedVersionId}`,
+        );
+      },
+      revalidateBeforeWorkerDeploy: async () => {},
+      verifyHealth: async () => {},
+    });
+    expect(recoveryEvents.slice(0, 2)).toEqual([
+      'recover:proxy:previous-proxy:staged-proxy',
+      'recover:api:previous-api:staged-api',
+    ]);
+    expect(recovered.manifest.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'worker-cutover:999:restored' }),
+        expect.objectContaining({ key: 'worker-traffic-state:999', resultHash: 'enabled' }),
+        expect.objectContaining({ key: 'worker-cutover:1000:committed' }),
+      ]),
+    );
+
     function named(key: string) {
       const resource = byKey.get(key)!;
       return { id: resource.id, name: resource.name };

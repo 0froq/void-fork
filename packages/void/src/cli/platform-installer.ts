@@ -3,6 +3,13 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
+  encodeCloudflareVersionMessage,
+  readCloudflareTriggerConfig,
+  stabilizeCloudflareVersionTriggers,
+  type CloudflareCommandResult,
+  type CloudflareCommandRunner,
+} from '@void/deploy-cloudflare';
+import {
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
   createPlatformWorkerConfigs,
@@ -66,7 +73,10 @@ type InstallerClient = Pick<
   | 'createZone'
   | 'putKvValue'
   | 'putR2Object'
->;
+> &
+  Partial<Pick<PlatformCloudflareClient, 'deleteResource' | 'removeRoutes'>>;
+
+type PlatformWorkerRollback = () => Promise<void>;
 
 export type PlatformInstallerDependencies = Readonly<{
   acquireDatabaseLifecycleLock: (
@@ -83,9 +93,15 @@ export type PlatformInstallerDependencies = Readonly<{
   deployWorker?: (
     config: Record<string, unknown>,
     secrets: Record<string, string> | null,
-  ) => Promise<void>;
+  ) => Promise<PlatformWorkerRollback | void>;
   migrateDatabase?: (databaseUrl: string, migrationsFolder: string) => Promise<void>;
   now?: () => string;
+  recoverWorkerCutover?: (input: {
+    key: PlatformWorkerKey;
+    previousVersionId: string | null;
+    stagedVersionId: string;
+    workerName: string;
+  }) => Promise<void>;
   revalidateBeforeWorkerDeploy: (
     manifest: PlatformInstallationManifest,
     action: PlatformInstallPlanAction,
@@ -199,6 +215,10 @@ export async function installPlatform(
   const now = dependencies.now ?? (() => new Date().toISOString());
   const version = readPlatformRuntimeManifest().platformVersion;
   const preserveDisabled = existing?.desiredState === 'disabled';
+  const previousPublicEndpoints = stablePublicEndpointState(existing);
+  let workerCutoverGeneration = 0;
+  let workerRollbacks: Array<PlatformWorkerRollback> = [];
+  let workerDeploymentCommitted = false;
   let manifest = existing;
   if (!manifest) {
     const createdAt = now();
@@ -444,14 +464,13 @@ export async function installPlatform(
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
-    const configs = createPlatformWorkerConfigs({
+    const configInput = {
       accountId: plan.account.id,
       apiUrl: plan.apiUrl,
       deployment: plan.deployment,
       installationId: manifest.id,
       ownershipNonce: manifest.ownershipNonce,
       platformVersion: version,
-      publicEndpoints: !preserveDisabled,
       proxyUrl: plan.proxyUrl,
       resources: {
         hyperdrive: requireId(ids, 'hyperdrive'),
@@ -461,8 +480,79 @@ export async function installPlatform(
         zone: zone.id,
       },
       runtimeEntrypoints: entrypoints,
+    };
+    const configs = createPlatformWorkerConfigs({
+      ...configInput,
+      publicEndpoints: !preserveDisabled,
     });
-    const deployWorker = dependencies.deployWorker ?? deployPlatformWorker;
+    const previousConfigs = createPlatformWorkerConfigs({
+      ...configInput,
+      publicEndpoints: previousPublicEndpoints,
+    });
+    const interruptedCutover = interruptedWorkerCutover(manifest);
+    if (interruptedCutover) {
+      for (const key of [...interruptedCutover.staged.keys()].reverse()) {
+        const snapshot = interruptedCutover.staged.get(key)!;
+        const recoveryConfig = { ...configs[key], name: snapshot.workerName };
+        const previousRecoveryConfig = { ...previousConfigs[key], name: snapshot.workerName };
+        if (dependencies.recoverWorkerCutover) {
+          await dependencies.recoverWorkerCutover({
+            key,
+            previousVersionId: snapshot.previousVersionId,
+            stagedVersionId: snapshot.stagedVersionId,
+            workerName: snapshot.workerName,
+          });
+        } else {
+          await rollbackPlatformWorker({
+            accountId: plan.account.id,
+            activatedVersionId: snapshot.stagedVersionId,
+            config: recoveryConfig,
+            nextTriggers: readTriggerConfigFromObject(recoveryConfig),
+            previousConfig: previousRecoveryConfig,
+            previousTriggers: readTriggerConfigFromObject(previousRecoveryConfig),
+            previousVersionId: snapshot.previousVersionId,
+            removeCustomDomains: async () => {
+              if (!dependencies.client.removeRoutes) {
+                throw new Error('platform: Cloudflare route removal is unavailable.');
+              }
+              await dependencies.client.removeRoutes(
+                plan.account.id,
+                zone.id,
+                new Set([snapshot.workerName]),
+              );
+            },
+            removeNewWorker: async () => {
+              if (!dependencies.client.deleteResource) {
+                throw new Error('platform: Cloudflare Worker removal is unavailable.');
+              }
+              await dependencies.client.deleteResource(
+                plan.account.id,
+                'worker',
+                snapshot.workerName,
+                zone.id,
+              );
+            },
+            workerExisted: snapshot.previousVersionId !== null,
+            workerName: snapshot.workerName,
+          });
+        }
+      }
+      manifest = recordWorkerCutoverResolution(
+        manifest,
+        interruptedCutover.generation,
+        'restored',
+        now(),
+      );
+      manifest = recordWorkerTrafficState(
+        manifest,
+        interruptedCutover.generation,
+        previousPublicEndpoints,
+        now(),
+      );
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    }
+    workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
     for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
       const action = plan.actions.find((entry) => entry.key === `${key}-worker`)!;
       const workerSecrets =
@@ -475,7 +565,49 @@ export async function installPlatform(
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       await dependencies.revalidateBeforeWorkerDeploy(manifest, action);
-      await deployWorker(configs[key], workerSecrets);
+      const rollback = dependencies.deployWorker
+        ? await dependencies.deployWorker(configs[key], workerSecrets)
+        : await deployPlatformWorker(configs[key], workerSecrets, {
+            onStaged: async (previousVersionId, stagedVersionId) => {
+              manifest = recordWorkerCutoverStage(
+                manifest!,
+                workerCutoverGeneration,
+                key,
+                previousVersionId,
+                stagedVersionId,
+                action.name,
+                now(),
+              );
+              writeInstallationManifest(manifest);
+              await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+            },
+            previousConfig: previousConfigs[key],
+            removeCustomDomains: async () => {
+              if (!dependencies.client.removeRoutes) {
+                throw new Error('platform: Cloudflare route removal is unavailable.');
+              }
+              await dependencies.client.removeRoutes(
+                plan.account.id,
+                zone.id,
+                new Set([action.name]),
+              );
+            },
+            removeNewWorker: async () => {
+              if (!dependencies.client.deleteResource) {
+                throw new Error('platform: Cloudflare Worker removal is unavailable.');
+              }
+              await dependencies.client.deleteResource(
+                plan.account.id,
+                'worker',
+                action.name,
+                zone.id,
+              );
+            },
+            workerExisted: action.action !== 'create',
+          });
+      if (rollback) {
+        workerRollbacks.push(rollback);
+      }
       manifest = recordResource(manifest, action, action.name, 'created', now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -487,6 +619,14 @@ export async function installPlatform(
       now(),
     );
     if (preserveDisabled) {
+      workerDeploymentCommitted = true;
+      manifest = recordWorkerCutoverResolution(
+        manifest,
+        workerCutoverGeneration,
+        'committed',
+        now(),
+      );
+      manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, false, now());
       manifest = transitionInstallation(manifest, 'disabled', now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -497,6 +637,9 @@ export async function installPlatform(
     manifest = transitionInstallation(manifest, 'verifying', now());
     writeInstallationManifest(manifest);
     await (dependencies.verifyHealth ?? verifyPlatformHealth)(plan.apiUrl, manifest.id);
+    workerDeploymentCommitted = true;
+    manifest = recordWorkerCutoverResolution(manifest, workerCutoverGeneration, 'committed', now());
+    manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, true, now());
     manifest = transitionInstallation(manifest, 'installed', now());
     writeInstallationManifest(manifest);
     await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -504,6 +647,38 @@ export async function installPlatform(
     saveInstalledPlatformConnection(plan, manifest);
     return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
   } catch (error) {
+    let failure: unknown = error;
+    if (!workerDeploymentCommitted && workerRollbacks.length > 0) {
+      const rollbackFailures: Array<string> = [];
+      for (const rollback of workerRollbacks.reverse()) {
+        try {
+          await rollback();
+        } catch (rollbackError) {
+          rollbackFailures.push(errorMessage(rollbackError));
+        }
+      }
+      workerRollbacks = [];
+      if (rollbackFailures.length > 0) {
+        failure = new Error(
+          `platform: ${errorMessage(error)} Automatic Worker rollback was incomplete: ${rollbackFailures.join('; ')} Inspect the installation before retrying.`,
+          { cause: error },
+        );
+      } else if (workerCutoverGeneration > 0) {
+        manifest = recordWorkerCutoverResolution(
+          manifest,
+          workerCutoverGeneration,
+          'restored',
+          now(),
+        );
+        manifest = recordWorkerTrafficState(
+          manifest,
+          workerCutoverGeneration,
+          previousPublicEndpoints,
+          now(),
+        );
+        writeInstallationManifest(manifest);
+      }
+    }
     if (manifest.status !== 'failed' && manifest.status !== 'uninstalled') {
       try {
         manifest = transitionInstallation(manifest, 'failed', now());
@@ -513,7 +688,7 @@ export async function installPlatform(
         // Preserve the original failure when a terminal state cannot transition.
       }
     }
-    throw error;
+    throw failure;
   } finally {
     await releaseDatabaseLock();
   }
@@ -1094,37 +1269,389 @@ export async function claimPlatformDatabaseConnection(
   }
 }
 
+type PlatformWorkerDeploymentOptions = Readonly<{
+  onStaged: (previousVersionId: string | null, stagedVersionId: string) => Promise<void>;
+  previousConfig: Record<string, unknown>;
+  removeCustomDomains: () => Promise<void>;
+  removeNewWorker: () => Promise<void>;
+  workerExisted: boolean;
+}>;
+
 async function deployPlatformWorker(
   config: Record<string, unknown>,
   secrets: Record<string, string> | null,
-): Promise<void> {
+  options: PlatformWorkerDeploymentOptions,
+): Promise<PlatformWorkerRollback> {
   const directory = mkdtempSync(join(tmpdir(), 'void-platform-deploy-'));
+  const workerName = String(config.name);
+  const accountId = String(config.account_id);
+  let activatedVersionId: string | null = null;
+  let uploadedVersionId: string | null = null;
+  let previousVersionId: string | null = null;
   try {
     const configPath = join(directory, 'wrangler.json');
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-    const argv = ['deploy', '--config', configPath, '--strict'];
+    const previousConfigPath = join(directory, 'wrangler.previous.json');
+    writeFileSync(previousConfigPath, `${JSON.stringify(options.previousConfig, null, 2)}\n`, {
+      mode: 0o600,
+    });
+    const previousTriggers = readCloudflareTriggerConfig(previousConfigPath);
+    const nextTriggers = readCloudflareTriggerConfig(configPath);
+    if (options.workerExisted) {
+      previousVersionId = await readActivePlatformWorkerVersion(configPath, accountId, workerName);
+      if (!previousVersionId) {
+        throw new Error(
+          `platform: Existing Worker ${workerName} has no single active production version.`,
+        );
+      }
+    }
+    const argv = [
+      ...(options.workerExisted ? ['versions', 'upload'] : ['deploy']),
+      '--config',
+      configPath,
+      '--strict',
+      '--experimental-provision=false',
+      '--experimental-auto-create=false',
+      ...(!options.workerExisted ? ['--autoconfig=false'] : []),
+      '--message',
+      encodeCloudflareVersionMessage([], nextTriggers),
+    ];
     if (secrets) {
       const secretsPath = join(directory, 'secrets.json');
       writeFileSync(secretsPath, JSON.stringify(secrets), { mode: 0o600 });
       argv.push('--secrets-file', secretsPath);
     }
-    const [command, ...prefix] = resolveWranglerArgv(process.cwd());
-    const result = spawnSync(command, [...prefix, ...argv], {
-      cwd: directory,
-      env: {
-        ...process.env,
-        CLOUDFLARE_ACCOUNT_ID: String(config.account_id),
-        CLOUDFLARE_API_TOKEN:
-          process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || undefined,
-      },
-      stdio: 'inherit',
-      timeout: 10 * 60 * 1000,
-    });
-    if (result.status !== 0) {
+    const uploaded = await runPlatformWrangler(argv, accountId, directory, true);
+    uploadedVersionId = parseUploadedPlatformWorkerVersion(
+      `${uploaded.stdout}\n${uploaded.stderr}`,
+    );
+    if (!options.workerExisted) {
+      activatedVersionId = uploadedVersionId;
+    }
+    assertCleanPlatformWrangler(
+      uploaded,
+      `${options.workerExisted ? 'upload' : 'bootstrap'} ${workerName}`,
+    );
+    if (!uploadedVersionId) {
       throw new Error(
-        `platform: Wrangler failed to deploy ${String(config.name)} (${result.signal ?? result.status ?? 'unknown failure'}).`,
+        `platform: Wrangler uploaded ${workerName} without reporting its immutable version id.`,
       );
     }
+    await options.onStaged(previousVersionId, uploadedVersionId);
+    if (options.workerExisted) {
+      const ownerBeforeActivation = await readActivePlatformWorkerVersion(
+        configPath,
+        accountId,
+        workerName,
+      );
+      if (ownerBeforeActivation !== previousVersionId) {
+        throw new Error(
+          `platform: Worker ${workerName} changed concurrently before activation; refusing to overwrite it.`,
+        );
+      }
+      activatedVersionId = uploadedVersionId;
+      const activated = await runPlatformWrangler(
+        [
+          'versions',
+          'deploy',
+          `${uploadedVersionId}@100`,
+          '--config',
+          configPath,
+          '--message',
+          `Void platform activation ${uploadedVersionId}`,
+          '--yes',
+        ],
+        accountId,
+        directory,
+        true,
+      );
+      assertCleanPlatformWrangler(activated, `activate ${workerName}`);
+    }
+    const triggers = await stabilizeCloudflareVersionTriggers({
+      configPath,
+      knownTriggerConfigs: {
+        [uploadedVersionId]: nextTriggers,
+        ...(previousVersionId ? { [previousVersionId]: previousTriggers } : {}),
+      },
+      previousTriggerConfig: previousTriggers,
+      publishEmptyCustomDomains: async () => {
+        await options.removeCustomDomains();
+        return cleanPlatformCommandResult();
+      },
+      runWrangler: platformWorkerCommandRunner(accountId, directory),
+      targetTriggerConfig: nextTriggers,
+      targetVersionId: uploadedVersionId,
+      workerName,
+    });
+    assertPlatformTriggerStabilization(triggers, workerName, uploadedVersionId, 'publish');
+    const rollback = () =>
+      rollbackPlatformWorker({
+        accountId,
+        activatedVersionId: uploadedVersionId!,
+        config,
+        nextTriggers,
+        previousConfig: options.previousConfig,
+        previousTriggers,
+        previousVersionId,
+        removeCustomDomains: options.removeCustomDomains,
+        removeNewWorker: options.removeNewWorker,
+        workerExisted: options.workerExisted,
+        workerName,
+      });
+    return rollback;
+  } catch (error) {
+    let recoveryError: unknown = null;
+    try {
+      if (activatedVersionId && uploadedVersionId) {
+        await rollbackPlatformWorker({
+          accountId,
+          activatedVersionId: uploadedVersionId,
+          config,
+          nextTriggers: readTriggerConfigFromObject(config),
+          previousConfig: options.previousConfig,
+          previousTriggers: readTriggerConfigFromObject(options.previousConfig),
+          previousVersionId,
+          removeCustomDomains: options.removeCustomDomains,
+          removeNewWorker: options.removeNewWorker,
+          workerExisted: options.workerExisted,
+          workerName,
+        });
+      } else if (!options.workerExisted && uploadedVersionId) {
+        await options.removeNewWorker();
+      }
+    } catch (rollbackError) {
+      recoveryError = rollbackError;
+    }
+    if (recoveryError) {
+      throw new Error(
+        `platform: ${errorMessage(error)} Automatic recovery for ${workerName} was incomplete: ${errorMessage(recoveryError)}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+}
+
+async function rollbackPlatformWorker(input: {
+  accountId: string;
+  activatedVersionId: string;
+  config: Record<string, unknown>;
+  nextTriggers: ReturnType<typeof readCloudflareTriggerConfig>;
+  previousConfig: Record<string, unknown>;
+  previousTriggers: ReturnType<typeof readCloudflareTriggerConfig>;
+  previousVersionId: string | null;
+  removeCustomDomains: () => Promise<void>;
+  removeNewWorker: () => Promise<void>;
+  workerExisted: boolean;
+  workerName: string;
+}): Promise<void> {
+  const directory = mkdtempSync(join(tmpdir(), 'void-platform-rollback-'));
+  try {
+    const configPath = join(directory, 'wrangler.json');
+    writeFileSync(configPath, `${JSON.stringify(input.config, null, 2)}\n`, { mode: 0o600 });
+    const currentVersionId = await readActivePlatformWorkerVersion(
+      configPath,
+      input.accountId,
+      input.workerName,
+      !input.workerExisted,
+    );
+    if (!input.workerExisted) {
+      if (currentVersionId !== null && currentVersionId !== input.activatedVersionId) {
+        throw new Error(
+          `Worker ${input.workerName} changed concurrently from installer version ${input.activatedVersionId} to ${currentVersionId}; refusing to delete it.`,
+        );
+      }
+      await input.removeNewWorker();
+      return;
+    }
+    if (
+      currentVersionId !== input.previousVersionId &&
+      currentVersionId !== input.activatedVersionId
+    ) {
+      throw new Error(
+        `Worker ${input.workerName} changed concurrently from installer version ${input.activatedVersionId} to ${currentVersionId ?? 'no active version'}; refusing to overwrite it.`,
+      );
+    }
+    if (!input.previousVersionId) {
+      throw new Error(`Worker ${input.workerName} has no previous version to restore.`);
+    }
+    if (currentVersionId === input.activatedVersionId) {
+      const restored = await runPlatformWrangler(
+        [
+          'versions',
+          'deploy',
+          `${input.previousVersionId}@100`,
+          '--config',
+          configPath,
+          '--message',
+          `Void automatic rollback after platform deployment failed`,
+          '--yes',
+        ],
+        input.accountId,
+        directory,
+        true,
+      );
+      assertCleanPlatformWrangler(restored, `restore ${input.workerName}`);
+    }
+    const previousConfigPath = join(directory, 'wrangler.previous.json');
+    writeFileSync(previousConfigPath, `${JSON.stringify(input.previousConfig, null, 2)}\n`, {
+      mode: 0o600,
+    });
+    const triggers = await stabilizeCloudflareVersionTriggers({
+      configPath: previousConfigPath,
+      knownTriggerConfigs: {
+        [input.activatedVersionId]: input.nextTriggers,
+        [input.previousVersionId]: input.previousTriggers,
+      },
+      previousTriggerConfig: input.nextTriggers,
+      publishEmptyCustomDomains: async () => {
+        await input.removeCustomDomains();
+        return cleanPlatformCommandResult();
+      },
+      runWrangler: platformWorkerCommandRunner(input.accountId, directory),
+      targetTriggerConfig: input.previousTriggers,
+      targetVersionId: input.previousVersionId,
+      workerName: input.workerName,
+    });
+    assertPlatformTriggerStabilization(
+      triggers,
+      input.workerName,
+      input.previousVersionId,
+      'restore',
+    );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+}
+
+function platformWorkerCommandRunner(accountId: string, cwd: string): CloudflareCommandRunner {
+  return (args, options) => runPlatformWrangler(args, accountId, cwd, options.capture);
+}
+
+async function runPlatformWrangler(
+  args: ReadonlyArray<string>,
+  accountId: string,
+  cwd: string,
+  capture: boolean,
+): Promise<CloudflareCommandResult> {
+  const [command, ...prefix] = resolveWranglerArgv(process.cwd());
+  const result = spawnSync(command, [...prefix, ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      CLOUDFLARE_ACCOUNT_ID: accountId,
+      CLOUDFLARE_API_TOKEN:
+        process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || undefined,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10 * 60 * 1000,
+  });
+  const stdout = result.stdout || '';
+  const stderr = result.stderr || '';
+  if (!capture) {
+    if (stdout) {
+      process.stdout.write(stdout);
+    }
+    if (stderr) {
+      process.stderr.write(stderr);
+    }
+  }
+  return {
+    status: result.status ?? 1,
+    stderr,
+    stdout,
+  };
+}
+
+async function readActivePlatformWorkerVersion(
+  configPath: string,
+  accountId: string,
+  workerName: string,
+  allowMissing = false,
+): Promise<string | null> {
+  const result = await runPlatformWrangler(
+    ['deployments', 'status', '--config', configPath, '--name', workerName, '--json'],
+    accountId,
+    process.cwd(),
+    true,
+  );
+  if (result.status !== 0) {
+    if (allowMissing) {
+      return null;
+    }
+    assertCleanPlatformWrangler(result, `read active version for ${workerName}`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`platform: Wrangler returned malformed deployment status for ${workerName}.`);
+  }
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !Array.isArray((value as { versions?: unknown }).versions)
+  ) {
+    throw new Error(`platform: Wrangler returned malformed deployment status for ${workerName}.`);
+  }
+  const active = (value as { versions: Array<unknown> }).versions.filter(
+    (entry) =>
+      entry &&
+      typeof entry === 'object' &&
+      Number((entry as { percentage?: unknown }).percentage) === 100,
+  );
+  if (
+    active.length !== 1 ||
+    typeof (active[0] as { version_id?: unknown }).version_id !== 'string'
+  ) {
+    return null;
+  }
+  return (active[0] as { version_id: string }).version_id;
+}
+
+function parseUploadedPlatformWorkerVersion(output: string): string | null {
+  return /(?:Worker|Current) Version ID:\s*([0-9a-f]{8}-[0-9a-f-]{27})/i.exec(output)?.[1] ?? null;
+}
+
+function assertCleanPlatformWrangler(result: CloudflareCommandResult, operation: string): void {
+  if (result.status !== 0) {
+    throw new Error(
+      `platform: Wrangler failed to ${operation} (${result.stderr.trim() || `exit ${result.status}`}).`,
+    );
+  }
+}
+
+function cleanPlatformCommandResult(): CloudflareCommandResult {
+  return { status: 0, stderr: '', stdout: '' };
+}
+
+function assertPlatformTriggerStabilization(
+  result: Awaited<ReturnType<typeof stabilizeCloudflareVersionTriggers>>,
+  workerName: string,
+  targetVersionId: string,
+  operation: string,
+): void {
+  if (!result.ok) {
+    throw new Error(
+      `platform: Failed to ${operation} triggers for ${workerName} (${result.reason}).`,
+    );
+  }
+  if (!result.targetOwnsTraffic) {
+    throw new Error(
+      `platform: Worker ${workerName} was superseded by ${result.activeVersionId} while publishing ${targetVersionId}; its active trigger state was repaired.`,
+    );
+  }
+}
+
+function readTriggerConfigFromObject(config: Record<string, unknown>) {
+  const directory = mkdtempSync(join(tmpdir(), 'void-platform-triggers-'));
+  try {
+    const path = join(directory, 'wrangler.json');
+    writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    return readCloudflareTriggerConfig(path);
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -1151,6 +1678,150 @@ function nextTrafficGeneration(manifest: PlatformInstallationManifest): number {
       }),
     ) + 1
   );
+}
+
+type PlatformWorkerKey = 'api' | 'proxy' | 'tail' | 'dispatch';
+
+type InterruptedWorkerCutover = Readonly<{
+  generation: number;
+  staged: ReadonlyMap<
+    PlatformWorkerKey,
+    Readonly<{ previousVersionId: string | null; stagedVersionId: string; workerName: string }>
+  >;
+}>;
+
+function nextWorkerCutoverGeneration(manifest: PlatformInstallationManifest): number {
+  return (
+    Math.max(
+      0,
+      ...manifest.steps.flatMap((step) => {
+        const match = /^worker-(?:cutover|traffic-state):(\d+)/.exec(step.key);
+        return match ? [Number(match[1])] : [];
+      }),
+    ) + 1
+  );
+}
+
+function recordWorkerCutoverStage(
+  manifest: PlatformInstallationManifest,
+  generation: number,
+  key: PlatformWorkerKey,
+  previousVersionId: string | null,
+  stagedVersionId: string,
+  workerName: string,
+  completedAt: string,
+): PlatformInstallationManifest {
+  return recordInstallationStep(
+    manifest,
+    {
+      completedAt,
+      key: `worker-cutover:${generation}:staged:${key}`,
+      resultHash: `${workerName}|${previousVersionId ?? 'none'}|${stagedVersionId}`,
+    },
+    completedAt,
+  );
+}
+
+function recordWorkerCutoverResolution(
+  manifest: PlatformInstallationManifest,
+  generation: number,
+  resolution: 'committed' | 'restored',
+  completedAt: string,
+): PlatformInstallationManifest {
+  return recordInstallationStep(
+    manifest,
+    {
+      completedAt,
+      key: `worker-cutover:${generation}:${resolution}`,
+      resultHash: resolution,
+    },
+    completedAt,
+  );
+}
+
+function interruptedWorkerCutover(
+  manifest: PlatformInstallationManifest,
+): InterruptedWorkerCutover | null {
+  const generations = new Map<
+    number,
+    {
+      resolved: boolean;
+      staged: Map<
+        PlatformWorkerKey,
+        { previousVersionId: string | null; stagedVersionId: string; workerName: string }
+      >;
+    }
+  >();
+  for (const step of manifest.steps) {
+    const resolution = /^worker-cutover:(\d+):(committed|restored)$/.exec(step.key);
+    if (resolution) {
+      const generation = Number(resolution[1]);
+      const entry = generations.get(generation) ?? { resolved: false, staged: new Map() };
+      entry.resolved = true;
+      generations.set(generation, entry);
+      continue;
+    }
+    const staged = /^worker-cutover:(\d+):staged:(api|proxy|tail|dispatch)$/.exec(step.key);
+    if (!staged) {
+      continue;
+    }
+    const generation = Number(staged[1]);
+    const [workerName, previous, stagedVersionId, ...extra] = step.resultHash.split('|');
+    if (!workerName || !previous || !stagedVersionId || extra.length > 0) {
+      throw new Error(`platform: Invalid Worker cutover checkpoint ${step.key}.`);
+    }
+    const entry = generations.get(generation) ?? { resolved: false, staged: new Map() };
+    entry.staged.set(staged[2] as PlatformWorkerKey, {
+      previousVersionId: previous === 'none' ? null : previous,
+      stagedVersionId,
+      workerName,
+    });
+    generations.set(generation, entry);
+  }
+  const unresolved = [...generations.entries()]
+    .filter(([, entry]) => !entry.resolved && entry.staged.size > 0)
+    .sort(([left], [right]) => right - left)[0];
+  return unresolved ? { generation: unresolved[0], staged: unresolved[1].staged } : null;
+}
+
+function recordWorkerTrafficState(
+  manifest: PlatformInstallationManifest,
+  generation: number,
+  enabled: boolean,
+  completedAt: string,
+): PlatformInstallationManifest {
+  return recordInstallationStep(
+    manifest,
+    {
+      completedAt,
+      key: `worker-traffic-state:${generation}`,
+      resultHash: enabled ? 'enabled' : 'disabled',
+    },
+    completedAt,
+  );
+}
+
+function stablePublicEndpointState(existing: PlatformInstallationManifest | null): boolean {
+  if (!existing) {
+    return false;
+  }
+  const latest = existing.steps
+    .flatMap((step) => {
+      const match = /^worker-traffic-state:(\d+)$/.exec(step.key);
+      return match ? [{ generation: Number(match[1]), state: step.resultHash }] : [];
+    })
+    .sort((left, right) => right.generation - left.generation)[0];
+  if (latest) {
+    return latest.state === 'enabled';
+  }
+  if (existing.status === 'disabled') {
+    return false;
+  }
+  return existing.status === 'installed' || existing.desiredState === 'enabled';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function verifyPlatformHealth(apiUrl: string, installationId: string): Promise<void> {
