@@ -39,6 +39,10 @@ describe('platform Worker configuration', () => {
     expect(configs.tail.vars).toEqual({
       PLATFORM_DISPATCH_WORKER_NAME: deployment.resources.dispatchWorker,
     });
+    expect(configs.api.vars).toMatchObject({
+      LOGS_DATASET: deployment.resources.logsDataset,
+      REQUESTS_DATASET: deployment.resources.requestsDataset,
+    });
     expect(configs.dispatch.routes).toEqual([
       { pattern: '*.apps.example.com/*', zone_name: 'example.com' },
       { pattern: '*.apps.example.com', zone_name: 'example.com' },

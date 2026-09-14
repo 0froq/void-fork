@@ -84,6 +84,7 @@ export function createPlatformWorkerConfigs(input: {
       CRON_FIRES_QUEUE_NAME: names.cronQueue,
       DISPATCH_NAMESPACE: names.dispatchNamespace,
       DISPATCH_WORKER_NAME: names.dispatchWorker,
+      LOGS_DATASET: names.logsDataset,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
       PLATFORM_DISPLAY_NAME: deployment.displayName,
       PLATFORM_ENV: 'production',
