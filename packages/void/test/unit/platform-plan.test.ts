@@ -2,9 +2,13 @@ import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
   recordInstallationResource,
+  recordInstallationStep,
 } from '@void/platform';
 import { describe, expect, it } from 'vite-plus/test';
-import { createPlatformInstallPlan } from '../../src/cli/platform-plan.ts';
+import {
+  createPlatformInstallPlan,
+  platformProvisionIntentHash,
+} from '../../src/cli/platform-plan.ts';
 
 function client(overrides: Record<string, unknown> = {}) {
   return {
@@ -49,6 +53,47 @@ describe('platform installation planning', () => {
         title === 'void-example-routing' ? [{ id: 'someone-else', name: title }] : [],
     });
     await expect(createPlatformInstallPlan(fake, input, null)).rejects.toThrow('not owned');
+  });
+
+  it('adopts a resource created after a checkpointed provision intent', async () => {
+    let manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-09-14T00:00:01.000Z',
+        key: 'provision-intent:routing-kv',
+        resultHash: platformProvisionIntentHash(
+          manifest,
+          'routing-kv',
+          'kv-namespace',
+          'void-example-routing',
+        ),
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const plan = await createPlatformInstallPlan(
+      client({
+        listKvNamespaces: async (_account: string, title: string) =>
+          title === 'void-example-routing' ? [{ id: 'created-before-crash', name: title }] : [],
+      }),
+      input,
+      manifest,
+    );
+    expect(plan.actions.find((action) => action.key === 'routing-kv')).toMatchObject({
+      action: 'reuse',
+      id: 'created-before-crash',
+    });
   });
 
   it('adopts an existing zone without claiming ownership', async () => {

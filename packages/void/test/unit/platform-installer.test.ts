@@ -180,4 +180,127 @@ describe('platform installer', () => {
     expect(result.manifest.status).toBe('waiting-for-dns');
     expect(result.manifest.resources).toHaveLength(1);
   });
+
+  it('redeploys every Worker while reusing provisioned resources on upgrade', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-upgrade-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const initialPlan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      null,
+    );
+    let index = 0;
+    const create = async (_account: string, name: string) => ({ id: `id-${index++}`, name });
+    const secrets = createPlatformInstallationSecrets({
+      cloudflareApiToken: 'cf-token',
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      githubClientId: 'github-id',
+      githubClientSecret: 'github-secret',
+      r2AccessKeyId: 'r2-id',
+      r2SecretAccessKey: 'r2-secret',
+    });
+    const installed = await installPlatform(initialPlan, secrets, null, {
+      client: {
+        createAiGateway: async (_account, name) => ({ id: name, name }),
+        createZone: async () => {
+          throw new Error('existing zone must not be created');
+        },
+        createKvNamespace: create,
+        createR2Bucket: create,
+        createQueue: create,
+        createDispatchNamespace: create,
+        createHyperdrive: async (account, name) => create(account, name),
+        putKvValue: async () => {},
+      },
+      deployWorker: async () => {},
+      migrateDatabase: async () => {},
+      verifyHealth: async () => {},
+    });
+    const byKey = new Map(installed.manifest.resources.map((resource) => [resource.key, resource]));
+    const deployment = installed.manifest.deployment;
+    const upgradedPlan = await createPlatformInstallPlan(
+      {
+        ...planningClient(),
+        listAiGateways: async () => [named('ai-gateway')],
+        listKvNamespaces: async (_account: string, title?: string) => {
+          const match = installed.manifest.resources.find(
+            (resource) => resource.kind === 'kv-namespace' && resource.name === title,
+          );
+          return match ? [{ id: match.id, name: match.name }] : [];
+        },
+        listR2Buckets: async () => [named('assets-bucket')],
+        listQueues: async (_account: string, name: string) => {
+          const match = installed.manifest.resources.find(
+            (resource) => resource.kind === 'queue' && resource.name === name,
+          );
+          return match ? [{ id: match.id, name: match.name }] : [];
+        },
+        listDispatchNamespaces: async () => [named('dispatch-namespace')],
+        listHyperdriveConfigs: async () => [named('hyperdrive')],
+        listWorkerNames: async () => [
+          deployment.resources.apiWorker,
+          deployment.resources.proxyWorker,
+          deployment.resources.tailWorker,
+          deployment.resources.dispatchWorker,
+        ],
+      },
+      {
+        accountId: 'account',
+        applicationDomain: deployment.application.baseDomain,
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: deployment.displayName,
+        installationSlug: deployment.installationSlug,
+        zoneName: deployment.application.zoneName,
+      },
+      installed.manifest,
+    );
+    const deployed: Array<string> = [];
+    let migrations = 0;
+    const upgraded = await installPlatform(upgradedPlan, secrets, installed.manifest, {
+      client: {
+        createAiGateway: create,
+        createZone: async () => {
+          throw new Error('must reuse zone');
+        },
+        createKvNamespace: create,
+        createR2Bucket: create,
+        createQueue: create,
+        createDispatchNamespace: create,
+        createHyperdrive: async (account, name) => create(account, name),
+        putKvValue: async () => {},
+      },
+      deployWorker: async (config) => {
+        deployed.push(String(config.name));
+      },
+      migrateDatabase: async () => {
+        migrations++;
+      },
+      verifyHealth: async () => {},
+    });
+
+    expect(deployed).toEqual([
+      deployment.resources.apiWorker,
+      deployment.resources.proxyWorker,
+      deployment.resources.tailWorker,
+      deployment.resources.dispatchWorker,
+    ]);
+    expect(migrations).toBe(0);
+    expect(upgraded.manifest.status).toBe('installed');
+    expect(upgraded.manifest.resources).toHaveLength(14);
+
+    function named(key: string) {
+      const resource = byKey.get(key)!;
+      return { id: resource.id, name: resource.name };
+    }
+  });
 });
