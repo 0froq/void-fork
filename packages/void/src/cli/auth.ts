@@ -87,8 +87,9 @@ export function isStagingMode(root: string = process.cwd()): boolean {
 export function getSiteDomain(root: string = process.cwd()): string {
   const domain =
     readProjectApplicationDomain(root) ??
-    (isStagingMode(root) ? 'staging.void.app' : getActivePlatformConnection()?.applicationDomain) ??
-    (isLegacyVoidCloudProject(root) ? VOID_CLOUD_PLATFORM.applicationDomain : undefined);
+    (isStagingMode(root) ? 'staging.void.app' : undefined) ??
+    (isLegacyVoidCloudProject(root) ? VOID_CLOUD_PLATFORM.applicationDomain : undefined) ??
+    getActivePlatformConnection()?.applicationDomain;
   if (!domain) {
     throw new Error(
       'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',
@@ -312,9 +313,9 @@ export function getApiUrl(root: string = process.cwd()): string {
     process.env.VOID_API_URL ??
     readProjectPlatformUrl(root) ??
     (isStagingMode(root) ? STAGING_API_URL : undefined) ??
-    getActivePlatformConnection()?.apiUrl ??
     readConfig().api ??
-    (isLegacyVoidCloudProject(root) ? DEFAULT_API_URL : undefined);
+    (isLegacyVoidCloudProject(root) ? DEFAULT_API_URL : undefined) ??
+    getActivePlatformConnection()?.apiUrl;
   if (!apiUrl) {
     throw new Error(
       'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',

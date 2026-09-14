@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { getApiUrl } from '../../src/cli/auth.ts';
+import { getApiUrl, getSiteDomain } from '../../src/cli/auth.ts';
 import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 import {
   attachSelectedPlatform,
@@ -51,6 +51,24 @@ describe('project config', () => {
 
     expect(readDeploymentPlatform(root)).toBe('void');
     expect(getApiUrl(root)).toBe('https://api.void.cloud');
+  });
+
+  it('keeps legacy Void Cloud projects pinned when another platform is active', () => {
+    const root = makeRoot();
+    const registry = makeRoot();
+    process.env.VOID_PLATFORM_REGISTRY_DIR = registry;
+    writeProjectJson(root, { projectId: 'proj_123', slug: 'demo' });
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://platform.example.test',
+      applicationDomain: 'apps.example.test',
+      displayName: 'Example',
+      installationId: null,
+      kind: 'connected',
+    });
+
+    expect(getApiUrl(root)).toBe('https://api.void.cloud');
+    expect(getSiteDomain(root)).toBe('void.app');
   });
 
   it('stores a platform without requiring a Void project link', () => {
