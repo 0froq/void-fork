@@ -17,6 +17,8 @@ Use `void` in examples and commands in this skill. For first-time setup, prefer 
 
 Use `void` and `@void/*` in code examples and package manifests.
 
+For self-hosted platform installation, require a dedicated empty PostgreSQL database. The installer transactionally claims it for one installation and never removes that claim during uninstall.
+
 ## No-Args Behavior
 
 If invoked without a concrete task, do a brief app status check and report:

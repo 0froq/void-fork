@@ -48,6 +48,7 @@ function planningClient() {
 }
 
 describe('platform installer', () => {
+  const claimDatabase = async () => {};
   it('resolves the initial administrator to an immutable GitHub account id', async () => {
     const requests: Array<string> = [];
     await expect(
@@ -86,6 +87,7 @@ describe('platform installer', () => {
     let r2OwnershipMarker = '';
     const routingValues = new Map<string, string>();
     let remoteManifest = '';
+    const databaseClaims: Array<[string, string]> = [];
     const result = await installPlatform(
       plan,
       createPlatformInstallationSecrets({
@@ -100,6 +102,9 @@ describe('platform installer', () => {
       }),
       null,
       {
+        claimDatabase: async (_url, installationId, ownershipNonce) => {
+          databaseClaims.push([installationId, ownershipNonce]);
+        },
         client: {
           createAiGateway: created,
           createDnsRecord: async (_zone, name) => ({
@@ -139,6 +144,7 @@ describe('platform installer', () => {
     );
 
     expect(result.manifest.status).toBe('installed');
+    expect(databaseClaims).toEqual([[result.manifest.id, result.manifest.ownershipNonce]]);
     expect(result.manifest.resources).toHaveLength(15);
     expect(deployed).toEqual([
       result.manifest.deployment.resources.apiWorker,
@@ -196,6 +202,7 @@ describe('platform installer', () => {
       }),
       null,
       {
+        claimDatabase,
         client: {
           createAiGateway: async () => {
             throw new Error('must wait for DNS');
@@ -271,6 +278,7 @@ describe('platform installer', () => {
       r2SecretAccessKey: 'r2-secret',
     });
     const installed = await installPlatform(initialPlan, secrets, null, {
+      claimDatabase,
       client: {
         createAiGateway: async (_account, name) => ({ id: name, name }),
         createDnsRecord: async (_zone, name) => ({
@@ -368,6 +376,7 @@ describe('platform installer', () => {
       putR2Object: async () => {},
     };
     const upgraded = await installPlatform(upgradedPlan, secrets, installed.manifest, {
+      claimDatabase,
       client: upgradeClient,
       deployWorker: async (config) => {
         deployed.push(String(config.name));
@@ -399,6 +408,7 @@ describe('platform installer', () => {
         status: 'disabled',
       },
       {
+        claimDatabase,
         client: upgradeClient,
         deployWorker: async (config) => {
           disabledConfigs.push(config);
@@ -423,6 +433,7 @@ describe('platform installer', () => {
     let interrupted = false;
     await expect(
       installPlatform(upgradedPlan, secrets, disabledUpgrade.manifest, {
+        claimDatabase,
         client: upgradeClient,
         deployWorker: async () => {
           interrupted = true;
@@ -442,6 +453,7 @@ describe('platform installer', () => {
       secrets,
       failedDisabledUpgrade,
       {
+        claimDatabase,
         client: upgradeClient,
         deployWorker: async (config) => {
           resumedConfigs.push(config);
@@ -468,6 +480,7 @@ describe('platform installer', () => {
         '2026-09-14T00:00:05.000Z',
       ),
       {
+        claimDatabase,
         client: upgradeClient,
         deployWorker: async (config) => {
           enabledConfigs.push(config);

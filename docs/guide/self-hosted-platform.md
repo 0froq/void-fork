@@ -14,7 +14,7 @@ You need:
 
 - A Cloudflare account with Workers for Platforms and the products represented in the footprint below.
 - A scoped Cloudflare API token. The installer and installed control plane use it to manage Workers scripts, Workers for Platforms, Worker routes and custom domains, KV, R2, Queues, Hyperdrive, AI Gateway, DNS, and zones. Scope it to the selected account and only the zones the platform will use. The exact permission labels can vary in Cloudflare's token UI; the installation plan is read-only and is a useful permission check before applying anything.
-- An external PostgreSQL database reachable through Cloudflare Hyperdrive. Void never creates or deletes this database.
+- A dedicated, empty external PostgreSQL database reachable through Cloudflare Hyperdrive. Void never creates or deletes this database. The installer transactionally claims it for one platform installation and refuses to share it with another installation.
 - An application base domain such as `apps.example.com`. Its containing Cloudflare zone may already exist or the installer can create it.
 - A GitHub OAuth App for login. The installer prints the exact callback URL before asking for its client credentials.
 - An R2 API token with Object Read & Write access. This is separate from the Cloudflare management API token and is used to sign direct asset uploads.
@@ -82,6 +82,8 @@ void platform install \
   --application-domain apps.example.com \
   --zone example.com
 ```
+
+The database must be dedicated to this installation. Its ownership claim and platform tables remain after uninstall because external PostgreSQL is never purged automatically. To reuse it for a different installation, explicitly remove the old platform schema and data yourself or provide a fresh database.
 
 Before changing Cloudflare, the installer shows the complete plan and defaults the confirmation to No. Every create operation is preceded by a durable local intent checkpoint, and ownership is continuously mirrored into the installer-owned routing namespace. The installer also stamps installation-specific ownership markers into every platform Worker and the assets R2 bucket. A local intent alone is never accepted as remote ownership proof, so a concurrent or ambiguous same-name installation fails closed instead of claiming resources it might later delete.
 

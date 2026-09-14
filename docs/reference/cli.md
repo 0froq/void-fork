@@ -290,7 +290,7 @@ void platform install [options]
 | `--plan`                          | Resolve and print a read-only plan                                               |
 | `--resume`                        | Continue the matching checkpointed installation                                  |
 
-The installer requires `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) and prompts for PostgreSQL, GitHub OAuth, and R2 credentials. Non-interactive use supplies `VOID_PLATFORM_DATABASE_URL`, `VOID_PLATFORM_GITHUB_CLIENT_ID`, `VOID_PLATFORM_GITHUB_CLIENT_SECRET`, `VOID_PLATFORM_R2_ACCESS_KEY_ID`, and `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`.
+The installer requires `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) and prompts for a dedicated empty PostgreSQL database, GitHub OAuth, and R2 credentials. It transactionally claims that database for exactly one platform installation. Non-interactive use supplies `VOID_PLATFORM_DATABASE_URL`, `VOID_PLATFORM_GITHUB_CLIENT_ID`, `VOID_PLATFORM_GITHUB_CLIENT_SECRET`, `VOID_PLATFORM_R2_ACCESS_KEY_ID`, and `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`.
 
 If a newly created zone is waiting for registrar delegation, resume after it becomes active:
 

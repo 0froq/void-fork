@@ -62,6 +62,11 @@ type InstallerClient = Pick<
 >;
 
 export type PlatformInstallerDependencies = Readonly<{
+  claimDatabase?: (
+    databaseUrl: string,
+    installationId: string,
+    ownershipNonce: string,
+  ) => Promise<void>;
   client: InstallerClient;
   deployWorker?: (
     config: Record<string, unknown>,
@@ -178,6 +183,11 @@ export async function installPlatform(
   writePendingInstallationSecrets(manifest, secretCheckpoint(secrets));
 
   try {
+    await (dependencies.claimDatabase ?? claimPlatformDatabase)(
+      secrets.databaseUrl,
+      manifest.id,
+      manifest.ownershipNonce,
+    );
     if (manifest.status !== 'provisioning') {
       manifest = transitionInstallation(manifest, 'provisioning', now());
       writeInstallationManifest(manifest);
@@ -642,6 +652,62 @@ async function migratePlatformDatabase(
   try {
     await migrate(drizzle(pool), { migrationsFolder });
   } finally {
+    await pool.end();
+  }
+}
+
+export async function claimPlatformDatabase(
+  databaseUrl: string,
+  installationId: string,
+  ownershipNonce: string,
+): Promise<void> {
+  const { Pool } = await import('pg');
+  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext('void-platform-installation-ownership-v1'))`,
+    );
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "__void_platform_installation" (
+        "singleton" boolean PRIMARY KEY DEFAULT true CHECK ("singleton"),
+        "installation_id" text NOT NULL,
+        "ownership_nonce" text NOT NULL,
+        "claimed_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    const result = await client.query<{
+      installation_id: string;
+      ownership_nonce: string;
+    }>(
+      `SELECT "installation_id", "ownership_nonce"
+       FROM "__void_platform_installation"
+       WHERE "singleton" = true
+       FOR UPDATE`,
+    );
+    const claim = result.rows[0];
+    if (!claim) {
+      await client.query(
+        `INSERT INTO "__void_platform_installation"
+           ("singleton", "installation_id", "ownership_nonce")
+         VALUES (true, $1, $2)`,
+        [installationId, ownershipNonce],
+      );
+    } else if (
+      claim.installation_id !== installationId ||
+      claim.ownership_nonce !== ownershipNonce
+    ) {
+      throw new Error(
+        `platform: This PostgreSQL database is already claimed by Void platform installation ${claim.installation_id}. Use a dedicated empty database for each installation.`,
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
     await pool.end();
   }
 }
