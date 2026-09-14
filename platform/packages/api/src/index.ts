@@ -1,4 +1,5 @@
 import { createPlatformDiscoveryDocument } from '@void/platform';
+import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
 import { adminCsrfMiddleware } from './admin/middleware/csrf.ts';
@@ -94,7 +95,36 @@ const app = new Hono<ApiEnv>()
     await next();
   })
 
-  .get('/health', (context) => context.json({ status: 'ok' }))
+  .get('/health', async (context) => {
+    try {
+      const installationId = context.env.PLATFORM_INSTALLATION_ID;
+      if (installationId) {
+        const result = await context.get('db').execute<{
+          installation_id: string;
+          users_table: string | null;
+        }>(sql`
+          SELECT
+            "installation_id",
+            to_regclass('"users"')::text AS "users_table"
+          FROM "__void_platform_installation"
+          WHERE "singleton" = true
+        `);
+        const claim = result.rows[0];
+        if (claim?.installation_id !== installationId || claim.users_table !== 'users') {
+          throw new Error('The database does not match the deployed platform installation.');
+        }
+      } else {
+        // Void Cloud does not use the self-hosted installation claim. Still
+        // exercise the configured database and a required schema relation so
+        // this endpoint cannot report healthy from Worker startup alone.
+        await context.get('db').execute(sql`SELECT 1 FROM "users" LIMIT 1`);
+      }
+      return context.json({ status: 'ok' });
+    } catch (error) {
+      console.error('[api] health check failed:', error);
+      return context.json({ status: 'unhealthy' }, 503);
+    }
+  })
   .get('/.well-known/void-platform', (context) => {
     const capabilities = getPlatformCapabilities(context.env);
     return context.json(
