@@ -84,7 +84,7 @@ import {
   requiresSandboxPlatformImage,
   resolveSandboxConfig,
 } from '../sandbox/config.ts';
-import { cfAccessHeaders } from '../shared/cf-access.ts';
+import { trustedCloudflareWorkerAccessHeaders } from '../shared/cf-access.ts';
 import { mergeAndExpand, parseDotenvFile, scanWranglerDotenvKeys } from '../shared/dotenv.ts';
 import {
   CLOUDFLARE_DEPLOY_BUILD_ENV,
@@ -516,7 +516,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
  *
  * We scrub it on the CHILD env rather than mutating `process.env`: deleting it
  * from the parent also breaks interactive expired-token re-auth, which reads
- * `cfAccessHeaders(process.env)` / the cloudflared pair-guard AFTER the build
+ * the trusted readiness-header capture / cloudflared pair-guard AFTER the build
  * step. Managed prerender runs later in this trusted parent process with a
  * dedicated short-lived proxy credential. The deploy token, Cloudflare,
  * Access, and production database credentials never reach arbitrary build
@@ -5168,7 +5168,7 @@ function formatCloudflareReadinessRestoration(
 
 /** Capture the Access credential used only by the guarded Worker readiness probe. */
 function cloudflareWorkerReadinessHeaders(): Record<string, string> {
-  return cfAccessHeaders({
+  return trustedCloudflareWorkerAccessHeaders({
     CF_ACCESS_CLIENT_ID: process.env.CF_ACCESS_CLIENT_ID,
     CF_ACCESS_CLIENT_SECRET: process.env.CF_ACCESS_CLIENT_SECRET,
     CF_ACCESS_TOKEN: process.env.CF_ACCESS_TOKEN,

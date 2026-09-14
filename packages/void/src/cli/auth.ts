@@ -280,7 +280,7 @@ async function exchangeLoginCode(
   ensureCloudflaredToken(apiUrl);
   const res = await fetch(new URL('auth/cli/token', base), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...cfAccessHeaders(process.env) },
+    headers: { 'Content-Type': 'application/json', ...cfAccessHeaders(process.env, apiUrl) },
     body: JSON.stringify({
       code,
       state,

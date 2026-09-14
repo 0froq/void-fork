@@ -294,7 +294,7 @@ export class PlatformClient {
       // sending a placeholder like "unknown" would trip the fail-closed
       // 426 path and brick the CLI permanently.
       ...(VOID_CLI_VERSION !== null && { 'X-Void-CLI-Version': VOID_CLI_VERSION }),
-      ...cfAccessHeaders(process.env),
+      ...cfAccessHeaders(process.env, this.baseUrl),
     };
   }
 

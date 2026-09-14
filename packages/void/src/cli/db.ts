@@ -937,7 +937,7 @@ async function runExecute(
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
-        ...cfAccessHeaders(process.env),
+        ...cfAccessHeaders(process.env, proxyUrl),
       },
       body: JSON.stringify({
         projectId: projectConfig.projectId,
