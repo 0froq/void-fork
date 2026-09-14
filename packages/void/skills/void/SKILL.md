@@ -17,7 +17,7 @@ Use `void` in examples and commands in this skill. For first-time setup, prefer 
 
 Use `void` and `@void/*` in code examples and package manifests.
 
-For self-hosted platform installation, require a dedicated empty PostgreSQL database. The installer transactionally claims it for one installation, never removes that claim during uninstall, and uses it for a cross-host lifecycle lock plus a secret-free authoritative lifecycle manifest. Back up `~/.void/platforms/`. After discovery on a new machine, provide `VOID_PLATFORM_DATABASE_URL`; repair, upgrade, enable, or install resume also needs the original `VOID_PLATFORM_JWT_SECRET` and base64-encoded 32-byte `VOID_PLATFORM_PROJECT_SECRET_KEY`. Never replace those runtime keys for an existing installation.
+For self-hosted platform installation, require a dedicated empty PostgreSQL database. The installer transactionally claims it for one installation, pins that URL after a successful claim, never removes the claim during uninstall, and uses it for a cross-host lifecycle lock plus a secret-free authoritative lifecycle manifest. Back up `~/.void/platforms/`. After discovery on a new machine, provide `VOID_PLATFORM_DATABASE_URL`; repair, upgrade, enable, or install resume also needs the original `VOID_PLATFORM_JWT_SECRET` and base64-encoded 32-byte `VOID_PLATFORM_PROJECT_SECRET_KEY`. Never replace those runtime keys for an existing installation. Safe uninstall stops before mutation when a platform Worker has a route or custom domain outside the installation manifest.
 
 ## No-Args Behavior
 
