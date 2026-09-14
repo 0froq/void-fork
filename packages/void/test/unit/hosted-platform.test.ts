@@ -65,4 +65,19 @@ describe('hosted platform compatibility', () => {
       readLegacyHostedPlatformSelection(config({ api: 'https://attacker.example' })),
     ).toBeNull();
   });
+
+  it('recognizes token-only configs written by the historical Void Cloud CLI', () => {
+    expect(readLegacyHostedPlatformSelection(config({ token: 'legacy-secret' }))).toMatchObject({
+      apiUrl: 'https://api.void.cloud',
+      applicationDomain: 'void.app',
+      source: 'legacy-credential',
+    });
+    expect(
+      readLegacyHostedPlatformSelection(config({ stagingToken: 'legacy-secret' })),
+    ).toMatchObject({
+      apiUrl: 'https://api.staging.void.cloud',
+      applicationDomain: 'staging.void.app',
+      source: 'legacy-credential',
+    });
+  });
 });

@@ -128,11 +128,13 @@ describe('runLink', () => {
 
   it('links through a legacy Void Cloud selection without reconnecting', async () => {
     const { runLink } = await import('../../src/cli/link.ts');
+    rmSync(join(root, 'registry'), { force: true, recursive: true });
     mockReadLegacyHostedPlatformSelection.mockReturnValue({
       apiUrl: 'https://api.void.cloud',
       applicationDomain: 'void.app',
       displayName: 'Void Cloud',
       proxyUrl: 'https://proxy.void.cloud',
+      source: 'legacy-credential',
     });
     mockGetToken.mockReturnValue('legacy-token');
     mockListProjects.mockResolvedValueOnce([existingProject]);

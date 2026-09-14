@@ -27,7 +27,6 @@ import {
 
 const CONFIG_DIR = join(homedir(), '.void');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
-
 const KEYRING_SERVICE = 'dev.void.cli';
 
 // ---------------------------------------------------------------------------
@@ -91,12 +90,16 @@ export function isStagingMode(root: string = process.cwd()): boolean {
 }
 
 export function getSiteDomain(root: string = process.cwd()): string {
+  const legacySelection = readLegacyHostedPlatformSelection();
   const domain =
     readProjectApplicationDomain(root) ??
     (isStagingMode(root) ? VOID_CLOUD_STAGING_PLATFORM.applicationDomain : undefined) ??
     (isLegacyVoidCloudProject(root) ? VOID_CLOUD_PLATFORM.applicationDomain : undefined) ??
-    readLegacyHostedPlatformSelection()?.applicationDomain ??
-    getActivePlatformConnection()?.applicationDomain;
+    (legacySelection?.source === 'configured-api'
+      ? legacySelection.applicationDomain
+      : undefined) ??
+    getActivePlatformConnection()?.applicationDomain ??
+    legacySelection?.applicationDomain;
   if (!domain) {
     throw new Error(
       'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',
@@ -336,10 +339,30 @@ export function getApiUrl(root: string = process.cwd()): string {
     );
   }
 
-  const apiUrl =
-    readConfig().api ??
+  const config = readConfig();
+  const legacySelection = readLegacyHostedPlatformSelection();
+  let apiUrl =
+    config.api ??
     (isLegacyVoidCloudProject(root) ? DEFAULT_API_URL : undefined) ??
-    getActivePlatformConnection()?.apiUrl;
+    getActivePlatformConnection()?.apiUrl ??
+    legacySelection?.apiUrl;
+  if (!apiUrl) {
+    apiUrl = keyringGet('token')
+      ? DEFAULT_API_URL
+      : keyringGet('stagingToken')
+        ? STAGING_API_URL
+        : undefined;
+    if (apiUrl) {
+      // Historical keychain entries had no corresponding API selection. Record
+      // the non-sensitive hosted origin so project linking can complete the
+      // migration without importing auth/keyring code into project state.
+      try {
+        writeConfig({ ...config, api: apiUrl });
+      } catch {
+        // Selection still works for this invocation; migration is best-effort.
+      }
+    }
+  }
   if (!apiUrl) {
     throw new Error(
       'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',

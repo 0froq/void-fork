@@ -9,6 +9,9 @@ export type HostedPlatform = Readonly<{
   proxyUrl: string;
 }>;
 
+export type HostedPlatformSelection = HostedPlatform &
+  Readonly<{ source: 'configured-api' | 'legacy-credential' }>;
+
 export const VOID_CLOUD_PLATFORM: HostedPlatform = Object.freeze({
   apiUrl: 'https://api.void.cloud',
   applicationDomain: 'void.app',
@@ -55,11 +58,22 @@ export function hostedPlatformForApiUrl(apiUrl: unknown): HostedPlatform | null 
 /** Resolve an old ~/.void/config.json API selection without reading its credential fields. */
 export function readLegacyHostedPlatformSelection(
   configPath: string = join(homedir(), '.void', 'config.json'),
-): HostedPlatform | null {
+): HostedPlatformSelection | null {
+  let value: { api?: unknown; stagingToken?: unknown; token?: unknown } = {};
   try {
-    const value = JSON.parse(readFileSync(configPath, 'utf8')) as { api?: unknown };
-    return hostedPlatformForApiUrl(value?.api);
+    value = JSON.parse(readFileSync(configPath, 'utf8')) as typeof value;
   } catch {
-    return null;
+    // A legacy keyring entry can outlive its config-file token migration.
   }
+  if (value.api !== undefined) {
+    const platform = hostedPlatformForApiUrl(value.api);
+    return platform ? { ...platform, source: 'configured-api' } : null;
+  }
+  if (typeof value.token === 'string' && value.token !== '') {
+    return { ...VOID_CLOUD_PLATFORM, source: 'legacy-credential' };
+  }
+  if (typeof value.stagingToken === 'string' && value.stagingToken !== '') {
+    return { ...VOID_CLOUD_STAGING_PLATFORM, source: 'legacy-credential' };
+  }
+  return null;
 }

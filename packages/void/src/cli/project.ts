@@ -168,7 +168,7 @@ export function attachSelectedPlatform(
     };
   }
   const legacySelection = readLegacyHostedPlatformSelection();
-  if (legacySelection) {
+  if (legacySelection?.source === 'configured-api') {
     return {
       ...config,
       applicationDomain: legacySelection.applicationDomain,
@@ -180,17 +180,25 @@ export function attachSelectedPlatform(
     return { ...config, ...legacyVoidCloudProjectMetadata() };
   }
   const connection = getActivePlatformConnection();
-  if (!connection?.applicationDomain || !connection.proxyUrl) {
-    throw new Error(
-      'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',
-    );
+  if (connection?.applicationDomain && connection.proxyUrl) {
+    return {
+      ...config,
+      applicationDomain: connection.applicationDomain,
+      platformUrl: connection.apiUrl,
+      proxyUrl: connection.proxyUrl,
+    };
   }
-  return {
-    ...config,
-    applicationDomain: connection.applicationDomain,
-    platformUrl: connection.apiUrl,
-    proxyUrl: connection.proxyUrl,
-  };
+  if (legacySelection) {
+    return {
+      ...config,
+      applicationDomain: legacySelection.applicationDomain,
+      platformUrl: legacySelection.apiUrl,
+      proxyUrl: legacySelection.proxyUrl,
+    };
+  }
+  throw new Error(
+    'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',
+  );
 }
 
 export function isLegacyVoidCloudProject(root: string): boolean {
