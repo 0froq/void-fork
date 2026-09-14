@@ -112,14 +112,18 @@ describe('platform Cloudflare client', () => {
   });
 
   it('empties every paginated R2 object before bucket deletion', async () => {
-    const deleted: Array<string> = [];
+    const deleted: Array<ReadonlyArray<string>> = [];
     const cursors: Array<string> = [];
     const client = new PlatformCloudflareClient('token', {
       fetcher: async (input, init) => {
         const url = new URL(String(input));
         if (init?.method === 'DELETE') {
-          deleted.push(decodeURIComponent(url.pathname.split('/objects/')[1]!));
-          return new Response(null, { status: 204 });
+          const keys = JSON.parse(String(init.body)) as Array<string>;
+          deleted.push(keys);
+          return Response.json({
+            success: true,
+            result: keys.map((key) => ({ key })),
+          });
         }
         const cursor = url.searchParams.get('cursor') ?? '';
         cursors.push(cursor);
@@ -137,7 +141,7 @@ describe('platform Cloudflare client', () => {
 
     await client.emptyR2Bucket('account', 'void-assets');
     expect(cursors).toEqual(['', 'next-page']);
-    expect(deleted.sort()).toEqual(['a.txt', 'b.txt', 'nested/c.txt']);
+    expect(deleted).toEqual([['a.txt', 'b.txt'], ['nested/c.txt']]);
   });
 
   it('uses the documented AI Gateway lifecycle endpoints and creation shape', async () => {

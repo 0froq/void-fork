@@ -442,12 +442,8 @@ export class PlatformCloudflareClient {
         );
       }
       const keys = envelope.result.map((object) => requiredString(object.key, 'R2 object key'));
-      for (let offset = 0; offset < keys.length; offset += 25) {
-        await Promise.all(
-          keys
-            .slice(offset, offset + 25)
-            .map((key) => this.deleteR2Object(accountId, bucketName, key)),
-        );
+      for (let offset = 0; offset < keys.length; offset += 1000) {
+        await this.deleteR2Objects(accountId, bucketName, keys.slice(offset, offset + 1000));
       }
       const nextCursor = envelope.result_info?.cursor ?? '';
       if (!nextCursor) {
@@ -461,20 +457,24 @@ export class PlatformCloudflareClient {
     }
   }
 
-  private async deleteR2Object(accountId: string, bucketName: string, key: string): Promise<void> {
-    const response = await this.#fetcher(
-      `${this.#apiBase}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
-      {
-        headers: { Authorization: `Bearer ${this.#token}` },
-        method: 'DELETE',
-        signal: AbortSignal.timeout(30_000),
-      },
+  private async deleteR2Objects(
+    accountId: string,
+    bucketName: string,
+    keys: ReadonlyArray<string>,
+  ): Promise<void> {
+    if (keys.length === 0) {
+      return;
+    }
+    const deleted = await this.request<ReadonlyArray<{ key?: unknown }>>(
+      `/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects`,
+      { body: JSON.stringify(keys), method: 'DELETE' },
     );
-    if (!response.ok && response.status !== 404) {
-      throw new PlatformCloudflareApiError(
-        `Cloudflare API error deleting an R2 object (HTTP ${response.status}).`,
-        response.status,
-      );
+    const deletedKeys = new Set(
+      deleted.map((entry) => requiredString(entry.key, 'deleted R2 object key')),
+    );
+    const missing = keys.find((key) => !deletedKeys.has(key));
+    if (missing !== undefined) {
+      throw new Error('platform: Cloudflare did not confirm every requested R2 object deletion.');
     }
   }
 
