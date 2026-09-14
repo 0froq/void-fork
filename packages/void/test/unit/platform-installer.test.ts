@@ -1852,6 +1852,71 @@ describe('platform installer', () => {
     expect(upgraded.manifest.platformVersion).toBe(readPlatformRuntimeManifest().platformVersion);
     expect(upgraded.manifest.resources).toHaveLength(15);
 
+    const repairedWorkerConfigs: Array<Record<string, unknown>> = [];
+    const repairEvents: Array<string> = [];
+    const repairPlan = {
+      ...upgradedPlan,
+      actions: upgradedPlan.actions.map((action) =>
+        action.key === 'api-worker'
+          ? {
+              ...action,
+              action: 'create' as const,
+              id: null,
+              reason: 'Recreate the missing installer-owned Worker.',
+            }
+          : action,
+      ),
+    };
+    await installPlatform(repairPlan, secrets, upgraded.manifest, {
+      acquireDatabaseLifecycleLock,
+      claimDatabase,
+      client: {
+        ...upgradeClient,
+        deleteKvValue: async (_account, _namespace, key) => {
+          if (key === PLATFORM_DISABLED_KEY) {
+            repairEvents.push('gate:open');
+          }
+        },
+        putKvValue: async (_account, _namespace, key) => {
+          if (key === PLATFORM_DISABLED_KEY) {
+            repairEvents.push('gate:closed');
+          }
+        },
+      },
+      deployWorker: async (config) => {
+        repairedWorkerConfigs.push(config);
+        repairEvents.push(`deploy:${String(config.name)}`);
+      },
+      migrateDatabase: async () => {},
+      revalidateBeforeWorkerDeploy: async () => {},
+      verifyHealth: async () => {
+        repairEvents.push('health');
+      },
+      verifyWorkerCutover: async () => {
+        repairEvents.push('cutover');
+      },
+    });
+    expect(repairEvents[0]).toBe('gate:closed');
+    expect(repairEvents.indexOf('gate:closed')).toBeLessThan(
+      repairEvents.findIndex((event) => event.startsWith('deploy:')),
+    );
+    expect(repairEvents.indexOf('gate:open')).toBeGreaterThan(repairEvents.indexOf('cutover'));
+    expect(repairEvents.indexOf('gate:open')).toBeGreaterThan(repairEvents.indexOf('health'));
+    expect(repairEvents.indexOf('gate:open')).toBeGreaterThan(
+      Math.max(
+        ...repairEvents.flatMap((event, index) => (event.startsWith('deploy:') ? [index] : [])),
+      ),
+    );
+    expect(repairedWorkerConfigs).toHaveLength(8);
+    for (const index of [0, 1, 3]) {
+      expect(
+        (repairedWorkerConfigs[index]!.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
+      ).toBe('staging');
+      expect(
+        (repairedWorkerConfigs[index + 4]!.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
+      ).toBe('enabled');
+    }
+
     const disabledConfigs: Array<Record<string, unknown>> = [];
     let disabledHealthChecks = 0;
     const disabledUpgrade = await installPlatform(
@@ -2301,10 +2366,18 @@ describe('platform installer', () => {
     };
     let replannedResourceState = '';
     const replannedActions: Array<string> = [];
+    const interruptedInitialGateWrites: Array<string> = [];
     await installPlatform(upgradedPlan, secrets, interruptedInitialCutover, {
       acquireDatabaseLifecycleLock,
       claimDatabase,
-      client: upgradeClient,
+      client: {
+        ...upgradeClient,
+        putKvValue: async (_account, _namespace, key) => {
+          if (key === PLATFORM_DISABLED_KEY) {
+            interruptedInitialGateWrites.push(key);
+          }
+        },
+      },
       deployWorker: async () => {},
       migrateDatabase: async () => {},
       recoverWorkerCutover: async () => {},
@@ -2323,6 +2396,7 @@ describe('platform installer', () => {
       },
       verifyHealth: async () => {},
     });
+    expect(interruptedInitialGateWrites).toEqual([PLATFORM_DISABLED_KEY]);
     expect(replannedResourceState).toBe('ready');
     expect(replannedActions).toContain('api-worker:reuse');
 

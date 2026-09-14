@@ -626,7 +626,20 @@ export async function installPlatform(
     ) as Record<'api' | 'dispatch' | 'proxy' | 'tail', string>;
     const interruptedCutover = interruptedWorkerCutover(manifest);
     const recoveringUnsafeTraffic = (interruptedCutover?.unsafeTraffic.size ?? 0) > 0;
-    if (!previousPublicEndpoints || recoveringUnsafeTraffic) {
+    const createsWorker = plan.actions.some(
+      (action) => action.kind === 'worker' && action.action === 'create',
+    );
+    const recoveringCreatedWorker =
+      interruptedCutover !== null &&
+      [...interruptedCutover.staged.values()].some(
+        (snapshot) => snapshot.previousVersionId === null,
+      );
+    const requiresTrafficGuard =
+      !previousPublicEndpoints ||
+      recoveringUnsafeTraffic ||
+      createsWorker ||
+      recoveringCreatedWorker;
+    if (requiresTrafficGuard) {
       await dependencies.client.putKvValue(
         plan.account.id,
         requireId(ids, 'routing-kv'),
@@ -667,8 +680,7 @@ export async function installPlatform(
       },
       runtimeEntrypoints: entrypoints,
     };
-    const requiresStagedCommit =
-      !preserveDisabled && (!previousPublicEndpoints || recoveringUnsafeTraffic);
+    const requiresStagedCommit = !preserveDisabled && requiresTrafficGuard;
     const enabledConfigs = createPlatformWorkerConfigs({
       ...configInput,
       publicEndpoints: !preserveDisabled,
