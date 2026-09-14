@@ -274,16 +274,41 @@ describe('platform lifecycle management', () => {
   });
 
   it('accepts a live immutable resource recorded ahead of stale routing KV', async () => {
+    let manifest = installedManifest();
+    const resource = manifest.resources.find((entry) => entry.key === 'isr-cache-kv')!;
+    const intent = {
+      completedAt: '2026-09-14T00:00:01.000Z',
+      key: `provision-intent:${resource.key}`,
+      resultHash: platformProvisionIntentHash(manifest, resource.key, resource.kind, resource.name),
+    };
+    manifest = recordInstallationStep(manifest, intent, '2026-09-14T00:00:02.000Z');
+    const stale = recordInstallationStep(
+      {
+        ...manifest,
+        resources: manifest.resources.filter((resource) => resource.key !== 'isr-cache-kv'),
+      },
+      intent,
+      '2026-09-14T00:00:01.000Z',
+    );
+    const fake = client(manifest);
+    fake.getKvValue = async () => JSON.stringify(stale);
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).resolves.toBeUndefined();
+  });
+
+  it('rejects a locally appended live resource without a remote provision intent', async () => {
     const manifest = installedManifest();
     const stale = {
       ...manifest,
-      resources: manifest.resources.filter((resource) => resource.key !== 'isr-cache-kv'),
+      resources: manifest.resources.filter((resource) => resource.key !== 'cron-queue'),
       updatedAt: '2026-09-14T00:00:01.000Z',
     };
     const fake = client(manifest);
     fake.getKvValue = async () => JSON.stringify(stale);
 
-    await expect(verifyPlatformInstallationOwnership(fake, manifest)).resolves.toBeUndefined();
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).rejects.toThrow(
+      'remote checkpoint does not own queue cron-queue',
+    );
   });
 
   it('never recovers a reusable AI Gateway name from stale routing KV', async () => {

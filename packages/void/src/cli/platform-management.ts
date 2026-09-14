@@ -822,7 +822,12 @@ async function verifyPlatformMutationOwnership(
   for (const resource of targetResources) {
     const proof = remote.resources.find((entry) => entry.key === resource.key);
     if (!hasMatchingResourceProof(remote, resource)) {
-      if (!proof && localAdvancesRemote && resource.kind !== 'ai-gateway') {
+      if (
+        !proof &&
+        localAdvancesRemote &&
+        resource.kind !== 'ai-gateway' &&
+        hasMatchingProvisionIntent(remote, resource)
+      ) {
         continue;
       }
       throw ownershipError(`the remote checkpoint does not own ${resource.kind} ${resource.name}`);
@@ -912,6 +917,21 @@ function hasMatchingResourceProof(
     proof.kind === resource.kind &&
     proof.name === resource.name &&
     proof.ownership === resource.ownership
+  );
+}
+
+function hasMatchingProvisionIntent(
+  manifest: PlatformInstallationManifest,
+  resource: InstallationResource,
+): boolean {
+  return (
+    resource.ownership === 'created' &&
+    manifest.steps.some(
+      (step) =>
+        step.key === `provision-intent:${resource.key}` &&
+        step.resultHash ===
+          platformProvisionIntentHash(manifest, resource.key, resource.kind, resource.name),
+    )
   );
 }
 
