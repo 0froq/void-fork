@@ -1,0 +1,15 @@
+export {
+  PLATFORM_DEPLOYMENT_SCHEMA_VERSION,
+  createApplicationRoutes,
+  createPlatformDeploymentManifest,
+  createPlatformResourceNames,
+  normalizeApplicationDomain,
+  normalizeInstallationSlug,
+  parsePlatformDeploymentManifest,
+  type PlatformApplicationRoute,
+  type PlatformCapabilities,
+  type PlatformControlPlane,
+  type PlatformDeploymentManifest,
+  type PlatformDeploymentManifestInput,
+  type PlatformResourceNames,
+} from './manifest.ts';

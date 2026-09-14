@@ -112,6 +112,7 @@ native Cloudflare live E2E procedure.
 | `packages/void`              | Core Vite plugin + CLI                                            |
 | `packages/deploy-core`       | Shared deploy contracts, artifacts, planning, and target boundary |
 | `packages/deploy-cloudflare` | Public direct-Cloudflare deployment primitives                    |
+| `packages/platform`          | Platform deployment manifests, naming, and lifecycle contracts    |
 | `packages/edge`              | Shared edge routing and static asset runtime                      |
 | `packages/isr`               | Shared ISR protocol, core, and direct runtime                     |
 | `packages/react`             | React framework adapter                                           |
