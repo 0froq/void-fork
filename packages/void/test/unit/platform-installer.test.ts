@@ -30,6 +30,7 @@ function planningClient() {
       nameServers: [],
       status: 'active',
     }),
+    listDnsRecords: async () => [],
     listKvNamespaces: async () => [],
     listR2Buckets: async () => [],
     listQueues: async () => [],
@@ -78,6 +79,13 @@ describe('platform installer', () => {
       {
         client: {
           createAiGateway: created,
+          createDnsRecord: async (_zone, name) => ({
+            content: '100::',
+            id: `resource-${resourceIndex++}`,
+            name,
+            proxied: true,
+            type: 'AAAA',
+          }),
           createZone: async () => {
             throw new Error('existing zone must not be created');
           },
@@ -99,7 +107,7 @@ describe('platform installer', () => {
     );
 
     expect(result.manifest.status).toBe('installed');
-    expect(result.manifest.resources).toHaveLength(14);
+    expect(result.manifest.resources).toHaveLength(15);
     expect(deployed).toEqual([
       'void-example-api',
       'void-example-proxy',
@@ -155,6 +163,9 @@ describe('platform installer', () => {
             nameServers: ['a.ns.cloudflare.com', 'b.ns.cloudflare.com'],
             status: 'pending',
           }),
+          createDnsRecord: async () => {
+            throw new Error('must wait for DNS');
+          },
           createKvNamespace: async () => {
             throw new Error('must wait for DNS');
           },
@@ -211,6 +222,13 @@ describe('platform installer', () => {
     const installed = await installPlatform(initialPlan, secrets, null, {
       client: {
         createAiGateway: async (_account, name) => ({ id: name, name }),
+        createDnsRecord: async (_zone, name) => ({
+          content: '100::',
+          id: `id-${index++}`,
+          name,
+          proxied: true,
+          type: 'AAAA',
+        }),
         createZone: async () => {
           throw new Error('existing zone must not be created');
         },
@@ -231,6 +249,14 @@ describe('platform installer', () => {
       {
         ...planningClient(),
         listAiGateways: async () => [named('ai-gateway')],
+        listDnsRecords: async () => [
+          {
+            ...named('application-dns'),
+            content: '100::',
+            proxied: true,
+            type: 'AAAA',
+          },
+        ],
         listKvNamespaces: async (_account: string, title?: string) => {
           const match = installed.manifest.resources.find(
             (resource) => resource.kind === 'kv-namespace' && resource.name === title,
@@ -269,6 +295,13 @@ describe('platform installer', () => {
     const upgraded = await installPlatform(upgradedPlan, secrets, installed.manifest, {
       client: {
         createAiGateway: create,
+        createDnsRecord: async (_zone, name) => ({
+          content: '100::',
+          id: name,
+          name,
+          proxied: true,
+          type: 'AAAA',
+        }),
         createZone: async () => {
           throw new Error('must reuse zone');
         },
@@ -296,7 +329,7 @@ describe('platform installer', () => {
     ]);
     expect(migrations).toBe(0);
     expect(upgraded.manifest.status).toBe('installed');
-    expect(upgraded.manifest.resources).toHaveLength(14);
+    expect(upgraded.manifest.resources).toHaveLength(15);
 
     function named(key: string) {
       const resource = byKey.get(key)!;

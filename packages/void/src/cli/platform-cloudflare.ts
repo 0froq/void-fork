@@ -18,6 +18,12 @@ export class PlatformCloudflareApiError extends Error {
 
 export type CloudflareAccount = Readonly<{ id: string; name: string }>;
 export type CloudflareNamedResource = Readonly<{ id: string; name: string }>;
+export type CloudflareDnsRecord = CloudflareNamedResource &
+  Readonly<{
+    content: string;
+    proxied: boolean;
+    type: string;
+  }>;
 export type CloudflareZone = Readonly<{
   id: string;
   name: string;
@@ -141,6 +147,26 @@ export class PlatformCloudflareClient {
         method: 'POST',
         body: JSON.stringify({ account: { id: accountId }, name, type: 'full' }),
       }),
+    );
+  }
+
+  async listDnsRecords(zoneId: string, name: string): Promise<ReadonlyArray<CloudflareDnsRecord>> {
+    const query = new URLSearchParams({ name, per_page: '100' });
+    const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
+      `/zones/${encodeURIComponent(zoneId)}/dns_records?${query}`,
+    );
+    return result.map(parseDnsRecord);
+  }
+
+  async createDnsRecord(zoneId: string, name: string): Promise<CloudflareDnsRecord> {
+    return parseDnsRecord(
+      await this.request<Record<string, unknown>>(
+        `/zones/${encodeURIComponent(zoneId)}/dns_records`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ content: '100::', name, proxied: true, ttl: 1, type: 'AAAA' }),
+        },
+      ),
     );
   }
 
@@ -340,27 +366,36 @@ export class PlatformCloudflareClient {
     }
   }
 
-  async deleteResource(accountId: string, kind: string, id: string): Promise<void> {
+  async deleteResource(
+    accountId: string,
+    kind: string,
+    id: string,
+    zoneId?: string,
+  ): Promise<void> {
     const account = encodeURIComponent(accountId);
     const encoded = encodeURIComponent(id);
     const path =
       kind === 'kv-namespace'
         ? `/accounts/${account}/storage/kv/namespaces/${encoded}`
-        : kind === 'ai-gateway'
-          ? `/accounts/${account}/ai-gateway/gateways/${encoded}`
-          : kind === 'r2-bucket'
-            ? `/accounts/${account}/r2/buckets/${encoded}`
-            : kind === 'queue'
-              ? `/accounts/${account}/queues/${encoded}`
-              : kind === 'dispatch-namespace'
-                ? `/accounts/${account}/workers/dispatch/namespaces/${encoded}`
-                : kind === 'hyperdrive'
-                  ? `/accounts/${account}/hyperdrive/configs/${encoded}`
-                  : kind === 'worker'
-                    ? `/accounts/${account}/workers/scripts/${encoded}`
-                    : kind === 'zone'
-                      ? `/zones/${encoded}`
-                      : null;
+        : kind === 'dns-record'
+          ? zoneId
+            ? `/zones/${encodeURIComponent(zoneId)}/dns_records/${encoded}`
+            : null
+          : kind === 'ai-gateway'
+            ? `/accounts/${account}/ai-gateway/gateways/${encoded}`
+            : kind === 'r2-bucket'
+              ? `/accounts/${account}/r2/buckets/${encoded}`
+              : kind === 'queue'
+                ? `/accounts/${account}/queues/${encoded}`
+                : kind === 'dispatch-namespace'
+                  ? `/accounts/${account}/workers/dispatch/namespaces/${encoded}`
+                  : kind === 'hyperdrive'
+                    ? `/accounts/${account}/hyperdrive/configs/${encoded}`
+                    : kind === 'worker'
+                      ? `/accounts/${account}/workers/scripts/${encoded}`
+                      : kind === 'zone'
+                        ? `/zones/${encoded}`
+                        : null;
     if (!path) {
       throw new Error(`platform: Unsupported Cloudflare deletion kind ${kind}.`);
     }
@@ -429,6 +464,16 @@ function parseZone(value: Record<string, unknown>): CloudflareZone {
       ? value.name_servers.filter((entry): entry is string => typeof entry === 'string')
       : [],
     status: requiredString(value.status, 'Zone status'),
+  };
+}
+
+function parseDnsRecord(value: Record<string, unknown>): CloudflareDnsRecord {
+  return {
+    content: requiredString(value.content, 'DNS record content'),
+    id: requiredString(value.id, 'DNS record id'),
+    name: requiredString(value.name, 'DNS record name'),
+    proxied: value.proxied === true,
+    type: requiredString(value.type, 'DNS record type'),
   };
 }
 

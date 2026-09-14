@@ -44,6 +44,7 @@ export type PlatformInstallationSecrets = Readonly<{
 type InstallerClient = Pick<
   PlatformCloudflareClient,
   | 'createDispatchNamespace'
+  | 'createDnsRecord'
   | 'createAiGateway'
   | 'createHyperdrive'
   | 'createKvNamespace'
@@ -189,6 +190,14 @@ export async function installPlatform(
     for (const action of plan.actions.filter(
       (entry) => entry.kind !== 'zone' && entry.kind !== 'worker',
     )) {
+      if (action.action === 'adopt') {
+        if (!action.id) {
+          throw new Error(`platform: Adopted ${action.kind} ${action.name} has no id.`);
+        }
+        manifest = recordResource(manifest, action, action.id, 'adopted', now());
+        writeInstallationManifest(manifest);
+        continue;
+      }
       if (action.action === 'reuse') {
         if (!manifest.resources.some((resource) => resource.key === action.key) && action.id) {
           manifest = recordResource(manifest, action, action.id, 'created', now());
@@ -198,7 +207,13 @@ export async function installPlatform(
       }
       manifest = recordProvisionIntent(manifest, action, now());
       writeInstallationManifest(manifest);
-      const resource = await createResource(dependencies.client, plan, action, secrets.databaseUrl);
+      const resource = await createResource(
+        dependencies.client,
+        plan,
+        action,
+        secrets.databaseUrl,
+        zone.id,
+      );
       manifest = recordResource(manifest, action, resource.id, 'created', now());
       writeInstallationManifest(manifest);
     }
@@ -337,10 +352,13 @@ async function createResource(
   plan: PlatformInstallPlan,
   action: PlatformInstallPlanAction,
   databaseUrl: string,
+  zoneId: string,
 ): Promise<{ id: string; name: string }> {
   switch (action.kind) {
     case 'ai-gateway':
       return client.createAiGateway(plan.account.id, action.name);
+    case 'dns-record':
+      return client.createDnsRecord(zoneId, action.name);
     case 'kv-namespace':
       return client.createKvNamespace(plan.account.id, action.name);
     case 'r2-bucket':

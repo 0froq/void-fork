@@ -7,6 +7,7 @@ import {
 } from '@void/platform';
 import type {
   CloudflareAccount,
+  CloudflareDnsRecord,
   CloudflareNamedResource,
   CloudflareZone,
   PlatformCloudflareClient,
@@ -47,6 +48,7 @@ type PlanningClient = Pick<
   | 'listAiGateways'
   | 'listAccounts'
   | 'listDispatchNamespaces'
+  | 'listDnsRecords'
   | 'listHyperdriveConfigs'
   | 'listKvNamespaces'
   | 'listQueues'
@@ -90,6 +92,7 @@ export async function createPlatformInstallPlan(
   }
 
   const names = deployment.resources;
+  const wildcardHostname = `*.${deployment.application.baseDomain}`;
   const [
     workersSubdomain,
     zone,
@@ -117,6 +120,7 @@ export async function createPlatformInstallPlan(
     client.listHyperdriveConfigs(account.id),
     client.listWorkerNames(account.id),
   ]);
+  const dnsRecords = zone ? await client.listDnsRecords(zone.id, wildcardHostname) : [];
   const actions: Array<PlatformInstallPlanAction> = [];
   const recordedZone = existing?.resources.find((resource) => resource.key === 'zone');
   const intendedZone = existing
@@ -153,6 +157,7 @@ export async function createPlatformInstallPlan(
           ? 'Use the existing zone without taking ownership.'
           : 'Create the requested zone.',
   });
+  addDnsPlan(actions, existing, wildcardHostname, dnsRecords, options);
   addNamedPlan(
     actions,
     existing,
@@ -256,6 +261,62 @@ export async function createPlatformInstallPlan(
     ? `https://${deployment.controlPlane.apiHostname}`
     : `https://${names.apiWorker}.${workersSubdomain}.workers.dev`;
   return { account, actions, apiUrl, deployment, workersSubdomain, zone };
+}
+
+function addDnsPlan(
+  actions: Array<PlatformInstallPlanAction>,
+  existing: PlatformInstallationManifest | null,
+  name: string,
+  records: ReadonlyArray<CloudflareDnsRecord>,
+  options?: { repairMissing?: boolean },
+): void {
+  const compatible = records.filter((record) => record.proxied);
+  if (records.some((record) => !record.proxied)) {
+    throw new Error(
+      `platform: DNS name ${JSON.stringify(name)} contains an unproxied record. Proxy every record at this wildcard name through Cloudflare or choose another application domain.`,
+    );
+  }
+  const recorded = existing?.resources.find((resource) => resource.key === 'application-dns');
+  const remote = recorded
+    ? compatible.find((record) => record.id === recorded.id)
+    : compatible.sort((left, right) => left.id.localeCompare(right.id))[0];
+  if (recorded) {
+    if (remote && recorded.id === remote.id && recorded.kind === 'dns-record') {
+      actions.push({
+        action: 'reuse',
+        id: remote.id,
+        key: 'application-dns',
+        kind: 'dns-record',
+        name,
+        reason: 'Reuse the recorded wildcard application DNS record.',
+      });
+      return;
+    }
+    if (!remote && options?.repairMissing && recorded.ownership === 'created') {
+      actions.push({
+        action: 'create',
+        id: null,
+        key: 'application-dns',
+        kind: 'dns-record',
+        name,
+        reason: 'Recreate the missing installer-owned wildcard application DNS record.',
+      });
+      return;
+    }
+    throw new Error(
+      `platform: Recorded DNS record ${JSON.stringify(recorded.name)} (${recorded.id}) no longer matches the Cloudflare zone.`,
+    );
+  }
+  actions.push({
+    action: remote ? 'adopt' : 'create',
+    id: remote?.id ?? null,
+    key: 'application-dns',
+    kind: 'dns-record',
+    name,
+    reason: remote
+      ? 'Use the existing compatible wildcard DNS record without taking ownership.'
+      : 'Create an installer-owned proxied wildcard DNS record for application traffic.',
+  });
 }
 
 function resolveAccount(

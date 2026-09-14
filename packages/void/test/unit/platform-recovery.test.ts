@@ -42,6 +42,7 @@ function remoteManifest() {
   });
   const resources: Array<[string, InstallationResourceKind, string, string]> = [
     ['zone', 'zone', 'zone-id', 'example.com'],
+    ['application-dns', 'dns-record', 'dns-id', '*.apps.example.com'],
     ['ai-gateway', 'ai-gateway', deployment.resources.aiGateway, deployment.resources.aiGateway],
     ['routing-kv', 'kv-namespace', 'routing-id', deployment.resources.routingKv],
     ['isr-cache-kv', 'kv-namespace', 'isr-id', deployment.resources.isrCacheKv],
@@ -124,6 +125,15 @@ function client(manifest = remoteManifest()) {
       nameServers: [],
       status: 'active',
     }),
+    listDnsRecords: async () => [
+      {
+        content: '100::',
+        id: 'dns-id',
+        name: '*.apps.example.com',
+        proxied: true,
+        type: 'AAAA',
+      },
+    ],
     listKvNamespaces: async (_account: string, title?: string) => {
       if (!title) {
         return [{ id: 'routing-id', name: manifest.deployment.resources.routingKv }];

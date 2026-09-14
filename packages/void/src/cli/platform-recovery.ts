@@ -19,6 +19,7 @@ type RecoveryClient = Pick<
   | 'listAccounts'
   | 'listAiGateways'
   | 'listDispatchNamespaces'
+  | 'listDnsRecords'
   | 'listHyperdriveConfigs'
   | 'listKvNamespaces'
   | 'listQueues'

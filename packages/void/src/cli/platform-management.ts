@@ -224,11 +224,12 @@ export async function uninstallPlatform(
       worker: 0,
       queue: 1,
       'ai-gateway': 2,
-      'dispatch-namespace': 3,
-      hyperdrive: 4,
-      'kv-namespace': 5,
-      'r2-bucket': 6,
-      zone: 7,
+      'dns-record': 3,
+      'dispatch-namespace': 4,
+      hyperdrive: 5,
+      'kv-namespace': 6,
+      'r2-bucket': 7,
+      zone: 8,
     };
     const resources = [...next.resources].sort(
       (left, right) => (deletionPriority[left.kind] ?? 99) - (deletionPriority[right.kind] ?? 99),
@@ -252,7 +253,7 @@ export async function uninstallPlatform(
         writeInstallationManifest(next);
         continue;
       }
-      await client.deleteResource(next.account.id, resource.kind, resource.id);
+      await client.deleteResource(next.account.id, resource.kind, resource.id, zone.id);
       next = updateResourceState(next, resource.key, 'deleted');
       writeInstallationManifest(next);
     }

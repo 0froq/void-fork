@@ -17,6 +17,7 @@ function client(overrides: Record<string, unknown> = {}) {
     getWorkersSubdomain: async () => 'example',
     listAiGateways: async () => [],
     findZone: async () => null,
+    listDnsRecords: async () => [],
     listKvNamespaces: async () => [],
     listR2Buckets: async () => [],
     listQueues: async () => [],
@@ -42,7 +43,7 @@ describe('platform installation planning', () => {
     const fake = client();
     const plan = await createPlatformInstallPlan(fake, input, null);
     expect(plan.apiUrl).toBe('https://void-example-api.example.workers.dev');
-    expect(plan.actions).toHaveLength(14);
+    expect(plan.actions).toHaveLength(15);
     expect(plan.actions.every((action) => action.action === 'create')).toBe(true);
     expect(Object.keys(fake)).not.toContain('createZone');
   });
@@ -107,6 +108,54 @@ describe('platform installation planning', () => {
     });
     const plan = await createPlatformInstallPlan(fake, input, null);
     expect(plan.actions[0]).toMatchObject({ action: 'adopt', id: 'zone', kind: 'zone' });
+  });
+
+  it('adopts only a compatible wildcard application DNS record', async () => {
+    const zone = {
+      id: 'zone',
+      name: 'example.com',
+      nameServers: [],
+      status: 'active',
+    };
+    const plan = await createPlatformInstallPlan(
+      client({
+        findZone: async () => zone,
+        listDnsRecords: async () => [
+          {
+            content: '100::',
+            id: 'dns',
+            name: '*.apps.example.com',
+            proxied: true,
+            type: 'AAAA',
+          },
+        ],
+      }),
+      input,
+      null,
+    );
+    expect(plan.actions.find((action) => action.key === 'application-dns')).toMatchObject({
+      action: 'adopt',
+      id: 'dns',
+    });
+
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          findZone: async () => zone,
+          listDnsRecords: async () => [
+            {
+              content: '192.0.2.1',
+              id: 'dns',
+              name: '*.apps.example.com',
+              proxied: false,
+              type: 'A',
+            },
+          ],
+        }),
+        input,
+        null,
+      ),
+    ).rejects.toThrow('unproxied record');
   });
 
   it('repairs a missing installer-owned resource', async () => {

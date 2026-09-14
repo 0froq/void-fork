@@ -110,4 +110,54 @@ describe('platform Cloudflare client', () => {
       },
     ]);
   });
+
+  it('creates and deletes the proxied wildcard application DNS record in its zone', async () => {
+    const requests: Array<{ body: unknown; method: string; pathname: string }> = [];
+    const dns = {
+      content: '100::',
+      id: 'dns-id',
+      name: '*.apps.example.com',
+      proxied: true,
+      type: 'AAAA',
+    };
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+          method: init?.method ?? 'GET',
+          pathname: url.pathname,
+        });
+        return Response.json({
+          success: true,
+          result:
+            init?.method === 'GET' || !init?.method ? [dns] : init.method === 'POST' ? dns : null,
+        });
+      },
+    });
+
+    await expect(client.listDnsRecords('zone-id', '*.apps.example.com')).resolves.toEqual([dns]);
+    await expect(client.createDnsRecord('zone-id', '*.apps.example.com')).resolves.toEqual(dns);
+    await client.deleteResource('account', 'dns-record', 'dns-id', 'zone-id');
+
+    expect(requests).toEqual([
+      { body: null, method: 'GET', pathname: '/client/v4/zones/zone-id/dns_records' },
+      {
+        body: {
+          content: '100::',
+          name: '*.apps.example.com',
+          proxied: true,
+          ttl: 1,
+          type: 'AAAA',
+        },
+        method: 'POST',
+        pathname: '/client/v4/zones/zone-id/dns_records',
+      },
+      {
+        body: null,
+        method: 'DELETE',
+        pathname: '/client/v4/zones/zone-id/dns_records/dns-id',
+      },
+    ]);
+  });
 });
