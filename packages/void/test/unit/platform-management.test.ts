@@ -12,7 +12,11 @@ import {
 } from '@void/platform';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { disablePlatform, uninstallPlatform } from '../../src/cli/platform-management.ts';
+import {
+  disablePlatform,
+  uninstallPlatform,
+  verifyPlatformInstallationOwnership,
+} from '../../src/cli/platform-management.ts';
 import {
   listInstallationManifests,
   promoteInstallationSecrets,
@@ -206,6 +210,26 @@ const uninstallArgs = {
 };
 
 describe('platform lifecycle management', () => {
+  it('refuses to resume installation over a replacement Worker', async () => {
+    const manifest = installedManifest();
+    const fake = client(manifest);
+    fake.getWorkerPlainTextBindings = async () => ({});
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).rejects.toThrow(
+      'has no ownership marker',
+    );
+  });
+
+  it('refuses to resume installation into a replacement R2 bucket', async () => {
+    const manifest = installedManifest();
+    const fake = client(manifest);
+    fake.getR2Object = async () => null;
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).rejects.toThrow(
+      'has no ownership marker',
+    );
+  });
+
   it('disables routes without deleting resources', async () => {
     const manifest = installedManifest();
     persist(manifest);

@@ -53,7 +53,12 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     );
   }
   const client = new PlatformCloudflareClient(token);
-  const existing = args.resume ? resolveInstallationManifest(args.name) : null;
+  let existing = args.resume ? resolveInstallationManifest(args.name) : null;
+  if (existing?.endpoints.apiUrl) {
+    throw new Error(
+      `platform: Installation ${existing.id} has already been deployed. Use \`void platform repair ${existing.id}\` or \`void platform upgrade ${existing.id}\` instead.`,
+    );
+  }
   const recorded = existing?.deployment;
   const name =
     recorded?.installationSlug ??
@@ -105,6 +110,11 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   }
   const release = args.plan ? null : acquirePlatformLifecycleLock(accountId, installationSlug);
   try {
+    if (existing && !args.plan) {
+      existing = resolveInstallationManifest(existing.id);
+      const { verifyPlatformInstallationOwnership } = await import('./platform-management.ts');
+      await verifyPlatformInstallationOwnership(client, existing);
+    }
     const plan = await createPlatformInstallPlan(
       client,
       {

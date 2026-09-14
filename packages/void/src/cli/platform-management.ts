@@ -28,7 +28,7 @@ import {
   writeInstallationManifest,
 } from './platform-registry.ts';
 
-type PlatformManagementClient = Pick<
+export type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
   | 'deleteResource'
   | 'emptyR2Bucket'
@@ -48,6 +48,37 @@ type PlatformManagementClient = Pick<
   | 'removeRoutes'
   | 'setWorkerSubdomain'
 >;
+
+export async function verifyPlatformInstallationOwnership(
+  client: PlatformManagementClient,
+  manifest: PlatformInstallationManifest,
+): Promise<void> {
+  const ready = manifest.resources.filter(
+    (resource) => resource.state === 'ready' && isOwnershipVerifiableKind(resource.kind),
+  );
+  const routing = ready.find((resource) => resource.key === 'routing-kv');
+  if (!routing) {
+    const unsafe = ready.filter((resource) => resource.kind !== 'zone');
+    if (unsafe.length > 0) {
+      throw ownershipError(
+        `the remote installation checkpoint is missing for ${unsafe[0]!.kind} ${unsafe[0]!.name}`,
+      );
+    }
+    const zone = ready.find((resource) => resource.kind === 'zone');
+    if (zone) {
+      const current = await client.findZone(manifest.account.id, zone.name);
+      if (current?.id !== zone.id) {
+        throw ownershipError(`zone ${zone.name} was replaced`);
+      }
+    }
+    return;
+  }
+  await verifyPlatformMutationOwnership(
+    client,
+    manifest,
+    new Set(ready.map((resource) => resource.key)),
+  );
+}
 
 export type PlatformManagementDependencies = Readonly<{
   confirm?: (message: string, initialValue: boolean) => Promise<boolean>;
