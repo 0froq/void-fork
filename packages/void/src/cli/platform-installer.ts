@@ -657,6 +657,7 @@ export async function installPlatform(
         } else {
           await rollbackPlatformWorker({
             accountId: plan.account.id,
+            activatedDeploymentId: null,
             activatedVersionId: snapshot.stagedVersionId,
             config: recoveryConfig,
             nextTriggers: readTriggerConfigFromObject(recoveryConfig),
@@ -1791,7 +1792,9 @@ async function deployPlatformWorker(
   const workerName = String(config.name);
   const accountId = String(config.account_id);
   let activatedVersionId: string | null = null;
+  let activatedDeploymentId: string | null = null;
   let uploadedVersionId: string | null = null;
+  let previousDeploymentId: string | null = null;
   let previousVersionId: string | null = null;
   let previousTriggers = readTriggerConfigFromObject(options.previousConfig);
   try {
@@ -1806,6 +1809,13 @@ async function deployPlatformWorker(
         readPlatformWorkerOwnershipMarker(config),
       );
       previousVersionId = previous.versionId;
+      const deployments = await readPlatformWorkerDeployments(configPath, accountId, workerName);
+      if (!deploymentRunsOnlyVersion(deployments[0], previousVersionId)) {
+        throw new Error(
+          `platform: Worker ${workerName} changed concurrently while its deployment lineage was inspected.`,
+        );
+      }
+      previousDeploymentId = deployments[0]!.id;
       previousTriggers = resolvePlatformPreviousTriggerConfig(
         previous.triggerConfig,
         previousTriggers,
@@ -1847,12 +1857,15 @@ async function deployPlatformWorker(
     }
     await options.onStaged(previousVersionId, uploadedVersionId, previousTriggers);
     if (options.workerExisted) {
-      const ownerBeforeActivation = await readActivePlatformWorkerVersion(
+      const deploymentsBeforeActivation = await readPlatformWorkerDeployments(
         configPath,
         accountId,
         workerName,
       );
-      if (ownerBeforeActivation !== previousVersionId) {
+      if (
+        deploymentsBeforeActivation[0]?.id !== previousDeploymentId ||
+        !deploymentRunsOnlyVersion(deploymentsBeforeActivation[0], previousVersionId)
+      ) {
         throw new Error(
           `platform: Worker ${workerName} changed concurrently before activation; refusing to overwrite it.`,
         );
@@ -1875,6 +1888,49 @@ async function deployPlatformWorker(
       );
       assertCleanPlatformWrangler(activated, `activate ${workerName}`);
     }
+    const deploymentsAfterActivation = await readPlatformWorkerDeployments(
+      configPath,
+      accountId,
+      workerName,
+    );
+    const lineage = classifyPlatformWorkerDeploymentLineage(
+      deploymentsAfterActivation,
+      uploadedVersionId,
+      previousDeploymentId,
+    );
+    if (lineage.kind === 'concurrent-after') {
+      activatedVersionId = null;
+      throw new Error(
+        `platform: Worker ${workerName} changed concurrently after activation; refusing to overwrite the newer deployment.`,
+      );
+    }
+    activatedDeploymentId = lineage.deploymentId;
+    if (lineage.kind === 'intervening') {
+      const removed = await runPlatformWrangler(
+        [
+          'deployments',
+          'delete',
+          activatedDeploymentId,
+          '--config',
+          configPath,
+          '--name',
+          workerName,
+          '--yes',
+        ],
+        accountId,
+        directory,
+        true,
+      );
+      assertCleanPlatformWrangler(
+        removed,
+        `remove raced deployment ${activatedDeploymentId} from ${workerName}`,
+      );
+      activatedVersionId = null;
+      activatedDeploymentId = null;
+      throw new Error(
+        `platform: Worker ${workerName} changed concurrently during activation. The installer deployment was removed and the intervening deployment was restored.`,
+      );
+    }
     const triggers = await stabilizeCloudflareVersionTriggers({
       configPath,
       knownTriggerConfigs: {
@@ -1896,6 +1952,7 @@ async function deployPlatformWorker(
     const rollback = () =>
       rollbackPlatformWorker({
         accountId,
+        activatedDeploymentId,
         activatedVersionId: uploadedVersionId!,
         config,
         nextTriggers,
@@ -1915,6 +1972,7 @@ async function deployPlatformWorker(
       if (activatedVersionId && uploadedVersionId) {
         await rollbackPlatformWorker({
           accountId,
+          activatedDeploymentId,
           activatedVersionId: uploadedVersionId,
           config,
           nextTriggers: readTriggerConfigFromObject(config),
@@ -1945,6 +2003,7 @@ async function deployPlatformWorker(
 
 async function rollbackPlatformWorker(input: {
   accountId: string;
+  activatedDeploymentId: string | null;
   activatedVersionId: string;
   config: Record<string, unknown>;
   nextTriggers: ReturnType<typeof readCloudflareTriggerConfig>;
@@ -1999,15 +2058,30 @@ async function rollbackPlatformWorker(input: {
       throw new Error(`Worker ${input.workerName} has no previous version to restore.`);
     }
     if (currentVersionId === input.activatedVersionId) {
+      const currentDeployments = await readPlatformWorkerDeployments(
+        configPath,
+        input.accountId,
+        input.workerName,
+      );
+      const activeDeploymentId = input.activatedDeploymentId ?? currentDeployments[0]?.id ?? null;
+      if (
+        !activeDeploymentId ||
+        currentDeployments[0]?.id !== activeDeploymentId ||
+        !deploymentRunsOnlyVersion(currentDeployments[0], input.activatedVersionId)
+      ) {
+        throw new Error(
+          `Worker ${input.workerName} changed concurrently after installer deployment; refusing to alter its deployment history.`,
+        );
+      }
       const restored = await runPlatformWrangler(
         [
-          'versions',
-          'deploy',
-          `${input.previousVersionId}@100`,
+          'deployments',
+          'delete',
+          activeDeploymentId,
           '--config',
           configPath,
-          '--message',
-          `Void automatic rollback after platform deployment failed`,
+          '--name',
+          input.workerName,
           '--yes',
         ],
         input.accountId,
@@ -2015,6 +2089,16 @@ async function rollbackPlatformWorker(input: {
         true,
       );
       assertCleanPlatformWrangler(restored, `restore ${input.workerName}`);
+      const restoredVersionId = await readActivePlatformWorkerVersion(
+        configPath,
+        input.accountId,
+        input.workerName,
+      );
+      if (restoredVersionId !== input.previousVersionId) {
+        throw new Error(
+          `Worker ${input.workerName} did not restore immutable version ${input.previousVersionId} after removing installer deployment ${activeDeploymentId}.`,
+        );
+      }
     }
     const previousConfigPath = join(directory, 'wrangler.previous.json');
     writeFileSync(previousConfigPath, `${JSON.stringify(input.previousConfig, null, 2)}\n`, {
@@ -2128,6 +2212,95 @@ async function readActivePlatformWorkerVersion(
     return null;
   }
   return (active[0] as { version_id: string }).version_id;
+}
+
+export type PlatformWorkerDeployment = Readonly<{
+  id: string;
+  versions: ReadonlyArray<Readonly<{ percentage: number; versionId: string }>>;
+}>;
+
+export async function readPlatformWorkerDeployments(
+  configPath: string,
+  accountId: string,
+  workerName: string,
+  runner: typeof runPlatformWrangler = runPlatformWrangler,
+): Promise<ReadonlyArray<PlatformWorkerDeployment>> {
+  const result = await runner(
+    ['deployments', 'list', '--config', configPath, '--name', workerName, '--json'],
+    accountId,
+    process.cwd(),
+    true,
+  );
+  if (result.status !== 0) {
+    assertCleanPlatformWrangler(result, `read deployment lineage for ${workerName}`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`platform: Wrangler returned malformed deployment history for ${workerName}.`);
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`platform: Wrangler returned malformed deployment history for ${workerName}.`);
+  }
+  return value.map((entry) => {
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      typeof (entry as { id?: unknown }).id !== 'string' ||
+      !Array.isArray((entry as { versions?: unknown }).versions)
+    ) {
+      throw new Error(
+        `platform: Wrangler returned malformed deployment history for ${workerName}.`,
+      );
+    }
+    const versions = (entry as { versions: Array<unknown> }).versions.map((version) => {
+      if (
+        !version ||
+        typeof version !== 'object' ||
+        typeof (version as { version_id?: unknown }).version_id !== 'string' ||
+        !Number.isFinite(Number((version as { percentage?: unknown }).percentage))
+      ) {
+        throw new Error(
+          `platform: Wrangler returned malformed deployment history for ${workerName}.`,
+        );
+      }
+      return {
+        percentage: Number((version as { percentage: unknown }).percentage),
+        versionId: (version as { version_id: string }).version_id,
+      };
+    });
+    return { id: (entry as { id: string }).id, versions };
+  });
+}
+
+function deploymentRunsOnlyVersion(
+  deployment: PlatformWorkerDeployment | undefined,
+  versionId: string | null,
+): boolean {
+  return (
+    versionId !== null &&
+    deployment?.versions.length === 1 &&
+    deployment.versions[0]?.versionId === versionId &&
+    deployment.versions[0].percentage === 100
+  );
+}
+
+export function classifyPlatformWorkerDeploymentLineage(
+  deployments: ReadonlyArray<PlatformWorkerDeployment>,
+  installedVersionId: string,
+  previousDeploymentId: string | null,
+):
+  | Readonly<{ deploymentId: string; kind: 'committed' }>
+  | Readonly<{ kind: 'concurrent-after' }>
+  | Readonly<{ deploymentId: string; kind: 'intervening' }> {
+  const installed = deployments[0];
+  if (!deploymentRunsOnlyVersion(installed, installedVersionId)) {
+    return { kind: 'concurrent-after' };
+  }
+  return (deployments[1]?.id ?? null) === previousDeploymentId
+    ? { deploymentId: installed.id, kind: 'committed' }
+    : { deploymentId: installed.id, kind: 'intervening' };
 }
 
 export async function inspectNewPlatformWorker(

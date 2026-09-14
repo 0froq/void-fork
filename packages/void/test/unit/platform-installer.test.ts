@@ -25,6 +25,7 @@ import {
 } from '../../src/cli/platform-cloudflare.ts';
 import {
   acquirePlatformDatabaseLifecycleLockConnection,
+  classifyPlatformWorkerDeploymentLineage,
   installPlatform,
   claimPlatformDatabaseConnection,
   createPlatformInstallationSecrets,
@@ -90,6 +91,47 @@ function planningClient() {
 describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('accepts only an installer deployment with the expected predecessor', () => {
+    const ours = {
+      id: 'deployment-ours',
+      versions: [{ percentage: 100, versionId: 'version-ours' }],
+    };
+    const previous = {
+      id: 'deployment-previous',
+      versions: [{ percentage: 100, versionId: 'version-previous' }],
+    };
+    const intervening = {
+      id: 'deployment-intervening',
+      versions: [{ percentage: 100, versionId: 'version-intervening' }],
+    };
+
+    expect(classifyPlatformWorkerDeploymentLineage([ours], 'version-ours', null)).toEqual({
+      deploymentId: 'deployment-ours',
+      kind: 'committed',
+    });
+    expect(
+      classifyPlatformWorkerDeploymentLineage(
+        [ours, previous],
+        'version-ours',
+        'deployment-previous',
+      ),
+    ).toEqual({ deploymentId: 'deployment-ours', kind: 'committed' });
+    expect(
+      classifyPlatformWorkerDeploymentLineage(
+        [ours, intervening, previous],
+        'version-ours',
+        'deployment-previous',
+      ),
+    ).toEqual({ deploymentId: 'deployment-ours', kind: 'intervening' });
+    expect(
+      classifyPlatformWorkerDeploymentLineage(
+        [intervening, ours, previous],
+        'version-ours',
+        'deployment-previous',
+      ),
+    ).toEqual({ kind: 'concurrent-after' });
+  });
 
   it('binds an existing Worker snapshot to its immutable ownership marker', async () => {
     const versionId = '11111111-1111-4111-8111-111111111111';
