@@ -15,6 +15,7 @@ import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
   disablePlatform,
+  selectAuthoritativePlatformManifest,
   uninstallPlatform,
   verifyPlatformInstallationOwnership,
 } from '../../src/cli/platform-management.ts';
@@ -288,7 +289,12 @@ describe('platform lifecycle management', () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client(manifest);
-    await disablePlatform(fake, manifest, false);
+    const databaseCheckpoints: Array<PlatformInstallationManifest> = [];
+    await disablePlatform(fake, manifest, false, {
+      checkpoint: async (checkpoint) => {
+        databaseCheckpoints.push(checkpoint);
+      },
+    });
     expect(fake.removedRoutes).toBe(1);
     expect(fake.subdomains).toEqual([
       ['api-worker', false],
@@ -300,6 +306,16 @@ describe('platform lifecycle management', () => {
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
     expect(JSON.parse(fake.remoteWrites[0]!)).toMatchObject({ status: 'disabling' });
     expect(JSON.parse(fake.remoteWrites.at(-1)!)).toMatchObject({ status: 'disabled' });
+    expect(databaseCheckpoints.at(-1)?.status).toBe('disabled');
+  });
+
+  it('selects cross-host disabled and uninstalled state over a stale local manifest', () => {
+    const local = installedManifest();
+    const disabled = { ...local, desiredState: 'disabled' as const, status: 'disabled' as const };
+    const uninstalled = { ...disabled, status: 'uninstalled' as const };
+
+    expect(selectAuthoritativePlatformManifest(local, disabled)).toBe(disabled);
+    expect(selectAuthoritativePlatformManifest(local, uninstalled)).toBe(uninstalled);
   });
 
   it('removes public endpoints again after a platform is re-enabled', async () => {

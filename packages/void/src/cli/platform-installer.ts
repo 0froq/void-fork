@@ -6,6 +6,7 @@ import {
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
   createPlatformWorkerConfigs,
+  parsePlatformInstallationManifest,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   recordInstallationResource,
@@ -47,6 +48,11 @@ export type PlatformInstallationSecrets = Readonly<{
   r2SecretAccessKey: string;
 }>;
 
+export type PlatformDatabaseLifecycleLock = (() => Promise<void>) & {
+  authoritativeManifest?: PlatformInstallationManifest | null;
+  checkpoint?: (manifest: PlatformInstallationManifest) => Promise<void>;
+};
+
 type InstallerClient = Pick<
   PlatformCloudflareClient,
   | 'createDispatchNamespace'
@@ -66,7 +72,7 @@ export type PlatformInstallerDependencies = Readonly<{
     databaseUrl: string,
     installationId: string,
     ownershipNonce: string,
-  ) => Promise<() => Promise<void>>;
+  ) => Promise<PlatformDatabaseLifecycleLock>;
   claimDatabase?: (
     databaseUrl: string,
     installationId: string,
@@ -185,10 +191,6 @@ export async function installPlatform(
     manifest = setInstallationDesiredState(manifest, 'disabled', now());
     writeInstallationManifest(manifest);
   }
-  if (manifest.platformVersion !== version) {
-    manifest = { ...manifest, platformVersion: version, updatedAt: now() };
-    writeInstallationManifest(manifest);
-  }
   writePendingInstallationSecrets(manifest, secretCheckpoint(secrets));
 
   await (dependencies.claimDatabase ?? claimPlatformDatabase)(
@@ -201,7 +203,31 @@ export async function installPlatform(
     manifest.id,
     manifest.ownershipNonce,
   );
+  const writeRemoteInstallationCheckpoint = (
+    client: InstallerClient,
+    checkpointPlan: PlatformInstallPlan,
+    checkpointManifest: PlatformInstallationManifest,
+  ) =>
+    writeRemoteInstallationCheckpointWithoutDatabase(
+      client,
+      checkpointPlan,
+      checkpointManifest,
+      releaseDatabaseLock,
+    );
+  const authoritative = releaseDatabaseLock.authoritativeManifest;
+  if (authoritative && JSON.stringify(authoritative) !== JSON.stringify(manifest)) {
+    writeInstallationManifest(authoritative);
+    await releaseDatabaseLock();
+    throw new Error(
+      'platform: This installation changed on another host. Local state was refreshed; rerun the command to review a current plan.',
+    );
+  }
   try {
+    if (manifest.platformVersion !== version) {
+      manifest = { ...manifest, platformVersion: version, updatedAt: now() };
+      writeInstallationManifest(manifest);
+    }
+    await releaseDatabaseLock.checkpoint?.(manifest);
     if (manifest.status !== 'provisioning') {
       manifest = transitionInstallation(manifest, 'provisioning', now());
       writeInstallationManifest(manifest);
@@ -224,6 +250,7 @@ export async function installPlatform(
     } else {
       manifest = recordProvisionIntent(manifest, routingAction, now());
       writeInstallationManifest(manifest);
+      await releaseDatabaseLock.checkpoint?.(manifest);
       const routing = await createResource(
         dependencies.client,
         plan,
@@ -263,6 +290,7 @@ export async function installPlatform(
     if (zone.status !== 'active') {
       manifest = transitionInstallation(manifest, 'waiting-for-dns', now());
       writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       return { manifest, waitingForDns: true, zoneNameServers: zone.nameServers };
     }
 
@@ -492,11 +520,13 @@ function saveInstalledPlatformConnection(
   });
 }
 
-async function writeRemoteInstallationCheckpoint(
+async function writeRemoteInstallationCheckpointWithoutDatabase(
   client: InstallerClient,
   plan: PlatformInstallPlan,
   manifest: PlatformInstallationManifest,
+  databaseLock?: PlatformDatabaseLifecycleLock,
 ): Promise<void> {
+  await databaseLock?.checkpoint?.(manifest);
   const routing = manifest.resources.find(
     (resource) =>
       resource.key === 'routing-kv' &&
@@ -707,7 +737,7 @@ export async function acquirePlatformDatabaseLifecycleLock(
   databaseUrl: string,
   installationId: string,
   ownershipNonce: string,
-): Promise<() => Promise<void>> {
+): Promise<PlatformDatabaseLifecycleLock> {
   const { Pool } = await import('pg');
   const pool = new Pool({ connectionString: databaseUrl, max: 1 });
   const client = await pool.connect();
@@ -717,7 +747,7 @@ export async function acquirePlatformDatabaseLifecycleLock(
       installationId,
       ownershipNonce,
     );
-    return async () => {
+    const release: PlatformDatabaseLifecycleLock = async () => {
       try {
         await releaseConnectionLock();
       } finally {
@@ -725,6 +755,9 @@ export async function acquirePlatformDatabaseLifecycleLock(
         await pool.end();
       }
     };
+    release.authoritativeManifest = releaseConnectionLock.authoritativeManifest;
+    release.checkpoint = releaseConnectionLock.checkpoint;
+    return release;
   } catch (error) {
     client.release();
     await pool.end();
@@ -743,7 +776,11 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
   client: DatabaseClaimConnection,
   installationId: string,
   ownershipNonce: string,
-): Promise<() => Promise<void>> {
+): Promise<PlatformDatabaseLifecycleLock> {
+  await client.query(
+    `ALTER TABLE "__void_platform_installation"
+     ADD COLUMN IF NOT EXISTS "lifecycle_manifest" jsonb`,
+  );
   const claim = await client.query<{ installation_id: string; ownership_nonce: string }>(
     `SELECT "installation_id", "ownership_nonce"
      FROM "__void_platform_installation"
@@ -769,14 +806,71 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
       `platform: Another lifecycle operation is active for installation ${installationId} on another host.`,
     );
   }
+  let authoritativeManifest: PlatformInstallationManifest | null = null;
+  try {
+    const checkpoint = await client.query<{ lifecycle_manifest: unknown }>(
+      `SELECT "lifecycle_manifest"
+       FROM "__void_platform_installation"
+       WHERE "singleton" = true
+         AND "installation_id" = $1
+         AND "ownership_nonce" = $2`,
+      [installationId, ownershipNonce],
+    );
+    const value = checkpoint.rows[0]?.lifecycle_manifest;
+    if (checkpoint.rows.length !== 1) {
+      throw new Error('platform: The PostgreSQL database ownership claim changed unexpectedly.');
+    }
+    if (value !== null && value !== undefined) {
+      authoritativeManifest = parsePlatformInstallationManifest(value);
+      if (
+        authoritativeManifest.id !== installationId ||
+        authoritativeManifest.ownershipNonce !== ownershipNonce
+      ) {
+        throw new Error(
+          'platform: The PostgreSQL lifecycle checkpoint does not match this installation.',
+        );
+      }
+    }
+  } catch (error) {
+    await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockIdentity]);
+    if (error instanceof Error && error.message.startsWith('platform:')) {
+      throw error;
+    }
+    throw new Error(
+      `platform: The PostgreSQL lifecycle checkpoint is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   let released = false;
-  return async () => {
+  const release: PlatformDatabaseLifecycleLock = async () => {
     if (released) {
       return;
     }
     released = true;
     await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockIdentity]);
   };
+  release.authoritativeManifest = authoritativeManifest;
+  release.checkpoint = async (manifest) => {
+    if (released) {
+      throw new Error('platform: Cannot checkpoint lifecycle state after releasing its lock.');
+    }
+    if (manifest.id !== installationId || manifest.ownershipNonce !== ownershipNonce) {
+      throw new Error('platform: Refusing to checkpoint lifecycle state for another installation.');
+    }
+    const updated = await client.query<{ singleton: boolean }>(
+      `UPDATE "__void_platform_installation"
+       SET "lifecycle_manifest" = $1::jsonb
+       WHERE "singleton" = true
+         AND "installation_id" = $2
+         AND "ownership_nonce" = $3
+       RETURNING "singleton"`,
+      [JSON.stringify(manifest), installationId, ownershipNonce],
+    );
+    if (updated.rows.length !== 1) {
+      throw new Error('platform: The PostgreSQL database ownership claim changed unexpectedly.');
+    }
+    release.authoritativeManifest = manifest;
+  };
+  return release;
 }
 
 export async function claimPlatformDatabaseConnection(
@@ -794,9 +888,14 @@ export async function claimPlatformDatabaseConnection(
         "singleton" boolean PRIMARY KEY DEFAULT true CHECK ("singleton"),
         "installation_id" text NOT NULL,
         "ownership_nonce" text NOT NULL,
-        "claimed_at" timestamptz NOT NULL DEFAULT now()
+        "claimed_at" timestamptz NOT NULL DEFAULT now(),
+        "lifecycle_manifest" jsonb
       )
     `);
+    await client.query(
+      `ALTER TABLE "__void_platform_installation"
+       ADD COLUMN IF NOT EXISTS "lifecycle_manifest" jsonb`,
+    );
     const result = await client.query<{
       installation_id: string;
       ownership_nonce: string;

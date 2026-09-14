@@ -1,6 +1,11 @@
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { setInstallationDesiredState } from '@void/platform';
+import {
+  createPlatformDeploymentManifest,
+  createPlatformInstallationManifest,
+  setInstallationDesiredState,
+  transitionInstallation,
+} from '@void/platform';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
@@ -88,6 +93,63 @@ describe('platform installer', () => {
     expect(queries.find(({ sql }) => sql.includes('pg_try_advisory_lock'))?.values).toEqual([
       'void-platform-lifecycle-v1:install-one:nonce-one',
     ]);
+  });
+
+  it('reads and writes authoritative lifecycle state while holding the database lock', async () => {
+    let manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'install-one',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = transitionInstallation(manifest, 'planned', '2026-09-14T00:00:01.000Z');
+    const queries: Array<{ sql: string; values?: ReadonlyArray<unknown> }> = [];
+    const connection = {
+      query: async <Row extends Record<string, unknown>>(
+        sql: string,
+        values?: ReadonlyArray<unknown>,
+      ) => {
+        queries.push({ sql, values });
+        if (sql.includes('FROM "__void_platform_installation"')) {
+          return {
+            rows: [
+              {
+                installation_id: manifest.id,
+                lifecycle_manifest: manifest,
+                ownership_nonce: manifest.ownershipNonce,
+              },
+            ] as unknown as ReadonlyArray<Row>,
+          };
+        }
+        if (sql.includes('pg_try_advisory_lock')) {
+          return { rows: [{ acquired: true }] as unknown as ReadonlyArray<Row> };
+        }
+        if (sql.includes('UPDATE "__void_platform_installation"')) {
+          return { rows: [{ singleton: true }] as unknown as ReadonlyArray<Row> };
+        }
+        return { rows: [] as ReadonlyArray<Row> };
+      },
+    };
+
+    const lock = await acquirePlatformDatabaseLifecycleLockConnection(
+      connection,
+      manifest.id,
+      manifest.ownershipNonce,
+    );
+    expect(lock.authoritativeManifest).toEqual(manifest);
+    const next = transitionInstallation(manifest, 'provisioning', '2026-09-14T00:00:02.000Z');
+    await lock.checkpoint!(next);
+    expect(lock.authoritativeManifest).toEqual(next);
+    expect(
+      queries.find(({ sql }) => sql.includes('UPDATE "__void_platform_installation"'))?.values,
+    ).toEqual([JSON.stringify(next), manifest.id, manifest.ownershipNonce]);
+    await lock();
   });
 
   it('claims only an empty database or an existing matching claim', async () => {

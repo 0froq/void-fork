@@ -106,9 +106,27 @@ export async function verifyPlatformInstallationOwnership(
 }
 
 export type PlatformManagementDependencies = Readonly<{
+  checkpoint?: (manifest: PlatformInstallationManifest) => Promise<void>;
   confirm?: (message: string, initialValue: boolean) => Promise<boolean>;
   interactive?: boolean;
 }>;
+
+export function selectAuthoritativePlatformManifest(
+  local: PlatformInstallationManifest,
+  authoritative: PlatformInstallationManifest | null | undefined,
+): PlatformInstallationManifest {
+  if (!authoritative) {
+    return local;
+  }
+  if (
+    authoritative.id !== local.id ||
+    authoritative.ownershipNonce !== local.ownershipNonce ||
+    authoritative.account.id !== local.account.id
+  ) {
+    throw new Error('platform: The authoritative lifecycle state belongs to another installation.');
+  }
+  return authoritative;
+}
 
 export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<void> {
   if (
@@ -127,15 +145,18 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   }
   const client = new PlatformCloudflareClient(token);
 
-  const execute = async (currentManifest: PlatformInstallationManifest): Promise<void> => {
+  const execute = async (
+    currentManifest: PlatformInstallationManifest,
+    databaseCheckpoint?: (manifest: PlatformInstallationManifest) => Promise<void>,
+  ): Promise<void> => {
     const manifest = currentManifest;
 
     if (args.subcommand === 'disable') {
-      await disablePlatform(client, manifest, args.plan);
+      await disablePlatform(client, manifest, args.plan, { checkpoint: databaseCheckpoint });
       return;
     }
     if (args.subcommand === 'uninstall') {
-      await uninstallPlatform(client, manifest, args);
+      await uninstallPlatform(client, manifest, args, { checkpoint: databaseCheckpoint });
       return;
     }
     if (
@@ -211,7 +232,8 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     const result = await installPlatform(plan, secrets, installation, {
       // runInstalledPlatformCommand holds the database session lock across the
       // entire replan and mutation sequence.
-      acquireDatabaseLifecycleLock: async () => async () => {},
+      acquireDatabaseLifecycleLock: async () =>
+        Object.assign(async () => {}, { checkpoint: databaseCheckpoint }),
       client,
       revalidateBeforeWorkerDeploy: (manifest, action) =>
         revalidatePlatformInstallAction(client, plan, manifest, action),
@@ -250,7 +272,15 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       current.ownershipNonce,
     );
     try {
-      await execute(current);
+      const authoritative = releaseDatabase.authoritativeManifest;
+      const currentManifest = selectAuthoritativePlatformManifest(current, authoritative);
+      if (authoritative && JSON.stringify(authoritative) !== JSON.stringify(current)) {
+        writeInstallationManifest(authoritative);
+      }
+      if (!authoritative) {
+        await releaseDatabase.checkpoint?.(currentManifest);
+      }
+      await execute(currentManifest, releaseDatabase.checkpoint);
     } finally {
       await releaseDatabase();
     }
@@ -263,8 +293,27 @@ export async function disablePlatform(
   client: PlatformManagementClient,
   initialManifest: PlatformInstallationManifest,
   planOnly: boolean,
+  dependencies: PlatformManagementDependencies = {},
 ): Promise<void> {
   const reconciled = await recoverDurablyMarkedProvisionIntents(client, initialManifest);
+  const writeLifecycleCheckpoint = (
+    checkpointClient: PlatformManagementClient,
+    checkpointManifest: PlatformInstallationManifest,
+  ) =>
+    writeLifecycleCheckpointWithoutDatabase(
+      checkpointClient,
+      checkpointManifest,
+      dependencies.checkpoint,
+    );
+  const writeRemoteManifestIfPresent = (
+    checkpointClient: PlatformManagementClient,
+    checkpointManifest: PlatformInstallationManifest,
+  ) =>
+    writeRemoteManifestIfPresentWithoutDatabase(
+      checkpointClient,
+      checkpointManifest,
+      dependencies.checkpoint,
+    );
   const workers = new Set(
     reconciled.resources
       .filter((resource) => resource.kind === 'worker' && resource.state === 'ready')
@@ -337,6 +386,24 @@ export async function uninstallPlatform(
 ): Promise<void> {
   const reconciled = await recoverDurablyMarkedProvisionIntents(client, initialManifest);
   const manifest = reconciled;
+  const writeLifecycleCheckpoint = (
+    checkpointClient: PlatformManagementClient,
+    checkpointManifest: PlatformInstallationManifest,
+  ) =>
+    writeLifecycleCheckpointWithoutDatabase(
+      checkpointClient,
+      checkpointManifest,
+      dependencies.checkpoint,
+    );
+  const writeRemoteManifestIfPresent = (
+    checkpointClient: PlatformManagementClient,
+    checkpointManifest: PlatformInstallationManifest,
+  ) =>
+    writeRemoteManifestIfPresentWithoutDatabase(
+      checkpointClient,
+      checkpointManifest,
+      dependencies.checkpoint,
+    );
   const retainData = !args.purgeData;
   const hasRoutingCheckpoint = manifest.resources.some(
     (resource) => resource.key === 'routing-kv' && resource.state === 'ready',
@@ -991,18 +1058,21 @@ function recordLifecycleStep(
   return recordInstallationStep(manifest, { completedAt: now, key, resultHash: 'completed' }, now);
 }
 
-async function writeLifecycleCheckpoint(
+async function writeLifecycleCheckpointWithoutDatabase(
   client: PlatformManagementClient,
   manifest: PlatformInstallationManifest,
+  databaseCheckpoint?: (manifest: PlatformInstallationManifest) => Promise<void>,
 ): Promise<void> {
   writeInstallationManifest(manifest);
-  await writeRemoteManifestIfPresent(client, manifest);
+  await writeRemoteManifestIfPresentWithoutDatabase(client, manifest, databaseCheckpoint);
 }
 
-async function writeRemoteManifestIfPresent(
+async function writeRemoteManifestIfPresentWithoutDatabase(
   client: PlatformManagementClient,
   manifest: PlatformInstallationManifest,
+  databaseCheckpoint?: (manifest: PlatformInstallationManifest) => Promise<void>,
 ): Promise<void> {
+  await databaseCheckpoint?.(manifest);
   const routing = manifest.resources.find(
     (resource) => resource.key === 'routing-kv' && resource.state !== 'deleted',
   );
