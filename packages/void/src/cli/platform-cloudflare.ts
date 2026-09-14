@@ -45,6 +45,10 @@ export type CloudflareWorkerRoute = Readonly<{
   pattern: string;
   script: string | null;
 }>;
+export type CloudflareWorkerServiceRoute = Readonly<{
+  pattern: string;
+  zoneName: string;
+}>;
 export type PlatformManagedWorkerTraffic = Readonly<{
   customDomains: ReadonlyArray<Readonly<{ hostname: string; service: string }>>;
   routes: ReadonlyArray<Readonly<{ pattern: string; script: string }>>;
@@ -175,20 +179,6 @@ export class PlatformCloudflareClient {
     return exact ? parseZone(exact) : null;
   }
 
-  async listZones(accountId: string): Promise<ReadonlyArray<CloudflareZone>> {
-    const zones: Array<Record<string, unknown>> = [];
-    for (let page = 1; ; page++) {
-      const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
-        `/zones?account.id=${encodeURIComponent(accountId)}&page=${page}&per_page=50`,
-      );
-      zones.push(...result);
-      if (result.length < 50) {
-        break;
-      }
-    }
-    return zones.map(parseZone);
-  }
-
   async createZone(accountId: string, name: string): Promise<CloudflareZone> {
     return parseZone(
       await this.request<Record<string, unknown>>('/zones', {
@@ -228,6 +218,19 @@ export class PlatformCloudflareClient {
       id: requiredString(entry.id, 'Worker route id'),
       pattern: requiredString(entry.pattern, 'Worker route pattern'),
       script: typeof entry.script === 'string' ? entry.script : null,
+    }));
+  }
+
+  async listWorkerServiceRoutes(
+    accountId: string,
+    workerName: string,
+  ): Promise<ReadonlyArray<CloudflareWorkerServiceRoute>> {
+    const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
+      `/accounts/${encodeURIComponent(accountId)}/workers/services/${encodeURIComponent(workerName)}/environments/production/routes?show_zonename=true`,
+    );
+    return result.map((entry) => ({
+      pattern: requiredString(entry.pattern, 'Worker service route pattern'),
+      zoneName: requiredString(entry.zone_name, 'Worker service route zone name'),
     }));
   }
 

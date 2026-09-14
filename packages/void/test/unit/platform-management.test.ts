@@ -200,15 +200,10 @@ function client(manifest: PlatformInstallationManifest) {
     > => [],
     listWorkerNames: async () =>
       namedResources(manifest, 'worker').map((resource) => resource.name),
-    listWorkerRoutes: async (
-      _zoneId: string,
-    ): Promise<Array<{ id: string; pattern: string; script: string | null }>> => [],
-    listZones: async () =>
-      namedResources(manifest, 'zone').map((zone) => ({
-        ...zone,
-        nameServers: [],
-        status: 'active',
-      })),
+    listWorkerServiceRoutes: async (
+      _accountId: string,
+      _workerName: string,
+    ): Promise<Array<{ pattern: string; zoneName: string }>> => [],
     putKvValue: async (_account: string, _namespace: string, _key: string, value: string) => {
       remoteWrites.push(value);
     },
@@ -692,21 +687,12 @@ describe('platform lifecycle management', () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client(manifest);
-    fake.listZones = async () => [
-      ...namedResources(manifest, 'zone').map((zone) => ({
-        ...zone,
-        nameServers: [],
-        status: 'active',
-      })),
-      { id: 'other-zone', name: 'other.example', nameServers: [], status: 'active' },
-    ];
-    fake.listWorkerRoutes = async (zoneId: string) =>
-      zoneId === 'other-zone'
+    fake.listWorkerServiceRoutes = async (_accountId: string, workerName: string) =>
+      workerName === 'api-worker'
         ? [
             {
-              id: 'manual-route',
               pattern: 'manual.other.example/*',
-              script: 'api-worker',
+              zoneName: 'other.example',
             },
           ]
         : [];

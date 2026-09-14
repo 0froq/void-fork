@@ -62,7 +62,7 @@ export type PlatformManagementClient = Pick<
 >;
 
 export type PlatformUninstallClient = PlatformManagementClient &
-  Pick<PlatformCloudflareClient, 'listWorkerDomains' | 'listWorkerRoutes' | 'listZones'>;
+  Pick<PlatformCloudflareClient, 'listWorkerDomains' | 'listWorkerServiceRoutes'>;
 
 export type PlatformOwnershipClient = Pick<
   PlatformManagementClient,
@@ -726,13 +726,7 @@ async function assertNoUnmanagedWorkerTraffic(
     return;
   }
   const managed = platformManagedWorkerTraffic(manifest.deployment);
-  const managedZoneId = manifest.resources.find(
-    (resource) => resource.key === 'zone' && resource.state === 'ready',
-  )?.id;
-  const [domains, zones] = await Promise.all([
-    client.listWorkerDomains(manifest.account.id),
-    client.listZones(manifest.account.id),
-  ]);
+  const domains = await client.listWorkerDomains(manifest.account.id);
   const unmanaged = domains
     .filter(
       (domain) =>
@@ -742,20 +736,18 @@ async function assertNoUnmanagedWorkerTraffic(
         ),
     )
     .map((domain) => `custom domain ${domain.hostname} -> ${domain.service}`);
-  for (const zone of zones) {
-    const routes = await client.listWorkerRoutes(zone.id);
+  for (const worker of workers) {
+    const routes = await client.listWorkerServiceRoutes(manifest.account.id, worker);
     for (const route of routes) {
       if (
-        route.script &&
-        workers.has(route.script) &&
-        !(
-          zone.id === managedZoneId &&
-          managed.routes.some(
-            (target) => target.pattern === route.pattern && target.script === route.script,
-          )
+        !managed.routes.some(
+          (target) =>
+            target.pattern === route.pattern &&
+            target.script === worker &&
+            route.zoneName === manifest.deployment.application.zoneName,
         )
       ) {
-        unmanaged.push(`route ${route.pattern} in zone ${zone.name} -> ${route.script}`);
+        unmanaged.push(`route ${route.pattern} in zone ${route.zoneName} -> ${worker}`);
       }
     }
   }
