@@ -31,6 +31,7 @@ import {
 export type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
   | 'deleteResource'
+  | 'deleteR2Object'
   | 'emptyR2Bucket'
   | 'findZone'
   | 'getKvValue'
@@ -383,7 +384,19 @@ export async function uninstallPlatform(
     );
     const zone = next.resources.find((resource) => resource.key === 'zone');
     if (zone?.state === 'ready') {
-      await client.removeRoutes(next.account.id, zone.id, workers);
+      for (const worker of next.resources.filter(
+        (resource) =>
+          resource.kind === 'worker' && resource.state === 'ready' && workers.has(resource.name),
+      )) {
+        const missing = await verifyPlatformMutationOwnership(
+          client,
+          next,
+          new Set(['routing-kv', 'zone', worker.key]),
+        );
+        if (!missing.has(worker.key)) {
+          await client.removeRoutes(next.account.id, zone.id, new Set([worker.name]));
+        }
+      }
     }
     const deletionPriority: Record<string, number> = {
       worker: 0,
@@ -420,11 +433,32 @@ export async function uninstallPlatform(
         writeInstallationManifest(next);
         continue;
       }
+      const immediatelyMissing = await verifyPlatformMutationOwnership(
+        client,
+        next,
+        new Set(['routing-kv', resource.key]),
+        { allowDeletedRoutingCheckpoint: args.purgeData },
+      );
+      if (immediatelyMissing.has(resource.key)) {
+        next = updateResourceState(
+          next,
+          resource.key,
+          resource.ownership === 'created' ? 'deleted' : 'retained',
+        );
+        writeInstallationManifest(next);
+        continue;
+      }
       if (resource.kind === 'r2-bucket') {
         await client.emptyR2Bucket(
           next.account.id,
           resource.name,
           new Set([PLATFORM_R2_OWNERSHIP_MARKER_KEY]),
+        );
+        await verifyPlatformMutationOwnership(client, next, new Set(['routing-kv', resource.key]));
+        await client.deleteR2Object(
+          next.account.id,
+          resource.name,
+          PLATFORM_R2_OWNERSHIP_MARKER_KEY,
         );
       }
       await client.deleteResource(next.account.id, resource.kind, resource.id, zone?.id);

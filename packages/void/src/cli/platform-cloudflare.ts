@@ -465,6 +465,17 @@ export class PlatformCloudflareClient {
     return response.text();
   }
 
+  async deleteR2Object(accountId: string, bucketName: string, key: string): Promise<void> {
+    try {
+      await this.deleteR2Objects(accountId, bucketName, [key]);
+    } catch (error) {
+      if (error instanceof PlatformCloudflareApiError && error.status === 404) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   async getWorkerPlainTextBindings(
     accountId: string,
     workerName: string,
