@@ -50,6 +50,7 @@ import { join } from 'pathslash';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
+  PlatformWorkerCustomDomainsChangedError,
   type CloudflareNamedResource,
   type CloudflareWorkerCustomDomainOrigin,
   type PlatformCloudflareClient,
@@ -178,6 +179,7 @@ export type PlatformInstallerDependencies = Readonly<{
   ) => Promise<PlatformDatabaseMigrationResult>;
   recoverWorkerCutover?: (input: {
     key: PlatformWorkerKey;
+    preserveCustomDomains: boolean;
     previousVersionId: string | null;
     stagedVersionId: string;
     workerName: string;
@@ -687,6 +689,7 @@ export async function installPlatform(
         if (dependencies.recoverWorkerCutover) {
           await dependencies.recoverWorkerCutover({
             key,
+            preserveCustomDomains: interruptedCutover.unsafeTraffic.has(key),
             previousVersionId: snapshot.previousVersionId,
             stagedVersionId: snapshot.stagedVersionId,
             workerName: snapshot.workerName,
@@ -708,6 +711,7 @@ export async function installPlatform(
               preservedRoutes,
             ),
             previousVersionId: snapshot.previousVersionId,
+            preserveCustomDomains: interruptedCutover.unsafeTraffic.has(key),
             inspectNewWorker: () =>
               inspectNewPlatformWorker(
                 dependencies.client,
@@ -755,7 +759,7 @@ export async function installPlatform(
       manifest = recordWorkerTrafficState(
         manifest,
         interruptedCutover.generation,
-        previousPublicEndpoints,
+        previousPublicEndpoints && interruptedCutover.unsafeTraffic.size === 0,
         now(),
       );
       let retainedNewWorker = false;
@@ -832,6 +836,17 @@ export async function installPlatform(
                 manifest!,
                 action.name,
                 { customDomains, routes },
+                now(),
+              );
+              writeInstallationManifest(manifest);
+              await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+            },
+            onUnsafeTraffic: async () => {
+              manifest = recordWorkerUnsafeTraffic(
+                manifest!,
+                workerCutoverGeneration,
+                key,
+                action.name,
                 now(),
               );
               writeInstallationManifest(manifest);
@@ -1972,6 +1987,7 @@ type PlatformWorkerDeploymentOptions = Readonly<{
     previousTriggers: CloudflareTriggerConfig,
   ) => Promise<void>;
   onTrafficPublished: () => Promise<void>;
+  onUnsafeTraffic: () => Promise<void>;
   previousConfig: Record<string, unknown>;
   previousPublicEndpoints: boolean;
   preservedRoutes: ReadonlyArray<unknown>;
@@ -2026,7 +2042,9 @@ async function deployPlatformWorker(
         previousTriggers,
         options.previousPublicEndpoints,
       );
-      previousTriggers = mergePreservedTriggerRoutes(previousTriggers, options.preservedRoutes);
+      previousTriggers = withoutPlatformCustomDomainTriggers(
+        mergePreservedTriggerRoutes(previousTriggers, options.preservedRoutes),
+      );
     }
     const argv = [
       ...(options.workerExisted ? ['versions', 'upload'] : ['deploy']),
@@ -2170,6 +2188,7 @@ async function deployPlatformWorker(
         previousCustomDomains: previousTraffic.customDomains,
         previousTriggers,
         previousVersionId,
+        preserveCustomDomains: false,
         inspectNewWorker: options.inspectNewWorker,
         removeCustomDomains: options.removeCustomDomains,
         publishCustomDomains: options.publishCustomDomains,
@@ -2179,8 +2198,13 @@ async function deployPlatformWorker(
       });
     return rollback;
   } catch (error) {
+    const unsafeTraffic = error instanceof PlatformWorkerCustomDomainsChangedError;
     let recoveryError: unknown = null;
     try {
+      if (unsafeTraffic) {
+        await options.retainNewWorker();
+        await options.onUnsafeTraffic();
+      }
       if (activatedVersionId && uploadedVersionId) {
         await rollbackPlatformWorker({
           accountId,
@@ -2192,6 +2216,7 @@ async function deployPlatformWorker(
           previousCustomDomains: previousTraffic.customDomains,
           previousTriggers,
           previousVersionId,
+          preserveCustomDomains: unsafeTraffic,
           inspectNewWorker: options.inspectNewWorker,
           removeCustomDomains: options.removeCustomDomains,
           publishCustomDomains: options.publishCustomDomains,
@@ -2206,6 +2231,12 @@ async function deployPlatformWorker(
     if (recoveryError) {
       throw new PlatformWorkerRecoveryIncompleteError(
         `platform: ${errorMessage(error)} Automatic recovery for ${workerName} was incomplete: ${errorMessage(recoveryError)}`,
+        { cause: error },
+      );
+    }
+    if (unsafeTraffic) {
+      throw new PlatformWorkerRecoveryIncompleteError(
+        `platform: ${errorMessage(error)} The routing gate remains closed and live Custom Domains were retained for safe reconciliation on retry.`,
         { cause: error },
       );
     }
@@ -2225,6 +2256,7 @@ async function rollbackPlatformWorker(input: {
   previousCustomDomains: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>;
   previousTriggers: ReturnType<typeof readCloudflareTriggerConfig>;
   previousVersionId: string | null;
+  preserveCustomDomains: boolean;
   inspectNewWorker: () => Promise<'missing' | 'owned'>;
   removeCustomDomains: () => Promise<void>;
   publishCustomDomains: (
@@ -2260,7 +2292,9 @@ async function rollbackPlatformWorker(input: {
         return;
       }
       await input.retainNewWorker();
-      await input.removeCustomDomains();
+      if (!input.preserveCustomDomains) {
+        await input.removeCustomDomains();
+      }
       return;
     }
     const currentVersionId = await readActivePlatformWorkerVersion(
@@ -2348,7 +2382,7 @@ async function rollbackPlatformWorker(input: {
       input.previousVersionId,
       'restore',
     );
-    if (input.previousCustomDomains.length > 0) {
+    if (!input.preserveCustomDomains && input.previousCustomDomains.length > 0) {
       await input.publishCustomDomains(input.workerName, input.previousCustomDomains);
     }
   } finally {
@@ -2987,6 +3021,7 @@ type PlatformWorkerCutoverSnapshot = Readonly<{
 type InterruptedWorkerCutover = Readonly<{
   generation: number;
   staged: ReadonlyMap<PlatformWorkerKey, PlatformWorkerCutoverSnapshot>;
+  unsafeTraffic: ReadonlySet<PlatformWorkerKey>;
 }>;
 
 function nextWorkerCutoverGeneration(manifest: PlatformInstallationManifest): number {
@@ -3047,6 +3082,24 @@ function recordWorkerCutoverResolution(
   );
 }
 
+function recordWorkerUnsafeTraffic(
+  manifest: PlatformInstallationManifest,
+  generation: number,
+  key: PlatformWorkerKey,
+  workerName: string,
+  completedAt: string,
+): PlatformInstallationManifest {
+  return recordInstallationStep(
+    manifest,
+    {
+      completedAt,
+      key: `worker-cutover:${generation}:unsafe-traffic:${key}`,
+      resultHash: workerName,
+    },
+    completedAt,
+  );
+}
+
 function parseWorkerCutoverSnapshot(value: string): PlatformWorkerCutoverSnapshot | null {
   try {
     const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as {
@@ -3101,14 +3154,33 @@ function interruptedWorkerCutover(
           workerName: string;
         }
       >;
+      unsafeTraffic: Set<PlatformWorkerKey>;
     }
   >();
   for (const step of manifest.steps) {
     const resolution = /^worker-cutover:(\d+):(committed|restored)$/.exec(step.key);
     if (resolution) {
       const generation = Number(resolution[1]);
-      const entry = generations.get(generation) ?? { resolved: false, staged: new Map() };
+      const entry = generations.get(generation) ?? {
+        resolved: false,
+        staged: new Map(),
+        unsafeTraffic: new Set(),
+      };
       entry.resolved = true;
+      generations.set(generation, entry);
+      continue;
+    }
+    const unsafeTraffic = /^worker-cutover:(\d+):unsafe-traffic:(api|proxy|tail|dispatch)$/.exec(
+      step.key,
+    );
+    if (unsafeTraffic) {
+      const generation = Number(unsafeTraffic[1]);
+      const entry = generations.get(generation) ?? {
+        resolved: false,
+        staged: new Map(),
+        unsafeTraffic: new Set(),
+      };
+      entry.unsafeTraffic.add(unsafeTraffic[2] as PlatformWorkerKey);
       generations.set(generation, entry);
       continue;
     }
@@ -3121,14 +3193,24 @@ function interruptedWorkerCutover(
     if (!snapshot) {
       throw new Error(`platform: Invalid Worker cutover checkpoint ${step.key}.`);
     }
-    const entry = generations.get(generation) ?? { resolved: false, staged: new Map() };
+    const entry = generations.get(generation) ?? {
+      resolved: false,
+      staged: new Map(),
+      unsafeTraffic: new Set(),
+    };
     entry.staged.set(staged[2] as PlatformWorkerKey, snapshot);
     generations.set(generation, entry);
   }
   const unresolved = [...generations.entries()]
     .filter(([, entry]) => !entry.resolved && entry.staged.size > 0)
     .sort(([left], [right]) => right - left)[0];
-  return unresolved ? { generation: unresolved[0], staged: unresolved[1].staged } : null;
+  return unresolved
+    ? {
+        generation: unresolved[0],
+        staged: unresolved[1].staged,
+        unsafeTraffic: unresolved[1].unsafeTraffic,
+      }
+    : null;
 }
 
 function recordWorkerTrafficState(

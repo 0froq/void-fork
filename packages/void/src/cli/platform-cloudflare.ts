@@ -24,6 +24,13 @@ export class PlatformCloudflareApiError extends Error {
   }
 }
 
+export class PlatformWorkerCustomDomainsChangedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PlatformWorkerCustomDomainsChangedError';
+  }
+}
+
 export type CloudflareAccount = Readonly<{ id: string; name: string }>;
 export type CloudflareNamedResource = Readonly<{
   fingerprint?: string;
@@ -292,7 +299,7 @@ export class PlatformCloudflareClient {
       expected.length !== actual.length ||
       expected.some((hostname, index) => hostname !== actual[index])
     ) {
-      throw new Error(
+      throw new PlatformWorkerCustomDomainsChangedError(
         `platform: Worker ${JSON.stringify(workerName)} Custom Domains changed concurrently after publication; refusing to overwrite the newer traffic state.`,
       );
     }

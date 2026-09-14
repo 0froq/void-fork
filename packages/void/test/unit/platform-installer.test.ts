@@ -2049,6 +2049,11 @@ describe('platform installer', () => {
             'staged-proxy',
           ),
         },
+        {
+          completedAt: '2026-09-14T00:00:06.000Z',
+          key: 'worker-cutover:999:unsafe-traffic:proxy',
+          resultHash: deployment.resources.proxyWorker,
+        },
       ],
     };
     const recoveryEvents: Array<string> = [];
@@ -2062,20 +2067,20 @@ describe('platform installer', () => {
       migrateDatabase: async () => {},
       recoverWorkerCutover: async (snapshot) => {
         recoveryEvents.push(
-          `recover:${snapshot.key}:${snapshot.previousVersionId}:${snapshot.stagedVersionId}`,
+          `recover:${snapshot.key}:${snapshot.previousVersionId}:${snapshot.stagedVersionId}:${snapshot.preserveCustomDomains}`,
         );
       },
       revalidateBeforeWorkerDeploy: async () => {},
       verifyHealth: async () => {},
     });
     expect(recoveryEvents.slice(0, 2)).toEqual([
-      'recover:proxy:previous-proxy:staged-proxy',
-      'recover:api:previous-api:staged-api',
+      'recover:proxy:previous-proxy:staged-proxy:true',
+      'recover:api:previous-api:staged-api:false',
     ]);
     expect(recovered.manifest.steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ key: 'worker-cutover:999:restored' }),
-        expect.objectContaining({ key: 'worker-traffic-state:999', resultHash: 'enabled' }),
+        expect.objectContaining({ key: 'worker-traffic-state:999', resultHash: 'disabled' }),
         expect.objectContaining({ key: 'worker-cutover:1000:committed' }),
       ]),
     );

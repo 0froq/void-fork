@@ -4,6 +4,7 @@ import {
   hyperdriveOriginFromConnectionString,
   parsePostgresConnectionString,
   PlatformCloudflareClient,
+  PlatformWorkerCustomDomainsChangedError,
 } from '../../src/cli/platform-cloudflare.ts';
 
 describe('platform Cloudflare client', () => {
@@ -583,11 +584,11 @@ describe('platform Cloudflare client', () => {
             }),
     });
 
-    await expect(
-      client.publishWorkerCustomDomainsSafely('account', 'void-api', [
-        { hostname: 'api.example.com' },
-      ]),
-    ).rejects.toThrow('changed concurrently');
+    const publication = client.publishWorkerCustomDomainsSafely('account', 'void-api', [
+      { hostname: 'api.example.com' },
+    ]);
+    await expect(publication).rejects.toBeInstanceOf(PlatformWorkerCustomDomainsChangedError);
+    await expect(publication).rejects.toThrow('changed concurrently');
   });
 
   it('inventories every route for a Worker without requiring zone visibility', async () => {
