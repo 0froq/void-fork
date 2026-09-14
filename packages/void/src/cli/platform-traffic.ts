@@ -47,35 +47,15 @@ function trafficConfigHash(kind: 'worker-custom-domain' | 'worker-route', value:
 }
 
 export function trackedPlatformWorkerTraffic(
-  manifest: PlatformInstallationManifest,
-  workers?: ReadonlySet<string>,
+  _manifest: PlatformInstallationManifest,
+  _workers?: ReadonlySet<string>,
 ): PlatformTrackedWorkerTraffic {
-  const desired = platformManagedWorkerTraffic(manifest.deployment, workers);
-  const resources = manifest.resources.filter((resource) => resource.state === 'ready');
-  return {
-    customDomains: desired.customDomains.flatMap((target) => {
-      const configHash = trafficConfigHash('worker-custom-domain', target);
-      return resources
-        .filter(
-          (resource) =>
-            resource.kind === 'worker-custom-domain' &&
-            resource.name === target.hostname &&
-            resource.configHash === configHash,
-        )
-        .map((resource) => ({ ...target, id: resource.id }));
-    }),
-    routes: desired.routes.flatMap((target) => {
-      const configHash = trafficConfigHash('worker-route', target);
-      return resources
-        .filter(
-          (resource) =>
-            resource.kind === 'worker-route' &&
-            resource.name === target.pattern &&
-            resource.configHash === configHash,
-        )
-        .map((resource) => ({ ...target, id: resource.id }));
-    }),
-  };
+  // Cloudflare does not expose a generation precondition for route or custom
+  // domain deletion. Even an immutable record id can be repurposed between a
+  // client-side ownership check and DELETE, so no observed attachment is safe
+  // for unattended cleanup. Disable traffic through the installation-owned KV
+  // gate and retain attachments for explicit dashboard cleanup.
+  return { customDomains: [], routes: [] };
 }
 
 export function recordPlatformWorkerTraffic(
@@ -107,8 +87,8 @@ export function recordPlatformWorkerTraffic(
         key: `worker-route:${route.id}`,
         kind: 'worker-route',
         name: route.pattern,
-        ownership: 'created',
-        state: 'ready',
+        ownership: 'external',
+        state: 'retained',
       },
       updatedAt,
     );
@@ -131,8 +111,8 @@ export function recordPlatformWorkerTraffic(
         key: `worker-custom-domain:${domain.id}`,
         kind: 'worker-custom-domain',
         name: domain.hostname,
-        ownership: 'created',
-        state: 'ready',
+        ownership: 'external',
+        state: 'retained',
       },
       updatedAt,
     );

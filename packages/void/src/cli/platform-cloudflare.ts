@@ -747,72 +747,14 @@ export class PlatformCloudflareClient {
   }
 
   async removeRoutes(
-    accountId: string,
-    zoneId: string | null,
+    _accountId: string,
+    _zoneId: string | null,
     tracked: PlatformTrackedWorkerTraffic,
   ): Promise<void> {
-    if (zoneId !== null && tracked.routes.length > 0) {
-      let routes: ReadonlyArray<{ id?: unknown; pattern?: unknown; script?: unknown }> = [];
-      try {
-        routes = await this.request<
-          ReadonlyArray<{ id?: unknown; pattern?: unknown; script?: unknown }>
-        >(`/zones/${encodeURIComponent(zoneId)}/workers/routes`);
-      } catch (error) {
-        if (!(error instanceof PlatformCloudflareApiError && error.status === 404)) {
-          throw error;
-        }
-      }
-      for (const target of tracked.routes) {
-        const route = routes.find((entry) => entry.id === target.id);
-        if (!route) {
-          continue;
-        }
-        if (route.pattern !== target.pattern || route.script !== target.script) {
-          throw new Error(
-            `platform: Worker route ${target.id} changed after it was checkpointed; refusing to delete it.`,
-          );
-        }
-        if (typeof route.id === 'string') {
-          try {
-            await this.request(
-              `/zones/${encodeURIComponent(zoneId)}/workers/routes/${encodeURIComponent(route.id)}`,
-              {
-                method: 'DELETE',
-              },
-            );
-          } catch (error) {
-            if (!(error instanceof PlatformCloudflareApiError && error.status === 404)) {
-              throw error;
-            }
-          }
-        }
-      }
-    }
-    if (tracked.customDomains.length > 0) {
-      const domains = await this.#listWorkerDomainRecords(accountId);
-      for (const target of tracked.customDomains) {
-        const domain = domains.find((entry) => entry.id === target.id);
-        if (!domain) {
-          continue;
-        }
-        if (domain.hostname !== target.hostname || domain.service !== target.service) {
-          throw new Error(
-            `platform: Worker custom domain ${target.id} changed after it was checkpointed; refusing to delete it.`,
-          );
-        }
-        if (typeof domain.id === 'string') {
-          try {
-            await this.request(
-              `/accounts/${encodeURIComponent(accountId)}/workers/domains/${encodeURIComponent(domain.id)}`,
-              { method: 'DELETE' },
-            );
-          } catch (error) {
-            if (!(error instanceof PlatformCloudflareApiError && error.status === 404)) {
-              throw error;
-            }
-          }
-        }
-      }
+    if (tracked.routes.length > 0 || tracked.customDomains.length > 0) {
+      throw new Error(
+        'platform: Cloudflare does not support conditional Worker traffic deletion. Retaining routes and custom domains for explicit dashboard cleanup.',
+      );
     }
   }
 

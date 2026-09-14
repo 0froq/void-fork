@@ -1,5 +1,5 @@
 Void is a fullstack Vite framework and deployment platform for Cloudflare.
-Non-interactive self-hosted platform lifecycle mutations require `--yes`; `--plan` is read-only and needs no acknowledgement. Published routes and custom domains are checkpointed and cleaned up by immutable Cloudflare id; replacements and legacy untracked attachments are retained.
+Non-interactive self-hosted platform lifecycle mutations require `--yes`; `--plan` is read-only and needs no acknowledgement. Published routes and custom domains are observed for recovery but retained for explicit dashboard cleanup because Cloudflare cannot condition deletion on an immutable attachment generation.
 In an empty directory, set up a new app like this:
 
 npm install -D void

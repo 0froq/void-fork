@@ -9,7 +9,7 @@ import {
 } from '../../src/cli/platform-traffic.ts';
 
 describe('platform traffic checkpoints', () => {
-  it('records immutable route and custom-domain ids', () => {
+  it('records observed traffic as retained but never schedules unattended deletion', () => {
     const deployment = createPlatformDeploymentManifest({
       application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
       controlPlane: { apiHostname: 'api.example.com' },
@@ -60,27 +60,23 @@ describe('platform traffic checkpoints', () => {
       '2026-09-14T00:00:02.000Z',
     );
 
-    expect(trackedPlatformWorkerTraffic(manifest)).toEqual({
-      customDomains: [
-        {
-          hostname: 'api.example.com',
-          id: 'domain-id',
-          service: deployment.resources.apiWorker,
-        },
-      ],
-      routes: [
-        {
-          id: 'route-one',
-          pattern: '*.apps.example.com/*',
-          script: deployment.resources.dispatchWorker,
-        },
-        {
-          id: 'route-two',
-          pattern: '*.apps.example.com',
-          script: deployment.resources.dispatchWorker,
-        },
-      ],
-    });
+    expect(
+      manifest.resources
+        .filter(
+          (resource) =>
+            resource.kind === 'worker-route' || resource.kind === 'worker-custom-domain',
+        )
+        .map((resource) => ({
+          id: resource.id,
+          ownership: resource.ownership,
+          state: resource.state,
+        })),
+    ).toEqual([
+      { id: 'domain-id', ownership: 'external', state: 'retained' },
+      { id: 'route-one', ownership: 'external', state: 'retained' },
+      { id: 'route-two', ownership: 'external', state: 'retained' },
+    ]);
+    expect(trackedPlatformWorkerTraffic(manifest)).toEqual({ customDomains: [], routes: [] });
   });
 
   it('fails closed when published traffic is ambiguous or missing', () => {

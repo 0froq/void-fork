@@ -93,7 +93,7 @@ describe('platform Cloudflare client', () => {
     expect(message).toContain('non-JSON');
   });
 
-  it('removes Worker custom domains even when the application zone is missing', async () => {
+  it('refuses unattended custom-domain deletion without a generation precondition', async () => {
     const requests: Array<string> = [];
     const client = new PlatformCloudflareClient('token', {
       fetcher: async (input) => {
@@ -102,21 +102,16 @@ describe('platform Cloudflare client', () => {
       },
     });
 
-    await client.removeRoutes('account', null, {
-      customDomains: [{ hostname: 'api.example.com', id: 'domain-id', service: 'void-api' }],
-      routes: [],
-    });
-
-    expect(requests).toHaveLength(1);
-    const requestUrl = new URL(requests[0]);
-    expect(requestUrl.pathname).toBe('/client/v4/accounts/account/workers/domains');
-    expect(requestUrl.searchParams.get('service')).toBeNull();
-    expect(requestUrl.searchParams.get('page')).toBe('1');
-    expect(requestUrl.searchParams.get('per_page')).toBe('100');
-    expect(requests[0]).not.toContain('/zones/');
+    await expect(
+      client.removeRoutes('account', null, {
+        customDomains: [{ hostname: 'api.example.com', id: 'domain-id', service: 'void-api' }],
+        routes: [],
+      }),
+    ).rejects.toThrow('does not support conditional Worker traffic deletion');
+    expect(requests).toEqual([]);
   });
 
-  it('continues removing custom domains when the zone disappears concurrently', async () => {
+  it('refuses unattended route deletion before reading mutable zone state', async () => {
     const requests: Array<string> = [];
     const client = new PlatformCloudflareClient('token', {
       fetcher: async (input) => {
@@ -132,13 +127,13 @@ describe('platform Cloudflare client', () => {
       },
     });
 
-    await client.removeRoutes('account', 'removed-zone', {
-      customDomains: [{ hostname: 'api.example.com', id: 'domain-id', service: 'void-api' }],
-      routes: [{ id: 'route-id', pattern: 'apps.example.com/*', script: 'void-api' }],
-    });
-
-    expect(requests.some((url) => url.includes('/zones/removed-zone/workers/routes'))).toBe(true);
-    expect(requests.some((url) => url.includes('/accounts/account/workers/domains'))).toBe(true);
+    await expect(
+      client.removeRoutes('account', 'removed-zone', {
+        customDomains: [{ hostname: 'api.example.com', id: 'domain-id', service: 'void-api' }],
+        routes: [{ id: 'route-id', pattern: 'apps.example.com/*', script: 'void-api' }],
+      }),
+    ).rejects.toThrow('does not support conditional Worker traffic deletion');
+    expect(requests).toEqual([]);
   });
 
   it('treats a missing Worker as already disabled but not as enabled', async () => {
@@ -443,143 +438,12 @@ describe('platform Cloudflare client', () => {
     ]);
   });
 
-  it('removes Worker routes and custom domains through the account domains API', async () => {
-    const requests: Array<{ method: string; pathname: string; service: string | null }> = [];
+  it('never calls Cloudflare for non-empty unattended traffic cleanup', async () => {
+    let requests = 0;
     const client = new PlatformCloudflareClient('token', {
-      fetcher: async (input, init) => {
-        const url = new URL(String(input));
-        requests.push({
-          method: init?.method ?? 'GET',
-          pathname: url.pathname,
-          service: url.searchParams.get('service'),
-        });
-        if (url.pathname.endsWith('/workers/routes')) {
-          return Response.json({
-            success: true,
-            result: [
-              { id: 'route-api', pattern: 'api.example.com/*', script: 'void-team-api' },
-              { id: 'route-manual', pattern: 'manual.example.com/*', script: 'void-team-api' },
-              { id: 'route-other', pattern: 'other.example.com/*', script: 'unrelated' },
-            ],
-          });
-        }
-        if (url.pathname.endsWith('/workers/domains')) {
-          return Response.json({
-            success: true,
-            result: [
-              {
-                hostname: 'void-team-api.example.com',
-                id: 'domain-void-team-api',
-                service: 'void-team-api',
-              },
-              {
-                hostname: 'manual-void-team-api.example.com',
-                id: 'manual-domain-void-team-api',
-                service: 'void-team-api',
-              },
-              {
-                hostname: 'void-team-proxy.example.com',
-                id: 'domain-void-team-proxy',
-                service: 'void-team-proxy',
-              },
-            ],
-          });
-        }
+      fetcher: async () => {
+        requests++;
         return Response.json({ success: true, result: null });
-      },
-    });
-
-    await client.removeRoutes('account', 'zone', {
-      customDomains: [
-        {
-          hostname: 'void-team-api.example.com',
-          id: 'domain-void-team-api',
-          service: 'void-team-api',
-        },
-        {
-          hostname: 'void-team-proxy.example.com',
-          id: 'domain-void-team-proxy',
-          service: 'void-team-proxy',
-        },
-      ],
-      routes: [{ id: 'route-api', pattern: 'api.example.com/*', script: 'void-team-api' }],
-    });
-
-    expect(requests).toEqual([
-      {
-        method: 'GET',
-        pathname: '/client/v4/zones/zone/workers/routes',
-        service: null,
-      },
-      {
-        method: 'DELETE',
-        pathname: '/client/v4/zones/zone/workers/routes/route-api',
-        service: null,
-      },
-      {
-        method: 'GET',
-        pathname: '/client/v4/accounts/account/workers/domains',
-        service: null,
-      },
-      {
-        method: 'DELETE',
-        pathname: '/client/v4/accounts/account/workers/domains/domain-void-team-api',
-        service: null,
-      },
-      {
-        method: 'DELETE',
-        pathname: '/client/v4/accounts/account/workers/domains/domain-void-team-proxy',
-        service: null,
-      },
-    ]);
-  });
-
-  it('retains same-tuple route and domain replacements with new ids', async () => {
-    const deletes: Array<string> = [];
-    const client = new PlatformCloudflareClient('token', {
-      fetcher: async (input, init) => {
-        const url = new URL(String(input));
-        if (init?.method === 'DELETE') {
-          deletes.push(url.pathname);
-          return Response.json({ success: true, result: null });
-        }
-        if (url.pathname.endsWith('/workers/routes')) {
-          return Response.json({
-            success: true,
-            result: [{ id: 'replacement-route', pattern: 'apps.example.com/*', script: 'worker' }],
-          });
-        }
-        return Response.json({
-          success: true,
-          result: [
-            {
-              hostname: 'api.example.com',
-              id: 'replacement-domain',
-              service: 'worker',
-            },
-          ],
-        });
-      },
-    });
-
-    await client.removeRoutes('account', 'zone', {
-      customDomains: [{ hostname: 'api.example.com', id: 'original-domain', service: 'worker' }],
-      routes: [{ id: 'original-route', pattern: 'apps.example.com/*', script: 'worker' }],
-    });
-
-    expect(deletes).toEqual([]);
-  });
-
-  it('refuses to delete a checkpointed traffic id whose tuple changed', async () => {
-    const client = new PlatformCloudflareClient('token', {
-      fetcher: async (input) => {
-        const url = new URL(String(input));
-        return Response.json({
-          success: true,
-          result: url.pathname.endsWith('/workers/routes')
-            ? [{ id: 'route', pattern: 'unrelated.example/*', script: 'other' }]
-            : [],
-        });
       },
     });
 
@@ -588,7 +452,8 @@ describe('platform Cloudflare client', () => {
         customDomains: [],
         routes: [{ id: 'route', pattern: 'apps.example.com/*', script: 'worker' }],
       }),
-    ).rejects.toThrow('changed after it was checkpointed');
+    ).rejects.toThrow('does not support conditional Worker traffic deletion');
+    expect(requests).toBe(0);
   });
 
   it('inventories Worker custom domains before installer deployment', async () => {
@@ -634,35 +499,6 @@ describe('platform Cloudflare client', () => {
       },
     ]);
     expect(pages).toEqual(['1', '2']);
-  });
-
-  it('removes a managed Worker custom domain found on a later page', async () => {
-    const requests: Array<string> = [];
-    const client = new PlatformCloudflareClient('token', {
-      fetcher: async (input, init) => {
-        const url = new URL(String(input));
-        requests.push(`${init?.method ?? 'GET'} ${url.pathname}?${url.searchParams}`);
-        if (url.pathname.endsWith('/workers/domains')) {
-          const page = Number(url.searchParams.get('page'));
-          return Response.json({
-            success: true,
-            result:
-              page === 1
-                ? [{ hostname: 'manual.example.net', id: 'manual', service: 'worker' }]
-                : [{ hostname: 'api.example.com', id: 'managed', service: 'worker' }],
-            result_info: { page, per_page: 1, total_pages: 2 },
-          });
-        }
-        return Response.json({ success: true, result: null });
-      },
-    });
-
-    await client.removeRoutes('account', null, {
-      customDomains: [{ hostname: 'api.example.com', id: 'managed', service: 'worker' }],
-      routes: [],
-    });
-    expect(requests.filter((request) => request.startsWith('GET '))).toHaveLength(2);
-    expect(requests).toContain('DELETE /client/v4/accounts/account/workers/domains/managed?');
   });
 
   it('inventories every route for a Worker without requiring zone visibility', async () => {

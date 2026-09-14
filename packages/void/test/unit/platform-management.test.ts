@@ -729,7 +729,7 @@ describe('platform lifecycle management', () => {
     });
   });
 
-  it('deletes only checkpointed traffic ids when disabling', async () => {
+  it('retains observed traffic attachments when disabling', async () => {
     let manifest = installedManifest();
     const dispatchWorker = manifest.deployment.resources.dispatchWorker;
     manifest = recordPlatformWorkerTraffic(
@@ -761,26 +761,12 @@ describe('platform lifecycle management', () => {
 
     await disablePlatform(fake, manifest, false);
 
-    expect(removed).toEqual({
-      customDomains: [],
-      routes: [
-        {
-          id: 'route-one',
-          pattern: '*.apps.example.com/*',
-          script: dispatchWorker,
-        },
-        {
-          id: 'route-two',
-          pattern: '*.apps.example.com',
-          script: dispatchWorker,
-        },
-      ],
-    });
+    expect(removed).toEqual({ customDomains: [], routes: [] });
     expect(
       listInstallationManifests()[0]
         ?.resources.filter((resource) => resource.kind === 'worker-route')
         .map((resource) => resource.state),
-    ).toEqual(['deleted', 'deleted']);
+    ).toEqual(['retained', 'retained']);
   });
 
   it('retains Workers and their unmanaged traffic for manual cleanup', async () => {

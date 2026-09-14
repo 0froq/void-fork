@@ -405,7 +405,7 @@ export async function disablePlatform(
       dependencies.checkpoint,
     );
   note(
-    'Block platform traffic through installation-owned routing storage, then remove routes and custom domains. Workers and all data remain installed.',
+    'Block platform traffic through installation-owned routing storage. Retain routes and custom domains for explicit dashboard cleanup because Cloudflare cannot condition their deletion on an immutable generation. Workers and all data remain installed.',
     'Disable plan',
   );
   if (planOnly) {
@@ -452,7 +452,7 @@ export async function disablePlatform(
       missing.has(zone.key) ? null : zone.id,
       trackedTraffic,
     );
-    next = markTrackedTrafficDeleted(next, trackedTraffic);
+    next = markTrafficAttachmentsRetained(next);
     if (!hasLifecycleStep(next, `disable:${trafficGeneration}:routes`)) {
       next = recordLifecycleStep(next, `disable:${trafficGeneration}:routes`);
     }
@@ -514,7 +514,7 @@ export async function uninstallPlatform(
       ? 'Delete safely identifiable installer-owned data (--purge-data); retain Workers, R2, AI Gateway, and external PostgreSQL for manual cleanup.'
       : 'Retain installer-owned data; external PostgreSQL is never deleted.';
   note(
-    `Disable all platform traffic and remove managed routes.\nDelete installer-owned Queues.\n${dataMessage}\n${
+    `Disable all platform traffic through installation-owned routing storage.\nRetain routes and custom domains for explicit dashboard cleanup.\nDelete installer-owned Queues.\n${dataMessage}\n${
       createdZone
         ? `Keep zone ${createdZone.name} for explicit manual cleanup.`
         : 'Never delete the adopted application zone.'
@@ -624,7 +624,7 @@ export async function uninstallPlatform(
         if (!missing.has(worker.key)) {
           const trackedTraffic = trackedPlatformWorkerTraffic(next, new Set([worker.name]));
           await client.removeRoutes(next.account.id, zone.id, trackedTraffic);
-          next = markTrackedTrafficDeleted(next, trackedTraffic);
+          next = markTrafficAttachmentsRetained(next);
           next = recordLifecycleStep(next, `uninstall:routes:${worker.key}`);
           await writeLifecycleCheckpoint(client, next);
         }
@@ -1224,22 +1224,16 @@ function updateResourceState(
   return recordInstallationResource(manifest, { ...resource, state }, new Date().toISOString());
 }
 
-function markTrackedTrafficDeleted(
+function markTrafficAttachmentsRetained(
   manifest: PlatformInstallationManifest,
-  tracked: Parameters<PlatformManagementClient['removeRoutes']>[2],
 ): PlatformInstallationManifest {
-  const ids = new Set([
-    ...tracked.routes.map((route) => route.id),
-    ...tracked.customDomains.map((domain) => domain.id),
-  ]);
   let next = manifest;
   for (const resource of manifest.resources) {
     if (
       resource.state === 'ready' &&
-      ids.has(resource.id) &&
       (resource.kind === 'worker-route' || resource.kind === 'worker-custom-domain')
     ) {
-      next = updateResourceState(next, resource.key, 'deleted');
+      next = updateResourceState(next, resource.key, 'retained');
     }
   }
   return next;

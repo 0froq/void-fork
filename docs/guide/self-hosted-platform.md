@@ -160,9 +160,9 @@ Discovery verifies the account, every recorded Cloudflare resource, and the rout
 
 ## Disable and safely uninstall
 
-New installs checkpoint every published route and custom-domain Cloudflare id. Disable, rollback, and uninstall re-read each id, validate its recorded tuple, and delete only that immutable id. A same-tuple replacement with a new id is retained. Legacy installations without traffic-id checkpoints keep those attachments for explicit manual cleanup; the installation-owned routing flag still blocks requests.
+New installs observe published routes and custom domains and record them as retained attachments. Cloudflare does not expose a generation precondition for deleting either kind of attachment, so disable, rollback, and uninstall leave them in place for explicit dashboard cleanup. The installation-owned routing flag still blocks platform requests.
 
-Disable all routes and custom domains and gate every `workers.dev` request through an installation-owned routing flag, without deleting resources or data. Repair and upgrade keep the installation private until traffic is restored explicitly:
+Gate platform traffic through an installation-owned routing flag without deleting resources or data. Repair and upgrade keep the installation private until traffic is restored explicitly:
 
 ```sh
 void platform disable [id] --plan
@@ -182,7 +182,7 @@ void platform uninstall [id] --plan
 The default uninstall policy is ownership-aware:
 
 - Adopted or external resources are never deleted.
-- Transient Queues, installer-created routes, and installer-created DNS are removed.
+- Transient Queues and installer-created DNS are removed. Routes and custom domains are retained for explicit dashboard cleanup.
 - Installer-owned Workers, KV, R2, Hyperdrive, dispatch, and AI Gateway resources are retained and recorded in the final manifest by default.
 - External PostgreSQL is never deleted.
 - Zones are always retained. A zone can contain unrelated DNS, settings, and Cloudflare products that the installer cannot exhaustively prove ownership of, so inspect and delete an installer-created zone manually after uninstall if appropriate. The legacy `--delete-zone` flag fails before mutation with this guidance.
@@ -193,4 +193,4 @@ To delete installer-owned data:
 void platform uninstall [id] --purge-data
 ```
 
-`--purge-data` is destructive, but still never deletes external PostgreSQL, Workers, R2, the AI Gateway, adopted resources, or a zone. Cloudflare Worker deletion and subdomain mutation are name-addressed and expose no server-enforced generation condition, so a same-name replacement could race a client-side ownership check. Void therefore blocks the retained Workers through routing storage, removes only the installation's managed routes and custom domains, and leaves Worker deletion to an operator who can inspect the account immediately before cleanup. The same generation limitation applies to R2, so Void retains that bucket for explicit manual cleanup. AI Gateway ids can also be reused without a durable ownership marker. Before any Cloudflare mutation, Void compares the remote installation checkpoint with fresh resource inventory and verifies the ownership markers on every Worker. Unmanaged routes and custom domains on retained Workers are left untouched. A missing or changed ownership proof stops the operation before it can affect a replacement resource. The routing namespace is deleted last, so rerunning after a failure skips completed work. A default data-retaining uninstall keeps a final `uninstalled` audit checkpoint and disabled flag in the retained routing namespace.
+`--purge-data` is destructive, but still never deletes external PostgreSQL, Workers, R2, the AI Gateway, Worker routes, Worker custom domains, adopted resources, or a zone. Those Cloudflare APIs expose no server-enforced generation condition, so a replacement could race a client-side ownership check. Void therefore blocks platform traffic through routing storage and leaves those resources to an operator who can inspect the account immediately before cleanup. Before any Cloudflare mutation, Void compares the remote installation checkpoint with fresh resource inventory and verifies the ownership markers on every Worker. A missing or changed ownership proof stops the operation before it can affect a replacement resource. The routing namespace is deleted last, so rerunning after a failure skips completed work. A default data-retaining uninstall keeps a final `uninstalled` audit checkpoint and disabled flag in the retained routing namespace.
