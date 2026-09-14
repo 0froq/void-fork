@@ -119,10 +119,10 @@ describe('platform installer', () => {
     expect(result.manifest.status).toBe('installed');
     expect(result.manifest.resources).toHaveLength(15);
     expect(deployed).toEqual([
-      'void-example-api',
-      'void-example-proxy',
-      'void-example-tail',
-      'void-example-dispatch',
+      result.manifest.deployment.resources.apiWorker,
+      result.manifest.deployment.resources.proxyWorker,
+      result.manifest.deployment.resources.tailWorker,
+      result.manifest.deployment.resources.dispatchWorker,
     ]);
     expect(apiSecrets).toMatchObject({ PLATFORM_BOOTSTRAP_GITHUB_LOGIN: 'octocat' });
     expect(JSON.parse(remoteManifest)).toMatchObject({

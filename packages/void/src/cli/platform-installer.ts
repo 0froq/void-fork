@@ -146,7 +146,7 @@ export async function installPlatform(
       account: plan.account,
       createdAt,
       deployment: plan.deployment,
-      id: `${plan.deployment.installationSlug}-${randomBytes(4).toString('hex')}`,
+      id: plan.installationId,
       ownershipNonce: randomBytes(32).toString('base64url'),
       platformVersion: version,
     });

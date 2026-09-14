@@ -43,7 +43,8 @@ describe('platform installation planning', () => {
   it('builds a read-only core plan without containers', async () => {
     const fake = client();
     const plan = await createPlatformInstallPlan(fake, input, null);
-    expect(plan.apiUrl).toBe('https://void-example-api.example.workers.dev');
+    expect(plan.apiUrl).toBe(`https://${plan.deployment.resources.apiWorker}.example.workers.dev`);
+    expect(plan.deployment.resources.apiWorker).toMatch(/^void-example-[a-f0-9]{12}-api$/);
     expect(plan.actions).toHaveLength(15);
     expect(plan.actions.every((action) => action.action === 'create')).toBe(true);
     expect(Object.keys(fake)).not.toContain('createZone');
@@ -52,7 +53,7 @@ describe('platform installation planning', () => {
   it('fails closed on an unowned deterministic-name collision', async () => {
     const fake = client({
       listKvNamespaces: async (_account: string, title: string) =>
-        title === 'void-example-routing' ? [{ id: 'someone-else', name: title }] : [],
+        title.endsWith('-routing') ? [{ id: 'someone-else', name: title }] : [],
     });
     await expect(createPlatformInstallPlan(fake, input, null)).rejects.toThrow('not owned');
   });
@@ -94,6 +95,47 @@ describe('platform installation planning', () => {
         manifest,
       ),
     ).rejects.toThrow('not owned');
+  });
+
+  it('recovers a uniquely named resource after an ambiguous create response', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null);
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    const resourceName = initial.deployment.resources.routingKv;
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-09-14T00:00:01.000Z',
+        key: 'provision-intent:routing-kv',
+        resultHash: platformProvisionIntentHash(
+          manifest,
+          'routing-kv',
+          'kv-namespace',
+          resourceName,
+        ),
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+
+    const resumed = await createPlatformInstallPlan(
+      client({
+        listKvNamespaces: async (_account: string, title: string) =>
+          title === resourceName ? [{ id: 'created-before-crash', name: title }] : [],
+      }),
+      input,
+      manifest,
+    );
+
+    expect(resumed.actions.find((action) => action.key === 'routing-kv')).toMatchObject({
+      action: 'reuse',
+      id: 'created-before-crash',
+    });
   });
 
   it('resumes resources proven by the remote ownership checkpoint', async () => {
