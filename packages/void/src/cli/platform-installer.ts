@@ -31,6 +31,7 @@ import { resolveWranglerArgv } from './preset.ts';
 export const REMOTE_INSTALLATION_MANIFEST_KEY = '__void/platform/installation/v1';
 
 export type PlatformInstallationSecrets = Readonly<{
+  bootstrapGitHubLogin: string;
   cloudflareApiToken: string;
   databaseUrl: string;
   githubClientId: string;
@@ -72,6 +73,7 @@ export type PlatformInstallationResult = Readonly<{
 }>;
 
 export function createPlatformInstallationSecrets(input: {
+  bootstrapGitHubLogin: string;
   cloudflareApiToken: string;
   databaseUrl: string;
   githubClientId: string;
@@ -88,6 +90,10 @@ export function createPlatformInstallationSecrets(input: {
     return value;
   };
   return {
+    bootstrapGitHubLogin: required(
+      input.bootstrapGitHubLogin || checkpoint.bootstrapGitHubLogin || '',
+      'VOID_PLATFORM_ADMIN_GITHUB_LOGIN',
+    ),
     cloudflareApiToken: required(input.cloudflareApiToken, 'CLOUDFLARE_API_TOKEN'),
     databaseUrl: required(input.databaseUrl || checkpoint.databaseUrl || '', 'DATABASE_URL'),
     githubClientId: required(
@@ -113,6 +119,7 @@ export function createPlatformInstallationSecrets(input: {
 
 function secretCheckpoint(secrets: PlatformInstallationSecrets): Record<string, string> {
   return {
+    bootstrapGitHubLogin: secrets.bootstrapGitHubLogin,
     databaseUrl: secrets.databaseUrl,
     githubClientId: secrets.githubClientId,
     githubClientSecret: secrets.githubClientSecret,
@@ -241,6 +248,33 @@ export async function installPlatform(
     const ids = Object.fromEntries(
       manifest.resources.map((resource) => [resource.key, resource.id]),
     );
+    const bootstrapStep = 'bootstrap-access:v1';
+    if (!manifest.steps.some((step) => step.key === bootstrapStep)) {
+      const routingKv = requireId(ids, 'routing-kv');
+      await dependencies.client.putKvValue(plan.account.id, routingKv, 'signup:enabled', 'true');
+      await dependencies.client.putKvValue(
+        plan.account.id,
+        routingKv,
+        'signup:allowlist',
+        JSON.stringify([
+          {
+            type: 'github',
+            pattern: secrets.bootstrapGitHubLogin,
+            note: 'Initial platform administrator',
+          },
+        ]),
+      );
+      manifest = recordInstallationStep(
+        manifest,
+        {
+          completedAt: now(),
+          key: bootstrapStep,
+          resultHash: hash(secrets.bootstrapGitHubLogin.toLowerCase()),
+        },
+        now(),
+      );
+      writeInstallationManifest(manifest);
+    }
     const runtime = readPlatformRuntimeManifest();
     const entrypoints = Object.fromEntries(
       Object.entries(runtime.artifacts).map(([key, artifact]) => [

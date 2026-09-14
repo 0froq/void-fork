@@ -54,7 +54,7 @@ Create a GitHub OAuth App using the API URL from the plan:
 - Homepage URL: the API origin, for example `https://void-company-api.example.workers.dev`
 - Authorization callback URL: `<API origin>/auth/callback`
 
-Keep its client ID and client secret for the installer. The first person who completes GitHub login on a self-hosted installation becomes its administrator. Later users are normal platform users. This first-owner behavior is serialized in PostgreSQL so concurrent first logins cannot create multiple owners.
+Keep its client ID and client secret for the installer. The installer also asks for the GitHub username of the initial administrator. Only that account can bootstrap the installation, and signup remains restricted after the first login until an administrator explicitly changes the signup controls. First-owner creation is serialized in PostgreSQL so concurrent logins cannot create multiple owners.
 
 ## Install
 
@@ -71,6 +71,7 @@ export CLOUDFLARE_API_TOKEN=your-scoped-management-token
 export VOID_PLATFORM_DATABASE_URL='postgresql://user:password@host/database?sslmode=require'
 export VOID_PLATFORM_GITHUB_CLIENT_ID=your-github-oauth-client-id
 export VOID_PLATFORM_GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
+export VOID_PLATFORM_ADMIN_GITHUB_LOGIN=your-github-username
 export VOID_PLATFORM_R2_ACCESS_KEY_ID=your-r2-access-key-id
 export VOID_PLATFORM_R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
 

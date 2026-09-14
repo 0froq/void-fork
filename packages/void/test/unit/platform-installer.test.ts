@@ -64,10 +64,12 @@ describe('platform installer', () => {
       name,
     });
     const deployed: Array<string> = [];
+    const routingValues = new Map<string, string>();
     let remoteManifest = '';
     const result = await installPlatform(
       plan,
       createPlatformInstallationSecrets({
+        bootstrapGitHubLogin: 'octocat',
         cloudflareApiToken: 'cf-token',
         databaseUrl: 'postgres://user:password@db.example.com/void',
         githubClientId: 'github-id',
@@ -94,8 +96,11 @@ describe('platform installer', () => {
           createQueue: created,
           createDispatchNamespace: created,
           createHyperdrive: async (account, name) => created(account, name),
-          putKvValue: async (_account, _namespace, _key, value) => {
-            remoteManifest = value;
+          putKvValue: async (_account, _namespace, key, value) => {
+            routingValues.set(key, value);
+            if (key === '__void/platform/installation/v1') {
+              remoteManifest = value;
+            }
           },
         },
         deployWorker: async (config) => {
@@ -118,6 +123,14 @@ describe('platform installer', () => {
       id: result.manifest.id,
       status: 'installed',
     });
+    expect(routingValues.get('signup:enabled')).toBe('true');
+    expect(JSON.parse(routingValues.get('signup:allowlist')!)).toEqual([
+      {
+        type: 'github',
+        pattern: 'octocat',
+        note: 'Initial platform administrator',
+      },
+    ]);
     expect(listInstallationManifests(directory)).toHaveLength(1);
     expect(readdirSync(join(directory, 'account')).some((name) => name.endsWith('.secrets'))).toBe(
       false,
@@ -144,6 +157,7 @@ describe('platform installer', () => {
     const result = await installPlatform(
       plan,
       createPlatformInstallationSecrets({
+        bootstrapGitHubLogin: 'octocat',
         cloudflareApiToken: 'cf-token',
         databaseUrl: 'postgres://user:password@db.example.com/void',
         githubClientId: 'github-id',
@@ -212,6 +226,7 @@ describe('platform installer', () => {
     let index = 0;
     const create = async (_account: string, name: string) => ({ id: `id-${index++}`, name });
     const secrets = createPlatformInstallationSecrets({
+      bootstrapGitHubLogin: 'octocat',
       cloudflareApiToken: 'cf-token',
       databaseUrl: 'postgres://user:password@db.example.com/void',
       githubClientId: 'github-id',
@@ -292,6 +307,7 @@ describe('platform installer', () => {
     );
     const deployed: Array<string> = [];
     let migrations = 0;
+    const upgradeKvWrites: Array<string> = [];
     const upgraded = await installPlatform(upgradedPlan, secrets, installed.manifest, {
       client: {
         createAiGateway: create,
@@ -310,7 +326,9 @@ describe('platform installer', () => {
         createQueue: create,
         createDispatchNamespace: create,
         createHyperdrive: async (account, name) => create(account, name),
-        putKvValue: async () => {},
+        putKvValue: async (_account, _namespace, key) => {
+          upgradeKvWrites.push(key);
+        },
       },
       deployWorker: async (config) => {
         deployed.push(String(config.name));
@@ -328,6 +346,7 @@ describe('platform installer', () => {
       deployment.resources.dispatchWorker,
     ]);
     expect(migrations).toBe(0);
+    expect(upgradeKvWrites).toEqual(['__void/platform/installation/v1']);
     expect(upgraded.manifest.status).toBe('installed');
     expect(upgraded.manifest.resources).toHaveLength(15);
 

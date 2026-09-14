@@ -134,6 +134,10 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     'Authentication setup',
   );
   const secrets = createPlatformInstallationSecrets({
+    bootstrapGitHubLogin:
+      checkpoint?.bootstrapGitHubLogin ||
+      process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN ||
+      (await promptSecret('Initial administrator GitHub username:', false)),
     cloudflareApiToken: token,
     checkpoint,
     databaseUrl:

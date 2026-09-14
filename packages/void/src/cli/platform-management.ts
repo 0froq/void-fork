@@ -81,6 +81,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   }
   const recovery = readInstallationRecoverySecrets(manifest);
   const secrets = createPlatformInstallationSecrets({
+    bootstrapGitHubLogin: process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN || '',
     cloudflareApiToken: token,
     checkpoint: recovery,
     databaseUrl: process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || '',
