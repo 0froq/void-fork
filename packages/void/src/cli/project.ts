@@ -1,7 +1,11 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { normalizeApplicationDomain } from '@void/platform';
 import { join, dirname } from 'pathslash';
-import { VOID_CLOUD_PLATFORM } from './hosted-platform.ts';
+import {
+  readLegacyHostedPlatformSelection,
+  VOID_CLOUD_PLATFORM,
+  VOID_CLOUD_STAGING_PLATFORM,
+} from './hosted-platform.ts';
 import { normalizePlatformApiUrl } from './platform-registry.ts';
 import { getActivePlatformConnection } from './platform-registry.ts';
 import type { DeployTarget } from './types.ts';
@@ -157,10 +161,19 @@ export function attachSelectedPlatform(
   if (isVoidInternalStaging(root)) {
     return {
       ...config,
-      applicationDomain: 'staging.void.app',
-      platformUrl: 'https://api.staging.void.cloud',
-      proxyUrl: 'https://proxy.staging.void.cloud',
+      applicationDomain: VOID_CLOUD_STAGING_PLATFORM.applicationDomain,
+      platformUrl: VOID_CLOUD_STAGING_PLATFORM.apiUrl,
+      proxyUrl: VOID_CLOUD_STAGING_PLATFORM.proxyUrl,
       voidInternalStaging: true,
+    };
+  }
+  const legacySelection = readLegacyHostedPlatformSelection();
+  if (legacySelection) {
+    return {
+      ...config,
+      applicationDomain: legacySelection.applicationDomain,
+      platformUrl: legacySelection.apiUrl,
+      proxyUrl: legacySelection.proxyUrl,
     };
   }
   if (isLegacyVoidCloudProject(root)) {
@@ -196,7 +209,7 @@ export function legacyVoidCloudProjectMetadata(): Pick<
   return {
     applicationDomain: VOID_CLOUD_PLATFORM.applicationDomain,
     platformUrl: VOID_CLOUD_PLATFORM.apiUrl,
-    proxyUrl: 'https://proxy.void.cloud',
+    proxyUrl: VOID_CLOUD_PLATFORM.proxyUrl,
   };
 }
 

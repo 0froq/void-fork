@@ -6,7 +6,11 @@ import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from '../shared/proxy.ts';
 import { ensureCloudflaredToken } from './cf-access.ts';
-import { VOID_CLOUD_PLATFORM } from './hosted-platform.ts';
+import {
+  readLegacyHostedPlatformSelection,
+  VOID_CLOUD_PLATFORM,
+  VOID_CLOUD_STAGING_PLATFORM,
+} from './hosted-platform.ts';
 import { pc } from './output.ts';
 import {
   getActivePlatformConnection,
@@ -89,8 +93,9 @@ export function isStagingMode(root: string = process.cwd()): boolean {
 export function getSiteDomain(root: string = process.cwd()): string {
   const domain =
     readProjectApplicationDomain(root) ??
-    (isStagingMode(root) ? 'staging.void.app' : undefined) ??
+    (isStagingMode(root) ? VOID_CLOUD_STAGING_PLATFORM.applicationDomain : undefined) ??
     (isLegacyVoidCloudProject(root) ? VOID_CLOUD_PLATFORM.applicationDomain : undefined) ??
+    readLegacyHostedPlatformSelection()?.applicationDomain ??
     getActivePlatformConnection()?.applicationDomain;
   if (!domain) {
     throw new Error(
@@ -233,7 +238,7 @@ export function removeToken(root: string = process.cwd()): boolean {
 }
 
 const DEFAULT_API_URL = VOID_CLOUD_PLATFORM.apiUrl;
-const STAGING_API_URL = 'https://api.staging.void.cloud';
+const STAGING_API_URL = VOID_CLOUD_STAGING_PLATFORM.apiUrl;
 
 function legacyCredentialAccount(
   root: string,
