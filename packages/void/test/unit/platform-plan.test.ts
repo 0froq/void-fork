@@ -268,6 +268,131 @@ describe('platform installation planning', () => {
     ).rejects.toThrow('not owned');
   });
 
+  it('resumes an intent-owned dispatch Worker after its public route was uploaded', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null);
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    const workerName = manifest.deployment.resources.dispatchWorker;
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-09-14T00:00:01.000Z',
+        key: 'provision-intent:dispatch-worker',
+        resultHash: platformProvisionIntentHash(manifest, 'dispatch-worker', 'worker', workerName),
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const marker = JSON.stringify(
+      createPlatformResourceOwnershipMarker({
+        accountId: manifest.account.id,
+        installationId: manifest.id,
+        ownershipNonce: manifest.ownershipNonce,
+        resourceId: workerName,
+        resourceKey: 'dispatch-worker',
+        resourceKind: 'worker',
+        resourceName: workerName,
+      }),
+    );
+
+    const resumed = await createPlatformInstallPlan(
+      client({
+        findZone: async () => ({
+          id: 'zone',
+          name: 'example.com',
+          nameServers: [],
+          status: 'active',
+        }),
+        getWorkerPlainTextBindings: async () => ({ PLATFORM_OWNERSHIP_MARKER: marker }),
+        listWorkerNames: async () => [workerName],
+        listWorkerRoutes: async () => [
+          { id: 'route', pattern: '*.apps.example.com/*', script: workerName },
+        ],
+      }),
+      input,
+      manifest,
+    );
+
+    expect(resumed.actions.find((action) => action.key === 'dispatch-worker')).toMatchObject({
+      action: 'update',
+      id: workerName,
+    });
+  });
+
+  it('resumes an intent-owned API Worker after its custom domain was uploaded', async () => {
+    const customInput = { ...input, controlPlaneDomain: 'api.platform.example.com' };
+    const initial = await createPlatformInstallPlan(client(), customInput, null);
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    const workerName = manifest.deployment.resources.apiWorker;
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-09-14T00:00:01.000Z',
+        key: 'provision-intent:api-worker',
+        resultHash: platformProvisionIntentHash(manifest, 'api-worker', 'worker', workerName),
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const marker = JSON.stringify(
+      createPlatformResourceOwnershipMarker({
+        accountId: manifest.account.id,
+        installationId: manifest.id,
+        ownershipNonce: manifest.ownershipNonce,
+        resourceId: workerName,
+        resourceKey: 'api-worker',
+        resourceKind: 'worker',
+        resourceName: workerName,
+      }),
+    );
+
+    const resumed = await createPlatformInstallPlan(
+      client({
+        findZoneForHostname: async () => ({
+          id: 'control-zone',
+          name: 'example.com',
+          nameServers: [],
+          status: 'active',
+        }),
+        getWorkerPlainTextBindings: async () => ({ PLATFORM_OWNERSHIP_MARKER: marker }),
+        listDnsRecords: async (_zone: string, hostname: string) =>
+          hostname === customInput.controlPlaneDomain
+            ? [
+                {
+                  content: workerName,
+                  id: 'custom-domain-dns',
+                  name: hostname,
+                  proxied: true,
+                  type: 'CNAME',
+                },
+              ]
+            : [],
+        listWorkerDomains: async () => [
+          { hostname: customInput.controlPlaneDomain, id: 'domain', service: workerName },
+        ],
+        listWorkerNames: async () => [workerName],
+      }),
+      customInput,
+      manifest,
+    );
+
+    expect(resumed.actions.find((action) => action.key === 'api-worker')).toMatchObject({
+      action: 'update',
+      id: workerName,
+    });
+  });
+
   it('refuses to deploy over a Worker replaced after planning', async () => {
     const initial = await createPlatformInstallPlan(client(), input, null);
     let manifest = createPlatformInstallationManifest({

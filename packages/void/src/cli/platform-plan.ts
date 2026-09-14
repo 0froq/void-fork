@@ -155,58 +155,6 @@ export async function createPlatformInstallPlan(
     client.listWorkerNames(account.id),
   ]);
   const dnsRecords = zone ? await client.listDnsRecords(zone.id, wildcardHostname) : [];
-  if (zone) {
-    const expectedPatterns = new Set(
-      createApplicationRoutes(deployment.application).map((route) => route.pattern),
-    );
-    const expectedWorker = deployment.resources.dispatchWorker;
-    const recordedWorker = existing?.resources.some(
-      (resource) =>
-        resource.key === 'dispatch-worker' &&
-        resource.kind === 'worker' &&
-        resource.name === expectedWorker &&
-        resource.state === 'ready',
-    );
-    const conflicts = (await client.listWorkerRoutes(zone.id)).filter(
-      (route) =>
-        expectedPatterns.has(route.pattern) && (route.script !== expectedWorker || !recordedWorker),
-    );
-    if (conflicts.length > 0) {
-      const conflict = conflicts[0]!;
-      throw new Error(
-        `platform: Application route ${JSON.stringify(conflict.pattern)} is already assigned to ${JSON.stringify(conflict.script ?? 'no Worker')}. Choose another application domain.`,
-      );
-    }
-  }
-  if (deployment.controlPlane.apiHostname) {
-    const apiHostname = deployment.controlPlane.apiHostname;
-    const [workerDomains, controlPlaneZone] = await Promise.all([
-      client.listWorkerDomains(account.id),
-      client.findZoneForHostname(account.id, apiHostname),
-    ]);
-    const matchingDomain = workerDomains.find((domain) => domain.hostname === apiHostname);
-    const expectedWorker = deployment.resources.apiWorker;
-    if (matchingDomain && matchingDomain.service !== expectedWorker) {
-      throw new Error(
-        `platform: Custom API hostname ${JSON.stringify(apiHostname)} is already assigned to Worker ${JSON.stringify(matchingDomain.service)}. Choose another hostname.`,
-      );
-    }
-    const records = controlPlaneZone
-      ? await client.listDnsRecords(controlPlaneZone.id, apiHostname)
-      : [];
-    const recordedApiWorker = existing?.resources.find(
-      (resource) =>
-        resource.key === 'api-worker' &&
-        resource.kind === 'worker' &&
-        resource.name === expectedWorker &&
-        resource.state === 'ready',
-    );
-    if (records.length > 0 && (!matchingDomain || !recordedApiWorker)) {
-      throw new Error(
-        `platform: Custom API hostname ${JSON.stringify(apiHostname)} already has a DNS record that installation would replace. Choose another hostname or remove the record explicitly.`,
-      );
-    }
-  }
   const remoteOwnership = existing
     ? await readRemoteOwnership(client, account.id, routingKv, existing)
     : null;
@@ -243,6 +191,62 @@ export async function createPlatformInstallPlan(
           intentProofs.add(key);
         }
       }
+    }
+  }
+  if (zone) {
+    const expectedPatterns = new Set(
+      createApplicationRoutes(deployment.application).map((route) => route.pattern),
+    );
+    const expectedWorker = deployment.resources.dispatchWorker;
+    const ownedWorker =
+      intentProofs.has('dispatch-worker') ||
+      existing?.resources.some(
+        (resource) =>
+          resource.key === 'dispatch-worker' &&
+          resource.kind === 'worker' &&
+          resource.name === expectedWorker &&
+          resource.state === 'ready',
+      );
+    const conflicts = (await client.listWorkerRoutes(zone.id)).filter(
+      (route) =>
+        expectedPatterns.has(route.pattern) && (route.script !== expectedWorker || !ownedWorker),
+    );
+    if (conflicts.length > 0) {
+      const conflict = conflicts[0]!;
+      throw new Error(
+        `platform: Application route ${JSON.stringify(conflict.pattern)} is already assigned to ${JSON.stringify(conflict.script ?? 'no Worker')}. Choose another application domain.`,
+      );
+    }
+  }
+  if (deployment.controlPlane.apiHostname) {
+    const apiHostname = deployment.controlPlane.apiHostname;
+    const [workerDomains, controlPlaneZone] = await Promise.all([
+      client.listWorkerDomains(account.id),
+      client.findZoneForHostname(account.id, apiHostname),
+    ]);
+    const matchingDomain = workerDomains.find((domain) => domain.hostname === apiHostname);
+    const expectedWorker = deployment.resources.apiWorker;
+    if (matchingDomain && matchingDomain.service !== expectedWorker) {
+      throw new Error(
+        `platform: Custom API hostname ${JSON.stringify(apiHostname)} is already assigned to Worker ${JSON.stringify(matchingDomain.service)}. Choose another hostname.`,
+      );
+    }
+    const records = controlPlaneZone
+      ? await client.listDnsRecords(controlPlaneZone.id, apiHostname)
+      : [];
+    const ownedApiWorker =
+      intentProofs.has('api-worker') ||
+      existing?.resources.some(
+        (resource) =>
+          resource.key === 'api-worker' &&
+          resource.kind === 'worker' &&
+          resource.name === expectedWorker &&
+          resource.state === 'ready',
+      );
+    if (records.length > 0 && (!matchingDomain || !ownedApiWorker)) {
+      throw new Error(
+        `platform: Custom API hostname ${JSON.stringify(apiHostname)} already has a DNS record that installation would replace. Choose another hostname or remove the record explicitly.`,
+      );
     }
   }
   const actions: Array<PlatformInstallPlanAction> = [];
