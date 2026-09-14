@@ -8,6 +8,7 @@ import {
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   recordInstallationResource,
   recordInstallationStep,
+  setInstallationDesiredState,
   setInstallationEndpoints,
   transitionInstallation,
   type InstallationResource,
@@ -146,7 +147,7 @@ export async function installPlatform(
 ): Promise<PlatformInstallationResult> {
   const now = dependencies.now ?? (() => new Date().toISOString());
   const version = readPlatformRuntimeManifest().platformVersion;
-  const preserveDisabled = existing?.status === 'disabled';
+  const preserveDisabled = existing?.desiredState === 'disabled' || existing?.status === 'disabled';
   let manifest = existing;
   if (!manifest) {
     const createdAt = now();
@@ -162,6 +163,10 @@ export async function installPlatform(
     writeInstallationManifest(manifest);
   } else if (manifest.status === 'uninstalled') {
     throw new Error(`platform: Installation ${manifest.id} has already been uninstalled.`);
+  }
+  if (preserveDisabled && manifest.desiredState !== 'disabled') {
+    manifest = setInstallationDesiredState(manifest, 'disabled', now());
+    writeInstallationManifest(manifest);
   }
   if (manifest.platformVersion !== version) {
     manifest = { ...manifest, platformVersion: version, updatedAt: now() };

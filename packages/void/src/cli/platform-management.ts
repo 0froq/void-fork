@@ -1,6 +1,7 @@
 import { confirm, isCancel, log, note, outro } from '@clack/prompts';
 import {
   recordInstallationResource,
+  setInstallationDesiredState,
   transitionInstallation,
   type PlatformInstallationManifest,
 } from '@void/platform';
@@ -154,7 +155,9 @@ export async function disablePlatform(
     log.info(`${manifest.deployment.displayName} is already disabled.`);
     return;
   }
-  let next = transitionInstallation(manifest, 'disabling', new Date().toISOString());
+  let next = setInstallationDesiredState(manifest, 'disabled', new Date().toISOString());
+  writeInstallationManifest(next);
+  next = transitionInstallation(next, 'disabling', new Date().toISOString());
   writeInstallationManifest(next);
   try {
     const zone = requireResource(next, 'zone');

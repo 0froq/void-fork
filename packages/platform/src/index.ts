@@ -20,6 +20,7 @@ export {
   parsePlatformInstallationManifest,
   recordInstallationResource,
   recordInstallationStep,
+  setInstallationDesiredState,
   setInstallationEndpoints,
   transitionInstallation,
   type InstallationResource,

@@ -394,6 +394,43 @@ describe('platform installer', () => {
       expect(config).not.toHaveProperty('routes');
     }
 
+    let interrupted = false;
+    await expect(
+      installPlatform(upgradedPlan, secrets, disabledUpgrade.manifest, {
+        client: upgradeClient,
+        deployWorker: async () => {
+          interrupted = true;
+          throw new Error('interrupted deployment');
+        },
+        migrateDatabase: async () => {},
+      }),
+    ).rejects.toThrow('interrupted deployment');
+    expect(interrupted).toBe(true);
+    const failedDisabledUpgrade = listInstallationManifests(directory)[0]!;
+    expect(failedDisabledUpgrade.status).toBe('failed');
+    expect(failedDisabledUpgrade.desiredState).toBe('disabled');
+
+    const resumedConfigs: Array<Record<string, unknown>> = [];
+    const resumedDisabledUpgrade = await installPlatform(
+      upgradedPlan,
+      secrets,
+      failedDisabledUpgrade,
+      {
+        client: upgradeClient,
+        deployWorker: async (config) => {
+          resumedConfigs.push(config);
+        },
+        migrateDatabase: async () => {},
+      },
+    );
+    expect(resumedDisabledUpgrade.manifest.status).toBe('disabled');
+    expect(resumedConfigs).toHaveLength(4);
+    for (const config of resumedConfigs) {
+      expect(config.workers_dev).toBe(false);
+      expect(config.preview_urls).toBe(false);
+      expect(config).not.toHaveProperty('routes');
+    }
+
     function named(key: string) {
       const resource = byKey.get(key)!;
       return { id: resource.id, name: resource.name };

@@ -63,6 +63,7 @@ export type PlatformInstallationManifest = Readonly<{
   }>;
   createdAt: string;
   deployment: PlatformDeploymentManifest;
+  desiredState: 'enabled' | 'disabled';
   endpoints: PlatformInstallationEndpoints;
   id: string;
   ownershipNonce: string;
@@ -167,6 +168,7 @@ export function createPlatformInstallationManifest(input: {
     deployment: parsePlatformDeploymentManifest(
       JSON.parse(JSON.stringify(input.deployment)) as unknown,
     ),
+    desiredState: 'enabled',
     endpoints: { apiUrl: null, dashboardUrl: null, proxyUrl: null },
     id: input.id,
     ownershipNonce: input.ownershipNonce,
@@ -177,6 +179,14 @@ export function createPlatformInstallationManifest(input: {
     steps: [],
     updatedAt: createdAt,
   };
+}
+
+export function setInstallationDesiredState(
+  manifest: PlatformInstallationManifest,
+  desiredState: PlatformInstallationManifest['desiredState'],
+  updatedAt: string,
+): PlatformInstallationManifest {
+  return { ...manifest, desiredState, updatedAt: assertTimestamp(updatedAt, 'updatedAt') };
 }
 
 function normalizeEndpoint(value: string | null, label: string): string | null {
@@ -294,7 +304,17 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
   });
   const updatedAt = assertTimestamp(requiredString(value.updatedAt, 'updatedAt'), 'updatedAt');
   let next: PlatformInstallationManifest = setInstallationEndpoints(
-    { ...manifest, status: value.status, updatedAt },
+    {
+      ...manifest,
+      desiredState:
+        value.desiredState === 'disabled' || value.desiredState === 'enabled'
+          ? value.desiredState
+          : value.status === 'disabled' || value.status === 'disabling'
+            ? 'disabled'
+            : 'enabled',
+      status: value.status,
+      updatedAt,
+    },
     {
       apiUrl:
         endpoints.apiUrl === null ? null : requiredString(endpoints.apiUrl, 'endpoints.apiUrl'),

@@ -52,6 +52,13 @@ describe('platform installation manifest', () => {
     );
   });
 
+  it('infers disabled intent when reading a legacy disabled manifest', () => {
+    const legacy = JSON.parse(JSON.stringify(installation())) as Record<string, unknown>;
+    delete legacy.desiredState;
+    legacy.status = 'disabled';
+    expect(parsePlatformInstallationManifest(legacy).desiredState).toBe('disabled');
+  });
+
   it('rejects invalid state transitions', () => {
     expect(() => transitionInstallation(installation(), 'installed', now)).toThrow(
       'draft -> installed',
