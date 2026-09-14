@@ -758,6 +758,7 @@ async function verifyPlatformMutationOwnership(
   );
   let rawRemote: string | null = null;
   let remote: PlatformInstallationManifest | null = null;
+  let replacingMissingRoutingCheckpoint = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     rawRemote = await client.getKvValue(
       manifest.account.id,
@@ -793,12 +794,14 @@ async function verifyPlatformMutationOwnership(
       );
       if (!routingStillExists) {
         // The caller holds the authoritative PostgreSQL lifecycle lock. Repair
-        // may recreate this one missing checkpoint before any other resource
-        // mutation, after which normal remote proof checks resume.
-        return new Set([routing.key]);
+        // may use that manifest as the replacement checkpoint, but every
+        // surviving resource must still pass fresh inventory and marker checks.
+        remote = manifest;
+        replacingMissingRoutingCheckpoint = true;
       }
     }
     if (
+      !replacingMissingRoutingCheckpoint &&
       options.allowDeletedRoutingCheckpoint &&
       canResumeAfterRoutingCheckpointDeletion(manifest, targetKeys)
     ) {
@@ -807,7 +810,9 @@ async function verifyPlatformMutationOwnership(
         return new Set([routing.key]);
       }
     }
-    throw ownershipError('the remote installation checkpoint is missing');
+    if (!replacingMissingRoutingCheckpoint) {
+      throw ownershipError('the remote installation checkpoint is missing');
+    }
   }
   if (!remote) {
     throw ownershipError('the remote installation checkpoint is missing');
@@ -824,7 +829,7 @@ async function verifyPlatformMutationOwnership(
     }
   }
 
-  const missing = new Set<string>();
+  const missing = new Set<string>(replacingMissingRoutingCheckpoint ? [routing.key] : []);
   const accountId = manifest.account.id;
   const zone = manifest.resources.find((resource) => resource.key === 'zone');
   const inventory = await Promise.all([
@@ -879,6 +884,7 @@ async function verifyPlatformMutationOwnership(
         if (
           !marker &&
           bucket.fingerprint &&
+          !replacingMissingRoutingCheckpoint &&
           hasR2DeletionIntent(manifest, resource, bucket.fingerprint) &&
           hasR2DeletionIntent(remote, resource, bucket.fingerprint)
         ) {

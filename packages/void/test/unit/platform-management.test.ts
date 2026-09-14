@@ -256,6 +256,23 @@ describe('platform lifecycle management', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('still rejects a replacement R2 bucket while repairing a missing routing checkpoint', async () => {
+    const manifest = installedManifest();
+    const fake = client(manifest);
+    fake.getKvValue = async () => null;
+    fake.getR2Object = async () => null;
+    fake.listKvNamespaces = async () =>
+      namedResources(manifest, 'kv-namespace').filter(
+        (resource) => resource.id !== 'routing-kv-id',
+      );
+
+    await expect(
+      verifyPlatformInstallationOwnership(fake, manifest, {
+        allowMissingRoutingCheckpoint: true,
+      }),
+    ).rejects.toThrow('r2-bucket assets-bucket has no ownership marker');
+  });
+
   it('accepts a live immutable resource recorded ahead of stale routing KV', async () => {
     const manifest = installedManifest();
     const stale = {
