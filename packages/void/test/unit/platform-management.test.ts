@@ -162,7 +162,6 @@ describe('platform lifecycle management', () => {
       interactive: false,
     });
     expect(fake.deleted.map(([kind]) => kind).sort()).toEqual([
-      'ai-gateway',
       'queue',
       'queue',
       'worker',
@@ -174,7 +173,7 @@ describe('platform lifecycle management', () => {
     const retained = listInstallationManifests()[0]!.resources.filter(
       (resource) => resource.state === 'retained',
     );
-    expect(retained).toHaveLength(7);
+    expect(retained).toHaveLength(8);
   });
 
   it('purges installer-owned data while never deleting an adopted zone', async () => {
@@ -192,5 +191,51 @@ describe('platform lifecycle management', () => {
     );
     expect(fake.deleted).toHaveLength(13);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
+  });
+
+  it('resumes safely after a deletion failure without retrying completed deletions', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const first = client();
+    const originalDelete = first.deleteResource;
+    first.deleteResource = async (account, kind, id) => {
+      if (kind === 'queue') {
+        throw new Error('temporary deletion failure');
+      }
+      await originalDelete(account, kind, id);
+    };
+    await expect(
+      uninstallPlatform(first, manifest, uninstallArgs, {
+        countProjects: async () => 0,
+        interactive: false,
+      }),
+    ).rejects.toThrow('temporary deletion failure');
+    const checkpoint = listInstallationManifests()[0]!;
+    expect(checkpoint.status).toBe('failed');
+    expect(checkpoint.resources.filter((resource) => resource.state === 'deleted')).toHaveLength(4);
+
+    const second = client();
+    await uninstallPlatform(second, checkpoint, uninstallArgs, {
+      countProjects: async () => 0,
+      interactive: false,
+    });
+    expect(second.deleted.filter(([kind]) => kind === 'worker')).toEqual([]);
+    expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
+  });
+
+  it('resumes after routes were removed but remote disable checkpointing failed', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const first = client();
+    first.putKvValue = async () => {
+      throw new Error('temporary KV failure');
+    };
+    await expect(disablePlatform(first, manifest, false)).rejects.toThrow('temporary KV failure');
+    expect(listInstallationManifests()[0]?.status).toBe('failed');
+
+    const second = client();
+    await disablePlatform(second, listInstallationManifests()[0]!, false);
+    expect(second.removedRoutes).toBe(1);
+    expect(listInstallationManifests()[0]?.status).toBe('disabled');
   });
 });

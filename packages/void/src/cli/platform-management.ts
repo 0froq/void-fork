@@ -209,8 +209,17 @@ export async function uninstallPlatform(
         .filter((resource) => resource.kind === 'worker')
         .map((resource) => resource.name),
     );
-    await client.removeRoutes(next.account.id, requireResource(next, 'zone').id, workers);
-    const dataKinds = new Set(['dispatch-namespace', 'hyperdrive', 'kv-namespace', 'r2-bucket']);
+    const zone = requireResource(next, 'zone');
+    if (zone.state === 'ready') {
+      await client.removeRoutes(next.account.id, zone.id, workers);
+    }
+    const dataKinds = new Set([
+      'ai-gateway',
+      'dispatch-namespace',
+      'hyperdrive',
+      'kv-namespace',
+      'r2-bucket',
+    ]);
     const deletionPriority: Record<string, number> = {
       worker: 0,
       queue: 1,
