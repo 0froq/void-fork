@@ -145,9 +145,9 @@ Local state lives under `~/.void/platforms/`. Manifests and recovery material ar
 - Recreate only missing installer-owned resources with `void platform repair [id]`. Missing adopted or external resources fail closed.
 - Deploy the packaged current platform runtime and pending database migrations with `void platform upgrade [id]`. Upgrade and repair preserve whether traffic is currently enabled or disabled.
 - Recover a lost local manifest from the installation marker in Cloudflare with `void platform discover [--account <id>]`.
-- On a newly discovered workstation, export `VOID_PLATFORM_DATABASE_URL` before a mutating lifecycle command. Install, repair, upgrade, enable, disable, and uninstall hold a PostgreSQL session advisory lock so two hosts cannot mutate one installation concurrently.
+- On a newly discovered workstation, export `VOID_PLATFORM_DATABASE_URL` before a mutating lifecycle command. Install, repair, upgrade, enable, disable, and uninstall hold a PostgreSQL session advisory lock so two hosts cannot mutate one installation concurrently. The claimed database row also stores the secret-free authoritative lifecycle manifest, which prevents a host with stale local or Workers KV state from undoing a newer operation.
 
-Discovery verifies the account, every recorded Cloudflare resource, the routing namespace ownership marker, and the live endpoint identity before writing local state. Cloudflare does not contain the PostgreSQL, GitHub OAuth, or R2 secret values; after losing local recovery material, provide those `VOID_PLATFORM_*` variables again before repair, upgrade, or uninstall.
+Discovery verifies the account, every recorded Cloudflare resource, and the routing namespace ownership marker before writing local state. It also verifies the live endpoint identity for a completed enabled installation; interrupted and disabled installations remain recoverable when no endpoint is available. Cloudflare does not contain the PostgreSQL, GitHub OAuth, or R2 secret values; after losing local recovery material, provide those `VOID_PLATFORM_*` variables again before repair, upgrade, or uninstall.
 
 ## Disable and safely uninstall
 

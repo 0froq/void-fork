@@ -17,7 +17,7 @@ Use `void` in examples and commands in this skill. For first-time setup, prefer 
 
 Use `void` and `@void/*` in code examples and package manifests.
 
-For self-hosted platform installation, require a dedicated empty PostgreSQL database. The installer transactionally claims it for one installation, never removes that claim during uninstall, and uses it for a cross-host lifecycle lock. After discovery on a new machine, provide `VOID_PLATFORM_DATABASE_URL` before mutating the installation.
+For self-hosted platform installation, require a dedicated empty PostgreSQL database. The installer transactionally claims it for one installation, never removes that claim during uninstall, and uses it for a cross-host lifecycle lock plus a secret-free authoritative lifecycle manifest. After discovery on a new machine, provide `VOID_PLATFORM_DATABASE_URL` before mutating the installation.
 
 ## No-Args Behavior
 
