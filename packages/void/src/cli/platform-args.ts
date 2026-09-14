@@ -30,15 +30,22 @@ export type PlatformArgs =
       name: string;
       plan: boolean;
       resume: boolean;
+      yes: boolean;
       zone: string;
     }
-  | { subcommand: 'upgrade' | 'repair' | 'disable' | 'enable'; selector: string; plan: boolean }
+  | {
+      subcommand: 'upgrade' | 'repair' | 'disable' | 'enable';
+      selector: string;
+      plan: boolean;
+      yes: boolean;
+    }
   | {
       subcommand: 'uninstall';
       selector: string;
       plan: boolean;
       purgeData: boolean;
       deleteZone: boolean | null;
+      yes: boolean;
     };
 
 function readValue(rest: Array<string>, index: number, flag: string): [string, number] {
@@ -52,12 +59,16 @@ function readValue(rest: Array<string>, index: number, flag: string): [string, n
 function parseSelector(
   rest: Array<string>,
   subcommand: string,
-): { selector: string; plan: boolean } {
+  options: { allowYes?: boolean } = {},
+): { selector: string; plan: boolean; yes: boolean } {
   let selector = '';
   let plan = false;
+  let yes = false;
   for (const arg of rest) {
     if (arg === '--plan') {
       plan = true;
+    } else if (arg === '--yes' && options.allowYes) {
+      yes = true;
     } else if (arg.startsWith('-')) {
       throw new Error(`platform: Unknown flag '${arg}'.`);
     } else if (selector) {
@@ -69,7 +80,7 @@ function parseSelector(
   if ((subcommand === 'use' || subcommand === 'connect' || subcommand === 'status') && plan) {
     throw new Error("platform: Unknown flag '--plan'.");
   }
-  return { selector, plan };
+  return { selector, plan, yes };
 }
 
 export function parsePlatformArgs(args: Array<string>): PlatformArgs {
@@ -111,13 +122,14 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     subcommand === 'disable' ||
     subcommand === 'enable'
   ) {
-    const { selector, plan } = parseSelector(rest, subcommand);
-    return { subcommand, selector, plan };
+    const { selector, plan, yes } = parseSelector(rest, subcommand, { allowYes: true });
+    return { subcommand, selector, plan, yes };
   }
   if (subcommand === 'uninstall') {
     const parsed = parseSelector(
       rest.filter((arg) => !['--purge-data', '--delete-zone', '--keep-zone'].includes(arg)),
       subcommand,
+      { allowYes: true },
     );
     if (rest.includes('--delete-zone') && rest.includes('--keep-zone')) {
       throw new Error('platform: --delete-zone and --keep-zone cannot be used together.');
@@ -127,6 +139,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       selector: parsed.selector,
       plan: parsed.plan,
       purgeData: rest.includes('--purge-data'),
+      yes: parsed.yes,
       deleteZone: rest.includes('--delete-zone')
         ? true
         : rest.includes('--keep-zone')
@@ -139,6 +152,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     let plan = false;
     let resume = false;
     let dedicatedZone = false;
+    let yes = false;
     const valueFlags = new Set([
       '--account',
       '--application-domain',
@@ -159,6 +173,8 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
         resume = true;
       } else if (arg === '--dedicated-zone') {
         dedicatedZone = true;
+      } else if (arg === '--yes') {
+        yes = true;
       } else {
         throw new Error(`platform: Unexpected argument '${arg}'.`);
       }
@@ -173,6 +189,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       name: values.get('--name') ?? '',
       plan,
       resume,
+      yes,
       zone: values.get('--zone') ?? '',
     };
   }

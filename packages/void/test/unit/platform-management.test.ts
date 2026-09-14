@@ -272,9 +272,22 @@ const uninstallArgs = {
   plan: false,
   purgeData: false,
   deleteZone: null,
+  yes: true,
 };
 
 describe('platform lifecycle management', () => {
+  it('requires explicit acknowledgement for a non-interactive uninstall', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+
+    await expect(
+      uninstallPlatform(fake, manifest, { ...uninstallArgs, yes: false }, { interactive: false }),
+    ).rejects.toThrow('requires --yes');
+    expect(fake.deleted).toEqual([]);
+    expect(fake.removedRoutes).toBe(0);
+  });
+
   it('prompts for an installation when a lifecycle selector is omitted', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-management-selection-test-'));
     directories.push(directory);

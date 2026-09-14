@@ -130,6 +130,7 @@ const HELP_TREE: HelpTree = {
           { command: '--control-plane-domain <domain>', description: 'Optional API hostname' },
           { command: '--plan', description: 'Print the exact plan without changing Cloudflare' },
           { command: '--resume', description: 'Resume the matching local installation' },
+          { command: '--yes', description: 'Acknowledge changes without an interactive prompt' },
         ],
       },
       upgrade: lifecycleHelp(
@@ -144,6 +145,7 @@ const HELP_TREE: HelpTree = {
         usage: ['void platform uninstall [id] [options]'],
         options: [
           { command: '--plan', description: 'Print the exact deletion and retention plan' },
+          { command: '--yes', description: 'Acknowledge changes without an interactive prompt' },
           {
             command: '--purge-data',
             description: 'Delete installer-owned data even when it contains apps',
@@ -698,8 +700,11 @@ function lifecycleHelp(
 ): HelpPage {
   return {
     summary,
-    usage: [`void platform ${command} [id] [--plan]`],
-    options: [{ command: '--plan', description: 'Print the exact plan without making changes' }],
+    usage: [`void platform ${command} [id] [--plan] [--yes]`],
+    options: [
+      { command: '--plan', description: 'Print the exact plan without making changes' },
+      { command: '--yes', description: 'Acknowledge non-interactive Cloudflare changes' },
+    ],
   };
 }
 

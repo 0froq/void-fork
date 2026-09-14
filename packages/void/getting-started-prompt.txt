@@ -1,4 +1,5 @@
 Void is a fullstack Vite framework and deployment platform for Cloudflare.
+Non-interactive self-hosted platform lifecycle mutations require `--yes`; `--plan` is read-only and needs no acknowledgement.
 In an empty directory, set up a new app like this:
 
 npm install -D void

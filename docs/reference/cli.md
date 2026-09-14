@@ -275,7 +275,7 @@ void platform status [id]
 ### `void platform install`
 
 ```sh
-void platform install [options]
+void platform install [options] [--yes]
 ```
 
 | Option                            | Purpose                                                                          |
@@ -289,8 +289,9 @@ void platform install [options]
 | `--control-plane-domain <domain>` | Optional API custom hostname; defaults to `workers.dev`                          |
 | `--plan`                          | Resolve and print a read-only plan                                               |
 | `--resume`                        | Continue the matching checkpointed installation                                  |
+| `--yes`                           | Acknowledge Cloudflare changes in non-interactive use                            |
 
-The installer requires `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) and prompts for a dedicated empty PostgreSQL database, GitHub OAuth, and R2 credentials. It transactionally claims that database for exactly one platform installation. An explicit URL can replace a failed, unverified initial connection; after a successful claim or Hyperdrive provisioning, resume pins the recorded database URL and rejects a different environment value. Non-interactive use supplies `VOID_PLATFORM_DATABASE_URL`, `VOID_PLATFORM_GITHUB_CLIENT_ID`, `VOID_PLATFORM_GITHUB_CLIENT_SECRET`, `VOID_PLATFORM_R2_ACCESS_KEY_ID`, and `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`. Resuming or redeploying an installation after local recovery material was lost also requires its original `VOID_PLATFORM_JWT_SECRET` and base64-encoded 32-byte `VOID_PLATFORM_PROJECT_SECRET_KEY`; replacements are never generated for an existing installation.
+The installer requires `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) and prompts for a dedicated empty PostgreSQL database, GitHub OAuth, and R2 credentials. It transactionally claims that database for exactly one platform installation. An explicit URL can replace a failed, unverified initial connection; after a successful claim or Hyperdrive provisioning, resume pins the recorded database URL and rejects a different environment value. Non-interactive use supplies `--yes`, `VOID_PLATFORM_DATABASE_URL`, `VOID_PLATFORM_GITHUB_CLIENT_ID`, `VOID_PLATFORM_GITHUB_CLIENT_SECRET`, `VOID_PLATFORM_R2_ACCESS_KEY_ID`, and `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`. Resuming or redeploying an installation after local recovery material was lost also requires its original `VOID_PLATFORM_JWT_SECRET` and base64-encoded 32-byte `VOID_PLATFORM_PROJECT_SECRET_KEY`; replacements are never generated for an existing installation.
 
 If a newly created zone is waiting for registrar delegation, resume after it becomes active:
 
@@ -304,14 +305,14 @@ See [Self-host a Void platform](../guide/self-hosted-platform.md) for prerequisi
 
 ```sh
 void platform discover [--account <id>]
-void platform upgrade [id] [--plan]
-void platform repair [id] [--plan]
-void platform disable [id] [--plan]
-void platform enable [id] [--plan]
-void platform uninstall [id] [--plan] [--purge-data] [--keep-zone]
+void platform upgrade [id] [--plan] [--yes]
+void platform repair [id] [--plan] [--yes]
+void platform disable [id] [--plan] [--yes]
+void platform enable [id] [--plan] [--yes]
+void platform uninstall [id] [--plan] [--purge-data] [--keep-zone] [--yes]
 ```
 
-An omitted id auto-selects one local installation and prompts when several exist. Non-interactive use with multiple installations requires an id. `discover` verifies remote ownership before recovering local metadata and verifies endpoint identity for completed enabled installations; interrupted or disabled installations do not require a reachable endpoint. `repair` recreates missing installer-owned resources only. `disable` writes an installation-owned routing flag that rejects `workers.dev` requests and removes managed routes/custom domains without deleting data; repair and upgrade preserve that state. `enable` explicitly restores the configured routes, custom domains, and `workers.dev` access. Upgrade, repair, enable, and cutover recovery preserve live Worker routes and custom domains that are not owned by the installation, including in rollback snapshots. Before migrations or Worker upload, lifecycle commands also require the recorded Hyperdrive origin to match the pinned recovery database and stop if it was retargeted. Mutating lifecycle commands hold a session advisory lock in the installation's PostgreSQL database, preventing two workstations from changing the same platform concurrently. The same claimed row stores a secret-free authoritative lifecycle manifest so stale hosts cannot reverse newer operations. Owner-only local recovery material supplies the secrets; after discovery on a new workstation, provide `VOID_PLATFORM_DATABASE_URL` and, for operations that redeploy an existing API Worker, the original `VOID_PLATFORM_JWT_SECRET` and `VOID_PLATFORM_PROJECT_SECRET_KEY`.
+An omitted id auto-selects one local installation and prompts when several exist. Non-interactive use with multiple installations requires an id. Every non-interactive mutating lifecycle command also requires `--yes`; `--plan` is read-only and needs no acknowledgement. `discover` verifies remote ownership before recovering local metadata and verifies endpoint identity for completed enabled installations; interrupted or disabled installations do not require a reachable endpoint. `repair` recreates missing installer-owned resources only. `disable` writes an installation-owned routing flag that rejects `workers.dev` requests and removes managed routes/custom domains without deleting data; repair and upgrade preserve that state. `enable` explicitly restores the configured routes, custom domains, and `workers.dev` access. Upgrade, repair, enable, and cutover recovery preserve live Worker routes and custom domains that are not owned by the installation, including in rollback snapshots. Before migrations or Worker upload, lifecycle commands also require the recorded Hyperdrive origin to match the pinned recovery database and stop if it was retargeted. Mutating lifecycle commands hold a session advisory lock in the installation's PostgreSQL database, preventing two workstations from changing the same platform concurrently. The same claimed row stores a secret-free authoritative lifecycle manifest so stale hosts cannot reverse newer operations. Owner-only local recovery material supplies the secrets; after discovery on a new workstation, provide `VOID_PLATFORM_DATABASE_URL` and, for operations that redeploy an existing API Worker, the original `VOID_PLATFORM_JWT_SECRET` and `VOID_PLATFORM_PROJECT_SECRET_KEY`.
 
 Platform upgrade SQL is forward-only. The packaged runtime hashes its journal and every migration, and the installer requires the live Drizzle records to be an exact ordered prefix. Pending migrations for an installation with existing Workers run only when the release contains an exact rollback-compatibility edge for the old platform version and current schema digest; otherwise the command stops before database or Worker mutation and requires a supported intermediate version. Pending SQL executes in one transaction. The old platform version remains authoritative until target-version discovery and health checks pass, so a failed cutover can restore old Workers against an explicitly expand-compatible schema and retry without reapplying migrations.
 

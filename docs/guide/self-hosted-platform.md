@@ -40,8 +40,11 @@ void platform install --plan \
   --display-name "Company Void" \
   --account 0123456789abcdef0123456789abcdef \
   --application-domain apps.example.com \
-  --zone example.com
+  --zone example.com \
+  --yes
 ```
+
+`--yes` is required for every mutating lifecycle command in CI or another non-interactive shell. Interactive commands still ask before install or uninstall unless `--yes` is provided; `--plan` is always read-only.
 
 Use `--control-plane-domain platform.example.net` when you want a custom API hostname. The hostname must be in a zone the selected account and token can manage. Omitting it keeps the control plane on `workers.dev` and avoids requiring another domain.
 
@@ -165,6 +168,8 @@ void platform disable [id]
 void platform enable [id] --plan
 void platform enable [id]
 ```
+
+Add `--yes` to a mutating lifecycle command when running it non-interactively.
 
 Preview uninstall first:
 

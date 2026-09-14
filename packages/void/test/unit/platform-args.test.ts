@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
+import { assertNoninteractivePlatformMutationAcknowledged } from '../../src/cli/platform-lifecycle.ts';
 
 describe('platform args', () => {
   it('parses connection and lifecycle selectors', () => {
@@ -11,11 +12,13 @@ describe('platform args', () => {
       subcommand: 'repair',
       selector: 'example-a1b2c3d4',
       plan: true,
+      yes: false,
     });
     expect(parsePlatformArgs(['enable', 'example-a1b2c3d4'])).toEqual({
       subcommand: 'enable',
       selector: 'example-a1b2c3d4',
       plan: false,
+      yes: false,
     });
     expect(parsePlatformArgs(['discover', '--account', 'account-id'])).toEqual({
       subcommand: 'discover',
@@ -30,8 +33,25 @@ describe('platform args', () => {
       plan: false,
       purgeData: true,
       deleteZone: false,
+      yes: false,
     });
     expect(() => parsePlatformArgs(['uninstall', '--delete-zone', '--keep-zone'])).toThrow();
+  });
+
+  it('parses explicit lifecycle acknowledgement', () => {
+    expect(parsePlatformArgs(['upgrade', '--yes'])).toMatchObject({
+      subcommand: 'upgrade',
+      yes: true,
+    });
+    expect(parsePlatformArgs(['install', '--yes'])).toMatchObject({
+      subcommand: 'install',
+      yes: true,
+    });
+    expect(parsePlatformArgs(['uninstall', '--purge-data', '--yes'])).toMatchObject({
+      subcommand: 'uninstall',
+      purgeData: true,
+      yes: true,
+    });
   });
 
   it('parses a non-interactive installation', () => {
@@ -49,5 +69,26 @@ describe('platform args', () => {
         '--plan',
       ]),
     ).toMatchObject({ subcommand: 'install', name: 'company', plan: true });
+  });
+
+  it('fails closed for every unacknowledged non-interactive mutation', () => {
+    for (const command of ['install', 'upgrade', 'repair', 'disable', 'enable', 'uninstall']) {
+      const parsed = parsePlatformArgs([command]);
+      expect(() => assertNoninteractivePlatformMutationAcknowledged(parsed, false)).toThrow(
+        'requires --yes',
+      );
+      expect(() =>
+        assertNoninteractivePlatformMutationAcknowledged(
+          parsePlatformArgs([command, '--yes']),
+          false,
+        ),
+      ).not.toThrow();
+      expect(() =>
+        assertNoninteractivePlatformMutationAcknowledged(
+          parsePlatformArgs([command, '--plan']),
+          false,
+        ),
+      ).not.toThrow();
+    }
   });
 });

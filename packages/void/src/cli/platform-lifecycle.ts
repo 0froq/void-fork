@@ -97,6 +97,8 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     return;
   }
 
+  assertNoninteractivePlatformMutationAcknowledged(args, process.stdin.isTTY === true);
+
   console.log();
   intro(cliTitle('platform install'));
   const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || '';
@@ -204,7 +206,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       outro('No Cloudflare or local installation state was changed.');
       return;
     }
-    if (process.stdin.isTTY) {
+    if (process.stdin.isTTY && !args.yes) {
       const proceed = await confirm({ message: 'Apply this plan?', initialValue: false });
       if (isCancel(proceed) || !proceed) {
         outro('No changes made.');
@@ -286,6 +288,27 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   } finally {
     release?.();
   }
+}
+
+export function assertNoninteractivePlatformMutationAcknowledged(
+  args: PlatformArgs,
+  interactive: boolean,
+): void {
+  if (
+    args.subcommand === 'connect' ||
+    args.subcommand === 'list' ||
+    args.subcommand === 'use' ||
+    args.subcommand === 'status' ||
+    args.subcommand === 'discover' ||
+    args.plan ||
+    interactive ||
+    args.yes
+  ) {
+    return;
+  }
+  throw new Error(
+    `platform: Non-interactive \`void platform ${args.subcommand}\` requires --yes to acknowledge Cloudflare changes. Run with --plan first to inspect them.`,
+  );
 }
 
 async function readAccounts(

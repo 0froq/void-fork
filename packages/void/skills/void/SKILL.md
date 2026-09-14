@@ -17,6 +17,8 @@ Use `void` in examples and commands in this skill. For first-time setup, prefer 
 
 Use `void` and `@void/*` in code examples and package manifests.
 
+Non-interactive self-hosted platform install, upgrade, repair, disable, enable, and uninstall commands require `--yes`; `--plan` is read-only and needs no acknowledgement.
+
 For self-hosted platform installation, require a dedicated empty PostgreSQL database. The installer transactionally claims it for one installation, pins that URL after a successful claim, never removes the claim during uninstall, and uses it for a cross-host lifecycle lock plus a secret-free authoritative lifecycle manifest. Back up `~/.void/platforms/`. After discovery on a new machine, provide `VOID_PLATFORM_DATABASE_URL`; repair, upgrade, enable, or install resume also needs the original `VOID_PLATFORM_JWT_SECRET` and base64-encoded 32-byte `VOID_PLATFORM_PROJECT_SECRET_KEY`. Never replace those runtime keys for an existing installation. Lifecycle redeploys preserve unmanaged Worker routes and custom domains in both the new trigger state and rollback snapshot. They stop before migrations or uploads when live Hyperdrive origin metadata differs from the pinned database. Platform upgrade SQL is forward-only: packaged hashes and the live Drizzle prefix must match, pending migrations require an exact source-version/schema rollback edge, and the old version remains authoritative until target health succeeds. Safe uninstall stops before mutation when a platform Worker has a route or custom domain outside the installation manifest. `--purge-data` retains R2 for manual cleanup because Cloudflare cannot condition object deletion on an immutable bucket generation.
 
 ## No-Args Behavior

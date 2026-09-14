@@ -29,6 +29,7 @@ import {
   resolveBootstrapGitHubId,
 } from './platform-installer.ts';
 import { resolvePlatformInstallDatabaseUrl } from './platform-lifecycle.ts';
+import { assertNoninteractivePlatformMutationAcknowledged } from './platform-lifecycle.ts';
 import {
   createPlatformInstallPlan,
   formatPlatformInstallPlan,
@@ -159,6 +160,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   ) {
     throw new Error(`platform: Unsupported lifecycle command ${args.subcommand}.`);
   }
+  assertNoninteractivePlatformMutationAcknowledged(args, process.stdin.isTTY === true);
   const manifest = await resolveInstalledPlatformManifest(args.selector);
   const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || '';
   if (!token) {
@@ -524,7 +526,12 @@ export async function uninstallPlatform(
   if (manifest !== initialManifest) {
     writeInstallationManifest(manifest);
   }
-  if (interactive) {
+  if (!interactive && !args.yes) {
+    throw new Error(
+      'platform: Non-interactive `void platform uninstall` requires --yes to acknowledge Cloudflare changes. Run with --plan first to inspect them.',
+    );
+  }
+  if (interactive && !args.yes) {
     const proceed = await confirmAction(
       args.purgeData
         ? 'Permanently purge installer-owned platform data?'
