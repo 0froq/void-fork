@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { getApiUrl } from '../../src/cli/auth.ts';
 import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 import {
+  attachSelectedPlatform,
   isVoidInternalStaging,
   readDeploymentPlatform,
   readProjectConfig,
@@ -49,6 +50,7 @@ describe('project config', () => {
     writeProjectJson(root, { projectId: 'proj_123', slug: 'demo' });
 
     expect(readDeploymentPlatform(root)).toBe('void');
+    expect(getApiUrl(root)).toBe('https://api.void.cloud');
   });
 
   it('stores a platform without requiring a Void project link', () => {
@@ -143,5 +145,33 @@ describe('project config', () => {
 
     writeProjectJson(root, { voidInternalStaging: true });
     expect(getApiUrl(root)).toBe('https://api.staging.void.cloud');
+  });
+
+  it('requires a selected platform before creating a new project link', () => {
+    const root = makeRoot();
+    process.env.VOID_PLATFORM_REGISTRY_DIR = makeRoot();
+    expect(() => attachSelectedPlatform(root, { projectId: 'proj_new', slug: 'new-app' })).toThrow(
+      'No Void platform selected',
+    );
+  });
+
+  it('attaches the selected platform identity to a new project link', () => {
+    const root = makeRoot();
+    const registry = makeRoot();
+    process.env.VOID_PLATFORM_REGISTRY_DIR = registry;
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://platform.example.test',
+      applicationDomain: 'apps.example.test',
+      displayName: 'Example',
+      installationId: null,
+      kind: 'connected',
+    });
+    expect(attachSelectedPlatform(root, { projectId: 'proj_new', slug: 'new-app' })).toEqual({
+      applicationDomain: 'apps.example.test',
+      platformUrl: 'https://platform.example.test',
+      projectId: 'proj_new',
+      slug: 'new-app',
+    });
   });
 });

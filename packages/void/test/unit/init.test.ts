@@ -21,6 +21,7 @@ import {
   isVoidResolvableFrom,
   runInitCommand,
 } from '../../src/cli/init.ts';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 import { buildDrizzleKitSpawnEnv } from '../../src/cli/yarn-pnp.ts';
 
 const mockSpawnSync = vi.fn();
@@ -36,6 +37,7 @@ const mockSaveToken = vi.fn();
 const mockIsStagingMode = vi.fn();
 const mockListProjects = vi.fn();
 const mockCreateProject = vi.fn();
+let platformRegistryDirectory: string;
 
 describe('GitHub Actions deployment workflows', () => {
   it('scaffolds the direct Cloudflare deployment path with a scoped API token', () => {
@@ -222,6 +224,8 @@ function wranglerWhoamiResult(accounts: Array<{ id: string; name: string }>): {
 }
 
 afterEach(() => {
+  delete process.env.VOID_PLATFORM_REGISTRY_DIR;
+  rmSync(platformRegistryDirectory, { recursive: true, force: true });
   mockSpawnSync.mockReset();
   mockSelect.mockReset();
   mockConfirm.mockReset();
@@ -238,6 +242,16 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  platformRegistryDirectory = mkdtempSync(join(tmpdir(), 'void-init-platform-registry-'));
+  process.env.VOID_PLATFORM_REGISTRY_DIR = platformRegistryDirectory;
+  savePlatformConnection({
+    accountId: null,
+    apiUrl: 'https://api.void.cloud',
+    applicationDomain: 'void.app',
+    displayName: 'Void Cloud',
+    installationId: null,
+    kind: 'connected',
+  });
   mockSelect.mockImplementation((options: { message?: string }) =>
     options.message === 'Where should this project deploy?' ? 'void' : undefined,
   );
@@ -1704,7 +1718,9 @@ describe('isScaffoldableEmptyProject', () => {
 
       // The link was written...
       expect(JSON.parse(readFileSync(join(root, '.void', 'project.json'), 'utf-8'))).toEqual({
+        applicationDomain: 'void.app',
         platform: 'void',
+        platformUrl: 'https://api.void.cloud',
         projectId: 'proj_789',
         slug: 'linked-app',
       });
@@ -2523,7 +2539,9 @@ export default config;
       expect(mockListProjects).toHaveBeenCalledOnce();
       expect(mockCreateProject).toHaveBeenCalledWith('my-live-app');
       expect(JSON.parse(readFileSync(join(root, '.void', 'project.json'), 'utf-8'))).toEqual({
+        applicationDomain: 'void.app',
         platform: 'void',
+        platformUrl: 'https://api.void.cloud',
         projectId: 'proj_live',
         slug: 'my-live-app',
       });
@@ -2601,7 +2619,9 @@ export default config;
       expect(mockSaveToken).not.toHaveBeenCalled();
       expect(mockCreateProject).not.toHaveBeenCalled();
       expect(JSON.parse(readFileSync(join(root, '.void', 'project.json'), 'utf-8'))).toEqual({
+        applicationDomain: 'void.app',
         platform: 'void',
+        platformUrl: 'https://api.void.cloud',
         projectId: 'proj_456',
         slug: 'existing-app',
       });

@@ -556,7 +556,7 @@ async function runAiSetupPrompt(
 ): Promise<void> {
   const { select, text, isCancel, log } = await import('@clack/prompts');
   const { PlatformClient } = await import('./cli/client.ts');
-  const { writeProjectConfig } = await import('./cli/project.ts');
+  const { attachSelectedPlatform, writeProjectConfig } = await import('./cli/project.ts');
   const { inferDefaultSlug } = await import('./cli/resolve-project.ts');
 
   const apiUrl = staging ? STAGING_API_URL : DEFAULT_API_URL;
@@ -633,7 +633,7 @@ async function runAiSetupPrompt(
     slug = project.slug;
   }
 
-  writeProjectConfig(root, { projectId, slug });
+  writeProjectConfig(root, attachSelectedPlatform(root, { projectId, slug }));
   log.success(`Linked to ${pc.blue(slug)}`);
 
   // Restart the dev server so mergeBindings picks up fresh credentials

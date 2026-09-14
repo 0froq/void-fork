@@ -1,7 +1,7 @@
 import { log } from '@clack/prompts';
 import { PlatformApiError, type CreateProjectResponse, type PlatformClient } from './client.ts';
 import { pc } from './output.ts';
-import { writeProjectConfig, type ProjectConfig } from './project.ts';
+import { attachSelectedPlatform, writeProjectConfig, type ProjectConfig } from './project.ts';
 import { promptProjectSlug } from './prompt.ts';
 import { inferDefaultSlug } from './resolve-project.ts';
 
@@ -58,7 +58,7 @@ export async function promptAndCreateProject(
     throw new Error('Project creation cancelled.');
   }
   const config: ProjectConfig = { projectId: project.id, slug: project.slug };
-  writeProjectConfig(root, config);
+  writeProjectConfig(root, attachSelectedPlatform(root, config));
   return config;
 }
 

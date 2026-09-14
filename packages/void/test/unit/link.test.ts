@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { stripVTControlCharacters } from 'node:util';
 import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 
 const mockCancel = vi.fn();
 const mockConfirm = vi.fn();
@@ -67,6 +68,15 @@ describe('runLink', () => {
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'void-link-'));
+    process.env.VOID_PLATFORM_REGISTRY_DIR = join(root, 'registry');
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://api.void.cloud',
+      applicationDomain: 'void.app',
+      displayName: 'Void Cloud',
+      installationId: null,
+      kind: 'connected',
+    });
     mockCancel.mockReset();
     mockConfirm.mockReset();
     mockGetToken.mockReset();
@@ -76,6 +86,7 @@ describe('runLink', () => {
   });
 
   afterEach(() => {
+    delete process.env.VOID_PLATFORM_REGISTRY_DIR;
     vi.restoreAllMocks();
     rmSync(root, { recursive: true, force: true });
   });
@@ -94,7 +105,9 @@ describe('runLink', () => {
         'Linking to an existing project. Running `void deploy` will overwrite the current deployment of existing-app.void.app. Continue?',
     });
     expect(JSON.parse(readFileSync(join(root, '.void', 'project.json'), 'utf-8'))).toEqual({
+      applicationDomain: 'void.app',
       platform: 'void',
+      platformUrl: 'https://api.void.cloud',
       projectId: 'proj_1',
       slug: 'existing-app',
     });

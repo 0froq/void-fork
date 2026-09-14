@@ -5,6 +5,7 @@ import { Entry } from '@napi-rs/keyring';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensureCloudflaredToken } from './cf-access.ts';
+import { VOID_CLOUD_PLATFORM } from './hosted-platform.ts';
 import { pc } from './output.ts';
 import {
   getActivePlatformConnection,
@@ -12,6 +13,7 @@ import {
   platformCredentialAccount,
 } from './platform-registry.ts';
 import {
+  isLegacyVoidCloudProject,
   isVoidInternalStaging,
   readProjectApplicationDomain,
   readProjectPlatformUrl,
@@ -83,12 +85,16 @@ export function isStagingMode(root: string = process.cwd()): boolean {
 }
 
 export function getSiteDomain(root: string = process.cwd()): string {
-  return (
+  const domain =
     readProjectApplicationDomain(root) ??
-    (isStagingMode(root)
-      ? 'staging.void.app'
-      : (getActivePlatformConnection()?.applicationDomain ?? 'void.app'))
-  );
+    (isStagingMode(root) ? 'staging.void.app' : getActivePlatformConnection()?.applicationDomain) ??
+    (isLegacyVoidCloudProject(root) ? VOID_CLOUD_PLATFORM.applicationDomain : undefined);
+  if (!domain) {
+    throw new Error(
+      'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',
+    );
+  }
+  return domain;
 }
 
 /**
@@ -101,7 +107,12 @@ export function getToken(root: string = process.cwd()): string | null {
     return envToken;
   }
 
-  const apiUrl = getApiUrl(root);
+  let apiUrl: string;
+  try {
+    apiUrl = getApiUrl(root);
+  } catch {
+    return null;
+  }
   const account = platformCredentialAccount(apiUrl);
 
   // Try keyring first
@@ -218,7 +229,7 @@ export function removeToken(root: string = process.cwd()): boolean {
   return removed;
 }
 
-const DEFAULT_API_URL = 'https://api.void.cloud';
+const DEFAULT_API_URL = VOID_CLOUD_PLATFORM.apiUrl;
 const STAGING_API_URL = 'https://api.staging.void.cloud';
 
 function legacyCredentialAccount(
@@ -297,14 +308,19 @@ async function exchangeLoginCode(
  * Priority: VOID_API_URL env var > ~/.void/config.json > default
  */
 export function getApiUrl(root: string = process.cwd()): string {
-  return (
+  const apiUrl =
     process.env.VOID_API_URL ??
     readProjectPlatformUrl(root) ??
     (isStagingMode(root) ? STAGING_API_URL : undefined) ??
     getActivePlatformConnection()?.apiUrl ??
     readConfig().api ??
-    DEFAULT_API_URL
-  );
+    (isLegacyVoidCloudProject(root) ? DEFAULT_API_URL : undefined);
+  if (!apiUrl) {
+    throw new Error(
+      'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',
+    );
+  }
+  return apiUrl;
 }
 
 function page(title: string, message: string): string {

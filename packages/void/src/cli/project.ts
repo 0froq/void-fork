@@ -1,7 +1,9 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { normalizeApplicationDomain } from '@void/platform';
 import { join, dirname } from 'pathslash';
+import { VOID_CLOUD_PLATFORM } from './hosted-platform.ts';
 import { normalizePlatformApiUrl } from './platform-registry.ts';
+import { getActivePlatformConnection } from './platform-registry.ts';
 import type { DeployTarget } from './types.ts';
 
 export type ProjectConfig = {
@@ -132,6 +134,51 @@ export function readProjectPlatformUrl(root: string): string | null {
 export function readProjectApplicationDomain(root: string): string | null {
   const value = readProjectConfigFile(root)?.applicationDomain;
   return typeof value === 'string' && value !== '' ? normalizeApplicationDomain(value) : null;
+}
+
+/** Resolve the immutable platform identity that every newly linked project records. */
+export function attachSelectedPlatform(
+  root: string,
+  config: Pick<ProjectConfig, 'projectId' | 'slug'>,
+): ProjectConfig {
+  if (isVoidInternalStaging(root)) {
+    return {
+      ...config,
+      applicationDomain: 'staging.void.app',
+      platformUrl: 'https://api.staging.void.cloud',
+      voidInternalStaging: true,
+    };
+  }
+  const connection = getActivePlatformConnection();
+  if (!connection?.applicationDomain) {
+    throw new Error(
+      'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',
+    );
+  }
+  return {
+    ...config,
+    applicationDomain: connection.applicationDomain,
+    platformUrl: connection.apiUrl,
+  };
+}
+
+export function isLegacyVoidCloudProject(root: string): boolean {
+  const config = readProjectConfigFile(root);
+  return (
+    typeof config?.projectId === 'string' &&
+    typeof config.slug === 'string' &&
+    typeof config.platformUrl !== 'string'
+  );
+}
+
+export function legacyVoidCloudProjectMetadata(): Pick<
+  ProjectConfig,
+  'applicationDomain' | 'platformUrl'
+> {
+  return {
+    applicationDomain: VOID_CLOUD_PLATFORM.applicationDomain,
+    platformUrl: VOID_CLOUD_PLATFORM.apiUrl,
+  };
 }
 
 /**

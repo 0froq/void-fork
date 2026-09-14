@@ -169,6 +169,7 @@ import {
   type FrameworkPreset,
 } from './preset.ts';
 import {
+  attachSelectedPlatform,
   readDeploymentPlatform,
   readProjectConfig,
   writeProjectConfig,
@@ -5901,7 +5902,7 @@ export async function promptDeployProjectConfig(
     throw new Error('Unexpected project selection result.');
   }
   const config = { projectId: result.project.id, slug: result.project.slug };
-  writeProjectConfig(root, config);
+  writeProjectConfig(root, attachSelectedPlatform(root, config));
   log.step(`Linked to ${pc.blue(config.slug)}`);
   cliLog?.info('project_linked', { projectId: config.projectId, slug: config.slug });
   return config;
@@ -7481,7 +7482,7 @@ async function createProjectFromSlug(
   cliLog?.info('project_create_start', { slug });
   const project = await client.createProject(slug);
   const config = { projectId: project.id, slug: project.slug };
-  writeProjectConfig(root, config);
+  writeProjectConfig(root, attachSelectedPlatform(root, config));
   log.success(`Project created: ${pc.blue(config.slug)}`);
   cliLog?.info('project_create_success', { projectId: config.projectId, slug: config.slug });
   return config;
