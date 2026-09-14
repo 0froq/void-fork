@@ -19,11 +19,13 @@ export {
   parsePlatformInstallationManifest,
   recordInstallationResource,
   recordInstallationStep,
+  setInstallationEndpoints,
   transitionInstallation,
   type InstallationResource,
   type InstallationResourceKind,
   type InstallationStatus,
   type InstallationStep,
   type PlatformInstallationManifest,
+  type PlatformInstallationEndpoints,
   type ResourceOwnership,
 } from './installation.ts';

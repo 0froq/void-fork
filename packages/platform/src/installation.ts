@@ -49,6 +49,12 @@ export type InstallationStep = Readonly<{
   resultHash: string;
 }>;
 
+export type PlatformInstallationEndpoints = Readonly<{
+  apiUrl: string | null;
+  dashboardUrl: string | null;
+  proxyUrl: string | null;
+}>;
+
 export type PlatformInstallationManifest = Readonly<{
   account: Readonly<{
     id: string;
@@ -56,6 +62,7 @@ export type PlatformInstallationManifest = Readonly<{
   }>;
   createdAt: string;
   deployment: PlatformDeploymentManifest;
+  endpoints: PlatformInstallationEndpoints;
   id: string;
   ownershipNonce: string;
   platformVersion: string;
@@ -156,6 +163,7 @@ export function createPlatformInstallationManifest(input: {
     deployment: parsePlatformDeploymentManifest(
       JSON.parse(JSON.stringify(input.deployment)) as unknown,
     ),
+    endpoints: { apiUrl: null, dashboardUrl: null, proxyUrl: null },
     id: input.id,
     ownershipNonce: input.ownershipNonce,
     platformVersion: requiredString(input.platformVersion, 'platformVersion'),
@@ -164,6 +172,39 @@ export function createPlatformInstallationManifest(input: {
     status: 'draft',
     steps: [],
     updatedAt: createdAt,
+  };
+}
+
+function normalizeEndpoint(value: string | null, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${label} must be an absolute URL or null.`);
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+    throw new Error(`${label} must be a credential-free HTTPS URL.`);
+  }
+  url.pathname = url.pathname.replace(/\/+$/, '') || '/';
+  return url.href.replace(/\/$/, '');
+}
+
+export function setInstallationEndpoints(
+  manifest: PlatformInstallationManifest,
+  endpoints: PlatformInstallationEndpoints,
+  updatedAt: string,
+): PlatformInstallationManifest {
+  return {
+    ...manifest,
+    endpoints: {
+      apiUrl: normalizeEndpoint(endpoints.apiUrl, 'endpoints.apiUrl'),
+      dashboardUrl: normalizeEndpoint(endpoints.dashboardUrl, 'endpoints.dashboardUrl'),
+      proxyUrl: normalizeEndpoint(endpoints.proxyUrl, 'endpoints.proxyUrl'),
+    },
+    updatedAt: assertTimestamp(updatedAt, 'updatedAt'),
   };
 }
 
@@ -224,7 +265,9 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
     );
   }
   const account = value.account;
+  const endpoints = value.endpoints;
   assertRecord(account, 'account');
+  assertRecord(endpoints, 'endpoints');
   if (!isInstallationStatus(value.status)) {
     throw new Error(`Invalid installation status: ${String(value.status)}.`);
   }
@@ -246,7 +289,22 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
     platformVersion: requiredString(value.platformVersion, 'platformVersion'),
   });
   const updatedAt = assertTimestamp(requiredString(value.updatedAt, 'updatedAt'), 'updatedAt');
-  let next: PlatformInstallationManifest = { ...manifest, status: value.status, updatedAt };
+  let next: PlatformInstallationManifest = setInstallationEndpoints(
+    { ...manifest, status: value.status, updatedAt },
+    {
+      apiUrl:
+        endpoints.apiUrl === null ? null : requiredString(endpoints.apiUrl, 'endpoints.apiUrl'),
+      dashboardUrl:
+        endpoints.dashboardUrl === null
+          ? null
+          : requiredString(endpoints.dashboardUrl, 'endpoints.dashboardUrl'),
+      proxyUrl:
+        endpoints.proxyUrl === null
+          ? null
+          : requiredString(endpoints.proxyUrl, 'endpoints.proxyUrl'),
+    },
+    updatedAt,
+  );
   for (const [index, entry] of value.resources.entries()) {
     assertRecord(entry, `resources[${index}]`);
     if (!isResourceKind(entry.kind)) {
