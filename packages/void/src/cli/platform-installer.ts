@@ -137,7 +137,7 @@ type InstallerClient = Pick<
       | 'publishWorkerCustomDomainsSafely'
       | 'removeRoutes'
     >
-  >;
+  > & { readonly apiBaseUrl?: string };
 
 type WorkerInspectionClient = Partial<
   Pick<PlatformCloudflareClient, 'getWorkerPlainTextBindings' | 'listWorkerNames'>
@@ -309,6 +309,9 @@ export async function installPlatform(
   dependencies: PlatformInstallerDependencies,
 ): Promise<PlatformInstallationResult> {
   const now = dependencies.now ?? (() => new Date().toISOString());
+  const cloudflareApiBaseUrl = dependencies.client.apiBaseUrl ?? resolvePinnedApiBaseUrl();
+  const runPinnedPlatformWrangler: typeof runPlatformWrangler = (args, accountId, cwd, capture) =>
+    runPlatformWranglerAtApiBase(args, accountId, cwd, capture, cloudflareApiBaseUrl);
   const runtimeDirectory = getPlatformRuntimeDirectory();
   const runtime = readPlatformRuntimeManifest();
   verifyRuntimeArtifacts(runtimeDirectory, runtime);
@@ -761,6 +764,7 @@ export async function installPlatform(
                 PLATFORM_DISABLED_VALUE,
               );
             },
+            runner: runPinnedPlatformWrangler,
             workerExisted: snapshot.previousVersionId !== null,
             workerName: snapshot.workerName,
           });
@@ -826,6 +830,7 @@ export async function installPlatform(
       const rollback = dependencies.deployWorker
         ? await dependencies.deployWorker(workerConfig, workerSecrets, previousWorkerConfig)
         : await deployPlatformWorker(workerConfig, workerSecrets, {
+            apiBaseUrl: cloudflareApiBaseUrl,
             onStaged: async (previousVersionId, stagedVersionId, previousTriggers) => {
               manifest = recordWorkerCutoverStage(
                 manifest!,
@@ -904,6 +909,7 @@ export async function installPlatform(
                 PLATFORM_DISABLED_VALUE,
               );
             },
+            runner: runPinnedPlatformWrangler,
             workerExisted: action.action !== 'create',
           });
       if (rollback) {
@@ -978,6 +984,7 @@ export async function installPlatform(
         const rollback = dependencies.deployWorker
           ? await dependencies.deployWorker(workerConfig, workerSecrets, previousWorkerConfig)
           : await deployPlatformWorker(workerConfig, workerSecrets, {
+              apiBaseUrl: cloudflareApiBaseUrl,
               onStaged: async (previousVersionId, stagedVersionId, previousTriggers) => {
                 manifest = recordWorkerCutoverStage(
                   manifest!,
@@ -1059,6 +1066,7 @@ export async function installPlatform(
                   PLATFORM_DISABLED_VALUE,
                 );
               },
+              runner: runPinnedPlatformWrangler,
               workerExisted: true,
             });
         if (rollback) {
@@ -1078,6 +1086,7 @@ export async function installPlatform(
           workerCutoverGeneration,
           enabledConfigs,
           plan.account.id,
+          runPinnedPlatformWrangler,
         );
       }
     };
@@ -2143,6 +2152,7 @@ export async function claimPlatformDatabaseConnection(
 }
 
 type PlatformWorkerDeploymentOptions = Readonly<{
+  apiBaseUrl: string;
   inspectNewWorker: () => Promise<'missing' | 'owned'>;
   onStaged: (
     previousVersionId: string | null,
@@ -2160,6 +2170,7 @@ type PlatformWorkerDeploymentOptions = Readonly<{
   ) => Promise<void>;
   removeCustomDomains: () => Promise<void>;
   retainNewWorker: () => Promise<void>;
+  runner: typeof runPlatformWrangler;
   workerExisted: boolean;
 }>;
 
@@ -2191,9 +2202,15 @@ async function deployPlatformWorker(
         accountId,
         workerName,
         readPlatformWorkerOwnershipMarker(config),
+        options.runner,
       );
       previousVersionId = previous.versionId;
-      const deployments = await readPlatformWorkerDeployments(configPath, accountId, workerName);
+      const deployments = await readPlatformWorkerDeployments(
+        configPath,
+        accountId,
+        workerName,
+        options.runner,
+      );
       if (!deploymentRunsOnlyVersion(deployments[0], previousVersionId)) {
         throw new Error(
           `platform: Worker ${workerName} changed concurrently while its deployment lineage was inspected.`,
@@ -2226,8 +2243,15 @@ async function deployPlatformWorker(
       argv.push('--secrets-file', secretsPath);
     }
     const uploaded = options.workerExisted
-      ? await runPlatformWrangler(argv, accountId, directory, true)
-      : await runPlatformWranglerForConditionalCreate(argv, accountId, directory, true, workerName);
+      ? await options.runner(argv, accountId, directory, true)
+      : await runPlatformWranglerForConditionalCreate(
+          argv,
+          accountId,
+          directory,
+          true,
+          workerName,
+          options.apiBaseUrl,
+        );
     uploadedVersionId = parseUploadedPlatformWorkerVersion(
       `${uploaded.stdout}\n${uploaded.stderr}`,
     );
@@ -2249,6 +2273,7 @@ async function deployPlatformWorker(
         configPath,
         accountId,
         workerName,
+        options.runner,
       );
       if (
         deploymentsBeforeActivation[0]?.id !== previousDeploymentId ||
@@ -2259,7 +2284,7 @@ async function deployPlatformWorker(
         );
       }
       activatedVersionId = uploadedVersionId;
-      const activated = await runPlatformWrangler(
+      const activated = await options.runner(
         [
           'versions',
           'deploy',
@@ -2280,6 +2305,7 @@ async function deployPlatformWorker(
       configPath,
       accountId,
       workerName,
+      options.runner,
     );
     const lineage = classifyPlatformWorkerDeploymentLineage(
       deploymentsAfterActivation,
@@ -2294,7 +2320,7 @@ async function deployPlatformWorker(
     }
     activatedDeploymentId = lineage.deploymentId;
     if (lineage.kind === 'intervening') {
-      const removed = await runPlatformWrangler(
+      const removed = await options.runner(
         [
           'deployments',
           'delete',
@@ -2330,7 +2356,7 @@ async function deployPlatformWorker(
         await options.removeCustomDomains();
         return cleanPlatformCommandResult();
       },
-      runWrangler: platformWorkerCommandRunner(accountId, directory),
+      runWrangler: platformWorkerCommandRunner(accountId, directory, options.runner),
       targetTriggerConfig: nextTriggers,
       targetVersionId: uploadedVersionId,
       workerName,
@@ -2356,6 +2382,7 @@ async function deployPlatformWorker(
         removeCustomDomains: options.removeCustomDomains,
         publishCustomDomains: options.publishCustomDomains,
         retainNewWorker: options.retainNewWorker,
+        runner: options.runner,
         workerExisted: options.workerExisted,
         workerName,
       });
@@ -2383,6 +2410,7 @@ async function deployPlatformWorker(
               removeCustomDomains: options.removeCustomDomains,
               publishCustomDomains: options.publishCustomDomains,
               retainNewWorker: options.retainNewWorker,
+              runner: options.runner,
               workerExisted: options.workerExisted,
               workerName,
             })
@@ -2449,6 +2477,7 @@ async function rollbackPlatformWorker(input: {
     origins: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>,
   ) => Promise<void>;
   retainNewWorker: () => Promise<void>;
+  runner: typeof runPlatformWrangler;
   workerExisted: boolean;
   workerName: string;
 }): Promise<void> {
@@ -2467,6 +2496,7 @@ async function rollbackPlatformWorker(input: {
         configPath,
         input.accountId,
         input.workerName,
+        input.runner,
       );
       if (currentVersionId !== input.activatedVersionId) {
         throw new Error(
@@ -2486,6 +2516,7 @@ async function rollbackPlatformWorker(input: {
       configPath,
       input.accountId,
       input.workerName,
+      input.runner,
     );
     if (
       currentVersionId !== input.previousVersionId &&
@@ -2503,6 +2534,7 @@ async function rollbackPlatformWorker(input: {
         configPath,
         input.accountId,
         input.workerName,
+        input.runner,
       );
       const activeDeploymentId = input.activatedDeploymentId ?? currentDeployments[0]?.id ?? null;
       if (
@@ -2514,7 +2546,7 @@ async function rollbackPlatformWorker(input: {
           `Worker ${input.workerName} changed concurrently after installer deployment; refusing to alter its deployment history.`,
         );
       }
-      const restored = await runPlatformWrangler(
+      const restored = await input.runner(
         [
           'deployments',
           'delete',
@@ -2534,6 +2566,7 @@ async function rollbackPlatformWorker(input: {
         configPath,
         input.accountId,
         input.workerName,
+        input.runner,
       );
       if (restoredVersionId !== input.previousVersionId) {
         throw new Error(
@@ -2556,7 +2589,7 @@ async function rollbackPlatformWorker(input: {
         await input.removeCustomDomains();
         return cleanPlatformCommandResult();
       },
-      runWrangler: platformWorkerCommandRunner(input.accountId, directory),
+      runWrangler: platformWorkerCommandRunner(input.accountId, directory, input.runner),
       targetTriggerConfig: input.previousTriggers,
       targetVersionId: input.previousVersionId,
       workerName: input.workerName,
@@ -2575,8 +2608,12 @@ async function rollbackPlatformWorker(input: {
   }
 }
 
-function platformWorkerCommandRunner(accountId: string, cwd: string): CloudflareCommandRunner {
-  return (args, options) => runPlatformWrangler(args, accountId, cwd, options.capture);
+function platformWorkerCommandRunner(
+  accountId: string,
+  cwd: string,
+  runner: typeof runPlatformWrangler,
+): CloudflareCommandRunner {
+  return (args, options) => runner(args, accountId, cwd, options.capture);
 }
 
 async function runPlatformWrangler(
@@ -2817,9 +2854,13 @@ async function runPlatformWranglerForConditionalCreate(
   cwd: string,
   capture: boolean,
   workerName: string,
+  upstreamApiBaseUrl: string,
 ): Promise<CloudflareCommandResult> {
-  return withConditionalPlatformWorkerCreate(accountId, workerName, (apiBaseUrl) =>
-    runPlatformWranglerAtApiBase(args, accountId, cwd, capture, apiBaseUrl),
+  return withConditionalPlatformWorkerCreate(
+    accountId,
+    workerName,
+    (apiBaseUrl) => runPlatformWranglerAtApiBase(args, accountId, cwd, capture, apiBaseUrl),
+    upstreamApiBaseUrl,
   );
 }
 

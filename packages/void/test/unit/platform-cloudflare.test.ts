@@ -8,6 +8,53 @@ import {
 } from '../../src/cli/platform-cloudflare.ts';
 
 describe('platform Cloudflare client', () => {
+  it('pins every Wrangler Cloudflare transport selector exactly once', () => {
+    const keys = [
+      'CLOUDFLARE_API_BASE_URL',
+      'CF_API_BASE_URL',
+      'WRANGLER_API_ENVIRONMENT',
+      'CLOUDFLARE_COMPLIANCE_REGION',
+    ] as const;
+    const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const cases: Array<[Record<string, string>, string]> = [
+      [{ CF_API_BASE_URL: 'https://legacy.example/client/v4' }, 'https://legacy.example/client/v4'],
+      [{ WRANGLER_API_ENVIRONMENT: 'staging' }, 'https://api.staging.cloudflare.com/client/v4'],
+      [
+        { CLOUDFLARE_COMPLIANCE_REGION: 'fedramp_high' },
+        'https://api.fed.cloudflare.com/client/v4',
+      ],
+      [
+        {
+          CLOUDFLARE_COMPLIANCE_REGION: 'fedramp_high',
+          WRANGLER_API_ENVIRONMENT: 'staging',
+        },
+        'https://api.fed.staging.cloudflare.com/client/v4',
+      ],
+      [{ CLOUDFLARE_API_BASE_URL: '' }, ''],
+    ];
+    try {
+      for (const [environment, expected] of cases) {
+        for (const key of keys) {
+          delete process.env[key];
+        }
+        Object.assign(process.env, environment);
+        const client = new PlatformCloudflareClient('token');
+        expect(client.apiBaseUrl).toBe(expected);
+        process.env.CLOUDFLARE_API_BASE_URL = 'https://changed.example/client/v4';
+        expect(client.apiBaseUrl).toBe(expected);
+      }
+    } finally {
+      for (const key of keys) {
+        const value = original[key];
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
   it('parses PostgreSQL credentials without exposing them', () => {
     expect(
       parsePostgresConnectionString('postgres://user:p%40ss@db.example.com:5433/void'),

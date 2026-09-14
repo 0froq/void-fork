@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-
-const DEFAULT_API_BASE = 'https://api.cloudflare.com/client/v4';
+import { resolvePinnedApiBaseUrl } from './provision.ts';
 
 type CloudflareEnvelope<T> = Readonly<{
   errors?: ReadonlyArray<{ code?: number; message?: string }>;
@@ -90,7 +89,7 @@ export type PlatformTrackedWorkerTraffic = Readonly<{
 }>;
 
 export class PlatformCloudflareClient {
-  readonly #apiBase: string;
+  readonly apiBaseUrl: string;
   readonly #fetcher: typeof fetch;
   readonly #token: string;
 
@@ -101,11 +100,7 @@ export class PlatformCloudflareClient {
       );
     }
     this.#token = token;
-    this.#apiBase = (
-      options?.apiBase ??
-      process.env.CLOUDFLARE_API_BASE_URL ??
-      DEFAULT_API_BASE
-    ).replace(/\/+$/, '');
+    this.apiBaseUrl = (options?.apiBase ?? resolvePinnedApiBaseUrl()).replace(/\/+$/, '');
     this.#fetcher = options?.fetcher ?? fetch;
   }
 
@@ -117,7 +112,7 @@ export class PlatformCloudflareClient {
     path: string,
     init?: RequestInit,
   ): Promise<{ result: T; resultInfo: CloudflareEnvelope<T>['result_info'] }> {
-    const response = await this.#fetcher(`${this.#apiBase}${path}`, {
+    const response = await this.#fetcher(`${this.apiBaseUrl}${path}`, {
       ...init,
       headers: {
         Accept: 'application/json',
@@ -609,7 +604,7 @@ export class PlatformCloudflareClient {
 
   async getKvValue(accountId: string, namespaceId: string, key: string): Promise<string | null> {
     const response = await this.#fetcher(
-      `${this.#apiBase}/accounts/${encodeURIComponent(accountId)}/storage/kv/namespaces/${encodeURIComponent(namespaceId)}/values/${encodeURIComponent(key)}`,
+      `${this.apiBaseUrl}/accounts/${encodeURIComponent(accountId)}/storage/kv/namespaces/${encodeURIComponent(namespaceId)}/values/${encodeURIComponent(key)}`,
       {
         headers: { Authorization: `Bearer ${this.#token}` },
         signal: AbortSignal.timeout(30_000),
@@ -634,7 +629,7 @@ export class PlatformCloudflareClient {
     value: string,
   ): Promise<void> {
     const response = await this.#fetcher(
-      `${this.#apiBase}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+      `${this.apiBaseUrl}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
       {
         body: value,
         headers: {
@@ -655,7 +650,7 @@ export class PlatformCloudflareClient {
 
   async getR2Object(accountId: string, bucketName: string, key: string): Promise<string | null> {
     const response = await this.#fetcher(
-      `${this.#apiBase}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+      `${this.apiBaseUrl}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
       {
         headers: { Authorization: `Bearer ${this.#token}` },
         signal: AbortSignal.timeout(30_000),
@@ -733,7 +728,7 @@ export class PlatformCloudflareClient {
         query.set('cursor', cursor);
       }
       const response = await this.#fetcher(
-        `${this.#apiBase}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects?${query}`,
+        `${this.apiBaseUrl}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects?${query}`,
         {
           headers: {
             Accept: 'application/json',
