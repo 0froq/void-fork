@@ -457,7 +457,6 @@ export function promoteInstallationSecrets(
   const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
   const pending = manifestPath.replace(/\.json$/, '.secrets');
   const recovery = manifestPath.replace(/\.json$/, '.recovery');
-  rmSync(recovery, { force: true });
   renameSync(pending, recovery);
 }
 
@@ -479,7 +478,7 @@ export function readInstallationRecoverySecrets(
     return Object.fromEntries(entries) as Record<string, string>;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
+      return readPendingInstallationSecrets(manifest, directory);
     }
     throw new Error(
       `platform: Could not read installation recovery material: ${error instanceof Error ? error.message : String(error)}`,

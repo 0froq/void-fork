@@ -54,7 +54,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   }
   const client = new PlatformCloudflareClient(token);
   let existing = args.resume ? resolveInstallationManifest(args.name) : null;
-  if (existing?.endpoints.apiUrl) {
+  if (existing?.endpoints.apiUrl && !readPendingInstallationSecrets(existing)) {
     throw new Error(
       `platform: Installation ${existing.id} has already been deployed. Use \`void platform repair ${existing.id}\` or \`void platform upgrade ${existing.id}\` instead.`,
     );

@@ -141,11 +141,19 @@ describe('platform registry', () => {
     });
     writeInstallationManifest(manifest, directory);
     writePendingInstallationSecrets(manifest, { databaseUrl: 'postgres://secret' }, directory);
+    expect(readInstallationRecoverySecrets(manifest, directory)).toEqual({
+      databaseUrl: 'postgres://secret',
+    });
     promoteInstallationSecrets(manifest, directory);
     const recoveryPath = join(directory, 'account_123', 'example-a1b2c3d4.recovery');
     expect(statSync(recoveryPath).mode & 0o777).toBe(0o600);
     expect(readInstallationRecoverySecrets(manifest, directory)).toEqual({
       databaseUrl: 'postgres://secret',
+    });
+    writePendingInstallationSecrets(manifest, { databaseUrl: 'postgres://replacement' }, directory);
+    promoteInstallationSecrets(manifest, directory);
+    expect(readInstallationRecoverySecrets(manifest, directory)).toEqual({
+      databaseUrl: 'postgres://replacement',
     });
     removeInstallationRecoverySecrets(manifest, directory);
     expect(readInstallationRecoverySecrets(manifest, directory)).toBeNull();
