@@ -56,6 +56,14 @@ describe('platform installation planning', () => {
     expect(Object.keys(fake)).not.toContain('createZone');
   });
 
+  it('keeps a fresh read-only plan stable for the later apply', async () => {
+    const planned = await createPlatformInstallPlan(client(), input, null);
+    const applied = await createPlatformInstallPlan(client(), input, null);
+    expect(applied.installationId).toBe(planned.installationId);
+    expect(applied.apiUrl).toBe(planned.apiUrl);
+    expect(applied.deployment.resources).toEqual(planned.deployment.resources);
+  });
+
   it('fails closed on an unowned deterministic-name collision', async () => {
     const fake = client({
       listKvNamespaces: async (_account: string, title: string) =>

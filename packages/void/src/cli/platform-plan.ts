@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
   createPlatformDeploymentManifest,
   createApplicationRoutes,
@@ -88,7 +88,20 @@ export async function createPlatformInstallPlan(
     );
   }
   const installationSlug = normalizeInstallationSlug(input.installationSlug);
-  const installationId = existing?.id ?? `${installationSlug}-${randomBytes(6).toString('hex')}`;
+  const installationId =
+    existing?.id ??
+    `${installationSlug}-${createHash('sha256')
+      .update(
+        JSON.stringify({
+          accountId: account.id,
+          applicationDomain: input.applicationDomain,
+          controlPlaneDomain: input.controlPlaneDomain,
+          installationSlug,
+          zoneName: input.zoneName,
+        }),
+      )
+      .digest('hex')
+      .slice(0, 12)}`;
   const deployment = createPlatformDeploymentManifest({
     application: {
       baseDomain: input.applicationDomain,
