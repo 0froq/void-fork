@@ -585,6 +585,13 @@ export function rebuildRequest(
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    if (
+      !env.PLATFORM_INSTALLATION_ID &&
+      url.pathname === '/health' &&
+      request.headers.get('X-Health-Check') === 'void-admin'
+    ) {
+      return Response.json({ ok: true });
+    }
     // The installer proves the complete cutover while the public routing gate
     // remains closed. This endpoint exposes no application data and is already
     // reserved for the installer's exact health-check header.
