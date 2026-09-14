@@ -43,8 +43,15 @@ export function resolvePlatformInstallDatabaseUrl(
     manifest?.steps.some((step) => step.key.startsWith('database-migrations:'));
   if (databaseBound) {
     if (!recorded) {
+      if (explicit) {
+        // Discovery intentionally recovers no credentials. The database's
+        // installation claim and ownership nonce are verified under the
+        // advisory lock before any lifecycle mutation, and the live
+        // Hyperdrive origin is checked against this URL before redeployment.
+        return explicit;
+      }
       throw new Error(
-        'platform: The claimed PostgreSQL database URL is missing from local recovery state.',
+        'platform: The claimed PostgreSQL database URL is missing from local recovery state. Export VOID_PLATFORM_DATABASE_URL with the original installation database before continuing.',
       );
     }
     if (explicit && explicit !== recorded) {

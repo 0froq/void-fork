@@ -69,5 +69,14 @@ describe('platform lifecycle', () => {
     expect(() => resolvePlatformInstallDatabaseUrl(checkpoint, manifest)).toThrow(
       'already bound to its recorded PostgreSQL database',
     );
+
+    delete process.env.DATABASE_URL;
+    expect(() => resolvePlatformInstallDatabaseUrl(null, manifest)).toThrow(
+      'Export VOID_PLATFORM_DATABASE_URL',
+    );
+    process.env.VOID_PLATFORM_DATABASE_URL = 'postgres://recorded.example/void';
+    expect(resolvePlatformInstallDatabaseUrl(null, manifest)).toBe(
+      'postgres://recorded.example/void',
+    );
   });
 });
