@@ -474,7 +474,11 @@ export class PlatformCloudflareClient {
     }
   }
 
-  async emptyR2Bucket(accountId: string, bucketName: string): Promise<void> {
+  async emptyR2Bucket(
+    accountId: string,
+    bucketName: string,
+    preservedKeys: ReadonlySet<string> = new Set(),
+  ): Promise<void> {
     let cursor = '';
     const observedCursors = new Set<string>();
     for (;;) {
@@ -509,7 +513,9 @@ export class PlatformCloudflareClient {
           response.status,
         );
       }
-      const keys = envelope.result.map((object) => requiredString(object.key, 'R2 object key'));
+      const keys = envelope.result
+        .map((object) => requiredString(object.key, 'R2 object key'))
+        .filter((key) => !preservedKeys.has(key));
       for (let offset = 0; offset < keys.length; offset += 1000) {
         await this.deleteR2Objects(accountId, bucketName, keys.slice(offset, offset + 1000));
       }

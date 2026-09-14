@@ -1,8 +1,13 @@
 import { confirm, isCancel, log, note, outro } from '@clack/prompts';
 import {
+  createPlatformResourceOwnershipMarker,
+  parsePlatformInstallationManifest,
+  parsePlatformResourceOwnershipMarker,
+  PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   recordInstallationResource,
   setInstallationDesiredState,
   transitionInstallation,
+  type InstallationResource,
   type PlatformInstallationManifest,
 } from '@void/platform';
 import type { PlatformArgs } from './platform-args.ts';
@@ -25,9 +30,20 @@ import {
 
 type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
-  | 'deleteKvValue'
   | 'deleteResource'
   | 'emptyR2Bucket'
+  | 'findZone'
+  | 'getKvValue'
+  | 'getR2Object'
+  | 'getWorkerPlainTextBindings'
+  | 'listAiGateways'
+  | 'listDispatchNamespaces'
+  | 'listDnsRecords'
+  | 'listHyperdriveConfigs'
+  | 'listKvNamespaces'
+  | 'listQueues'
+  | 'listR2Buckets'
+  | 'listWorkerNames'
   | 'putKvValue'
   | 'removeRoutes'
   | 'setWorkerSubdomain'
@@ -155,6 +171,17 @@ export async function disablePlatform(
     log.info(`${manifest.deployment.displayName} is already disabled.`);
     return;
   }
+  await verifyPlatformMutationOwnership(
+    client,
+    manifest,
+    new Set([
+      'routing-kv',
+      'zone',
+      ...manifest.resources
+        .filter((resource) => resource.kind === 'worker')
+        .map((resource) => resource.key),
+    ]),
+  );
   let next = setInstallationDesiredState(manifest, 'disabled', new Date().toISOString());
   writeInstallationManifest(next);
   next = transitionInstallation(next, 'disabling', new Date().toISOString());
@@ -227,25 +254,54 @@ export async function uninstallPlatform(
     }
   }
 
+  const resourcesToDelete = new Set(
+    manifest.resources
+      .filter(
+        (resource) =>
+          shouldDeleteResource(resource, retainData, deleteZone) &&
+          !(
+            resource.kind === 'dns-record' &&
+            !manifest.resources.some((entry) => entry.key === 'zone')
+          ),
+      )
+      .map((resource) => resource.key),
+  );
+  const ownershipTargets = new Set([
+    'routing-kv',
+    'zone',
+    ...manifest.resources
+      .filter((resource) => resource.kind === 'worker')
+      .map((resource) => resource.key),
+    ...resourcesToDelete,
+  ]);
+  const missingResources = await verifyPlatformMutationOwnership(
+    client,
+    manifest,
+    ownershipTargets,
+    { allowDeletedRoutingCheckpoint: args.purgeData },
+  );
+
   let next = transitionInstallation(manifest, 'uninstalling', new Date().toISOString());
   writeInstallationManifest(next);
   try {
+    for (const key of missingResources) {
+      const resource = requireResource(next, key);
+      next = updateResourceState(
+        next,
+        key,
+        resource.ownership === 'created' ? 'deleted' : 'retained',
+      );
+      writeInstallationManifest(next);
+    }
     const workers = new Set(
       next.resources
-        .filter((resource) => resource.kind === 'worker')
+        .filter((resource) => resource.kind === 'worker' && resource.state === 'ready')
         .map((resource) => resource.name),
     );
     const zone = next.resources.find((resource) => resource.key === 'zone');
     if (zone?.state === 'ready') {
       await client.removeRoutes(next.account.id, zone.id, workers);
     }
-    const dataKinds = new Set([
-      'ai-gateway',
-      'dispatch-namespace',
-      'hyperdrive',
-      'kv-namespace',
-      'r2-bucket',
-    ]);
     const deletionPriority: Record<string, number> = {
       worker: 0,
       queue: 1,
@@ -258,23 +314,15 @@ export async function uninstallPlatform(
       zone: 8,
     };
     const resources = [...next.resources].sort(
-      (left, right) => (deletionPriority[left.kind] ?? 99) - (deletionPriority[right.kind] ?? 99),
+      (left, right) =>
+        resourceDeletionPriority(left, deletionPriority) -
+        resourceDeletionPriority(right, deletionPriority),
     );
     for (const resource of resources) {
       if (resource.state !== 'ready') {
         continue;
       }
-      if (resource.ownership !== 'created') {
-        next = updateResourceState(next, resource.key, 'retained');
-        writeInstallationManifest(next);
-        continue;
-      }
-      if (resource.kind === 'zone' && !deleteZone) {
-        next = updateResourceState(next, resource.key, 'retained');
-        writeInstallationManifest(next);
-        continue;
-      }
-      if (retainData && dataKinds.has(resource.kind)) {
+      if (!shouldDeleteResource(resource, retainData, deleteZone)) {
         next = updateResourceState(next, resource.key, 'retained');
         writeInstallationManifest(next);
         continue;
@@ -285,24 +333,20 @@ export async function uninstallPlatform(
         continue;
       }
       if (resource.kind === 'r2-bucket') {
-        await client.emptyR2Bucket(next.account.id, resource.name);
+        await client.emptyR2Bucket(
+          next.account.id,
+          resource.name,
+          new Set([PLATFORM_R2_OWNERSHIP_MARKER_KEY]),
+        );
       }
       await client.deleteResource(next.account.id, resource.kind, resource.id, zone?.id);
       next = updateResourceState(next, resource.key, 'deleted');
       writeInstallationManifest(next);
     }
-    const retainedRouting = next.resources.find(
-      (resource) => resource.key === 'routing-kv' && resource.state === 'retained',
-    );
-    if (retainedRouting) {
-      await client.deleteKvValue(
-        next.account.id,
-        retainedRouting.id,
-        REMOTE_INSTALLATION_MANIFEST_KEY,
-      );
-    }
-    next = transitionInstallation(next, 'uninstalled', new Date().toISOString());
-    writeInstallationManifest(next);
+    const completed = transitionInstallation(next, 'uninstalled', new Date().toISOString());
+    await writeRemoteManifestIfPresent(client, completed);
+    next = completed;
+    writeInstallationManifest(completed);
     removeInstallationRecoverySecrets(next);
     removePlatformConnectionForInstallation(next.id);
     log.success(
@@ -315,6 +359,206 @@ export async function uninstallPlatform(
     writeInstallationManifest(next);
     throw error;
   }
+}
+
+const DATA_RESOURCE_KINDS = new Set([
+  'ai-gateway',
+  'dispatch-namespace',
+  'hyperdrive',
+  'kv-namespace',
+  'r2-bucket',
+]);
+
+function shouldDeleteResource(
+  resource: InstallationResource,
+  retainData: boolean,
+  deleteZone: boolean,
+): boolean {
+  if (resource.state !== 'ready' || resource.ownership !== 'created') {
+    return false;
+  }
+  if (resource.kind === 'zone') {
+    return deleteZone;
+  }
+  return !(retainData && DATA_RESOURCE_KINDS.has(resource.kind));
+}
+
+function resourceDeletionPriority(
+  resource: InstallationResource,
+  priorities: Readonly<Record<string, number>>,
+): number {
+  // The routing namespace contains the authoritative ownership checkpoint.
+  // Delete it last so interrupted purges can still prove every earlier mutation.
+  return resource.key === 'routing-kv' ? 100 : (priorities[resource.kind] ?? 99);
+}
+
+async function verifyPlatformMutationOwnership(
+  client: PlatformManagementClient,
+  manifest: PlatformInstallationManifest,
+  targetKeys: ReadonlySet<string>,
+  options: { allowDeletedRoutingCheckpoint?: boolean } = {},
+): Promise<ReadonlySet<string>> {
+  const routing = requireResource(manifest, 'routing-kv');
+  const rawRemote = await client.getKvValue(
+    manifest.account.id,
+    routing.id,
+    REMOTE_INSTALLATION_MANIFEST_KEY,
+  );
+  if (rawRemote === null) {
+    if (
+      options.allowDeletedRoutingCheckpoint &&
+      canResumeAfterRoutingCheckpointDeletion(manifest, targetKeys)
+    ) {
+      const namespaces = await client.listKvNamespaces(manifest.account.id);
+      if (!namespaces.some((entry) => entry.id === routing.id)) {
+        return new Set([routing.key]);
+      }
+    }
+    throw ownershipError('the remote installation checkpoint is missing');
+  }
+
+  let remote: PlatformInstallationManifest;
+  try {
+    remote = parsePlatformInstallationManifest(JSON.parse(rawRemote) as unknown);
+  } catch {
+    throw ownershipError('the remote installation checkpoint is invalid');
+  }
+  if (
+    remote.id !== manifest.id ||
+    remote.ownershipNonce !== manifest.ownershipNonce ||
+    remote.account.id !== manifest.account.id
+  ) {
+    throw ownershipError('the remote installation identity does not match this installation');
+  }
+
+  const targets = manifest.resources.filter(
+    (resource) => targetKeys.has(resource.key) && resource.state === 'ready',
+  );
+  for (const resource of targets) {
+    const proof = remote.resources.find((entry) => entry.key === resource.key);
+    if (
+      !proof ||
+      proof.id !== resource.id ||
+      proof.kind !== resource.kind ||
+      proof.name !== resource.name ||
+      proof.ownership !== resource.ownership
+    ) {
+      throw ownershipError(`the remote checkpoint does not own ${resource.kind} ${resource.name}`);
+    }
+  }
+
+  const missing = new Set<string>();
+  const accountId = manifest.account.id;
+  const zone = manifest.resources.find((resource) => resource.key === 'zone');
+  const inventory = await Promise.all([
+    client.listAiGateways(accountId),
+    client.listDispatchNamespaces(accountId),
+    client.listHyperdriveConfigs(accountId),
+    client.listKvNamespaces(accountId),
+    client.listR2Buckets(accountId),
+    client.listWorkerNames(accountId),
+  ]);
+  const [aiGateways, dispatchNamespaces, hyperdrives, kvNamespaces, r2Buckets, workerNames] =
+    inventory;
+
+  for (const resource of targets) {
+    let exists = true;
+    if (resource.kind === 'ai-gateway') {
+      exists = hasNamedResource(aiGateways, resource);
+    } else if (resource.kind === 'dispatch-namespace') {
+      exists = hasNamedResource(dispatchNamespaces, resource);
+    } else if (resource.kind === 'hyperdrive') {
+      exists = hasNamedResource(hyperdrives, resource);
+    } else if (resource.kind === 'kv-namespace') {
+      exists = hasNamedResource(kvNamespaces, resource);
+    } else if (resource.kind === 'queue') {
+      exists = hasNamedResource(await client.listQueues(accountId, resource.name), resource);
+    } else if (resource.kind === 'zone') {
+      const current = await client.findZone(accountId, resource.name);
+      exists = current?.id === resource.id;
+    } else if (resource.kind === 'dns-record') {
+      if (!zone) {
+        exists = false;
+      } else {
+        exists = hasNamedResource(await client.listDnsRecords(zone.id, resource.name), resource);
+      }
+    } else if (resource.kind === 'worker') {
+      exists = workerNames.includes(resource.name);
+      if (exists) {
+        const bindings = await client.getWorkerPlainTextBindings(accountId, resource.name);
+        verifyResourceMarker(bindings.PLATFORM_OWNERSHIP_MARKER, manifest, resource);
+      }
+    } else if (resource.kind === 'r2-bucket') {
+      exists = hasNamedResource(r2Buckets, resource);
+      if (exists) {
+        verifyResourceMarker(
+          await client.getR2Object(accountId, resource.name, PLATFORM_R2_OWNERSHIP_MARKER_KEY),
+          manifest,
+          resource,
+        );
+      }
+    } else {
+      throw ownershipError(`live ownership checks do not support ${resource.kind}`);
+    }
+    if (!exists) {
+      missing.add(resource.key);
+    }
+  }
+  return missing;
+}
+
+function hasNamedResource(
+  entries: ReadonlyArray<{ id: string; name: string }>,
+  resource: InstallationResource,
+): boolean {
+  return entries.some((entry) => entry.id === resource.id && entry.name === resource.name);
+}
+
+function verifyResourceMarker(
+  value: string | null | undefined,
+  manifest: PlatformInstallationManifest,
+  resource: InstallationResource,
+): void {
+  if (!value) {
+    throw ownershipError(`${resource.kind} ${resource.name} has no ownership marker`);
+  }
+  let actual;
+  try {
+    actual = parsePlatformResourceOwnershipMarker(JSON.parse(value) as unknown);
+  } catch {
+    throw ownershipError(`${resource.kind} ${resource.name} has an invalid ownership marker`);
+  }
+  const expected = createPlatformResourceOwnershipMarker({
+    accountId: manifest.account.id,
+    installationId: manifest.id,
+    ownershipNonce: manifest.ownershipNonce,
+    resourceId: resource.id,
+    resourceKey: resource.key,
+    resourceKind: resource.kind,
+    resourceName: resource.name,
+  });
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw ownershipError(`${resource.kind} ${resource.name} belongs to another installation`);
+  }
+}
+
+function canResumeAfterRoutingCheckpointDeletion(
+  manifest: PlatformInstallationManifest,
+  targetKeys: ReadonlySet<string>,
+): boolean {
+  if (manifest.status !== 'failed' && manifest.status !== 'uninstalling') {
+    return false;
+  }
+  return manifest.resources.every(
+    (resource) =>
+      resource.key === 'routing-kv' || !targetKeys.has(resource.key) || resource.state !== 'ready',
+  );
+}
+
+function ownershipError(reason: string): Error {
+  return new Error(
+    `platform: Refusing to change Cloudflare resources because ${reason}. Run \`void platform repair\` to restore ownership proofs before retrying.`,
+  );
 }
 
 function requireResource(manifest: PlatformInstallationManifest, key: string) {
@@ -339,7 +583,7 @@ async function writeRemoteManifestIfPresent(
   manifest: PlatformInstallationManifest,
 ): Promise<void> {
   const routing = manifest.resources.find(
-    (resource) => resource.key === 'routing-kv' && resource.state === 'ready',
+    (resource) => resource.key === 'routing-kv' && resource.state !== 'deleted',
   );
   if (routing) {
     await client.putKvValue(

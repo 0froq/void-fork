@@ -184,14 +184,18 @@ describe('platform Cloudflare client', () => {
             ? { success: true, result: [{ key: 'nested/c.txt' }] }
             : {
                 success: true,
-                result: [{ key: 'a.txt' }, { key: 'b.txt' }],
+                result: [
+                  { key: 'a.txt' },
+                  { key: '__void/platform/ownership/v1' },
+                  { key: 'b.txt' },
+                ],
                 result_info: { cursor: 'next-page' },
               },
         );
       },
     });
 
-    await client.emptyR2Bucket('account', 'void-assets');
+    await client.emptyR2Bucket('account', 'void-assets', new Set(['__void/platform/ownership/v1']));
     expect(cursors).toEqual(['', 'next-page']);
     expect(deleted).toEqual([['a.txt', 'b.txt'], ['nested/c.txt']]);
   });
