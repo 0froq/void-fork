@@ -279,12 +279,17 @@ export async function installPlatform(
   dependencies: PlatformInstallerDependencies,
 ): Promise<PlatformInstallationResult> {
   const now = dependencies.now ?? (() => new Date().toISOString());
-  const version = readPlatformRuntimeManifest().platformVersion;
+  const runtimeDirectory = getPlatformRuntimeDirectory();
+  const runtime = readPlatformRuntimeManifest();
+  verifyRuntimeArtifacts(runtimeDirectory, runtime);
+  const version = runtime.platformVersion;
   const sourcePlatformVersion = existing?.platformVersion ?? null;
   const hadPriorWorkers =
-    existing?.resources.some(
+    existing !== null &&
+    (existing.resources.some(
       (resource) => resource.kind === 'worker' && resource.state === 'ready',
-    ) ?? false;
+    ) ||
+      plan.actions.some((action) => action.kind === 'worker' && action.action !== 'create'));
   const wasDisabled = existing?.status === 'disabled';
   const preserveDisabled = existing?.desiredState === 'disabled';
   const previousPublicEndpoints = stablePublicEndpointState(existing);
@@ -507,9 +512,6 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
 
-    const runtimeDirectory = getPlatformRuntimeDirectory();
-    const runtime = readPlatformRuntimeManifest();
-    verifyRuntimeArtifacts(runtimeDirectory, runtime);
     const migrationStep = `database-schema:${runtime.database.schemaDigest}`;
     if (!manifest.steps.some((step) => step.key === migrationStep)) {
       const legacyMigrationStep = `database-migrations:${runtime.database.journalSha256}`;
