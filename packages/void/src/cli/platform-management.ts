@@ -48,8 +48,6 @@ import { platformManagedWorkerTraffic } from './platform-traffic.ts';
 export type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
   | 'deleteResource'
-  | 'deleteR2Object'
-  | 'emptyR2Bucket'
   | 'findZone'
   | 'getHyperdriveConfig'
   | 'getKvValue'
@@ -520,7 +518,7 @@ export async function uninstallPlatform(
   const dataMessage = retainData
     ? 'Retain installer-owned storage, dispatch, AI logs, and Hyperdrive by default.'
     : args.purgeData
-      ? 'Delete safely identifiable installer-owned storage (--purge-data); retain AI Gateway and external PostgreSQL.'
+      ? 'Delete safely identifiable installer-owned data (--purge-data); retain R2, AI Gateway, and external PostgreSQL for manual cleanup.'
       : 'Retain installer-owned data; external PostgreSQL is never deleted.';
   note(
     `Disable all platform routes.\nDelete installer-owned Workers and Queues.\n${dataMessage}\n${
@@ -695,33 +693,6 @@ export async function uninstallPlatform(
         await writeLifecycleCheckpoint(client, next);
         continue;
       }
-      if (resource.kind === 'r2-bucket') {
-        const bucket = (await client.listR2Buckets(next.account.id)).find(
-          (entry) => entry.id === resource.id && entry.name === resource.name,
-        );
-        if (!bucket?.fingerprint) {
-          throw ownershipError(
-            `Cloudflare did not return a creation fingerprint for r2-bucket ${resource.name}`,
-          );
-        }
-        if (!hasR2DeletionIntent(next, resource, bucket.fingerprint)) {
-          next = recordR2DeletionIntent(next, resource, bucket.fingerprint);
-          await writeLifecycleCheckpoint(client, next);
-        }
-        await client.emptyR2Bucket(
-          next.account.id,
-          resource.name,
-          new Set([PLATFORM_R2_OWNERSHIP_MARKER_KEY]),
-        );
-        await verifyPlatformMutationOwnership(client, next, new Set(['routing-kv', resource.key]), {
-          databaseUrl: dependencies.databaseUrl,
-        });
-        await client.deleteR2Object(
-          next.account.id,
-          resource.name,
-          PLATFORM_R2_OWNERSHIP_MARKER_KEY,
-        );
-      }
       await client.deleteResource(next.account.id, resource.kind, resource.id, zone?.id);
       next = updateResourceState(next, resource.key, 'deleted');
       await writeLifecycleCheckpoint(client, next);
@@ -884,6 +855,13 @@ function shouldDeleteResource(
   // API exposes no durable ownership marker, so automatic deletion could
   // remove a replacement gateway created by another installation.
   if (resource.kind === 'ai-gateway') {
+    return false;
+  }
+  // Cloudflare exposes no server-enforced condition tying object deletion to
+  // an R2 bucket generation. A same-name replacement can therefore race any
+  // client-side ownership recheck. Retain R2 even during --purge-data and
+  // require the operator to remove it explicitly in the Cloudflare dashboard.
+  if (resource.kind === 'r2-bucket') {
     return false;
   }
   return !(retainData && DATA_RESOURCE_KINDS.has(resource.kind));
@@ -1103,23 +1081,11 @@ async function verifyPlatformMutationOwnership(
     } else if (resource.kind === 'r2-bucket') {
       exists = hasNamedResource(r2Buckets, resource);
       if (exists) {
-        const bucket = r2Buckets.find(
-          (entry) => entry.id === resource.id && entry.name === resource.name,
-        )!;
         const marker = await client.getR2Object(
           accountId,
           resource.name,
           PLATFORM_R2_OWNERSHIP_MARKER_KEY,
         );
-        if (
-          !marker &&
-          bucket.fingerprint &&
-          !replacingMissingRoutingCheckpoint &&
-          hasR2DeletionIntent(manifest, resource, bucket.fingerprint) &&
-          hasR2DeletionIntent(remote, resource, bucket.fingerprint)
-        ) {
-          continue;
-        }
         verifyResourceMarker(marker, manifest, resource);
       }
     } else {
@@ -1235,55 +1201,6 @@ function dnsRecordConfigHash(
   return createHash('sha256')
     .update(JSON.stringify({ content, kind: 'dns-record', name, proxied, type }))
     .digest('hex');
-}
-
-function r2DeletionIntentHash(
-  manifest: PlatformInstallationManifest,
-  resource: InstallationResource,
-  fingerprint: string,
-): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        accountId: manifest.account.id,
-        fingerprint,
-        installationId: manifest.id,
-        ownershipNonce: manifest.ownershipNonce,
-        resourceId: resource.id,
-        resourceKey: resource.key,
-        resourceName: resource.name,
-      }),
-    )
-    .digest('hex');
-}
-
-function hasR2DeletionIntent(
-  manifest: PlatformInstallationManifest,
-  resource: InstallationResource,
-  fingerprint: string,
-): boolean {
-  return manifest.steps.some(
-    (step) =>
-      step.key === `delete-intent:${resource.key}` &&
-      step.resultHash === r2DeletionIntentHash(manifest, resource, fingerprint),
-  );
-}
-
-function recordR2DeletionIntent(
-  manifest: PlatformInstallationManifest,
-  resource: InstallationResource,
-  fingerprint: string,
-): PlatformInstallationManifest {
-  const now = new Date().toISOString();
-  return recordInstallationStep(
-    manifest,
-    {
-      completedAt: now,
-      key: `delete-intent:${resource.key}`,
-      resultHash: r2DeletionIntentHash(manifest, resource, fingerprint),
-    },
-    now,
-  );
 }
 
 function verifyResourceMarker(
