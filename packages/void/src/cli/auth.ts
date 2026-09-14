@@ -169,6 +169,7 @@ export function getToken(root: string = process.cwd()): string | null {
       // Successfully migrated — best-effort cleanup of the config-file copy.
       // Failures here (read-only FS, permission denied, full disk) must not
       // crash callers. Token stays in the file; next invocation will retry.
+      config.api ??= normalizedApiUrl;
       delete config[legacyAccount];
       try {
         writeConfig(config);

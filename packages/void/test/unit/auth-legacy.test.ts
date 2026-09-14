@@ -1,0 +1,80 @@
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'pathslash';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+
+const state = vi.hoisted(() => ({
+  home: '',
+  passwords: new Map<string, string>(),
+}));
+
+vi.mock('node:os', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:os')>()),
+  homedir: () => state.home,
+}));
+
+vi.mock('@napi-rs/keyring', () => ({
+  Entry: class {
+    readonly account: string;
+
+    constructor(_service: string, account: string) {
+      this.account = account;
+    }
+
+    deletePassword() {
+      return state.passwords.delete(this.account);
+    }
+
+    getPassword() {
+      return state.passwords.get(this.account) ?? null;
+    }
+
+    setPassword(password: string) {
+      state.passwords.set(this.account, password);
+    }
+  },
+}));
+
+const directories: Array<string> = [];
+
+beforeEach(() => {
+  state.home = mkdtempSync('/tmp/void-auth-legacy-home-');
+  directories.push(state.home);
+  state.passwords.clear();
+  process.env.VOID_PLATFORM_REGISTRY_DIR = join(state.home, 'registry');
+  vi.resetModules();
+});
+
+afterEach(() => {
+  delete process.env.VOID_API_URL;
+  delete process.env.VOID_PLATFORM_REGISTRY_DIR;
+  delete process.env.VOID_PROXY_URL;
+  for (const directory of directories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+describe('legacy Void Cloud authentication', () => {
+  it('preserves a token-only platform selection while migrating to the keychain', async () => {
+    const root = mkdtempSync('/tmp/void-auth-legacy-project-');
+    directories.push(root);
+    const configDirectory = join(state.home, '.void');
+    mkdirSync(configDirectory, { recursive: true });
+    const configPath = join(configDirectory, 'config.json');
+    writeFileSync(configPath, JSON.stringify({ token: 'legacy-token' }));
+    const { getApiUrl, getToken } = await import('../../src/cli/auth.ts');
+    const { attachSelectedPlatform } = await import('../../src/cli/project.ts');
+
+    expect(getApiUrl(root)).toBe('https://api.void.cloud');
+    expect(getToken(root)).toBe('legacy-token');
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
+      api: 'https://api.void.cloud',
+    });
+    expect(attachSelectedPlatform(root, { projectId: 'project', slug: 'app' })).toMatchObject({
+      applicationDomain: 'void.app',
+      platformUrl: 'https://api.void.cloud',
+      proxyUrl: 'https://proxy.void.cloud',
+    });
+    expect(getApiUrl(root)).toBe('https://api.void.cloud');
+    expect(getToken(root)).toBe('legacy-token');
+  });
+});
