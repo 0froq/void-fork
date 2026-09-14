@@ -87,9 +87,17 @@ export class PlatformCloudflareClient {
   }
 
   async listAccounts(): Promise<ReadonlyArray<CloudflareAccount>> {
-    const result =
-      await this.request<ReadonlyArray<{ id?: unknown; name?: unknown }>>('/accounts?per_page=50');
-    return result.map((entry) => ({
+    const entries: Array<{ id?: unknown; name?: unknown }> = [];
+    for (let page = 1; ; page++) {
+      const result = await this.request<ReadonlyArray<{ id?: unknown; name?: unknown }>>(
+        `/accounts?page=${page}&per_page=50`,
+      );
+      entries.push(...result);
+      if (result.length < 50) {
+        break;
+      }
+    }
+    return entries.map((entry) => ({
       id: requiredString(entry.id, 'Cloudflare account id'),
       name: requiredString(entry.name, 'Cloudflare account name'),
     }));
@@ -103,10 +111,17 @@ export class PlatformCloudflareClient {
   }
 
   async listAiGateways(accountId: string): Promise<ReadonlyArray<CloudflareNamedResource>> {
-    const result = await this.request<ReadonlyArray<{ id?: unknown }>>(
-      `/accounts/${encodeURIComponent(accountId)}/ai-gateway/gateways`,
-    );
-    return result.map((entry) => ({
+    const entries: Array<{ id?: unknown }> = [];
+    for (let page = 1; ; page++) {
+      const result = await this.request<ReadonlyArray<{ id?: unknown }>>(
+        `/accounts/${encodeURIComponent(accountId)}/ai-gateway/gateways?page=${page}&per_page=50`,
+      );
+      entries.push(...result);
+      if (result.length < 50) {
+        break;
+      }
+    }
+    return entries.map((entry) => ({
       id: requiredString(entry.id, 'AI Gateway id'),
       name: requiredString(entry.id, 'AI Gateway id'),
     }));
@@ -206,14 +221,31 @@ export class PlatformCloudflareClient {
   }
 
   async listR2Buckets(accountId: string): Promise<ReadonlyArray<CloudflareNamedResource>> {
-    const result = await this.request<
-      { buckets?: ReadonlyArray<{ name?: unknown }> } | ReadonlyArray<{ name?: unknown }>
-    >(`/accounts/${encodeURIComponent(accountId)}/r2/buckets?per_page=100`);
-    const buckets: ReadonlyArray<{ name?: unknown }> = Array.isArray(result)
-      ? result
-      : 'buckets' in result
-        ? (result.buckets ?? [])
-        : [];
+    const buckets: Array<{ name?: unknown }> = [];
+    let startAfter = '';
+    for (;;) {
+      const query = new URLSearchParams({ direction: 'asc', order: 'name', per_page: '1000' });
+      if (startAfter) {
+        query.set('start_after', startAfter);
+      }
+      const result = await this.request<
+        { buckets?: ReadonlyArray<{ name?: unknown }> } | ReadonlyArray<{ name?: unknown }>
+      >(`/accounts/${encodeURIComponent(accountId)}/r2/buckets?${query}`);
+      const page = Array.isArray(result)
+        ? result
+        : 'buckets' in result
+          ? (result.buckets ?? [])
+          : [];
+      buckets.push(...page);
+      if (page.length < 1000) {
+        break;
+      }
+      const next = requiredString(page.at(-1)?.name, 'R2 bucket name');
+      if (next === startAfter) {
+        throw new Error('platform: Cloudflare returned a non-advancing R2 bucket page.');
+      }
+      startAfter = next;
+    }
     return buckets.map((entry) => {
       const name = requiredString(entry.name, 'R2 bucket name');
       return { id: name, name };
@@ -275,10 +307,17 @@ export class PlatformCloudflareClient {
   }
 
   async listHyperdriveConfigs(accountId: string): Promise<ReadonlyArray<CloudflareNamedResource>> {
-    const result = await this.request<ReadonlyArray<{ id?: unknown; name?: unknown }>>(
-      `/accounts/${encodeURIComponent(accountId)}/hyperdrive/configs?per_page=100`,
-    );
-    return result.map((entry) => ({
+    const entries: Array<{ id?: unknown; name?: unknown }> = [];
+    for (let page = 1; ; page++) {
+      const result = await this.request<ReadonlyArray<{ id?: unknown; name?: unknown }>>(
+        `/accounts/${encodeURIComponent(accountId)}/hyperdrive/configs?page=${page}&per_page=50`,
+      );
+      entries.push(...result);
+      if (result.length < 50) {
+        break;
+      }
+    }
+    return entries.map((entry) => ({
       id: requiredString(entry.id, 'Hyperdrive id'),
       name: requiredString(entry.name, 'Hyperdrive name'),
     }));

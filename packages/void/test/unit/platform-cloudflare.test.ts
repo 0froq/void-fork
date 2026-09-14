@@ -56,6 +56,61 @@ describe('platform Cloudflare client', () => {
     expect(pages).toEqual(['1', '2']);
   });
 
+  it('exhausts paginated collision checks for platform resource names', async () => {
+    const calls: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        const url = new URL(String(input));
+        calls.push(`${url.pathname}?${url.searchParams}`);
+        const page = Number(url.searchParams.get('page') ?? '1');
+        if (url.pathname.endsWith('/ai-gateway/gateways')) {
+          return Response.json({
+            success: true,
+            result:
+              page === 1
+                ? Array.from({ length: 50 }, (_, index) => ({ id: `gateway-${index}` }))
+                : [{ id: 'gateway-50' }],
+          });
+        }
+        return Response.json({
+          success: true,
+          result:
+            page === 1
+              ? Array.from({ length: 50 }, (_, index) => ({
+                  id: `hyperdrive-${index}`,
+                  name: `hyperdrive-${index}`,
+                }))
+              : [{ id: 'hyperdrive-50', name: 'hyperdrive-50' }],
+        });
+      },
+    });
+
+    await expect(client.listAiGateways('account')).resolves.toHaveLength(51);
+    await expect(client.listHyperdriveConfigs('account')).resolves.toHaveLength(51);
+    expect(calls.filter((call) => call.includes('ai-gateway'))).toHaveLength(2);
+    expect(calls.filter((call) => call.includes('hyperdrive'))).toHaveLength(2);
+  });
+
+  it('paginates R2 buckets with a stable start-after cursor', async () => {
+    const cursors: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        const url = new URL(String(input));
+        const cursor = url.searchParams.get('start_after') ?? '';
+        cursors.push(cursor);
+        const buckets = cursor
+          ? [{ name: 'bucket-1000' }]
+          : Array.from({ length: 1000 }, (_, index) => ({
+              name: `bucket-${String(index).padStart(4, '0')}`,
+            }));
+        return Response.json({ success: true, result: { buckets } });
+      },
+    });
+
+    await expect(client.listR2Buckets('account')).resolves.toHaveLength(1001);
+    expect(cursors).toEqual(['', 'bucket-0999']);
+  });
+
   it('uses the documented AI Gateway lifecycle endpoints and creation shape', async () => {
     const requests: Array<{ body: unknown; method: string; pathname: string }> = [];
     const client = new PlatformCloudflareClient('token', {
