@@ -174,20 +174,18 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         existing = selected;
       }
     }
-    const plan = await createPlatformInstallPlan(
-      client,
-      {
-        accountId,
-        applicationDomain,
-        controlPlaneDomain,
-        dedicatedZone,
-        displayName,
-        installationSlug,
-        zoneName,
-      },
-      existing,
-      { authoritativeProvisionIntents },
-    );
+    const planInput = {
+      accountId,
+      applicationDomain,
+      controlPlaneDomain,
+      dedicatedZone,
+      displayName,
+      installationSlug,
+      zoneName,
+    };
+    const plan = await createPlatformInstallPlan(client, planInput, existing, {
+      authoritativeProvisionIntents,
+    });
     note(
       formatPlatformInstallPlan(plan),
       args.plan ? 'Read-only installation plan' : 'Installation plan',
@@ -246,6 +244,13 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     const result = await installPlatform(plan, secrets, existing, {
       acquireDatabaseLifecycleLock: acquirePlatformDatabaseLifecycleLock,
       client,
+      replanWorkers: async (manifest) =>
+        (
+          await createPlatformInstallPlan(client, planInput, manifest, {
+            authoritativeProvisionIntents: true,
+            repairMissing: true,
+          })
+        ).actions.filter((action) => action.kind === 'worker'),
       revalidateBeforeWorkerDeploy: (manifest, action) =>
         revalidatePlatformInstallAction(client, plan, manifest, action),
       verifyExistingOwnership: async (manifest, databaseCheckpointExists) => {

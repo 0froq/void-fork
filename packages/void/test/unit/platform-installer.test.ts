@@ -1300,6 +1300,45 @@ describe('platform installer', () => {
       ]),
     );
 
+    const interruptedInitialCutover = {
+      ...enabledUpgrade.manifest,
+      status: 'failed' as const,
+      steps: [
+        ...enabledUpgrade.manifest.steps,
+        {
+          completedAt: '2026-09-14T00:00:07.000Z',
+          key: 'worker-cutover:2000:staged:api',
+          resultHash: cutoverSnapshot(deployment.resources.apiWorker, null, 'staged-api'),
+        },
+      ],
+    };
+    let replannedResourceState = '';
+    const replannedActions: Array<string> = [];
+    await installPlatform(upgradedPlan, secrets, interruptedInitialCutover, {
+      acquireDatabaseLifecycleLock,
+      claimDatabase,
+      client: upgradeClient,
+      deployWorker: async () => {},
+      migrateDatabase: async () => {},
+      recoverWorkerCutover: async () => {},
+      replanWorkers: async (manifest) => {
+        replannedResourceState = manifest.resources.find(
+          (resource) => resource.key === 'api-worker',
+        )!.state;
+        return upgradedPlan.actions
+          .filter((action) => action.kind === 'worker')
+          .map((action) =>
+            action.key === 'api-worker' ? { ...action, action: 'create', id: null } : action,
+          );
+      },
+      revalidateBeforeWorkerDeploy: async (_manifest, action) => {
+        replannedActions.push(`${action.key}:${action.action}`);
+      },
+      verifyHealth: async () => {},
+    });
+    expect(replannedResourceState).toBe('deleted');
+    expect(replannedActions).toContain('api-worker:create');
+
     function named(key: string) {
       const resource = byKey.get(key)!;
       return { id: resource.id, name: resource.name };
@@ -1307,7 +1346,7 @@ describe('platform installer', () => {
 
     function cutoverSnapshot(
       workerName: string,
-      previousVersionId: string,
+      previousVersionId: string | null,
       stagedVersionId: string,
     ) {
       return Buffer.from(

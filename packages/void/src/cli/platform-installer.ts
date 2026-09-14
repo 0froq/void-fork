@@ -116,6 +116,9 @@ export type PlatformInstallerDependencies = Readonly<{
     stagedVersionId: string;
     workerName: string;
   }) => Promise<void>;
+  replanWorkers?: (
+    manifest: PlatformInstallationManifest,
+  ) => Promise<ReadonlyArray<PlatformInstallPlanAction>>;
   revalidateBeforeWorkerDeploy: (
     manifest: PlatformInstallationManifest,
     action: PlatformInstallPlanAction,
@@ -525,6 +528,9 @@ export async function installPlatform(
       publicEndpoints: previousPublicEndpoints,
     });
     const interruptedCutover = interruptedWorkerCutover(manifest);
+    let workerActions: ReadonlyArray<PlatformInstallPlanAction> = plan.actions.filter(
+      (action) => action.kind === 'worker',
+    );
     if (interruptedCutover) {
       for (const key of [...interruptedCutover.staged.keys()].reverse()) {
         const snapshot = interruptedCutover.staged.get(key)!;
@@ -592,12 +598,38 @@ export async function installPlatform(
         previousPublicEndpoints,
         now(),
       );
+      let deletedNewWorker = false;
+      for (const [key, snapshot] of interruptedCutover.staged) {
+        if (snapshot.previousVersionId !== null) {
+          continue;
+        }
+        const resourceKey = `${key}-worker`;
+        const resource = manifest.resources.find(
+          (entry) => entry.key === resourceKey && entry.name === snapshot.workerName,
+        );
+        if (resource?.state === 'ready') {
+          manifest = recordInstallationResource(manifest, { ...resource, state: 'deleted' }, now());
+        }
+        deletedNewWorker = true;
+      }
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      if (deletedNewWorker) {
+        if (!dependencies.replanWorkers) {
+          throw new Error(
+            'platform: Recovering newly created Workers requires a fresh Cloudflare installation plan.',
+          );
+        }
+        workerActions = validateReplannedWorkerActions(
+          plan,
+          manifest,
+          await dependencies.replanWorkers(manifest),
+        );
+      }
     }
     workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
     for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
-      const action = plan.actions.find((entry) => entry.key === `${key}-worker`)!;
+      const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
       const workerSecrets =
         key === 'api'
           ? apiWorkerSecrets(secrets, plan.account.id, zone.id)
@@ -948,6 +980,38 @@ function recordResource(
     },
     now,
   );
+}
+
+function validateReplannedWorkerActions(
+  original: PlatformInstallPlan,
+  manifest: PlatformInstallationManifest,
+  actions: ReadonlyArray<PlatformInstallPlanAction>,
+): ReadonlyArray<PlatformInstallPlanAction> {
+  const expected = original.actions.filter((action) => action.kind === 'worker');
+  if (actions.length !== expected.length) {
+    throw new Error('platform: Fresh Cloudflare planning did not return every platform Worker.');
+  }
+  for (const previous of expected) {
+    const matches = actions.filter((action) => action.key === previous.key);
+    const current = matches[0];
+    if (
+      matches.length !== 1 ||
+      !current ||
+      current.kind !== 'worker' ||
+      current.name !== previous.name
+    ) {
+      throw new Error(
+        `platform: Fresh Cloudflare planning changed the identity of Worker ${JSON.stringify(previous.name)}.`,
+      );
+    }
+    const resource = manifest.resources.find((entry) => entry.key === current.key);
+    if (resource?.state === 'deleted' && current.action !== 'create') {
+      throw new Error(
+        `platform: Fresh Cloudflare planning did not recreate deleted Worker ${JSON.stringify(current.name)}.`,
+      );
+    }
+  }
+  return actions;
 }
 
 function dnsRecordConfigHash(
