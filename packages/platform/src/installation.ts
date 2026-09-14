@@ -1,6 +1,7 @@
 import { parsePlatformDeploymentManifest, type PlatformDeploymentManifest } from './manifest.ts';
 
 export const PLATFORM_INSTALLATION_SCHEMA_VERSION = 1 as const;
+export const PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY = '__void/platform/installation/v1';
 
 export type InstallationStatus =
   | 'draft'

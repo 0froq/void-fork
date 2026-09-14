@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import {
   createPlatformInstallationManifest,
   createPlatformWorkerConfigs,
+  PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   recordInstallationResource,
   recordInstallationStep,
   setInstallationEndpoints,
@@ -28,7 +29,7 @@ import {
 } from './platform-registry.ts';
 import { resolveWranglerArgv } from './preset.ts';
 
-export const REMOTE_INSTALLATION_MANIFEST_KEY = '__void/platform/installation/v1';
+export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
 
 export type PlatformInstallationSecrets = Readonly<{
   bootstrapGitHubLogin: string;
@@ -188,6 +189,7 @@ export async function installPlatform(
       now(),
     );
     writeInstallationManifest(manifest);
+    await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     if (zone.status !== 'active') {
       manifest = transitionInstallation(manifest, 'waiting-for-dns', now());
       writeInstallationManifest(manifest);
@@ -203,12 +205,14 @@ export async function installPlatform(
         }
         manifest = recordResource(manifest, action, action.id, 'adopted', now());
         writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
         continue;
       }
       if (action.action === 'reuse') {
         if (!manifest.resources.some((resource) => resource.key === action.key) && action.id) {
           manifest = recordResource(manifest, action, action.id, 'created', now());
           writeInstallationManifest(manifest);
+          await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
         }
         continue;
       }
@@ -223,6 +227,7 @@ export async function installPlatform(
       );
       manifest = recordResource(manifest, action, resource.id, 'created', now());
       writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
 
     const runtimeDirectory = getPlatformRuntimeDirectory();
@@ -313,6 +318,7 @@ export async function installPlatform(
       await deployWorker(configs[key], workerSecrets);
       manifest = recordResource(manifest, action, action.name, 'created', now());
       writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
 
     manifest = setInstallationEndpoints(
@@ -325,12 +331,7 @@ export async function installPlatform(
     await (dependencies.verifyHealth ?? verifyPlatformHealth)(plan.apiUrl, manifest.id);
     manifest = transitionInstallation(manifest, 'installed', now());
     writeInstallationManifest(manifest);
-    await dependencies.client.putKvValue(
-      plan.account.id,
-      requireId(ids, 'routing-kv'),
-      REMOTE_INSTALLATION_MANIFEST_KEY,
-      JSON.stringify(manifest),
-    );
+    await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     promoteInstallationSecrets(manifest);
     savePlatformConnection({
       accountId: plan.account.id,
@@ -347,12 +348,36 @@ export async function installPlatform(
       try {
         manifest = transitionInstallation(manifest, 'failed', now());
         writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       } catch {
         // Preserve the original failure when a terminal state cannot transition.
       }
     }
     throw error;
   }
+}
+
+async function writeRemoteInstallationCheckpoint(
+  client: InstallerClient,
+  plan: PlatformInstallPlan,
+  manifest: PlatformInstallationManifest,
+): Promise<void> {
+  const routing = manifest.resources.find(
+    (resource) =>
+      resource.key === 'routing-kv' &&
+      resource.kind === 'kv-namespace' &&
+      resource.ownership === 'created' &&
+      resource.state === 'ready',
+  );
+  if (!routing) {
+    return;
+  }
+  await client.putKvValue(
+    plan.account.id,
+    routing.id,
+    REMOTE_INSTALLATION_MANIFEST_KEY,
+    JSON.stringify(manifest),
+  );
 }
 
 function recordProvisionIntent(

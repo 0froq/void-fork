@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
   createPlatformDeploymentManifest,
+  parsePlatformInstallationManifest,
+  PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   type InstallationResourceKind,
   type PlatformDeploymentManifest,
   type PlatformInstallationManifest,
@@ -45,6 +47,7 @@ export type PlatformInstallPlanInput = Readonly<{
 type PlanningClient = Pick<
   PlatformCloudflareClient,
   | 'findZone'
+  | 'getKvValue'
   | 'getWorkersSubdomain'
   | 'listAiGateways'
   | 'listAccounts'
@@ -122,11 +125,14 @@ export async function createPlatformInstallPlan(
     client.listWorkerNames(account.id),
   ]);
   const dnsRecords = zone ? await client.listDnsRecords(zone.id, wildcardHostname) : [];
+  const remoteOwnership = existing
+    ? await readRemoteOwnership(client, account.id, routingKv, existing)
+    : null;
   const actions: Array<PlatformInstallPlanAction> = [];
   const recordedZone = existing?.resources.find((resource) => resource.key === 'zone');
-  const intendedZone = existing
-    ? hasProvisionIntent(existing, 'zone', 'zone', deployment.application.zoneName)
-    : false;
+  const remotelyOwnedZone = remoteOwnership?.resources.some(
+    (resource) => resource.key === 'zone' && resource.id === zone?.id,
+  );
   const repairCreatedZone =
     options?.repairMissing && recordedZone?.ownership === 'created' && !zone;
   if (
@@ -141,7 +147,7 @@ export async function createPlatformInstallPlan(
   actions.push({
     action: repairCreatedZone
       ? 'create'
-      : recordedZone || (zone && intendedZone)
+      : recordedZone || (zone && remotelyOwnedZone)
         ? 'reuse'
         : zone
           ? 'adopt'
@@ -152,7 +158,7 @@ export async function createPlatformInstallPlan(
     name: deployment.application.zoneName,
     reason: repairCreatedZone
       ? 'Recreate the missing installer-owned zone.'
-      : recordedZone || intendedZone
+      : recordedZone || remotelyOwnedZone
         ? 'Reuse the recorded zone.'
         : zone
           ? 'Use the existing zone without taking ownership.'
@@ -168,6 +174,7 @@ export async function createPlatformInstallPlan(
     aiGateways.filter((resource) => resource.id === names.aiGateway),
     'reuse',
     options,
+    remoteOwnership,
   );
   addNamedPlan(
     actions,
@@ -178,6 +185,7 @@ export async function createPlatformInstallPlan(
     routingKv,
     'reuse',
     options,
+    remoteOwnership,
   );
   addNamedPlan(
     actions,
@@ -188,6 +196,7 @@ export async function createPlatformInstallPlan(
     isrKv,
     'reuse',
     options,
+    remoteOwnership,
   );
   addNamedPlan(
     actions,
@@ -198,6 +207,7 @@ export async function createPlatformInstallPlan(
     legacyKv,
     'reuse',
     options,
+    remoteOwnership,
   );
   addNamedPlan(
     actions,
@@ -208,6 +218,7 @@ export async function createPlatformInstallPlan(
     r2Buckets.filter((resource) => resource.name === names.assetsBucket),
     'reuse',
     options,
+    remoteOwnership,
   );
   addNamedPlan(
     actions,
@@ -218,6 +229,7 @@ export async function createPlatformInstallPlan(
     usageQueues,
     'reuse',
     options,
+    remoteOwnership,
   );
   addNamedPlan(
     actions,
@@ -228,6 +240,7 @@ export async function createPlatformInstallPlan(
     cronQueues,
     'reuse',
     options,
+    remoteOwnership,
   );
   addNamedPlan(
     actions,
@@ -238,6 +251,7 @@ export async function createPlatformInstallPlan(
     dispatchNamespaces.filter((resource) => resource.name === names.dispatchNamespace),
     'reuse',
     options,
+    remoteOwnership,
   );
   addNamedPlan(
     actions,
@@ -248,6 +262,7 @@ export async function createPlatformInstallPlan(
     hyperdrives.filter((resource) => resource.name === names.hyperdrive),
     'reuse',
     options,
+    remoteOwnership,
   );
   for (const [key, name] of [
     ['api-worker', names.apiWorker],
@@ -256,7 +271,17 @@ export async function createPlatformInstallPlan(
     ['dispatch-worker', names.dispatchWorker],
   ] as const) {
     const matches = workers.includes(name) ? [{ id: name, name }] : [];
-    addNamedPlan(actions, existing, key, 'worker', name, matches, 'update', options);
+    addNamedPlan(
+      actions,
+      existing,
+      key,
+      'worker',
+      name,
+      matches,
+      'update',
+      options,
+      remoteOwnership,
+    );
   }
   const apiUrl = deployment.controlPlane.apiHostname
     ? `https://${deployment.controlPlane.apiHostname}`
@@ -352,6 +377,7 @@ function addNamedPlan(
   matches: ReadonlyArray<CloudflareNamedResource>,
   existingAction: 'reuse' | 'update' = 'reuse',
   options?: { repairMissing?: boolean },
+  remoteOwnership?: PlatformInstallationManifest | null,
 ): void {
   if (matches.length > 1) {
     throw new Error(`platform: More than one ${kind} named ${JSON.stringify(name)} exists.`);
@@ -359,8 +385,15 @@ function addNamedPlan(
   const remote = matches[0];
   const recorded = existing?.resources.find((resource) => resource.key === key);
   if (remote) {
-    const intended = existing ? hasProvisionIntent(existing, key, kind, name) : false;
-    if ((!recorded || recorded.id !== remote.id || recorded.kind !== kind) && !intended) {
+    const remotelyOwned = remoteOwnership?.resources.some(
+      (resource) =>
+        resource.key === key &&
+        resource.kind === kind &&
+        resource.id === remote.id &&
+        resource.name === name &&
+        resource.ownership === 'created',
+    );
+    if ((!recorded || recorded.id !== remote.id || recorded.kind !== kind) && !remotelyOwned) {
       throw new Error(
         `platform: ${kind} ${JSON.stringify(name)} already exists but is not owned by this installation. Choose another installation name.`,
       );
@@ -420,14 +453,42 @@ export function platformProvisionIntentHash(
     .digest('hex');
 }
 
-function hasProvisionIntent(
-  manifest: PlatformInstallationManifest,
-  key: string,
-  kind: InstallationResourceKind,
-  name: string,
-): boolean {
-  const intent = manifest.steps.find((step) => step.key === `provision-intent:${key}`);
-  return intent?.resultHash === platformProvisionIntentHash(manifest, key, kind, name);
+async function readRemoteOwnership(
+  client: PlanningClient,
+  accountId: string,
+  routingNamespaces: ReadonlyArray<CloudflareNamedResource>,
+  existing: PlatformInstallationManifest,
+): Promise<PlatformInstallationManifest | null> {
+  for (const namespace of routingNamespaces) {
+    const value = await client.getKvValue(
+      accountId,
+      namespace.id,
+      PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
+    );
+    if (value === null) {
+      continue;
+    }
+    let remote: PlatformInstallationManifest;
+    try {
+      remote = parsePlatformInstallationManifest(JSON.parse(value) as unknown);
+    } catch {
+      throw new Error(
+        `platform: Routing namespace ${JSON.stringify(namespace.name)} contains invalid ownership metadata.`,
+      );
+    }
+    const routing = remote.resources.find((resource) => resource.key === 'routing-kv');
+    if (
+      remote.id === existing.id &&
+      remote.ownershipNonce === existing.ownershipNonce &&
+      remote.account.id === accountId &&
+      routing?.id === namespace.id &&
+      routing.name === namespace.name &&
+      routing.ownership === 'created'
+    ) {
+      return remote;
+    }
+  }
+  return null;
 }
 
 export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {

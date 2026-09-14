@@ -23,6 +23,7 @@ function planningClient() {
     verifyToken: async () => {},
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'workers-subdomain',
+    getKvValue: async () => null,
     listAiGateways: async () => [],
     findZone: async () => ({
       id: 'zone-id',
@@ -346,7 +347,7 @@ describe('platform installer', () => {
       deployment.resources.dispatchWorker,
     ]);
     expect(migrations).toBe(0);
-    expect(upgradeKvWrites).toEqual(['__void/platform/installation/v1']);
+    expect(new Set(upgradeKvWrites)).toEqual(new Set(['__void/platform/installation/v1']));
     expect(upgraded.manifest.status).toBe('installed');
     expect(upgraded.manifest.resources).toHaveLength(15);
 

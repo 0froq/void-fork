@@ -15,6 +15,7 @@ export {
 } from './manifest.ts';
 export {
   PLATFORM_INSTALLATION_SCHEMA_VERSION,
+  PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   createPlatformInstallationManifest,
   parsePlatformInstallationManifest,
   recordInstallationResource,

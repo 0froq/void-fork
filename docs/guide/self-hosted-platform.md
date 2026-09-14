@@ -83,7 +83,7 @@ void platform install \
   --zone example.com
 ```
 
-Before changing Cloudflare, the installer shows the complete plan and defaults the confirmation to No. Every create operation is preceded by a durable local intent checkpoint. If a command exits after Cloudflare accepted a request but before the result was recorded, the next plan can safely recognize the resource as belonging to that attempt.
+Before changing Cloudflare, the installer shows the complete plan and defaults the confirmation to No. Every create operation is preceded by a durable local intent checkpoint, and ownership is continuously mirrored into the installer-owned routing namespace. A local intent alone is never accepted as remote ownership proof, so a concurrent or ambiguous same-name installation fails closed instead of claiming resources it might later delete.
 
 If the requested zone does not exist, Void creates it and stops in a `waiting-for-dns` state. Update the domain at its registrar to use the printed Cloudflare nameservers, wait for the zone to become active, then resume:
 
