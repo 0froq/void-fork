@@ -17,6 +17,7 @@ app.use('/*', async (context, next) => {
   const installerProbe =
     context.req.path === '/health' && context.req.header('X-Health-Check') === 'void-admin';
   if (
+    context.env.PLATFORM_INSTALLATION_ID &&
     !installerProbe &&
     (await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
   ) {

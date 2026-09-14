@@ -591,7 +591,10 @@ export default {
     if (url.pathname === '/health' && request.headers.get('X-Health-Check') === 'void-admin') {
       return Response.json({ ok: true });
     }
-    if ((await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+    if (
+      env.PLATFORM_INSTALLATION_ID &&
+      (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+    ) {
       return createErrorResponse(request, 503, 'Platform disabled', {
         'Cache-Control': 'no-store',
       });

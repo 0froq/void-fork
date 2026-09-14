@@ -15,16 +15,17 @@ function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
-function createEnv(disabled = false): Env {
+function createEnv(disabled = false, selfHosted = false): Env {
   const workerFetch = vi.fn(async () => new Response('worker'));
   return {
     ROUTING: {
-      get: async (key: string) =>
+      get: vi.fn(async (key: string) =>
         key === PLATFORM_DISABLED_KEY
           ? disabled
             ? 'disabled'
             : null
           : JSON.stringify({ workerName: 'user-app', projectId: 'proj_1' }),
+      ),
     },
     DISPATCH: {
       get: vi.fn(() => ({ fetch: workerFetch })),
@@ -37,6 +38,7 @@ function createEnv(disabled = false): Env {
     ANALYTICS: {
       writeDataPoint: vi.fn(),
     },
+    ...(selfHosted ? { PLATFORM_INSTALLATION_ID: 'installation-id' } : {}),
   } as unknown as Env;
 }
 
@@ -44,7 +46,7 @@ describe('internal route blocking', () => {
   it('rejects every request while the platform is disabled', async () => {
     const response = await app.fetch(
       new Request('https://my-app.void.app/normal-path'),
-      createEnv(true),
+      createEnv(true, true),
       createCtx(),
     );
     expect(response.status).toBe(503);
@@ -56,11 +58,22 @@ describe('internal route blocking', () => {
       new Request('https://my-app.void.app/health', {
         headers: { 'X-Health-Check': 'void-admin' },
       }),
-      createEnv(true),
+      createEnv(true, true),
       createCtx(),
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it('does not add a lifecycle routing read for hosted Void Cloud', async () => {
+    const env = createEnv();
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/normal-path'),
+      env,
+      createCtx(),
+    );
+    expect(response.status).toBe(200);
+    expect(env.ROUTING.get).toHaveBeenCalledTimes(1);
   });
 
   it('blocks POST /__void/migrate with 404', async () => {

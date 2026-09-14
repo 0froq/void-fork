@@ -130,6 +130,7 @@ function createEnv(
   aiOverrides?: Partial<MockAi>,
   kvData?: Record<string, string>,
   apiOverride?: { fetch: ReturnType<typeof vi.fn> | ((req: Request) => Promise<Response>) },
+  platformInstallationId?: string,
 ) {
   return {
     AI: {
@@ -149,6 +150,7 @@ function createEnv(
         throw new Error('worker not found');
       }),
     },
+    ...(platformInstallationId ? { PLATFORM_INSTALLATION_ID: platformInstallationId } : {}),
   };
 }
 
@@ -180,7 +182,7 @@ describe('proxy worker', () => {
   it('rejects every request while the platform is disabled', async () => {
     const res = await worker.fetch(
       new Request('https://proxy.void.cloud/health'),
-      createEnv(undefined, { [PLATFORM_DISABLED_KEY]: 'disabled' }),
+      createEnv(undefined, { [PLATFORM_DISABLED_KEY]: 'disabled' }, undefined, 'installation-id'),
     );
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'Platform disabled' });
@@ -191,10 +193,17 @@ describe('proxy worker', () => {
       new Request('https://proxy.void.cloud/health', {
         headers: { 'X-Health-Check': 'void-admin' },
       }),
-      createEnv(undefined, { [PLATFORM_DISABLED_KEY]: 'disabled' }),
+      createEnv(undefined, { [PLATFORM_DISABLED_KEY]: 'disabled' }, undefined, 'installation-id'),
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true });
+  });
+
+  it('does not read the lifecycle gate for hosted Void Cloud', async () => {
+    const env = createEnv();
+    const res = await worker.fetch(new Request('https://proxy.void.cloud/health'), env);
+    expect(res.status).toBe(200);
+    expect(env.ROUTING.get).not.toHaveBeenCalled();
   });
 
   describe('CORS', () => {

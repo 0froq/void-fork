@@ -147,6 +147,7 @@ export function createPlatformWorkerConfigs(input: {
     vars: {
       AI_GATEWAY_ID: names.aiGateway,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
+      PLATFORM_INSTALLATION_ID: installationId,
       ...ownershipVars('proxy-worker', names.proxyWorker),
     },
   };
@@ -192,6 +193,7 @@ export function createPlatformWorkerConfigs(input: {
       tail_consumers: [{ service: names.tailWorker }],
       vars: {
         BASE_HOSTNAME: deployment.application.baseDomain,
+        PLATFORM_INSTALLATION_ID: installationId,
         ...ownershipVars('dispatch-worker', names.dispatchWorker),
       },
     },

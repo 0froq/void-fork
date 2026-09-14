@@ -11,4 +11,5 @@ export type Env = Readonly<{
   USAGE_QUEUE: Queue<unknown>;
   BASE_HOSTNAME?: string;
   DISPATCH_TIMEOUT_MS?: string;
+  PLATFORM_INSTALLATION_ID?: string;
 }>;

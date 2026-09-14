@@ -37,6 +37,7 @@ describe('platform Worker configuration', () => {
     expect(configs.proxy.vars).toMatchObject({
       AI_GATEWAY_ID: deployment.resources.aiGateway,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
+      PLATFORM_INSTALLATION_ID: 'example-a1b2c3d4',
     });
     expect(configs.tail.vars).toMatchObject({
       PLATFORM_DISPATCH_WORKER_NAME: deployment.resources.dispatchWorker,
@@ -59,6 +60,9 @@ describe('platform Worker configuration', () => {
       { pattern: '*.apps.example.com/*', zone_name: 'example.com' },
       { pattern: '*.apps.example.com', zone_name: 'example.com' },
     ]);
+    expect(configs.dispatch.vars).toMatchObject({
+      PLATFORM_INSTALLATION_ID: 'example-a1b2c3d4',
+    });
   });
 
   it('can deploy an upgrade without exposing a disabled installation', () => {

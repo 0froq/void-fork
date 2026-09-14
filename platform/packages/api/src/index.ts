@@ -100,6 +100,7 @@ const app = new Hono<ApiEnv>()
       context.req.header('X-Health-Check') === 'void-admin' &&
       (context.req.path === '/health' || context.req.path === '/.well-known/void-platform');
     if (
+      context.env.PLATFORM_INSTALLATION_ID &&
       !installerProbe &&
       (await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
     ) {
@@ -272,7 +273,10 @@ async function scheduled(
   env: ApiEnv['Bindings'],
   _ctx: ExecutionContext,
 ): Promise<void> {
-  if ((await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+  if (
+    env.PLATFORM_INSTALLATION_ID &&
+    (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+  ) {
     return;
   }
   const db = createDb(env.HYPERDRIVE.connectionString);
@@ -789,7 +793,10 @@ export default {
   fetch: app.fetch,
   scheduled,
   async queue(batch: MessageBatch<unknown>, env: ApiEnv['Bindings']): Promise<void> {
-    if ((await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+    if (
+      env.PLATFORM_INSTALLATION_ID &&
+      (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+    ) {
       return;
     }
     // Dispatch by queue name. void-api consumes two queues:

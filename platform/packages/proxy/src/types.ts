@@ -52,6 +52,7 @@ export type Env = Readonly<{
   API: Fetcher;
   DISPATCH: DispatchNamespace;
   PLATFORM_CAPABILITIES?: string;
+  PLATFORM_INSTALLATION_ID?: string;
   SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounterRpc>;
 }>;
 

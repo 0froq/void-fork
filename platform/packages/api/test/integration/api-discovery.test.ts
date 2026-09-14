@@ -92,7 +92,7 @@ describe('GET /.well-known/void-platform', () => {
         new Request('https://api.void.cloud/.well-known/void-platform', {
           headers: { 'X-Health-Check': 'void-admin' },
         }),
-        env,
+        { ...env, PLATFORM_INSTALLATION_ID: 'installation-id' },
       );
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ schemaVersion: 1 });
