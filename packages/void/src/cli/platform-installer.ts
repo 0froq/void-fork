@@ -1,6 +1,13 @@
-import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingHttpHeaders,
+  type Server,
+} from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import {
   encodeCloudflareVersionMessage,
@@ -63,6 +70,7 @@ import {
   trackedPlatformWorkerTraffic,
 } from './platform-traffic.ts';
 import { resolveWranglerArgv } from './preset.ts';
+import { createDefaultRunWrangler, resolvePinnedApiBaseUrl } from './provision.ts';
 
 export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
 
@@ -1839,7 +1847,9 @@ async function deployPlatformWorker(
       writeFileSync(secretsPath, JSON.stringify(secrets), { mode: 0o600 });
       argv.push('--secrets-file', secretsPath);
     }
-    const uploaded = await runPlatformWrangler(argv, accountId, directory, true);
+    const uploaded = options.workerExisted
+      ? await runPlatformWrangler(argv, accountId, directory, true)
+      : await runPlatformWranglerForConditionalCreate(argv, accountId, directory, true, workerName);
     uploadedVersionId = parseUploadedPlatformWorkerVersion(
       `${uploaded.stdout}\n${uploaded.stderr}`,
     );
@@ -2141,18 +2151,27 @@ async function runPlatformWrangler(
   cwd: string,
   capture: boolean,
 ): Promise<CloudflareCommandResult> {
-  const [command, ...prefix] = resolveWranglerArgv(process.cwd());
-  const result = spawnSync(command, [...prefix, ...args], {
+  return runPlatformWranglerAtApiBase(args, accountId, cwd, capture);
+}
+
+const PLATFORM_WRANGLER_TIMEOUT_MS = 10 * 60 * 1000;
+
+async function runPlatformWranglerAtApiBase(
+  args: ReadonlyArray<string>,
+  accountId: string,
+  cwd: string,
+  capture: boolean,
+  apiBaseUrl = resolvePinnedApiBaseUrl(),
+): Promise<CloudflareCommandResult> {
+  const runner = createDefaultRunWrangler(process.cwd(), {
+    launcher: resolveWranglerArgv(process.cwd()),
+    timeoutMs: PLATFORM_WRANGLER_TIMEOUT_MS,
+  });
+  const result = await runner([...args], {
+    accountId,
+    apiBaseUrl,
+    captureJson: capture,
     cwd,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      CLOUDFLARE_ACCOUNT_ID: accountId,
-      CLOUDFLARE_API_TOKEN:
-        process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || undefined,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 10 * 60 * 1000,
   });
   const stdout = result.stdout || '';
   const stderr = result.stderr || '';
@@ -2165,10 +2184,209 @@ async function runPlatformWrangler(
     }
   }
   return {
-    status: result.status ?? 1,
+    status: result.status,
     stderr,
     stdout,
   };
+}
+
+type ConditionalWorkerCreateState = {
+  attempted: boolean;
+  conflictStatus: number | null;
+  created: boolean;
+  forwarded: boolean;
+  rejectedMutation: string | null;
+};
+
+type ConditionalWorkerCreateProxy = Readonly<{
+  apiBaseUrl: string;
+  close: () => Promise<void>;
+  state: ConditionalWorkerCreateState;
+}>;
+
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+function forwardHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => !HOP_BY_HOP_HEADERS.has(name.toLowerCase())),
+  );
+}
+
+function closeHttpServer(server: Server): Promise<void> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    server.close((error) => {
+      if (error) {
+        rejectPromise(error);
+      } else {
+        resolvePromise();
+      }
+    });
+    server.closeAllConnections();
+  });
+}
+
+async function startConditionalWorkerCreateProxy(
+  upstreamApiBaseUrl: string,
+  accountId: string,
+  workerName: string,
+): Promise<ConditionalWorkerCreateProxy> {
+  const upstreamBase = new URL(upstreamApiBaseUrl);
+  if (upstreamBase.protocol !== 'http:' && upstreamBase.protocol !== 'https:') {
+    throw new Error('platform: Cloudflare API base URL must use HTTP or HTTPS.');
+  }
+  const basePath = upstreamBase.pathname.replace(/\/+$/, '');
+  const expectedPath = `${basePath}/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}`;
+  const state: ConditionalWorkerCreateState = {
+    attempted: false,
+    conflictStatus: null,
+    created: false,
+    forwarded: false,
+    rejectedMutation: null,
+  };
+  const server = createServer((incoming, outgoing) => {
+    void (async () => {
+      const incomingUrl = new URL(incoming.url ?? '/', 'http://127.0.0.1');
+      if (incomingUrl.pathname !== basePath && !incomingUrl.pathname.startsWith(`${basePath}/`)) {
+        outgoing.writeHead(502, { 'Content-Type': 'application/json' });
+        outgoing.end('{"success":false,"errors":[{"message":"Invalid API proxy path"}]}');
+        return;
+      }
+      const isConditionalCreate =
+        incoming.method === 'PUT' &&
+        incomingUrl.pathname === expectedPath &&
+        incomingUrl.search === '';
+      const isTopLevelWorkerUpload =
+        incoming.method === 'PUT' &&
+        new RegExp(
+          `^${basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/accounts/[^/]+/workers/scripts/[^/]+$`,
+        ).test(incomingUrl.pathname);
+      const isReadOnly =
+        incoming.method === 'GET' || incoming.method === 'HEAD' || incoming.method === 'OPTIONS';
+      if (
+        (isTopLevelWorkerUpload && !isConditionalCreate) ||
+        (!isReadOnly && !isConditionalCreate && !state.created)
+      ) {
+        state.rejectedMutation = `${incoming.method ?? 'UNKNOWN'} ${incomingUrl.pathname}`;
+        incoming.resume();
+        outgoing.writeHead(409, { 'Content-Type': 'application/json' });
+        outgoing.end(
+          '{"success":false,"errors":[{"message":"Mutation blocked until conditional Worker creation succeeds"}]}',
+        );
+        return;
+      }
+      const headers = forwardHeaders(incoming.headers);
+      delete headers.host;
+      if (isConditionalCreate) {
+        state.attempted = true;
+        headers['if-none-match'] = '*';
+      }
+      const upstreamUrl = new URL(
+        `${incomingUrl.pathname}${incomingUrl.search}`,
+        upstreamBase.origin,
+      );
+      const request = (upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest)(
+        upstreamUrl,
+        {
+          headers,
+          method: incoming.method,
+        },
+        (response) => {
+          if (isConditionalCreate) {
+            state.forwarded = true;
+            if (response.statusCode === 409 || response.statusCode === 412) {
+              state.conflictStatus = response.statusCode;
+            }
+            state.created =
+              response.statusCode !== undefined &&
+              response.statusCode >= 200 &&
+              response.statusCode < 300;
+          }
+          const responseHeaders = forwardHeaders(response.headers);
+          outgoing.writeHead(response.statusCode ?? 502, responseHeaders);
+          response.pipe(outgoing);
+        },
+      );
+      request.on('error', () => {
+        if (!outgoing.headersSent) {
+          outgoing.writeHead(502, { 'Content-Type': 'application/json' });
+        }
+        outgoing.end(
+          '{"success":false,"errors":[{"message":"Cloudflare API proxy request failed"}]}',
+        );
+      });
+      incoming.pipe(request);
+    })().catch(() => {
+      if (!outgoing.headersSent) {
+        outgoing.writeHead(502, { 'Content-Type': 'application/json' });
+      }
+      outgoing.end('{"success":false,"errors":[{"message":"Cloudflare API proxy failed"}]}');
+    });
+  });
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    server.once('error', rejectPromise);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', rejectPromise);
+      resolvePromise();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    apiBaseUrl: `http://127.0.0.1:${address.port}${basePath}`,
+    close: () => closeHttpServer(server),
+    state,
+  };
+}
+
+export async function withConditionalPlatformWorkerCreate<T>(
+  accountId: string,
+  workerName: string,
+  operation: (apiBaseUrl: string) => Promise<T>,
+  upstreamApiBaseUrl: string = resolvePinnedApiBaseUrl(),
+): Promise<T> {
+  const proxy = await startConditionalWorkerCreateProxy(upstreamApiBaseUrl, accountId, workerName);
+  let result: T;
+  try {
+    result = await operation(proxy.apiBaseUrl);
+  } finally {
+    await proxy.close();
+  }
+  if (proxy.state.rejectedMutation) {
+    throw new Error(
+      `platform: Wrangler attempted unexpected mutation ${proxy.state.rejectedMutation} while conditionally creating new Worker ${workerName}; the mutation was blocked.`,
+    );
+  }
+  if (!proxy.state.attempted || !proxy.state.forwarded) {
+    throw new Error(
+      `platform: Wrangler did not use the guarded create endpoint for new Worker ${workerName}; refusing an unverified deployment.`,
+    );
+  }
+  if (proxy.state.conflictStatus !== null) {
+    throw new Error(
+      `platform: Worker ${workerName} was created concurrently (HTTP ${proxy.state.conflictStatus}); no existing Worker was changed. Re-run to inspect the collision.`,
+    );
+  }
+  return result;
+}
+
+async function runPlatformWranglerForConditionalCreate(
+  args: ReadonlyArray<string>,
+  accountId: string,
+  cwd: string,
+  capture: boolean,
+  workerName: string,
+): Promise<CloudflareCommandResult> {
+  return withConditionalPlatformWorkerCreate(accountId, workerName, (apiBaseUrl) =>
+    runPlatformWranglerAtApiBase(args, accountId, cwd, capture, apiBaseUrl),
+  );
 }
 
 async function readActivePlatformWorkerVersion(

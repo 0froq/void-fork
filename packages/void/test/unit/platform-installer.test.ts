@@ -1,4 +1,6 @@
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { encodeCloudflareVersionMessage } from '@void/deploy-cloudflare';
 import {
@@ -41,6 +43,7 @@ import {
   resolveBootstrapGitHubId,
   stablePublicEndpointState,
   verifyPlatformHealth,
+  withConditionalPlatformWorkerCreate,
 } from '../../src/cli/platform-installer.ts';
 import {
   createPlatformInstallPlan,
@@ -88,9 +91,155 @@ function planningClient() {
   };
 }
 
+async function listen(server: Server): Promise<string> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    server.once('error', rejectPromise);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', rejectPromise);
+      resolvePromise();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function close(server: Server): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    server.close((error) => (error ? rejectPromise(error) : resolvePromise()));
+    server.closeAllConnections();
+  });
+}
+
 describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('creates a new Worker through an atomic conditional API request', async () => {
+    const requests: Array<{
+      authorization: string | undefined;
+      body: string;
+      ifNoneMatch: string | undefined;
+      method: string | undefined;
+      path: string | undefined;
+    }> = [];
+    const upstream = createServer((request, response) => {
+      let body = '';
+      request.setEncoding('utf8');
+      request.on('data', (chunk: string) => {
+        body += chunk;
+      });
+      request.on('end', () => {
+        requests.push({
+          authorization: request.headers.authorization,
+          body,
+          ifNoneMatch: request.headers['if-none-match'],
+          method: request.method,
+          path: request.url,
+        });
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end('{"success":true,"result":{"id":"version"}}');
+      });
+    });
+    const upstreamOrigin = await listen(upstream);
+    try {
+      await expect(
+        withConditionalPlatformWorkerCreate(
+          'account',
+          'void-api',
+          async (apiBaseUrl) => {
+            const inspection = await fetch(`${apiBaseUrl}/accounts/account/workers/subdomain`, {
+              headers: { Authorization: 'Bearer secret-token' },
+            });
+            expect(inspection.ok).toBe(true);
+            const created = await fetch(`${apiBaseUrl}/accounts/account/workers/scripts/void-api`, {
+              body: 'worker bundle',
+              headers: {
+                Authorization: 'Bearer secret-token',
+                'Content-Type': 'text/plain',
+              },
+              method: 'PUT',
+            });
+            expect(created.ok).toBe(true);
+            return 'created';
+          },
+          `${upstreamOrigin}/client/v4`,
+        ),
+      ).resolves.toBe('created');
+      expect(requests).toEqual([
+        {
+          authorization: 'Bearer secret-token',
+          body: '',
+          ifNoneMatch: undefined,
+          method: 'GET',
+          path: '/client/v4/accounts/account/workers/subdomain',
+        },
+        {
+          authorization: 'Bearer secret-token',
+          body: 'worker bundle',
+          ifNoneMatch: '*',
+          method: 'PUT',
+          path: '/client/v4/accounts/account/workers/scripts/void-api',
+        },
+      ]);
+    } finally {
+      await close(upstream);
+    }
+  });
+
+  it('fails a raced Worker create without exposing credentials', async () => {
+    const upstream = createServer((_request, response) => {
+      response.writeHead(412, { 'Content-Type': 'application/json' });
+      response.end('{"success":false,"errors":[{"message":"Bearer secret-token already exists"}]}');
+    });
+    const upstreamOrigin = await listen(upstream);
+    try {
+      const failure = withConditionalPlatformWorkerCreate(
+        'account',
+        'void-api',
+        async (apiBaseUrl) => {
+          await fetch(`${apiBaseUrl}/accounts/account/workers/scripts/void-api`, {
+            body: 'worker bundle',
+            headers: { Authorization: 'Bearer secret-token' },
+            method: 'PUT',
+          });
+        },
+        `${upstreamOrigin}/client/v4`,
+      );
+      await expect(failure).rejects.toThrow('created concurrently (HTTP 412)');
+      await expect(failure).rejects.not.toThrow('secret-token');
+    } finally {
+      await close(upstream);
+    }
+  });
+
+  it('blocks mutations before the guarded Worker create and closes the proxy', async () => {
+    let proxyBaseUrl = '';
+    const upstream = createServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end('{"success":true,"result":{}}');
+    });
+    const upstreamOrigin = await listen(upstream);
+    try {
+      await expect(
+        withConditionalPlatformWorkerCreate(
+          'account',
+          'void-api',
+          async (apiBaseUrl) => {
+            proxyBaseUrl = apiBaseUrl;
+            const response = await fetch(
+              `${apiBaseUrl}/accounts/account/workers/scripts/other-worker`,
+              { body: 'unconditional bundle', method: 'PUT' },
+            );
+            expect(response.status).toBe(409);
+          },
+          `${upstreamOrigin}/client/v4`,
+        ),
+      ).rejects.toThrow('unexpected mutation PUT');
+      await expect(fetch(`${proxyBaseUrl}/accounts/account/workers/subdomain`)).rejects.toThrow();
+    } finally {
+      await close(upstream);
+    }
+  });
 
   it('accepts only an installer deployment with the expected predecessor', () => {
     const ours = {
