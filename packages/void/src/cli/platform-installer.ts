@@ -4,10 +4,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   encodeCloudflareVersionMessage,
+  parseCloudflareVersionMessage,
   readCloudflareTriggerConfig,
   stabilizeCloudflareVersionTriggers,
   type CloudflareCommandResult,
   type CloudflareCommandRunner,
+  type CloudflareTriggerConfig,
 } from '@void/deploy-cloudflare';
 import {
   createPlatformInstallationManifest,
@@ -509,7 +511,7 @@ export async function installPlatform(
             config: recoveryConfig,
             nextTriggers: readTriggerConfigFromObject(recoveryConfig),
             previousConfig: previousRecoveryConfig,
-            previousTriggers: readTriggerConfigFromObject(previousRecoveryConfig),
+            previousTriggers: snapshot.previousTriggers,
             previousVersionId: snapshot.previousVersionId,
             removeCustomDomains: async () => {
               if (!dependencies.client.removeRoutes) {
@@ -568,7 +570,7 @@ export async function installPlatform(
       const rollback = dependencies.deployWorker
         ? await dependencies.deployWorker(configs[key], workerSecrets)
         : await deployPlatformWorker(configs[key], workerSecrets, {
-            onStaged: async (previousVersionId, stagedVersionId) => {
+            onStaged: async (previousVersionId, stagedVersionId, previousTriggers) => {
               manifest = recordWorkerCutoverStage(
                 manifest!,
                 workerCutoverGeneration,
@@ -576,6 +578,7 @@ export async function installPlatform(
                 previousVersionId,
                 stagedVersionId,
                 action.name,
+                previousTriggers,
                 now(),
               );
               writeInstallationManifest(manifest);
@@ -1270,7 +1273,11 @@ export async function claimPlatformDatabaseConnection(
 }
 
 type PlatformWorkerDeploymentOptions = Readonly<{
-  onStaged: (previousVersionId: string | null, stagedVersionId: string) => Promise<void>;
+  onStaged: (
+    previousVersionId: string | null,
+    stagedVersionId: string,
+    previousTriggers: CloudflareTriggerConfig,
+  ) => Promise<void>;
   previousConfig: Record<string, unknown>;
   removeCustomDomains: () => Promise<void>;
   removeNewWorker: () => Promise<void>;
@@ -1295,15 +1302,12 @@ async function deployPlatformWorker(
     writeFileSync(previousConfigPath, `${JSON.stringify(options.previousConfig, null, 2)}\n`, {
       mode: 0o600,
     });
-    const previousTriggers = readCloudflareTriggerConfig(previousConfigPath);
+    let previousTriggers = readCloudflareTriggerConfig(previousConfigPath);
     const nextTriggers = readCloudflareTriggerConfig(configPath);
     if (options.workerExisted) {
-      previousVersionId = await readActivePlatformWorkerVersion(configPath, accountId, workerName);
-      if (!previousVersionId) {
-        throw new Error(
-          `platform: Existing Worker ${workerName} has no single active production version.`,
-        );
-      }
+      const previous = await readActivePlatformWorkerSnapshot(configPath, accountId, workerName);
+      previousVersionId = previous.versionId;
+      previousTriggers = previous.triggerConfig;
     }
     const argv = [
       ...(options.workerExisted ? ['versions', 'upload'] : ['deploy']),
@@ -1337,7 +1341,7 @@ async function deployPlatformWorker(
         `platform: Wrangler uploaded ${workerName} without reporting its immutable version id.`,
       );
     }
-    await options.onStaged(previousVersionId, uploadedVersionId);
+    await options.onStaged(previousVersionId, uploadedVersionId, previousTriggers);
     if (options.workerExisted) {
       const ownerBeforeActivation = await readActivePlatformWorkerVersion(
         configPath,
@@ -1612,6 +1616,49 @@ async function readActivePlatformWorkerVersion(
   return (active[0] as { version_id: string }).version_id;
 }
 
+async function readActivePlatformWorkerSnapshot(
+  configPath: string,
+  accountId: string,
+  workerName: string,
+): Promise<{ triggerConfig: CloudflareTriggerConfig; versionId: string }> {
+  const versionId = await readActivePlatformWorkerVersion(configPath, accountId, workerName);
+  if (!versionId) {
+    throw new Error(
+      `platform: Existing Worker ${workerName} has no single active production version.`,
+    );
+  }
+  const result = await runPlatformWrangler(
+    ['versions', 'view', versionId, '--config', configPath, '--name', workerName, '--json'],
+    accountId,
+    process.cwd(),
+    true,
+  );
+  assertCleanPlatformWrangler(result, `read rollback metadata for ${workerName}`);
+  let value: unknown;
+  try {
+    value = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`platform: Wrangler returned malformed version metadata for ${workerName}.`);
+  }
+  if (!value || typeof value !== 'object') {
+    throw new Error(`platform: Wrangler returned malformed version metadata for ${workerName}.`);
+  }
+  const annotations = (value as { annotations?: unknown }).annotations;
+  const message =
+    annotations &&
+    typeof annotations === 'object' &&
+    typeof (annotations as Record<string, unknown>)['workers/message'] === 'string'
+      ? ((annotations as Record<string, string>)['workers/message'] ?? null)
+      : null;
+  const metadata = parseCloudflareVersionMessage(message);
+  if (metadata?.schema !== 2) {
+    throw new Error(
+      `platform: Active Worker ${workerName} predates safe trigger snapshots. Refusing to upgrade because its routes, cron, and queue consumers could not be restored after a failed cutover.`,
+    );
+  }
+  return { triggerConfig: metadata.triggerConfig, versionId };
+}
+
 function parseUploadedPlatformWorkerVersion(output: string): string | null {
   return /(?:Worker|Current) Version ID:\s*([0-9a-f]{8}-[0-9a-f-]{27})/i.exec(output)?.[1] ?? null;
 }
@@ -1682,12 +1729,16 @@ function nextTrafficGeneration(manifest: PlatformInstallationManifest): number {
 
 type PlatformWorkerKey = 'api' | 'proxy' | 'tail' | 'dispatch';
 
+type PlatformWorkerCutoverSnapshot = Readonly<{
+  previousVersionId: string | null;
+  previousTriggers: CloudflareTriggerConfig;
+  stagedVersionId: string;
+  workerName: string;
+}>;
+
 type InterruptedWorkerCutover = Readonly<{
   generation: number;
-  staged: ReadonlyMap<
-    PlatformWorkerKey,
-    Readonly<{ previousVersionId: string | null; stagedVersionId: string; workerName: string }>
-  >;
+  staged: ReadonlyMap<PlatformWorkerKey, PlatformWorkerCutoverSnapshot>;
 }>;
 
 function nextWorkerCutoverGeneration(manifest: PlatformInstallationManifest): number {
@@ -1709,6 +1760,7 @@ function recordWorkerCutoverStage(
   previousVersionId: string | null,
   stagedVersionId: string,
   workerName: string,
+  previousTriggers: CloudflareTriggerConfig,
   completedAt: string,
 ): PlatformInstallationManifest {
   return recordInstallationStep(
@@ -1716,7 +1768,15 @@ function recordWorkerCutoverStage(
     {
       completedAt,
       key: `worker-cutover:${generation}:staged:${key}`,
-      resultHash: `${workerName}|${previousVersionId ?? 'none'}|${stagedVersionId}`,
+      resultHash: Buffer.from(
+        JSON.stringify({
+          previousTriggers,
+          previousVersionId,
+          schema: 1,
+          stagedVersionId,
+          workerName,
+        }),
+      ).toString('base64url'),
     },
     completedAt,
   );
@@ -1739,6 +1799,44 @@ function recordWorkerCutoverResolution(
   );
 }
 
+function parseWorkerCutoverSnapshot(value: string): PlatformWorkerCutoverSnapshot | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as {
+      previousTriggers?: unknown;
+      previousVersionId?: unknown;
+      schema?: unknown;
+      stagedVersionId?: unknown;
+      workerName?: unknown;
+    };
+    const metadata = parseCloudflareVersionMessage(
+      `void:${JSON.stringify({
+        migrations: [],
+        schema: 2,
+        triggerConfig: parsed.previousTriggers,
+      })}`,
+    );
+    if (
+      parsed.schema !== 1 ||
+      (parsed.previousVersionId !== null && typeof parsed.previousVersionId !== 'string') ||
+      typeof parsed.stagedVersionId !== 'string' ||
+      parsed.stagedVersionId === '' ||
+      typeof parsed.workerName !== 'string' ||
+      parsed.workerName === '' ||
+      metadata?.schema !== 2
+    ) {
+      return null;
+    }
+    return {
+      previousTriggers: metadata.triggerConfig,
+      previousVersionId: parsed.previousVersionId,
+      stagedVersionId: parsed.stagedVersionId,
+      workerName: parsed.workerName,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function interruptedWorkerCutover(
   manifest: PlatformInstallationManifest,
 ): InterruptedWorkerCutover | null {
@@ -1748,7 +1846,12 @@ function interruptedWorkerCutover(
       resolved: boolean;
       staged: Map<
         PlatformWorkerKey,
-        { previousVersionId: string | null; stagedVersionId: string; workerName: string }
+        {
+          previousVersionId: string | null;
+          previousTriggers: CloudflareTriggerConfig;
+          stagedVersionId: string;
+          workerName: string;
+        }
       >;
     }
   >();
@@ -1766,16 +1869,12 @@ function interruptedWorkerCutover(
       continue;
     }
     const generation = Number(staged[1]);
-    const [workerName, previous, stagedVersionId, ...extra] = step.resultHash.split('|');
-    if (!workerName || !previous || !stagedVersionId || extra.length > 0) {
+    const snapshot = parseWorkerCutoverSnapshot(step.resultHash);
+    if (!snapshot) {
       throw new Error(`platform: Invalid Worker cutover checkpoint ${step.key}.`);
     }
     const entry = generations.get(generation) ?? { resolved: false, staged: new Map() };
-    entry.staged.set(staged[2] as PlatformWorkerKey, {
-      previousVersionId: previous === 'none' ? null : previous,
-      stagedVersionId,
-      workerName,
-    });
+    entry.staged.set(staged[2] as PlatformWorkerKey, snapshot);
     generations.set(generation, entry);
   }
   const unresolved = [...generations.entries()]

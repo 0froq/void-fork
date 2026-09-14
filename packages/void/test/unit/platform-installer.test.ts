@@ -1045,12 +1045,16 @@ describe('platform installer', () => {
         {
           completedAt: '2026-09-14T00:00:06.000Z',
           key: 'worker-cutover:999:staged:api',
-          resultHash: `${deployment.resources.apiWorker}|previous-api|staged-api`,
+          resultHash: cutoverSnapshot(deployment.resources.apiWorker, 'previous-api', 'staged-api'),
         },
         {
           completedAt: '2026-09-14T00:00:06.000Z',
           key: 'worker-cutover:999:staged:proxy',
-          resultHash: `${deployment.resources.proxyWorker}|previous-proxy|staged-proxy`,
+          resultHash: cutoverSnapshot(
+            deployment.resources.proxyWorker,
+            'previous-proxy',
+            'staged-proxy',
+          ),
         },
       ],
     };
@@ -1086,6 +1090,29 @@ describe('platform installer', () => {
     function named(key: string) {
       const resource = byKey.get(key)!;
       return { id: resource.id, name: resource.name };
+    }
+
+    function cutoverSnapshot(
+      workerName: string,
+      previousVersionId: string,
+      stagedVersionId: string,
+    ) {
+      return Buffer.from(
+        JSON.stringify({
+          previousTriggers: {
+            crons: [],
+            preview_urls: true,
+            queueConsumers: [],
+            routes: [],
+            workers_dev: true,
+            workflows: [],
+          },
+          previousVersionId,
+          schema: 1,
+          stagedVersionId,
+          workerName,
+        }),
+      ).toString('base64url');
     }
   });
 });
