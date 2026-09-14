@@ -19,7 +19,6 @@ import adminUsers from './admin/routes/users.tsx';
 import { BuildManager, BuildManagerLarge } from './build-manager.ts';
 import { BuildScheduler } from './build-scheduler.ts';
 import { capabilityMiddleware, getPlatformCapabilities } from './capabilities.ts';
-import { type CronFireMessage, processCronFiresBatch } from './cron-fires-queue.ts';
 import { CronScheduler } from './cron-scheduler.ts';
 import {
   createDb,
@@ -46,6 +45,7 @@ import type { ApiEnv } from './env.ts';
 import { ErrorAlertMonitor } from './error-alert-monitor.ts';
 import { cancelContainerBuildDos } from './github/cancel-builds.ts';
 import { authMiddleware } from './middleware/auth.ts';
+import { processPlatformQueue } from './platform-queue.ts';
 import { tryActivateDomain } from './provisioning/activate-domain.ts';
 import {
   CloudflareApiError,
@@ -75,7 +75,6 @@ import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
 import type { Domain, Project } from './types.ts';
 import { UsageCounter } from './usage-counter.ts';
-import { processUsageEventBatch } from './usage-queue.ts';
 import { replayFailedWebhookDeliveries } from './webhook-replay.ts';
 
 const app = new Hono<ApiEnv>()
@@ -798,22 +797,6 @@ export default {
   fetch: app.fetch,
   scheduled,
   async queue(batch: MessageBatch<unknown>, env: ApiEnv['Bindings']): Promise<void> {
-    if (
-      env.PLATFORM_TRAFFIC_STATE === 'staging' ||
-      (env.PLATFORM_INSTALLATION_ID &&
-        (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE)
-    ) {
-      return;
-    }
-    // Dispatch by queue name. void-api consumes two queues:
-    // - `void-usage-events` (and `*-staging`): per-request usage rollup
-    // - `void-cron-fires` (and `*-staging`): cron-trigger invocations from
-    //   the CronScheduler DO, deferred here so the dispatched fetch runs
-    //   outside the DO's RPC context.
-    if (batch.queue === (env.CRON_FIRES_QUEUE_NAME ?? 'void-cron-fires')) {
-      await processCronFiresBatch(batch as unknown as MessageBatch<CronFireMessage>, env);
-      return;
-    }
-    await processUsageEventBatch(batch, env);
+    await processPlatformQueue(batch, env);
   },
 } satisfies ExportedHandler<ApiEnv['Bindings']>;
