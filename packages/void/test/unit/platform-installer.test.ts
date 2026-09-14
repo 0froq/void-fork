@@ -5,6 +5,7 @@ import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
   installPlatform,
+  claimPlatformDatabaseConnection,
   createPlatformInstallationSecrets,
   resolveBootstrapGitHubId,
 } from '../../src/cli/platform-installer.ts';
@@ -49,6 +50,40 @@ function planningClient() {
 
 describe('platform installer', () => {
   const claimDatabase = async () => {};
+
+  it('claims only an empty database or an existing matching claim', async () => {
+    const queries: Array<string> = [];
+    const connection = (claim: ReadonlyArray<Record<string, string>>, hasContents: boolean) => ({
+      query: async <Row extends Record<string, unknown>>(sql: string) => {
+        queries.push(sql);
+        if (sql.includes('SELECT "installation_id"')) {
+          return { rows: claim as ReadonlyArray<Row> };
+        }
+        if (sql.includes('FROM "pg_catalog"."pg_tables"')) {
+          return {
+            rows: (hasContents
+              ? [{ schemaname: 'public', tablename: 'users' }]
+              : []) as unknown as ReadonlyArray<Row>,
+          };
+        }
+        return { rows: [] as ReadonlyArray<Row> };
+      },
+    });
+    await expect(
+      claimPlatformDatabaseConnection(connection([], false), 'install-one', 'nonce-one'),
+    ).resolves.toBeUndefined();
+    await expect(
+      claimPlatformDatabaseConnection(
+        connection([{ installation_id: 'install-one', ownership_nonce: 'nonce-one' }], true),
+        'install-one',
+        'nonce-one',
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      claimPlatformDatabaseConnection(connection([], true), 'install-two', 'nonce-two'),
+    ).rejects.toThrow('non-empty PostgreSQL database');
+    expect(queries.some((sql) => sql === 'ROLLBACK')).toBe(true);
+  });
   it('resolves the initial administrator to an immutable GitHub account id', async () => {
     const requests: Array<string> = [];
     await expect(

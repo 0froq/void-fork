@@ -665,7 +665,27 @@ export async function claimPlatformDatabase(
   const pool = new Pool({ connectionString: databaseUrl, max: 1 });
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await claimPlatformDatabaseConnection(client, installationId, ownershipNonce);
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+type DatabaseClaimConnection = Readonly<{
+  query: <Row extends Record<string, unknown> = Record<string, unknown>>(
+    sql: string,
+    values?: ReadonlyArray<unknown>,
+  ) => Promise<{ rows: ReadonlyArray<Row> }>;
+}>;
+
+export async function claimPlatformDatabaseConnection(
+  client: DatabaseClaimConnection,
+  installationId: string,
+  ownershipNonce: string,
+): Promise<void> {
+  await client.query('BEGIN');
+  try {
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtext('void-platform-installation-ownership-v1'))`,
     );
@@ -688,6 +708,20 @@ export async function claimPlatformDatabase(
     );
     const claim = result.rows[0];
     if (!claim) {
+      const contents = await client.query<{ schemaname: string; tablename: string }>(
+        `SELECT "schemaname", "tablename"
+         FROM "pg_catalog"."pg_tables"
+         WHERE "schemaname" = ANY (current_schemas(false))
+           AND "tablename" <> '__void_platform_installation'
+         ORDER BY "schemaname", "tablename"
+         LIMIT 1`,
+      );
+      if (contents.rows.length > 0) {
+        const table = contents.rows[0]!;
+        throw new Error(
+          `platform: Refusing to claim a non-empty PostgreSQL database (found ${table.schemaname}.${table.tablename}). Use a dedicated empty database for each installation.`,
+        );
+      }
       await client.query(
         `INSERT INTO "__void_platform_installation"
            ("singleton", "installation_id", "ownership_nonce")
@@ -704,11 +738,8 @@ export async function claimPlatformDatabase(
     }
     await client.query('COMMIT');
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => ({ rows: [] }));
     throw error;
-  } finally {
-    client.release();
-    await pool.end();
   }
 }
 
