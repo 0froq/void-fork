@@ -950,6 +950,7 @@ export async function installPlatform(
       manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, false, now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      workerRollbacks = [];
 
       workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
       for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {

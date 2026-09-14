@@ -1884,6 +1884,74 @@ describe('platform installer', () => {
       expect(config).not.toHaveProperty('routes');
     }
 
+    const failedEnableEvents: Array<string> = [];
+    let failedEnableDeploys = 0;
+    await expect(
+      installPlatform(
+        upgradedPlan,
+        secrets,
+        setInstallationDesiredState(
+          resumedDisabledUpgrade.manifest,
+          'enabled',
+          '2026-09-14T00:00:04.500Z',
+        ),
+        {
+          acquireDatabaseLifecycleLock,
+          claimDatabase,
+          client: upgradeClient,
+          deployWorker: async (config) => {
+            const deploymentIndex = ++failedEnableDeploys;
+            failedEnableEvents.push(`deploy:${deploymentIndex}:${String(config.name)}`);
+            if (deploymentIndex === 6) {
+              throw new Error('generation 2 deployment failed');
+            }
+            return async () => {
+              failedEnableEvents.push(`rollback:${deploymentIndex}:${String(config.name)}`);
+              if (deploymentIndex === 5) {
+                throw new Error('generation 2 rollback failed');
+              }
+            };
+          },
+          migrateDatabase: async () => {},
+          revalidateBeforeWorkerDeploy: async () => {},
+          verifyHealth: async () => {},
+        },
+      ),
+    ).rejects.toThrow(
+      'generation 2 deployment failed Automatic Worker rollback was incomplete: generation 2 rollback failed',
+    );
+    expect(failedEnableEvents.filter((event) => event.startsWith('rollback:'))).toEqual([
+      `rollback:5:${deployment.resources.apiWorker}`,
+    ]);
+
+    const failedEnableManifest = listInstallationManifests(directory)[0]!;
+    const retryPreviousConfigs: Array<Record<string, unknown>> = [];
+    const retriedEnable = await installPlatform(upgradedPlan, secrets, failedEnableManifest, {
+      acquireDatabaseLifecycleLock,
+      claimDatabase,
+      client: upgradeClient,
+      deployWorker: async (_config, _secrets, previousConfig) => {
+        retryPreviousConfigs.push(previousConfig);
+      },
+      migrateDatabase: async () => {},
+      revalidateBeforeWorkerDeploy: async () => {},
+      verifyHealth: async () => {},
+    });
+    expect(retriedEnable.manifest.status).toBe('installed');
+    expect(retryPreviousConfigs).toHaveLength(8);
+    expect(retryPreviousConfigs.slice(0, 4).every((config) => config.workers_dev === false)).toBe(
+      true,
+    );
+    expect(retryPreviousConfigs.slice(4).every((config) => config.workers_dev === true)).toBe(true);
+    expect(
+      retryPreviousConfigs
+        .slice(4)
+        .filter((config) => !String(config.name).endsWith('-tail'))
+        .every(
+          (config) => (config.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE === 'staging',
+        ),
+    ).toBe(true);
+
     const enabledConfigs: Array<Record<string, unknown>> = [];
     let enabledHealthChecks = 0;
     const enabledUpgrade = await installPlatform(
