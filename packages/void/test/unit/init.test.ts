@@ -126,6 +126,15 @@ vi.mock('../../src/cli/client', () => ({
     readonly body = undefined;
   },
   PlatformClient: class {
+    readonly apiUrl: string;
+
+    constructor(_token: string, options?: string | { apiUrl?: string }) {
+      this.apiUrl =
+        (typeof options === 'string' ? options : options?.apiUrl) ??
+        mockGetApiUrl() ??
+        'https://api.example.com';
+    }
+
     listProjects(...args: Array<unknown>) {
       return mockListProjects(...args);
     }
