@@ -161,6 +161,25 @@ function client(manifest: PlatformInstallationManifest) {
         ? { id: resource.id, name: resource.name, nameServers: [], status: 'active' }
         : null;
     },
+    getHyperdriveConfig: async (_account: string, id: string) => {
+      const resource = manifest.resources.find(
+        (entry) => entry.kind === 'hyperdrive' && entry.id === id && entry.state === 'ready',
+      );
+      if (!resource) {
+        throw new Error('missing Hyperdrive');
+      }
+      return {
+        id: resource.id,
+        name: resource.name,
+        origin: {
+          database: 'void',
+          host: 'db.example.com',
+          port: 5432,
+          scheme: 'postgresql' as const,
+          user: 'user',
+        },
+      };
+    },
     getKvValue: async (): Promise<string | null> => JSON.stringify(manifest),
     getR2Object: async () => {
       const resource = manifest.resources.find(
@@ -292,6 +311,28 @@ describe('platform lifecycle management', () => {
 
     await expect(verifyPlatformInstallationOwnership(fake, manifest)).resolves.toBeUndefined();
     expect(reads).toBe(2);
+  });
+
+  it('rejects Hyperdrive origin drift from the pinned lifecycle database', async () => {
+    const manifest = installedManifest();
+    const fake = client(manifest);
+    fake.getHyperdriveConfig = async (_account: string, id: string) => ({
+      id,
+      name: 'hyperdrive',
+      origin: {
+        database: 'replacement',
+        host: 'db2.example.com',
+        port: 5432,
+        scheme: 'postgresql' as const,
+        user: 'user',
+      },
+    });
+
+    await expect(
+      verifyPlatformInstallationOwnership(fake, manifest, {
+        databaseUrl: 'postgres://user:secret@db.example.com/void',
+      }),
+    ).rejects.toThrow('different PostgreSQL origin');
   });
 
   it('allows authoritative repair to recreate a confirmed-missing routing checkpoint', async () => {

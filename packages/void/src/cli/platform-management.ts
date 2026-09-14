@@ -13,7 +13,12 @@ import {
   type PlatformInstallationManifest,
 } from '@void/platform';
 import type { PlatformArgs } from './platform-args.ts';
-import { PlatformCloudflareClient } from './platform-cloudflare.ts';
+import {
+  hyperdriveOriginConfigHash,
+  hyperdriveOriginFromConnectionString,
+  hyperdriveOriginMatches,
+  PlatformCloudflareClient,
+} from './platform-cloudflare.ts';
 import {
   acquirePlatformDatabaseLifecycleLock,
   createPlatformInstallationSecrets,
@@ -46,6 +51,7 @@ export type PlatformManagementClient = Pick<
   | 'deleteR2Object'
   | 'emptyR2Bucket'
   | 'findZone'
+  | 'getHyperdriveConfig'
   | 'getKvValue'
   | 'getR2Object'
   | 'getWorkerPlainTextBindings'
@@ -68,6 +74,7 @@ export type PlatformUninstallClient = PlatformManagementClient &
 export type PlatformOwnershipClient = Pick<
   PlatformManagementClient,
   | 'findZone'
+  | 'getHyperdriveConfig'
   | 'getKvValue'
   | 'getR2Object'
   | 'getWorkerPlainTextBindings'
@@ -87,6 +94,7 @@ export async function verifyPlatformInstallationOwnership(
   options: {
     allowMissingRoutingCheckpoint?: boolean;
     allowUninitializedRoutingCheckpoint?: boolean;
+    databaseUrl?: string;
   } = {},
 ): Promise<void> {
   const ready = manifest.resources.filter(
@@ -120,6 +128,7 @@ export async function verifyPlatformInstallationOwnership(
 export type PlatformManagementDependencies = Readonly<{
   checkpoint?: (manifest: PlatformInstallationManifest) => Promise<void>;
   confirm?: (message: string, initialValue: boolean) => Promise<boolean>;
+  databaseUrl?: string;
   interactive?: boolean;
 }>;
 
@@ -163,13 +172,21 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     databaseCheckpointExists = false,
   ): Promise<void> => {
     const manifest = currentManifest;
+    const recovery = readInstallationRecoverySecrets(manifest);
+    const databaseUrl = resolvePlatformInstallDatabaseUrl(recovery, manifest);
 
     if (args.subcommand === 'disable') {
-      await disablePlatform(client, manifest, args.plan, { checkpoint: databaseCheckpoint });
+      await disablePlatform(client, manifest, args.plan, {
+        checkpoint: databaseCheckpoint,
+        databaseUrl,
+      });
       return;
     }
     if (args.subcommand === 'uninstall') {
-      await uninstallPlatform(client, manifest, args, { checkpoint: databaseCheckpoint });
+      await uninstallPlatform(client, manifest, args, {
+        checkpoint: databaseCheckpoint,
+        databaseUrl,
+      });
       return;
     }
     if (
@@ -182,23 +199,19 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     }
 
     const deployment = manifest.deployment;
-    const plan = await createPlatformInstallPlan(
-      client,
-      {
-        accountId: manifest.account.id,
-        applicationDomain: deployment.application.baseDomain,
-        controlPlaneDomain: deployment.controlPlane.apiHostname ?? '',
-        dedicatedZone: deployment.application.dedicatedZone,
-        displayName: deployment.displayName,
-        installationSlug: deployment.installationSlug,
-        zoneName: deployment.application.zoneName,
-      },
-      manifest,
-      {
-        authoritativeProvisionIntents: databaseCheckpointExists,
-        repairMissing: args.subcommand === 'repair',
-      },
-    );
+    const planInput = {
+      accountId: manifest.account.id,
+      applicationDomain: deployment.application.baseDomain,
+      controlPlaneDomain: deployment.controlPlane.apiHostname ?? '',
+      dedicatedZone: deployment.application.dedicatedZone,
+      displayName: deployment.displayName,
+      installationSlug: deployment.installationSlug,
+      zoneName: deployment.application.zoneName,
+    };
+    const plan = await createPlatformInstallPlan(client, planInput, manifest, {
+      authoritativeProvisionIntents: databaseCheckpointExists,
+      repairMissing: args.subcommand === 'repair',
+    });
     note(
       formatPlatformInstallPlan(plan),
       args.subcommand === 'upgrade'
@@ -228,6 +241,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         allowMissingRoutingCheckpoint: repairingMissingRoutingCheckpoint,
         allowUninitializedRoutingCheckpoint:
           args.subcommand === 'repair' && databaseCheckpointExists,
+        databaseUrl,
       },
     );
     const installation =
@@ -237,8 +251,6 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     if (installation !== manifest) {
       writeInstallationManifest(installation);
     }
-    const recovery = readInstallationRecoverySecrets(installation);
-    const databaseUrl = resolvePlatformInstallDatabaseUrl(recovery, installation);
     const bootstrapGitHubLogin =
       process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN || recovery?.bootstrapGitHubLogin || '';
     const bootstrapGitHubId =
@@ -265,6 +277,13 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       acquireDatabaseLifecycleLock: async () =>
         Object.assign(async () => {}, { checkpoint: databaseCheckpoint }),
       client,
+      replanWorkers: async (recoveryManifest) =>
+        (
+          await createPlatformInstallPlan(client, planInput, recoveryManifest, {
+            authoritativeProvisionIntents: true,
+            repairMissing: true,
+          })
+        ).actions.filter((action) => action.kind === 'worker'),
       revalidateBeforeWorkerDeploy: (manifest, action) =>
         revalidatePlatformInstallAction(client, plan, manifest, action, {
           repairMissing: args.subcommand === 'repair',
@@ -411,6 +430,7 @@ export async function disablePlatform(
         .filter((resource) => resource.kind === 'worker')
         .map((resource) => resource.key),
     ]),
+    { databaseUrl: dependencies.databaseUrl },
   );
   let next = setInstallationDesiredState(manifest, 'disabled', new Date().toISOString());
   writeInstallationManifest(next);
@@ -557,9 +577,12 @@ export async function uninstallPlatform(
   if (hasRoutingCheckpoint) {
     missingResources = await verifyPlatformMutationOwnership(client, manifest, ownershipTargets, {
       allowDeletedRoutingCheckpoint: args.purgeData,
+      databaseUrl: dependencies.databaseUrl,
     });
   } else {
-    await verifyPlatformInstallationOwnership(client, manifest);
+    await verifyPlatformInstallationOwnership(client, manifest, {
+      databaseUrl: dependencies.databaseUrl,
+    });
     missingResources = new Set();
   }
 
@@ -606,6 +629,7 @@ export async function uninstallPlatform(
           client,
           next,
           new Set(['routing-kv', 'zone', worker.key]),
+          { databaseUrl: dependencies.databaseUrl },
         );
         if (!missing.has(worker.key)) {
           await client.removeRoutes(
@@ -657,7 +681,10 @@ export async function uninstallPlatform(
         client,
         next,
         new Set(['routing-kv', resource.key]),
-        { allowDeletedRoutingCheckpoint: args.purgeData },
+        {
+          allowDeletedRoutingCheckpoint: args.purgeData,
+          databaseUrl: dependencies.databaseUrl,
+        },
       );
       if (immediatelyMissing.has(resource.key)) {
         next = updateResourceState(
@@ -686,7 +713,9 @@ export async function uninstallPlatform(
           resource.name,
           new Set([PLATFORM_R2_OWNERSHIP_MARKER_KEY]),
         );
-        await verifyPlatformMutationOwnership(client, next, new Set(['routing-kv', resource.key]));
+        await verifyPlatformMutationOwnership(client, next, new Set(['routing-kv', resource.key]), {
+          databaseUrl: dependencies.databaseUrl,
+        });
         await client.deleteR2Object(
           next.account.id,
           resource.name,
@@ -877,6 +906,7 @@ async function verifyPlatformMutationOwnership(
     allowDeletedRoutingCheckpoint?: boolean;
     allowMissingRoutingCheckpoint?: boolean;
     allowUninitializedRoutingCheckpoint?: boolean;
+    databaseUrl?: string;
   } = {},
 ): Promise<ReadonlySet<string>> {
   const routing = requireResource(manifest, 'routing-kv');
@@ -994,6 +1024,40 @@ async function verifyPlatformMutationOwnership(
       exists = hasNamedResource(dispatchNamespaces, resource);
     } else if (resource.kind === 'hyperdrive') {
       exists = hasNamedResource(hyperdrives, resource);
+      if (exists) {
+        const live = await client.getHyperdriveConfig(accountId, resource.id);
+        exists = live.id === resource.id && live.name === resource.name;
+        if (exists) {
+          const legacyHash = createHash('sha256')
+            .update(JSON.stringify({ kind: resource.kind, name: resource.name }))
+            .digest('hex');
+          const malformedLegacyHash = !/^[a-f0-9]{64}$/.test(resource.configHash);
+          if (options.databaseUrl) {
+            const expected = hyperdriveOriginFromConnectionString(options.databaseUrl);
+            if (!hyperdriveOriginMatches(live.origin, expected)) {
+              throw ownershipError(
+                `hyperdrive ${resource.name} targets a different PostgreSQL origin than this installation's pinned database`,
+              );
+            }
+            const expectedHash = hyperdriveOriginConfigHash(expected);
+            if (
+              resource.configHash !== expectedHash &&
+              resource.configHash !== legacyHash &&
+              !malformedLegacyHash
+            ) {
+              throw ownershipError(
+                `hyperdrive ${resource.name} does not match the installation's database fingerprint`,
+              );
+            }
+          } else if (
+            resource.configHash !== hyperdriveOriginConfigHash(live.origin) &&
+            resource.configHash !== legacyHash &&
+            !malformedLegacyHash
+          ) {
+            throw ownershipError(`hyperdrive ${resource.name} changed configuration`);
+          }
+        }
+      }
     } else if (resource.kind === 'kv-namespace') {
       exists = hasNamedResource(kvNamespaces, resource);
     } else if (resource.kind === 'queue') {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
+  hyperdriveOriginConfigHash,
+  hyperdriveOriginFromConnectionString,
   parsePostgresConnectionString,
   PlatformCloudflareClient,
 } from '../../src/cli/platform-cloudflare.ts';
@@ -39,6 +41,41 @@ describe('platform Cloudflare client', () => {
     expect(() =>
       parsePostgresConnectionString('postgresql://user:secret@db.example.com/void?sslmode=prefer'),
     ).toThrow('Unsupported sslmode');
+  });
+
+  it('reads and fingerprints a Hyperdrive origin without its password', async () => {
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async () =>
+        Response.json({
+          success: true,
+          result: {
+            id: 'hyperdrive-id',
+            name: 'void-db',
+            origin: {
+              database: 'void',
+              host: 'DB.EXAMPLE.COM',
+              port: 5432,
+              scheme: 'postgres',
+              user: 'void-user',
+            },
+          },
+        }),
+    });
+    const config = await client.getHyperdriveConfig('account', 'hyperdrive-id');
+    expect(config.origin).toEqual({
+      database: 'void',
+      host: 'db.example.com',
+      port: 5432,
+      scheme: 'postgresql',
+      user: 'void-user',
+    });
+    expect(hyperdriveOriginConfigHash(config.origin)).toBe(
+      hyperdriveOriginConfigHash(
+        hyperdriveOriginFromConnectionString(
+          'postgres://void-user:secret@db.example.com:5432/void',
+        ),
+      ),
+    );
   });
 
   it('never includes the API token in errors', async () => {

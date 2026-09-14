@@ -22,6 +22,7 @@ type RecoveryClient = Pick<
   PlatformCloudflareClient,
   | 'findZone'
   | 'findZoneForHostname'
+  | 'getHyperdriveConfig'
   | 'getKvValue'
   | 'getR2Object'
   | 'getWorkerPlainTextBindings'

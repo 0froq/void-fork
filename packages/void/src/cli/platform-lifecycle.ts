@@ -257,6 +257,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         const { verifyPlatformInstallationOwnership } = await import('./platform-management.ts');
         await verifyPlatformInstallationOwnership(client, manifest, {
           allowUninitializedRoutingCheckpoint: databaseCheckpointExists,
+          databaseUrl: secrets.databaseUrl,
         });
       },
     });

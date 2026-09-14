@@ -29,7 +29,11 @@ import {
 } from '@void/platform';
 import { getPlatformRuntimeDirectory, readPlatformRuntimeManifest } from '@void/platform/installer';
 import { join } from 'pathslash';
-import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
+import {
+  hyperdriveOriginConfigHash,
+  hyperdriveOriginFromConnectionString,
+  type PlatformCloudflareClient,
+} from './platform-cloudflare.ts';
 import {
   platformAdoptionIntentHash,
   platformProvisionIntentHash,
@@ -411,14 +415,32 @@ export async function installPlatform(
         manifest = recordAdoptionIntent(manifest, action, action.id, now());
         writeInstallationManifest(manifest);
         await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-        manifest = recordResource(manifest, action, action.id, 'adopted', now());
+        manifest = recordResource(
+          manifest,
+          action,
+          action.id,
+          'adopted',
+          now(),
+          secrets.databaseUrl,
+        );
         writeInstallationManifest(manifest);
         await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
         continue;
       }
       if (action.action === 'reuse') {
-        if (!manifest.resources.some((resource) => resource.key === action.key) && action.id) {
-          manifest = recordResource(manifest, action, action.id, 'created', now());
+        if (
+          action.id &&
+          (action.kind === 'hyperdrive' ||
+            !manifest.resources.some((resource) => resource.key === action.key))
+        ) {
+          manifest = recordResource(
+            manifest,
+            action,
+            action.id,
+            undefined,
+            now(),
+            secrets.databaseUrl,
+          );
           writeInstallationManifest(manifest);
           await writeR2OwnershipMarkerIfNeeded(dependencies.client, plan, manifest, action);
           await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -435,7 +457,14 @@ export async function installPlatform(
         secrets.databaseUrl,
         zone.id,
       );
-      manifest = recordResource(manifest, action, resource.id, 'created', now());
+      manifest = recordResource(
+        manifest,
+        action,
+        resource.id,
+        'created',
+        now(),
+        secrets.databaseUrl,
+      );
       writeInstallationManifest(manifest);
       await writeR2OwnershipMarkerIfNeeded(dependencies.client, plan, manifest, action);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -994,6 +1023,7 @@ function recordResource(
   id: string,
   ownership: InstallationResource['ownership'] | undefined,
   now: string,
+  databaseUrl?: string,
 ): PlatformInstallationManifest {
   const previous = manifest.resources.find((resource) => resource.key === action.key);
   return recordInstallationResource(
@@ -1002,7 +1032,9 @@ function recordResource(
       configHash:
         action.kind === 'dns-record'
           ? dnsRecordConfigHash(action.name, 'AAAA', '100::', true)
-          : hash(JSON.stringify({ kind: action.kind, name: action.name })),
+          : action.kind === 'hyperdrive' && databaseUrl
+            ? hyperdriveOriginConfigHash(hyperdriveOriginFromConnectionString(databaseUrl))
+            : hash(JSON.stringify({ kind: action.kind, name: action.name })),
       id,
       key: action.key,
       kind: action.kind,

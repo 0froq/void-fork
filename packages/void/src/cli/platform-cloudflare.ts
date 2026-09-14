@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 const DEFAULT_API_BASE = 'https://api.cloudflare.com/client/v4';
 
 type CloudflareEnvelope<T> = Readonly<{
@@ -23,6 +25,15 @@ export type CloudflareNamedResource = Readonly<{
   id: string;
   name: string;
 }>;
+export type CloudflareHyperdriveOrigin = Readonly<{
+  database: string;
+  host: string;
+  port: number;
+  scheme: 'postgresql';
+  user: string | null;
+}>;
+export type CloudflareHyperdriveConfig = CloudflareNamedResource &
+  Readonly<{ origin: CloudflareHyperdriveOrigin }>;
 export type CloudflareDnsRecord = CloudflareNamedResource &
   Readonly<{
     content: string;
@@ -403,6 +414,13 @@ export class PlatformCloudflareClient {
       id: requiredString(entry.id, 'Hyperdrive id'),
       name: requiredString(entry.name, 'Hyperdrive name'),
     }));
+  }
+
+  async getHyperdriveConfig(accountId: string, id: string): Promise<CloudflareHyperdriveConfig> {
+    const result = await this.request<Record<string, unknown>>(
+      `/accounts/${encodeURIComponent(accountId)}/hyperdrive/configs/${encodeURIComponent(id)}`,
+    );
+    return parseHyperdriveConfig(result);
   }
 
   async createHyperdrive(
@@ -846,5 +864,70 @@ export function parsePostgresConnectionString(value: string): {
     password: decodeURIComponent(url.password),
     port,
     user: decodeURIComponent(url.username),
+  };
+}
+
+export function hyperdriveOriginFromConnectionString(value: string): CloudflareHyperdriveOrigin {
+  const parsed = parsePostgresConnectionString(value);
+  return {
+    database: parsed.database,
+    host: parsed.host.toLowerCase(),
+    port: parsed.port,
+    scheme: 'postgresql',
+    user: parsed.user,
+  };
+}
+
+export function hyperdriveOriginConfigHash(origin: CloudflareHyperdriveOrigin): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        database: origin.database,
+        host: origin.host.toLowerCase(),
+        port: origin.port,
+        scheme: 'postgresql',
+        user: origin.user,
+      }),
+    )
+    .digest('hex');
+}
+
+export function hyperdriveOriginMatches(
+  live: CloudflareHyperdriveOrigin,
+  expected: CloudflareHyperdriveOrigin,
+): boolean {
+  return (
+    live.database === expected.database &&
+    live.host.toLowerCase() === expected.host.toLowerCase() &&
+    live.port === expected.port &&
+    live.scheme === expected.scheme &&
+    (live.user === null || live.user === expected.user)
+  );
+}
+
+function parseHyperdriveConfig(value: Record<string, unknown>): CloudflareHyperdriveConfig {
+  const origin = value.origin;
+  if (!origin || typeof origin !== 'object' || Array.isArray(origin)) {
+    throw new Error('platform: Cloudflare Hyperdrive config has no origin metadata.');
+  }
+  const record = origin as Record<string, unknown>;
+  const scheme = requiredString(record.scheme, 'Hyperdrive origin scheme').toLowerCase();
+  if (scheme !== 'postgres' && scheme !== 'postgresql') {
+    throw new Error(`platform: Unsupported Hyperdrive origin scheme ${JSON.stringify(scheme)}.`);
+  }
+  const port = typeof record.port === 'number' ? record.port : Number(record.port);
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+    throw new Error('platform: Cloudflare Hyperdrive config has an invalid origin port.');
+  }
+  return {
+    id: requiredString(value.id, 'Hyperdrive id'),
+    name: requiredString(value.name, 'Hyperdrive name'),
+    origin: {
+      database: requiredString(record.database, 'Hyperdrive origin database'),
+      host: requiredString(record.host, 'Hyperdrive origin host').toLowerCase(),
+      port,
+      scheme: 'postgresql',
+      user: typeof record.user === 'string' && record.user ? record.user : null,
+    },
   };
 }

@@ -13,6 +13,10 @@ import {
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
+  hyperdriveOriginConfigHash,
+  hyperdriveOriginFromConnectionString,
+} from '../../src/cli/platform-cloudflare.ts';
+import {
   acquirePlatformDatabaseLifecycleLockConnection,
   installPlatform,
   claimPlatformDatabaseConnection,
@@ -991,6 +995,9 @@ describe('platform installer', () => {
       verifyHealth: async () => {},
     });
     const byKey = new Map(installed.manifest.resources.map((resource) => [resource.key, resource]));
+    expect(byKey.get('hyperdrive')?.configHash).toBe(
+      hyperdriveOriginConfigHash(hyperdriveOriginFromConnectionString(secrets.databaseUrl)),
+    );
     const deployment = installed.manifest.deployment;
     const upgradedPlan = await createPlatformInstallPlan(
       {

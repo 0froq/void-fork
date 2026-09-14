@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
@@ -13,6 +14,7 @@ import {
 } from '@void/platform';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { hyperdriveOriginConfigHash } from '../../src/cli/platform-cloudflare.ts';
 import { REMOTE_INSTALLATION_MANIFEST_KEY } from '../../src/cli/platform-installer.ts';
 import { disablePlatform } from '../../src/cli/platform-management.ts';
 import { platformProvisionIntentHash } from '../../src/cli/platform-plan.ts';
@@ -82,7 +84,28 @@ function remoteManifest() {
     manifest = recordInstallationResource(
       manifest,
       {
-        configHash: 'hash',
+        configHash:
+          kind === 'dns-record'
+            ? createHash('sha256')
+                .update(
+                  JSON.stringify({
+                    content: '100::',
+                    kind,
+                    name,
+                    proxied: true,
+                    type: 'AAAA',
+                  }),
+                )
+                .digest('hex')
+            : kind === 'hyperdrive'
+              ? hyperdriveOriginConfigHash({
+                  database: 'void',
+                  host: 'db.example.com',
+                  port: 5432,
+                  scheme: 'postgresql',
+                  user: 'user',
+                })
+              : 'hash',
         id,
         key,
         kind,
@@ -184,6 +207,17 @@ function client(manifest = remoteManifest()) {
     listHyperdriveConfigs: async () => [
       { id: 'hyperdrive-id', name: manifest.deployment.resources.hyperdrive },
     ],
+    getHyperdriveConfig: async () => ({
+      id: 'hyperdrive-id',
+      name: manifest.deployment.resources.hyperdrive,
+      origin: {
+        database: 'void',
+        host: 'db.example.com',
+        port: 5432,
+        scheme: 'postgresql' as const,
+        user: 'user',
+      },
+    }),
     listWorkerNames: async () => [
       manifest.deployment.resources.apiWorker,
       manifest.deployment.resources.proxyWorker,
