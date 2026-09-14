@@ -51,6 +51,7 @@ import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
   PlatformWorkerCustomDomainsChangedError,
+  PlatformWorkerRoutesChangedError,
   type CloudflareNamedResource,
   type CloudflareWorkerCustomDomainOrigin,
   type PlatformCloudflareClient,
@@ -135,6 +136,7 @@ type InstallerClient = Pick<
       | 'listWorkerServiceRoutes'
       | 'listWorkerRoutes'
       | 'publishWorkerCustomDomainsSafely'
+      | 'publishWorkerRoutesSafely'
       | 'removeRoutes'
     >
   > & { readonly apiBaseUrl?: string };
@@ -684,6 +686,7 @@ export async function installPlatform(
       publicEndpoints: previousPublicEndpoints,
       trafficState: previousPublicEndpoints ? 'enabled' : 'staging',
     });
+    const managedRoutes = platformManagedWorkerTraffic(plan.deployment).routes;
     let workerActions: ReadonlyArray<PlatformInstallPlanAction> = plan.actions.filter(
       (action) => action.kind === 'worker',
     );
@@ -873,6 +876,11 @@ export async function installPlatform(
               writeInstallationManifest(manifest);
               await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
             },
+            managedRoutes: preserveDisabled
+              ? []
+              : managedRoutes
+                  .filter((route) => route.script === action.name)
+                  .map((route) => route.pattern),
             preservedRoutes,
             publishCustomDomains: (workerName, origins) =>
               publishPlatformWorkerCustomDomains(
@@ -881,6 +889,14 @@ export async function installPlatform(
                 workerName,
                 origins,
               ),
+            publishRoutes: async (workerName, patterns) => {
+              if (!dependencies.client.publishWorkerRoutesSafely) {
+                throw new Error(
+                  'platform: Safe Cloudflare Worker route publication is unavailable.',
+                );
+              }
+              await dependencies.client.publishWorkerRoutesSafely(zone.id, workerName, patterns);
+            },
             previousConfig: previousWorkerConfig,
             previousPublicEndpoints,
             inspectNewWorker: () =>
@@ -1030,6 +1046,9 @@ export async function installPlatform(
                 writeInstallationManifest(manifest);
                 await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
               },
+              managedRoutes: managedRoutes
+                .filter((route) => route.script === action.name)
+                .map((route) => route.pattern),
               preservedRoutes,
               publishCustomDomains: (workerName, origins) =>
                 publishPlatformWorkerCustomDomains(
@@ -1038,6 +1057,14 @@ export async function installPlatform(
                   workerName,
                   origins,
                 ),
+              publishRoutes: async (workerName, patterns) => {
+                if (!dependencies.client.publishWorkerRoutesSafely) {
+                  throw new Error(
+                    'platform: Safe Cloudflare Worker route publication is unavailable.',
+                  );
+                }
+                await dependencies.client.publishWorkerRoutesSafely(zone.id, workerName, patterns);
+              },
               previousConfig: previousWorkerConfig,
               previousPublicEndpoints: true,
               inspectNewWorker: () =>
@@ -2161,6 +2188,7 @@ type PlatformWorkerDeploymentOptions = Readonly<{
   ) => Promise<void>;
   onTrafficPublished: () => Promise<void>;
   onUnsafeTraffic: () => Promise<void>;
+  managedRoutes: ReadonlyArray<string>;
   previousConfig: Record<string, unknown>;
   previousPublicEndpoints: boolean;
   preservedRoutes: ReadonlyArray<unknown>;
@@ -2168,6 +2196,7 @@ type PlatformWorkerDeploymentOptions = Readonly<{
     workerName: string,
     origins: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>,
   ) => Promise<void>;
+  publishRoutes: (workerName: string, patterns: ReadonlyArray<string>) => Promise<void>;
   removeCustomDomains: () => Promise<void>;
   retainNewWorker: () => Promise<void>;
   runner: typeof runPlatformWrangler;
@@ -2351,6 +2380,7 @@ async function deployPlatformWorker(
         [uploadedVersionId]: nextTriggers,
         ...(previousVersionId ? { [previousVersionId]: previousTriggers } : {}),
       },
+      manageRoutes: false,
       previousTriggerConfig: previousTriggers,
       publishEmptyCustomDomains: async () => {
         await options.removeCustomDomains();
@@ -2364,6 +2394,9 @@ async function deployPlatformWorker(
     assertPlatformTriggerStabilization(triggers, workerName, uploadedVersionId, 'publish');
     if (nextTraffic.customDomains.length > 0) {
       await options.publishCustomDomains(workerName, nextTraffic.customDomains);
+    }
+    if (options.managedRoutes.length > 0) {
+      await options.publishRoutes(workerName, options.managedRoutes);
     }
     await options.onTrafficPublished();
     const rollback = () =>
@@ -2388,7 +2421,9 @@ async function deployPlatformWorker(
       });
     return rollback;
   } catch (error) {
-    const unsafeTraffic = error instanceof PlatformWorkerCustomDomainsChangedError;
+    const unsafeTraffic =
+      error instanceof PlatformWorkerCustomDomainsChangedError ||
+      error instanceof PlatformWorkerRoutesChangedError;
     const rollbackVersionId = activatedVersionId && uploadedVersionId ? uploadedVersionId : null;
     const recoveryFailures = await recoverFailedPlatformWorkerDeployment({
       checkpointUnsafeTraffic: options.onUnsafeTraffic,
@@ -2584,6 +2619,7 @@ async function rollbackPlatformWorker(input: {
         [input.activatedVersionId]: input.nextTriggers,
         [input.previousVersionId]: input.previousTriggers,
       },
+      manageRoutes: false,
       previousTriggerConfig: input.nextTriggers,
       publishEmptyCustomDomains: async () => {
         await input.removeCustomDomains();

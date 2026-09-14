@@ -138,6 +138,7 @@ export async function deployCloudflareVersionTriggers(options: {
   previousTriggerConfig?: CloudflareTriggerConfig;
   /** Wrangler skips an empty Custom Domain set, so the caller may publish it directly. */
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
+  manageRoutes?: boolean;
 }): Promise<CloudflareCommandResult> {
   const source = options.configPath ? parseRootWranglerConfig(options.configPath) : {};
   // `triggers deploy` still validates unrelated upload configuration. Build a trigger-only
@@ -151,6 +152,7 @@ export async function deployCloudflareVersionTriggers(options: {
       options.triggerConfig,
       options.previousTriggerConfig,
     ),
+    options.manageRoutes,
   );
   const directory = mkdtempSync(join(tmpdir(), 'void-version-triggers-'));
   const configPath = join(directory, 'wrangler.json');
@@ -176,6 +178,7 @@ export async function deployCloudflareVersionTriggers(options: {
       }
     }
     if (
+      options.manageRoutes !== false &&
       hasCustomDomains(options.previousTriggerConfig?.routes) &&
       !hasCustomDomains(options.triggerConfig.routes)
     ) {
@@ -238,6 +241,7 @@ export async function stabilizeCloudflareVersionTriggers(options: {
   previousTriggerConfig?: CloudflareTriggerConfig;
   knownTriggerConfigs?: Readonly<Record<string, CloudflareTriggerConfig>>;
   publishEmptyCustomDomains?: () => Promise<CloudflareCommandResult>;
+  manageRoutes?: boolean;
   attempts?: number;
 }): Promise<CloudflareTriggerStabilization> {
   const commonArgs = [...(options.configPath ? ['-c', options.configPath] : []), '--env='];
@@ -279,6 +283,7 @@ export async function stabilizeCloudflareVersionTriggers(options: {
       triggerConfig: activeTriggerConfig,
       previousTriggerConfig: cleanupBaseline,
       publishEmptyCustomDomains: options.publishEmptyCustomDomains,
+      manageRoutes: options.manageRoutes,
     });
     if (!isCleanCommandExit(triggers)) {
       return {
@@ -494,6 +499,7 @@ function parseTriggerConfig(value: unknown): CloudflareTriggerConfig | null {
 function triggerWranglerConfig(
   base: Record<string, unknown>,
   triggerConfig: CloudflareTriggerConfig,
+  manageRoutes = true,
 ): Record<string, unknown> {
   const triggers = isRecord(base.triggers) ? { ...base.triggers } : {};
   const queues = isRecord(base.queues) ? { ...base.queues } : {};
@@ -501,13 +507,15 @@ function triggerWranglerConfig(
   queues.consumers = [...triggerConfig.queueConsumers];
   const config: Record<string, unknown> = {
     ...base,
-    routes: [...triggerConfig.routes],
     triggers,
     queues,
     workflows: [...triggerConfig.workflows],
     workers_dev: triggerConfig.workers_dev,
     preview_urls: triggerConfig.preview_urls,
   };
+  if (manageRoutes) {
+    config.routes = [...triggerConfig.routes];
+  }
   delete config.route;
   return config;
 }

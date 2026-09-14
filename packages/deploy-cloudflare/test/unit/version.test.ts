@@ -192,6 +192,33 @@ describe('Cloudflare version activation', () => {
     }
   });
 
+  it('can reconcile non-route triggers without publishing a stale route snapshot', async () => {
+    let applied: Record<string, unknown> | undefined;
+    await deployCloudflareVersionTriggers({
+      manageRoutes: false,
+      runWrangler: async (args) => {
+        const configIndex = args.indexOf('-c');
+        applied = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf-8')) as Record<
+          string,
+          unknown
+        >;
+        return ok();
+      },
+      workerName: 'app',
+      triggerConfig: {
+        workers_dev: false,
+        preview_urls: false,
+        routes: [{ pattern: 'apps.example.com/*', zone_name: 'example.com' }],
+        crons: ['0 * * * *'],
+        queueConsumers: [],
+        workflows: [],
+      },
+    });
+
+    expect(applied).not.toHaveProperty('routes');
+    expect(applied).toMatchObject({ triggers: { crons: ['0 * * * *'] } });
+  });
+
   it('removes queue consumers omitted from the desired trigger snapshot', async () => {
     const calls: Array<Array<string>> = [];
     const result = await deployCloudflareVersionTriggers({

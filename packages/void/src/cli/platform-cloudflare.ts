@@ -30,6 +30,13 @@ export class PlatformWorkerCustomDomainsChangedError extends Error {
   }
 }
 
+export class PlatformWorkerRoutesChangedError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'PlatformWorkerRoutesChangedError';
+  }
+}
+
 export type CloudflareAccount = Readonly<{ id: string; name: string }>;
 export type CloudflareNamedResource = Readonly<{
   fingerprint?: string;
@@ -354,6 +361,45 @@ export class PlatformCloudflareClient {
       pattern: requiredString(entry.pattern, 'Worker route pattern'),
       script: typeof entry.script === 'string' ? entry.script : null,
     }));
+  }
+
+  async publishWorkerRoutesSafely(
+    zoneId: string,
+    workerName: string,
+    patterns: ReadonlyArray<string>,
+  ): Promise<void> {
+    const before = await this.listWorkerRoutes(zoneId);
+    const pending = patterns.filter((pattern) => {
+      const matches = before.filter((route) => route.pattern === pattern);
+      if (matches.length > 1 || matches.some((route) => route.script !== workerName)) {
+        throw new PlatformWorkerRoutesChangedError(
+          `platform: Worker route ${JSON.stringify(pattern)} changed concurrently before publication; refusing to replace its traffic state.`,
+        );
+      }
+      return matches.length === 0;
+    });
+    for (const pattern of pending) {
+      try {
+        await this.request(`/zones/${encodeURIComponent(zoneId)}/workers/routes`, {
+          body: JSON.stringify({ pattern, script: workerName }),
+          method: 'POST',
+        });
+      } catch (error) {
+        throw new PlatformWorkerRoutesChangedError(
+          `platform: Worker route publication for ${JSON.stringify(pattern)} had an ambiguous outcome; retaining live routes for safe reconciliation.`,
+          { cause: error },
+        );
+      }
+    }
+    const after = await this.listWorkerRoutes(zoneId);
+    for (const pattern of patterns) {
+      const matches = after.filter((route) => route.pattern === pattern);
+      if (matches.length !== 1 || matches[0]!.script !== workerName) {
+        throw new PlatformWorkerRoutesChangedError(
+          `platform: Worker route ${JSON.stringify(pattern)} changed concurrently after publication; retaining live routes for safe reconciliation.`,
+        );
+      }
+    }
   }
 
   async listWorkerServiceRoutes(

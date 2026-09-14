@@ -573,6 +573,64 @@ describe('platform Cloudflare client', () => {
     expect(pages).toEqual(['1', '2']);
   });
 
+  it('adds only missing managed routes while preserving concurrent routes', async () => {
+    const requests: Array<{ body: unknown; method: string; url: string }> = [];
+    let inventories = 0;
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input, init) => {
+        const url = String(input);
+        requests.push({
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+          method: init?.method ?? 'GET',
+          url,
+        });
+        if (init?.method === 'POST') {
+          return Response.json({
+            success: true,
+            result: { id: 'managed-id', pattern: 'apps.example.com/*', script: 'void-dispatch' },
+          });
+        }
+        return Response.json({
+          success: true,
+          result:
+            inventories++ === 0
+              ? [{ id: 'manual-id', pattern: 'manual.example.net/*', script: 'void-dispatch' }]
+              : [
+                  { id: 'manual-id', pattern: 'manual.example.net/*', script: 'void-dispatch' },
+                  { id: 'managed-id', pattern: 'apps.example.com/*', script: 'void-dispatch' },
+                  {
+                    id: 'concurrent-id',
+                    pattern: 'concurrent.example.net/*',
+                    script: 'void-dispatch',
+                  },
+                ],
+        });
+      },
+    });
+
+    await client.publishWorkerRoutesSafely('zone', 'void-dispatch', ['apps.example.com/*']);
+
+    expect(requests.map((request) => request.method)).toEqual(['GET', 'POST', 'GET']);
+    expect(requests[1]).toMatchObject({
+      body: { pattern: 'apps.example.com/*', script: 'void-dispatch' },
+    });
+  });
+
+  it('treats an ambiguous managed route publication as unsafe', async () => {
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (_input, init) => {
+        if (init?.method === 'POST') {
+          throw new Error('connection reset');
+        }
+        return Response.json({ success: true, result: [] });
+      },
+    });
+
+    await expect(
+      client.publishWorkerRoutesSafely('zone', 'void-dispatch', ['apps.example.com/*']),
+    ).rejects.toMatchObject({ name: 'PlatformWorkerRoutesChangedError' });
+  });
+
   it('publishes Worker custom domains without takeover flags and verifies ownership', async () => {
     const requests: Array<{ body: unknown; method: string; url: string }> = [];
     let inventories = 0;
