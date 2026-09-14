@@ -258,13 +258,29 @@ export async function installPlatform(
     manifest = setInstallationDesiredState(manifest, 'disabled', now());
     writeInstallationManifest(manifest);
   }
-  writePendingInstallationSecrets(manifest, secretCheckpoint(secrets));
+  const pendingSecrets = secretCheckpoint(secrets);
+  writePendingInstallationSecrets(manifest, {
+    ...pendingSecrets,
+    databaseClaimState: 'claiming',
+  });
 
-  await (dependencies.claimDatabase ?? claimPlatformDatabase)(
-    secrets.databaseUrl,
-    manifest.id,
-    manifest.ownershipNonce,
-  );
+  try {
+    await (dependencies.claimDatabase ?? claimPlatformDatabase)(
+      secrets.databaseUrl,
+      manifest.id,
+      manifest.ownershipNonce,
+    );
+  } catch (error) {
+    writePendingInstallationSecrets(manifest, {
+      ...pendingSecrets,
+      databaseClaimState: 'failed',
+    });
+    throw error;
+  }
+  writePendingInstallationSecrets(manifest, {
+    ...pendingSecrets,
+    databaseClaimState: 'claimed',
+  });
   const releaseDatabaseLock = await dependencies.acquireDatabaseLifecycleLock(
     secrets.databaseUrl,
     manifest.id,

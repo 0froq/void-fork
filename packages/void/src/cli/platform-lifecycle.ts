@@ -1,5 +1,9 @@
 import { confirm, intro, isCancel, log, note, outro, password, select, text } from '@clack/prompts';
-import { normalizeApplicationDomain, normalizeInstallationSlug } from '@void/platform';
+import {
+  normalizeApplicationDomain,
+  normalizeInstallationSlug,
+  type PlatformInstallationManifest,
+} from '@void/platform';
 import { cliTitle } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import { PlatformCloudflareClient, type CloudflareAccount } from './platform-cloudflare.ts';
@@ -25,16 +29,34 @@ import {
 
 export function resolvePlatformInstallDatabaseUrl(
   checkpoint: Record<string, string> | null,
+  manifest: PlatformInstallationManifest | null = null,
 ): string {
-  // An initial connection failure happens before the database can prove the
-  // checkpoint belongs to this installation. Keep explicit operator input
-  // authoritative so `--resume` can replace a mistyped or unavailable URL.
-  return (
-    process.env.VOID_PLATFORM_DATABASE_URL ||
-    process.env.DATABASE_URL ||
-    checkpoint?.databaseUrl ||
-    ''
-  );
+  const explicit = process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || '';
+  const recorded = checkpoint?.databaseUrl || '';
+  const databaseBound =
+    checkpoint?.databaseClaimState === 'claimed' ||
+    manifest?.resources.some(
+      (resource) =>
+        resource.state === 'ready' &&
+        (resource.kind === 'hyperdrive' || resource.kind === 'worker'),
+    ) ||
+    manifest?.steps.some((step) => step.key.startsWith('database-migrations:'));
+  if (databaseBound) {
+    if (!recorded) {
+      throw new Error(
+        'platform: The claimed PostgreSQL database URL is missing from local recovery state.',
+      );
+    }
+    if (explicit && explicit !== recorded) {
+      throw new Error(
+        'platform: This installation is already bound to its recorded PostgreSQL database. Unset DATABASE_URL and VOID_PLATFORM_DATABASE_URL before resuming; changing databases requires an explicit migration flow.',
+      );
+    }
+    return recorded;
+  }
+  // A failed initial claim has no Cloudflare resource bound to the database,
+  // so explicit operator input may correct an unreachable or mistyped URL.
+  return explicit || recorded;
 }
 
 export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<void> {
@@ -129,9 +151,9 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       existing = resolveInstallationManifest(existing.id);
     }
     const checkpoint = existing ? readPendingInstallationSecrets(existing) : null;
+    const databaseUrl = resolvePlatformInstallDatabaseUrl(checkpoint, existing);
     let authoritativeProvisionIntents = false;
     if (existing) {
-      const databaseUrl = resolvePlatformInstallDatabaseUrl(checkpoint);
       if (!databaseUrl) {
         throw new Error(
           'platform: DATABASE_URL is required to verify an interrupted installation before resuming it.',
@@ -200,9 +222,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       bootstrapGitHubLogin,
       cloudflareApiToken: token,
       checkpoint,
-      databaseUrl:
-        resolvePlatformInstallDatabaseUrl(checkpoint) ||
-        (await promptSecret('PostgreSQL DATABASE_URL:')),
+      databaseUrl: databaseUrl || (await promptSecret('PostgreSQL DATABASE_URL:')),
       githubClientId:
         checkpoint?.githubClientId ||
         process.env.VOID_PLATFORM_GITHUB_CLIENT_ID ||
