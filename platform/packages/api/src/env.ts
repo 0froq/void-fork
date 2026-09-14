@@ -129,6 +129,7 @@ export type ApiEnv = Env & {
      * why the DO can't make the call directly.
      */
     CRON_FIRES_QUEUE: Queue<import('./cron-fires-queue.ts').CronFireMessage>;
+    CRON_FIRES_QUEUE_NAME?: string;
     LOGS_DATASET?: string;
     REQUESTS_DATASET?: string;
     PLATFORM_ENV?: string;

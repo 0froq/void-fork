@@ -729,7 +729,7 @@ export default {
     // - `void-cron-fires` (and `*-staging`): cron-trigger invocations from
     //   the CronScheduler DO, deferred here so the dispatched fetch runs
     //   outside the DO's RPC context.
-    if (batch.queue.startsWith('void-cron-fires')) {
+    if (batch.queue === (env.CRON_FIRES_QUEUE_NAME ?? 'void-cron-fires')) {
       await processCronFiresBatch(batch as unknown as MessageBatch<CronFireMessage>, env);
       return;
     }

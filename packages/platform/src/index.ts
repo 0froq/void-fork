@@ -35,3 +35,8 @@ export {
   parsePlatformDiscoveryDocument,
   type PlatformDiscoveryDocument,
 } from './discovery.ts';
+export {
+  createPlatformWorkerConfigs,
+  type PlatformProvisionedResourceIds,
+  type PlatformWorkerConfigSet,
+} from './worker-config.ts';
