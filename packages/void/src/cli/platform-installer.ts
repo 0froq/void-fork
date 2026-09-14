@@ -935,7 +935,10 @@ function recordResource(
   return recordInstallationResource(
     manifest,
     {
-      configHash: hash(JSON.stringify({ kind: action.kind, name: action.name })),
+      configHash:
+        action.kind === 'dns-record'
+          ? dnsRecordConfigHash(action.name, 'AAAA', '100::', true)
+          : hash(JSON.stringify({ kind: action.kind, name: action.name })),
       id,
       key: action.key,
       kind: action.kind,
@@ -945,6 +948,15 @@ function recordResource(
     },
     now,
   );
+}
+
+function dnsRecordConfigHash(
+  name: string,
+  type: string,
+  content: string,
+  proxied: boolean,
+): string {
+  return hash(JSON.stringify({ content, kind: 'dns-record', name, proxied, type }));
 }
 
 function hash(value: string | Buffer): string {

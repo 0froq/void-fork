@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
@@ -75,7 +76,20 @@ function installedManifest(zoneOwnership: ResourceOwnership = 'created') {
     manifest = recordInstallationResource(
       manifest,
       {
-        configHash: 'hash',
+        configHash:
+          kind === 'dns-record'
+            ? createHash('sha256')
+                .update(
+                  JSON.stringify({
+                    content: '100::',
+                    kind: 'dns-record',
+                    name: key,
+                    proxied: true,
+                    type: 'AAAA',
+                  }),
+                )
+                .digest('hex')
+            : 'hash',
         id: kind === 'worker' ? `void-example-${key.replace('-worker', '')}` : `${key}-id`,
         key,
         kind,
@@ -703,6 +717,29 @@ describe('platform lifecycle management', () => {
     await expect(
       uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false }),
     ).rejects.toThrow('Workers serve traffic not managed by this installation');
+
+    expect(fake.deleted).toEqual([]);
+    expect(fake.removedRoutes).toBe(0);
+    expect(listInstallationManifests()[0]?.status).toBe('installed');
+  });
+
+  it('refuses to delete an installer DNS record that was repurposed', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    fake.listDnsRecords = async (_zone: string, name: string) =>
+      namedResources(manifest, 'dns-record')
+        .filter((resource) => resource.name === name)
+        .map((resource) => ({
+          ...resource,
+          content: 'origin.unrelated.example',
+          proxied: false,
+          type: 'CNAME',
+        }));
+
+    await expect(
+      uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false }),
+    ).rejects.toThrow('changed configuration after installation');
 
     expect(fake.deleted).toEqual([]);
     expect(fake.removedRoutes).toBe(0);

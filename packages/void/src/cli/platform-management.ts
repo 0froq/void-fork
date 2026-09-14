@@ -1012,7 +1012,30 @@ async function verifyPlatformMutationOwnership(
       if (!zone) {
         exists = false;
       } else {
-        exists = hasNamedResource(await client.listDnsRecords(zone.id, resource.name), resource);
+        const current = (await client.listDnsRecords(zone.id, resource.name)).find(
+          (entry) => entry.id === resource.id && entry.name === resource.name,
+        );
+        exists = current !== undefined;
+        if (current && resource.ownership === 'created') {
+          const liveHash = dnsRecordConfigHash(
+            current.name,
+            current.type,
+            current.content,
+            current.proxied,
+          );
+          const legacyHash = createHash('sha256')
+            .update(JSON.stringify({ kind: resource.kind, name: resource.name }))
+            .digest('hex');
+          const expectedHash = dnsRecordConfigHash(resource.name, 'AAAA', '100::', true);
+          if (
+            liveHash !== resource.configHash &&
+            !(resource.configHash === legacyHash && liveHash === expectedHash)
+          ) {
+            throw ownershipError(
+              `dns-record ${resource.name} changed configuration after installation`,
+            );
+          }
+        }
       }
     } else if (resource.kind === 'worker') {
       exists = workerNames.includes(resource.name);
@@ -1144,6 +1167,17 @@ function hasNamedResource(
   resource: InstallationResource,
 ): boolean {
   return entries.some((entry) => entry.id === resource.id && entry.name === resource.name);
+}
+
+function dnsRecordConfigHash(
+  name: string,
+  type: string,
+  content: string,
+  proxied: boolean,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ content, kind: 'dns-record', name, proxied, type }))
+    .digest('hex');
 }
 
 function r2DeletionIntentHash(
