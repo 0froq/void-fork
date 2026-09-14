@@ -5,6 +5,7 @@ import {
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
   recordInstallationResource,
+  recordInstallationStep,
   transitionInstallation,
   type InstallationResourceKind,
   type PlatformInstallationManifest,
@@ -298,6 +299,40 @@ describe('platform lifecycle management', () => {
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
     expect(JSON.parse(fake.remoteWrites[0]!)).toMatchObject({ status: 'disabling' });
     expect(JSON.parse(fake.remoteWrites.at(-1)!)).toMatchObject({ status: 'disabled' });
+  });
+
+  it('removes public endpoints again after a platform is re-enabled', async () => {
+    let manifest = installedManifest();
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-09-14T00:00:03.000Z',
+        key: 'traffic-enabled:1',
+        resultHash: '1',
+      },
+      '2026-09-14T00:00:03.000Z',
+    );
+    persist(manifest);
+    const first = client(manifest);
+    await disablePlatform(first, manifest, false);
+
+    let reenabled = listInstallationManifests()[0]!;
+    reenabled = recordInstallationStep(
+      reenabled,
+      {
+        completedAt: '2026-09-14T00:00:04.000Z',
+        key: 'traffic-enabled:2',
+        resultHash: '2',
+      },
+      '2026-09-14T00:00:04.000Z',
+    );
+    reenabled = { ...reenabled, desiredState: 'enabled', status: 'installed' };
+    writeInstallationManifest(reenabled);
+
+    const second = client(reenabled);
+    await disablePlatform(second, reenabled, false);
+    expect(second.removedRoutes).toBe(1);
+    expect(second.subdomains).toHaveLength(4);
   });
 
   it('retains installer-owned data and the zone by default', async () => {

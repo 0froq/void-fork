@@ -298,13 +298,14 @@ export async function disablePlatform(
   try {
     await writeRemoteManifestIfPresent(client, next);
     const zone = requireResource(next, 'zone');
-    if (!hasLifecycleStep(next, 'disable:routes')) {
+    const trafficGeneration = currentTrafficGeneration(next);
+    if (!hasLifecycleStep(next, `disable:${trafficGeneration}:routes`)) {
       await client.removeRoutes(next.account.id, zone.id, workers);
-      next = recordLifecycleStep(next, 'disable:routes');
+      next = recordLifecycleStep(next, `disable:${trafficGeneration}:routes`);
       await writeLifecycleCheckpoint(client, next);
     }
     for (const worker of workers) {
-      const step = `disable:workers.dev:${worker}`;
+      const step = `disable:${trafficGeneration}:workers.dev:${worker}`;
       if (!hasLifecycleStep(next, step)) {
         await client.setWorkerSubdomain(next.account.id, worker, false);
         next = recordLifecycleStep(next, step);
@@ -901,6 +902,16 @@ function updateResourceState(
 
 function hasLifecycleStep(manifest: PlatformInstallationManifest, key: string): boolean {
   return manifest.steps.some((step) => step.key === key);
+}
+
+function currentTrafficGeneration(manifest: PlatformInstallationManifest): number {
+  return Math.max(
+    0,
+    ...manifest.steps.flatMap((step) => {
+      const match = /^traffic-enabled:(\d+)$/.exec(step.key);
+      return match ? [Number(match[1])] : [];
+    }),
+  );
 }
 
 function recordLifecycleStep(

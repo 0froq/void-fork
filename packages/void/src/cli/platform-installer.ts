@@ -355,6 +355,20 @@ export async function installPlatform(
       ]),
     ) as Record<'api' | 'dispatch' | 'proxy' | 'tail', string>;
     verifyRuntimeArtifacts(runtimeDirectory);
+    if (!preserveDisabled) {
+      const trafficGeneration = nextTrafficGeneration(manifest);
+      manifest = recordInstallationStep(
+        manifest,
+        {
+          completedAt: now(),
+          key: `traffic-enabled:${trafficGeneration}`,
+          resultHash: String(trafficGeneration),
+        },
+        now(),
+      );
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    }
     const configs = createPlatformWorkerConfigs({
       accountId: plan.account.id,
       apiUrl: plan.apiUrl,
@@ -874,6 +888,18 @@ function verifyRuntimeArtifacts(runtimeDirectory: string): void {
       throw new Error(`platform: Packaged Worker artifact failed integrity verification: ${path}.`);
     }
   }
+}
+
+function nextTrafficGeneration(manifest: PlatformInstallationManifest): number {
+  return (
+    Math.max(
+      0,
+      ...manifest.steps.flatMap((step) => {
+        const match = /^traffic-enabled:(\d+)$/.exec(step.key);
+        return match ? [Number(match[1])] : [];
+      }),
+    ) + 1
+  );
 }
 
 async function verifyPlatformHealth(apiUrl: string, installationId: string): Promise<void> {
