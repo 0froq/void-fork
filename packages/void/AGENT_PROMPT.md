@@ -1,6 +1,6 @@
 ## Void
 
-Non-interactive self-hosted platform lifecycle mutations require `--yes`; `--plan` is read-only and needs no acknowledgement.
+Non-interactive self-hosted platform lifecycle mutations require `--yes`; `--plan` is read-only and needs no acknowledgement. Published routes and custom domains are checkpointed and cleaned up by immutable Cloudflare id; replacements and legacy untracked attachments are retained.
 
 This project uses [Void](https://void.cloud) — a fullstack Vite plugin + deployment platform for Cloudflare. `voidPlugin()` in `vite.config.ts` gives you file-based API routing on Hono (`routes/`), Inertia-inspired server-rendered pages with co-located loaders/actions (`pages/` + `@void/vue` or `@void/react`), auto-provisioned D1/KV/R2 bindings, typed Durable Object state, first-class Drizzle ORM integration (schema in `db/schema.ts` -> `void/db` Drizzle instance -> typed routes -> typed fetch client), built-in auth, queues, cron jobs, edge caching (ISR), and one-command deploys via `npx void deploy`. For first-time setup, prefer `npx void init`; in an empty directory, install `void` first and let the interactive flow scaffold the starter with Vite+ by default, add the matching framework adapter, configure project files, handle auth, and link or create the deploy project before the first deploy. In an existing app, `void init` configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`. Use `void` and `@void/*` package names in source code and package manifests.
 

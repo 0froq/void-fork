@@ -70,6 +70,10 @@ export type PlatformManagedWorkerTraffic = Readonly<{
   customDomains: ReadonlyArray<Readonly<{ hostname: string; service: string }>>;
   routes: ReadonlyArray<Readonly<{ pattern: string; script: string }>>;
 }>;
+export type PlatformTrackedWorkerTraffic = Readonly<{
+  customDomains: ReadonlyArray<CloudflareWorkerDomain>;
+  routes: ReadonlyArray<Readonly<{ id: string; pattern: string; script: string }>>;
+}>;
 
 export class PlatformCloudflareClient {
   readonly #apiBase: string;
@@ -745,9 +749,9 @@ export class PlatformCloudflareClient {
   async removeRoutes(
     accountId: string,
     zoneId: string | null,
-    managed: PlatformManagedWorkerTraffic,
+    tracked: PlatformTrackedWorkerTraffic,
   ): Promise<void> {
-    if (zoneId !== null && managed.routes.length > 0) {
+    if (zoneId !== null && tracked.routes.length > 0) {
       let routes: ReadonlyArray<{ id?: unknown; pattern?: unknown; script?: unknown }> = [];
       try {
         routes = await this.request<
@@ -758,15 +762,17 @@ export class PlatformCloudflareClient {
           throw error;
         }
       }
-      for (const route of routes) {
-        if (
-          typeof route.id === 'string' &&
-          typeof route.pattern === 'string' &&
-          typeof route.script === 'string' &&
-          managed.routes.some(
-            (target) => target.pattern === route.pattern && target.script === route.script,
-          )
-        ) {
+      for (const target of tracked.routes) {
+        const route = routes.find((entry) => entry.id === target.id);
+        if (!route) {
+          continue;
+        }
+        if (route.pattern !== target.pattern || route.script !== target.script) {
+          throw new Error(
+            `platform: Worker route ${target.id} changed after it was checkpointed; refusing to delete it.`,
+          );
+        }
+        if (typeof route.id === 'string') {
           try {
             await this.request(
               `/zones/${encodeURIComponent(zoneId)}/workers/routes/${encodeURIComponent(route.id)}`,
@@ -782,17 +788,19 @@ export class PlatformCloudflareClient {
         }
       }
     }
-    const removedDomainIds = new Set<string>();
-    for (const target of managed.customDomains) {
-      const domains = await this.#listWorkerDomainRecords(accountId, target.service);
-      for (const domain of domains) {
-        if (
-          typeof domain.id === 'string' &&
-          domain.hostname === target.hostname &&
-          domain.service === target.service &&
-          !removedDomainIds.has(domain.id)
-        ) {
-          removedDomainIds.add(domain.id);
+    if (tracked.customDomains.length > 0) {
+      const domains = await this.#listWorkerDomainRecords(accountId);
+      for (const target of tracked.customDomains) {
+        const domain = domains.find((entry) => entry.id === target.id);
+        if (!domain) {
+          continue;
+        }
+        if (domain.hostname !== target.hostname || domain.service !== target.service) {
+          throw new Error(
+            `platform: Worker custom domain ${target.id} changed after it was checkpointed; refusing to delete it.`,
+          );
+        }
+        if (typeof domain.id === 'string') {
           try {
             await this.request(
               `/accounts/${encodeURIComponent(accountId)}/workers/domains/${encodeURIComponent(domain.id)}`,

@@ -34,6 +34,7 @@ import {
   writeInstallationManifest,
   writePendingInstallationSecrets,
 } from '../../src/cli/platform-registry.ts';
+import { recordPlatformWorkerTraffic } from '../../src/cli/platform-traffic.ts';
 
 const directories: Array<string> = [];
 
@@ -726,6 +727,60 @@ describe('platform lifecycle management', () => {
     expect(readInstallationRecoverySecrets(result)).toEqual({
       databaseUrl: 'postgres://recovery',
     });
+  });
+
+  it('deletes only checkpointed traffic ids when disabling', async () => {
+    let manifest = installedManifest();
+    const dispatchWorker = manifest.deployment.resources.dispatchWorker;
+    manifest = recordPlatformWorkerTraffic(
+      manifest,
+      dispatchWorker,
+      {
+        customDomains: [],
+        routes: [
+          {
+            id: 'route-one',
+            pattern: '*.apps.example.com/*',
+            script: dispatchWorker,
+          },
+          {
+            id: 'route-two',
+            pattern: '*.apps.example.com',
+            script: dispatchWorker,
+          },
+        ],
+      },
+      '2026-09-14T00:00:03.000Z',
+    );
+    persist(manifest);
+    const fake = client(manifest);
+    let removed: unknown;
+    fake.removeRoutes = async (_account: string, _zone: string | null, traffic: unknown) => {
+      removed = traffic;
+    };
+
+    await disablePlatform(fake, manifest, false);
+
+    expect(removed).toEqual({
+      customDomains: [],
+      routes: [
+        {
+          id: 'route-one',
+          pattern: '*.apps.example.com/*',
+          script: dispatchWorker,
+        },
+        {
+          id: 'route-two',
+          pattern: '*.apps.example.com',
+          script: dispatchWorker,
+        },
+      ],
+    });
+    expect(
+      listInstallationManifests()[0]
+        ?.resources.filter((resource) => resource.kind === 'worker-route')
+        .map((resource) => resource.state),
+    ).toEqual(['deleted', 'deleted']);
   });
 
   it('retains Workers and their unmanaged traffic for manual cleanup', async () => {

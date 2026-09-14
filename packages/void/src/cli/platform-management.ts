@@ -46,7 +46,7 @@ import {
   resolveInstallationManifest,
   writeInstallationManifest,
 } from './platform-registry.ts';
-import { platformManagedWorkerTraffic } from './platform-traffic.ts';
+import { trackedPlatformWorkerTraffic } from './platform-traffic.ts';
 
 export type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
@@ -446,11 +446,13 @@ export async function disablePlatform(
       PLATFORM_DISABLED_KEY,
       PLATFORM_DISABLED_VALUE,
     );
+    const trackedTraffic = trackedPlatformWorkerTraffic(next);
     await client.removeRoutes(
       next.account.id,
       missing.has(zone.key) ? null : zone.id,
-      platformManagedWorkerTraffic(next.deployment),
+      trackedTraffic,
     );
+    next = markTrackedTrafficDeleted(next, trackedTraffic);
     if (!hasLifecycleStep(next, `disable:${trafficGeneration}:routes`)) {
       next = recordLifecycleStep(next, `disable:${trafficGeneration}:routes`);
     }
@@ -620,11 +622,9 @@ export async function uninstallPlatform(
           { databaseUrl: dependencies.databaseUrl },
         );
         if (!missing.has(worker.key)) {
-          await client.removeRoutes(
-            next.account.id,
-            zone.id,
-            platformManagedWorkerTraffic(next.deployment, new Set([worker.name])),
-          );
+          const trackedTraffic = trackedPlatformWorkerTraffic(next, new Set([worker.name]));
+          await client.removeRoutes(next.account.id, zone.id, trackedTraffic);
+          next = markTrackedTrafficDeleted(next, trackedTraffic);
           next = recordLifecycleStep(next, `uninstall:routes:${worker.key}`);
           await writeLifecycleCheckpoint(client, next);
         }
@@ -813,6 +813,12 @@ function shouldDeleteResource(resource: InstallationResource, retainData: boolea
   // generation precondition that can prevent a same-name replacement from
   // racing the final ownership check, so retain Workers for manual cleanup.
   if (resource.kind === 'worker') {
+    return false;
+  }
+  // Traffic attachments are removed only through their immutable Cloudflare
+  // ids after tuple validation. Never pass an untracked or stale attachment to
+  // the generic resource deleter.
+  if (resource.kind === 'worker-route' || resource.kind === 'worker-custom-domain') {
     return false;
   }
   return !(retainData && DATA_RESOURCE_KINDS.has(resource.kind));
@@ -1216,6 +1222,27 @@ function updateResourceState(
 ): PlatformInstallationManifest {
   const resource = requireResource(manifest, key);
   return recordInstallationResource(manifest, { ...resource, state }, new Date().toISOString());
+}
+
+function markTrackedTrafficDeleted(
+  manifest: PlatformInstallationManifest,
+  tracked: Parameters<PlatformManagementClient['removeRoutes']>[2],
+): PlatformInstallationManifest {
+  const ids = new Set([
+    ...tracked.routes.map((route) => route.id),
+    ...tracked.customDomains.map((domain) => domain.id),
+  ]);
+  let next = manifest;
+  for (const resource of manifest.resources) {
+    if (
+      resource.state === 'ready' &&
+      ids.has(resource.id) &&
+      (resource.kind === 'worker-route' || resource.kind === 'worker-custom-domain')
+    ) {
+      next = updateResourceState(next, resource.key, 'deleted');
+    }
+  }
+  return next;
 }
 
 function hasLifecycleStep(manifest: PlatformInstallationManifest, key: string): boolean {

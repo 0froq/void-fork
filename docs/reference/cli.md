@@ -303,6 +303,8 @@ See [Self-host a Void platform](../guide/self-hosted-platform.md) for prerequisi
 
 ### Lifecycle commands
 
+Traffic cleanup is id-bound. New installs checkpoint every published route and custom-domain Cloudflare id. Disable, rollback, and uninstall re-read each checkpointed id, validate its recorded pattern or hostname and Worker, and delete only that id; a same-tuple replacement with a new id is retained. Legacy installations without traffic-id checkpoints retain those attachments for explicit manual cleanup while the routing flag still blocks requests.
+
 ```sh
 void platform discover [--account <id>]
 void platform upgrade [id] [--plan] [--yes]

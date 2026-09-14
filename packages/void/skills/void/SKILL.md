@@ -23,6 +23,8 @@ For self-hosted platform installation, require a dedicated empty PostgreSQL data
 
 ## No-Args Behavior
 
+Published self-hosted platform routes and custom domains are checkpointed by immutable Cloudflare id; lifecycle cleanup validates and deletes only those ids, retaining replacements and legacy untracked attachments.
+
 If invoked without a concrete task, do a brief app status check and report:
 
 1. App type (`void`, `framework`, `spa`, `static`) using `docs/app-types.md` criteria.

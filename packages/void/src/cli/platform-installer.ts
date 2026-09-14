@@ -57,7 +57,11 @@ import {
   writeInstallationManifest,
   writePendingInstallationSecrets,
 } from './platform-registry.ts';
-import { platformManagedWorkerTraffic } from './platform-traffic.ts';
+import {
+  platformManagedWorkerTraffic,
+  recordPlatformWorkerTraffic,
+  trackedPlatformWorkerTraffic,
+} from './platform-traffic.ts';
 import { resolveWranglerArgv } from './preset.ts';
 
 export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
@@ -118,6 +122,7 @@ type InstallerClient = Pick<
       | 'listWorkerDomains'
       | 'listWorkerNames'
       | 'listWorkerServiceRoutes'
+      | 'listWorkerRoutes'
       | 'removeRoutes'
     >
   >;
@@ -676,7 +681,7 @@ export async function installPlatform(
               await dependencies.client.removeRoutes(
                 plan.account.id,
                 zone.id,
-                platformManagedWorkerTraffic(plan.deployment, new Set([snapshot.workerName])),
+                trackedPlatformWorkerTraffic(manifest!, new Set([snapshot.workerName])),
               );
             },
             retainNewWorker: async () => {
@@ -766,6 +771,23 @@ export async function installPlatform(
               writeInstallationManifest(manifest);
               await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
             },
+            onTrafficPublished: async () => {
+              if (!dependencies.client.listWorkerDomains || !dependencies.client.listWorkerRoutes) {
+                throw new Error('platform: Cloudflare traffic inventory is unavailable.');
+              }
+              const [customDomains, routes] = await Promise.all([
+                dependencies.client.listWorkerDomains(plan.account.id),
+                dependencies.client.listWorkerRoutes(zone.id),
+              ]);
+              manifest = recordPlatformWorkerTraffic(
+                manifest!,
+                action.name,
+                { customDomains, routes },
+                now(),
+              );
+              writeInstallationManifest(manifest);
+              await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+            },
             preservedRoutes,
             previousConfig: previousWorkerConfig,
             previousPublicEndpoints,
@@ -784,7 +806,7 @@ export async function installPlatform(
               await dependencies.client.removeRoutes(
                 plan.account.id,
                 zone.id,
-                platformManagedWorkerTraffic(plan.deployment, new Set([action.name])),
+                trackedPlatformWorkerTraffic(manifest!, new Set([action.name])),
               );
             },
             retainNewWorker: async () => {
@@ -1751,6 +1773,7 @@ type PlatformWorkerDeploymentOptions = Readonly<{
     stagedVersionId: string,
     previousTriggers: CloudflareTriggerConfig,
   ) => Promise<void>;
+  onTrafficPublished: () => Promise<void>;
   previousConfig: Record<string, unknown>;
   previousPublicEndpoints: boolean;
   preservedRoutes: ReadonlyArray<unknown>;
@@ -1869,6 +1892,7 @@ async function deployPlatformWorker(
       workerName,
     });
     assertPlatformTriggerStabilization(triggers, workerName, uploadedVersionId, 'publish');
+    await options.onTrafficPublished();
     const rollback = () =>
       rollbackPlatformWorker({
         accountId,

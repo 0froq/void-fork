@@ -160,6 +160,8 @@ Discovery verifies the account, every recorded Cloudflare resource, and the rout
 
 ## Disable and safely uninstall
 
+New installs checkpoint every published route and custom-domain Cloudflare id. Disable, rollback, and uninstall re-read each id, validate its recorded tuple, and delete only that immutable id. A same-tuple replacement with a new id is retained. Legacy installations without traffic-id checkpoints keep those attachments for explicit manual cleanup; the installation-owned routing flag still blocks requests.
+
 Disable all routes and custom domains and gate every `workers.dev` request through an installation-owned routing flag, without deleting resources or data. Repair and upgrade keep the installation private until traffic is restored explicitly:
 
 ```sh
