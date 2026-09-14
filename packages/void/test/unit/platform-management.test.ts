@@ -249,7 +249,8 @@ describe('platform lifecycle management', () => {
     ]);
     expect(fake.deleted).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
-    expect(JSON.parse(fake.remoteWrites[0]!)).toMatchObject({ status: 'disabled' });
+    expect(JSON.parse(fake.remoteWrites[0]!)).toMatchObject({ status: 'disabling' });
+    expect(JSON.parse(fake.remoteWrites.at(-1)!)).toMatchObject({ status: 'disabled' });
   });
 
   it('retains installer-owned data and the zone by default', async () => {

@@ -256,6 +256,26 @@ describe('platform recovery', () => {
     expect(endpointChecks).toBe(0);
   });
 
+  it('recovers an interrupted uninstall without probing its removed endpoint', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const interrupted = { ...remoteManifest(), status: 'uninstalling' as const };
+    let endpointChecks = 0;
+
+    const recovered = await recoverPlatformInstallations(
+      client(interrupted),
+      'account',
+      async () => {
+        endpointChecks++;
+      },
+    );
+
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]?.status).toBe('uninstalling');
+    expect(endpointChecks).toBe(0);
+  });
+
   it('never overwrites divergent local lifecycle progress during discovery', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
     directories.push(directory);

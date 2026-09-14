@@ -5,6 +5,7 @@ import {
   parsePlatformResourceOwnershipMarker,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   recordInstallationResource,
+  recordInstallationStep,
   setInstallationDesiredState,
   transitionInstallation,
   type InstallationResource,
@@ -272,18 +273,28 @@ export async function disablePlatform(
   next = transitionInstallation(next, 'disabling', new Date().toISOString());
   writeInstallationManifest(next);
   try {
+    await writeRemoteManifestIfPresent(client, next);
     const zone = requireResource(next, 'zone');
-    await client.removeRoutes(next.account.id, zone.id, workers);
+    if (!hasLifecycleStep(next, 'disable:routes')) {
+      await client.removeRoutes(next.account.id, zone.id, workers);
+      next = recordLifecycleStep(next, 'disable:routes');
+      await writeLifecycleCheckpoint(client, next);
+    }
     for (const worker of workers) {
-      await client.setWorkerSubdomain(next.account.id, worker, false);
+      const step = `disable:workers.dev:${worker}`;
+      if (!hasLifecycleStep(next, step)) {
+        await client.setWorkerSubdomain(next.account.id, worker, false);
+        next = recordLifecycleStep(next, step);
+        await writeLifecycleCheckpoint(client, next);
+      }
     }
     next = transitionInstallation(next, 'disabled', new Date().toISOString());
-    writeInstallationManifest(next);
-    await writeRemoteManifestIfPresent(client, next);
+    await writeLifecycleCheckpoint(client, next);
     log.success(`${next.deployment.displayName} is disabled. Its data was not changed.`);
   } catch (error) {
     next = transitionInstallation(next, 'failed', new Date().toISOString());
     writeInstallationManifest(next);
+    await writeRemoteManifestIfPresent(client, next).catch(() => {});
     throw error;
   }
 }
@@ -376,6 +387,7 @@ export async function uninstallPlatform(
   let next = transitionInstallation(manifest, 'uninstalling', new Date().toISOString());
   writeInstallationManifest(next);
   try {
+    await writeRemoteManifestIfPresent(client, next);
     for (const key of missingResources) {
       const resource = requireResource(next, key);
       next = updateResourceState(
@@ -383,7 +395,7 @@ export async function uninstallPlatform(
         key,
         resource.ownership === 'created' ? 'deleted' : 'retained',
       );
-      writeInstallationManifest(next);
+      await writeLifecycleCheckpoint(client, next);
     }
     const workers = new Set(
       next.resources
@@ -403,6 +415,8 @@ export async function uninstallPlatform(
         );
         if (!missing.has(worker.key)) {
           await client.removeRoutes(next.account.id, zone.id, new Set([worker.name]));
+          next = recordLifecycleStep(next, `uninstall:routes:${worker.key}`);
+          await writeLifecycleCheckpoint(client, next);
         }
       }
     }
@@ -428,17 +442,17 @@ export async function uninstallPlatform(
       }
       if (!hasRoutingCheckpoint && resource.kind !== 'zone') {
         next = updateResourceState(next, resource.key, 'retained');
-        writeInstallationManifest(next);
+        await writeLifecycleCheckpoint(client, next);
         continue;
       }
       if (!shouldDeleteResource(resource, retainData, deleteZone)) {
         next = updateResourceState(next, resource.key, 'retained');
-        writeInstallationManifest(next);
+        await writeLifecycleCheckpoint(client, next);
         continue;
       }
       if (resource.kind === 'dns-record' && !zone) {
         next = updateResourceState(next, resource.key, 'retained');
-        writeInstallationManifest(next);
+        await writeLifecycleCheckpoint(client, next);
         continue;
       }
       const immediatelyMissing = await verifyPlatformMutationOwnership(
@@ -453,7 +467,7 @@ export async function uninstallPlatform(
           resource.key,
           resource.ownership === 'created' ? 'deleted' : 'retained',
         );
-        writeInstallationManifest(next);
+        await writeLifecycleCheckpoint(client, next);
         continue;
       }
       if (resource.kind === 'r2-bucket') {
@@ -471,7 +485,7 @@ export async function uninstallPlatform(
       }
       await client.deleteResource(next.account.id, resource.kind, resource.id, zone?.id);
       next = updateResourceState(next, resource.key, 'deleted');
-      writeInstallationManifest(next);
+      await writeLifecycleCheckpoint(client, next);
     }
     const completed = transitionInstallation(next, 'uninstalled', new Date().toISOString());
     await writeRemoteManifestIfPresent(client, completed);
@@ -487,6 +501,7 @@ export async function uninstallPlatform(
   } catch (error) {
     next = transitionInstallation(next, 'failed', new Date().toISOString());
     writeInstallationManifest(next);
+    await writeRemoteManifestIfPresent(client, next).catch(() => {});
     throw error;
   }
 }
@@ -726,6 +741,26 @@ function updateResourceState(
 ): PlatformInstallationManifest {
   const resource = requireResource(manifest, key);
   return recordInstallationResource(manifest, { ...resource, state }, new Date().toISOString());
+}
+
+function hasLifecycleStep(manifest: PlatformInstallationManifest, key: string): boolean {
+  return manifest.steps.some((step) => step.key === key);
+}
+
+function recordLifecycleStep(
+  manifest: PlatformInstallationManifest,
+  key: string,
+): PlatformInstallationManifest {
+  const now = new Date().toISOString();
+  return recordInstallationStep(manifest, { completedAt: now, key, resultHash: 'completed' }, now);
+}
+
+async function writeLifecycleCheckpoint(
+  client: PlatformManagementClient,
+  manifest: PlatformInstallationManifest,
+): Promise<void> {
+  writeInstallationManifest(manifest);
+  await writeRemoteManifestIfPresent(client, manifest);
 }
 
 async function writeRemoteManifestIfPresent(

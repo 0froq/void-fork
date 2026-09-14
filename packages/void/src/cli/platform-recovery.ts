@@ -112,7 +112,7 @@ export async function recoverPlatformInstallations(
       throw new Error(`platform: Installation ${manifest.id} has inconsistent proxy metadata.`);
     }
     await verifyPlatformInstallationOwnership(client, manifest);
-    if (manifest.desiredState === 'enabled' && manifest.status !== 'disabled') {
+    if (manifest.desiredState === 'enabled' && manifest.status === 'installed') {
       await verifyEndpoint(manifest);
     }
     recovered.push(manifest);
