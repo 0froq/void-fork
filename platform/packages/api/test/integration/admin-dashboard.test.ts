@@ -1164,6 +1164,7 @@ describe('GET /admin/login', () => {
     expect(authorization.origin + authorization.pathname).toBe(
       'https://github.com/login/oauth/authorize',
     );
+    expect(authorization.searchParams.get('redirect_uri')).toBe('http://localhost/auth/callback');
     const state = authorization.searchParams.get('state')!;
     const browserCookie = start.headers.get('Set-Cookie')!.split(';', 1)[0]!;
 
@@ -1187,7 +1188,7 @@ describe('GET /admin/login', () => {
     try {
       const callback = await app.fetch(
         new Request(
-          `http://localhost/admin/callback?code=test-code&state=${encodeURIComponent(state)}`,
+          `http://localhost/auth/callback?code=test-code&state=${encodeURIComponent(state)}`,
           { headers: { Cookie: browserCookie }, redirect: 'manual' },
         ),
         env,

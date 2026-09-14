@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
 import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from '../../auth/github.ts';
 import {
@@ -21,6 +21,19 @@ import type { ApiEnv } from '../../env.ts';
 
 const app = new Hono<ApiEnv>();
 type AdminProvider = 'github' | 'google';
+
+export function isAdminOAuthState(state: string): boolean {
+  try {
+    const dotIndex = state.lastIndexOf('.');
+    if (dotIndex === -1) {
+      return false;
+    }
+    const stateData = JSON.parse(atob(state.slice(0, dotIndex))) as { audience?: unknown };
+    return stateData.audience === 'admin';
+  } catch {
+    return false;
+  }
+}
 
 // GET /login
 app.get('/login', (context) => {
@@ -55,10 +68,11 @@ app.get('/login/:provider', async (context) => {
   ) {
     return context.html('<h1>Login failed</h1><p>Authentication provider unavailable.</p>', 501);
   }
-  const redirectUri = new URL(context.req.url).origin + '/admin/callback';
+  const redirectUri =
+    context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).toString();
   const nonce = crypto.randomUUID();
   await storeOAuthNonce(context.get('db'), nonce, 600);
-  const stateData = JSON.stringify({ nonce, provider });
+  const stateData = JSON.stringify({ audience: 'admin', nonce, provider });
   const stateEncoded = btoa(stateData);
   const signature = await hmacSignState(stateEncoded, context.env.JWT_SECRET);
   const state = `${stateEncoded}.${signature}`;
@@ -71,14 +85,13 @@ app.get('/login/:provider', async (context) => {
     httpOnly: true,
     secure: true,
     sameSite: 'Lax',
-    path: '/admin/callback',
+    path: '/auth/callback',
     maxAge: 600,
   });
   return context.redirect(url);
 });
 
-// GET /callback
-app.get('/callback', async (context) => {
+export async function handleAdminOAuthCallback(context: Context<ApiEnv>): Promise<Response> {
   const code = context.req.query('code');
   const state = context.req.query('state');
 
@@ -104,9 +117,13 @@ app.get('/callback', async (context) => {
   let provider: AdminProvider;
   try {
     const stateData = JSON.parse(atob(stateEncoded)) as {
+      audience?: string;
       nonce: string;
       provider?: AdminProvider;
     };
+    if (stateData.audience !== 'admin') {
+      throw new Error('unknown audience');
+    }
     nonce = stateData.nonce;
     // Preserve Google callbacks initiated before a deployment of this version.
     provider = stateData.provider ?? 'google';
@@ -130,9 +147,10 @@ app.get('/callback', async (context) => {
     return context.html('<h1>Login failed</h1><p>Invalid or expired login state.</p>', 400);
   }
 
-  deleteCookie(context, 'oauth_nonce', { path: '/admin/callback' });
+  deleteCookie(context, 'oauth_nonce', { path: '/auth/callback' });
 
-  const redirectUri = new URL(context.req.url).origin + '/admin/callback';
+  const redirectUri =
+    context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).toString();
   let providerId: string;
   let login: string;
   let email: string | null;
@@ -194,7 +212,7 @@ app.get('/callback', async (context) => {
   });
 
   return context.redirect('/admin/');
-});
+}
 
 // GET /logout
 app.get('/logout', (context) => {

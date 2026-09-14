@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
+import { handleAdminOAuthCallback, isAdminOAuthState } from '../admin/routes/login.ts';
 import {
   ensureGitHubPreviewRepoAccess,
   getGitHubPreviewRepoConfig,
@@ -211,6 +212,10 @@ app.get('/callback', async (context) => {
 
   if (!code || !state) {
     return context.json({ error: 'missing code or state' }, 400);
+  }
+
+  if (isAdminOAuthState(state)) {
+    return handleAdminOAuthCallback(context);
   }
 
   // Verify state HMAC
