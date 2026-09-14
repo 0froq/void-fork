@@ -30,6 +30,7 @@ function client(overrides: Record<string, unknown> = {}) {
     listHyperdriveConfigs: async () => [],
     listWorkerNames: async () => [],
     listWorkerDomains: async () => [],
+    listWorkerRoutes: async () => [],
     ...overrides,
   };
 }
@@ -103,6 +104,26 @@ describe('platform installation planning', () => {
         null,
       ),
     ).rejects.toThrow('already has a DNS record');
+  });
+
+  it('refuses to take over an existing application Worker route', async () => {
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          findZone: async () => ({
+            id: 'zone',
+            name: 'example.com',
+            nameServers: [],
+            status: 'active',
+          }),
+          listWorkerRoutes: async () => [
+            { id: 'route', pattern: '*.apps.example.com/*', script: 'other-worker' },
+          ],
+        }),
+        input,
+        null,
+      ),
+    ).rejects.toThrow('Application route');
   });
 
   it('does not treat a local provision intent as remote ownership proof', async () => {

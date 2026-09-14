@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   createPlatformDeploymentManifest,
+  createApplicationRoutes,
   createPlatformResourceOwnershipMarker,
   createPlatformResourceNames,
   normalizeInstallationSlug,
@@ -68,6 +69,7 @@ type PlanningClient = Pick<
   | 'listR2Buckets'
   | 'listWorkerNames'
   | 'listWorkerDomains'
+  | 'listWorkerRoutes'
   | 'verifyToken'
 >;
 
@@ -140,6 +142,29 @@ export async function createPlatformInstallPlan(
     client.listWorkerNames(account.id),
   ]);
   const dnsRecords = zone ? await client.listDnsRecords(zone.id, wildcardHostname) : [];
+  if (zone) {
+    const expectedPatterns = new Set(
+      createApplicationRoutes(deployment.application).map((route) => route.pattern),
+    );
+    const expectedWorker = deployment.resources.dispatchWorker;
+    const recordedWorker = existing?.resources.some(
+      (resource) =>
+        resource.key === 'dispatch-worker' &&
+        resource.kind === 'worker' &&
+        resource.name === expectedWorker &&
+        resource.state === 'ready',
+    );
+    const conflicts = (await client.listWorkerRoutes(zone.id)).filter(
+      (route) =>
+        expectedPatterns.has(route.pattern) && (route.script !== expectedWorker || !recordedWorker),
+    );
+    if (conflicts.length > 0) {
+      const conflict = conflicts[0]!;
+      throw new Error(
+        `platform: Application route ${JSON.stringify(conflict.pattern)} is already assigned to ${JSON.stringify(conflict.script ?? 'no Worker')}. Choose another application domain.`,
+      );
+    }
+  }
   if (deployment.controlPlane.apiHostname) {
     const apiHostname = deployment.controlPlane.apiHostname;
     const [workerDomains, controlPlaneZone] = await Promise.all([

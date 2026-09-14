@@ -32,6 +32,7 @@ type RecoveryClient = Pick<
   | 'listR2Buckets'
   | 'listWorkerNames'
   | 'listWorkerDomains'
+  | 'listWorkerRoutes'
   | 'verifyToken'
 >;
 

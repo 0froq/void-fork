@@ -45,6 +45,7 @@ function planningClient() {
     listHyperdriveConfigs: async () => [],
     listWorkerNames: async () => [],
     listWorkerDomains: async () => [],
+    listWorkerRoutes: async () => [],
   };
 }
 

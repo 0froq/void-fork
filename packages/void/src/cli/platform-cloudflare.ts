@@ -36,6 +36,11 @@ export type CloudflareWorkerDomain = Readonly<{
   id: string;
   service: string;
 }>;
+export type CloudflareWorkerRoute = Readonly<{
+  id: string;
+  pattern: string;
+  script: string | null;
+}>;
 
 export class PlatformCloudflareClient {
   readonly #apiBase: string;
@@ -190,6 +195,17 @@ export class PlatformCloudflareClient {
       hostname: requiredString(entry.hostname, 'Worker custom domain hostname'),
       id: requiredString(entry.id, 'Worker custom domain id'),
       service: requiredString(entry.service, 'Worker custom domain service'),
+    }));
+  }
+
+  async listWorkerRoutes(zoneId: string): Promise<ReadonlyArray<CloudflareWorkerRoute>> {
+    const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
+      `/zones/${encodeURIComponent(zoneId)}/workers/routes`,
+    );
+    return result.map((entry) => ({
+      id: requiredString(entry.id, 'Worker route id'),
+      pattern: requiredString(entry.pattern, 'Worker route pattern'),
+      script: typeof entry.script === 'string' ? entry.script : null,
     }));
   }
 

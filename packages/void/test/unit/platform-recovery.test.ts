@@ -181,6 +181,7 @@ function client(manifest = remoteManifest()) {
       manifest.deployment.resources.dispatchWorker,
     ],
     listWorkerDomains: async () => [],
+    listWorkerRoutes: async () => [],
   };
 }
 
