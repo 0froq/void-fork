@@ -9,6 +9,7 @@ import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
   acquirePlatformLifecycleLock,
+  assertPlatformInstallationSlugAvailable,
   getActivePlatformConnection,
   listInstallationManifests,
   listPlatformConnections,
@@ -49,6 +50,29 @@ describe('platform registry', () => {
     release();
     const releaseAgain = acquirePlatformLifecycleLock('account_123', 'example', directory);
     releaseAgain();
+  });
+
+  it('rejects a fresh installation slug after a competing checkpoint appears', () => {
+    const directory = temporaryRegistry();
+    let manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = { ...manifest, status: 'planned' };
+    writeInstallationManifest(manifest, directory);
+
+    expect(() => assertPlatformInstallationSlugAvailable('example', directory)).toThrow(
+      'already uses this name',
+    );
+    expect(() => assertPlatformInstallationSlugAvailable('other', directory)).not.toThrow();
   });
 
   it('normalizes and validates API origins', () => {

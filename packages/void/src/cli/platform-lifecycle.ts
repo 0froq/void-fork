@@ -15,7 +15,7 @@ import {
 } from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
-  listInstallationManifests,
+  assertPlatformInstallationSlugAvailable,
   readPendingInstallationSecrets,
   resolveInstallationManifest,
 } from './platform-registry.ts';
@@ -69,16 +69,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     (args.name || (await promptText('Installation name:', 'company')));
   const installationSlug = normalizeInstallationSlug(name);
   if (!existing) {
-    const collision = listInstallationManifests().find(
-      (manifest) =>
-        manifest.status !== 'uninstalled' &&
-        manifest.deployment.installationSlug === installationSlug,
-    );
-    if (collision) {
-      throw new Error(
-        `platform: Installation ${collision.id} already uses this name. Resume it with \`void platform install --resume --name ${collision.id}\`.`,
-      );
-    }
+    assertPlatformInstallationSlugAvailable(installationSlug);
   }
   const accounts = await readAccounts(client);
   const accountId = recorded ? existing!.account.id : await selectAccount(accounts, args.account);
@@ -114,6 +105,9 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   }
   const release = args.plan ? null : acquirePlatformLifecycleLock(accountId, installationSlug);
   try {
+    if (!existing && !args.plan) {
+      assertPlatformInstallationSlugAvailable(installationSlug);
+    }
     if (existing && !args.plan) {
       existing = resolveInstallationManifest(existing.id);
       const { verifyPlatformInstallationOwnership } = await import('./platform-management.ts');

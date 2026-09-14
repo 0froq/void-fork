@@ -254,6 +254,22 @@ export function listPlatformConnections(
   return readRegistry(directory).connections;
 }
 
+export function assertPlatformInstallationSlugAvailable(
+  installationSlug: string,
+  directory: string = platformRegistryDirectory(),
+): void {
+  const collision = listInstallationManifests(directory).find(
+    (manifest) =>
+      manifest.status !== 'uninstalled' &&
+      manifest.deployment.installationSlug === installationSlug,
+  );
+  if (collision) {
+    throw new Error(
+      `platform: Installation ${collision.id} already uses this name. Resume it with \`void platform install --resume --name ${collision.id}\`.`,
+    );
+  }
+}
+
 export function getActivePlatformConnection(
   directory: string = platformRegistryDirectory(),
 ): PlatformConnection | null {
