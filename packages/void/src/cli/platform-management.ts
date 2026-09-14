@@ -27,7 +27,6 @@ type PlatformManagementClient = Pick<
 
 export type PlatformManagementDependencies = Readonly<{
   confirm?: (message: string, initialValue: boolean) => Promise<boolean>;
-  countProjects?: (databaseUrl: string) => Promise<number>;
   interactive?: boolean;
 }>;
 
@@ -145,19 +144,7 @@ export async function uninstallPlatform(
   args: Extract<PlatformArgs, { subcommand: 'uninstall' }>,
   dependencies: PlatformManagementDependencies = {},
 ): Promise<void> {
-  const recovery = readInstallationRecoverySecrets(manifest);
-  const databaseUrl =
-    recovery?.databaseUrl ||
-    process.env.VOID_PLATFORM_DATABASE_URL ||
-    process.env.DATABASE_URL ||
-    '';
-  if (!databaseUrl) {
-    throw new Error(
-      'platform: DATABASE_URL recovery material is unavailable. Set VOID_PLATFORM_DATABASE_URL so uninstall can determine whether app data must be retained.',
-    );
-  }
-  const appCount = await (dependencies.countProjects ?? countProjects)(databaseUrl);
-  const retainData = appCount > 0 && !args.purgeData;
+  const retainData = !args.purgeData;
   const createdZone = manifest.resources.find(
     (resource) => resource.key === 'zone' && resource.ownership === 'created',
   );
@@ -171,10 +158,10 @@ export async function uninstallPlatform(
     );
   }
   const dataMessage = retainData
-    ? `Retain storage and Hyperdrive because PostgreSQL contains ${appCount} app(s).`
+    ? 'Retain installer-owned storage, dispatch, AI logs, and Hyperdrive by default.'
     : args.purgeData
       ? 'Delete installer-owned storage (--purge-data); external PostgreSQL is never deleted.'
-      : 'Delete empty installer-owned storage; external PostgreSQL is never deleted.';
+      : 'Retain installer-owned data; external PostgreSQL is never deleted.';
   note(
     `Disable all platform routes.\nDelete installer-owned Workers and Queues.\n${dataMessage}\n${
       createdZone
@@ -210,8 +197,8 @@ export async function uninstallPlatform(
         .filter((resource) => resource.kind === 'worker')
         .map((resource) => resource.name),
     );
-    const zone = requireResource(next, 'zone');
-    if (zone.state === 'ready') {
+    const zone = next.resources.find((resource) => resource.key === 'zone');
+    if (zone?.state === 'ready') {
       await client.removeRoutes(next.account.id, zone.id, workers);
     }
     const dataKinds = new Set([
@@ -254,7 +241,12 @@ export async function uninstallPlatform(
         writeInstallationManifest(next);
         continue;
       }
-      await client.deleteResource(next.account.id, resource.kind, resource.id, zone.id);
+      if (resource.kind === 'dns-record' && !zone) {
+        next = updateResourceState(next, resource.key, 'retained');
+        writeInstallationManifest(next);
+        continue;
+      }
+      await client.deleteResource(next.account.id, resource.kind, resource.id, zone?.id);
       next = updateResourceState(next, resource.key, 'deleted');
       writeInstallationManifest(next);
     }
@@ -274,7 +266,7 @@ export async function uninstallPlatform(
     removePlatformConnectionForInstallation(next.id);
     log.success(
       retainData
-        ? `${next.deployment.displayName} was uninstalled; app data was retained and recorded in ${next.id}.`
+        ? `${next.deployment.displayName} was uninstalled; data resources were retained and recorded in ${next.id}.`
         : `${next.deployment.displayName} was uninstalled.`,
     );
   } catch (error) {
@@ -315,23 +307,6 @@ async function writeRemoteManifestIfPresent(
       REMOTE_INSTALLATION_MANIFEST_KEY,
       JSON.stringify(manifest),
     );
-  }
-}
-
-async function countProjects(databaseUrl: string): Promise<number> {
-  const { Pool } = await import('pg');
-  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
-  try {
-    const result = await pool.query<{ count: string }>(
-      'SELECT COUNT(*)::text AS count FROM projects',
-    );
-    const count = Number(result.rows[0]?.count ?? '');
-    if (!Number.isSafeInteger(count) || count < 0) {
-      throw new Error('platform: PostgreSQL returned an invalid project count.');
-    }
-    return count;
-  } finally {
-    await pool.end();
   }
 }
 

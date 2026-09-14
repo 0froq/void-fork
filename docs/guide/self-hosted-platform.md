@@ -165,12 +165,11 @@ The default uninstall policy is ownership-aware:
 
 - Adopted or external resources are never deleted.
 - Workers, transient Queues, installer-created routes, and installer-created DNS are removed.
-- If PostgreSQL contains no apps, installer-owned KV, R2, Hyperdrive, dispatch, and AI Gateway resources are removed.
-- If apps exist, those data-bearing resources are retained and recorded in the final manifest.
+- Installer-owned KV, R2, Hyperdrive, dispatch, and AI Gateway resources are retained and recorded in the final manifest by default.
 - External PostgreSQL is never deleted.
 - An installer-created zone is kept by default. Interactive uninstall asks separately and defaults to No; use `--delete-zone` or `--keep-zone` to make the choice explicit.
 
-To delete installer-owned data even when apps exist:
+To delete installer-owned data:
 
 ```sh
 void platform uninstall [id] --purge-data

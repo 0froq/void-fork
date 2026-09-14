@@ -139,27 +139,33 @@ describe('platform lifecycle management', () => {
     expect(JSON.parse(fake.remoteWrites[0]!)).toMatchObject({ status: 'disabled' });
   });
 
-  it('deletes empty installer-owned resources but keeps the zone by default', async () => {
+  it('retains installer-owned data and the zone by default', async () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client();
     await uninstallPlatform(fake, manifest, uninstallArgs, {
-      countProjects: async () => 0,
       interactive: false,
     });
-    expect(fake.deleted).toHaveLength(14);
+    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual([
+      'dns-record',
+      'queue',
+      'queue',
+      'worker',
+      'worker',
+      'worker',
+      'worker',
+    ]);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
     const result = listInstallationManifests()[0]!;
     expect(result.status).toBe('uninstalled');
     expect(result.resources.find((resource) => resource.key === 'zone')?.state).toBe('retained');
   });
 
-  it('retains data when apps exist and removes the remote ownership marker', async () => {
+  it('removes the remote ownership marker when retaining data', async () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client();
     await uninstallPlatform(fake, manifest, uninstallArgs, {
-      countProjects: async () => 2,
       interactive: false,
     });
     expect(fake.deleted.map(([kind]) => kind).sort()).toEqual([
@@ -187,7 +193,6 @@ describe('platform lifecycle management', () => {
       manifest,
       { ...uninstallArgs, purgeData: true, deleteZone: true },
       {
-        countProjects: async () => 3,
         interactive: false,
       },
     );
@@ -208,7 +213,6 @@ describe('platform lifecycle management', () => {
     };
     await expect(
       uninstallPlatform(first, manifest, uninstallArgs, {
-        countProjects: async () => 0,
         interactive: false,
       }),
     ).rejects.toThrow('temporary deletion failure');
@@ -218,11 +222,28 @@ describe('platform lifecycle management', () => {
 
     const second = client();
     await uninstallPlatform(second, checkpoint, uninstallArgs, {
-      countProjects: async () => 0,
       interactive: false,
     });
     expect(second.deleted.filter(([kind]) => kind === 'worker')).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
+  });
+
+  it('cleans up a partial installation without PostgreSQL or a recorded zone', async () => {
+    const manifest = {
+      ...installedManifest(),
+      resources: installedManifest().resources.filter((resource) => resource.key !== 'zone'),
+    };
+    persist(manifest);
+    const fake = client();
+    await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
+    expect(fake.removedRoutes).toBe(0);
+    expect(fake.deleted.some(([kind]) => kind === 'worker')).toBe(true);
+    expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
+    expect(
+      listInstallationManifests()[0]?.resources.find(
+        (resource) => resource.key === 'application-dns',
+      )?.state,
+    ).toBe('retained');
   });
 
   it('resumes after routes were removed but remote disable checkpointing failed', async () => {
