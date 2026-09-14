@@ -114,7 +114,7 @@ describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
 
-  it('creates a new Worker through an atomic conditional API request', async () => {
+  it('creates a new Worker through a conditional API request', async () => {
     const requests: Array<{
       authorization: string | undefined;
       body: string;
