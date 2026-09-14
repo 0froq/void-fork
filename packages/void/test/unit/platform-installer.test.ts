@@ -1176,6 +1176,7 @@ describe('platform installer', () => {
       name,
     });
     const deployed: Array<string> = [];
+    const deployedTrafficStates: Array<unknown> = [];
     let apiSecrets: Record<string, string> | null = null;
     let r2OwnershipMarker = '';
     const routingValues = new Map<string, string>();
@@ -1238,6 +1239,9 @@ describe('platform installer', () => {
           expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
           lifecycleEvents.push(`deploy:${String(config.name)}`);
           deployed.push(String(config.name));
+          deployedTrafficStates.push(
+            (config.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
+          );
           if (String(config.name).endsWith('-api')) {
             apiSecrets = secrets;
           }
@@ -1260,6 +1264,20 @@ describe('platform installer', () => {
       result.manifest.deployment.resources.proxyWorker,
       result.manifest.deployment.resources.tailWorker,
       result.manifest.deployment.resources.dispatchWorker,
+      result.manifest.deployment.resources.apiWorker,
+      result.manifest.deployment.resources.proxyWorker,
+      result.manifest.deployment.resources.tailWorker,
+      result.manifest.deployment.resources.dispatchWorker,
+    ]);
+    expect(deployedTrafficStates).toEqual([
+      'staging',
+      'staging',
+      undefined,
+      'staging',
+      'enabled',
+      'enabled',
+      undefined,
+      'enabled',
     ]);
     expect(apiSecrets).toMatchObject({ PLATFORM_BOOTSTRAP_GITHUB_ID: '583231' });
     expect(JSON.parse(r2OwnershipMarker)).toMatchObject({
@@ -1276,7 +1294,10 @@ describe('platform installer', () => {
     expect(JSON.parse(routingValues.get('signup:allowlist')!)).toEqual([]);
     expect(routingValues.has(PLATFORM_DISABLED_KEY)).toBe(false);
     expect(lifecycleEvents[0]).toBe(`put:${PLATFORM_DISABLED_KEY}`);
-    expect(lifecycleEvents.at(-2)).toBe('verify');
+    expect(lifecycleEvents.filter((event) => event === 'verify')).toHaveLength(1);
+    expect(lifecycleEvents.indexOf('verify')).toBeLessThan(
+      lifecycleEvents.lastIndexOf(`deploy:${result.manifest.deployment.resources.dispatchWorker}`),
+    );
     expect(lifecycleEvents.at(-1)).toBe(`delete:${PLATFORM_DISABLED_KEY}`);
     expect(listInstallationManifests(directory)).toHaveLength(1);
     expect(readdirSync(join(directory, 'account')).some((name) => name.endsWith('.secrets'))).toBe(
@@ -1891,13 +1912,19 @@ describe('platform installer', () => {
     expect(enabledUpgrade.manifest.desiredState).toBe('enabled');
     expect(enabledHealthChecks).toBe(1);
     expect(deletedKvValues).toContain('__void/platform/disabled/v1');
-    expect(enabledConfigs).toHaveLength(4);
-    for (const config of enabledConfigs) {
+    expect(enabledConfigs).toHaveLength(8);
+    for (const config of enabledConfigs.slice(0, 4)) {
+      expect((config.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE).not.toBe('enabled');
+    }
+    for (const config of enabledConfigs.slice(4)) {
       expect(config.workers_dev).toBe(true);
       expect(config.preview_urls).toBe(true);
+      if (!String(config.name).endsWith('-tail')) {
+        expect((config.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE).toBe('enabled');
+      }
     }
     expect(
-      enabledConfigs.find((config) => config.name === deployment.resources.dispatchWorker),
+      enabledConfigs.slice(4).find((config) => config.name === deployment.resources.dispatchWorker),
     ).toHaveProperty('routes');
 
     const disabledRollbackStates: Array<unknown> = [];

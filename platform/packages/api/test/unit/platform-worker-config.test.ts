@@ -85,6 +85,7 @@ describe('platform Worker configuration', () => {
       platformVersion: '1.0.0',
       proxyUrl: 'https://proxy.example.com',
       publicEndpoints: false,
+      trafficState: 'staging',
       resources: {
         hyperdrive: 'hyperdrive',
         isrCacheKv: 'isr',
@@ -104,6 +105,9 @@ describe('platform Worker configuration', () => {
       expect(config.workers_dev).toBe(false);
       expect(config.preview_urls).toBe(false);
     }
+    expect(configs.api.vars).toMatchObject({ PLATFORM_TRAFFIC_STATE: 'staging' });
+    expect(configs.proxy.vars).toMatchObject({ PLATFORM_TRAFFIC_STATE: 'staging' });
+    expect(configs.dispatch.vars).toMatchObject({ PLATFORM_TRAFFIC_STATE: 'staging' });
     expect(configs.api).not.toHaveProperty('routes');
     expect(configs.proxy).not.toHaveProperty('routes');
     expect(configs.dispatch).not.toHaveProperty('routes');

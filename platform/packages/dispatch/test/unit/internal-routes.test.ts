@@ -15,7 +15,12 @@ function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
-function createEnv(disabled = false, selfHosted = false, healthProbeToken?: string): Env {
+function createEnv(
+  disabled = false,
+  selfHosted = false,
+  healthProbeToken?: string,
+  trafficState?: string,
+): Env {
   const workerFetch = vi.fn(async () => new Response('worker'));
   return {
     ROUTING: {
@@ -40,6 +45,7 @@ function createEnv(disabled = false, selfHosted = false, healthProbeToken?: stri
     },
     ...(selfHosted ? { PLATFORM_INSTALLATION_ID: 'installation-id' } : {}),
     ...(healthProbeToken ? { PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken } : {}),
+    ...(trafficState ? { PLATFORM_TRAFFIC_STATE: trafficState } : {}),
   } as unknown as Env;
 }
 
@@ -52,6 +58,15 @@ describe('internal route blocking', () => {
     );
     expect(response.status).toBe(503);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('fails closed in staging even when routing KV is missing the disabled value', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/normal-path'),
+      createEnv(false, true, undefined, 'staging'),
+      createCtx(),
+    );
+    expect(response.status).toBe(503);
   });
 
   it('admits installer health checks while public traffic is disabled', async () => {

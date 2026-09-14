@@ -132,6 +132,7 @@ function createEnv(
   apiOverride?: { fetch: ReturnType<typeof vi.fn> | ((req: Request) => Promise<Response>) },
   platformInstallationId?: string,
   healthProbeToken?: string,
+  trafficState?: string,
 ) {
   return {
     AI: {
@@ -153,6 +154,7 @@ function createEnv(
     },
     ...(platformInstallationId ? { PLATFORM_INSTALLATION_ID: platformInstallationId } : {}),
     ...(healthProbeToken ? { PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken } : {}),
+    ...(trafficState ? { PLATFORM_TRAFFIC_STATE: trafficState } : {}),
   };
 }
 
@@ -188,6 +190,14 @@ describe('proxy worker', () => {
     );
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'Platform disabled' });
+  });
+
+  it('fails closed in staging even when routing KV is missing the disabled value', async () => {
+    const res = await worker.fetch(
+      new Request('https://proxy.void.cloud/health'),
+      createEnv(undefined, undefined, undefined, 'installation-id', undefined, 'staging'),
+    );
+    expect(res.status).toBe(503);
   });
 
   it('admits installer health checks while public traffic is disabled', async () => {

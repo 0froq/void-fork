@@ -656,13 +656,23 @@ export async function installPlatform(
       },
       runtimeEntrypoints: entrypoints,
     };
-    const configs = createPlatformWorkerConfigs({
+    const requiresStagedCommit = !preserveDisabled && !previousPublicEndpoints;
+    const enabledConfigs = createPlatformWorkerConfigs({
       ...configInput,
       publicEndpoints: !preserveDisabled,
+      trafficState: preserveDisabled ? 'staging' : 'enabled',
     });
+    const configs = requiresStagedCommit
+      ? createPlatformWorkerConfigs({
+          ...configInput,
+          publicEndpoints: true,
+          trafficState: 'staging',
+        })
+      : enabledConfigs;
     const previousConfigs = createPlatformWorkerConfigs({
       ...configInput,
       publicEndpoints: previousPublicEndpoints,
+      trafficState: previousPublicEndpoints ? 'enabled' : 'staging',
     });
     const interruptedCutover = interruptedWorkerCutover(manifest);
     let workerActions: ReadonlyArray<PlatformInstallPlanAction> = plan.actions.filter(
@@ -930,6 +940,125 @@ export async function installPlatform(
       version,
       createPlatformHealthProbeToken(manifest.ownershipNonce),
     );
+    if (requiresStagedCommit) {
+      manifest = recordWorkerCutoverResolution(
+        manifest,
+        workerCutoverGeneration,
+        'committed',
+        now(),
+      );
+      manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, false, now());
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+
+      workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
+      for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
+        const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
+        const workerSecrets =
+          key === 'api'
+            ? apiWorkerSecrets(secrets, plan.account.id, zone.id)
+            : key === 'proxy'
+              ? proxyWorkerSecrets(secrets, plan.account.id)
+              : null;
+        const preservedRoutes = dependencies.deployWorker
+          ? []
+          : await inventoryUnmanagedPlatformWorkerTraffic(dependencies.client, plan, action.name);
+        const workerConfig = mergePlatformWorkerTrafficConfig(enabledConfigs[key], preservedRoutes);
+        const previousWorkerConfig = mergePlatformWorkerTrafficConfig(
+          configs[key],
+          preservedRoutes,
+        );
+        const rollback = dependencies.deployWorker
+          ? await dependencies.deployWorker(workerConfig, workerSecrets, previousWorkerConfig)
+          : await deployPlatformWorker(workerConfig, workerSecrets, {
+              onStaged: async (previousVersionId, stagedVersionId, previousTriggers) => {
+                manifest = recordWorkerCutoverStage(
+                  manifest!,
+                  workerCutoverGeneration,
+                  key,
+                  previousVersionId,
+                  stagedVersionId,
+                  action.name,
+                  previousTriggers,
+                  now(),
+                );
+                writeInstallationManifest(manifest);
+                await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+              },
+              onTrafficPublished: async () => {
+                if (
+                  !dependencies.client.listWorkerDomains ||
+                  !dependencies.client.listWorkerRoutes
+                ) {
+                  throw new Error('platform: Cloudflare traffic inventory is unavailable.');
+                }
+                const [customDomains, routes] = await Promise.all([
+                  dependencies.client.listWorkerDomains(plan.account.id),
+                  dependencies.client.listWorkerRoutes(zone.id),
+                ]);
+                manifest = recordPlatformWorkerTraffic(
+                  manifest!,
+                  action.name,
+                  { customDomains, routes },
+                  now(),
+                );
+                writeInstallationManifest(manifest);
+                await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+              },
+              onUnsafeTraffic: async () => {
+                manifest = recordWorkerUnsafeTraffic(
+                  manifest!,
+                  workerCutoverGeneration,
+                  key,
+                  action.name,
+                  now(),
+                );
+                writeInstallationManifest(manifest);
+                await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+              },
+              preservedRoutes,
+              publishCustomDomains: (workerName, origins) =>
+                publishPlatformWorkerCustomDomains(
+                  dependencies.client,
+                  plan.account.id,
+                  workerName,
+                  origins,
+                ),
+              previousConfig: previousWorkerConfig,
+              previousPublicEndpoints: true,
+              inspectNewWorker: () =>
+                inspectNewPlatformWorker(
+                  dependencies.client,
+                  plan.account.id,
+                  manifest!,
+                  action.key,
+                  action.name,
+                ),
+              removeCustomDomains: async () => {
+                if (!dependencies.client.removeRoutes) {
+                  throw new Error('platform: Cloudflare route removal is unavailable.');
+                }
+                await dependencies.client.removeRoutes(
+                  plan.account.id,
+                  zone.id,
+                  trackedPlatformWorkerTraffic(manifest!, new Set([action.name])),
+                );
+              },
+              retainNewWorker: async () => {
+                await dependencies.client.putKvValue(
+                  plan.account.id,
+                  requireId(ids, 'routing-kv'),
+                  PLATFORM_DISABLED_KEY,
+                  PLATFORM_DISABLED_VALUE,
+                );
+              },
+              workerExisted: true,
+            });
+        if (rollback) {
+          workerRollbacks.push(rollback);
+        }
+      }
+    }
     if (dependencies.client.deleteKvValue) {
       await dependencies.client.deleteKvValue(
         plan.account.id,

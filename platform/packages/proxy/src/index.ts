@@ -21,9 +21,10 @@ app.use('/*', async (context, next) => {
     context.req.path === '/health' &&
     context.req.header('X-Void-Platform-Probe') === healthProbeToken;
   if (
-    context.env.PLATFORM_INSTALLATION_ID &&
     !installerProbe &&
-    (await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+    (context.env.PLATFORM_TRAFFIC_STATE === 'staging' ||
+      (context.env.PLATFORM_INSTALLATION_ID &&
+        (await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE))
   ) {
     return context.json({ error: 'Platform disabled' }, 503);
   }

@@ -52,6 +52,16 @@ describe('GET /health', () => {
     }
   });
 
+  it('fails closed in staging even when routing KV is missing the disabled value', async () => {
+    const res = await app.fetch(new Request('http://localhost/health'), {
+      ...env,
+      PLATFORM_INSTALLATION_ID: 'installation-id',
+      PLATFORM_TRAFFIC_STATE: 'staging',
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'Platform disabled' });
+  });
+
   it('admits installer health checks while public traffic is disabled', async () => {
     await env.ROUTING.put(PLATFORM_DISABLED_KEY, 'disabled');
     await createInstallationClaim();

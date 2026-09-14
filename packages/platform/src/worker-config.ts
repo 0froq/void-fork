@@ -25,6 +25,7 @@ export function createPlatformWorkerConfigs(input: {
   proxyUrl: string;
   resources: PlatformProvisionedResourceIds;
   runtimeEntrypoints: Readonly<Record<'api' | 'dispatch' | 'proxy' | 'tail', string>>;
+  trafficState?: 'enabled' | 'staging';
 }): PlatformWorkerConfigSet {
   const {
     accountId,
@@ -39,6 +40,7 @@ export function createPlatformWorkerConfigs(input: {
     runtimeEntrypoints,
   } = input;
   const publicEndpoints = input.publicEndpoints ?? true;
+  const trafficState = input.trafficState ?? 'enabled';
   const names = deployment.resources;
   const ownershipVars = (resourceKey: string, resourceName: string) => ({
     PLATFORM_OWNERSHIP_MARKER: JSON.stringify(
@@ -113,6 +115,7 @@ export function createPlatformWorkerConfigs(input: {
       PLATFORM_ENV: 'production',
       PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken,
       PLATFORM_INSTALLATION_ID: installationId,
+      PLATFORM_TRAFFIC_STATE: trafficState,
       ...ownershipVars('api-worker', names.apiWorker),
       PLATFORM_VERSION: platformVersion,
       PROXY_URL: proxyUrl,
@@ -152,6 +155,7 @@ export function createPlatformWorkerConfigs(input: {
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
       PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken,
       PLATFORM_INSTALLATION_ID: installationId,
+      PLATFORM_TRAFFIC_STATE: trafficState,
       ...ownershipVars('proxy-worker', names.proxyWorker),
     },
   };
@@ -199,6 +203,7 @@ export function createPlatformWorkerConfigs(input: {
         BASE_HOSTNAME: deployment.application.baseDomain,
         PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken,
         PLATFORM_INSTALLATION_ID: installationId,
+        PLATFORM_TRAFFIC_STATE: trafficState,
         ...ownershipVars('dispatch-worker', names.dispatchWorker),
       },
     },

@@ -138,6 +138,7 @@ export type ApiEnv = Env & {
     PLATFORM_BOOTSTRAP_GITHUB_ID?: string;
     PLATFORM_HEALTH_PROBE_TOKEN?: string;
     PLATFORM_INSTALLATION_ID?: string;
+    PLATFORM_TRAFFIC_STATE?: string;
     PLATFORM_VERSION?: string;
     PLATFORM_CAPABILITIES?: string;
     PROXY_URL?: string;

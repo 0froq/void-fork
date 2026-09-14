@@ -103,9 +103,10 @@ const app = new Hono<ApiEnv>()
       context.req.header('X-Void-Platform-Probe') === healthProbeToken &&
       (context.req.path === '/health' || context.req.path === '/.well-known/void-platform');
     if (
-      context.env.PLATFORM_INSTALLATION_ID &&
       !installerProbe &&
-      (await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+      (context.env.PLATFORM_TRAFFIC_STATE === 'staging' ||
+        (context.env.PLATFORM_INSTALLATION_ID &&
+          (await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE))
     ) {
       return context.json({ error: 'Platform disabled' }, 503);
     }
@@ -277,8 +278,9 @@ async function scheduled(
   _ctx: ExecutionContext,
 ): Promise<void> {
   if (
-    env.PLATFORM_INSTALLATION_ID &&
-    (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+    env.PLATFORM_TRAFFIC_STATE === 'staging' ||
+    (env.PLATFORM_INSTALLATION_ID &&
+      (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE)
   ) {
     return;
   }
@@ -797,8 +799,9 @@ export default {
   scheduled,
   async queue(batch: MessageBatch<unknown>, env: ApiEnv['Bindings']): Promise<void> {
     if (
-      env.PLATFORM_INSTALLATION_ID &&
-      (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+      env.PLATFORM_TRAFFIC_STATE === 'staging' ||
+      (env.PLATFORM_INSTALLATION_ID &&
+        (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE)
     ) {
       return;
     }

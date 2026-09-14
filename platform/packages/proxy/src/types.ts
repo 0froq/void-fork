@@ -54,6 +54,7 @@ export type Env = Readonly<{
   PLATFORM_CAPABILITIES?: string;
   PLATFORM_HEALTH_PROBE_TOKEN?: string;
   PLATFORM_INSTALLATION_ID?: string;
+  PLATFORM_TRAFFIC_STATE?: string;
   SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounterRpc>;
 }>;
 

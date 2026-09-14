@@ -596,8 +596,9 @@ export default {
       return Response.json({ ok: true });
     }
     if (
-      env.PLATFORM_INSTALLATION_ID &&
-      (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE
+      env.PLATFORM_TRAFFIC_STATE === 'staging' ||
+      (env.PLATFORM_INSTALLATION_ID &&
+        (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE)
     ) {
       return createErrorResponse(request, 503, 'Platform disabled', {
         'Cache-Control': 'no-store',
