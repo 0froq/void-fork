@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   createPlatformDeploymentManifest,
   type InstallationResourceKind,
@@ -113,13 +114,27 @@ export async function createPlatformInstallPlan(
     client.listWorkerNames(account.id),
   ]);
   const actions: Array<PlatformInstallPlanAction> = [];
+  const recordedZone = existing?.resources.find((resource) => resource.key === 'zone');
+  const intendedZone = existing
+    ? hasProvisionIntent(existing, 'zone', 'zone', deployment.application.zoneName)
+    : false;
+  if (recordedZone && (!zone || recordedZone.id !== zone.id || recordedZone.kind !== 'zone')) {
+    throw new Error(
+      `platform: Recorded zone ${recordedZone.name} (${recordedZone.id}) no longer matches the Cloudflare account.`,
+    );
+  }
   actions.push({
-    action: zone ? 'adopt' : 'create',
+    action: recordedZone || (zone && intendedZone) ? 'reuse' : zone ? 'adopt' : 'create',
     id: zone?.id ?? null,
     key: 'zone',
     kind: 'zone',
     name: deployment.application.zoneName,
-    reason: zone ? 'Use the existing zone without taking ownership.' : 'Create the requested zone.',
+    reason:
+      recordedZone || intendedZone
+        ? 'Reuse the recorded zone.'
+        : zone
+          ? 'Use the existing zone without taking ownership.'
+          : 'Create the requested zone.',
   });
   addNamedPlan(actions, existing, 'routing-kv', 'kv-namespace', names.routingKv, routingKv);
   addNamedPlan(actions, existing, 'isr-cache-kv', 'kv-namespace', names.isrCacheKv, isrKv);
@@ -207,7 +222,8 @@ function addNamedPlan(
   const remote = matches[0];
   const recorded = existing?.resources.find((resource) => resource.key === key);
   if (remote) {
-    if (!recorded || recorded.id !== remote.id || recorded.kind !== kind) {
+    const intended = existing ? hasProvisionIntent(existing, key, kind, name) : false;
+    if ((!recorded || recorded.id !== remote.id || recorded.kind !== kind) && !intended) {
       throw new Error(
         `platform: ${kind} ${JSON.stringify(name)} already exists but is not owned by this installation. Choose another installation name.`,
       );
@@ -238,6 +254,27 @@ function addNamedPlan(
     name,
     reason: `Create an installer-owned ${kind}.`,
   });
+}
+
+export function platformProvisionIntentHash(
+  manifest: Pick<PlatformInstallationManifest, 'ownershipNonce'>,
+  key: string,
+  kind: InstallationResourceKind,
+  name: string,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ key, kind, name, ownershipNonce: manifest.ownershipNonce }))
+    .digest('hex');
+}
+
+function hasProvisionIntent(
+  manifest: PlatformInstallationManifest,
+  key: string,
+  kind: InstallationResourceKind,
+  name: string,
+): boolean {
+  const intent = manifest.steps.find((step) => step.key === `provision-intent:${key}`);
+  return intent?.resultHash === platformProvisionIntentHash(manifest, key, kind, name);
 }
 
 export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {

@@ -309,3 +309,70 @@ export function listInstallationManifests(
     left.deployment.displayName.localeCompare(right.deployment.displayName),
   );
 }
+
+export function resolveInstallationManifest(
+  selector: string,
+  directory: string = platformRegistryDirectory(),
+): PlatformInstallationManifest {
+  const manifests = listInstallationManifests(directory).filter(
+    (manifest) =>
+      manifest.status !== 'uninstalled' &&
+      (!selector ||
+        manifest.id === selector ||
+        manifest.deployment.installationSlug === selector ||
+        manifest.deployment.displayName.toLowerCase() === selector.toLowerCase()),
+  );
+  if (manifests.length !== 1) {
+    throw new Error(
+      manifests.length === 0
+        ? `platform: No local installation matches ${JSON.stringify(selector)}.`
+        : 'platform: Multiple local installations match; specify an installation id.',
+    );
+  }
+  return manifests[0]!;
+}
+
+export function writePendingInstallationSecrets(
+  manifest: PlatformInstallationManifest,
+  secrets: Record<string, string>,
+  directory: string = platformRegistryDirectory(),
+): void {
+  const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
+  writeJsonAtomically(manifestPath.replace(/\.json$/, '.secrets'), secrets);
+}
+
+export function readPendingInstallationSecrets(
+  manifest: PlatformInstallationManifest,
+  directory: string = platformRegistryDirectory(),
+): Record<string, string> | null {
+  const path = installationManifestPath(manifest.account.id, manifest.id, directory).replace(
+    /\.json$/,
+    '.secrets',
+  );
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('secret checkpoint must be an object');
+    }
+    const entries = Object.entries(value);
+    if (entries.some(([, entry]) => typeof entry !== 'string')) {
+      throw new Error('secret checkpoint values must be strings');
+    }
+    return Object.fromEntries(entries) as Record<string, string>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw new Error(
+      `platform: Could not read pending installation secrets: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function removePendingInstallationSecrets(
+  manifest: PlatformInstallationManifest,
+  directory: string = platformRegistryDirectory(),
+): void {
+  const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
+  rmSync(manifestPath.replace(/\.json$/, '.secrets'), { force: true });
+}

@@ -22,11 +22,8 @@ export type PlatformArgs =
       account: string;
       applicationDomain: string;
       controlPlaneDomain: string;
-      databaseUrl: string;
       dedicatedZone: boolean;
       displayName: string;
-      githubClientId: string;
-      githubClientSecret: string;
       name: string;
       plan: boolean;
       resume: boolean;
@@ -129,10 +126,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       '--account',
       '--application-domain',
       '--control-plane-domain',
-      '--database-url',
       '--display-name',
-      '--github-client-id',
-      '--github-client-secret',
       '--name',
       '--zone',
     ]);
@@ -157,11 +151,8 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       account: values.get('--account') ?? '',
       applicationDomain: values.get('--application-domain') ?? '',
       controlPlaneDomain: values.get('--control-plane-domain') ?? '',
-      databaseUrl: values.get('--database-url') ?? '',
       dedicatedZone,
       displayName: values.get('--display-name') ?? '',
-      githubClientId: values.get('--github-client-id') ?? '',
-      githubClientSecret: values.get('--github-client-secret') ?? '',
       name: values.get('--name') ?? '',
       plan,
       resume,
