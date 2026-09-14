@@ -154,7 +154,7 @@ Discovery verifies the account, every recorded Cloudflare resource, and the rout
 
 ## Disable and safely uninstall
 
-Disable all routes, custom domains, and `workers.dev` endpoints without deleting resources or data. Repair and upgrade keep the installation private until traffic is restored explicitly:
+Disable all routes and custom domains and gate every `workers.dev` request through an installation-owned routing flag, without deleting resources or data. Repair and upgrade keep the installation private until traffic is restored explicitly:
 
 ```sh
 void platform disable [id] --plan
@@ -172,8 +172,8 @@ void platform uninstall [id] --plan
 The default uninstall policy is ownership-aware:
 
 - Adopted or external resources are never deleted.
-- Workers, transient Queues, installer-created routes, and installer-created DNS are removed.
-- Installer-owned KV, R2, Hyperdrive, dispatch, and AI Gateway resources are retained and recorded in the final manifest by default.
+- Transient Queues, installer-created routes, and installer-created DNS are removed.
+- Installer-owned Workers, KV, R2, Hyperdrive, dispatch, and AI Gateway resources are retained and recorded in the final manifest by default.
 - External PostgreSQL is never deleted.
 - Zones are always retained. A zone can contain unrelated DNS, settings, and Cloudflare products that the installer cannot exhaustively prove ownership of, so inspect and delete an installer-created zone manually after uninstall if appropriate. The legacy `--delete-zone` flag fails before mutation with this guidance.
 
@@ -183,4 +183,4 @@ To delete installer-owned data:
 void platform uninstall [id] --purge-data
 ```
 
-`--purge-data` is destructive, but still never deletes external PostgreSQL, R2, the AI Gateway, adopted resources, or a zone. Cloudflare exposes no server-enforced condition tying an R2 object deletion to one immutable bucket generation, so a client-side purge could race a same-name replacement bucket; Void retains R2 for explicit manual cleanup instead. AI Gateway ids can also be reused without a durable ownership marker, so remove that gateway manually only after checking its ownership. Before any Cloudflare mutation, Void compares the remote installation checkpoint with fresh resource inventory and verifies the ownership markers on every Worker. It also inventories Worker routes across every account zone and all Worker custom domains. If a platform Worker serves traffic not owned by this installation, uninstall stops before changing anything; detach that traffic explicitly and retry. A missing or changed ownership proof likewise stops the operation before it can affect a replacement resource. The routing namespace is deleted last, so rerunning after a failure skips completed work. A default data-retaining uninstall keeps a final `uninstalled` audit checkpoint in the retained routing namespace.
+`--purge-data` is destructive, but still never deletes external PostgreSQL, Workers, R2, the AI Gateway, adopted resources, or a zone. Cloudflare Worker deletion and subdomain mutation are name-addressed and expose no server-enforced generation condition, so a same-name replacement could race a client-side ownership check. Void therefore blocks the retained Workers through routing storage, removes only the installation's managed routes and custom domains, and leaves Worker deletion to an operator who can inspect the account immediately before cleanup. The same generation limitation applies to R2, so Void retains that bucket for explicit manual cleanup. AI Gateway ids can also be reused without a durable ownership marker. Before any Cloudflare mutation, Void compares the remote installation checkpoint with fresh resource inventory and verifies the ownership markers on every Worker. Unmanaged routes and custom domains on retained Workers are left untouched. A missing or changed ownership proof stops the operation before it can affect a replacement resource. The routing namespace is deleted last, so rerunning after a failure skips completed work. A default data-retaining uninstall keeps a final `uninstalled` audit checkpoint and disabled flag in the retained routing namespace.

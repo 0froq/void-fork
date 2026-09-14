@@ -5,6 +5,7 @@ import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
+  PLATFORM_DISABLED_KEY,
   recordInstallationResource,
   recordInstallationStep,
   setInstallationEndpoints,
@@ -139,6 +140,7 @@ function remoteManifest() {
 function client(manifest = remoteManifest()) {
   const byName = new Map(manifest.resources.map((resource) => [resource.name, resource]));
   return {
+    deleteKvValue: async () => {},
     deleteResource: async () => {},
     deleteR2Object: async () => {},
     emptyR2Bucket: async () => {},
@@ -178,7 +180,7 @@ function client(manifest = remoteManifest()) {
       namespace === 'routing-id' && key === REMOTE_INSTALLATION_MANIFEST_KEY
         ? JSON.stringify(manifest)
         : null,
-    putKvValue: async () => {},
+    putKvValue: async (_account: string, _namespace: string, _key: string, _value: string) => {},
     removeRoutes: async () => {},
     setWorkerSubdomain: async (_account: string, _worker: string, _enabled: boolean) => {},
     getR2Object: async () => {
@@ -414,11 +416,9 @@ describe('platform recovery', () => {
           : interrupted.resources.find((entry) => entry.kind === 'worker' && entry.name === name)!;
       return { PLATFORM_OWNERSHIP_MARKER: ownershipMarker(interrupted, resource) };
     };
-    const disabledWorkers: Array<string> = [];
-    fake.setWorkerSubdomain = async (_account, worker, enabled) => {
-      if (!enabled) {
-        disabledWorkers.push(worker);
-      }
+    const disabledKeys: Array<string> = [];
+    fake.putKvValue = async (_account, _namespace, key) => {
+      disabledKeys.push(key);
     };
 
     const [recovered] = await recoverPlatformInstallations(fake, 'account', async () => {});
@@ -431,7 +431,7 @@ describe('platform recovery', () => {
       state: 'ready',
     });
     await disablePlatform(fake, recovered!, false);
-    expect(disabledWorkers).toContain(workerName);
+    expect(disabledKeys).toContain(PLATFORM_DISABLED_KEY);
   });
 
   it('keeps locally advanced lifecycle progress during discovery', async () => {

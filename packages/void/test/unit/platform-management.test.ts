@@ -5,6 +5,8 @@ import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
+  PLATFORM_DISABLED_KEY,
+  PLATFORM_DISABLED_VALUE,
   recordInstallationResource,
   recordInstallationStep,
   transitionInstallation,
@@ -127,7 +129,8 @@ function client(manifest: PlatformInstallationManifest) {
   const preservedBucketKeys: Array<ReadonlyArray<string>> = [];
   const deletedBucketMarkers: Array<string> = [];
   const remoteWrites: Array<string> = [];
-  const subdomains: Array<[string, boolean]> = [];
+  const disabledWrites: Array<string> = [];
+  const deletedKvValues: Array<string> = [];
   let removedRoutes = 0;
   return {
     deleted,
@@ -135,12 +138,16 @@ function client(manifest: PlatformInstallationManifest) {
     preservedBucketKeys,
     deletedBucketMarkers,
     remoteWrites,
-    subdomains,
+    disabledWrites,
+    deletedKvValues,
     get removedRoutes() {
       return removedRoutes;
     },
     deleteResource: async (_account: string, kind: string, id: string) => {
       deleted.push([kind, id]);
+    },
+    deleteKvValue: async (_account: string, _namespace: string, key: string) => {
+      deletedKvValues.push(key);
     },
     deleteR2Object: async (_account: string, bucket: string) => {
       deletedBucketMarkers.push(bucket);
@@ -223,14 +230,15 @@ function client(manifest: PlatformInstallationManifest) {
       _accountId: string,
       _workerName: string,
     ): Promise<Array<{ pattern: string; zoneName: string }>> => [],
-    putKvValue: async (_account: string, _namespace: string, _key: string, value: string) => {
-      remoteWrites.push(value);
+    putKvValue: async (_account: string, _namespace: string, key: string, value: string) => {
+      if (key === PLATFORM_DISABLED_KEY) {
+        disabledWrites.push(value);
+      } else {
+        remoteWrites.push(value);
+      }
     },
     removeRoutes: async (_account: string, _zone: string | null, _managed: unknown) => {
       removedRoutes++;
-    },
-    setWorkerSubdomain: async (_account: string, worker: string, enabled: boolean) => {
-      subdomains.push([worker, enabled]);
     },
   };
 }
@@ -546,12 +554,7 @@ describe('platform lifecycle management', () => {
       },
     });
     expect(fake.removedRoutes).toBe(1);
-    expect(fake.subdomains).toEqual([
-      ['api-worker', false],
-      ['dispatch-worker', false],
-      ['proxy-worker', false],
-      ['tail-worker', false],
-    ]);
+    expect(fake.disabledWrites).toEqual([PLATFORM_DISABLED_VALUE]);
     expect(fake.deleted).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
     expect(JSON.parse(fake.remoteWrites[0]!)).toMatchObject({ status: 'disabling' });
@@ -599,7 +602,7 @@ describe('platform lifecycle management', () => {
     const second = client(reenabled);
     await disablePlatform(second, reenabled, false);
     expect(second.removedRoutes).toBe(1);
-    expect(second.subdomains).toHaveLength(4);
+    expect(second.disabledWrites).toHaveLength(1);
   });
 
   it('disables public Workers from an interrupted deployment', async () => {
@@ -610,11 +613,11 @@ describe('platform lifecycle management', () => {
     await disablePlatform(fake, manifest, false);
 
     expect(fake.removedRoutes).toBe(1);
-    expect(fake.subdomains).toHaveLength(4);
+    expect(fake.disabledWrites).toHaveLength(1);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
   });
 
-  it('disables every surviving Worker when one recorded Worker is missing', async () => {
+  it('uses routing storage when one recorded Worker is missing', async () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client(manifest);
@@ -622,15 +625,11 @@ describe('platform lifecycle management', () => {
 
     await disablePlatform(fake, manifest, false);
 
-    expect(fake.subdomains).toEqual([
-      ['api-worker', false],
-      ['proxy-worker', false],
-      ['tail-worker', false],
-    ]);
+    expect(fake.disabledWrites).toHaveLength(1);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
   });
 
-  it('disables workers.dev and custom domains when the recorded zone is missing', async () => {
+  it('disables workers.dev through routing storage when the recorded zone is missing', async () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client(manifest);
@@ -643,7 +642,7 @@ describe('platform lifecycle management', () => {
     await disablePlatform(fake, manifest, false);
 
     expect(routeZone).toBeNull();
-    expect(fake.subdomains).toHaveLength(4);
+    expect(fake.disabledWrites).toHaveLength(1);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
   });
 
@@ -687,7 +686,7 @@ describe('platform lifecycle management', () => {
 
     await disablePlatform(fake, manifest, false);
 
-    expect(fake.subdomains).toContainEqual([api.name, false]);
+    expect(fake.disabledWrites).toHaveLength(1);
     expect(
       listInstallationManifests()[0]?.resources.find((resource) => resource.key === api.key),
     ).toMatchObject({
@@ -706,15 +705,7 @@ describe('platform lifecycle management', () => {
     await uninstallPlatform(fake, manifest, uninstallArgs, {
       interactive: false,
     });
-    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual([
-      'dns-record',
-      'queue',
-      'queue',
-      'worker',
-      'worker',
-      'worker',
-      'worker',
-    ]);
+    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual(['dns-record', 'queue', 'queue']);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
     const result = listInstallationManifests()[0]!;
     expect(result.status).toBe('uninstalled');
@@ -724,7 +715,7 @@ describe('platform lifecycle management', () => {
     });
   });
 
-  it('refuses to delete Workers that still serve unmanaged traffic', async () => {
+  it('retains Workers and their unmanaged traffic for manual cleanup', async () => {
     const manifest = installedManifest();
     persist(manifest);
     const fake = client(manifest);
@@ -741,13 +732,11 @@ describe('platform lifecycle management', () => {
       { hostname: 'manual.example.com', id: 'manual-domain', service: 'proxy-worker' },
     ];
 
-    await expect(
-      uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false }),
-    ).rejects.toThrow('Workers serve traffic not managed by this installation');
+    await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
 
-    expect(fake.deleted).toEqual([]);
-    expect(fake.removedRoutes).toBe(0);
-    expect(listInstallationManifests()[0]?.status).toBe('installed');
+    expect(fake.deleted.some(([kind]) => kind === 'worker')).toBe(false);
+    expect(fake.removedRoutes).toBe(4);
+    expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
   });
 
   it('refuses to delete an installer DNS record that was repurposed', async () => {
@@ -780,20 +769,12 @@ describe('platform lifecycle management', () => {
     await uninstallPlatform(fake, manifest, uninstallArgs, {
       interactive: false,
     });
-    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual([
-      'dns-record',
-      'queue',
-      'queue',
-      'worker',
-      'worker',
-      'worker',
-      'worker',
-    ]);
+    expect(fake.deleted.map(([kind]) => kind).sort()).toEqual(['dns-record', 'queue', 'queue']);
     expect(fake.remoteWrites.map((value) => JSON.parse(value).status)).toContain('uninstalled');
     const retained = listInstallationManifests()[0]!.resources.filter(
       (resource) => resource.state === 'retained',
     );
-    expect(retained).toHaveLength(8);
+    expect(retained).toHaveLength(12);
   });
 
   it('refuses automatic deletion of an installer-created zone', async () => {
@@ -826,7 +807,7 @@ describe('platform lifecycle management', () => {
         interactive: false,
       },
     );
-    expect(fake.deleted).toHaveLength(12);
+    expect(fake.deleted).toHaveLength(8);
     expect(fake.deleted).not.toContainEqual(['ai-gateway', 'ai-gateway-id']);
     expect(fake.emptiedBuckets).toEqual([]);
     expect(fake.preservedBucketKeys).toEqual([]);
@@ -928,7 +909,7 @@ describe('platform lifecycle management', () => {
     ).rejects.toThrow('temporary deletion failure');
     const checkpoint = listInstallationManifests()[0]!;
     expect(checkpoint.status).toBe('failed');
-    expect(checkpoint.resources.filter((resource) => resource.state === 'deleted')).toHaveLength(4);
+    expect(checkpoint.resources.filter((resource) => resource.state === 'deleted')).toHaveLength(0);
 
     const second = client(checkpoint);
     await uninstallPlatform(second, checkpoint, uninstallArgs, {
@@ -993,7 +974,7 @@ describe('platform lifecycle management', () => {
     const fake = client(manifest);
     await uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false });
     expect(fake.removedRoutes).toBe(0);
-    expect(fake.deleted.some(([kind]) => kind === 'worker')).toBe(true);
+    expect(fake.deleted.some(([kind]) => kind === 'worker')).toBe(false);
     expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
     expect(
       listInstallationManifests()[0]?.resources.find(
@@ -1045,7 +1026,7 @@ describe('platform lifecycle management', () => {
     await disablePlatform(second, disabled, false);
 
     expect(second.removedRoutes).toBe(1);
-    expect(second.subdomains).toHaveLength(4);
+    expect(second.disabledWrites).toHaveLength(1);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
   });
 });

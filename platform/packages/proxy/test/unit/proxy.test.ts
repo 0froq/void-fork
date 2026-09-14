@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vite-plus/test';
 import worker from '../../src/index.ts';
+import { PLATFORM_DISABLED_KEY } from '../../src/platform-lifecycle.ts';
 
 const JWT_SECRET = 'test-secret-key';
 
@@ -174,6 +175,15 @@ describe('proxy worker', () => {
     for (const pid of ['proj_1', 'proj_42', 'proj_99', 'p']) {
       aiTokens[pid] = await signAiToken(pid, JWT_SECRET);
     }
+  });
+
+  it('rejects every request while the platform is disabled', async () => {
+    const res = await worker.fetch(
+      new Request('https://proxy.void.cloud/health'),
+      createEnv(undefined, { [PLATFORM_DISABLED_KEY]: 'disabled' }),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'Platform disabled' });
   });
 
   describe('CORS', () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import type { Env } from '../../src/env.ts';
 import app from '../../src/index.ts';
+import { PLATFORM_DISABLED_KEY } from '../../src/platform-lifecycle.ts';
 
 vi.stubGlobal('caches', {
   default: {
@@ -14,11 +15,16 @@ function createCtx(): ExecutionContext {
   return { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 }
 
-function createEnv(): Env {
+function createEnv(disabled = false): Env {
   const workerFetch = vi.fn(async () => new Response('worker'));
   return {
     ROUTING: {
-      get: async () => JSON.stringify({ workerName: 'user-app', projectId: 'proj_1' }),
+      get: async (key: string) =>
+        key === PLATFORM_DISABLED_KEY
+          ? disabled
+            ? 'disabled'
+            : null
+          : JSON.stringify({ workerName: 'user-app', projectId: 'proj_1' }),
     },
     DISPATCH: {
       get: vi.fn(() => ({ fetch: workerFetch })),
@@ -35,6 +41,16 @@ function createEnv(): Env {
 }
 
 describe('internal route blocking', () => {
+  it('rejects every request while the platform is disabled', async () => {
+    const response = await app.fetch(
+      new Request('https://my-app.void.app/normal-path'),
+      createEnv(true),
+      createCtx(),
+    );
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
   it('blocks POST /__void/migrate with 404', async () => {
     const response = await app.fetch(
       new Request('https://my-app.void.app/__void/migrate', { method: 'POST' }),

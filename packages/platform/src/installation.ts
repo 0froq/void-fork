@@ -1,6 +1,8 @@
 import { parsePlatformDeploymentManifest, type PlatformDeploymentManifest } from './manifest.ts';
 
 export const PLATFORM_INSTALLATION_SCHEMA_VERSION = 1 as const;
+export const PLATFORM_DISABLED_KEY = '__void/platform/disabled/v1';
+export const PLATFORM_DISABLED_VALUE = 'disabled';
 export const PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY = '__void/platform/installation/v1';
 export const PLATFORM_R2_OWNERSHIP_MARKER_KEY = '__void/platform/ownership/v1';
 export const PLATFORM_RESOURCE_OWNERSHIP_SCHEMA_VERSION = 1 as const;

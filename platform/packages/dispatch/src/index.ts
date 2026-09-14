@@ -26,6 +26,7 @@ import {
   type FailureKind,
   type RequestType,
 } from './metering.ts';
+import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from './platform-lifecycle.ts';
 import { classifyDynamicRequestType, hasExtension } from './request-type.ts';
 import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules.ts';
 import { resolveStaticPath, resolveAssetContentType, safeDecodePathname } from './static.ts';
@@ -583,6 +584,11 @@ export function rebuildRequest(
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    if ((await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+      return createErrorResponse(request, 503, 'Platform disabled', {
+        'Cache-Control': 'no-store',
+      });
+    }
     const startTime = Date.now();
     const url = new URL(request.url);
     // Budget for the bounded hot paths (static-asset reads, primary dispatch).

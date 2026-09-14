@@ -1,4 +1,8 @@
-import { createPlatformDiscoveryDocument } from '@void/platform';
+import {
+  createPlatformDiscoveryDocument,
+  PLATFORM_DISABLED_KEY,
+  PLATFORM_DISABLED_VALUE,
+} from '@void/platform';
 import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
@@ -87,6 +91,15 @@ const app = new Hono<ApiEnv>()
   .onError((err, context) => {
     console.error('[api] unhandled error:', err);
     return context.json({ error: 'Internal Server Error' }, 500);
+  })
+
+  // Lifecycle disablement lives in installation-owned KV, so it also gates
+  // workers.dev without mutating a reusable Worker script name.
+  .use('*', async (context, next) => {
+    if ((await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+      return context.json({ error: 'Platform disabled' }, 503);
+    }
+    await next();
   })
 
   // Drizzle middleware — creates a Db instance per request
@@ -253,6 +266,9 @@ async function scheduled(
   env: ApiEnv['Bindings'],
   _ctx: ExecutionContext,
 ): Promise<void> {
+  if ((await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+    return;
+  }
   const db = createDb(env.HYPERDRIVE.connectionString);
   const capabilities = getPlatformCapabilities(env);
 
@@ -767,6 +783,9 @@ export default {
   fetch: app.fetch,
   scheduled,
   async queue(batch: MessageBatch<unknown>, env: ApiEnv['Bindings']): Promise<void> {
+    if ((await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+      return;
+    }
     // Dispatch by queue name. void-api consumes two queues:
     // - `void-usage-events` (and `*-staging`): per-request usage rollup
     // - `void-cron-fires` (and `*-staging`): cron-trigger invocations from

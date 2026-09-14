@@ -1,3 +1,4 @@
+import { PLATFORM_DISABLED_KEY } from '@void/platform';
 import { sql } from 'drizzle-orm';
 import { describe, it, expect, beforeAll, afterAll } from 'vite-plus/test';
 import app from '../../src/index.ts';
@@ -18,6 +19,17 @@ describe('GET /health', () => {
     const res = await app.fetch(new Request('http://localhost/health'), env);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: 'ok' });
+  });
+
+  it('rejects health checks while the platform is disabled', async () => {
+    await env.ROUTING.put(PLATFORM_DISABLED_KEY, 'disabled');
+    try {
+      const res = await app.fetch(new Request('http://localhost/health'), env);
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: 'Platform disabled' });
+    } finally {
+      await env.ROUTING.delete(PLATFORM_DISABLED_KEY);
+    }
   });
 
   it('verifies a self-hosted installation through its database claim', async () => {

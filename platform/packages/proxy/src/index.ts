@@ -4,6 +4,7 @@ import { ai } from './ai.ts';
 import { asString, isProxyBody } from './body.ts';
 import { d1 } from './d1.ts';
 import { kv } from './kv.ts';
+import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from './platform-lifecycle.ts';
 import { r2 } from './r2.ts';
 import { verifyPrerenderBuild, verifyProjectOwner } from './resolve.ts';
 import { revalidate } from './revalidate.ts';
@@ -11,6 +12,13 @@ import { sandbox } from './sandbox.ts';
 import type { JwtPayload, ProxyBody, ProxyEnv } from './types.ts';
 
 const app = new Hono<ProxyEnv>();
+
+app.use('/*', async (context, next) => {
+  if ((await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE) {
+    return context.json({ error: 'Platform disabled' }, 503);
+  }
+  await next();
+});
 
 // CORS
 app.use(

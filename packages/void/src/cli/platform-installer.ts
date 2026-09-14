@@ -17,6 +17,8 @@ import {
   createPlatformWorkerConfigs,
   parsePlatformInstallationManifest,
   parsePlatformResourceOwnershipMarker,
+  PLATFORM_DISABLED_KEY,
+  PLATFORM_DISABLED_VALUE,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   recordInstallationResource,
@@ -85,7 +87,7 @@ type InstallerClient = Pick<
   Partial<
     Pick<
       PlatformCloudflareClient,
-      | 'deleteResource'
+      | 'deleteKvValue'
       | 'getWorkerPlainTextBindings'
       | 'listWorkerDomains'
       | 'listWorkerNames'
@@ -245,6 +247,7 @@ export async function installPlatform(
 ): Promise<PlatformInstallationResult> {
   const now = dependencies.now ?? (() => new Date().toISOString());
   const version = readPlatformRuntimeManifest().platformVersion;
+  const wasDisabled = existing?.status === 'disabled';
   const preserveDisabled = existing?.desiredState === 'disabled';
   const previousPublicEndpoints = stablePublicEndpointState(existing);
   let workerCutoverGeneration = 0;
@@ -620,15 +623,12 @@ export async function installPlatform(
                 platformManagedWorkerTraffic(plan.deployment, new Set([snapshot.workerName])),
               );
             },
-            removeNewWorker: async () => {
-              if (!dependencies.client.deleteResource) {
-                throw new Error('platform: Cloudflare Worker removal is unavailable.');
-              }
-              await dependencies.client.deleteResource(
+            retainNewWorker: async () => {
+              await dependencies.client.putKvValue(
                 plan.account.id,
-                'worker',
-                snapshot.workerName,
-                zone.id,
+                requireId(ids, 'routing-kv'),
+                PLATFORM_DISABLED_KEY,
+                PLATFORM_DISABLED_VALUE,
               );
             },
             workerExisted: snapshot.previousVersionId !== null,
@@ -648,26 +648,19 @@ export async function installPlatform(
         previousPublicEndpoints,
         now(),
       );
-      let deletedNewWorker = false;
-      for (const [key, snapshot] of interruptedCutover.staged) {
+      let retainedNewWorker = false;
+      for (const [, snapshot] of interruptedCutover.staged) {
         if (snapshot.previousVersionId !== null) {
           continue;
         }
-        const resourceKey = `${key}-worker`;
-        const resource = manifest.resources.find(
-          (entry) => entry.key === resourceKey && entry.name === snapshot.workerName,
-        );
-        if (resource?.state === 'ready') {
-          manifest = recordInstallationResource(manifest, { ...resource, state: 'deleted' }, now());
-        }
-        deletedNewWorker = true;
+        retainedNewWorker = true;
       }
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      if (deletedNewWorker) {
+      if (retainedNewWorker) {
         if (!dependencies.replanWorkers) {
           throw new Error(
-            'platform: Recovering newly created Workers requires a fresh Cloudflare installation plan.',
+            'platform: Recovering retained Workers requires a fresh Cloudflare installation plan.',
           );
         }
         workerActions = validateReplannedWorkerActions(
@@ -738,15 +731,12 @@ export async function installPlatform(
                 platformManagedWorkerTraffic(plan.deployment, new Set([action.name])),
               );
             },
-            removeNewWorker: async () => {
-              if (!dependencies.client.deleteResource) {
-                throw new Error('platform: Cloudflare Worker removal is unavailable.');
-              }
-              await dependencies.client.deleteResource(
+            retainNewWorker: async () => {
+              await dependencies.client.putKvValue(
                 plan.account.id,
-                'worker',
-                action.name,
-                zone.id,
+                requireId(ids, 'routing-kv'),
+                PLATFORM_DISABLED_KEY,
+                PLATFORM_DISABLED_VALUE,
               );
             },
             workerExisted: action.action !== 'create',
@@ -779,6 +769,15 @@ export async function installPlatform(
       promoteInstallationSecrets(manifest);
       saveInstalledPlatformConnection(plan, manifest);
       return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
+    }
+    if (dependencies.client.deleteKvValue) {
+      await dependencies.client.deleteKvValue(
+        plan.account.id,
+        requireId(ids, 'routing-kv'),
+        PLATFORM_DISABLED_KEY,
+      );
+    } else if (wasDisabled) {
+      throw new Error('platform: Routing disablement removal is unavailable.');
     }
     manifest = transitionInstallation(manifest, 'verifying', now());
     writeInstallationManifest(manifest);
@@ -1552,7 +1551,7 @@ type PlatformWorkerDeploymentOptions = Readonly<{
   previousPublicEndpoints: boolean;
   preservedRoutes: ReadonlyArray<unknown>;
   removeCustomDomains: () => Promise<void>;
-  removeNewWorker: () => Promise<void>;
+  retainNewWorker: () => Promise<void>;
   workerExisted: boolean;
 }>;
 
@@ -1672,7 +1671,7 @@ async function deployPlatformWorker(
         previousVersionId,
         inspectNewWorker: options.inspectNewWorker,
         removeCustomDomains: options.removeCustomDomains,
-        removeNewWorker: options.removeNewWorker,
+        retainNewWorker: options.retainNewWorker,
         workerExisted: options.workerExisted,
         workerName,
       });
@@ -1691,7 +1690,7 @@ async function deployPlatformWorker(
           previousVersionId,
           inspectNewWorker: options.inspectNewWorker,
           removeCustomDomains: options.removeCustomDomains,
-          removeNewWorker: options.removeNewWorker,
+          retainNewWorker: options.retainNewWorker,
           workerExisted: options.workerExisted,
           workerName,
         });
@@ -1721,7 +1720,7 @@ async function rollbackPlatformWorker(input: {
   previousVersionId: string | null;
   inspectNewWorker: () => Promise<'missing' | 'owned'>;
   removeCustomDomains: () => Promise<void>;
-  removeNewWorker: () => Promise<void>;
+  retainNewWorker: () => Promise<void>;
   workerExisted: boolean;
   workerName: string;
 }): Promise<void> {
@@ -1746,7 +1745,8 @@ async function rollbackPlatformWorker(input: {
       if ((await input.inspectNewWorker()) === 'missing') {
         return;
       }
-      await input.removeNewWorker();
+      await input.retainNewWorker();
+      await input.removeCustomDomains();
       return;
     }
     const currentVersionId = await readActivePlatformWorkerVersion(
@@ -1918,7 +1918,7 @@ export async function inspectNewPlatformWorker(
     );
   } catch {
     throw new Error(
-      `platform: Worker ${workerName} no longer has this installation's ownership marker; refusing to delete it.`,
+      `platform: Worker ${workerName} no longer has this installation's ownership marker; refusing to treat it as installer-owned.`,
     );
   }
   const expected = createPlatformResourceOwnershipMarker({
@@ -1940,7 +1940,7 @@ export async function inspectNewPlatformWorker(
     marker.resourceName !== expected.resourceName
   ) {
     throw new Error(
-      `platform: Worker ${workerName} no longer has this installation's ownership marker; refusing to delete it.`,
+      `platform: Worker ${workerName} no longer has this installation's ownership marker; refusing to treat it as installer-owned.`,
     );
   }
   return 'owned';

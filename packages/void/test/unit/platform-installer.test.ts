@@ -157,7 +157,7 @@ describe('platform installer', () => {
     ).toEqual(nextConfig.routes);
   });
 
-  it('requires the installation ownership marker before deleting a new Worker', async () => {
+  it('requires the installation ownership marker before managing a new Worker', async () => {
     const manifest = createPlatformInstallationManifest({
       account: { id: 'account', name: 'Account' },
       createdAt: '2026-09-14T00:00:00.000Z',
@@ -195,7 +195,7 @@ describe('platform installer', () => {
     });
     await expect(
       inspectNewPlatformWorker(workerClient, 'account', manifest, 'api-worker', 'void-example-api'),
-    ).rejects.toThrow('refusing to delete');
+    ).rejects.toThrow('refusing to treat it as installer-owned');
 
     workerClient.listWorkerNames = async () => [];
     await expect(
@@ -1047,6 +1047,7 @@ describe('platform installer', () => {
     const deployed: Array<string> = [];
     let migrations = 0;
     const upgradeKvWrites: Array<string> = [];
+    const deletedKvValues: Array<string> = [];
     const upgradeClient = {
       createAiGateway: create,
       createDnsRecord: async (_zone: string, name: string) => ({
@@ -1064,6 +1065,9 @@ describe('platform installer', () => {
       createQueue: create,
       createDispatchNamespace: create,
       createHyperdrive: async (account: string, name: string) => create(account, name),
+      deleteKvValue: async (_account: string, _namespace: string, key: string) => {
+        deletedKvValues.push(key);
+      },
       putKvValue: async (_account: string, _namespace: string, key: string) => {
         upgradeKvWrites.push(key);
       },
@@ -1198,6 +1202,7 @@ describe('platform installer', () => {
     expect(enabledUpgrade.manifest.status).toBe('installed');
     expect(enabledUpgrade.manifest.desiredState).toBe('enabled');
     expect(enabledHealthChecks).toBe(1);
+    expect(deletedKvValues).toContain('__void/platform/disabled/v1');
     expect(enabledConfigs).toHaveLength(4);
     for (const config of enabledConfigs) {
       expect(config.workers_dev).toBe(true);
@@ -1415,7 +1420,7 @@ describe('platform installer', () => {
         return upgradedPlan.actions
           .filter((action) => action.kind === 'worker')
           .map((action) =>
-            action.key === 'api-worker' ? { ...action, action: 'create', id: null } : action,
+            action.key === 'api-worker' ? { ...action, action: 'reuse', id: action.name } : action,
           );
       },
       revalidateBeforeWorkerDeploy: async (_manifest, action) => {
@@ -1423,8 +1428,8 @@ describe('platform installer', () => {
       },
       verifyHealth: async () => {},
     });
-    expect(replannedResourceState).toBe('deleted');
-    expect(replannedActions).toContain('api-worker:create');
+    expect(replannedResourceState).toBe('ready');
+    expect(replannedActions).toContain('api-worker:reuse');
 
     function named(key: string) {
       const resource = byKey.get(key)!;

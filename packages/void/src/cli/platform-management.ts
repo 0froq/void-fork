@@ -4,6 +4,8 @@ import {
   createPlatformResourceOwnershipMarker,
   parsePlatformInstallationManifest,
   parsePlatformResourceOwnershipMarker,
+  PLATFORM_DISABLED_KEY,
+  PLATFORM_DISABLED_VALUE,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   recordInstallationResource,
   recordInstallationStep,
@@ -47,6 +49,7 @@ import { platformManagedWorkerTraffic } from './platform-traffic.ts';
 
 export type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
+  | 'deleteKvValue'
   | 'deleteResource'
   | 'findZone'
   | 'getHyperdriveConfig'
@@ -63,7 +66,6 @@ export type PlatformManagementClient = Pick<
   | 'listWorkerNames'
   | 'putKvValue'
   | 'removeRoutes'
-  | 'setWorkerSubdomain'
 >;
 
 export type PlatformUninstallClient = PlatformManagementClient &
@@ -400,13 +402,8 @@ export async function disablePlatform(
       checkpointManifest,
       dependencies.checkpoint,
     );
-  const workers = new Set(
-    reconciled.resources
-      .filter((resource) => resource.kind === 'worker' && resource.state === 'ready')
-      .map((resource) => resource.name),
-  );
   note(
-    `Remove routes and custom domains and disable workers.dev for:\n${[...workers].join('\n')}\n\nWorkers and all data remain installed.`,
+    'Block platform traffic through installation-owned routing storage, then remove routes and custom domains. Workers and all data remain installed.',
     'Disable plan',
   );
   if (planOnly) {
@@ -439,7 +436,14 @@ export async function disablePlatform(
   try {
     await writeRemoteManifestIfPresent(client, next);
     const zone = requireResource(next, 'zone');
+    const routing = requireResource(next, 'routing-kv');
     const trafficGeneration = currentTrafficGeneration(next);
+    await client.putKvValue(
+      next.account.id,
+      routing.id,
+      PLATFORM_DISABLED_KEY,
+      PLATFORM_DISABLED_VALUE,
+    );
     await client.removeRoutes(
       next.account.id,
       missing.has(zone.key) ? null : zone.id,
@@ -449,19 +453,6 @@ export async function disablePlatform(
       next = recordLifecycleStep(next, `disable:${trafficGeneration}:routes`);
     }
     await writeLifecycleCheckpoint(client, next);
-    for (const worker of workers) {
-      const step = `disable:${trafficGeneration}:workers.dev:${worker}`;
-      const resource = next.resources.find(
-        (entry) => entry.kind === 'worker' && entry.name === worker,
-      )!;
-      if (!missing.has(resource.key)) {
-        await client.setWorkerSubdomain(next.account.id, worker, false);
-      }
-      if (!hasLifecycleStep(next, step)) {
-        next = recordLifecycleStep(next, step);
-      }
-      await writeLifecycleCheckpoint(client, next);
-    }
     next = transitionInstallation(next, 'disabled', new Date().toISOString());
     await writeLifecycleCheckpoint(client, next);
     log.success(`${next.deployment.displayName} is disabled. Its data was not changed.`);
@@ -514,12 +505,12 @@ export async function uninstallPlatform(
     );
   }
   const dataMessage = retainData
-    ? 'Retain installer-owned storage, dispatch, AI logs, and Hyperdrive by default.'
+    ? 'Retain installer-owned Workers, storage, dispatch, AI logs, and Hyperdrive by default.'
     : args.purgeData
-      ? 'Delete safely identifiable installer-owned data (--purge-data); retain R2, AI Gateway, and external PostgreSQL for manual cleanup.'
+      ? 'Delete safely identifiable installer-owned data (--purge-data); retain Workers, R2, AI Gateway, and external PostgreSQL for manual cleanup.'
       : 'Retain installer-owned data; external PostgreSQL is never deleted.';
   note(
-    `Disable all platform routes.\nDelete installer-owned Workers and Queues.\n${dataMessage}\n${
+    `Disable all platform traffic and remove managed routes.\nDelete installer-owned Queues.\n${dataMessage}\n${
       createdZone
         ? `Keep zone ${createdZone.name} for explicit manual cleanup.`
         : 'Never delete the adopted application zone.'
@@ -580,25 +571,21 @@ export async function uninstallPlatform(
     missingResources = new Set();
   }
 
-  await assertNoUnmanagedWorkerTraffic(
-    client,
-    manifest,
-    new Set(
-      manifest.resources
-        .filter(
-          (resource) =>
-            resource.kind === 'worker' &&
-            resource.state === 'ready' &&
-            resourcesToDelete.has(resource.key),
-        )
-        .map((resource) => resource.name),
-    ),
-  );
-
   let next = transitionInstallation(manifest, 'uninstalling', new Date().toISOString());
   writeInstallationManifest(next);
   try {
     await writeRemoteManifestIfPresent(client, next);
+    const routing = next.resources.find(
+      (resource) => resource.key === 'routing-kv' && resource.state === 'ready',
+    );
+    if (routing) {
+      await client.putKvValue(
+        next.account.id,
+        routing.id,
+        PLATFORM_DISABLED_KEY,
+        PLATFORM_DISABLED_VALUE,
+      );
+    }
     for (const key of missingResources) {
       const resource = requireResource(next, key);
       next = updateResourceState(
@@ -714,47 +701,6 @@ export async function uninstallPlatform(
   }
 }
 
-async function assertNoUnmanagedWorkerTraffic(
-  client: PlatformUninstallClient,
-  manifest: PlatformInstallationManifest,
-  workers: ReadonlySet<string>,
-): Promise<void> {
-  if (workers.size === 0) {
-    return;
-  }
-  const managed = platformManagedWorkerTraffic(manifest.deployment);
-  const domains = await client.listWorkerDomains(manifest.account.id);
-  const unmanaged = domains
-    .filter(
-      (domain) =>
-        workers.has(domain.service) &&
-        !managed.customDomains.some(
-          (target) => target.hostname === domain.hostname && target.service === domain.service,
-        ),
-    )
-    .map((domain) => `custom domain ${domain.hostname} -> ${domain.service}`);
-  for (const worker of workers) {
-    const routes = await client.listWorkerServiceRoutes(manifest.account.id, worker);
-    for (const route of routes) {
-      if (
-        !managed.routes.some(
-          (target) =>
-            target.pattern === route.pattern &&
-            target.script === worker &&
-            route.zoneName === manifest.deployment.application.zoneName,
-        )
-      ) {
-        unmanaged.push(`route ${route.pattern} in zone ${route.zoneName} -> ${worker}`);
-      }
-    }
-  }
-  if (unmanaged.length > 0) {
-    throw new Error(
-      `platform: Refusing to uninstall because installer-owned Workers serve traffic not managed by this installation:\n${unmanaged.map((entry) => `- ${entry}`).join('\n')}\nRemove these routes or custom domains explicitly, then retry.`,
-    );
-  }
-}
-
 export async function recoverDurablyMarkedProvisionIntents(
   client: PlatformOwnershipClient,
   manifest: PlatformInstallationManifest,
@@ -854,6 +800,12 @@ function shouldDeleteResource(resource: InstallationResource, retainData: boolea
   // client-side ownership recheck. Retain R2 even during --purge-data and
   // require the operator to remove it explicitly in the Cloudflare dashboard.
   if (resource.kind === 'r2-bucket') {
+    return false;
+  }
+  // Worker lifecycle mutations are name-addressed. Cloudflare exposes no
+  // generation precondition that can prevent a same-name replacement from
+  // racing the final ownership check, so retain Workers for manual cleanup.
+  if (resource.kind === 'worker') {
     return false;
   }
   return !(retainData && DATA_RESOURCE_KINDS.has(resource.kind));
