@@ -8,6 +8,7 @@ import { REMOTE_INSTALLATION_MANIFEST_KEY } from './platform-installer.ts';
 import { verifyPlatformInstallationOwnership } from './platform-management.ts';
 import { createPlatformInstallPlan } from './platform-plan.ts';
 import {
+  acquirePlatformLifecycleLock,
   listInstallationManifests,
   savePlatformConnection,
   writeInstallationManifest,
@@ -114,28 +115,40 @@ export async function recoverPlatformInstallations(
     recovered.push(manifest);
   }
 
-  const local = listInstallationManifests();
   for (const manifest of recovered) {
-    const collision = local.find((entry) => entry.id === manifest.id);
-    if (
-      collision &&
-      (collision.account.id !== manifest.account.id ||
-        collision.ownershipNonce !== manifest.ownershipNonce)
-    ) {
-      throw new Error(`platform: Local installation ${manifest.id} has conflicting ownership.`);
+    const release = acquirePlatformLifecycleLock(
+      manifest.account.id,
+      manifest.deployment.installationSlug,
+    );
+    try {
+      const collision = listInstallationManifests().find((entry) => entry.id === manifest.id);
+      if (
+        collision &&
+        (collision.account.id !== manifest.account.id ||
+          collision.ownershipNonce !== manifest.ownershipNonce)
+      ) {
+        throw new Error(`platform: Local installation ${manifest.id} has conflicting ownership.`);
+      }
+      if (collision && JSON.stringify(collision) !== JSON.stringify(manifest)) {
+        throw new Error(
+          `platform: Local installation ${manifest.id} differs from its remote checkpoint. Resolve or remove the local record before discovery; it was not overwritten.`,
+        );
+      }
+      if (!collision) {
+        writeInstallationManifest(manifest);
+      }
+      savePlatformConnection({
+        accountId: manifest.account.id,
+        apiUrl: manifest.endpoints.apiUrl!,
+        applicationDomain: manifest.deployment.application.baseDomain,
+        displayName: manifest.deployment.displayName,
+        installationId: manifest.id,
+        kind: 'installed',
+        proxyUrl: manifest.endpoints.proxyUrl!,
+      });
+    } finally {
+      release();
     }
-  }
-  for (const manifest of recovered) {
-    writeInstallationManifest(manifest);
-    savePlatformConnection({
-      accountId: manifest.account.id,
-      apiUrl: manifest.endpoints.apiUrl!,
-      applicationDomain: manifest.deployment.application.baseDomain,
-      displayName: manifest.deployment.displayName,
-      installationId: manifest.id,
-      kind: 'installed',
-      proxyUrl: manifest.endpoints.proxyUrl!,
-    });
   }
   return recovered;
 }

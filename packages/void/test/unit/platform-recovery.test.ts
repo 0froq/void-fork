@@ -16,6 +16,7 @@ import { recoverPlatformInstallations } from '../../src/cli/platform-recovery.ts
 import {
   listInstallationManifests,
   listPlatformConnections,
+  writeInstallationManifest,
 } from '../../src/cli/platform-registry.ts';
 
 const directories: Array<string> = [];
@@ -250,5 +251,23 @@ describe('platform recovery', () => {
     expect(recovered).toHaveLength(1);
     expect(recovered[0]).toMatchObject({ desiredState: 'disabled', status: 'disabled' });
     expect(endpointChecks).toBe(0);
+  });
+
+  it('never overwrites divergent local lifecycle progress during discovery', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const remote = remoteManifest();
+    const local = {
+      ...remote,
+      status: 'failed' as const,
+      updatedAt: '2026-09-14T00:00:04.000Z',
+    };
+    writeInstallationManifest(local);
+
+    await expect(
+      recoverPlatformInstallations(client(remote), 'account', async () => {}),
+    ).rejects.toThrow('differs from its remote checkpoint');
+    expect(listInstallationManifests()).toEqual([local]);
   });
 });
