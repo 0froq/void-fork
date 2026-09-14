@@ -81,7 +81,12 @@ type InstallerClient = Pick<
   Partial<
     Pick<
       PlatformCloudflareClient,
-      'deleteResource' | 'getWorkerPlainTextBindings' | 'listWorkerNames' | 'removeRoutes'
+      | 'deleteResource'
+      | 'getWorkerPlainTextBindings'
+      | 'listWorkerDomains'
+      | 'listWorkerNames'
+      | 'listWorkerServiceRoutes'
+      | 'removeRoutes'
     >
   >;
 
@@ -534,8 +539,21 @@ export async function installPlatform(
     if (interruptedCutover) {
       for (const key of [...interruptedCutover.staged.keys()].reverse()) {
         const snapshot = interruptedCutover.staged.get(key)!;
-        const recoveryConfig = { ...configs[key], name: snapshot.workerName };
-        const previousRecoveryConfig = { ...previousConfigs[key], name: snapshot.workerName };
+        const preservedRoutes = dependencies.recoverWorkerCutover
+          ? []
+          : await inventoryUnmanagedPlatformWorkerTraffic(
+              dependencies.client,
+              plan,
+              snapshot.workerName,
+            );
+        const recoveryConfig = mergePlatformWorkerTrafficConfig(
+          { ...configs[key], name: snapshot.workerName },
+          preservedRoutes,
+        );
+        const previousRecoveryConfig = mergePlatformWorkerTrafficConfig(
+          { ...previousConfigs[key], name: snapshot.workerName },
+          preservedRoutes,
+        );
         if (dependencies.recoverWorkerCutover) {
           await dependencies.recoverWorkerCutover({
             key,
@@ -550,7 +568,10 @@ export async function installPlatform(
             config: recoveryConfig,
             nextTriggers: readTriggerConfigFromObject(recoveryConfig),
             previousConfig: previousRecoveryConfig,
-            previousTriggers: snapshot.previousTriggers,
+            previousTriggers: mergePreservedTriggerRoutes(
+              snapshot.previousTriggers,
+              preservedRoutes,
+            ),
             previousVersionId: snapshot.previousVersionId,
             inspectNewWorker: () =>
               inspectNewPlatformWorker(
@@ -640,9 +661,19 @@ export async function installPlatform(
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       await dependencies.revalidateBeforeWorkerDeploy(manifest, action);
+      const preservedRoutes = dependencies.deployWorker
+        ? []
+        : action.action === 'create'
+          ? []
+          : await inventoryUnmanagedPlatformWorkerTraffic(dependencies.client, plan, action.name);
+      const workerConfig = mergePlatformWorkerTrafficConfig(configs[key], preservedRoutes);
+      const previousWorkerConfig = mergePlatformWorkerTrafficConfig(
+        previousConfigs[key],
+        preservedRoutes,
+      );
       const rollback = dependencies.deployWorker
-        ? await dependencies.deployWorker(configs[key], workerSecrets, previousConfigs[key])
-        : await deployPlatformWorker(configs[key], workerSecrets, {
+        ? await dependencies.deployWorker(workerConfig, workerSecrets, previousWorkerConfig)
+        : await deployPlatformWorker(workerConfig, workerSecrets, {
             onStaged: async (previousVersionId, stagedVersionId, previousTriggers) => {
               manifest = recordWorkerCutoverStage(
                 manifest!,
@@ -657,7 +688,8 @@ export async function installPlatform(
               writeInstallationManifest(manifest);
               await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
             },
-            previousConfig: previousConfigs[key],
+            preservedRoutes,
+            previousConfig: previousWorkerConfig,
             previousPublicEndpoints,
             inspectNewWorker: () =>
               inspectNewPlatformWorker(
@@ -1012,6 +1044,74 @@ function validateReplannedWorkerActions(
     }
   }
   return actions;
+}
+
+export async function inventoryUnmanagedPlatformWorkerTraffic(
+  client: Pick<InstallerClient, 'listWorkerDomains' | 'listWorkerServiceRoutes'>,
+  plan: PlatformInstallPlan,
+  workerName: string,
+): Promise<ReadonlyArray<unknown>> {
+  if (!client.listWorkerDomains || !client.listWorkerServiceRoutes) {
+    throw new Error(
+      `platform: Cloudflare traffic inventory is required before updating Worker ${JSON.stringify(workerName)}.`,
+    );
+  }
+  const [routes, domains] = await Promise.all([
+    client.listWorkerServiceRoutes(plan.account.id, workerName),
+    client.listWorkerDomains(plan.account.id),
+  ]);
+  const managed = platformManagedWorkerTraffic(plan.deployment, new Set([workerName]));
+  const managedRoutes = new Set(managed.routes.map((route) => route.pattern));
+  const managedDomains = new Set(managed.customDomains.map((domain) => domain.hostname));
+  return uniqueTriggerRoutes([
+    ...routes
+      .filter((route) => !managedRoutes.has(route.pattern))
+      .map((route) => ({ pattern: route.pattern, zone_name: route.zoneName })),
+    ...domains
+      .filter((domain) => domain.service === workerName && !managedDomains.has(domain.hostname))
+      .map((domain) => ({
+        pattern: domain.hostname,
+        custom_domain: true,
+        ...(domain.zoneName ? { zone_name: domain.zoneName } : {}),
+      })),
+  ]);
+}
+
+export function mergePlatformWorkerTrafficConfig(
+  config: Record<string, unknown>,
+  preservedRoutes: ReadonlyArray<unknown>,
+): Record<string, unknown> {
+  if (preservedRoutes.length === 0) {
+    return config;
+  }
+  return {
+    ...config,
+    routes: uniqueTriggerRoutes([
+      ...(Array.isArray(config.routes) ? config.routes : []),
+      ...preservedRoutes,
+    ]),
+  };
+}
+
+export function mergePreservedTriggerRoutes(
+  config: CloudflareTriggerConfig,
+  preservedRoutes: ReadonlyArray<unknown>,
+): CloudflareTriggerConfig {
+  return preservedRoutes.length === 0
+    ? config
+    : { ...config, routes: uniqueTriggerRoutes([...config.routes, ...preservedRoutes]) };
+}
+
+function uniqueTriggerRoutes(routes: ReadonlyArray<unknown>): ReadonlyArray<unknown> {
+  const seen = new Set<string>();
+  return routes.filter((route) => {
+    const key = JSON.stringify(route);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function dnsRecordConfigHash(
@@ -1418,6 +1518,7 @@ type PlatformWorkerDeploymentOptions = Readonly<{
   ) => Promise<void>;
   previousConfig: Record<string, unknown>;
   previousPublicEndpoints: boolean;
+  preservedRoutes: ReadonlyArray<unknown>;
   removeCustomDomains: () => Promise<void>;
   removeNewWorker: () => Promise<void>;
   workerExisted: boolean;
@@ -1447,6 +1548,7 @@ async function deployPlatformWorker(
         previousTriggers,
         options.previousPublicEndpoints,
       );
+      previousTriggers = mergePreservedTriggerRoutes(previousTriggers, options.preservedRoutes);
     }
     const argv = [
       ...(options.workerExisted ? ['versions', 'upload'] : ['deploy']),

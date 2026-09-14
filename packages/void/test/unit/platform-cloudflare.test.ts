@@ -488,7 +488,12 @@ describe('platform Cloudflare client', () => {
         Response.json({
           success: true,
           result: [
-            { hostname: 'api.platform.example.com', id: 'domain-id', service: 'existing-worker' },
+            {
+              hostname: 'api.platform.example.com',
+              id: 'domain-id',
+              service: 'existing-worker',
+              zone_name: 'example.com',
+            },
           ],
         }),
     });
@@ -497,6 +502,7 @@ describe('platform Cloudflare client', () => {
         hostname: 'api.platform.example.com',
         id: 'domain-id',
         service: 'existing-worker',
+        zoneName: 'example.com',
       },
     ]);
   });

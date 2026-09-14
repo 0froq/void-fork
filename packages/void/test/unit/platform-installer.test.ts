@@ -1,6 +1,7 @@
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
+  createApplicationRoutes,
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
@@ -17,6 +18,9 @@ import {
   claimPlatformDatabaseConnection,
   createPlatformInstallationSecrets,
   inspectNewPlatformWorker,
+  inventoryUnmanagedPlatformWorkerTraffic,
+  mergePlatformWorkerTrafficConfig,
+  mergePreservedTriggerRoutes,
   readPlatformDatabaseLifecycleManifestConnection,
   resolvePlatformPreviousTriggerConfig,
   resolveBootstrapGitHubId,
@@ -72,6 +76,82 @@ function planningClient() {
 describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('preserves unmanaged Worker routes and custom domains across deploy and rollback', async () => {
+    const plan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: 'api.example.com',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      null,
+    );
+    const managedDispatchPattern = createApplicationRoutes(plan.deployment.application)[0]!.pattern;
+    const client = {
+      listWorkerDomains: async () => [
+        {
+          hostname: 'api.example.com',
+          id: 'managed-api',
+          service: plan.deployment.resources.apiWorker,
+        },
+        {
+          hostname: 'admin.example.net',
+          id: 'manual-api',
+          service: plan.deployment.resources.apiWorker,
+        },
+        { hostname: 'other.example.net', id: 'other', service: 'unrelated-worker' },
+      ],
+      listWorkerServiceRoutes: async (_account: string, worker: string) =>
+        worker === plan.deployment.resources.dispatchWorker
+          ? [
+              { pattern: managedDispatchPattern, zoneName: 'example.com' },
+              { pattern: 'manual.example.net/*', zoneName: 'example.net' },
+            ]
+          : [],
+    };
+
+    const apiTraffic = await inventoryUnmanagedPlatformWorkerTraffic(
+      client,
+      plan,
+      plan.deployment.resources.apiWorker,
+    );
+    expect(apiTraffic).toEqual([{ pattern: 'admin.example.net', custom_domain: true }]);
+    const dispatchTraffic = await inventoryUnmanagedPlatformWorkerTraffic(
+      client,
+      plan,
+      plan.deployment.resources.dispatchWorker,
+    );
+    expect(dispatchTraffic).toEqual([
+      { pattern: 'manual.example.net/*', zone_name: 'example.net' },
+    ]);
+
+    const nextConfig = mergePlatformWorkerTrafficConfig(
+      { routes: [{ pattern: managedDispatchPattern, zone_name: 'example.com' }] },
+      dispatchTraffic,
+    );
+    expect(nextConfig.routes).toEqual([
+      { pattern: managedDispatchPattern, zone_name: 'example.com' },
+      { pattern: 'manual.example.net/*', zone_name: 'example.net' },
+    ]);
+    expect(
+      mergePreservedTriggerRoutes(
+        {
+          crons: [],
+          preview_urls: true,
+          queueConsumers: [],
+          routes: [{ pattern: managedDispatchPattern, zone_name: 'example.com' }],
+          workers_dev: true,
+          workflows: [],
+        },
+        dispatchTraffic,
+      ).routes,
+    ).toEqual(nextConfig.routes);
+  });
 
   it('requires the installation ownership marker before deleting a new Worker', async () => {
     const manifest = createPlatformInstallationManifest({

@@ -39,6 +39,7 @@ export type CloudflareWorkerDomain = Readonly<{
   hostname: string;
   id: string;
   service: string;
+  zoneName?: string;
 }>;
 export type CloudflareWorkerRoute = Readonly<{
   id: string;
@@ -207,6 +208,7 @@ export class PlatformCloudflareClient {
       hostname: requiredString(entry.hostname, 'Worker custom domain hostname'),
       id: requiredString(entry.id, 'Worker custom domain id'),
       service: requiredString(entry.service, 'Worker custom domain service'),
+      ...(typeof entry.zone_name === 'string' ? { zoneName: entry.zone_name } : {}),
     }));
   }
 
