@@ -940,6 +940,39 @@ describe('platform installer', () => {
       enabledConfigs.find((config) => config.name === deployment.resources.dispatchWorker),
     ).toHaveProperty('routes');
 
+    const disabledRollbackStates: Array<unknown> = [];
+    let disabledRollbackDeploys = 0;
+    await expect(
+      installPlatform(
+        upgradedPlan,
+        secrets,
+        {
+          ...setInstallationDesiredState(
+            enabledUpgrade.manifest,
+            'disabled',
+            '2026-09-14T00:00:05.500Z',
+          ),
+          status: 'disabled',
+        },
+        {
+          acquireDatabaseLifecycleLock,
+          claimDatabase,
+          client: upgradeClient,
+          deployWorker: async (_config, _secrets, previousConfig) => {
+            disabledRollbackStates.push(previousConfig.workers_dev);
+            disabledRollbackDeploys++;
+            if (disabledRollbackDeploys === 2) {
+              throw new Error('disabled upgrade failed');
+            }
+            return async () => {};
+          },
+          migrateDatabase: async () => {},
+          revalidateBeforeWorkerDeploy: async () => {},
+        },
+      ),
+    ).rejects.toThrow('disabled upgrade failed');
+    expect(disabledRollbackStates).toEqual([false, false]);
+
     let replacedWorkerDeploys = 0;
     await expect(
       installPlatform(upgradedPlan, secrets, enabledUpgrade.manifest, {

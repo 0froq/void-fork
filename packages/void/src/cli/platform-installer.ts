@@ -95,6 +95,7 @@ export type PlatformInstallerDependencies = Readonly<{
   deployWorker?: (
     config: Record<string, unknown>,
     secrets: Record<string, string> | null,
+    previousConfig: Record<string, unknown>,
   ) => Promise<PlatformWorkerRollback | void>;
   migrateDatabase?: (databaseUrl: string, migrationsFolder: string) => Promise<void>;
   now?: () => string;
@@ -568,7 +569,7 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       await dependencies.revalidateBeforeWorkerDeploy(manifest, action);
       const rollback = dependencies.deployWorker
-        ? await dependencies.deployWorker(configs[key], workerSecrets)
+        ? await dependencies.deployWorker(configs[key], workerSecrets, previousConfigs[key])
         : await deployPlatformWorker(configs[key], workerSecrets, {
             onStaged: async (previousVersionId, stagedVersionId, previousTriggers) => {
               manifest = recordWorkerCutoverStage(
@@ -1904,6 +1905,12 @@ function stablePublicEndpointState(existing: PlatformInstallationManifest | null
   if (!existing) {
     return false;
   }
+  // `void platform disable` removes traffic without redeploying Workers, so it
+  // does not create a Worker cutover marker. The terminal lifecycle status is
+  // authoritative over the last successful install/upgrade marker.
+  if (existing.status === 'disabled') {
+    return false;
+  }
   const latest = existing.steps
     .flatMap((step) => {
       const match = /^worker-traffic-state:(\d+)$/.exec(step.key);
@@ -1912,9 +1919,6 @@ function stablePublicEndpointState(existing: PlatformInstallationManifest | null
     .sort((left, right) => right.generation - left.generation)[0];
   if (latest) {
     return latest.state === 'enabled';
-  }
-  if (existing.status === 'disabled') {
-    return false;
   }
   return existing.status === 'installed' || existing.desiredState === 'enabled';
 }
