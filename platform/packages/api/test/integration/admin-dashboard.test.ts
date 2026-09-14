@@ -1128,7 +1128,76 @@ describe('GET /admin/login', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('Void Admin');
+    expect(html).toContain('GitHub');
     expect(html).toContain('Google');
+  });
+
+  test('shows only the authentication providers enabled by the platform', async () => {
+    env.PLATFORM_CAPABILITIES = JSON.stringify({
+      ai: true,
+      customDomains: false,
+      email: false,
+      githubActions: true,
+      githubOAuth: true,
+      googleOAuth: false,
+      managedBuilds: false,
+      sandbox: false,
+    });
+    try {
+      const res = await app.fetch(new Request('http://localhost/admin/login'), env);
+      const html = await res.text();
+      expect(html).toContain('Sign in with GitHub');
+      expect(html).not.toContain('Sign in with Google');
+    } finally {
+      env.PLATFORM_CAPABILITIES = undefined;
+    }
+  });
+
+  test('signs an administrator in with GitHub OAuth', async () => {
+    await createTestUser(env.db, 'octocat', 'github', '4242', 'custom', 'admin');
+    const start = await app.fetch(
+      new Request('http://localhost/admin/login/github', { redirect: 'manual' }),
+      env,
+    );
+    expect(start.status).toBe(302);
+    const authorization = new URL(start.headers.get('Location')!);
+    expect(authorization.origin + authorization.pathname).toBe(
+      'https://github.com/login/oauth/authorize',
+    );
+    const state = authorization.searchParams.get('state')!;
+    const browserCookie = start.headers.get('Set-Cookie')!.split(';', 1)[0]!;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request): Promise<Response> => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (url === 'https://github.com/login/oauth/access_token') {
+          return Response.json({ access_token: 'github-token' });
+        }
+        if (url === 'https://api.github.com/user') {
+          return Response.json({ id: 4242, login: 'octocat', email: null });
+        }
+        if (url === 'https://api.github.com/user/emails') {
+          return Response.json([]);
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+    try {
+      const callback = await app.fetch(
+        new Request(
+          `http://localhost/admin/callback?code=test-code&state=${encodeURIComponent(state)}`,
+          { headers: { Cookie: browserCookie }, redirect: 'manual' },
+        ),
+        env,
+      );
+      expect(callback.status).toBe(302);
+      expect(callback.headers.get('Location')).toBe('/admin/');
+      expect(callback.headers.get('Set-Cookie')).toContain('admin_token=');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

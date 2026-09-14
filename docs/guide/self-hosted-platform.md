@@ -91,6 +91,8 @@ If the requested zone does not exist, Void creates it and stops in a `waiting-fo
 void platform install --resume --name <installation-id>
 ```
 
+After installation, sign in through `void auth login`. The initial administrator can also open `<API origin>/admin/login` and use the same GitHub account to manage signup access and inspect the platform.
+
 For application traffic, Void creates one proxied wildcard DNS record at `*.application-domain` and the matching Worker routes. A compatible existing proxied record is adopted and is never deleted by Void.
 
 ## Cloudflare footprint
