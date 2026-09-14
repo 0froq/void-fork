@@ -83,6 +83,8 @@ Full docs at [void.cloud](https://void.cloud). Run `vp run dev:docs` in this rep
 
 To install a shared company platform, start with `void platform install --plan`. It packages the core API, routing, proxy, and telemetry Workers without requiring the dashboard, GitHub App, or build Containers. See [Self-host a Void platform](./docs/guide/self-hosted-platform.md).
 
+Platform upgrades are forward-only and rollback-aware: packaged PostgreSQL history is integrity-checked, pending SQL requires an explicit old-runtime compatibility edge, and the old Workers remain the rollback target until the new runtime passes health checks.
+
 ## Contributing
 
 ### Setup
