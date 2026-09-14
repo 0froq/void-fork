@@ -41,6 +41,7 @@ import {
   writeInstallationManifest,
   writePendingInstallationSecrets,
 } from './platform-registry.ts';
+import { platformManagedWorkerTraffic } from './platform-traffic.ts';
 import { resolveWranglerArgv } from './preset.ts';
 
 export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
@@ -526,7 +527,7 @@ export async function installPlatform(
               await dependencies.client.removeRoutes(
                 plan.account.id,
                 zone.id,
-                new Set([snapshot.workerName]),
+                platformManagedWorkerTraffic(plan.deployment, new Set([snapshot.workerName])),
               );
             },
             removeNewWorker: async () => {
@@ -599,7 +600,7 @@ export async function installPlatform(
               await dependencies.client.removeRoutes(
                 plan.account.id,
                 zone.id,
-                new Set([action.name]),
+                platformManagedWorkerTraffic(plan.deployment, new Set([action.name])),
               );
             },
             removeNewWorker: async () => {

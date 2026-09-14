@@ -185,7 +185,7 @@ function client(manifest: PlatformInstallationManifest) {
     putKvValue: async (_account: string, _namespace: string, _key: string, value: string) => {
       remoteWrites.push(value);
     },
-    removeRoutes: async (_account: string, _zone: string | null, _workers: ReadonlySet<string>) => {
+    removeRoutes: async (_account: string, _zone: string | null, _managed: unknown) => {
       removedRoutes++;
     },
     setWorkerSubdomain: async (_account: string, worker: string, enabled: boolean) => {

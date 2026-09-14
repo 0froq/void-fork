@@ -36,6 +36,7 @@ import {
   resolveInstallationManifest,
   writeInstallationManifest,
 } from './platform-registry.ts';
+import { platformManagedWorkerTraffic } from './platform-traffic.ts';
 
 export type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
@@ -379,7 +380,11 @@ export async function disablePlatform(
     await writeRemoteManifestIfPresent(client, next);
     const zone = requireResource(next, 'zone');
     const trafficGeneration = currentTrafficGeneration(next);
-    await client.removeRoutes(next.account.id, missing.has(zone.key) ? null : zone.id, workers);
+    await client.removeRoutes(
+      next.account.id,
+      missing.has(zone.key) ? null : zone.id,
+      platformManagedWorkerTraffic(next.deployment),
+    );
     if (!hasLifecycleStep(next, `disable:${trafficGeneration}:routes`)) {
       next = recordLifecycleStep(next, `disable:${trafficGeneration}:routes`);
     }
@@ -546,7 +551,11 @@ export async function uninstallPlatform(
           new Set(['routing-kv', 'zone', worker.key]),
         );
         if (!missing.has(worker.key)) {
-          await client.removeRoutes(next.account.id, zone.id, new Set([worker.name]));
+          await client.removeRoutes(
+            next.account.id,
+            zone.id,
+            platformManagedWorkerTraffic(next.deployment, new Set([worker.name])),
+          );
           next = recordLifecycleStep(next, `uninstall:routes:${worker.key}`);
           await writeLifecycleCheckpoint(client, next);
         }

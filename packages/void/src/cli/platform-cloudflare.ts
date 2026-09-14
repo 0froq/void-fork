@@ -45,6 +45,10 @@ export type CloudflareWorkerRoute = Readonly<{
   pattern: string;
   script: string | null;
 }>;
+export type PlatformManagedWorkerTraffic = Readonly<{
+  customDomains: ReadonlyArray<Readonly<{ hostname: string; service: string }>>;
+  routes: ReadonlyArray<Readonly<{ pattern: string; script: string }>>;
+}>;
 
 export class PlatformCloudflareClient {
   readonly #apiBase: string;
@@ -668,14 +672,14 @@ export class PlatformCloudflareClient {
   async removeRoutes(
     accountId: string,
     zoneId: string | null,
-    workerNames: ReadonlySet<string>,
+    managed: PlatformManagedWorkerTraffic,
   ): Promise<void> {
-    if (zoneId !== null) {
-      let routes: ReadonlyArray<{ id?: unknown; script?: unknown }> = [];
+    if (zoneId !== null && managed.routes.length > 0) {
+      let routes: ReadonlyArray<{ id?: unknown; pattern?: unknown; script?: unknown }> = [];
       try {
-        routes = await this.request<ReadonlyArray<{ id?: unknown; script?: unknown }>>(
-          `/zones/${encodeURIComponent(zoneId)}/workers/routes`,
-        );
+        routes = await this.request<
+          ReadonlyArray<{ id?: unknown; pattern?: unknown; script?: unknown }>
+        >(`/zones/${encodeURIComponent(zoneId)}/workers/routes`);
       } catch (error) {
         if (!(error instanceof PlatformCloudflareApiError && error.status === 404)) {
           throw error;
@@ -684,8 +688,11 @@ export class PlatformCloudflareClient {
       for (const route of routes) {
         if (
           typeof route.id === 'string' &&
+          typeof route.pattern === 'string' &&
           typeof route.script === 'string' &&
-          workerNames.has(route.script)
+          managed.routes.some(
+            (target) => target.pattern === route.pattern && target.script === route.script,
+          )
         ) {
           try {
             await this.request(
@@ -703,15 +710,16 @@ export class PlatformCloudflareClient {
       }
     }
     const removedDomainIds = new Set<string>();
-    for (const workerName of workerNames) {
-      const query = new URLSearchParams({ service: workerName });
-      const domains = await this.request<ReadonlyArray<{ id?: unknown; service?: unknown }>>(
-        `/accounts/${encodeURIComponent(accountId)}/workers/domains?${query}`,
-      );
+    for (const target of managed.customDomains) {
+      const query = new URLSearchParams({ service: target.service });
+      const domains = await this.request<
+        ReadonlyArray<{ hostname?: unknown; id?: unknown; service?: unknown }>
+      >(`/accounts/${encodeURIComponent(accountId)}/workers/domains?${query}`);
       for (const domain of domains) {
         if (
           typeof domain.id === 'string' &&
-          domain.service === workerName &&
+          domain.hostname === target.hostname &&
+          domain.service === target.service &&
           !removedDomainIds.has(domain.id)
         ) {
           removedDomainIds.add(domain.id);

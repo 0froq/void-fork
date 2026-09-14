@@ -65,7 +65,10 @@ describe('platform Cloudflare client', () => {
       },
     });
 
-    await client.removeRoutes('account', null, new Set(['void-api']));
+    await client.removeRoutes('account', null, {
+      customDomains: [{ hostname: 'api.example.com', service: 'void-api' }],
+      routes: [],
+    });
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toContain('/accounts/account/workers/domains?service=void-api');
@@ -88,7 +91,10 @@ describe('platform Cloudflare client', () => {
       },
     });
 
-    await client.removeRoutes('account', 'removed-zone', new Set(['void-api']));
+    await client.removeRoutes('account', 'removed-zone', {
+      customDomains: [{ hostname: 'api.example.com', service: 'void-api' }],
+      routes: [{ pattern: 'apps.example.com/*', script: 'void-api' }],
+    });
 
     expect(requests.some((url) => url.includes('/zones/removed-zone/workers/routes'))).toBe(true);
     expect(requests.some((url) => url.includes('/accounts/account/workers/domains'))).toBe(true);
@@ -410,8 +416,9 @@ describe('platform Cloudflare client', () => {
           return Response.json({
             success: true,
             result: [
-              { id: 'route-api', script: 'void-team-api' },
-              { id: 'route-other', script: 'unrelated' },
+              { id: 'route-api', pattern: 'api.example.com/*', script: 'void-team-api' },
+              { id: 'route-manual', pattern: 'manual.example.com/*', script: 'void-team-api' },
+              { id: 'route-other', pattern: 'other.example.com/*', script: 'unrelated' },
             ],
           });
         }
@@ -419,14 +426,27 @@ describe('platform Cloudflare client', () => {
           const service = url.searchParams.get('service');
           return Response.json({
             success: true,
-            result: [{ id: `domain-${service}`, service }],
+            result: [
+              { hostname: `${service}.example.com`, id: `domain-${service}`, service },
+              {
+                hostname: `manual-${service}.example.com`,
+                id: `manual-domain-${service}`,
+                service,
+              },
+            ],
           });
         }
         return Response.json({ success: true, result: null });
       },
     });
 
-    await client.removeRoutes('account', 'zone', new Set(['void-team-api', 'void-team-proxy']));
+    await client.removeRoutes('account', 'zone', {
+      customDomains: [
+        { hostname: 'void-team-api.example.com', service: 'void-team-api' },
+        { hostname: 'void-team-proxy.example.com', service: 'void-team-proxy' },
+      ],
+      routes: [{ pattern: 'api.example.com/*', script: 'void-team-api' }],
+    });
 
     expect(requests).toEqual([
       {
