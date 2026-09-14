@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   createPlatformDeploymentManifest,
@@ -15,6 +15,10 @@ import {
   platformCredentialAccount,
   savePlatformConnection,
   selectPlatformConnection,
+  promoteInstallationSecrets,
+  readInstallationRecoverySecrets,
+  removeInstallationRecoverySecrets,
+  writePendingInstallationSecrets,
   writeInstallationManifest,
 } from '../../src/cli/platform-registry.ts';
 
@@ -103,5 +107,31 @@ describe('platform registry', () => {
     );
     writeInstallationManifest(manifest, directory);
     expect(listInstallationManifests(directory)).toEqual([manifest]);
+  });
+
+  it('keeps recovery material private and removes it explicitly', () => {
+    const directory = temporaryRegistry();
+    const manifest = createPlatformInstallationManifest({
+      account: { id: 'account_123', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    writeInstallationManifest(manifest, directory);
+    writePendingInstallationSecrets(manifest, { databaseUrl: 'postgres://secret' }, directory);
+    promoteInstallationSecrets(manifest, directory);
+    const recoveryPath = join(directory, 'account_123', 'example-a1b2c3d4.recovery');
+    expect(statSync(recoveryPath).mode & 0o777).toBe(0o600);
+    expect(readInstallationRecoverySecrets(manifest, directory)).toEqual({
+      databaseUrl: 'postgres://secret',
+    });
+    removeInstallationRecoverySecrets(manifest, directory);
+    expect(readInstallationRecoverySecrets(manifest, directory)).toBeNull();
   });
 });

@@ -376,3 +376,70 @@ export function removePendingInstallationSecrets(
   const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
   rmSync(manifestPath.replace(/\.json$/, '.secrets'), { force: true });
 }
+
+export function promoteInstallationSecrets(
+  manifest: PlatformInstallationManifest,
+  directory: string = platformRegistryDirectory(),
+): void {
+  const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
+  const pending = manifestPath.replace(/\.json$/, '.secrets');
+  const recovery = manifestPath.replace(/\.json$/, '.recovery');
+  rmSync(recovery, { force: true });
+  renameSync(pending, recovery);
+}
+
+export function readInstallationRecoverySecrets(
+  manifest: PlatformInstallationManifest,
+  directory: string = platformRegistryDirectory(),
+): Record<string, string> | null {
+  const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
+  const recovery = manifestPath.replace(/\.json$/, '.recovery');
+  try {
+    const value = JSON.parse(readFileSync(recovery, 'utf8')) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('recovery material must be an object');
+    }
+    const entries = Object.entries(value);
+    if (entries.some(([, entry]) => typeof entry !== 'string')) {
+      throw new Error('recovery material values must be strings');
+    }
+    return Object.fromEntries(entries) as Record<string, string>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw new Error(
+      `platform: Could not read installation recovery material: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function removeInstallationRecoverySecrets(
+  manifest: PlatformInstallationManifest,
+  directory: string = platformRegistryDirectory(),
+): void {
+  const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
+  rmSync(manifestPath.replace(/\.json$/, '.recovery'), { force: true });
+  rmSync(manifestPath.replace(/\.json$/, '.secrets'), { force: true });
+}
+
+export function removePlatformConnectionForInstallation(
+  installationId: string,
+  directory: string = platformRegistryDirectory(),
+): void {
+  withRegistryLock(directory, () => {
+    const current = readRegistry(directory);
+    const connections = current.connections.filter(
+      (connection) => connection.installationId !== installationId,
+    );
+    writeJsonAtomically(join(directory, 'registry.json'), {
+      activeConnectionId:
+        current.activeConnectionId &&
+        connections.some((connection) => connection.id === current.activeConnectionId)
+          ? current.activeConnectionId
+          : (connections[0]?.id ?? null),
+      connections,
+      schemaVersion: PLATFORM_REGISTRY_SCHEMA_VERSION,
+    });
+  });
+}

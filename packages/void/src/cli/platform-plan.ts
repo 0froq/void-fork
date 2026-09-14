@@ -58,6 +58,7 @@ export async function createPlatformInstallPlan(
   client: PlanningClient,
   input: PlatformInstallPlanInput,
   existing: PlatformInstallationManifest | null,
+  options?: { repairMissing?: boolean },
 ): Promise<PlatformInstallPlan> {
   await client.verifyToken();
   const accounts = await client.listAccounts();
@@ -118,26 +119,57 @@ export async function createPlatformInstallPlan(
   const intendedZone = existing
     ? hasProvisionIntent(existing, 'zone', 'zone', deployment.application.zoneName)
     : false;
-  if (recordedZone && (!zone || recordedZone.id !== zone.id || recordedZone.kind !== 'zone')) {
+  const repairCreatedZone =
+    options?.repairMissing && recordedZone?.ownership === 'created' && !zone;
+  if (
+    recordedZone &&
+    !repairCreatedZone &&
+    (!zone || recordedZone.id !== zone.id || recordedZone.kind !== 'zone')
+  ) {
     throw new Error(
       `platform: Recorded zone ${recordedZone.name} (${recordedZone.id}) no longer matches the Cloudflare account.`,
     );
   }
   actions.push({
-    action: recordedZone || (zone && intendedZone) ? 'reuse' : zone ? 'adopt' : 'create',
+    action: repairCreatedZone
+      ? 'create'
+      : recordedZone || (zone && intendedZone)
+        ? 'reuse'
+        : zone
+          ? 'adopt'
+          : 'create',
     id: zone?.id ?? null,
     key: 'zone',
     kind: 'zone',
     name: deployment.application.zoneName,
-    reason:
-      recordedZone || intendedZone
+    reason: repairCreatedZone
+      ? 'Recreate the missing installer-owned zone.'
+      : recordedZone || intendedZone
         ? 'Reuse the recorded zone.'
         : zone
           ? 'Use the existing zone without taking ownership.'
           : 'Create the requested zone.',
   });
-  addNamedPlan(actions, existing, 'routing-kv', 'kv-namespace', names.routingKv, routingKv);
-  addNamedPlan(actions, existing, 'isr-cache-kv', 'kv-namespace', names.isrCacheKv, isrKv);
+  addNamedPlan(
+    actions,
+    existing,
+    'routing-kv',
+    'kv-namespace',
+    names.routingKv,
+    routingKv,
+    'reuse',
+    options,
+  );
+  addNamedPlan(
+    actions,
+    existing,
+    'isr-cache-kv',
+    'kv-namespace',
+    names.isrCacheKv,
+    isrKv,
+    'reuse',
+    options,
+  );
   addNamedPlan(
     actions,
     existing,
@@ -145,6 +177,8 @@ export async function createPlatformInstallPlan(
     'kv-namespace',
     names.legacyAssetsKv,
     legacyKv,
+    'reuse',
+    options,
   );
   addNamedPlan(
     actions,
@@ -153,9 +187,29 @@ export async function createPlatformInstallPlan(
     'r2-bucket',
     names.assetsBucket,
     r2Buckets.filter((resource) => resource.name === names.assetsBucket),
+    'reuse',
+    options,
   );
-  addNamedPlan(actions, existing, 'usage-queue', 'queue', names.usageQueue, usageQueues);
-  addNamedPlan(actions, existing, 'cron-queue', 'queue', names.cronQueue, cronQueues);
+  addNamedPlan(
+    actions,
+    existing,
+    'usage-queue',
+    'queue',
+    names.usageQueue,
+    usageQueues,
+    'reuse',
+    options,
+  );
+  addNamedPlan(
+    actions,
+    existing,
+    'cron-queue',
+    'queue',
+    names.cronQueue,
+    cronQueues,
+    'reuse',
+    options,
+  );
   addNamedPlan(
     actions,
     existing,
@@ -163,6 +217,8 @@ export async function createPlatformInstallPlan(
     'dispatch-namespace',
     names.dispatchNamespace,
     dispatchNamespaces.filter((resource) => resource.name === names.dispatchNamespace),
+    'reuse',
+    options,
   );
   addNamedPlan(
     actions,
@@ -171,6 +227,8 @@ export async function createPlatformInstallPlan(
     'hyperdrive',
     names.hyperdrive,
     hyperdrives.filter((resource) => resource.name === names.hyperdrive),
+    'reuse',
+    options,
   );
   for (const [key, name] of [
     ['api-worker', names.apiWorker],
@@ -179,7 +237,7 @@ export async function createPlatformInstallPlan(
     ['dispatch-worker', names.dispatchWorker],
   ] as const) {
     const matches = workers.includes(name) ? [{ id: name, name }] : [];
-    addNamedPlan(actions, existing, key, 'worker', name, matches, 'update');
+    addNamedPlan(actions, existing, key, 'worker', name, matches, 'update', options);
   }
   const apiUrl = deployment.controlPlane.apiHostname
     ? `https://${deployment.controlPlane.apiHostname}`
@@ -215,6 +273,7 @@ function addNamedPlan(
   name: string,
   matches: ReadonlyArray<CloudflareNamedResource>,
   existingAction: 'reuse' | 'update' = 'reuse',
+  options?: { repairMissing?: boolean },
 ): void {
   if (matches.length > 1) {
     throw new Error(`platform: More than one ${kind} named ${JSON.stringify(name)} exists.`);
@@ -242,6 +301,22 @@ function addNamedPlan(
     return;
   }
   if (recorded && recorded.state === 'ready') {
+    if (options?.repairMissing && recorded.ownership === 'created') {
+      actions.push({
+        action: 'create',
+        id: null,
+        key,
+        kind,
+        name,
+        reason: `Recreate the missing installer-owned ${kind}.`,
+      });
+      return;
+    }
+    if (options?.repairMissing && recorded.ownership !== 'created') {
+      throw new Error(
+        `platform: Recorded ${recorded.ownership} ${kind} ${JSON.stringify(name)} (${recorded.id}) is missing. Repair will not recreate a resource the installer does not own.`,
+      );
+    }
     throw new Error(
       `platform: Recorded ${kind} ${JSON.stringify(name)} (${recorded.id}) is missing. Run \`void platform repair ${existing!.id}\` to reconcile it.`,
     );

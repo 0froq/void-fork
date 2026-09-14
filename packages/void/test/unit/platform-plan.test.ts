@@ -1,3 +1,8 @@
+import {
+  createPlatformDeploymentManifest,
+  createPlatformInstallationManifest,
+  recordInstallationResource,
+} from '@void/platform';
 import { describe, expect, it } from 'vite-plus/test';
 import { createPlatformInstallPlan } from '../../src/cli/platform-plan.ts';
 
@@ -56,5 +61,71 @@ describe('platform installation planning', () => {
     });
     const plan = await createPlatformInstallPlan(fake, input, null);
     expect(plan.actions[0]).toMatchObject({ action: 'adopt', id: 'zone', kind: 'zone' });
+  });
+
+  it('repairs a missing installer-owned resource', async () => {
+    let manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: 'hash',
+        id: 'missing-routing',
+        key: 'routing-kv',
+        kind: 'kv-namespace',
+        name: 'void-example-routing',
+        ownership: 'created',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const plan = await createPlatformInstallPlan(client(), input, manifest, {
+      repairMissing: true,
+    });
+    expect(plan.actions.find((action) => action.key === 'routing-kv')).toMatchObject({
+      action: 'create',
+      id: null,
+    });
+  });
+
+  it('refuses to recreate a missing adopted resource', async () => {
+    let manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: 'hash',
+        id: 'external-routing',
+        key: 'routing-kv',
+        kind: 'kv-namespace',
+        name: 'void-example-routing',
+        ownership: 'adopted',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    await expect(
+      createPlatformInstallPlan(client(), input, manifest, { repairMissing: true }),
+    ).rejects.toThrow('will not recreate');
   });
 });

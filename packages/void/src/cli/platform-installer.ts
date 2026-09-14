@@ -21,7 +21,7 @@ import {
   type PlatformInstallPlanAction,
 } from './platform-plan.ts';
 import {
-  removePendingInstallationSecrets,
+  promoteInstallationSecrets,
   savePlatformConnection,
   writeInstallationManifest,
   writePendingInstallationSecrets,
@@ -145,6 +145,10 @@ export async function installPlatform(
   } else if (manifest.status === 'uninstalled') {
     throw new Error(`platform: Installation ${manifest.id} has already been uninstalled.`);
   }
+  if (manifest.platformVersion !== version) {
+    manifest = { ...manifest, platformVersion: version, updatedAt: now() };
+    writeInstallationManifest(manifest);
+  }
   writePendingInstallationSecrets(manifest, secretCheckpoint(secrets));
 
   try {
@@ -202,14 +206,15 @@ export async function installPlatform(
     const migrationHash = hash(
       readFileSync(join(runtimeDirectory, 'drizzle', 'meta', '_journal.json')),
     );
-    if (!manifest.steps.some((step) => step.key === 'database-migrations')) {
+    const migrationStep = `database-migrations:${migrationHash}`;
+    if (!manifest.steps.some((step) => step.key === migrationStep)) {
       await (dependencies.migrateDatabase ?? migratePlatformDatabase)(
         secrets.databaseUrl,
         join(runtimeDirectory, 'drizzle'),
       );
       manifest = recordInstallationStep(
         manifest,
-        { completedAt: now(), key: 'database-migrations', resultHash: migrationHash },
+        { completedAt: now(), key: migrationStep, resultHash: migrationHash },
         now(),
       );
       writeInstallationManifest(manifest);
@@ -275,7 +280,7 @@ export async function installPlatform(
       REMOTE_INSTALLATION_MANIFEST_KEY,
       JSON.stringify(manifest),
     );
-    removePendingInstallationSecrets(manifest);
+    promoteInstallationSecrets(manifest);
     savePlatformConnection({
       accountId: plan.account.id,
       apiUrl: plan.apiUrl,
