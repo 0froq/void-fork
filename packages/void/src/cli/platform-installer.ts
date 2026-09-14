@@ -458,6 +458,8 @@ async function deployPlatformWorker(
       env: {
         ...process.env,
         CLOUDFLARE_ACCOUNT_ID: String(config.account_id),
+        CLOUDFLARE_API_TOKEN:
+          process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || undefined,
       },
       stdio: 'inherit',
       timeout: 10 * 60 * 1000,
