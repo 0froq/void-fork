@@ -18,6 +18,7 @@ import {
   uninstallPlatform,
   verifyPlatformInstallationOwnership,
 } from '../../src/cli/platform-management.ts';
+import { platformProvisionIntentHash } from '../../src/cli/platform-plan.ts';
 import {
   listInstallationManifests,
   promoteInstallationSecrets,
@@ -345,6 +346,58 @@ describe('platform lifecycle management', () => {
     expect(fake.removedRoutes).toBe(1);
     expect(fake.subdomains).toHaveLength(4);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
+  });
+
+  it('disables a marked Worker deployed before its local resource checkpoint', async () => {
+    let manifest = installedManifest();
+    const recordedApi = manifest.resources.find((resource) => resource.key === 'api-worker')!;
+    const api = {
+      ...recordedApi,
+      id: manifest.deployment.resources.apiWorker,
+      name: manifest.deployment.resources.apiWorker,
+    };
+    manifest = {
+      ...manifest,
+      resources: manifest.resources.filter((resource) => resource.key !== 'api-worker'),
+      status: 'deploying',
+    };
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-09-14T00:00:03.000Z',
+        key: 'provision-intent:api-worker',
+        resultHash: platformProvisionIntentHash(manifest, api.key, api.kind, api.name),
+      },
+      '2026-09-14T00:00:03.000Z',
+    );
+    persist(manifest);
+    const fake = client(manifest);
+    fake.listWorkerNames = async () => [
+      api.name,
+      ...manifest.resources
+        .filter((resource) => resource.kind === 'worker')
+        .map((resource) => resource.name),
+    ];
+    fake.getWorkerPlainTextBindings = async (_account, name) => {
+      const resource =
+        name === api.name
+          ? api
+          : manifest.resources.find((entry) => entry.kind === 'worker' && entry.name === name)!;
+      return { PLATFORM_OWNERSHIP_MARKER: ownershipMarker(manifest, resource) };
+    };
+
+    await disablePlatform(fake, manifest, false);
+
+    expect(fake.subdomains).toContainEqual([api.name, false]);
+    expect(
+      listInstallationManifests()[0]?.resources.find((resource) => resource.key === api.key),
+    ).toMatchObject({
+      id: api.id,
+      kind: api.kind,
+      name: api.name,
+      ownership: 'created',
+      state: 'ready',
+    });
   });
 
   it('retains installer-owned data and the zone by default', async () => {

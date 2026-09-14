@@ -24,6 +24,7 @@ import {
 import {
   createPlatformInstallPlan,
   formatPlatformInstallPlan,
+  platformProvisionIntentHash,
   revalidatePlatformInstallAction,
 } from './platform-plan.ts';
 import {
@@ -260,11 +261,12 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
 
 export async function disablePlatform(
   client: PlatformManagementClient,
-  manifest: PlatformInstallationManifest,
+  initialManifest: PlatformInstallationManifest,
   planOnly: boolean,
 ): Promise<void> {
+  const reconciled = await recoverDurablyMarkedProvisionIntents(client, initialManifest);
   const workers = new Set(
-    manifest.resources
+    reconciled.resources
       .filter((resource) => resource.kind === 'worker' && resource.state === 'ready')
       .map((resource) => resource.name),
   );
@@ -275,6 +277,10 @@ export async function disablePlatform(
   if (planOnly) {
     outro('No Cloudflare or local installation state was changed.');
     return;
+  }
+  const manifest = reconciled;
+  if (manifest !== initialManifest) {
+    writeInstallationManifest(manifest);
   }
   if (manifest.status === 'disabled') {
     log.info(`${manifest.deployment.displayName} is already disabled.`);
@@ -325,10 +331,12 @@ export async function disablePlatform(
 
 export async function uninstallPlatform(
   client: PlatformManagementClient,
-  manifest: PlatformInstallationManifest,
+  initialManifest: PlatformInstallationManifest,
   args: Extract<PlatformArgs, { subcommand: 'uninstall' }>,
   dependencies: PlatformManagementDependencies = {},
 ): Promise<void> {
+  const reconciled = await recoverDurablyMarkedProvisionIntents(client, initialManifest);
+  const manifest = reconciled;
   const retainData = !args.purgeData;
   const hasRoutingCheckpoint = manifest.resources.some(
     (resource) => resource.key === 'routing-kv' && resource.state === 'ready',
@@ -363,6 +371,9 @@ export async function uninstallPlatform(
   if (args.plan) {
     outro('No Cloudflare or local installation state was changed.');
     return;
+  }
+  if (manifest !== initialManifest) {
+    writeInstallationManifest(manifest);
   }
   if (interactive) {
     const proceed = await confirmAction(
@@ -540,6 +551,64 @@ export async function uninstallPlatform(
     await writeRemoteManifestIfPresent(client, next).catch(() => {});
     throw error;
   }
+}
+
+export async function recoverDurablyMarkedProvisionIntents(
+  client: PlatformOwnershipClient,
+  manifest: PlatformInstallationManifest,
+): Promise<PlatformInstallationManifest> {
+  const candidates = [
+    ['api-worker', 'worker', manifest.deployment.resources.apiWorker],
+    ['proxy-worker', 'worker', manifest.deployment.resources.proxyWorker],
+    ['tail-worker', 'worker', manifest.deployment.resources.tailWorker],
+    ['dispatch-worker', 'worker', manifest.deployment.resources.dispatchWorker],
+    ['assets-bucket', 'r2-bucket', manifest.deployment.resources.assetsBucket],
+  ] as const;
+  const pending = candidates.filter(
+    ([key, kind, name]) =>
+      !manifest.resources.some((resource) => resource.key === key) &&
+      manifest.steps.some(
+        (step) =>
+          step.key === `provision-intent:${key}` &&
+          step.resultHash === platformProvisionIntentHash(manifest, key, kind, name),
+      ),
+  );
+  if (pending.length === 0) {
+    return manifest;
+  }
+  const [workers, buckets] = await Promise.all([
+    client.listWorkerNames(manifest.account.id),
+    client.listR2Buckets(manifest.account.id),
+  ]);
+  let recovered = manifest;
+  for (const [key, kind, name] of pending) {
+    const live =
+      kind === 'worker'
+        ? workers.includes(name)
+          ? { id: name, name }
+          : null
+        : (buckets.find((bucket) => bucket.name === name) ?? null);
+    if (!live) {
+      continue;
+    }
+    const resource: InstallationResource = {
+      configHash: createHash('sha256').update(JSON.stringify({ kind, name })).digest('hex'),
+      id: live.id,
+      key,
+      kind,
+      name,
+      ownership: 'created',
+      state: 'ready',
+    };
+    const marker =
+      kind === 'worker'
+        ? (await client.getWorkerPlainTextBindings(manifest.account.id, name))
+            .PLATFORM_OWNERSHIP_MARKER
+        : await client.getR2Object(manifest.account.id, name, PLATFORM_R2_OWNERSHIP_MARKER_KEY);
+    verifyResourceMarker(marker, manifest, resource);
+    recovered = recordInstallationResource(recovered, resource, manifest.updatedAt);
+  }
+  return recovered;
 }
 
 const DATA_RESOURCE_KINDS = new Set([

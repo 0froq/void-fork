@@ -5,13 +5,17 @@ import {
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
   recordInstallationResource,
+  recordInstallationStep,
   setInstallationEndpoints,
   transitionInstallation,
   type InstallationResourceKind,
+  type PlatformInstallationManifest,
 } from '@void/platform';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { REMOTE_INSTALLATION_MANIFEST_KEY } from '../../src/cli/platform-installer.ts';
+import { disablePlatform } from '../../src/cli/platform-management.ts';
+import { platformProvisionIntentHash } from '../../src/cli/platform-plan.ts';
 import { recoverPlatformInstallations } from '../../src/cli/platform-recovery.ts';
 import {
   listInstallationManifests,
@@ -112,6 +116,9 @@ function remoteManifest() {
 function client(manifest = remoteManifest()) {
   const byName = new Map(manifest.resources.map((resource) => [resource.name, resource]));
   return {
+    deleteResource: async () => {},
+    deleteR2Object: async () => {},
+    emptyR2Bucket: async () => {},
     verifyToken: async () => {},
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'example-workers',
@@ -148,6 +155,9 @@ function client(manifest = remoteManifest()) {
       namespace === 'routing-id' && key === REMOTE_INSTALLATION_MANIFEST_KEY
         ? JSON.stringify(manifest)
         : null,
+    putKvValue: async () => {},
+    removeRoutes: async () => {},
+    setWorkerSubdomain: async (_account: string, _worker: string, _enabled: boolean) => {},
     getR2Object: async () => {
       const resource = manifest.resources.find((entry) => entry.kind === 'r2-bucket')!;
       return ownershipMarker(manifest, resource);
@@ -299,6 +309,70 @@ describe('platform recovery', () => {
     expect(listInstallationManifests(directory)).toEqual([interrupted]);
     expect(listPlatformConnections(directory)).toEqual([]);
     expect(endpointChecks).toBe(0);
+  });
+
+  it('recovers and disables a Worker deployed before its resource checkpoint', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const base = remoteManifest();
+    const installationId = 'example-a1b2c3d4e5f6';
+    const workerName = 'void-example-a1b2c3d4e5f6-api';
+    let interrupted: PlatformInstallationManifest = {
+      ...base,
+      deployment: {
+        ...base.deployment,
+        resources: { ...base.deployment.resources, apiWorker: workerName },
+      },
+      endpoints: { apiUrl: null, dashboardUrl: null, proxyUrl: null },
+      id: installationId,
+      resources: base.resources.filter((resource) => resource.key !== 'api-worker'),
+      status: 'deploying' as const,
+    };
+    interrupted = recordInstallationStep(
+      interrupted,
+      {
+        completedAt: '2026-09-14T00:00:04.000Z',
+        key: 'provision-intent:api-worker',
+        resultHash: platformProvisionIntentHash(interrupted, 'api-worker', 'worker', workerName),
+      },
+      '2026-09-14T00:00:04.000Z',
+    );
+    const fake = client(interrupted);
+    const workerResource = {
+      configHash: 'hash',
+      id: workerName,
+      key: 'api-worker',
+      kind: 'worker' as const,
+      name: workerName,
+      ownership: 'created' as const,
+      state: 'ready' as const,
+    };
+    fake.getWorkerPlainTextBindings = async (_account, name) => {
+      const resource =
+        name === workerName
+          ? workerResource
+          : interrupted.resources.find((entry) => entry.kind === 'worker' && entry.name === name)!;
+      return { PLATFORM_OWNERSHIP_MARKER: ownershipMarker(interrupted, resource) };
+    };
+    const disabledWorkers: Array<string> = [];
+    fake.setWorkerSubdomain = async (_account, worker, enabled) => {
+      if (!enabled) {
+        disabledWorkers.push(worker);
+      }
+    };
+
+    const [recovered] = await recoverPlatformInstallations(fake, 'account', async () => {});
+    expect(recovered?.resources.find((resource) => resource.key === 'api-worker')).toMatchObject({
+      id: workerName,
+      key: 'api-worker',
+      kind: 'worker',
+      name: workerName,
+      ownership: 'created',
+      state: 'ready',
+    });
+    await disablePlatform(fake, recovered!, false);
+    expect(disabledWorkers).toContain(workerName);
   });
 
   it('keeps locally advanced lifecycle progress during discovery', async () => {

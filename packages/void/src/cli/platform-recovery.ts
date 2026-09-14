@@ -7,6 +7,7 @@ import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import { REMOTE_INSTALLATION_MANIFEST_KEY } from './platform-installer.ts';
 import {
   isPlatformManifestMonotonicExtension,
+  recoverDurablyMarkedProvisionIntents,
   verifyPlatformInstallationOwnership,
 } from './platform-management.ts';
 import { createPlatformInstallPlan } from './platform-plan.ts';
@@ -102,6 +103,7 @@ export async function recoverPlatformInstallations(
       },
       manifest,
     );
+    manifest = await recoverDurablyMarkedProvisionIntents(client, manifest);
     if (manifest.endpoints.apiUrl !== null && manifest.endpoints.apiUrl !== plan.apiUrl) {
       throw new Error(`platform: Installation ${manifest.id} has inconsistent API metadata.`);
     }
