@@ -5,6 +5,7 @@ import {
 } from '@void/platform';
 import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import { REMOTE_INSTALLATION_MANIFEST_KEY } from './platform-installer.ts';
+import { verifyPlatformInstallationOwnership } from './platform-management.ts';
 import { createPlatformInstallPlan } from './platform-plan.ts';
 import {
   listInstallationManifests,
@@ -16,6 +17,8 @@ type RecoveryClient = Pick<
   PlatformCloudflareClient,
   | 'findZone'
   | 'getKvValue'
+  | 'getR2Object'
+  | 'getWorkerPlainTextBindings'
   | 'getWorkersSubdomain'
   | 'listAccounts'
   | 'listAiGateways'
@@ -104,7 +107,10 @@ export async function recoverPlatformInstallations(
     } else if (manifest.endpoints.proxyUrl !== plan.proxyUrl) {
       throw new Error(`platform: Installation ${manifest.id} has inconsistent proxy metadata.`);
     }
-    await verifyEndpoint(manifest);
+    await verifyPlatformInstallationOwnership(client, manifest);
+    if (manifest.desiredState === 'enabled' && manifest.status !== 'disabled') {
+      await verifyEndpoint(manifest);
+    }
     recovered.push(manifest);
   }
 

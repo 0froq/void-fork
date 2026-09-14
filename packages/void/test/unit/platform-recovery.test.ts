@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
+  createPlatformResourceOwnershipMarker,
   recordInstallationResource,
   setInstallationEndpoints,
   transitionInstallation,
@@ -145,6 +146,16 @@ function client(manifest = remoteManifest()) {
       namespace === 'routing-id' && key === REMOTE_INSTALLATION_MANIFEST_KEY
         ? JSON.stringify(manifest)
         : null,
+    getR2Object: async () => {
+      const resource = manifest.resources.find((entry) => entry.kind === 'r2-bucket')!;
+      return ownershipMarker(manifest, resource);
+    },
+    getWorkerPlainTextBindings: async (_account: string, name: string) => {
+      const resource = manifest.resources.find(
+        (entry) => entry.kind === 'worker' && entry.name === name,
+      )!;
+      return { PLATFORM_OWNERSHIP_MARKER: ownershipMarker(manifest, resource) };
+    },
     listR2Buckets: async () => [
       {
         id: manifest.deployment.resources.assetsBucket,
@@ -168,6 +179,23 @@ function client(manifest = remoteManifest()) {
       manifest.deployment.resources.dispatchWorker,
     ],
   };
+}
+
+function ownershipMarker(
+  manifest: ReturnType<typeof remoteManifest>,
+  resource: ReturnType<typeof remoteManifest>['resources'][number],
+): string {
+  return JSON.stringify(
+    createPlatformResourceOwnershipMarker({
+      accountId: manifest.account.id,
+      installationId: manifest.id,
+      ownershipNonce: manifest.ownershipNonce,
+      resourceId: resource.id,
+      resourceKey: resource.key,
+      resourceKind: resource.kind,
+      resourceName: resource.name,
+    }),
+  );
 }
 
 describe('platform recovery', () => {
@@ -203,5 +231,24 @@ describe('platform recovery', () => {
       recoverPlatformInstallations(client(tampered), 'account', async () => {}),
     ).rejects.toThrow('does not match');
     expect(listInstallationManifests(directory)).toEqual([]);
+  });
+
+  it('recovers a disabled installation without probing its private endpoint', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const installed = remoteManifest();
+    const disabled = {
+      ...installed,
+      desiredState: 'disabled' as const,
+      status: 'disabled' as const,
+    };
+    let endpointChecks = 0;
+    const recovered = await recoverPlatformInstallations(client(disabled), 'account', async () => {
+      endpointChecks++;
+    });
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]).toMatchObject({ desiredState: 'disabled', status: 'disabled' });
+    expect(endpointChecks).toBe(0);
   });
 });

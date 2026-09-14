@@ -49,8 +49,24 @@ export type PlatformManagementClient = Pick<
   | 'setWorkerSubdomain'
 >;
 
+export type PlatformOwnershipClient = Pick<
+  PlatformManagementClient,
+  | 'findZone'
+  | 'getKvValue'
+  | 'getR2Object'
+  | 'getWorkerPlainTextBindings'
+  | 'listAiGateways'
+  | 'listDispatchNamespaces'
+  | 'listDnsRecords'
+  | 'listHyperdriveConfigs'
+  | 'listKvNamespaces'
+  | 'listQueues'
+  | 'listR2Buckets'
+  | 'listWorkerNames'
+>;
+
 export async function verifyPlatformInstallationOwnership(
-  client: PlatformManagementClient,
+  client: PlatformOwnershipClient,
   manifest: PlatformInstallationManifest,
 ): Promise<void> {
   const ready = manifest.resources.filter(
@@ -479,7 +495,7 @@ function resourceDeletionPriority(
 }
 
 async function verifyPlatformMutationOwnership(
-  client: PlatformManagementClient,
+  client: PlatformOwnershipClient,
   manifest: PlatformInstallationManifest,
   targetKeys: ReadonlySet<string>,
   options: { allowDeletedRoutingCheckpoint?: boolean } = {},
