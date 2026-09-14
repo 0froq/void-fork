@@ -276,6 +276,31 @@ describe('platform recovery', () => {
     expect(endpointChecks).toBe(0);
   });
 
+  it('recovers an interrupted install before endpoints were checkpointed', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const interrupted = {
+      ...remoteManifest(),
+      endpoints: { apiUrl: null, dashboardUrl: null, proxyUrl: null },
+      status: 'deploying' as const,
+    };
+    let endpointChecks = 0;
+
+    const recovered = await recoverPlatformInstallations(
+      client(interrupted),
+      'account',
+      async () => {
+        endpointChecks++;
+      },
+    );
+
+    expect(recovered).toEqual([interrupted]);
+    expect(listInstallationManifests(directory)).toEqual([interrupted]);
+    expect(listPlatformConnections(directory)).toEqual([]);
+    expect(endpointChecks).toBe(0);
+  });
+
   it('keeps locally advanced lifecycle progress during discovery', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
     directories.push(directory);

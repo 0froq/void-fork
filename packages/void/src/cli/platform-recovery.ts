@@ -85,7 +85,7 @@ export async function recoverPlatformInstallations(
         `platform: Routing namespace ${namespace.name} does not match its ownership manifest.`,
       );
     }
-    if (manifest.status === 'uninstalled' || !manifest.endpoints.apiUrl) {
+    if (manifest.status === 'uninstalled') {
       continue;
     }
     const deployment = manifest.deployment;
@@ -102,16 +102,19 @@ export async function recoverPlatformInstallations(
       },
       manifest,
     );
-    if (manifest.endpoints.apiUrl !== plan.apiUrl) {
+    if (manifest.endpoints.apiUrl !== null && manifest.endpoints.apiUrl !== plan.apiUrl) {
       throw new Error(`platform: Installation ${manifest.id} has inconsistent API metadata.`);
     }
-    if (manifest.endpoints.proxyUrl === null) {
+    if (manifest.endpoints.apiUrl !== null && manifest.endpoints.proxyUrl === null) {
       manifest = setInstallationEndpoints(
         manifest,
         { ...manifest.endpoints, proxyUrl: plan.proxyUrl },
         manifest.updatedAt,
       );
-    } else if (manifest.endpoints.proxyUrl !== plan.proxyUrl) {
+    } else if (
+      manifest.endpoints.proxyUrl !== null &&
+      manifest.endpoints.proxyUrl !== plan.proxyUrl
+    ) {
       throw new Error(`platform: Installation ${manifest.id} has inconsistent proxy metadata.`);
     }
     await verifyPlatformInstallationOwnership(client, manifest);
@@ -152,15 +155,17 @@ export async function recoverPlatformInstallations(
       if (!collision) {
         writeInstallationManifest(manifest);
       }
-      savePlatformConnection({
-        accountId: manifest.account.id,
-        apiUrl: manifest.endpoints.apiUrl!,
-        applicationDomain: manifest.deployment.application.baseDomain,
-        displayName: manifest.deployment.displayName,
-        installationId: manifest.id,
-        kind: 'installed',
-        proxyUrl: manifest.endpoints.proxyUrl!,
-      });
+      if (manifest.endpoints.apiUrl !== null && manifest.endpoints.proxyUrl !== null) {
+        savePlatformConnection({
+          accountId: manifest.account.id,
+          apiUrl: manifest.endpoints.apiUrl,
+          applicationDomain: manifest.deployment.application.baseDomain,
+          displayName: manifest.deployment.displayName,
+          installationId: manifest.id,
+          kind: 'installed',
+          proxyUrl: manifest.endpoints.proxyUrl,
+        });
+      }
       resolved.push(manifest);
     } finally {
       release();
