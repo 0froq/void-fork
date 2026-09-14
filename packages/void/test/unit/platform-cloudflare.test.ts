@@ -108,7 +108,11 @@ describe('platform Cloudflare client', () => {
     });
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]).toContain('/accounts/account/workers/domains?service=void-api');
+    const requestUrl = new URL(requests[0]);
+    expect(requestUrl.pathname).toBe('/client/v4/accounts/account/workers/domains');
+    expect(requestUrl.searchParams.get('service')).toBe('void-api');
+    expect(requestUrl.searchParams.get('page')).toBe('1');
+    expect(requestUrl.searchParams.get('per_page')).toBe('100');
     expect(requests[0]).not.toContain('/zones/');
   });
 
@@ -520,19 +524,33 @@ describe('platform Cloudflare client', () => {
   });
 
   it('inventories Worker custom domains before installer deployment', async () => {
+    const pages: Array<string | null> = [];
     const client = new PlatformCloudflareClient('token', {
-      fetcher: async () =>
-        Response.json({
+      fetcher: async (input) => {
+        const page = new URL(String(input)).searchParams.get('page');
+        pages.push(page);
+        return Response.json({
           success: true,
-          result: [
-            {
-              hostname: 'api.platform.example.com',
-              id: 'domain-id',
-              service: 'existing-worker',
-              zone_name: 'example.com',
-            },
-          ],
-        }),
+          result:
+            page === '1'
+              ? [
+                  {
+                    hostname: 'api.platform.example.com',
+                    id: 'domain-id',
+                    service: 'existing-worker',
+                    zone_name: 'example.com',
+                  },
+                ]
+              : [
+                  {
+                    hostname: 'admin.platform.example.net',
+                    id: 'domain-id-2',
+                    service: 'existing-worker',
+                  },
+                ],
+          result_info: { page: Number(page), per_page: 1, total_pages: 2 },
+        });
+      },
     });
     await expect(client.listWorkerDomains('account')).resolves.toEqual([
       {
@@ -541,7 +559,42 @@ describe('platform Cloudflare client', () => {
         service: 'existing-worker',
         zoneName: 'example.com',
       },
+      {
+        hostname: 'admin.platform.example.net',
+        id: 'domain-id-2',
+        service: 'existing-worker',
+      },
     ]);
+    expect(pages).toEqual(['1', '2']);
+  });
+
+  it('removes a managed Worker custom domain found on a later page', async () => {
+    const requests: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push(`${init?.method ?? 'GET'} ${url.pathname}?${url.searchParams}`);
+        if (url.pathname.endsWith('/workers/domains')) {
+          const page = Number(url.searchParams.get('page'));
+          return Response.json({
+            success: true,
+            result:
+              page === 1
+                ? [{ hostname: 'manual.example.net', id: 'manual', service: 'worker' }]
+                : [{ hostname: 'api.example.com', id: 'managed', service: 'worker' }],
+            result_info: { page, per_page: 1, total_pages: 2 },
+          });
+        }
+        return Response.json({ success: true, result: null });
+      },
+    });
+
+    await client.removeRoutes('account', null, {
+      customDomains: [{ hostname: 'api.example.com', service: 'worker' }],
+      routes: [],
+    });
+    expect(requests.filter((request) => request.startsWith('GET '))).toHaveLength(2);
+    expect(requests).toContain('DELETE /client/v4/accounts/account/workers/domains/managed?');
   });
 
   it('inventories every route for a Worker without requiring zone visibility', async () => {

@@ -5,7 +5,12 @@ const DEFAULT_API_BASE = 'https://api.cloudflare.com/client/v4';
 type CloudflareEnvelope<T> = Readonly<{
   errors?: ReadonlyArray<{ code?: number; message?: string }>;
   result?: T;
-  result_info?: { cursor?: string };
+  result_info?: {
+    cursor?: string;
+    page?: number;
+    per_page?: number;
+    total_pages?: number;
+  };
   success?: boolean;
 }>;
 
@@ -87,6 +92,13 @@ export class PlatformCloudflareClient {
   }
 
   async request<T>(path: string, init?: RequestInit): Promise<T> {
+    return (await this.#requestEnvelope<T>(path, init)).result;
+  }
+
+  async #requestEnvelope<T>(
+    path: string,
+    init?: RequestInit,
+  ): Promise<{ result: T; resultInfo: CloudflareEnvelope<T>['result_info'] }> {
     const response = await this.#fetcher(`${this.#apiBase}${path}`, {
       ...init,
       headers: {
@@ -114,7 +126,7 @@ export class PlatformCloudflareClient {
           .join(', ') || `HTTP ${response.status}`;
       throw new PlatformCloudflareApiError(`Cloudflare API error: ${details}`, response.status);
     }
-    return envelope.result;
+    return { result: envelope.result, resultInfo: envelope.result_info };
   }
 
   async verifyToken(): Promise<void> {
@@ -212,15 +224,39 @@ export class PlatformCloudflareClient {
   }
 
   async listWorkerDomains(accountId: string): Promise<ReadonlyArray<CloudflareWorkerDomain>> {
-    const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
-      `/accounts/${encodeURIComponent(accountId)}/workers/domains`,
-    );
+    const result = await this.#listWorkerDomainRecords(accountId);
     return result.map((entry) => ({
       hostname: requiredString(entry.hostname, 'Worker custom domain hostname'),
       id: requiredString(entry.id, 'Worker custom domain id'),
       service: requiredString(entry.service, 'Worker custom domain service'),
       ...(typeof entry.zone_name === 'string' ? { zoneName: entry.zone_name } : {}),
     }));
+  }
+
+  async #listWorkerDomainRecords(
+    accountId: string,
+    service?: string,
+  ): Promise<ReadonlyArray<Record<string, unknown>>> {
+    const entries: Array<Record<string, unknown>> = [];
+    const perPage = 100;
+    for (let page = 1; ; page++) {
+      const query = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+      if (service) {
+        query.set('service', service);
+      }
+      const response = await this.#requestEnvelope<ReadonlyArray<Record<string, unknown>>>(
+        `/accounts/${encodeURIComponent(accountId)}/workers/domains?${query}`,
+      );
+      entries.push(...response.result);
+      const totalPages = response.resultInfo?.total_pages;
+      if (
+        (typeof totalPages === 'number' && page >= totalPages) ||
+        (totalPages === undefined && response.result.length < perPage)
+      ) {
+        break;
+      }
+    }
+    return entries;
   }
 
   async listWorkerRoutes(zoneId: string): Promise<ReadonlyArray<CloudflareWorkerRoute>> {
@@ -748,10 +784,7 @@ export class PlatformCloudflareClient {
     }
     const removedDomainIds = new Set<string>();
     for (const target of managed.customDomains) {
-      const query = new URLSearchParams({ service: target.service });
-      const domains = await this.request<
-        ReadonlyArray<{ hostname?: unknown; id?: unknown; service?: unknown }>
-      >(`/accounts/${encodeURIComponent(accountId)}/workers/domains?${query}`);
+      const domains = await this.#listWorkerDomainRecords(accountId, target.service);
       for (const domain of domains) {
         if (
           typeof domain.id === 'string' &&
