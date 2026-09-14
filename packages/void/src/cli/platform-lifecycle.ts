@@ -40,7 +40,10 @@ export function resolvePlatformInstallDatabaseUrl(
         resource.state === 'ready' &&
         (resource.kind === 'hyperdrive' || resource.kind === 'worker'),
     ) ||
-    manifest?.steps.some((step) => step.key.startsWith('database-migrations:'));
+    manifest?.steps.some(
+      (step) =>
+        step.key.startsWith('database-schema:') || step.key.startsWith('database-migrations:'),
+    );
   if (databaseBound) {
     if (!recorded) {
       if (explicit) {

@@ -10,6 +10,12 @@ import {
   setInstallationDesiredState,
   transitionInstallation,
 } from '@void/platform';
+import {
+  getPlatformRuntimeDirectory,
+  platformDatabaseSchemaDigest,
+  readPlatformRuntimeManifest,
+  type PlatformRuntimeDatabaseManifest,
+} from '@void/platform/installer';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
@@ -22,9 +28,11 @@ import {
   claimPlatformDatabaseConnection,
   createPlatformInstallationSecrets,
   inspectNewPlatformWorker,
+  inspectPlatformDatabaseStateConnection,
   inventoryUnmanagedPlatformWorkerTraffic,
   mergePlatformWorkerTrafficConfig,
   mergePreservedTriggerRoutes,
+  preparePlatformDatabaseConnection,
   readPlatformDatabaseLifecycleManifestConnection,
   resolvePlatformPreviousTriggerConfig,
   resolveBootstrapGitHubId,
@@ -261,7 +269,7 @@ describe('platform installer', () => {
       requests.push({ headers: new Headers(init?.headers), url });
       return Response.json(
         url.endsWith('/.well-known/void-platform')
-          ? { installationId: 'example-a1b2c3d4' }
+          ? { installationId: 'example-a1b2c3d4', platformVersion: '1.2.3' }
           : { ok: true },
       );
     }) as typeof fetch;
@@ -271,6 +279,7 @@ describe('platform installer', () => {
       'example-a1b2c3d4',
       'https://proxy.example.com',
       'apps.example.com',
+      '1.2.3',
       fetcher,
     );
 
@@ -291,7 +300,7 @@ describe('platform installer', () => {
       }
       return Response.json(
         url.endsWith('/.well-known/void-platform')
-          ? { installationId: 'example-a1b2c3d4' }
+          ? { installationId: 'example-a1b2c3d4', platformVersion: '1.2.3' }
           : { ok: true },
       );
     }) as typeof fetch;
@@ -302,9 +311,118 @@ describe('platform installer', () => {
         'example-a1b2c3d4',
         'https://proxy.example.com',
         'apps.example.com',
+        '1.2.3',
         fetcher,
       ),
     ).rejects.toThrow('Proxy health check failed');
+  });
+
+  it('requires live PostgreSQL migration history to be an exact package prefix', async () => {
+    const database = readPlatformRuntimeManifest().database;
+    const first = database.migrations[0]!;
+    const second = database.migrations[1]!;
+    const connection = migrationConnection([
+      { created_at: first.timestampMillis, hash: first.sha256, id: 1 },
+      { created_at: second.timestampMillis, hash: second.sha256, id: 2 },
+    ]);
+
+    const state = await inspectPlatformDatabaseStateConnection(connection, database);
+    expect(state.schemaDigest).toBe(
+      platformDatabaseSchemaDigest(database.lineage, database.migrations.slice(0, 2)),
+    );
+    expect(state.pendingMigrations).toEqual(database.migrations.slice(2));
+
+    connection.rows[1] = { ...connection.rows[1]!, hash: '0'.repeat(64) };
+    await expect(inspectPlatformDatabaseStateConnection(connection, database)).rejects.toThrow(
+      'not an exact prefix',
+    );
+
+    connection.rows[1] = {
+      ...connection.rows[1]!,
+      created_at: first.timestampMillis,
+      hash: second.sha256,
+    };
+    await expect(inspectPlatformDatabaseStateConnection(connection, database)).rejects.toThrow(
+      'duplicated or not strictly ordered',
+    );
+  });
+
+  it('applies a fresh database transactionally without a rollback edge', async () => {
+    const database = migrationSubset(2);
+    const connection = migrationConnection();
+
+    const result = await preparePlatformDatabaseConnection(
+      connection,
+      getPlatformRuntimeDirectory(),
+      database,
+      null,
+      false,
+    );
+
+    expect(result).toEqual({
+      appliedMigrations: 2,
+      previousSchemaDigest: platformDatabaseSchemaDigest(database.lineage, []),
+      schemaDigest: database.schemaDigest,
+    });
+    expect(connection.rows).toEqual(
+      database.migrations.map((migration, index) => ({
+        created_at: migration.timestampMillis,
+        hash: migration.sha256,
+        id: index + 1,
+      })),
+    );
+    expect(connection.queries).toContain('BEGIN');
+    expect(connection.queries).toContain('COMMIT');
+    expect(connection.queries).not.toContain('ROLLBACK');
+  });
+
+  it('requires an exact rollback compatibility edge before an existing install migrates', async () => {
+    const base = migrationSubset(1);
+    const sourceDigest = platformDatabaseSchemaDigest(base.lineage, []);
+    const connection = migrationConnection();
+
+    await expect(
+      preparePlatformDatabaseConnection(
+        connection,
+        getPlatformRuntimeDirectory(),
+        base,
+        '0.10.13',
+        true,
+      ),
+    ).rejects.toThrow('cannot safely roll back');
+    expect(connection.queries).not.toContain('BEGIN');
+
+    const compatible = {
+      ...base,
+      rollbackSafeFrom: [{ platformVersion: '0.10.13', schemaDigest: sourceDigest }],
+    } satisfies PlatformRuntimeDatabaseManifest;
+    await expect(
+      preparePlatformDatabaseConnection(
+        connection,
+        getPlatformRuntimeDirectory(),
+        compatible,
+        '0.10.13',
+        true,
+      ),
+    ).resolves.toMatchObject({ appliedMigrations: 1, schemaDigest: compatible.schemaDigest });
+  });
+
+  it('rolls back every pending migration when one statement fails', async () => {
+    const database = migrationSubset(2);
+    const connection = migrationConnection([], 'CREATE TABLE "oauth_accounts"');
+
+    await expect(
+      preparePlatformDatabaseConnection(
+        connection,
+        getPlatformRuntimeDirectory(),
+        database,
+        null,
+        false,
+      ),
+    ).rejects.toThrow('migration failed');
+    expect(connection.queries).toContain('ROLLBACK');
+    expect(connection.queries).not.toContain('COMMIT');
+    expect(connection.rows).toEqual([]);
   });
 
   it('serializes lifecycle changes with the claimed PostgreSQL database', async () => {
@@ -1073,7 +1191,26 @@ describe('platform installer', () => {
       },
       putR2Object: async () => {},
     };
-    const upgraded = await installPlatform(upgradedPlan, secrets, installed.manifest, {
+    const sourceManifest = { ...installed.manifest, platformVersion: '0.10.13' };
+    let verifiedTargetVersion = '';
+    await expect(
+      installPlatform(upgradedPlan, secrets, sourceManifest, {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: upgradeClient,
+        deployWorker: async () => async () => {},
+        migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async (_api, _id, _proxy, _domain, platformVersion) => {
+          verifiedTargetVersion = platformVersion;
+          throw new Error('upgrade health failed');
+        },
+      }),
+    ).rejects.toThrow('upgrade health failed');
+    expect(verifiedTargetVersion).toBe(readPlatformRuntimeManifest().platformVersion);
+    expect(listInstallationManifests(directory)[0]?.platformVersion).toBe('0.10.13');
+
+    const upgraded = await installPlatform(upgradedPlan, secrets, sourceManifest, {
       acquireDatabaseLifecycleLock,
       claimDatabase,
       client: upgradeClient,
@@ -1096,6 +1233,7 @@ describe('platform installer', () => {
     expect(migrations).toBe(0);
     expect(new Set(upgradeKvWrites)).toEqual(new Set(['__void/platform/installation/v1']));
     expect(upgraded.manifest.status).toBe('installed');
+    expect(upgraded.manifest.platformVersion).toBe(readPlatformRuntimeManifest().platformVersion);
     expect(upgraded.manifest.resources).toHaveLength(15);
 
     const disabledConfigs: Array<Record<string, unknown>> = [];
@@ -1460,3 +1598,65 @@ describe('platform installer', () => {
     }
   });
 });
+
+function migrationSubset(length: number): PlatformRuntimeDatabaseManifest {
+  const database = readPlatformRuntimeManifest().database;
+  const migrations = database.migrations.slice(0, length);
+  return {
+    ...database,
+    migrations,
+    rollbackSafeFrom: [],
+    schemaDigest: platformDatabaseSchemaDigest(database.lineage, migrations),
+  };
+}
+
+function migrationConnection(
+  initialRows: Array<{ created_at: unknown; hash: unknown; id: unknown }> = [],
+  failSql = '',
+) {
+  let relationExists = initialRows.length > 0;
+  let transactionRows: Array<{ created_at: unknown; hash: unknown; id: unknown }> | null = null;
+  let transactionRelation = false;
+  const rows = [...initialRows];
+  const queries: Array<string> = [];
+  const result = <Row extends Record<string, unknown>>(value: ReadonlyArray<unknown>) => ({
+    rows: value as ReadonlyArray<Row>,
+  });
+  return {
+    queries,
+    rows,
+    query: async <Row extends Record<string, unknown>>(
+      sql: string,
+      values?: ReadonlyArray<unknown>,
+    ) => {
+      queries.push(sql.trim());
+      if (sql === 'BEGIN') {
+        transactionRows = rows.map((row) => ({ ...row }));
+        transactionRelation = relationExists;
+      } else if (sql === 'ROLLBACK') {
+        rows.splice(0, rows.length, ...(transactionRows ?? []));
+        relationExists = transactionRelation;
+        transactionRows = null;
+      } else if (sql === 'COMMIT') {
+        transactionRows = null;
+      } else if (sql.includes('to_regclass')) {
+        return result<Row>([{ relation: relationExists ? 'drizzle.__drizzle_migrations' : null }]);
+      } else if (sql.includes('FROM "drizzle"."__drizzle_migrations"')) {
+        return result<Row>(
+          [...rows].sort(
+            (left, right) =>
+              Number(left.created_at) - Number(right.created_at) ||
+              Number(left.id) - Number(right.id),
+          ),
+        );
+      } else if (sql.includes('CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations"')) {
+        relationExists = true;
+      } else if (sql.includes('INSERT INTO "drizzle"."__drizzle_migrations"')) {
+        rows.push({ created_at: values?.[1], hash: values?.[0], id: rows.length + 1 });
+      } else if (failSql && sql.includes(failSql)) {
+        throw new Error('migration failed');
+      }
+      return result<Row>([]);
+    },
+  };
+}

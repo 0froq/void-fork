@@ -128,6 +128,16 @@ export function parsePlatformRuntimeManifest(value: unknown): PlatformRuntimeMan
   if (new Set(compatibilityKeys).size !== compatibilityKeys.length) {
     throw new Error('runtime manifest database rollback compatibility entries must be unique');
   }
+  const prefixDigests = new Set(
+    Array.from({ length: migrations.length + 1 }, (_, length) =>
+      platformDatabaseSchemaDigest(lineage, migrations.slice(0, length)),
+    ),
+  );
+  if (rollbackSafeFrom.some((entry) => !prefixDigests.has(entry.schemaDigest))) {
+    throw new Error(
+      'runtime manifest database rollback compatibility must reference this migration lineage',
+    );
+  }
   return {
     artifacts,
     database: {

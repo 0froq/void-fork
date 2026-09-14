@@ -29,7 +29,16 @@ import {
   type InstallationResource,
   type PlatformInstallationManifest,
 } from '@void/platform';
-import { getPlatformRuntimeDirectory, readPlatformRuntimeManifest } from '@void/platform/installer';
+import {
+  getPlatformRuntimeDirectory,
+  platformDatabaseSchemaDigest,
+  readPlatformRuntimeManifest,
+} from '@void/platform/installer';
+import type {
+  PlatformRuntimeDatabaseManifest,
+  PlatformRuntimeManifest,
+  PlatformRuntimeMigration,
+} from '@void/platform/installer';
 import { join } from 'pathslash';
 import {
   hyperdriveOriginConfigHash,
@@ -69,7 +78,24 @@ export type PlatformInstallationSecrets = Readonly<{
 export type PlatformDatabaseLifecycleLock = (() => Promise<void>) & {
   authoritativeManifest?: PlatformInstallationManifest | null;
   checkpoint?: (manifest: PlatformInstallationManifest) => Promise<void>;
+  prepareDatabase?: (
+    runtimeDirectory: string,
+    database: PlatformRuntimeDatabaseManifest,
+    sourcePlatformVersion: string | null,
+    hasPriorWorkers: boolean,
+  ) => Promise<PlatformDatabaseMigrationResult>;
 };
+
+export type PlatformDatabaseState = Readonly<{
+  pendingMigrations: ReadonlyArray<PlatformRuntimeMigration>;
+  schemaDigest: string;
+}>;
+
+export type PlatformDatabaseMigrationResult = Readonly<{
+  appliedMigrations: number;
+  previousSchemaDigest: string;
+  schemaDigest: string;
+}>;
 
 type InstallerClient = Pick<
   PlatformCloudflareClient,
@@ -121,6 +147,12 @@ export type PlatformInstallerDependencies = Readonly<{
   ) => Promise<PlatformWorkerRollback | void>;
   migrateDatabase?: (databaseUrl: string, migrationsFolder: string) => Promise<void>;
   now?: () => string;
+  prepareDatabase?: (
+    runtimeDirectory: string,
+    database: PlatformRuntimeDatabaseManifest,
+    sourcePlatformVersion: string | null,
+    hasPriorWorkers: boolean,
+  ) => Promise<PlatformDatabaseMigrationResult>;
   recoverWorkerCutover?: (input: {
     key: PlatformWorkerKey;
     previousVersionId: string | null;
@@ -143,6 +175,7 @@ export type PlatformInstallerDependencies = Readonly<{
     installationId: string,
     proxyUrl: string,
     applicationBaseDomain: string,
+    platformVersion: string,
   ) => Promise<void>;
 }>;
 
@@ -247,6 +280,11 @@ export async function installPlatform(
 ): Promise<PlatformInstallationResult> {
   const now = dependencies.now ?? (() => new Date().toISOString());
   const version = readPlatformRuntimeManifest().platformVersion;
+  const sourcePlatformVersion = existing?.platformVersion ?? null;
+  const hadPriorWorkers =
+    existing?.resources.some(
+      (resource) => resource.kind === 'worker' && resource.state === 'ready',
+    ) ?? false;
   const wasDisabled = existing?.status === 'disabled';
   const preserveDisabled = existing?.desiredState === 'disabled';
   const previousPublicEndpoints = stablePublicEndpointState(existing);
@@ -331,10 +369,6 @@ export async function installPlatform(
       manifest = { ...manifest, deployment: plan.deployment, updatedAt: now() };
       writeInstallationManifest(manifest);
       await releaseDatabaseLock.checkpoint?.(manifest);
-    }
-    if (manifest.platformVersion !== version) {
-      manifest = { ...manifest, platformVersion: version, updatedAt: now() };
-      writeInstallationManifest(manifest);
     }
     await releaseDatabaseLock.checkpoint?.(manifest);
     if (manifest.status !== 'provisioning') {
@@ -474,21 +508,43 @@ export async function installPlatform(
     }
 
     const runtimeDirectory = getPlatformRuntimeDirectory();
-    const migrationHash = hash(
-      readFileSync(join(runtimeDirectory, 'drizzle', 'meta', '_journal.json')),
-    );
-    const migrationStep = `database-migrations:${migrationHash}`;
+    const runtime = readPlatformRuntimeManifest();
+    verifyRuntimeArtifacts(runtimeDirectory, runtime);
+    const migrationStep = `database-schema:${runtime.database.schemaDigest}`;
     if (!manifest.steps.some((step) => step.key === migrationStep)) {
-      await (dependencies.migrateDatabase ?? migratePlatformDatabase)(
-        secrets.databaseUrl,
-        join(runtimeDirectory, 'drizzle'),
-      );
+      const legacyMigrationStep = `database-migrations:${runtime.database.journalSha256}`;
+      if (dependencies.migrateDatabase) {
+        if (!manifest.steps.some((step) => step.key === legacyMigrationStep)) {
+          await dependencies.migrateDatabase(
+            secrets.databaseUrl,
+            join(runtimeDirectory, 'drizzle'),
+          );
+        }
+      } else {
+        const prepareDatabase = dependencies.prepareDatabase ?? releaseDatabaseLock.prepareDatabase;
+        if (!prepareDatabase) {
+          throw new Error(
+            'platform: The PostgreSQL lifecycle lock cannot verify or migrate this database.',
+          );
+        }
+        await prepareDatabase(
+          runtimeDirectory,
+          runtime.database,
+          sourcePlatformVersion,
+          hadPriorWorkers,
+        );
+      }
       manifest = recordInstallationStep(
         manifest,
-        { completedAt: now(), key: migrationStep, resultHash: migrationHash },
+        {
+          completedAt: now(),
+          key: migrationStep,
+          resultHash: runtime.database.schemaDigest,
+        },
         now(),
       );
       writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
 
     manifest = transitionInstallation(manifest, 'deploying', now());
@@ -517,14 +573,12 @@ export async function installPlatform(
       );
       writeInstallationManifest(manifest);
     }
-    const runtime = readPlatformRuntimeManifest();
     const entrypoints = Object.fromEntries(
       Object.entries(runtime.artifacts).map(([key, artifact]) => [
         key,
         join(runtimeDirectory, artifact.path),
       ]),
     ) as Record<'api' | 'dispatch' | 'proxy' | 'tail', string>;
-    verifyRuntimeArtifacts(runtimeDirectory);
     if (!preserveDisabled) {
       const trafficGeneration = nextTrafficGeneration(manifest);
       manifest = recordInstallationStep(
@@ -763,6 +817,7 @@ export async function installPlatform(
         now(),
       );
       manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, false, now());
+      manifest = { ...manifest, platformVersion: version, updatedAt: now() };
       manifest = transitionInstallation(manifest, 'disabled', now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -786,10 +841,12 @@ export async function installPlatform(
       manifest.id,
       plan.proxyUrl,
       plan.deployment.application.baseDomain,
+      version,
     );
     workerDeploymentCommitted = true;
     manifest = recordWorkerCutoverResolution(manifest, workerCutoverGeneration, 'committed', now());
     manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, true, now());
+    manifest = { ...manifest, platformVersion: version, updatedAt: now() };
     manifest = transitionInstallation(manifest, 'installed', now());
     writeInstallationManifest(manifest);
     await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -1158,6 +1215,21 @@ function hash(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function databaseInteger(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) {
+    return value;
+  }
+  if (typeof value === 'bigint') {
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? number : null;
+  }
+  if (typeof value === 'string' && /^[0-9]+$/.test(value)) {
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? number : null;
+  }
+  return null;
+}
+
 function requireId(ids: Record<string, string>, key: string): string {
   const id = ids[key];
   if (!id) {
@@ -1231,23 +1303,6 @@ function proxyWorkerSecrets(
   };
 }
 
-async function migratePlatformDatabase(
-  databaseUrl: string,
-  migrationsFolder: string,
-): Promise<void> {
-  const [{ Pool }, { drizzle }, { migrate }] = await Promise.all([
-    import('pg'),
-    import('drizzle-orm/node-postgres'),
-    import('drizzle-orm/node-postgres/migrator'),
-  ]);
-  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
-  try {
-    await migrate(drizzle(pool), { migrationsFolder });
-  } finally {
-    await pool.end();
-  }
-}
-
 export async function claimPlatformDatabase(
   databaseUrl: string,
   installationId: string,
@@ -1288,6 +1343,7 @@ export async function acquirePlatformDatabaseLifecycleLock(
     };
     release.authoritativeManifest = releaseConnectionLock.authoritativeManifest;
     release.checkpoint = releaseConnectionLock.checkpoint;
+    release.prepareDatabase = releaseConnectionLock.prepareDatabase;
     return release;
   } catch (error) {
     client.release();
@@ -1327,6 +1383,144 @@ type DatabaseClaimConnection = Readonly<{
     values?: ReadonlyArray<unknown>,
   ) => Promise<{ rows: ReadonlyArray<Row> }>;
 }>;
+
+type PlatformDatabaseMigrationRow = Readonly<{
+  created_at: unknown;
+  hash: unknown;
+  id: unknown;
+}>;
+
+export async function inspectPlatformDatabaseStateConnection(
+  client: DatabaseClaimConnection,
+  database: PlatformRuntimeDatabaseManifest,
+): Promise<PlatformDatabaseState> {
+  const relation = await client.query<{ relation: string | null }>(
+    `SELECT to_regclass('"drizzle"."__drizzle_migrations"')::text AS "relation"`,
+  );
+  if (relation.rows.length === 0 || relation.rows[0]?.relation === null) {
+    return {
+      pendingMigrations: database.migrations,
+      schemaDigest: platformDatabaseSchemaDigest(database.lineage, []),
+    };
+  }
+  const result = await client.query<PlatformDatabaseMigrationRow>(
+    `SELECT "id", "hash", "created_at"
+     FROM "drizzle"."__drizzle_migrations"
+     ORDER BY "created_at", "id"`,
+  );
+  if (result.rows.length > database.migrations.length) {
+    throw new Error(
+      'platform: PostgreSQL contains migrations newer than this Void Platform package.',
+    );
+  }
+  let previousTimestamp = -1;
+  const seenTimestamps = new Set<number>();
+  for (const [position, row] of result.rows.entries()) {
+    const timestampMillis = databaseInteger(row.created_at);
+    if (
+      timestampMillis === null ||
+      timestampMillis <= previousTimestamp ||
+      seenTimestamps.has(timestampMillis)
+    ) {
+      throw new Error(
+        'platform: PostgreSQL migration history is duplicated or not strictly ordered.',
+      );
+    }
+    const expected = database.migrations[position];
+    if (!expected || timestampMillis !== expected.timestampMillis || row.hash !== expected.sha256) {
+      throw new Error(
+        'platform: PostgreSQL migration history is not an exact prefix of this Void Platform package. Refusing to apply edited, forked, or out-of-order migrations.',
+      );
+    }
+    previousTimestamp = timestampMillis;
+    seenTimestamps.add(timestampMillis);
+  }
+  const applied = database.migrations.slice(0, result.rows.length);
+  return {
+    pendingMigrations: database.migrations.slice(result.rows.length),
+    schemaDigest: platformDatabaseSchemaDigest(database.lineage, applied),
+  };
+}
+
+export async function preparePlatformDatabaseConnection(
+  client: DatabaseClaimConnection,
+  runtimeDirectory: string,
+  database: PlatformRuntimeDatabaseManifest,
+  sourcePlatformVersion: string | null,
+  hasPriorWorkers: boolean,
+): Promise<PlatformDatabaseMigrationResult> {
+  verifyPlatformDatabaseArtifacts(runtimeDirectory, database);
+  const before = await inspectPlatformDatabaseStateConnection(client, database);
+  if (before.pendingMigrations.length === 0) {
+    if (before.schemaDigest !== database.schemaDigest) {
+      throw new Error('platform: PostgreSQL schema digest does not match the packaged runtime.');
+    }
+    return {
+      appliedMigrations: 0,
+      previousSchemaDigest: before.schemaDigest,
+      schemaDigest: before.schemaDigest,
+    };
+  }
+  if (
+    hasPriorWorkers &&
+    !database.rollbackSafeFrom.some(
+      (entry) =>
+        entry.platformVersion === sourcePlatformVersion &&
+        entry.schemaDigest === before.schemaDigest,
+    )
+  ) {
+    throw new Error(
+      `platform: Void Platform ${sourcePlatformVersion ?? 'unknown'} cannot safely roll back after migrating database schema ${before.schemaDigest} to this release. Upgrade through a supported intermediate version or install into a fresh database.`,
+    );
+  }
+
+  await client.query('BEGIN');
+  try {
+    await client.query('CREATE SCHEMA IF NOT EXISTS "drizzle"');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (
+        "id" serial PRIMARY KEY,
+        "hash" text NOT NULL,
+        "created_at" bigint
+      )
+    `);
+    const rechecked = await inspectPlatformDatabaseStateConnection(client, database);
+    if (rechecked.schemaDigest !== before.schemaDigest) {
+      throw new Error(
+        'platform: PostgreSQL migration history changed while preparing this upgrade.',
+      );
+    }
+    for (const migration of rechecked.pendingMigrations) {
+      const sql = readFileSync(join(runtimeDirectory, 'drizzle', `${migration.tag}.sql`), 'utf8');
+      for (const statement of sql
+        .split('--> statement-breakpoint')
+        .map((value) => value.trim())
+        .filter(Boolean)) {
+        await client.query(statement);
+      }
+      await client.query(
+        `INSERT INTO "drizzle"."__drizzle_migrations" ("hash", "created_at")
+         VALUES ($1, $2)`,
+        [migration.sha256, migration.timestampMillis],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => ({ rows: [] }));
+    throw error;
+  }
+  const after = await inspectPlatformDatabaseStateConnection(client, database);
+  if (after.pendingMigrations.length !== 0 || after.schemaDigest !== database.schemaDigest) {
+    throw new Error(
+      'platform: PostgreSQL migration transaction completed without reaching the packaged schema.',
+    );
+  }
+  return {
+    appliedMigrations: before.pendingMigrations.length,
+    previousSchemaDigest: before.schemaDigest,
+    schemaDigest: after.schemaDigest,
+  };
+}
 
 export async function readPlatformDatabaseLifecycleManifestConnection(
   client: DatabaseClaimConnection,
@@ -1468,6 +1662,14 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
     }
     release.authoritativeManifest = manifest;
   };
+  release.prepareDatabase = (runtimeDirectory, database, sourcePlatformVersion, hasPriorWorkers) =>
+    preparePlatformDatabaseConnection(
+      client,
+      runtimeDirectory,
+      database,
+      sourcePlatformVersion,
+      hasPriorWorkers,
+    );
   return release;
 }
 
@@ -2034,13 +2236,47 @@ function readTriggerConfigFromObject(config: Record<string, unknown>) {
   }
 }
 
-function verifyRuntimeArtifacts(runtimeDirectory: string): void {
-  const manifest = readPlatformRuntimeManifest();
+function verifyRuntimeArtifacts(runtimeDirectory: string, manifest: PlatformRuntimeManifest): void {
   for (const artifact of Object.values(manifest.artifacts)) {
     const path = join(runtimeDirectory, artifact.path);
     const contents = readFileSync(path);
     if (contents.byteLength !== artifact.size || hash(contents) !== artifact.sha256) {
       throw new Error(`platform: Packaged Worker artifact failed integrity verification: ${path}.`);
+    }
+  }
+  verifyPlatformDatabaseArtifacts(runtimeDirectory, manifest.database);
+}
+
+export function verifyPlatformDatabaseArtifacts(
+  runtimeDirectory: string,
+  database: PlatformRuntimeDatabaseManifest,
+): void {
+  const journalPath = join(runtimeDirectory, 'drizzle', 'meta', '_journal.json');
+  let journal: Buffer;
+  try {
+    journal = readFileSync(journalPath);
+  } catch (error) {
+    throw new Error(
+      `platform: Packaged database migration journal is missing: ${errorMessage(error)}`,
+    );
+  }
+  if (hash(journal) !== database.journalSha256) {
+    throw new Error(
+      `platform: Packaged database migration journal failed integrity verification: ${journalPath}.`,
+    );
+  }
+  for (const migration of database.migrations) {
+    const path = join(runtimeDirectory, 'drizzle', `${migration.tag}.sql`);
+    let contents: Buffer;
+    try {
+      contents = readFileSync(path);
+    } catch (error) {
+      throw new Error(`platform: Packaged database migration is missing: ${errorMessage(error)}`);
+    }
+    if (hash(contents) !== migration.sha256) {
+      throw new Error(
+        `platform: Packaged database migration failed integrity verification: ${path}.`,
+      );
     }
   }
 }
@@ -2282,6 +2518,7 @@ export async function verifyPlatformHealth(
   installationId: string,
   proxyUrl: string,
   applicationBaseDomain: string,
+  platformVersion: string,
   fetcher: typeof fetch = fetch,
 ): Promise<void> {
   const request = (url: string, headers?: HeadersInit) =>
@@ -2300,9 +2537,15 @@ export async function verifyPlatformHealth(
   if (!discovery.ok) {
     throw new Error(`platform: Discovery check failed at ${apiUrl} (HTTP ${discovery.status}).`);
   }
-  const body = (await discovery.json()) as { installationId?: unknown };
+  const body = (await discovery.json()) as {
+    installationId?: unknown;
+    platformVersion?: unknown;
+  };
   if (body.installationId !== installationId) {
     throw new Error('platform: Deployed API discovery identity does not match this installation.');
+  }
+  if (body.platformVersion !== platformVersion) {
+    throw new Error('platform: Deployed API discovery version does not match this release.');
   }
   if (!proxy.ok) {
     throw new Error(`platform: Proxy health check failed at ${proxyUrl} (HTTP ${proxy.status}).`);
