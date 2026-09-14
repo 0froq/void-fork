@@ -8,7 +8,11 @@ import {
   installPlatform,
   resolveBootstrapGitHubId,
 } from './platform-installer.ts';
-import { createPlatformInstallPlan, formatPlatformInstallPlan } from './platform-plan.ts';
+import {
+  createPlatformInstallPlan,
+  formatPlatformInstallPlan,
+  revalidatePlatformInstallAction,
+} from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
   listInstallationManifests,
@@ -185,7 +189,11 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY ||
         (await promptSecret('R2 secret access key:')),
     });
-    const result = await installPlatform(plan, secrets, existing, { client });
+    const result = await installPlatform(plan, secrets, existing, {
+      client,
+      revalidateBeforeWorkerDeploy: (manifest, action) =>
+        revalidatePlatformInstallAction(client, plan, manifest, action),
+    });
     if (result.waitingForDns) {
       note(
         result.zoneNameServers.length > 0

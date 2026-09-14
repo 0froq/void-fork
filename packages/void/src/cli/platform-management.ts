@@ -18,7 +18,11 @@ import {
   REMOTE_INSTALLATION_MANIFEST_KEY,
   resolveBootstrapGitHubId,
 } from './platform-installer.ts';
-import { createPlatformInstallPlan, formatPlatformInstallPlan } from './platform-plan.ts';
+import {
+  createPlatformInstallPlan,
+  formatPlatformInstallPlan,
+  revalidatePlatformInstallAction,
+} from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
   readInstallationRecoverySecrets,
@@ -200,7 +204,11 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       r2AccessKeyId: process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID || '',
       r2SecretAccessKey: process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY || '',
     });
-    const result = await installPlatform(plan, secrets, installation, { client });
+    const result = await installPlatform(plan, secrets, installation, {
+      client,
+      revalidateBeforeWorkerDeploy: (manifest, action) =>
+        revalidatePlatformInstallAction(client, plan, manifest, action),
+    });
     if (result.waitingForDns) {
       note(
         `Wait for ${deployment.application.zoneName} to become active, then rerun this command.`,

@@ -175,6 +175,7 @@ describe('platform installer', () => {
           }
         },
         migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
         verifyHealth: async () => {},
       },
     );
@@ -274,6 +275,7 @@ describe('platform installer', () => {
             throw new Error('must wait for DNS');
           },
         },
+        revalidateBeforeWorkerDeploy: async () => {},
       },
     );
     expect(result.waitingForDns).toBe(true);
@@ -337,6 +339,7 @@ describe('platform installer', () => {
       },
       deployWorker: async () => {},
       migrateDatabase: async () => {},
+      revalidateBeforeWorkerDeploy: async () => {},
       verifyHealth: async () => {},
     });
     const byKey = new Map(installed.manifest.resources.map((resource) => [resource.key, resource]));
@@ -420,6 +423,7 @@ describe('platform installer', () => {
       migrateDatabase: async () => {
         migrations++;
       },
+      revalidateBeforeWorkerDeploy: async () => {},
       verifyHealth: async () => {},
     });
 
@@ -452,6 +456,7 @@ describe('platform installer', () => {
         migrateDatabase: async () => {
           migrations++;
         },
+        revalidateBeforeWorkerDeploy: async () => {},
         verifyHealth: async () => {
           disabledHealthChecks++;
         },
@@ -476,6 +481,7 @@ describe('platform installer', () => {
           throw new Error('interrupted deployment');
         },
         migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
       }),
     ).rejects.toThrow('interrupted deployment');
     expect(interrupted).toBe(true);
@@ -495,6 +501,7 @@ describe('platform installer', () => {
           resumedConfigs.push(config);
         },
         migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
       },
     );
     expect(resumedDisabledUpgrade.manifest.status).toBe('disabled');
@@ -522,6 +529,7 @@ describe('platform installer', () => {
           enabledConfigs.push(config);
         },
         migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
         verifyHealth: async () => {
           enabledHealthChecks++;
         },
@@ -538,6 +546,22 @@ describe('platform installer', () => {
     expect(
       enabledConfigs.find((config) => config.name === deployment.resources.dispatchWorker),
     ).toHaveProperty('routes');
+
+    let replacedWorkerDeploys = 0;
+    await expect(
+      installPlatform(upgradedPlan, secrets, enabledUpgrade.manifest, {
+        claimDatabase,
+        client: upgradeClient,
+        deployWorker: async () => {
+          replacedWorkerDeploys++;
+        },
+        migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {
+          throw new Error('platform: Worker ownership marker changed after planning.');
+        },
+      }),
+    ).rejects.toThrow('ownership marker changed after planning');
+    expect(replacedWorkerDeploys).toBe(0);
 
     function named(key: string) {
       const resource = byKey.get(key)!;

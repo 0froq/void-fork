@@ -422,6 +422,39 @@ export async function createPlatformInstallPlan(
   };
 }
 
+export async function revalidatePlatformInstallAction(
+  client: PlanningClient,
+  original: PlatformInstallPlan,
+  manifest: PlatformInstallationManifest,
+  action: PlatformInstallPlanAction,
+): Promise<void> {
+  const deployment = original.deployment;
+  const refreshed = await createPlatformInstallPlan(
+    client,
+    {
+      accountId: original.account.id,
+      applicationDomain: deployment.application.baseDomain,
+      controlPlaneDomain: deployment.controlPlane.apiHostname ?? '',
+      dedicatedZone: deployment.application.dedicatedZone,
+      displayName: deployment.displayName,
+      installationSlug: deployment.installationSlug,
+      zoneName: deployment.application.zoneName,
+    },
+    manifest,
+  );
+  const current = refreshed.actions.find((entry) => entry.key === action.key);
+  if (
+    !current ||
+    current.kind !== action.kind ||
+    current.name !== action.name ||
+    current.action !== action.action
+  ) {
+    throw new Error(
+      `platform: Cloudflare changed after the installation plan was approved for ${action.kind} ${JSON.stringify(action.name)}. Review a new plan before retrying.`,
+    );
+  }
+}
+
 function resourceSlugForInstallation(installationSlug: string, installationId: string): string {
   const suffix = installationId.slice(installationSlug.length + 1);
   if (!/^[a-f0-9]{12}$/.test(suffix)) {

@@ -74,6 +74,10 @@ export type PlatformInstallerDependencies = Readonly<{
   ) => Promise<void>;
   migrateDatabase?: (databaseUrl: string, migrationsFolder: string) => Promise<void>;
   now?: () => string;
+  revalidateBeforeWorkerDeploy: (
+    manifest: PlatformInstallationManifest,
+    action: PlatformInstallPlanAction,
+  ) => Promise<void>;
   verifyHealth?: (apiUrl: string, installationId: string) => Promise<void>;
 }>;
 
@@ -371,6 +375,7 @@ export async function installPlatform(
       manifest = recordProvisionIntent(manifest, action, now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      await dependencies.revalidateBeforeWorkerDeploy(manifest, action);
       await deployWorker(configs[key], workerSecrets);
       manifest = recordResource(manifest, action, action.name, 'created', now());
       writeInstallationManifest(manifest);
