@@ -40,6 +40,10 @@ function req(path: string, cookie?: string, init?: RequestInit): Response | Prom
   const headers: Record<string, string> = {
     ...(init?.headers as Record<string, string>),
   };
+  const method = init?.method?.toUpperCase() ?? 'GET';
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && headers.Origin === undefined) {
+    headers.Origin = 'http://localhost';
+  }
   if (cookie) {
     headers.Cookie = `admin_token=${cookie}`;
   }
@@ -82,6 +86,31 @@ describe('auth middleware', () => {
     const admin = await createTestUser(env.db, 'admin', 'github', undefined, 'free', 'admin');
     const res = await req('/admin/', admin.adminJwt);
     expect(res.status).toBe(200);
+  });
+
+  test('rejects same-site sibling origins for admin mutations', async () => {
+    const admin = await createTestUser(env.db, 'admin-csrf', 'github', undefined, 'free', 'admin');
+    const res = await req('/admin/signup-control/toggle', admin.adminJwt, {
+      method: 'POST',
+      headers: { Origin: 'https://attacker.apps.example.com' },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('rejects admin mutations without browser origin evidence', async () => {
+    const admin = await createTestUser(
+      env.db,
+      'admin-csrf-missing',
+      'github',
+      undefined,
+      'free',
+      'admin',
+    );
+    const res = await req('/admin/signup-control/toggle', admin.adminJwt, {
+      method: 'POST',
+      headers: { Origin: '' },
+    });
+    expect(res.status).toBe(403);
   });
 });
 
@@ -486,6 +515,7 @@ describe('POST /admin/users/:id/plan', () => {
         method: 'POST',
         headers: {
           Cookie: `admin_token=${admin.adminJwt}`,
+          Origin: 'http://localhost',
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({ plan: 'pro' }).toString(),
@@ -644,6 +674,7 @@ describe('POST /admin/users/:id/suspend + unsuspend', () => {
         method: 'POST',
         headers: {
           Cookie: `admin_token=${adminJwt}`,
+          Origin: 'http://localhost',
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: '',
@@ -666,6 +697,7 @@ describe('POST /admin/users/:id/suspend + unsuspend', () => {
         method: 'POST',
         headers: {
           Cookie: `admin_token=${adminJwt}`,
+          Origin: 'http://localhost',
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({ reason }).toString(),

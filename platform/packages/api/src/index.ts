@@ -1,6 +1,7 @@
 import { createPlatformDiscoveryDocument } from '@void/platform';
 import { Hono } from 'hono';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
+import { adminCsrfMiddleware } from './admin/middleware/csrf.ts';
 import adminBuilds from './admin/routes/builds.tsx';
 import adminDeployments from './admin/routes/deployments.tsx';
 import adminInvitations from './admin/routes/invitations.tsx';
@@ -178,6 +179,7 @@ const app = new Hono<ApiEnv>()
 // Admin dashboard (HTML, cookie-based auth)
 app.route('/admin', adminLogin);
 app.use('/admin/*', adminAuthMiddleware);
+app.use('/admin/*', adminCsrfMiddleware);
 app.get('/admin/', adminAuthMiddleware, dashboardHandler);
 app.route('/admin/users', adminUsers);
 app.route('/admin/projects', adminProjects);
