@@ -22,7 +22,7 @@ import { DEFAULT_DASHBOARD_URL } from '../constants.ts';
 import {
   getUserByOAuthAccount,
   getUserByEmail,
-  createUser,
+  createUserForPlatform,
   updateUser,
   createOAuthAccount,
   acceptInvitationByEmail,
@@ -359,12 +359,13 @@ app.get('/callback', async (context) => {
     }
     user = await db.transaction(async (tx) => {
       const txDb = tx as unknown as typeof db;
-      const newUser = await createUser(
+      const newUser = await createUserForPlatform(
         txDb,
         resolvedProvider,
         providerId,
         login,
         emailVerified ? email : null,
+        context.env.PLATFORM_INSTALLATION_ID,
       );
       await createOAuthAccount(txDb, newUser.id, resolvedProvider, providerId);
       return newUser;
