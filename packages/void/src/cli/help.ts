@@ -85,6 +85,73 @@ const HELP_TREE: HelpTree = {
       token: basicSubcommand('Copy auth token to clipboard.', 'void auth token'),
     },
   },
+  platform: {
+    summary: 'Connect, install, and manage Void platforms.',
+    usage: ['void platform <command>'],
+    commands: [
+      { command: 'connect [url]', description: 'Connect to an existing Void platform' },
+      { command: 'list', description: 'List installed and connected platforms' },
+      { command: 'use [id]', description: 'Select the default Void platform' },
+      { command: 'status [id]', description: 'Inspect a platform and its health' },
+      { command: 'install', description: 'Install a Void platform in Cloudflare' },
+      { command: 'upgrade [id]', description: 'Upgrade an installed Void platform' },
+      { command: 'repair [id]', description: 'Reconcile an installed Void platform' },
+      { command: 'disable [id]', description: 'Disable traffic without deleting data' },
+      { command: 'uninstall [id]', description: 'Safely remove an installed Void platform' },
+    ],
+    children: {
+      connect: basicSubcommand(
+        'Connect to a platform after verifying its discovery document.',
+        'void platform connect [url]',
+      ),
+      list: basicSubcommand('List installed and connected platforms.', 'void platform list'),
+      use: basicSubcommand('Select the default Void platform.', 'void platform use [id]'),
+      status: basicSubcommand('Inspect a platform and its health.', 'void platform status [id]'),
+      install: {
+        summary: 'Install or resume a Void platform in Cloudflare.',
+        usage: ['void platform install [options]'],
+        options: [
+          { command: '--name <slug>', description: 'Installation name' },
+          { command: '--display-name <name>', description: 'Human-readable platform name' },
+          { command: '--account <id>', description: 'Cloudflare account id' },
+          { command: '--application-domain <domain>', description: 'Base domain for applications' },
+          { command: '--zone <domain>', description: 'Cloudflare zone containing the app domain' },
+          {
+            command: '--dedicated-zone',
+            description: 'Allow zone-wide application catch-all routes',
+          },
+          { command: '--control-plane-domain <domain>', description: 'Optional API hostname' },
+          { command: '--database-url <url>', description: 'External PostgreSQL connection string' },
+          { command: '--github-client-id <id>', description: 'GitHub OAuth application client id' },
+          { command: '--github-client-secret <secret>', description: 'GitHub OAuth client secret' },
+          { command: '--plan', description: 'Print the exact plan without changing Cloudflare' },
+          { command: '--resume', description: 'Resume the matching local installation' },
+        ],
+      },
+      upgrade: lifecycleHelp('Upgrade an installed platform without deleting resources.'),
+      repair: lifecycleHelp('Reconcile drift using the installation ownership manifest.'),
+      disable: lifecycleHelp('Disable platform traffic without deleting data.'),
+      uninstall: {
+        summary: 'Safely remove installer-owned platform resources.',
+        usage: ['void platform uninstall [id] [options]'],
+        options: [
+          { command: '--plan', description: 'Print the exact deletion and retention plan' },
+          {
+            command: '--purge-data',
+            description: 'Delete installer-owned data even when it contains apps',
+          },
+          {
+            command: '--delete-zone',
+            description: 'Delete an installer-created zone after all resources',
+          },
+          {
+            command: '--keep-zone',
+            description: 'Keep an installer-created zone without prompting',
+          },
+        ],
+      },
+    },
+  },
   project: {
     summary: 'Manage Void projects and deployments.',
     usage: ['void project <command>'],
@@ -621,6 +688,16 @@ function withProjectOption(summary: string, usage: string): HelpPage {
   };
 }
 
+function lifecycleHelp(summary: string): HelpPage {
+  return {
+    summary,
+    usage: [
+      `void platform ${summary.startsWith('Upgrade') ? 'upgrade' : summary.startsWith('Reconcile') ? 'repair' : 'disable'} [id] [--plan]`,
+    ],
+    options: [{ command: '--plan', description: 'Print the exact plan without making changes' }],
+  };
+}
+
 export function printGlobalHelp(): void {
   printVoidHeader();
 
@@ -633,6 +710,8 @@ export function printGlobalHelp(): void {
       ...globalOptionLines(['deploy']),
       '',
       ...globalCommandGroup('auth'),
+      '',
+      ...globalCommandGroup('platform'),
       '',
       ...globalCommandGroup('project'),
       '',

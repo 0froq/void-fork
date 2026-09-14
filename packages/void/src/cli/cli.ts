@@ -13,6 +13,7 @@ import { envSubcommands, parseEnvArgs } from './env-args.ts';
 import { genSubcommands, parseGenArgs } from './gen-args.ts';
 import { githubSubcommands, parseGithubArgs } from './github-args.ts';
 import { getHelpPath, printGlobalHelp, printHelpPage, printVoidHeader } from './help.ts';
+import { parsePlatformArgs, platformSubcommands } from './platform-args.ts';
 import { parsePrepareArgs } from './prepare-args.ts';
 import { projectSubcommands, parseProjectArgs } from './project-args.ts';
 import { secretSubcommands, parseSecretArgs } from './secret-args.ts';
@@ -113,6 +114,10 @@ if (helpPath) {
   runSubcommandGroup('auth', authSubcommands, parseAuthArgs, (root, parsed) =>
     import('./auth-cmd.ts').then(({ runAuthCommand }) => runAuthCommand(root, parsed)),
   );
+} else if (command === 'platform') {
+  runSubcommandGroup('platform', platformSubcommands, parsePlatformArgs, (root, parsed) =>
+    import('./platform-cmd.ts').then(({ runPlatformCommand }) => runPlatformCommand(root, parsed)),
+  );
 } else if (command === 'project') {
   runSubcommandGroup('project', projectSubcommands, parseProjectArgs, (root, parsed) =>
     import('./project-cmd.ts').then(({ runProjectCommand }) => runProjectCommand(root, parsed)),
@@ -193,6 +198,11 @@ if (helpPath) {
       description: 'Login, logout, and token management',
     },
     {
+      name: 'platform',
+      hint: 'connect | list | use | status | install | upgrade | repair | disable | uninstall',
+      description: 'Connect, install, and manage Void platforms',
+    },
+    {
       name: 'project',
       hint: 'status | link | list | logs | requests | rollback | cancel | delete | purge-cache',
       description: 'Manage projects and deployments',
@@ -261,6 +271,10 @@ if (helpPath) {
       case 'auth':
         return runSubcommandGroup('auth', authSubcommands, parseAuthArgs, (r, p) =>
           import('./auth-cmd.ts').then(({ runAuthCommand }) => runAuthCommand(r, p)),
+        );
+      case 'platform':
+        return runSubcommandGroup('platform', platformSubcommands, parsePlatformArgs, (r, p) =>
+          import('./platform-cmd.ts').then(({ runPlatformCommand }) => runPlatformCommand(r, p)),
         );
       case 'project':
         return runSubcommandGroup('project', projectSubcommands, parseProjectArgs, (r, p) =>
