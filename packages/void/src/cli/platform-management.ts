@@ -24,6 +24,7 @@ import {
 import {
   createPlatformInstallPlan,
   formatPlatformInstallPlan,
+  platformAdoptionIntentHash,
   platformProvisionIntentHash,
   revalidatePlatformInstallAction,
 } from './platform-plan.ts';
@@ -826,7 +827,7 @@ async function verifyPlatformMutationOwnership(
         !proof &&
         localAdvancesRemote &&
         resource.kind !== 'ai-gateway' &&
-        hasMatchingProvisionIntent(remote, resource)
+        hasMatchingResourceIntent(remote, resource)
       ) {
         continue;
       }
@@ -920,19 +921,33 @@ function hasMatchingResourceProof(
   );
 }
 
-function hasMatchingProvisionIntent(
+function hasMatchingResourceIntent(
   manifest: PlatformInstallationManifest,
   resource: InstallationResource,
 ): boolean {
-  return (
-    resource.ownership === 'created' &&
-    manifest.steps.some(
+  if (resource.ownership === 'created') {
+    return manifest.steps.some(
       (step) =>
         step.key === `provision-intent:${resource.key}` &&
         step.resultHash ===
           platformProvisionIntentHash(manifest, resource.key, resource.kind, resource.name),
-    )
-  );
+    );
+  }
+  if (resource.ownership === 'adopted') {
+    return manifest.steps.some(
+      (step) =>
+        step.key === `adoption-intent:${resource.key}` &&
+        step.resultHash ===
+          platformAdoptionIntentHash(
+            manifest,
+            resource.key,
+            resource.kind,
+            resource.id,
+            resource.name,
+          ),
+    );
+  }
+  return false;
 }
 
 export function isPlatformManifestMonotonicExtension(

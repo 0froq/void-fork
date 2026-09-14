@@ -348,6 +348,7 @@ describe('platform installer', () => {
     );
 
     expect(result.manifest.status).toBe('installed');
+    expect(result.manifest.steps.some((step) => step.key === 'adoption-intent:zone')).toBe(true);
     expect(databaseClaims).toEqual([[result.manifest.id, result.manifest.ownershipNonce]]);
     expect(result.manifest.resources).toHaveLength(15);
     expect(deployed).toEqual([

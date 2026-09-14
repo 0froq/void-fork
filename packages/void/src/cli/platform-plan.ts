@@ -743,6 +743,18 @@ export function platformProvisionIntentHash(
     .digest('hex');
 }
 
+export function platformAdoptionIntentHash(
+  manifest: Pick<PlatformInstallationManifest, 'ownershipNonce'>,
+  key: string,
+  kind: InstallationResourceKind,
+  id: string,
+  name: string,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ id, key, kind, name, ownershipNonce: manifest.ownershipNonce }))
+    .digest('hex');
+}
+
 async function readRemoteOwnership(
   client: PlanningClient,
   accountId: string,

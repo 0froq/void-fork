@@ -21,6 +21,7 @@ import { getPlatformRuntimeDirectory, readPlatformRuntimeManifest } from '@void/
 import { join } from 'pathslash';
 import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import {
+  platformAdoptionIntentHash,
   platformProvisionIntentHash,
   type PlatformInstallPlan,
   type PlatformInstallPlanAction,
@@ -274,6 +275,11 @@ export async function installPlatform(
     if (!zone) {
       throw new Error('platform: Cloudflare did not return the platform zone.');
     }
+    if (zoneAction.action === 'adopt') {
+      manifest = recordAdoptionIntent(manifest, zoneAction, zone.id, now());
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    }
     manifest = recordResource(
       manifest,
       zoneAction,
@@ -301,6 +307,9 @@ export async function installPlatform(
         if (!action.id) {
           throw new Error(`platform: Adopted ${action.kind} ${action.name} has no id.`);
         }
+        manifest = recordAdoptionIntent(manifest, action, action.id, now());
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
         manifest = recordResource(manifest, action, action.id, 'adopted', now());
         writeInstallationManifest(manifest);
         await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -556,6 +565,23 @@ function recordProvisionIntent(
       completedAt: now,
       key: `provision-intent:${action.key}`,
       resultHash: platformProvisionIntentHash(manifest, action.key, action.kind, action.name),
+    },
+    now,
+  );
+}
+
+function recordAdoptionIntent(
+  manifest: PlatformInstallationManifest,
+  action: PlatformInstallPlanAction,
+  id: string,
+  now: string,
+): PlatformInstallationManifest {
+  return recordInstallationStep(
+    manifest,
+    {
+      completedAt: now,
+      key: `adoption-intent:${action.key}`,
+      resultHash: platformAdoptionIntentHash(manifest, action.key, action.kind, id, action.name),
     },
     now,
   );

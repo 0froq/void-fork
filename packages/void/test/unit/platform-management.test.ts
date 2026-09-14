@@ -19,7 +19,10 @@ import {
   uninstallPlatform,
   verifyPlatformInstallationOwnership,
 } from '../../src/cli/platform-management.ts';
-import { platformProvisionIntentHash } from '../../src/cli/platform-plan.ts';
+import {
+  platformAdoptionIntentHash,
+  platformProvisionIntentHash,
+} from '../../src/cli/platform-plan.ts';
 import {
   listInstallationManifests,
   promoteInstallationSecrets,
@@ -308,6 +311,72 @@ describe('platform lifecycle management', () => {
 
     await expect(verifyPlatformInstallationOwnership(fake, manifest)).rejects.toThrow(
       'remote checkpoint does not own queue cron-queue',
+    );
+  });
+
+  it('accepts an exact adopted resource recorded ahead of its remote checkpoint', async () => {
+    let manifest = installedManifest('adopted');
+    const resource = manifest.resources.find((entry) => entry.key === 'zone')!;
+    const intent = {
+      completedAt: '2026-09-14T00:00:01.000Z',
+      key: `adoption-intent:${resource.key}`,
+      resultHash: platformAdoptionIntentHash(
+        manifest,
+        resource.key,
+        resource.kind,
+        resource.id,
+        resource.name,
+      ),
+    };
+    manifest = recordInstallationStep(manifest, intent, '2026-09-14T00:00:02.000Z');
+    const stale = recordInstallationStep(
+      {
+        ...manifest,
+        resources: manifest.resources.filter((entry) => entry.key !== resource.key),
+      },
+      intent,
+      '2026-09-14T00:00:01.000Z',
+    );
+    const fake = client(manifest);
+    fake.getKvValue = async () => JSON.stringify(stale);
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).resolves.toBeUndefined();
+  });
+
+  it('rejects an adopted resource id changed after its remote intent', async () => {
+    let manifest = installedManifest('adopted');
+    const resource = manifest.resources.find((entry) => entry.key === 'zone')!;
+    const intent = {
+      completedAt: '2026-09-14T00:00:01.000Z',
+      key: `adoption-intent:${resource.key}`,
+      resultHash: platformAdoptionIntentHash(
+        manifest,
+        resource.key,
+        resource.kind,
+        resource.id,
+        resource.name,
+      ),
+    };
+    manifest = recordInstallationStep(manifest, intent, '2026-09-14T00:00:02.000Z');
+    const stale = recordInstallationStep(
+      {
+        ...manifest,
+        resources: manifest.resources.filter((entry) => entry.key !== resource.key),
+      },
+      intent,
+      '2026-09-14T00:00:01.000Z',
+    );
+    const changed = {
+      ...manifest,
+      resources: manifest.resources.map((entry) =>
+        entry.key === resource.key ? { ...entry, id: 'replacement-zone-id' } : entry,
+      ),
+    };
+    const fake = client(changed);
+    fake.getKvValue = async () => JSON.stringify(stale);
+
+    await expect(verifyPlatformInstallationOwnership(fake, changed)).rejects.toThrow(
+      'remote checkpoint does not own zone zone',
     );
   });
 
