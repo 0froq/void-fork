@@ -387,6 +387,7 @@ export class PlatformCloudflareClient {
             scheme: 'postgresql',
             user: parsed.user,
           },
+          ...(parsed.mtls ? { mtls: parsed.mtls } : {}),
         }),
       },
     );
@@ -736,6 +737,7 @@ function parseDnsRecord(value: Record<string, unknown>): CloudflareDnsRecord {
 export function parsePostgresConnectionString(value: string): {
   database: string;
   host: string;
+  mtls?: Readonly<{ sslmode: 'require' | 'verify-ca' | 'verify-full' }>;
   password: string;
   port: number;
   user: string;
@@ -753,11 +755,26 @@ export function parsePostgresConnectionString(value: string): {
   if (!url.username || !url.password || !database) {
     throw new Error('platform: DATABASE_URL must include username, password, host, and database.');
   }
+  const port = url.port ? Number(url.port) : 5432;
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+    throw new Error('platform: DATABASE_URL has an invalid PostgreSQL port.');
+  }
+  const sslmode = url.searchParams.get('sslmode');
+  let mtls: Readonly<{ sslmode: 'require' | 'verify-ca' | 'verify-full' }> | undefined;
+  if (sslmode) {
+    if (sslmode !== 'require' && sslmode !== 'verify-ca' && sslmode !== 'verify-full') {
+      throw new Error(
+        'platform: Unsupported sslmode. Cloudflare Hyperdrive supports "require", "verify-ca", or "verify-full".',
+      );
+    }
+    mtls = { sslmode };
+  }
   return {
     database,
     host: url.hostname,
+    ...(mtls ? { mtls } : {}),
     password: decodeURIComponent(url.password),
-    port: url.port ? Number(url.port) : 5432,
+    port,
     user: decodeURIComponent(url.username),
   };
 }

@@ -20,6 +20,27 @@ describe('platform Cloudflare client', () => {
     );
   });
 
+  it('preserves supported PostgreSQL TLS modes in Hyperdrive requests', async () => {
+    let payload: unknown;
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (_input, init) => {
+        payload = JSON.parse(String(init?.body));
+        return Response.json({ success: true, result: { id: 'hyperdrive-id', name: 'void-db' } });
+      },
+    });
+
+    await client.createHyperdrive(
+      'account',
+      'void-db',
+      'postgresql://user:secret@db.example.com/void?sslmode=verify-full',
+    );
+
+    expect(payload).toMatchObject({ mtls: { sslmode: 'verify-full' } });
+    expect(() =>
+      parsePostgresConnectionString('postgresql://user:secret@db.example.com/void?sslmode=prefer'),
+    ).toThrow('Unsupported sslmode');
+  });
+
   it('never includes the API token in errors', async () => {
     const token = 'super-secret-token';
     const client = new PlatformCloudflareClient(token, {
