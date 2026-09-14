@@ -175,6 +175,20 @@ export class PlatformCloudflareClient {
     return exact ? parseZone(exact) : null;
   }
 
+  async listZones(accountId: string): Promise<ReadonlyArray<CloudflareZone>> {
+    const zones: Array<Record<string, unknown>> = [];
+    for (let page = 1; ; page++) {
+      const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
+        `/zones?account.id=${encodeURIComponent(accountId)}&page=${page}&per_page=50`,
+      );
+      zones.push(...result);
+      if (result.length < 50) {
+        break;
+      }
+    }
+    return zones.map(parseZone);
+  }
+
   async createZone(accountId: string, name: string): Promise<CloudflareZone> {
     return parseZone(
       await this.request<Record<string, unknown>>('/zones', {

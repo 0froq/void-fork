@@ -60,6 +60,9 @@ export type PlatformManagementClient = Pick<
   | 'setWorkerSubdomain'
 >;
 
+export type PlatformUninstallClient = PlatformManagementClient &
+  Pick<PlatformCloudflareClient, 'listWorkerDomains' | 'listWorkerRoutes' | 'listZones'>;
+
 export type PlatformOwnershipClient = Pick<
   PlatformManagementClient,
   | 'findZone'
@@ -414,7 +417,7 @@ export async function disablePlatform(
 }
 
 export async function uninstallPlatform(
-  client: PlatformManagementClient,
+  client: PlatformUninstallClient,
   initialManifest: PlatformInstallationManifest,
   args: Extract<PlatformArgs, { subcommand: 'uninstall' }>,
   dependencies: PlatformManagementDependencies = {},
@@ -520,6 +523,21 @@ export async function uninstallPlatform(
     await verifyPlatformInstallationOwnership(client, manifest);
     missingResources = new Set();
   }
+
+  await assertNoUnmanagedWorkerTraffic(
+    client,
+    manifest,
+    new Set(
+      manifest.resources
+        .filter(
+          (resource) =>
+            resource.kind === 'worker' &&
+            resource.state === 'ready' &&
+            resourcesToDelete.has(resource.key),
+        )
+        .map((resource) => resource.name),
+    ),
+  );
 
   let next = transitionInstallation(manifest, 'uninstalling', new Date().toISOString());
   writeInstallationManifest(next);
@@ -658,6 +676,55 @@ export async function uninstallPlatform(
     writeInstallationManifest(next);
     await writeRemoteManifestIfPresent(client, next).catch(() => {});
     throw error;
+  }
+}
+
+async function assertNoUnmanagedWorkerTraffic(
+  client: PlatformUninstallClient,
+  manifest: PlatformInstallationManifest,
+  workers: ReadonlySet<string>,
+): Promise<void> {
+  if (workers.size === 0) {
+    return;
+  }
+  const managed = platformManagedWorkerTraffic(manifest.deployment);
+  const managedZoneId = manifest.resources.find(
+    (resource) => resource.key === 'zone' && resource.state === 'ready',
+  )?.id;
+  const [domains, zones] = await Promise.all([
+    client.listWorkerDomains(manifest.account.id),
+    client.listZones(manifest.account.id),
+  ]);
+  const unmanaged = domains
+    .filter(
+      (domain) =>
+        workers.has(domain.service) &&
+        !managed.customDomains.some(
+          (target) => target.hostname === domain.hostname && target.service === domain.service,
+        ),
+    )
+    .map((domain) => `custom domain ${domain.hostname} -> ${domain.service}`);
+  for (const zone of zones) {
+    const routes = await client.listWorkerRoutes(zone.id);
+    for (const route of routes) {
+      if (
+        route.script &&
+        workers.has(route.script) &&
+        !(
+          zone.id === managedZoneId &&
+          managed.routes.some(
+            (target) => target.pattern === route.pattern && target.script === route.script,
+          )
+        )
+      ) {
+        unmanaged.push(`route ${route.pattern} in zone ${zone.name} -> ${route.script}`);
+      }
+    }
+  }
+  if (unmanaged.length > 0) {
+    throw new Error(
+      `platform: Refusing to uninstall because installer-owned Workers serve traffic not managed by this installation:\n${unmanaged.map((entry) => `- ${entry}`).join('\n')}\nRemove these routes or custom domains explicitly, then retry.`,
+    );
   }
 }
 

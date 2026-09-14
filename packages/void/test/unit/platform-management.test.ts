@@ -180,8 +180,20 @@ function client(manifest: PlatformInstallationManifest) {
         ...resource,
         fingerprint: '2026-09-14T00:00:00.000Z',
       })),
+    listWorkerDomains: async (): Promise<
+      Array<{ hostname: string; id: string; service: string }>
+    > => [],
     listWorkerNames: async () =>
       namedResources(manifest, 'worker').map((resource) => resource.name),
+    listWorkerRoutes: async (
+      _zoneId: string,
+    ): Promise<Array<{ id: string; pattern: string; script: string | null }>> => [],
+    listZones: async () =>
+      namedResources(manifest, 'zone').map((zone) => ({
+        ...zone,
+        nameServers: [],
+        status: 'active',
+      })),
     putKvValue: async (_account: string, _namespace: string, _key: string, value: string) => {
       remoteWrites.push(value);
     },
@@ -628,6 +640,41 @@ describe('platform lifecycle management', () => {
     expect(readInstallationRecoverySecrets(result)).toEqual({
       databaseUrl: 'postgres://recovery',
     });
+  });
+
+  it('refuses to delete Workers that still serve unmanaged traffic', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    fake.listZones = async () => [
+      ...namedResources(manifest, 'zone').map((zone) => ({
+        ...zone,
+        nameServers: [],
+        status: 'active',
+      })),
+      { id: 'other-zone', name: 'other.example', nameServers: [], status: 'active' },
+    ];
+    fake.listWorkerRoutes = async (zoneId: string) =>
+      zoneId === 'other-zone'
+        ? [
+            {
+              id: 'manual-route',
+              pattern: 'manual.other.example/*',
+              script: 'api-worker',
+            },
+          ]
+        : [];
+    fake.listWorkerDomains = async () => [
+      { hostname: 'manual.example.com', id: 'manual-domain', service: 'proxy-worker' },
+    ];
+
+    await expect(
+      uninstallPlatform(fake, manifest, uninstallArgs, { interactive: false }),
+    ).rejects.toThrow('Workers serve traffic not managed by this installation');
+
+    expect(fake.deleted).toEqual([]);
+    expect(fake.removedRoutes).toBe(0);
+    expect(listInstallationManifests()[0]?.status).toBe('installed');
   });
 
   it('records the completed uninstall in retained routing storage', async () => {

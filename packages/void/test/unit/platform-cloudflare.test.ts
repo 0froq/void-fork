@@ -500,4 +500,27 @@ describe('platform Cloudflare client', () => {
       },
     ]);
   });
+
+  it('inventories every account zone before destructive lifecycle operations', async () => {
+    const requests: Array<number> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        const page = Number(new URL(String(input)).searchParams.get('page'));
+        requests.push(page);
+        const count = page === 1 ? 50 : 1;
+        return Response.json({
+          success: true,
+          result: Array.from({ length: count }, (_, index) => ({
+            id: `zone-${page}-${index}`,
+            name: `${page}-${index}.example.com`,
+            name_servers: [],
+            status: 'active',
+          })),
+        });
+      },
+    });
+
+    await expect(client.listZones('account')).resolves.toHaveLength(51);
+    expect(requests).toEqual([1, 2]);
+  });
 });
