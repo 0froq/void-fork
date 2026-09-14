@@ -635,7 +635,9 @@ export async function uninstallPlatform(
     await writeRemoteManifestIfPresent(client, completed);
     next = completed;
     writeInstallationManifest(completed);
-    removeInstallationRecoverySecrets(next);
+    if (!retainData) {
+      removeInstallationRecoverySecrets(next);
+    }
     removePlatformConnectionForInstallation(next.id);
     log.success(
       retainData

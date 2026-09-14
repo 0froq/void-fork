@@ -26,6 +26,7 @@ import {
 import {
   listInstallationManifests,
   promoteInstallationSecrets,
+  readInstallationRecoverySecrets,
   writeInstallationManifest,
   writePendingInstallationSecrets,
 } from '../../src/cli/platform-registry.ts';
@@ -624,6 +625,9 @@ describe('platform lifecycle management', () => {
     const result = listInstallationManifests()[0]!;
     expect(result.status).toBe('uninstalled');
     expect(result.resources.find((resource) => resource.key === 'zone')?.state).toBe('retained');
+    expect(readInstallationRecoverySecrets(result)).toEqual({
+      databaseUrl: 'postgres://recovery',
+    });
   });
 
   it('records the completed uninstall in retained routing storage', async () => {
@@ -668,6 +672,7 @@ describe('platform lifecycle management', () => {
     expect(fake.deletedBucketMarkers).toEqual(['assets-bucket']);
     expect(fake.deleted).toContainEqual(['r2-bucket', 'assets-bucket-id']);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
+    expect(readInstallationRecoverySecrets(listInstallationManifests()[0]!)).toBeNull();
   });
 
   it('revalidates R2 ownership after emptying and before deleting the marker', async () => {
