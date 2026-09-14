@@ -591,6 +591,7 @@ export async function installPlatform(
               await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
             },
             previousConfig: previousConfigs[key],
+            previousPublicEndpoints,
             removeCustomDomains: async () => {
               if (!dependencies.client.removeRoutes) {
                 throw new Error('platform: Cloudflare route removal is unavailable.');
@@ -1290,6 +1291,7 @@ type PlatformWorkerDeploymentOptions = Readonly<{
     previousTriggers: CloudflareTriggerConfig,
   ) => Promise<void>;
   previousConfig: Record<string, unknown>;
+  previousPublicEndpoints: boolean;
   removeCustomDomains: () => Promise<void>;
   removeNewWorker: () => Promise<void>;
   workerExisted: boolean;
@@ -1306,19 +1308,19 @@ async function deployPlatformWorker(
   let activatedVersionId: string | null = null;
   let uploadedVersionId: string | null = null;
   let previousVersionId: string | null = null;
+  let previousTriggers = readTriggerConfigFromObject(options.previousConfig);
   try {
     const configPath = join(directory, 'wrangler.json');
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-    const previousConfigPath = join(directory, 'wrangler.previous.json');
-    writeFileSync(previousConfigPath, `${JSON.stringify(options.previousConfig, null, 2)}\n`, {
-      mode: 0o600,
-    });
-    let previousTriggers = readCloudflareTriggerConfig(previousConfigPath);
     const nextTriggers = readCloudflareTriggerConfig(configPath);
     if (options.workerExisted) {
       const previous = await readActivePlatformWorkerSnapshot(configPath, accountId, workerName);
       previousVersionId = previous.versionId;
-      previousTriggers = previous.triggerConfig;
+      previousTriggers = resolvePlatformPreviousTriggerConfig(
+        previous.triggerConfig,
+        previousTriggers,
+        options.previousPublicEndpoints,
+      );
     }
     const argv = [
       ...(options.workerExisted ? ['versions', 'upload'] : ['deploy']),
@@ -1424,7 +1426,7 @@ async function deployPlatformWorker(
           config,
           nextTriggers: readTriggerConfigFromObject(config),
           previousConfig: options.previousConfig,
-          previousTriggers: readTriggerConfigFromObject(options.previousConfig),
+          previousTriggers,
           previousVersionId,
           removeCustomDomains: options.removeCustomDomains,
           removeNewWorker: options.removeNewWorker,
@@ -1911,14 +1913,14 @@ function recordWorkerTrafficState(
   );
 }
 
-function stablePublicEndpointState(existing: PlatformInstallationManifest | null): boolean {
+export function stablePublicEndpointState(existing: PlatformInstallationManifest | null): boolean {
   if (!existing) {
     return false;
   }
   // `void platform disable` removes traffic without redeploying Workers, so it
-  // does not create a Worker cutover marker. The terminal lifecycle status is
+  // does not create a Worker cutover marker. Its durable desired state is
   // authoritative over the last successful install/upgrade marker.
-  if (existing.status === 'disabled') {
+  if (existing.status === 'disabled' || existing.desiredState === 'disabled') {
     return false;
   }
   const latest = existing.steps
@@ -1931,6 +1933,27 @@ function stablePublicEndpointState(existing: PlatformInstallationManifest | null
     return latest.state === 'enabled';
   }
   return existing.status === 'installed' || existing.desiredState === 'enabled';
+}
+
+export function resolvePlatformPreviousTriggerConfig(
+  versionSnapshot: CloudflareTriggerConfig,
+  configuredSnapshot: CloudflareTriggerConfig,
+  publicEndpoints: boolean,
+): CloudflareTriggerConfig {
+  if (publicEndpoints) {
+    return versionSnapshot;
+  }
+  // Disable removes public traffic without uploading a new immutable Worker
+  // version, so the active version message can still describe the last enabled
+  // routes. The durable lifecycle state owns those three traffic fields while
+  // the version message remains authoritative for cron, queue, and workflow
+  // triggers that disable does not change.
+  return {
+    ...versionSnapshot,
+    preview_urls: configuredSnapshot.preview_urls,
+    routes: configuredSnapshot.routes,
+    workers_dev: configuredSnapshot.workers_dev,
+  };
 }
 
 function errorMessage(error: unknown): string {

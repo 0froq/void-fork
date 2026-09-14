@@ -16,7 +16,9 @@ import {
   claimPlatformDatabaseConnection,
   createPlatformInstallationSecrets,
   readPlatformDatabaseLifecycleManifestConnection,
+  resolvePlatformPreviousTriggerConfig,
   resolveBootstrapGitHubId,
+  stablePublicEndpointState,
   verifyPlatformHealth,
 } from '../../src/cli/platform-installer.ts';
 import {
@@ -68,6 +70,57 @@ function planningClient() {
 describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('keeps disabled lifecycle traffic authoritative over stale Worker metadata', () => {
+    const installed = {
+      ...createPlatformInstallationManifest({
+        account: { id: 'account', name: 'Account' },
+        createdAt: '2026-09-14T00:00:00.000Z',
+        deployment: createPlatformDeploymentManifest({
+          application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+          displayName: 'Example',
+          installationSlug: 'example',
+        }),
+        id: 'example-a1b2c3d4',
+        ownershipNonce: '0123456789abcdef0123456789abcdef',
+        platformVersion: '1.0.0',
+      }),
+      status: 'installed' as const,
+    };
+    const failedDisable = {
+      ...setInstallationDesiredState(installed, 'disabled', '2026-09-14T00:00:02.000Z'),
+      status: 'failed' as const,
+    };
+    expect(stablePublicEndpointState(failedDisable)).toBe(false);
+
+    const previous = resolvePlatformPreviousTriggerConfig(
+      {
+        crons: ['0 * * * *'],
+        preview_urls: true,
+        queueConsumers: [{ queue: 'usage' }],
+        routes: [{ pattern: 'api.example.com', custom_domain: true }],
+        workers_dev: true,
+        workflows: [{ name: 'maintenance' }],
+      },
+      {
+        crons: ['new cron must not replace version state'],
+        preview_urls: false,
+        queueConsumers: [],
+        routes: [],
+        workers_dev: false,
+        workflows: [],
+      },
+      false,
+    );
+    expect(previous).toEqual({
+      crons: ['0 * * * *'],
+      preview_urls: false,
+      queueConsumers: [{ queue: 'usage' }],
+      routes: [],
+      workers_dev: false,
+      workflows: [{ name: 'maintenance' }],
+    });
+  });
 
   it('verifies API, discovery, proxy, and dispatch before committing a cutover', async () => {
     const requests: Array<{ headers: Headers; url: string }> = [];
