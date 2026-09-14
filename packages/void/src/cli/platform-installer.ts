@@ -3554,7 +3554,11 @@ export function stablePublicEndpointState(existing: PlatformInstallationManifest
   if (latest) {
     return latest.state === 'enabled';
   }
-  return existing.status === 'installed' || existing.desiredState === 'enabled';
+  // Older manifests do not have a Worker traffic marker. Only a completed
+  // install proves that their endpoints were ever intentionally published.
+  // Fresh and interrupted installs begin with desiredState=enabled, so using
+  // desired state here would let a resume bypass the initial traffic gate.
+  return existing.status === 'installed';
 }
 
 export function resolvePlatformPreviousTriggerConfig(

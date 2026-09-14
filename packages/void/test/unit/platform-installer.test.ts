@@ -532,6 +532,14 @@ describe('platform installer', () => {
     };
     expect(stablePublicEndpointState(failedDisable)).toBe(false);
 
+    const interruptedFreshInstall = {
+      ...installed,
+      status: 'failed' as const,
+    };
+    expect(interruptedFreshInstall.desiredState).toBe('enabled');
+    expect(stablePublicEndpointState(interruptedFreshInstall)).toBe(false);
+    expect(stablePublicEndpointState(installed)).toBe(true);
+
     const previous = resolvePlatformPreviousTriggerConfig(
       {
         crons: ['0 * * * *'],
