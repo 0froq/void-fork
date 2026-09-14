@@ -3,7 +3,11 @@ import { normalizeApplicationDomain, normalizeInstallationSlug } from '@void/pla
 import { cliTitle } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import { PlatformCloudflareClient, type CloudflareAccount } from './platform-cloudflare.ts';
-import { createPlatformInstallationSecrets, installPlatform } from './platform-installer.ts';
+import {
+  createPlatformInstallationSecrets,
+  installPlatform,
+  resolveBootstrapGitHubId,
+} from './platform-installer.ts';
 import { createPlatformInstallPlan, formatPlatformInstallPlan } from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
@@ -136,11 +140,17 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         'For direct asset uploads, create an R2 API token with Object Read & Write access to this account.',
       'Authentication setup',
     );
+    const bootstrapGitHubLogin =
+      checkpoint?.bootstrapGitHubLogin ||
+      process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN ||
+      (await promptSecret('Initial administrator GitHub username:', false));
+    const bootstrapGitHubId =
+      checkpoint?.bootstrapGitHubId ||
+      process.env.VOID_PLATFORM_ADMIN_GITHUB_ID ||
+      (await resolveBootstrapGitHubId(bootstrapGitHubLogin));
     const secrets = createPlatformInstallationSecrets({
-      bootstrapGitHubLogin:
-        checkpoint?.bootstrapGitHubLogin ||
-        process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN ||
-        (await promptSecret('Initial administrator GitHub username:', false)),
+      bootstrapGitHubId,
+      bootstrapGitHubLogin,
       cloudflareApiToken: token,
       checkpoint,
       databaseUrl:

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
   installPlatform,
   createPlatformInstallationSecrets,
+  resolveBootstrapGitHubId,
 } from '../../src/cli/platform-installer.ts';
 import { createPlatformInstallPlan } from '../../src/cli/platform-plan.ts';
 import { listInstallationManifests } from '../../src/cli/platform-registry.ts';
@@ -42,6 +43,17 @@ function planningClient() {
 }
 
 describe('platform installer', () => {
+  it('resolves the initial administrator to an immutable GitHub account id', async () => {
+    const requests: Array<string> = [];
+    await expect(
+      resolveBootstrapGitHubId('Octocat', async (input) => {
+        requests.push(String(input));
+        return Response.json({ id: 583231 });
+      }),
+    ).resolves.toBe('583231');
+    expect(requests).toEqual(['https://api.github.com/users/Octocat']);
+  });
+
   it('checkpoints every resource and removes pending secrets only after verification', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-installer-test-'));
     directories.push(directory);
@@ -71,6 +83,7 @@ describe('platform installer', () => {
     const result = await installPlatform(
       plan,
       createPlatformInstallationSecrets({
+        bootstrapGitHubId: '583231',
         bootstrapGitHubLogin: 'octocat',
         cloudflareApiToken: 'cf-token',
         databaseUrl: 'postgres://user:password@db.example.com/void',
@@ -124,7 +137,7 @@ describe('platform installer', () => {
       result.manifest.deployment.resources.tailWorker,
       result.manifest.deployment.resources.dispatchWorker,
     ]);
-    expect(apiSecrets).toMatchObject({ PLATFORM_BOOTSTRAP_GITHUB_LOGIN: 'octocat' });
+    expect(apiSecrets).toMatchObject({ PLATFORM_BOOTSTRAP_GITHUB_ID: '583231' });
     expect(JSON.parse(remoteManifest)).toMatchObject({
       id: result.manifest.id,
       status: 'installed',
@@ -157,6 +170,7 @@ describe('platform installer', () => {
     const result = await installPlatform(
       plan,
       createPlatformInstallationSecrets({
+        bootstrapGitHubId: '583231',
         bootstrapGitHubLogin: 'octocat',
         cloudflareApiToken: 'cf-token',
         databaseUrl: 'postgres://user:password@db.example.com/void',
@@ -226,6 +240,7 @@ describe('platform installer', () => {
     let index = 0;
     const create = async (_account: string, name: string) => ({ id: `id-${index++}`, name });
     const secrets = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '583231',
       bootstrapGitHubLogin: 'octocat',
       cloudflareApiToken: 'cf-token',
       databaseUrl: 'postgres://user:password@db.example.com/void',

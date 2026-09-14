@@ -10,6 +10,7 @@ import {
   createPlatformInstallationSecrets,
   installPlatform,
   REMOTE_INSTALLATION_MANIFEST_KEY,
+  resolveBootstrapGitHubId,
 } from './platform-installer.ts';
 import { createPlatformInstallPlan, formatPlatformInstallPlan } from './platform-plan.ts';
 import {
@@ -88,8 +89,15 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       return;
     }
     const recovery = readInstallationRecoverySecrets(manifest);
+    const bootstrapGitHubLogin =
+      process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN || recovery?.bootstrapGitHubLogin || '';
+    const bootstrapGitHubId =
+      process.env.VOID_PLATFORM_ADMIN_GITHUB_ID ||
+      recovery?.bootstrapGitHubId ||
+      (await resolveBootstrapGitHubId(bootstrapGitHubLogin));
     const secrets = createPlatformInstallationSecrets({
-      bootstrapGitHubLogin: process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN || '',
+      bootstrapGitHubId,
+      bootstrapGitHubLogin,
       cloudflareApiToken: token,
       checkpoint: recovery,
       databaseUrl: process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || '',

@@ -114,7 +114,7 @@ export async function createUserForPlatform(
   installationId?: string,
   options?: {
     additionalSignupAllowed: boolean;
-    bootstrapGitHubLogin: string;
+    bootstrapGitHubId: string;
   },
 ): Promise<User> {
   if (!installationId) {
@@ -125,8 +125,8 @@ export async function createUserForPlatform(
   if (!existing) {
     if (
       provider !== 'github' ||
-      !options?.bootstrapGitHubLogin ||
-      login.toLowerCase() !== options.bootstrapGitHubLogin.toLowerCase()
+      !options?.bootstrapGitHubId ||
+      providerId !== options.bootstrapGitHubId
     ) {
       throw new SelfHostedSignupRestrictedError();
     }

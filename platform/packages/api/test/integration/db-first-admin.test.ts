@@ -27,7 +27,7 @@ describe('self-hosted first owner bootstrap', () => {
           `user-${id}`,
           null,
           'installation-a1b2c3d4',
-          { additionalSignupAllowed: true, bootstrapGitHubLogin: `user-${id}` },
+          { additionalSignupAllowed: true, bootstrapGitHubId: id },
         ),
       );
     const users = await Promise.all([create('one'), create('two')]);
@@ -46,7 +46,7 @@ describe('self-hosted first owner bootstrap', () => {
           'attacker',
           null,
           'installation-a1b2c3d4',
-          { additionalSignupAllowed: false, bootstrapGitHubLogin: 'owner' },
+          { additionalSignupAllowed: false, bootstrapGitHubId: 'owner-id' },
         ),
       ),
     ).rejects.toThrow('signup is restricted');
@@ -58,10 +58,38 @@ describe('self-hosted first owner bootstrap', () => {
         'owner',
         null,
         'installation-a1b2c3d4',
-        { additionalSignupAllowed: false, bootstrapGitHubLogin: 'owner' },
+        { additionalSignupAllowed: false, bootstrapGitHubId: 'owner-id' },
       ),
     );
     expect(owner.role).toBe('admin');
+  });
+
+  it('binds bootstrap ownership to the immutable GitHub account id', async () => {
+    await expect(
+      env.db.transaction((tx) =>
+        createUserForPlatform(
+          tx as unknown as typeof env.db,
+          'github',
+          'attacker-id',
+          'owner',
+          null,
+          'installation-a1b2c3d4',
+          { additionalSignupAllowed: false, bootstrapGitHubId: 'owner-id' },
+        ),
+      ),
+    ).rejects.toThrow('signup is restricted');
+    const renamedOwner = await env.db.transaction((tx) =>
+      createUserForPlatform(
+        tx as unknown as typeof env.db,
+        'github',
+        'owner-id',
+        'renamed-owner',
+        null,
+        'installation-a1b2c3d4',
+        { additionalSignupAllowed: false, bootstrapGitHubId: 'owner-id' },
+      ),
+    );
+    expect(renamedOwner.role).toBe('admin');
   });
 
   it('preserves Void Cloud user defaults when no installation id is set', async () => {

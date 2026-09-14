@@ -395,7 +395,7 @@ app.get('/callback', async (context) => {
           context.env.PLATFORM_INSTALLATION_ID,
           {
             additionalSignupAllowed,
-            bootstrapGitHubLogin: context.env.PLATFORM_BOOTSTRAP_GITHUB_LOGIN ?? '',
+            bootstrapGitHubId: context.env.PLATFORM_BOOTSTRAP_GITHUB_ID ?? '',
           },
         );
         await createOAuthAccount(txDb, newUser.id, resolvedProvider, providerId);

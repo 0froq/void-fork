@@ -135,7 +135,7 @@ export type ApiEnv = Env & {
     REQUESTS_DATASET?: string;
     PLATFORM_ENV?: string;
     PLATFORM_DISPLAY_NAME?: string;
-    PLATFORM_BOOTSTRAP_GITHUB_LOGIN?: string;
+    PLATFORM_BOOTSTRAP_GITHUB_ID?: string;
     PLATFORM_INSTALLATION_ID?: string;
     PLATFORM_VERSION?: string;
     PLATFORM_CAPABILITIES?: string;

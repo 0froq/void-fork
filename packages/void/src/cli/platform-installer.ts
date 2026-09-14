@@ -32,6 +32,7 @@ import { resolveWranglerArgv } from './preset.ts';
 export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
 
 export type PlatformInstallationSecrets = Readonly<{
+  bootstrapGitHubId: string;
   bootstrapGitHubLogin: string;
   cloudflareApiToken: string;
   databaseUrl: string;
@@ -74,6 +75,7 @@ export type PlatformInstallationResult = Readonly<{
 }>;
 
 export function createPlatformInstallationSecrets(input: {
+  bootstrapGitHubId: string;
   bootstrapGitHubLogin: string;
   cloudflareApiToken: string;
   databaseUrl: string;
@@ -91,6 +93,10 @@ export function createPlatformInstallationSecrets(input: {
     return value;
   };
   return {
+    bootstrapGitHubId: required(
+      input.bootstrapGitHubId || checkpoint.bootstrapGitHubId || '',
+      'resolved administrator GitHub account id',
+    ),
     bootstrapGitHubLogin: required(
       input.bootstrapGitHubLogin || checkpoint.bootstrapGitHubLogin || '',
       'VOID_PLATFORM_ADMIN_GITHUB_LOGIN',
@@ -120,6 +126,7 @@ export function createPlatformInstallationSecrets(input: {
 
 function secretCheckpoint(secrets: PlatformInstallationSecrets): Record<string, string> {
   return {
+    bootstrapGitHubId: secrets.bootstrapGitHubId,
     bootstrapGitHubLogin: secrets.bootstrapGitHubLogin,
     databaseUrl: secrets.databaseUrl,
     githubClientId: secrets.githubClientId,
@@ -268,7 +275,7 @@ export async function installPlatform(
         {
           completedAt: now(),
           key: bootstrapStep,
-          resultHash: hash(secrets.bootstrapGitHubLogin.toLowerCase()),
+          resultHash: hash(secrets.bootstrapGitHubId),
         },
         now(),
       );
@@ -476,12 +483,46 @@ function apiWorkerSecrets(
     GITHUB_CLIENT_ID: secrets.githubClientId,
     GITHUB_CLIENT_SECRET: secrets.githubClientSecret,
     JWT_SECRET: secrets.jwtSecret,
-    PLATFORM_BOOTSTRAP_GITHUB_LOGIN: secrets.bootstrapGitHubLogin,
+    PLATFORM_BOOTSTRAP_GITHUB_ID: secrets.bootstrapGitHubId,
     PROJECT_SECRET_ACTIVE_KEY_VERSION: 'v1',
     PROJECT_SECRET_KEYS_JSON: JSON.stringify({ v1: secrets.projectSecretKey }),
     R2_ACCESS_KEY_ID: secrets.r2AccessKeyId,
     R2_SECRET_ACCESS_KEY: secrets.r2SecretAccessKey,
   };
+}
+
+export async function resolveBootstrapGitHubId(
+  login: string,
+  fetcher: typeof fetch = fetch,
+): Promise<string> {
+  const normalizedLogin = login.trim();
+  if (!normalizedLogin) {
+    throw new Error('platform: VOID_PLATFORM_ADMIN_GITHUB_LOGIN is required.');
+  }
+  const response = await fetcher(
+    `https://api.github.com/users/${encodeURIComponent(normalizedLogin)}`,
+    {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'void-platform-installer',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `platform: Could not resolve GitHub user ${JSON.stringify(normalizedLogin)} (HTTP ${response.status}). Verify the username and retry.`,
+    );
+  }
+  const body = (await response.json()) as { id?: unknown };
+  const id = typeof body.id === 'number' && Number.isSafeInteger(body.id) ? String(body.id) : '';
+  if (!/^[1-9][0-9]*$/.test(id)) {
+    throw new Error(
+      'platform: GitHub returned an invalid account id for the initial administrator.',
+    );
+  }
+  return id;
 }
 
 function proxyWorkerSecrets(
