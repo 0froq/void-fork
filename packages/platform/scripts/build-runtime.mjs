@@ -9,7 +9,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repositoryRoot = join(packageRoot, '..', '..');
 const runtimeRoot = join(packageRoot, 'dist', 'runtime');
 const temporaryRoot = mkdtempSync(join(tmpdir(), 'void-platform-runtime-'));
-const wrangler = join(repositoryRoot, 'packages', 'void', 'node_modules', '.bin', 'wrangler');
+const wrangler = fileURLToPath(import.meta.resolve('wrangler'));
 
 const workers = [
   ['api', join(repositoryRoot, 'platform', 'packages', 'api', 'src', 'index.ts')],
@@ -36,8 +36,8 @@ try {
       }),
     );
     const result = spawnSync(
-      wrangler,
-      ['deploy', '--dry-run', '--config', configPath, '--outdir', outputDirectory],
+      process.execPath,
+      [wrangler, 'deploy', '--dry-run', '--config', configPath, '--outdir', outputDirectory],
       { cwd: dirname(entrypoint), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     );
     if (result.status !== 0) {
