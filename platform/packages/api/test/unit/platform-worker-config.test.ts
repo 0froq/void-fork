@@ -32,6 +32,9 @@ describe('platform Worker configuration', () => {
     expect(configs.api).not.toHaveProperty('containers');
     expect(JSON.stringify(configs)).not.toContain('BuildManager');
     expect(JSON.stringify(configs)).not.toContain('BUILD_SCHEDULER');
+    expect(configs.proxy.vars).toEqual({
+      PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
+    });
     expect(configs.dispatch.routes).toEqual([
       { pattern: '*.apps.example.com/*', zone_name: 'example.com' },
       { pattern: '*.apps.example.com', zone_name: 'example.com' },

@@ -18,6 +18,7 @@ import {
   createCodeChallenge,
   isValidCodeVerifier,
 } from '../auth/pkce.ts';
+import { getPlatformCapabilities } from '../capabilities.ts';
 import { DEFAULT_DASHBOARD_URL } from '../constants.ts';
 import {
   getUserByOAuthAccount,
@@ -91,6 +92,13 @@ app.get('/login', async (context) => {
   const provider = context.req.query('provider') ?? 'github';
   if (provider !== 'github' && provider !== 'google') {
     return context.json({ error: 'provider must be github or google' }, 400);
+  }
+  const capabilities = getPlatformCapabilities(context.env);
+  if (
+    (provider === 'github' && !capabilities.githubOAuth) ||
+    (provider === 'google' && !capabilities.googleOAuth)
+  ) {
+    return context.json({ error: 'authentication provider unavailable', provider }, 501);
   }
 
   const codeChallenge = context.req.query('code_challenge');
@@ -255,6 +263,16 @@ app.get('/callback', async (context) => {
   }
 
   const resolvedProvider = provider ?? 'github';
+  const capabilities = getPlatformCapabilities(context.env);
+  if (
+    (resolvedProvider === 'github' && !capabilities.githubOAuth) ||
+    (resolvedProvider === 'google' && !capabilities.googleOAuth)
+  ) {
+    return context.json(
+      { error: 'authentication provider unavailable', provider: resolvedProvider },
+      501,
+    );
+  }
   let providerId: string;
   let login: string;
   let email: string | null;

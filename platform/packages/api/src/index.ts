@@ -1,4 +1,4 @@
-import { createPlatformDiscoveryDocument, type PlatformCapabilities } from '@void/platform';
+import { createPlatformDiscoveryDocument } from '@void/platform';
 import { Hono } from 'hono';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
 import adminBuilds from './admin/routes/builds.tsx';
@@ -12,6 +12,7 @@ import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
 import adminUsers from './admin/routes/users.tsx';
 import { BuildManager, BuildManagerLarge } from './build-manager.ts';
 import { BuildScheduler } from './build-scheduler.ts';
+import { capabilityMiddleware, getPlatformCapabilities } from './capabilities.ts';
 import { type CronFireMessage, processCronFiresBatch } from './cron-fires-queue.ts';
 import { CronScheduler } from './cron-scheduler.ts';
 import {
@@ -94,18 +95,7 @@ const app = new Hono<ApiEnv>()
 
   .get('/health', (context) => context.json({ status: 'ok' }))
   .get('/.well-known/void-platform', (context) => {
-    const capabilities: PlatformCapabilities = context.env.PLATFORM_CAPABILITIES
-      ? (JSON.parse(context.env.PLATFORM_CAPABILITIES) as PlatformCapabilities)
-      : {
-          ai: true,
-          customDomains: true,
-          email: true,
-          githubActions: true,
-          githubOAuth: true,
-          googleOAuth: true,
-          managedBuilds: true,
-          sandbox: true,
-        };
+    const capabilities = getPlatformCapabilities(context.env);
     return context.json(
       createPlatformDiscoveryDocument({
         apiUrl: new URL(context.req.url).origin,
@@ -162,7 +152,9 @@ const app = new Hono<ApiEnv>()
   .route('/internal/resolve-worker', internalResolveWorker)
   .route('/internal/verify-owner', internalVerifyOwner)
   .route('/internal/verify-prerender-build', internalVerifyPrerenderBuild)
+  .use('/webhooks/*', capabilityMiddleware('managedBuilds'))
   .route('/webhooks', webhookRoutes)
+  .use('/github/*', capabilityMiddleware('managedBuilds'))
   .route('/github', githubRoutes)
   .use('/me', authMiddleware)
   .route('/me', me)
@@ -225,12 +217,16 @@ async function scheduled(
   _ctx: ExecutionContext,
 ): Promise<void> {
   const db = createDb(env.HYPERDRIVE.connectionString);
+  const capabilities = getPlatformCapabilities(env);
 
   // Fast tier (every 2 min): only reconcile recently-created pending domains
   // (within the last 30 min) so a freshly-configured custom domain comes online
   // quickly without the user polling. The heavier hourly maintenance does NOT
   // run on this tick.
   if (controller.cron === FAST_CRON) {
+    if (!capabilities.customDomains) {
+      return;
+    }
     const cutoff = new Date(controller.scheduledTime - RECENT_PENDING_WINDOW_MS).toISOString();
     const young = await getPendingDomainsNewerThan(db, cutoff, MAX_PENDING_RECONCILE_PER_RUN);
     if (young.length === MAX_PENDING_RECONCILE_PER_RUN) {
@@ -263,15 +259,17 @@ async function scheduled(
   // of the owner's concurrency slots. Container builds free their slot via the
   // BuildManager DO timeout, so this is scoped to executor='github_actions'.
   // Best-effort and isolated like the steps around it.
-  await failStaleActiveGithubActionsBuilds(db, STALE_ACTIONS_BUILD_MAX_AGE_MINUTES)
-    .then((n) => {
-      if (n > 0) {
-        console.log(`[scheduled] auto-failed ${n} stale github_actions build(s)`);
-      }
-    })
-    .catch((err) =>
-      console.error('[scheduled] failed to clean up stale github_actions builds:', err),
-    );
+  if (capabilities.managedBuilds) {
+    await failStaleActiveGithubActionsBuilds(db, STALE_ACTIONS_BUILD_MAX_AGE_MINUTES)
+      .then((n) => {
+        if (n > 0) {
+          console.log(`[scheduled] auto-failed ${n} stale github_actions build(s)`);
+        }
+      })
+      .catch((err) =>
+        console.error('[scheduled] failed to clean up stale github_actions builds:', err),
+      );
+  }
 
   // Auto-fail container builds stuck ACTIVE far longer than the hard-max build
   // timeout. The BuildManager DO normally reaps these via its own timeout, but
@@ -293,22 +291,24 @@ async function scheduled(
   // terminal, acceptable. A DO RPC failure must NOT break the handler (the slot
   // is already freed by phase 1), so this is wrapped best-effort and isolated
   // like the steps around it. Scoped to executor='container'.
-  await failStaleActiveContainerBuilds(db, STALE_CONTAINER_BUILD_MAX_AGE_MINUTES)
-    .then(async (staleBuilds) => {
-      if (staleBuilds.length > 0) {
-        console.log(`[scheduled] auto-failed ${staleBuilds.length} stale container build(s)`);
-        await cancelContainerBuildDos(
-          env,
-          // The reaper deals only with container builds; carry each build's
-          // instance_type so the cancel addresses the SAME size namespace the
-          // scheduler started it on (a paid build cancelled against the base
-          // namespace would miss its live container).
-          staleBuilds.map((b) => ({ ...b, executor: 'container' as const })),
-          'stale build reaper',
-        );
-      }
-    })
-    .catch((err) => console.error('[scheduled] failed to clean up stale container builds:', err));
+  if (capabilities.managedBuilds) {
+    await failStaleActiveContainerBuilds(db, STALE_CONTAINER_BUILD_MAX_AGE_MINUTES)
+      .then(async (staleBuilds) => {
+        if (staleBuilds.length > 0) {
+          console.log(`[scheduled] auto-failed ${staleBuilds.length} stale container build(s)`);
+          await cancelContainerBuildDos(
+            env,
+            // The reaper deals only with container builds; carry each build's
+            // instance_type so the cancel addresses the SAME size namespace the
+            // scheduler started it on (a paid build cancelled against the base
+            // namespace would miss its live container).
+            staleBuilds.map((b) => ({ ...b, executor: 'container' as const })),
+            'stale build reaper',
+          );
+        }
+      })
+      .catch((err) => console.error('[scheduled] failed to clean up stale container builds:', err));
+  }
 
   // Re-arm the build scheduler if any container builds are still queued. The
   // webhook push handler pokes BUILD_SCHEDULER best-effort after inserting a
@@ -317,14 +317,16 @@ async function scheduled(
   // to drain it. This cron safety net guarantees an orphaned queued build is
   // picked up within one tick. Best-effort and isolated like the steps around
   // it — one failure must not block the rest of the hourly maintenance.
-  await hasQueuedContainerBuilds(db)
-    .then(async (hasQueued) => {
-      if (hasQueued) {
-        const scheduler = env.BUILD_SCHEDULER.get(env.BUILD_SCHEDULER.idFromName('global'));
-        await scheduler.fetch('https://scheduler/poke', { method: 'POST' });
-      }
-    })
-    .catch((err) => console.error('[scheduled] failed to re-arm build scheduler:', err));
+  if (capabilities.managedBuilds) {
+    await hasQueuedContainerBuilds(db)
+      .then(async (hasQueued) => {
+        if (hasQueued) {
+          const scheduler = env.BUILD_SCHEDULER.get(env.BUILD_SCHEDULER.idFromName('global'));
+          await scheduler.fetch('https://scheduler/poke', { method: 'POST' });
+        }
+      })
+      .catch((err) => console.error('[scheduled] failed to re-arm build scheduler:', err));
+  }
 
   // Purge expired OAuth nonces and auth codes left by abandoned login flows (best-effort)
   await purgeExpiredOAuthNonces(db).catch((err) =>
@@ -339,44 +341,48 @@ async function scheduled(
   // already redelivered. Redelivered events re-enter the idempotent webhook
   // handler, so this is safe. App-secret gated, bounded per run, and isolated
   // like the steps around it — one failure must not block the rest.
-  try {
-    const r = await replayFailedWebhookDeliveries(env, db);
-    if (r.redelivered > 0) {
-      console.log(
-        `[scheduled] webhook-replay redelivered ${r.redelivered}/${r.scanned} failed deliveries`,
-      );
+  if (capabilities.managedBuilds) {
+    try {
+      const r = await replayFailedWebhookDeliveries(env, db);
+      if (r.redelivered > 0) {
+        console.log(
+          `[scheduled] webhook-replay redelivered ${r.redelivered}/${r.scanned} failed deliveries`,
+        );
+      }
+    } catch (err) {
+      console.warn('[scheduled] webhook-replay failed', err);
     }
-  } catch (err) {
-    console.warn('[scheduled] webhook-replay failed', err);
   }
 
   // Reconcile ALL pending domains BEFORE the stale-cleanup janitor, so a domain
   // that only just finished validating (even one near the 7-day cutoff) gets
   // activated instead of garbage-collected.
-  const allPending = await getPendingDomains(db, MAX_PENDING_RECONCILE_PER_RUN);
-  if (allPending.length === MAX_PENDING_RECONCILE_PER_RUN) {
-    console.warn(
-      `[scheduled] hourly pending-domain reconcile hit the per-run cap (${MAX_PENDING_RECONCILE_PER_RUN}); remaining pending domains will be processed on the next run`,
+  if (capabilities.customDomains) {
+    const allPending = await getPendingDomains(db, MAX_PENDING_RECONCILE_PER_RUN);
+    if (allPending.length === MAX_PENDING_RECONCILE_PER_RUN) {
+      console.warn(
+        `[scheduled] hourly pending-domain reconcile hit the per-run cap (${MAX_PENDING_RECONCILE_PER_RUN}); remaining pending domains will be processed on the next run`,
+      );
+    }
+    // Only the hourly tier re-triggers HTTP DCV via PATCH: it bounds the
+    // per-account CF custom-hostname API load (the every-2-min fast tier would
+    // amplify PATCH volume under a burst of young pending domains and could 429
+    // other tenants' hostname operations), while still re-triggering the long
+    // tail and resetting CF's decaying 7-day validation backoff once per hour.
+    await reconcilePendingDomains(env, db, allPending, true).catch((err) =>
+      console.error('[scheduled] hourly pending-domain reconcile failed:', err),
+    );
+
+    // Cleanup janitor: custom hostnames that have sat in `pending` for more than
+    // 7 days never completed ownership/cert validation. Their CF cert order is
+    // still open (CT-log noise) and — under a wildcard-CNAME hijack attempt —
+    // CF's own "Moved → Deleted after 7 days" sweep may not fire. Delete the CF
+    // hostname (revokes the cert order) and drop the DB row. Run once globally;
+    // conservative — only `status === 'pending'` rows are eligible.
+    await cleanupStalePendingDomains(env, db, controller.scheduledTime).catch((err) =>
+      console.error('[scheduled] failed to clean up stale pending domains:', err),
     );
   }
-  // Only the hourly tier re-triggers HTTP DCV via PATCH: it bounds the
-  // per-account CF custom-hostname API load (the every-2-min fast tier would
-  // amplify PATCH volume under a burst of young pending domains and could 429
-  // other tenants' hostname operations), while still re-triggering the long
-  // tail and resetting CF's decaying 7-day validation backoff once per hour.
-  await reconcilePendingDomains(env, db, allPending, true).catch((err) =>
-    console.error('[scheduled] hourly pending-domain reconcile failed:', err),
-  );
-
-  // Cleanup janitor: custom hostnames that have sat in `pending` for more than
-  // 7 days never completed ownership/cert validation. Their CF cert order is
-  // still open (CT-log noise) and — under a wildcard-CNAME hijack attempt —
-  // CF's own "Moved → Deleted after 7 days" sweep may not fire. Delete the CF
-  // hostname (revokes the cert order) and drop the DB row. Run once globally;
-  // conservative — only `status === 'pending'` rows are eligible.
-  await cleanupStalePendingDomains(env, db, controller.scheduledTime).catch((err) =>
-    console.error('[scheduled] failed to clean up stale pending domains:', err),
-  );
 
   let offset = 0;
   while (true) {

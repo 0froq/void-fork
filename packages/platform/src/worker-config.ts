@@ -119,6 +119,7 @@ export function createPlatformWorkerConfigs(input: {
         },
       ],
     },
+    vars: { PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities) },
   };
   if (deployment.controlPlane.proxyHostname) {
     proxy.routes = [{ pattern: deployment.controlPlane.proxyHostname, custom_domain: true }];

@@ -124,6 +124,20 @@ app.post('/ai/*', async (context, next) => {
   await next();
 });
 
+app.post('/sandbox/*', async (context, next) => {
+  if (!proxyCapabilityEnabled(context.env.PLATFORM_CAPABILITIES, 'sandbox')) {
+    return context.json(
+      {
+        error: 'platform capability unavailable',
+        capability: 'sandbox',
+        message: 'This Void platform does not enable sandbox.',
+      },
+      501,
+    );
+  }
+  await next();
+});
+
 // Route groups
 app.route('/ai', ai);
 app.route('/d1', d1);
@@ -133,6 +147,23 @@ app.route('/revalidate', revalidate);
 app.route('/sandbox', sandbox);
 
 export default app;
+
+function proxyCapabilityEnabled(value: string | undefined, capability: string): boolean {
+  if (!value) {
+    return true;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return (
+      !!parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      (parsed as Record<string, unknown>)[capability] === true
+    );
+  } catch {
+    return false;
+  }
+}
 
 // --- HMAC verification ---
 

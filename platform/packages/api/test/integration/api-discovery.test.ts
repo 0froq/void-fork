@@ -60,5 +60,24 @@ describe('GET /.well-known/void-platform', () => {
       installationId: 'dpx-a1b2c3d4',
       platformVersion: '0.10.13',
     });
+
+    const google = await app.fetch(
+      new Request(
+        'https://platform.example.com/auth/login?redirect=http://localhost:8787/callback&provider=google',
+      ),
+      selfHostedEnv,
+    );
+    expect(google.status).toBe(501);
+    expect(await google.json()).toEqual({
+      error: 'authentication provider unavailable',
+      provider: 'google',
+    });
+
+    const managedBuild = await app.fetch(
+      new Request('https://platform.example.com/github/install-url'),
+      selfHostedEnv,
+    );
+    expect(managedBuild.status).toBe(501);
+    expect(await managedBuild.json()).toMatchObject({ capability: 'managedBuilds' });
   });
 });
