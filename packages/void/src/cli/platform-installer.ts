@@ -113,7 +113,12 @@ export type PlatformInstallerDependencies = Readonly<{
     manifest: PlatformInstallationManifest,
     databaseCheckpointExists: boolean,
   ) => Promise<void>;
-  verifyHealth?: (apiUrl: string, installationId: string) => Promise<void>;
+  verifyHealth?: (
+    apiUrl: string,
+    installationId: string,
+    proxyUrl: string,
+    applicationBaseDomain: string,
+  ) => Promise<void>;
 }>;
 
 export type PlatformInstallationResult = Readonly<{
@@ -640,7 +645,12 @@ export async function installPlatform(
     }
     manifest = transitionInstallation(manifest, 'verifying', now());
     writeInstallationManifest(manifest);
-    await (dependencies.verifyHealth ?? verifyPlatformHealth)(plan.apiUrl, manifest.id);
+    await (dependencies.verifyHealth ?? verifyPlatformHealth)(
+      plan.apiUrl,
+      manifest.id,
+      plan.proxyUrl,
+      plan.deployment.application.baseDomain,
+    );
     workerDeploymentCommitted = true;
     manifest = recordWorkerCutoverResolution(manifest, workerCutoverGeneration, 'committed', now());
     manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, true, now());
@@ -1927,19 +1937,39 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function verifyPlatformHealth(apiUrl: string, installationId: string): Promise<void> {
-  const health = await fetch(`${apiUrl}/health`, { signal: AbortSignal.timeout(30_000) });
+export async function verifyPlatformHealth(
+  apiUrl: string,
+  installationId: string,
+  proxyUrl: string,
+  applicationBaseDomain: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const request = (url: string, headers?: HeadersInit) =>
+    fetcher(url, { headers, signal: AbortSignal.timeout(30_000) });
+  const [health, discovery, proxy, dispatch] = await Promise.all([
+    request(`${apiUrl}/health`),
+    request(`${apiUrl}/.well-known/void-platform`),
+    request(`${proxyUrl}/health`),
+    request(`https://test.${applicationBaseDomain}/health`, {
+      'X-Health-Check': 'void-admin',
+    }),
+  ]);
   if (!health.ok) {
     throw new Error(`platform: Health check failed at ${apiUrl} (HTTP ${health.status}).`);
   }
-  const discovery = await fetch(`${apiUrl}/.well-known/void-platform`, {
-    signal: AbortSignal.timeout(30_000),
-  });
   if (!discovery.ok) {
     throw new Error(`platform: Discovery check failed at ${apiUrl} (HTTP ${discovery.status}).`);
   }
   const body = (await discovery.json()) as { installationId?: unknown };
   if (body.installationId !== installationId) {
     throw new Error('platform: Deployed API discovery identity does not match this installation.');
+  }
+  if (!proxy.ok) {
+    throw new Error(`platform: Proxy health check failed at ${proxyUrl} (HTTP ${proxy.status}).`);
+  }
+  if (!dispatch.ok) {
+    throw new Error(
+      `platform: Dispatch health check failed at https://test.${applicationBaseDomain} (HTTP ${dispatch.status}).`,
+    );
   }
 }

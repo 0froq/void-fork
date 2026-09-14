@@ -17,6 +17,7 @@ import {
   createPlatformInstallationSecrets,
   readPlatformDatabaseLifecycleManifestConnection,
   resolveBootstrapGitHubId,
+  verifyPlatformHealth,
 } from '../../src/cli/platform-installer.ts';
 import {
   createPlatformInstallPlan,
@@ -67,6 +68,59 @@ function planningClient() {
 describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('verifies API, discovery, proxy, and dispatch before committing a cutover', async () => {
+    const requests: Array<{ headers: Headers; url: string }> = [];
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ headers: new Headers(init?.headers), url });
+      return Response.json(
+        url.endsWith('/.well-known/void-platform')
+          ? { installationId: 'example-a1b2c3d4' }
+          : { ok: true },
+      );
+    }) as typeof fetch;
+
+    await verifyPlatformHealth(
+      'https://api.example.com',
+      'example-a1b2c3d4',
+      'https://proxy.example.com',
+      'apps.example.com',
+      fetcher,
+    );
+
+    expect(requests.map((entry) => entry.url)).toEqual([
+      'https://api.example.com/health',
+      'https://api.example.com/.well-known/void-platform',
+      'https://proxy.example.com/health',
+      'https://test.apps.example.com/health',
+    ]);
+    expect(requests[3]!.headers.get('X-Health-Check')).toBe('void-admin');
+  });
+
+  it('rejects a cutover when the proxy is unhealthy', async () => {
+    const fetcher = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === 'https://proxy.example.com/health') {
+        return new Response('unhealthy', { status: 500 });
+      }
+      return Response.json(
+        url.endsWith('/.well-known/void-platform')
+          ? { installationId: 'example-a1b2c3d4' }
+          : { ok: true },
+      );
+    }) as typeof fetch;
+
+    await expect(
+      verifyPlatformHealth(
+        'https://api.example.com',
+        'example-a1b2c3d4',
+        'https://proxy.example.com',
+        'apps.example.com',
+        fetcher,
+      ),
+    ).rejects.toThrow('Proxy health check failed');
+  });
 
   it('serializes lifecycle changes with the claimed PostgreSQL database', async () => {
     const queries: Array<{ sql: string; values?: ReadonlyArray<unknown> }> = [];
