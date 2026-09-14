@@ -506,13 +506,11 @@ export async function uninstallPlatform(
   const createdZone = manifest.resources.find(
     (resource) => resource.key === 'zone' && resource.ownership === 'created',
   );
-  let deleteZone = args.deleteZone ?? false;
   const interactive = dependencies.interactive ?? process.stdin.isTTY;
   const confirmAction = dependencies.confirm ?? promptForConfirmation;
-  if (createdZone && args.deleteZone === null && !args.plan && interactive) {
-    deleteZone = await confirmAction(
-      `Delete the installer-created Cloudflare zone ${createdZone.name}?`,
-      false,
+  if (createdZone && args.deleteZone === true) {
+    throw new Error(
+      `platform: Refusing to delete Cloudflare zone ${JSON.stringify(createdZone.name)} automatically. A zone can contain unrelated DNS, settings, and products that the installer cannot exhaustively prove ownership of. Uninstall with --keep-zone, inspect the retained zone in Cloudflare, and delete it manually if appropriate.`,
     );
   }
   const dataMessage = retainData
@@ -523,9 +521,7 @@ export async function uninstallPlatform(
   note(
     `Disable all platform routes.\nDelete installer-owned Workers and Queues.\n${dataMessage}\n${
       createdZone
-        ? deleteZone
-          ? `Delete zone ${createdZone.name}.`
-          : `Keep zone ${createdZone.name}.`
+        ? `Keep zone ${createdZone.name} for explicit manual cleanup.`
         : 'Never delete the adopted application zone.'
     }`,
     'Uninstall plan',
@@ -554,7 +550,7 @@ export async function uninstallPlatform(
     manifest.resources
       .filter(
         (resource) =>
-          shouldDeleteResource(resource, retainData, deleteZone) &&
+          shouldDeleteResource(resource, retainData) &&
           (hasRoutingCheckpoint || resource.kind === 'zone') &&
           !(
             resource.kind === 'dns-record' &&
@@ -665,7 +661,7 @@ export async function uninstallPlatform(
         await writeLifecycleCheckpoint(client, next);
         continue;
       }
-      if (!shouldDeleteResource(resource, retainData, deleteZone)) {
+      if (!shouldDeleteResource(resource, retainData)) {
         next = updateResourceState(next, resource.key, 'retained');
         await writeLifecycleCheckpoint(client, next);
         continue;
@@ -840,16 +836,12 @@ function isOwnershipVerifiableKind(kind: InstallationResource['kind']): boolean 
   );
 }
 
-function shouldDeleteResource(
-  resource: InstallationResource,
-  retainData: boolean,
-  deleteZone: boolean,
-): boolean {
+function shouldDeleteResource(resource: InstallationResource, retainData: boolean): boolean {
   if (resource.state !== 'ready' || resource.ownership !== 'created') {
     return false;
   }
   if (resource.kind === 'zone') {
-    return deleteZone;
+    return false;
   }
   // AI Gateway ids are caller-selected and can be reused after deletion. The
   // API exposes no durable ownership marker, so automatic deletion could

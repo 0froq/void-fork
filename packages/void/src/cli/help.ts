@@ -149,12 +149,8 @@ const HELP_TREE: HelpTree = {
             description: 'Delete installer-owned data even when it contains apps',
           },
           {
-            command: '--delete-zone',
-            description: 'Delete an installer-created zone after all resources',
-          },
-          {
             command: '--keep-zone',
-            description: 'Keep an installer-created zone without prompting',
+            description: 'Explicitly retain an installer-created zone',
           },
         ],
       },

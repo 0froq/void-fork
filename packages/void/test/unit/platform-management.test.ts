@@ -796,6 +796,24 @@ describe('platform lifecycle management', () => {
     expect(retained).toHaveLength(8);
   });
 
+  it('refuses automatic deletion of an installer-created zone', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+
+    await expect(
+      uninstallPlatform(
+        fake,
+        manifest,
+        { ...uninstallArgs, deleteZone: true },
+        { interactive: false },
+      ),
+    ).rejects.toThrow('Refusing to delete Cloudflare zone');
+    expect(fake.deleted).toEqual([]);
+    expect(fake.removedRoutes).toBe(0);
+    expect(listInstallationManifests()[0]?.status).toBe('installed');
+  });
+
   it('purges installer-owned data while never deleting an adopted zone', async () => {
     const manifest = installedManifest('adopted');
     persist(manifest);
