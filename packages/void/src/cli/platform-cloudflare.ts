@@ -18,7 +18,11 @@ export class PlatformCloudflareApiError extends Error {
 }
 
 export type CloudflareAccount = Readonly<{ id: string; name: string }>;
-export type CloudflareNamedResource = Readonly<{ id: string; name: string }>;
+export type CloudflareNamedResource = Readonly<{
+  fingerprint?: string;
+  id: string;
+  name: string;
+}>;
 export type CloudflareDnsRecord = CloudflareNamedResource &
   Readonly<{
     content: string;
@@ -265,7 +269,7 @@ export class PlatformCloudflareClient {
   }
 
   async listR2Buckets(accountId: string): Promise<ReadonlyArray<CloudflareNamedResource>> {
-    const buckets: Array<{ name?: unknown }> = [];
+    const buckets: Array<{ creation_date?: unknown; name?: unknown }> = [];
     let startAfter = '';
     for (;;) {
       const query = new URLSearchParams({ direction: 'asc', order: 'name', per_page: '1000' });
@@ -273,7 +277,8 @@ export class PlatformCloudflareClient {
         query.set('start_after', startAfter);
       }
       const result = await this.request<
-        { buckets?: ReadonlyArray<{ name?: unknown }> } | ReadonlyArray<{ name?: unknown }>
+        | { buckets?: ReadonlyArray<{ creation_date?: unknown; name?: unknown }> }
+        | ReadonlyArray<{ creation_date?: unknown; name?: unknown }>
       >(`/accounts/${encodeURIComponent(accountId)}/r2/buckets?${query}`);
       const page = Array.isArray(result)
         ? result
@@ -292,17 +297,27 @@ export class PlatformCloudflareClient {
     }
     return buckets.map((entry) => {
       const name = requiredString(entry.name, 'R2 bucket name');
-      return { id: name, name };
+      return {
+        fingerprint: requiredString(entry.creation_date, 'R2 bucket creation date'),
+        id: name,
+        name,
+      };
     });
   }
 
   async createR2Bucket(accountId: string, name: string): Promise<CloudflareNamedResource> {
-    const result = await this.request<{ name?: unknown }>(
+    const result = await this.request<{ creation_date?: unknown; name?: unknown }>(
       `/accounts/${encodeURIComponent(accountId)}/r2/buckets`,
       { method: 'POST', body: JSON.stringify({ name }) },
     );
     const resultName = typeof result.name === 'string' ? result.name : name;
-    return { id: resultName, name: resultName };
+    return {
+      ...(typeof result.creation_date === 'string' && result.creation_date
+        ? { fingerprint: result.creation_date }
+        : {}),
+      id: resultName,
+      name: resultName,
+    };
   }
 
   async listQueues(

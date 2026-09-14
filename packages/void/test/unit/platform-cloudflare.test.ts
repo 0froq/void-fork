@@ -120,8 +120,9 @@ describe('platform Cloudflare client', () => {
         const cursor = url.searchParams.get('start_after') ?? '';
         cursors.push(cursor);
         const buckets = cursor
-          ? [{ name: 'bucket-1000' }]
+          ? [{ creation_date: '2026-09-14T00:00:01.000Z', name: 'bucket-1000' }]
           : Array.from({ length: 1000 }, (_, index) => ({
+              creation_date: '2026-09-14T00:00:00.000Z',
               name: `bucket-${String(index).padStart(4, '0')}`,
             }));
         return Response.json({ success: true, result: { buckets } });

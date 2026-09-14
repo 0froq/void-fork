@@ -168,7 +168,11 @@ function client(manifest: PlatformInstallationManifest) {
     listKvNamespaces: async () => namedResources(manifest, 'kv-namespace'),
     listQueues: async (_account: string, name: string) =>
       namedResources(manifest, 'queue').filter((resource) => resource.name === name),
-    listR2Buckets: async () => namedResources(manifest, 'r2-bucket'),
+    listR2Buckets: async () =>
+      namedResources(manifest, 'r2-bucket').map((resource) => ({
+        ...resource,
+        fingerprint: '2026-09-14T00:00:00.000Z',
+      })),
     listWorkerNames: async () =>
       namedResources(manifest, 'worker').map((resource) => resource.name),
     putKvValue: async (_account: string, _namespace: string, _key: string, value: string) => {
@@ -374,6 +378,12 @@ describe('platform lifecycle management', () => {
     };
     const originalMarker = fake.getR2Object;
     fake.getR2Object = async () => (replaced ? null : originalMarker());
+    const originalBuckets = fake.listR2Buckets;
+    fake.listR2Buckets = async () =>
+      (await originalBuckets()).map((bucket) => ({
+        ...bucket,
+        fingerprint: replaced ? '2026-09-14T00:00:09.000Z' : bucket.fingerprint,
+      }));
 
     await expect(
       uninstallPlatform(
@@ -385,6 +395,49 @@ describe('platform lifecycle management', () => {
     ).rejects.toThrow('has no ownership marker');
     expect(fake.deletedBucketMarkers).toEqual([]);
     expect(fake.deleted).not.toContainEqual(['r2-bucket', 'assets-bucket-id']);
+  });
+
+  it('resumes R2 purge after the ownership marker was deleted', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const first = client(manifest);
+    let markerPresent = true;
+    const originalDeleteMarker = first.deleteR2Object;
+    first.deleteR2Object = async (account: string, bucket: string) => {
+      await originalDeleteMarker(account, bucket);
+      markerPresent = false;
+    };
+    const originalMarker = first.getR2Object;
+    first.getR2Object = async (...args) => (markerPresent ? originalMarker(...args) : null);
+    const originalDelete = first.deleteResource;
+    first.deleteResource = async (account: string, kind: string, id: string) => {
+      if (kind === 'r2-bucket') {
+        throw new Error('interrupted after marker deletion');
+      }
+      await originalDelete(account, kind, id);
+    };
+
+    await expect(
+      uninstallPlatform(
+        first,
+        manifest,
+        { ...uninstallArgs, purgeData: true },
+        { interactive: false },
+      ),
+    ).rejects.toThrow('interrupted after marker deletion');
+    const checkpoint = listInstallationManifests()[0]!;
+    expect(checkpoint.steps.some((step) => step.key === 'delete-intent:assets-bucket')).toBe(true);
+
+    const second = client(checkpoint);
+    second.getR2Object = async () => null;
+    await uninstallPlatform(
+      second,
+      checkpoint,
+      { ...uninstallArgs, purgeData: true },
+      { interactive: false },
+    );
+    expect(second.deleted).toContainEqual(['r2-bucket', 'assets-bucket-id']);
+    expect(listInstallationManifests()[0]?.status).toBe('uninstalled');
   });
 
   it('refuses every mutation when the remote installation identity changed', async () => {

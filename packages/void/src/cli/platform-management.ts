@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { confirm, isCancel, log, note, outro } from '@clack/prompts';
 import {
   createPlatformResourceOwnershipMarker,
@@ -493,6 +494,18 @@ export async function uninstallPlatform(
         continue;
       }
       if (resource.kind === 'r2-bucket') {
+        const bucket = (await client.listR2Buckets(next.account.id)).find(
+          (entry) => entry.id === resource.id && entry.name === resource.name,
+        );
+        if (!bucket?.fingerprint) {
+          throw ownershipError(
+            `Cloudflare did not return a creation fingerprint for r2-bucket ${resource.name}`,
+          );
+        }
+        if (!hasR2DeletionIntent(next, resource, bucket.fingerprint)) {
+          next = recordR2DeletionIntent(next, resource, bucket.fingerprint);
+          await writeLifecycleCheckpoint(client, next);
+        }
         await client.emptyR2Bucket(
           next.account.id,
           resource.name,
@@ -689,11 +702,23 @@ async function verifyPlatformMutationOwnership(
     } else if (resource.kind === 'r2-bucket') {
       exists = hasNamedResource(r2Buckets, resource);
       if (exists) {
-        verifyResourceMarker(
-          await client.getR2Object(accountId, resource.name, PLATFORM_R2_OWNERSHIP_MARKER_KEY),
-          manifest,
-          resource,
+        const bucket = r2Buckets.find(
+          (entry) => entry.id === resource.id && entry.name === resource.name,
+        )!;
+        const marker = await client.getR2Object(
+          accountId,
+          resource.name,
+          PLATFORM_R2_OWNERSHIP_MARKER_KEY,
         );
+        if (
+          !marker &&
+          bucket.fingerprint &&
+          hasR2DeletionIntent(manifest, resource, bucket.fingerprint) &&
+          hasR2DeletionIntent(remote, resource, bucket.fingerprint)
+        ) {
+          continue;
+        }
+        verifyResourceMarker(marker, manifest, resource);
       }
     } else {
       throw ownershipError(`live ownership checks do not support ${resource.kind}`);
@@ -759,6 +784,55 @@ function hasNamedResource(
   resource: InstallationResource,
 ): boolean {
   return entries.some((entry) => entry.id === resource.id && entry.name === resource.name);
+}
+
+function r2DeletionIntentHash(
+  manifest: PlatformInstallationManifest,
+  resource: InstallationResource,
+  fingerprint: string,
+): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        accountId: manifest.account.id,
+        fingerprint,
+        installationId: manifest.id,
+        ownershipNonce: manifest.ownershipNonce,
+        resourceId: resource.id,
+        resourceKey: resource.key,
+        resourceName: resource.name,
+      }),
+    )
+    .digest('hex');
+}
+
+function hasR2DeletionIntent(
+  manifest: PlatformInstallationManifest,
+  resource: InstallationResource,
+  fingerprint: string,
+): boolean {
+  return manifest.steps.some(
+    (step) =>
+      step.key === `delete-intent:${resource.key}` &&
+      step.resultHash === r2DeletionIntentHash(manifest, resource, fingerprint),
+  );
+}
+
+function recordR2DeletionIntent(
+  manifest: PlatformInstallationManifest,
+  resource: InstallationResource,
+  fingerprint: string,
+): PlatformInstallationManifest {
+  const now = new Date().toISOString();
+  return recordInstallationStep(
+    manifest,
+    {
+      completedAt: now,
+      key: `delete-intent:${resource.key}`,
+      resultHash: r2DeletionIntentHash(manifest, resource, fingerprint),
+    },
+    now,
+  );
 }
 
 function verifyResourceMarker(
