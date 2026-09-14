@@ -181,7 +181,7 @@ function client(manifest: PlatformInstallationManifest) {
     putKvValue: async (_account: string, _namespace: string, _key: string, value: string) => {
       remoteWrites.push(value);
     },
-    removeRoutes: async () => {
+    removeRoutes: async (_account: string, _zone: string | null, _workers: ReadonlySet<string>) => {
       removedRoutes++;
     },
     setWorkerSubdomain: async (_account: string, worker: string, enabled: boolean) => {
@@ -360,6 +360,39 @@ describe('platform lifecycle management', () => {
     await disablePlatform(fake, manifest, false);
 
     expect(fake.removedRoutes).toBe(1);
+    expect(fake.subdomains).toHaveLength(4);
+    expect(listInstallationManifests()[0]?.status).toBe('disabled');
+  });
+
+  it('disables every surviving Worker when one recorded Worker is missing', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    fake.listWorkerNames = async () => ['api-worker', 'proxy-worker', 'tail-worker'];
+
+    await disablePlatform(fake, manifest, false);
+
+    expect(fake.subdomains).toEqual([
+      ['api-worker', false],
+      ['proxy-worker', false],
+      ['tail-worker', false],
+    ]);
+    expect(listInstallationManifests()[0]?.status).toBe('disabled');
+  });
+
+  it('disables workers.dev and custom domains when the recorded zone is missing', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const fake = client(manifest);
+    fake.findZone = async () => null;
+    let routeZone: string | null | undefined;
+    fake.removeRoutes = async (_account, zone) => {
+      routeZone = zone;
+    };
+
+    await disablePlatform(fake, manifest, false);
+
+    expect(routeZone).toBeNull();
     expect(fake.subdomains).toHaveLength(4);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
   });

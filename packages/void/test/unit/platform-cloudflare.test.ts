@@ -56,6 +56,37 @@ describe('platform Cloudflare client', () => {
     expect(message).toContain('non-JSON');
   });
 
+  it('removes Worker custom domains even when the application zone is missing', async () => {
+    const requests: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        requests.push(String(input));
+        return Response.json({ result: [], success: true });
+      },
+    });
+
+    await client.removeRoutes('account', null, new Set(['void-api']));
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContain('/accounts/account/workers/domains?service=void-api');
+    expect(requests[0]).not.toContain('/zones/');
+  });
+
+  it('treats a missing Worker as already disabled but not as enabled', async () => {
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async () =>
+        Response.json(
+          { errors: [{ message: 'missing' }], result: null, success: false },
+          { status: 404 },
+        ),
+    });
+
+    await expect(client.setWorkerSubdomain('account', 'missing', false)).resolves.toBeUndefined();
+    await expect(client.setWorkerSubdomain('account', 'missing', true)).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
   it('paginates namespace discovery without a title filter', async () => {
     const pages: Array<string> = [];
     const client = new PlatformCloudflareClient('token', {

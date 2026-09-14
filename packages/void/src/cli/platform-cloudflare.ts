@@ -667,24 +667,26 @@ export class PlatformCloudflareClient {
 
   async removeRoutes(
     accountId: string,
-    zoneId: string,
+    zoneId: string | null,
     workerNames: ReadonlySet<string>,
   ): Promise<void> {
-    const routes = await this.request<ReadonlyArray<{ id?: unknown; script?: unknown }>>(
-      `/zones/${encodeURIComponent(zoneId)}/workers/routes`,
-    );
-    for (const route of routes) {
-      if (
-        typeof route.id === 'string' &&
-        typeof route.script === 'string' &&
-        workerNames.has(route.script)
-      ) {
-        await this.request(
-          `/zones/${encodeURIComponent(zoneId)}/workers/routes/${encodeURIComponent(route.id)}`,
-          {
-            method: 'DELETE',
-          },
-        );
+    if (zoneId !== null) {
+      const routes = await this.request<ReadonlyArray<{ id?: unknown; script?: unknown }>>(
+        `/zones/${encodeURIComponent(zoneId)}/workers/routes`,
+      );
+      for (const route of routes) {
+        if (
+          typeof route.id === 'string' &&
+          typeof route.script === 'string' &&
+          workerNames.has(route.script)
+        ) {
+          await this.request(
+            `/zones/${encodeURIComponent(zoneId)}/workers/routes/${encodeURIComponent(route.id)}`,
+            {
+              method: 'DELETE',
+            },
+          );
+        }
       }
     }
     const removedDomainIds = new Set<string>();
@@ -710,14 +712,21 @@ export class PlatformCloudflareClient {
   }
 
   async setWorkerSubdomain(accountId: string, workerName: string, enabled: boolean): Promise<void> {
-    await this.request(
-      `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}/subdomain`,
-      {
-        body: JSON.stringify({ enabled, previews_enabled: enabled }),
-        headers: { 'Cloudflare-Workers-Script-Api-Date': '2025-08-01' },
-        method: 'POST',
-      },
-    );
+    try {
+      await this.request(
+        `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}/subdomain`,
+        {
+          body: JSON.stringify({ enabled, previews_enabled: enabled }),
+          headers: { 'Cloudflare-Workers-Script-Api-Date': '2025-08-01' },
+          method: 'POST',
+        },
+      );
+    } catch (error) {
+      if (!enabled && error instanceof PlatformCloudflareApiError && error.status === 404) {
+        return;
+      }
+      throw error;
+    }
   }
 }
 

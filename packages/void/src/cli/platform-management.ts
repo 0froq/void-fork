@@ -335,7 +335,7 @@ export async function disablePlatform(
     log.info(`${manifest.deployment.displayName} is already disabled.`);
     return;
   }
-  await verifyPlatformMutationOwnership(
+  const missing = await verifyPlatformMutationOwnership(
     client,
     manifest,
     new Set([
@@ -355,14 +355,19 @@ export async function disablePlatform(
     const zone = requireResource(next, 'zone');
     const trafficGeneration = currentTrafficGeneration(next);
     if (!hasLifecycleStep(next, `disable:${trafficGeneration}:routes`)) {
-      await client.removeRoutes(next.account.id, zone.id, workers);
+      await client.removeRoutes(next.account.id, missing.has(zone.key) ? null : zone.id, workers);
       next = recordLifecycleStep(next, `disable:${trafficGeneration}:routes`);
       await writeLifecycleCheckpoint(client, next);
     }
     for (const worker of workers) {
       const step = `disable:${trafficGeneration}:workers.dev:${worker}`;
       if (!hasLifecycleStep(next, step)) {
-        await client.setWorkerSubdomain(next.account.id, worker, false);
+        const resource = next.resources.find(
+          (entry) => entry.kind === 'worker' && entry.name === worker,
+        )!;
+        if (!missing.has(resource.key)) {
+          await client.setWorkerSubdomain(next.account.id, worker, false);
+        }
         next = recordLifecycleStep(next, step);
         await writeLifecycleCheckpoint(client, next);
       }
