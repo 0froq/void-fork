@@ -203,6 +203,10 @@ export type PlatformInstallerDependencies = Readonly<{
     platformVersion: string,
     healthProbeToken: string,
   ) => Promise<void>;
+  verifyWorkerCutover?: (
+    manifest: PlatformInstallationManifest,
+    generation: number,
+  ) => Promise<void>;
 }>;
 
 export type PlatformInstallationResult = Readonly<{
@@ -1060,15 +1064,41 @@ export async function installPlatform(
         }
       }
     }
+    const verifyCurrentWorkerCutover = async () => {
+      if (!requiresStagedCommit) {
+        return;
+      }
+      if (dependencies.verifyWorkerCutover) {
+        await dependencies.verifyWorkerCutover(manifest!, workerCutoverGeneration);
+      } else if (!dependencies.deployWorker) {
+        await verifyPlatformWorkerCutoverVersions(
+          manifest!,
+          workerCutoverGeneration,
+          enabledConfigs,
+          plan.account.id,
+        );
+      }
+    };
+    await verifyCurrentWorkerCutover();
     if (dependencies.client.deleteKvValue) {
       await dependencies.client.deleteKvValue(
         plan.account.id,
         requireId(ids, 'routing-kv'),
         PLATFORM_DISABLED_KEY,
       );
-      workerTrafficGuarded = false;
     } else if (wasDisabled || !previousPublicEndpoints) {
       throw new Error('platform: Routing disablement removal is unavailable.');
+    }
+    if (requiresStagedCommit) {
+      await (dependencies.verifyHealth ?? verifyPlatformHealth)(
+        plan.apiUrl,
+        manifest.id,
+        plan.proxyUrl,
+        plan.deployment.application.baseDomain,
+        version,
+        createPlatformHealthProbeToken(manifest.ownershipNonce),
+      );
+      await verifyCurrentWorkerCutover();
     }
     workerDeploymentCommitted = true;
     manifest = recordWorkerCutoverResolution(manifest, workerCutoverGeneration, 'committed', now());
@@ -1077,6 +1107,7 @@ export async function installPlatform(
     manifest = transitionInstallation(manifest, 'installed', now());
     writeInstallationManifest(manifest);
     await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    workerTrafficGuarded = false;
     promoteInstallationSecrets(manifest);
     saveInstalledPlatformConnection(plan, manifest);
     return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
@@ -2329,31 +2360,31 @@ async function deployPlatformWorker(
     return rollback;
   } catch (error) {
     const unsafeTraffic = error instanceof PlatformWorkerCustomDomainsChangedError;
+    const rollbackVersionId = activatedVersionId && uploadedVersionId ? uploadedVersionId : null;
     const recoveryFailures = await recoverFailedPlatformWorkerDeployment({
       checkpointUnsafeTraffic: options.onUnsafeTraffic,
       closeRoutingGate: options.retainNewWorker,
-      rollback:
-        activatedVersionId && uploadedVersionId
-          ? () =>
-              rollbackPlatformWorker({
-                accountId,
-                activatedDeploymentId,
-                activatedVersionId: uploadedVersionId,
-                config,
-                nextTriggers: readTriggerConfigFromObject(nextTraffic.wranglerConfig),
-                previousConfig: options.previousConfig,
-                previousCustomDomains: previousTraffic.customDomains,
-                previousTriggers,
-                previousVersionId,
-                preserveCustomDomains: unsafeTraffic,
-                inspectNewWorker: options.inspectNewWorker,
-                removeCustomDomains: options.removeCustomDomains,
-                publishCustomDomains: options.publishCustomDomains,
-                retainNewWorker: options.retainNewWorker,
-                workerExisted: options.workerExisted,
-                workerName,
-              })
-          : null,
+      rollback: rollbackVersionId
+        ? () =>
+            rollbackPlatformWorker({
+              accountId,
+              activatedDeploymentId,
+              activatedVersionId: rollbackVersionId,
+              config,
+              nextTriggers: readTriggerConfigFromObject(nextTraffic.wranglerConfig),
+              previousConfig: options.previousConfig,
+              previousCustomDomains: previousTraffic.customDomains,
+              previousTriggers,
+              previousVersionId,
+              preserveCustomDomains: unsafeTraffic,
+              inspectNewWorker: options.inspectNewWorker,
+              removeCustomDomains: options.removeCustomDomains,
+              publishCustomDomains: options.publishCustomDomains,
+              retainNewWorker: options.retainNewWorker,
+              workerExisted: options.workerExisted,
+              workerName,
+            })
+        : null,
       unsafeTraffic,
     });
     if (recoveryFailures.length > 0) {
@@ -3363,6 +3394,49 @@ function interruptedWorkerCutover(
         unsafeTraffic: unresolved[1].unsafeTraffic,
       }
     : null;
+}
+
+export async function verifyPlatformWorkerCutoverVersions(
+  manifest: PlatformInstallationManifest,
+  generation: number,
+  configs: Record<PlatformWorkerKey, Record<string, unknown>>,
+  accountId: string,
+  runner: typeof runPlatformWrangler = runPlatformWrangler,
+): Promise<void> {
+  const cutover = interruptedWorkerCutover(manifest);
+  if (cutover?.generation !== generation || cutover.staged.size !== 4) {
+    throw new Error(
+      `platform: Worker cutover generation ${generation} is missing a complete immutable-version checkpoint.`,
+    );
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'void-platform-cutover-verify-'));
+  try {
+    for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
+      const snapshot = cutover.staged.get(key);
+      if (!snapshot) {
+        throw new Error(
+          `platform: Worker cutover generation ${generation} is missing its ${key} checkpoint.`,
+        );
+      }
+      const config = configs[key];
+      const configPath = join(directory, `${key}.wrangler.json`);
+      writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+      const active = await readActivePlatformWorkerSnapshot(
+        configPath,
+        accountId,
+        snapshot.workerName,
+        readPlatformWorkerOwnershipMarker(config),
+        runner,
+      );
+      if (active.versionId !== snapshot.stagedVersionId) {
+        throw new Error(
+          `platform: Worker ${snapshot.workerName} changed concurrently from staged version ${snapshot.stagedVersionId} to ${active.versionId}; refusing to enable platform traffic.`,
+        );
+      }
+    }
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
 }
 
 function recordWorkerTrafficState(

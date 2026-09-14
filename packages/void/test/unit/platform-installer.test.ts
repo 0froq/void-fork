@@ -1270,7 +1270,9 @@ describe('platform installer', () => {
         migrateDatabase: async () => {},
         revalidateBeforeWorkerDeploy: async () => {},
         verifyHealth: async () => {
-          expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+          expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(
+            lifecycleEvents.includes('verify') ? undefined : PLATFORM_DISABLED_VALUE,
+          );
           lifecycleEvents.push('verify');
         },
       },
@@ -1315,11 +1317,13 @@ describe('platform installer', () => {
     expect(JSON.parse(routingValues.get('signup:allowlist')!)).toEqual([]);
     expect(routingValues.has(PLATFORM_DISABLED_KEY)).toBe(false);
     expect(lifecycleEvents[0]).toBe(`put:${PLATFORM_DISABLED_KEY}`);
-    expect(lifecycleEvents.filter((event) => event === 'verify')).toHaveLength(1);
+    expect(lifecycleEvents.filter((event) => event === 'verify')).toHaveLength(2);
     expect(lifecycleEvents.indexOf('verify')).toBeLessThan(
       lifecycleEvents.lastIndexOf(`deploy:${result.manifest.deployment.resources.dispatchWorker}`),
     );
-    expect(lifecycleEvents.at(-1)).toBe(`delete:${PLATFORM_DISABLED_KEY}`);
+    expect(lifecycleEvents.indexOf(`delete:${PLATFORM_DISABLED_KEY}`)).toBeLessThan(
+      lifecycleEvents.lastIndexOf('verify'),
+    );
     expect(listInstallationManifests(directory)).toHaveLength(1);
     expect(readdirSync(join(directory, 'account')).some((name) => name.endsWith('.secrets'))).toBe(
       false,
@@ -1905,6 +1909,50 @@ describe('platform installer', () => {
       expect(config).not.toHaveProperty('routes');
     }
 
+    const concurrentEnableEvents: Array<string> = [];
+    let cutoverVerifications = 0;
+    await expect(
+      installPlatform(
+        upgradedPlan,
+        secrets,
+        setInstallationDesiredState(
+          resumedDisabledUpgrade.manifest,
+          'enabled',
+          '2026-09-14T00:00:04.250Z',
+        ),
+        {
+          acquireDatabaseLifecycleLock,
+          claimDatabase,
+          client: {
+            ...upgradeClient,
+            deleteKvValue: async (_account, _namespace, key) => {
+              concurrentEnableEvents.push(`delete:${key}`);
+            },
+            putKvValue: async (_account, _namespace, key) => {
+              if (key === PLATFORM_DISABLED_KEY) {
+                concurrentEnableEvents.push(`put:${key}`);
+              }
+            },
+          },
+          deployWorker: async () => async () => {},
+          migrateDatabase: async () => {},
+          revalidateBeforeWorkerDeploy: async () => {},
+          verifyHealth: async () => {},
+          verifyWorkerCutover: async () => {
+            cutoverVerifications++;
+            if (cutoverVerifications === 2) {
+              throw new Error('platform: API Worker changed concurrently.');
+            }
+          },
+        },
+      ),
+    ).rejects.toThrow('API Worker changed concurrently');
+    expect(cutoverVerifications).toBe(2);
+    expect(concurrentEnableEvents.slice(-2)).toEqual([
+      `delete:${PLATFORM_DISABLED_KEY}`,
+      `put:${PLATFORM_DISABLED_KEY}`,
+    ]);
+
     const failedEnableEvents: Array<string> = [];
     let failedEnableDeploys = 0;
     await expect(
@@ -1999,7 +2047,7 @@ describe('platform installer', () => {
     );
     expect(enabledUpgrade.manifest.status).toBe('installed');
     expect(enabledUpgrade.manifest.desiredState).toBe('enabled');
-    expect(enabledHealthChecks).toBe(1);
+    expect(enabledHealthChecks).toBe(2);
     expect(deletedKvValues).toContain('__void/platform/disabled/v1');
     expect(enabledConfigs).toHaveLength(8);
     for (const config of enabledConfigs.slice(0, 4)) {
