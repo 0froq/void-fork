@@ -45,6 +45,7 @@ import {
   r2BucketConfigHash,
   readPlatformDatabaseLifecycleManifestConnection,
   readActivePlatformWorkerSnapshot,
+  recoverFailedPlatformWorkerDeployment,
   retainReplacedInstallationResource,
   resolvePlatformPreviousTriggerConfig,
   resolveBootstrapGitHubId,
@@ -120,6 +121,26 @@ async function close(server: Server): Promise<void> {
 describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('attempts Worker rollback even when closing an unsafe routing gate fails', async () => {
+    const events: Array<string> = [];
+    const failures = await recoverFailedPlatformWorkerDeployment({
+      checkpointUnsafeTraffic: async () => {
+        events.push('checkpoint');
+      },
+      closeRoutingGate: async () => {
+        events.push('gate');
+        throw new Error('KV unavailable');
+      },
+      rollback: async () => {
+        events.push('rollback');
+      },
+      unsafeTraffic: true,
+    });
+
+    expect(events).toEqual(['gate', 'checkpoint', 'rollback']);
+    expect(failures).toEqual(['closing the routing gate failed: KV unavailable']);
+  });
 
   it('creates a new Worker through a conditional API request', async () => {
     const requests: Array<{

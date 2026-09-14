@@ -2329,38 +2329,36 @@ async function deployPlatformWorker(
     return rollback;
   } catch (error) {
     const unsafeTraffic = error instanceof PlatformWorkerCustomDomainsChangedError;
-    let recoveryError: unknown = null;
-    try {
-      if (unsafeTraffic) {
-        await options.retainNewWorker();
-        await options.onUnsafeTraffic();
-      }
-      if (activatedVersionId && uploadedVersionId) {
-        await rollbackPlatformWorker({
-          accountId,
-          activatedDeploymentId,
-          activatedVersionId: uploadedVersionId,
-          config,
-          nextTriggers: readTriggerConfigFromObject(nextTraffic.wranglerConfig),
-          previousConfig: options.previousConfig,
-          previousCustomDomains: previousTraffic.customDomains,
-          previousTriggers,
-          previousVersionId,
-          preserveCustomDomains: unsafeTraffic,
-          inspectNewWorker: options.inspectNewWorker,
-          removeCustomDomains: options.removeCustomDomains,
-          publishCustomDomains: options.publishCustomDomains,
-          retainNewWorker: options.retainNewWorker,
-          workerExisted: options.workerExisted,
-          workerName,
-        });
-      }
-    } catch (rollbackError) {
-      recoveryError = rollbackError;
-    }
-    if (recoveryError) {
+    const recoveryFailures = await recoverFailedPlatformWorkerDeployment({
+      checkpointUnsafeTraffic: options.onUnsafeTraffic,
+      closeRoutingGate: options.retainNewWorker,
+      rollback:
+        activatedVersionId && uploadedVersionId
+          ? () =>
+              rollbackPlatformWorker({
+                accountId,
+                activatedDeploymentId,
+                activatedVersionId: uploadedVersionId,
+                config,
+                nextTriggers: readTriggerConfigFromObject(nextTraffic.wranglerConfig),
+                previousConfig: options.previousConfig,
+                previousCustomDomains: previousTraffic.customDomains,
+                previousTriggers,
+                previousVersionId,
+                preserveCustomDomains: unsafeTraffic,
+                inspectNewWorker: options.inspectNewWorker,
+                removeCustomDomains: options.removeCustomDomains,
+                publishCustomDomains: options.publishCustomDomains,
+                retainNewWorker: options.retainNewWorker,
+                workerExisted: options.workerExisted,
+                workerName,
+              })
+          : null,
+      unsafeTraffic,
+    });
+    if (recoveryFailures.length > 0) {
       throw new PlatformWorkerRecoveryIncompleteError(
-        `platform: ${errorMessage(error)} Automatic recovery for ${workerName} was incomplete: ${errorMessage(recoveryError)}`,
+        `platform: ${errorMessage(error)} Automatic recovery for ${workerName} was incomplete: ${recoveryFailures.join('; ')}`,
         { cause: error },
       );
     }
@@ -2374,6 +2372,30 @@ async function deployPlatformWorker(
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
+}
+
+export async function recoverFailedPlatformWorkerDeployment(input: {
+  checkpointUnsafeTraffic: () => Promise<void>;
+  closeRoutingGate: () => Promise<void>;
+  rollback: (() => Promise<void>) | null;
+  unsafeTraffic: boolean;
+}): Promise<Array<string>> {
+  const failures: Array<string> = [];
+  const attempt = async (label: string, operation: () => Promise<void>) => {
+    try {
+      await operation();
+    } catch (error) {
+      failures.push(`${label}: ${errorMessage(error)}`);
+    }
+  };
+  if (input.unsafeTraffic) {
+    await attempt('closing the routing gate failed', input.closeRoutingGate);
+    await attempt('checkpointing unsafe traffic failed', input.checkpointUnsafeTraffic);
+  }
+  if (input.rollback) {
+    await attempt('Worker rollback failed', input.rollback);
+  }
+  return failures;
 }
 
 async function rollbackPlatformWorker(input: {
