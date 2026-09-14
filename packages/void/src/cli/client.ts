@@ -5,6 +5,7 @@ import { getPackageDir } from './agents.ts';
 import { getApiUrl } from './auth.ts';
 import { ensureCloudflaredToken } from './cf-access.ts';
 import type { CliLogger } from './log-file.ts';
+import { normalizePlatformApiUrl } from './platform-registry.ts';
 import type { DeployAssetUploadRequest, DeployEvent, DeployUploadPayload } from './types.ts';
 
 /**
@@ -275,17 +276,19 @@ export class PlatformClient {
   private readonly baseUrl: string;
   private readonly authHeaders: Record<string, string>;
   private readonly cliLog?: CliLogger;
+  readonly apiUrl: string;
 
   constructor(
     token: string,
     options?: string | { apiUrl?: string; root?: string; cliLog?: CliLogger },
   ) {
     if (typeof options === 'string') {
-      this.baseUrl = options;
+      this.baseUrl = normalizePlatformApiUrl(options);
     } else {
-      this.baseUrl = options?.apiUrl ?? getApiUrl(options?.root);
+      this.baseUrl = normalizePlatformApiUrl(options?.apiUrl ?? getApiUrl(options?.root));
       this.cliLog = options?.cliLog;
     }
+    this.apiUrl = this.baseUrl;
     ensureCloudflaredToken(this.baseUrl);
     this.authHeaders = {
       Authorization: `Bearer ${token}`,

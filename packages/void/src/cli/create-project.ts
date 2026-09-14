@@ -58,7 +58,7 @@ export async function promptAndCreateProject(
     throw new Error('Project creation cancelled.');
   }
   const config: ProjectConfig = { projectId: project.id, slug: project.slug };
-  writeProjectConfig(root, attachSelectedPlatform(root, config));
+  writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
   return config;
 }
 

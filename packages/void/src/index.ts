@@ -641,7 +641,7 @@ async function runAiSetupPrompt(
     slug = project.slug;
   }
 
-  writeProjectConfig(root, attachSelectedPlatform(root, { projectId, slug }));
+  writeProjectConfig(root, attachSelectedPlatform(root, { projectId, slug }, client.apiUrl));
   log.success(`Linked to ${pc.blue(slug)}`);
 
   // Restart the dev server so mergeBindings picks up fresh credentials

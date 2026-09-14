@@ -34,6 +34,7 @@ vi.mock('@clack/prompts', () => ({
 
 function createClient() {
   return {
+    apiUrl: 'https://api.void.cloud',
     createProject: vi.fn(),
     listProjects: vi.fn(),
   } as unknown as PlatformClient & {

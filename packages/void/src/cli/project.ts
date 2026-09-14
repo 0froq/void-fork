@@ -2,12 +2,11 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { normalizeApplicationDomain } from '@void/platform';
 import { join, dirname } from 'pathslash';
 import {
-  readLegacyHostedPlatformSelection,
+  hostedPlatformForApiUrl,
   VOID_CLOUD_PLATFORM,
   VOID_CLOUD_STAGING_PLATFORM,
 } from './hosted-platform.ts';
-import { normalizePlatformApiUrl } from './platform-registry.ts';
-import { getActivePlatformConnection } from './platform-registry.ts';
+import { listPlatformConnections, normalizePlatformApiUrl } from './platform-registry.ts';
 import type { DeployTarget } from './types.ts';
 
 export type ProjectConfig = {
@@ -157,21 +156,22 @@ export function readProjectProxyUrl(root: string): string | null {
 export function attachSelectedPlatform(
   root: string,
   config: Pick<ProjectConfig, 'projectId' | 'slug'>,
+  platformApiUrl: string,
 ): ProjectConfig {
-  if (isVoidInternalStaging(root)) {
+  const apiUrl = normalizePlatformApiUrl(platformApiUrl);
+  const hosted = hostedPlatformForApiUrl(apiUrl);
+  if (hosted) {
     return {
       ...config,
-      applicationDomain: VOID_CLOUD_STAGING_PLATFORM.applicationDomain,
-      platformUrl: VOID_CLOUD_STAGING_PLATFORM.apiUrl,
-      proxyUrl: VOID_CLOUD_STAGING_PLATFORM.proxyUrl,
-      voidInternalStaging: true,
+      applicationDomain: hosted.applicationDomain,
+      platformUrl: hosted.apiUrl,
+      proxyUrl: hosted.proxyUrl,
+      ...(isVoidInternalStaging(root) && hosted.apiUrl === VOID_CLOUD_STAGING_PLATFORM.apiUrl
+        ? { voidInternalStaging: true }
+        : {}),
     };
   }
-  const legacySelection = readLegacyHostedPlatformSelection();
-  if (isLegacyVoidCloudProject(root)) {
-    return { ...config, ...legacyVoidCloudProjectMetadata() };
-  }
-  const connection = getActivePlatformConnection();
+  const connection = listPlatformConnections().find((entry) => entry.apiUrl === apiUrl);
   if (connection?.applicationDomain && connection.proxyUrl) {
     return {
       ...config,
@@ -180,16 +180,8 @@ export function attachSelectedPlatform(
       proxyUrl: connection.proxyUrl,
     };
   }
-  if (legacySelection) {
-    return {
-      ...config,
-      applicationDomain: legacySelection.applicationDomain,
-      platformUrl: legacySelection.apiUrl,
-      proxyUrl: legacySelection.proxyUrl,
-    };
-  }
   throw new Error(
-    'platform: No Void platform selected. Run `void platform connect <url>` or `void platform install` first.',
+    `platform: No verified metadata is registered for ${apiUrl}. Run \`void platform connect ${apiUrl}\` before linking a project.`,
   );
 }
 

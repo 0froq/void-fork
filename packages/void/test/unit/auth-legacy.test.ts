@@ -83,7 +83,9 @@ describe('legacy Void Cloud authentication', () => {
     expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
       api: 'https://api.void.cloud',
     });
-    expect(attachSelectedPlatform(root, { projectId: 'project', slug: 'app' })).toMatchObject({
+    expect(
+      attachSelectedPlatform(root, { projectId: 'project', slug: 'app' }, 'https://api.void.cloud'),
+    ).toMatchObject({
       applicationDomain: 'void.app',
       platformUrl: 'https://api.void.cloud',
       proxyUrl: 'https://proxy.void.cloud',
@@ -116,7 +118,9 @@ describe('legacy Void Cloud authentication', () => {
 
     expect(getApiUrl(root)).toBe('https://platform.example.test');
     expect(getSiteDomain(root)).toBe('apps.example.test');
-    expect(attachSelectedPlatform(root, { projectId: 'project', slug: 'app' })).toMatchObject({
+    expect(
+      attachSelectedPlatform(root, { projectId: 'project', slug: 'app' }, getApiUrl(root)),
+    ).toMatchObject({
       applicationDomain: 'apps.example.test',
       platformUrl: 'https://platform.example.test',
       proxyUrl: 'https://proxy.example.test',

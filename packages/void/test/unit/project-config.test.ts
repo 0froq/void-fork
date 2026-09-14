@@ -242,9 +242,13 @@ describe('project config', () => {
   it('requires a selected platform before creating a new project link', () => {
     const root = makeRoot();
     process.env.VOID_PLATFORM_REGISTRY_DIR = makeRoot();
-    expect(() => attachSelectedPlatform(root, { projectId: 'proj_new', slug: 'new-app' })).toThrow(
-      'No Void platform selected',
-    );
+    expect(() =>
+      attachSelectedPlatform(
+        root,
+        { projectId: 'proj_new', slug: 'new-app' },
+        'https://platform.example.test',
+      ),
+    ).toThrow('No verified metadata is registered');
   });
 
   it('preserves Void Cloud when relinking a legacy project without a registry connection', () => {
@@ -252,7 +256,13 @@ describe('project config', () => {
     process.env.VOID_PLATFORM_REGISTRY_DIR = makeRoot();
     writeProjectJson(root, { projectId: 'proj_legacy', slug: 'legacy-app' });
 
-    expect(attachSelectedPlatform(root, { projectId: 'proj_new', slug: 'new-app' })).toEqual({
+    expect(
+      attachSelectedPlatform(
+        root,
+        { projectId: 'proj_new', slug: 'new-app' },
+        'https://api.void.cloud',
+      ),
+    ).toEqual({
       applicationDomain: 'void.app',
       platformUrl: 'https://api.void.cloud',
       proxyUrl: 'https://proxy.void.cloud',
@@ -274,12 +284,54 @@ describe('project config', () => {
       kind: 'connected',
       proxyUrl: 'https://proxy.example.test',
     });
-    expect(attachSelectedPlatform(root, { projectId: 'proj_new', slug: 'new-app' })).toEqual({
+    expect(
+      attachSelectedPlatform(
+        root,
+        { projectId: 'proj_new', slug: 'new-app' },
+        'https://platform.example.test',
+      ),
+    ).toEqual({
       applicationDomain: 'apps.example.test',
       platformUrl: 'https://platform.example.test',
       proxyUrl: 'https://proxy.example.test',
       projectId: 'proj_new',
       slug: 'new-app',
+    });
+  });
+
+  it('attaches the API operation platform instead of the active connection', () => {
+    const root = makeRoot();
+    const registry = makeRoot();
+    process.env.VOID_PLATFORM_REGISTRY_DIR = registry;
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://b.example.test',
+      applicationDomain: 'apps.b.example.test',
+      displayName: 'Platform B',
+      installationId: null,
+      kind: 'connected',
+      proxyUrl: 'https://proxy.b.example.test',
+    });
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://a.example.test',
+      applicationDomain: 'apps.a.example.test',
+      displayName: 'Platform A',
+      installationId: null,
+      kind: 'connected',
+      proxyUrl: 'https://proxy.a.example.test',
+    });
+
+    expect(
+      attachSelectedPlatform(
+        root,
+        { projectId: 'project-from-b', slug: 'app-b' },
+        'https://b.example.test',
+      ),
+    ).toMatchObject({
+      applicationDomain: 'apps.b.example.test',
+      platformUrl: 'https://b.example.test',
+      proxyUrl: 'https://proxy.b.example.test',
     });
   });
 });

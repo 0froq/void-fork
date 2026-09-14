@@ -39,6 +39,8 @@ vi.mock('../../src/cli/auth', () => ({
 
 vi.mock('../../src/cli/client', () => ({
   PlatformClient: class {
+    readonly apiUrl = 'https://api.void.cloud';
+
     listProjects(...args: Array<unknown>) {
       return mockListProjects(...args);
     }

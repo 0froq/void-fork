@@ -36,7 +36,7 @@ export async function runLink(root: string, slug?: string): Promise<void> {
       cancel(`project: No project found with slug '${slug}'.`);
       process.exit(1);
     }
-    const config = attachSelectedPlatform(root, resolved);
+    const config = attachSelectedPlatform(root, resolved, client.apiUrl);
     writeProjectConfig(root, config);
     outro(`Linked to ${pc.blue(config.slug)}.${getSiteDomain(root)}`);
     return;
@@ -55,7 +55,11 @@ export async function runLink(root: string, slug?: string): Promise<void> {
 
   writeProjectConfig(
     root,
-    attachSelectedPlatform(root, { projectId: result.project.id, slug: result.project.slug }),
+    attachSelectedPlatform(
+      root,
+      { projectId: result.project.id, slug: result.project.slug },
+      client.apiUrl,
+    ),
   );
   outro(`Linked to ${pc.blue(result.project.slug)}.${getSiteDomain(root)}`);
 }
