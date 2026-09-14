@@ -88,7 +88,7 @@ void platform install \
 
 The database must be dedicated to this installation. Its ownership claim and platform tables remain after uninstall because external PostgreSQL is never purged automatically. To reuse it for a different installation, explicitly remove the old platform schema and data yourself or provide a fresh database.
 
-Before changing Cloudflare, the installer shows the complete plan and defaults the confirmation to No. Every create operation is preceded by a durable local intent checkpoint, and ownership is continuously mirrored into the installer-owned routing namespace. The installer also stamps installation-specific ownership markers into every platform Worker and the assets R2 bucket. A local intent alone is never accepted as remote ownership proof, so a concurrent or ambiguous same-name installation fails closed instead of claiming resources it might later delete.
+Before changing Cloudflare, the installer shows the complete plan and defaults the confirmation to No. A read-only `--plan` shows the exact footprint with a representative stable suffix; the mutating install allocates a fresh cryptographically random suffix and shows those final names before confirmation. Every create operation is preceded by a durable local intent checkpoint, and ownership is continuously mirrored into the installer-owned routing namespace. The installer also stamps installation-specific ownership markers into every platform Worker and the assets R2 bucket. A local intent alone is never accepted as remote ownership proof, so a concurrent or ambiguous same-name installation fails closed instead of claiming resources it might later delete.
 
 If the requested zone does not exist, Void creates it and stops in a `waiting-for-dns` state. Update the domain at its registrar to use the printed Cloudflare nameservers, wait for the zone to become active, then resume:
 
@@ -102,7 +102,7 @@ For application traffic, Void creates one proxied wildcard DNS record at `*.appl
 
 ## Cloudflare footprint
 
-Every resource uses the deterministic `void-<installation-name>-*` prefix where Cloudflare permits names:
+Every resource uses a recognizable `void-<installation-name>-<random-suffix>-*` prefix where Cloudflare permits names. The per-installation suffix prevents a concurrent process from predicting and claiming a Worker name before its first upload.
 
 | Resource                                  |  Count | Purpose                                                            |
 | ----------------------------------------- | -----: | ------------------------------------------------------------------ |

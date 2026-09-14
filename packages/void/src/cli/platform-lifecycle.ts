@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { confirm, intro, isCancel, log, note, outro, password, select, text } from '@clack/prompts';
 import {
   normalizeApplicationDomain,
@@ -195,9 +196,13 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       installationSlug,
       zoneName,
     };
-    const plan = await createPlatformInstallPlan(client, planInput, existing, {
+    const plan = await createInitialPlatformInstallPlan(
+      client,
+      planInput,
+      existing,
       authoritativeProvisionIntents,
-    });
+      args.plan,
+    );
     note(
       formatPlatformInstallPlan(plan),
       args.plan ? 'Read-only installation plan' : 'Installation plan',
@@ -309,6 +314,37 @@ export function assertNoninteractivePlatformMutationAcknowledged(
   throw new Error(
     `platform: Non-interactive \`void platform ${args.subcommand}\` requires --yes to acknowledge Cloudflare changes. Run with --plan first to inspect them.`,
   );
+}
+
+async function createInitialPlatformInstallPlan(
+  client: PlatformCloudflareClient,
+  input: Parameters<typeof createPlatformInstallPlan>[1],
+  existing: PlatformInstallationManifest | null,
+  authoritativeProvisionIntents: boolean,
+  planOnly: boolean,
+): Promise<Awaited<ReturnType<typeof createPlatformInstallPlan>>> {
+  if (existing || planOnly) {
+    return createPlatformInstallPlan(client, input, existing, {
+      authoritativeProvisionIntents,
+    });
+  }
+  let collision: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await createPlatformInstallPlan(client, input, null, {
+        authoritativeProvisionIntents,
+        provisioningSuffix: randomBytes(6).toString('hex'),
+      });
+    } catch (error) {
+      if (!String(error).includes('already exists but is not owned by this installation')) {
+        throw error;
+      }
+      collision = error;
+    }
+  }
+  throw new Error('platform: Could not allocate collision-free platform resource names.', {
+    cause: collision,
+  });
 }
 
 async function readAccounts(

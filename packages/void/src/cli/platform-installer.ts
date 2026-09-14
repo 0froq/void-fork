@@ -1776,7 +1776,12 @@ async function deployPlatformWorker(
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
     const nextTriggers = readCloudflareTriggerConfig(configPath);
     if (options.workerExisted) {
-      const previous = await readActivePlatformWorkerSnapshot(configPath, accountId, workerName);
+      const previous = await readActivePlatformWorkerSnapshot(
+        configPath,
+        accountId,
+        workerName,
+        readPlatformWorkerOwnershipMarker(config),
+      );
       previousVersionId = previous.versionId;
       previousTriggers = resolvePlatformPreviousTriggerConfig(
         previous.triggerConfig,
@@ -2062,8 +2067,9 @@ async function readActivePlatformWorkerVersion(
   configPath: string,
   accountId: string,
   workerName: string,
+  runner: typeof runPlatformWrangler = runPlatformWrangler,
 ): Promise<string | null> {
-  const result = await runPlatformWrangler(
+  const result = await runner(
     ['deployments', 'status', '--config', configPath, '--name', workerName, '--json'],
     accountId,
     process.cwd(),
@@ -2150,18 +2156,34 @@ export async function inspectNewPlatformWorker(
   return 'owned';
 }
 
-async function readActivePlatformWorkerSnapshot(
+function readPlatformWorkerOwnershipMarker(config: Record<string, unknown>): string {
+  const vars = config.vars;
+  if (!vars || typeof vars !== 'object' || Array.isArray(vars)) {
+    throw new Error('platform: Platform Worker config is missing its ownership bindings.');
+  }
+  const marker = (vars as Record<string, unknown>).PLATFORM_OWNERSHIP_MARKER;
+  if (typeof marker !== 'string' || marker === '') {
+    throw new Error('platform: Platform Worker config is missing its ownership marker.');
+  }
+  return marker;
+}
+
+export async function readActivePlatformWorkerSnapshot(
   configPath: string,
   accountId: string,
   workerName: string,
+  expectedOwnershipMarker: string,
+  runner: typeof runPlatformWrangler = runPlatformWrangler,
 ): Promise<{ triggerConfig: CloudflareTriggerConfig; versionId: string }> {
-  const versionId = await readActivePlatformWorkerVersion(configPath, accountId, workerName);
+  const readActiveVersion = () =>
+    readActivePlatformWorkerVersion(configPath, accountId, workerName, runner);
+  const versionId = await readActiveVersion();
   if (!versionId) {
     throw new Error(
       `platform: Existing Worker ${workerName} has no single active production version.`,
     );
   }
-  const result = await runPlatformWrangler(
+  const result = await runner(
     ['versions', 'view', versionId, '--config', configPath, '--name', workerName, '--json'],
     accountId,
     process.cwd(),
@@ -2176,6 +2198,34 @@ async function readActivePlatformWorkerSnapshot(
   }
   if (!value || typeof value !== 'object') {
     throw new Error(`platform: Wrangler returned malformed version metadata for ${workerName}.`);
+  }
+  const resources = (value as { resources?: unknown }).resources;
+  const bindings =
+    resources && typeof resources === 'object' && !Array.isArray(resources)
+      ? (resources as { bindings?: unknown }).bindings
+      : null;
+  const ownershipBindings = Array.isArray(bindings)
+    ? bindings.filter(
+        (binding) =>
+          binding &&
+          typeof binding === 'object' &&
+          (binding as { name?: unknown }).name === 'PLATFORM_OWNERSHIP_MARKER' &&
+          (binding as { type?: unknown }).type === 'plain_text' &&
+          typeof (binding as { text?: unknown }).text === 'string',
+      )
+    : [];
+  if (
+    ownershipBindings.length !== 1 ||
+    (ownershipBindings[0] as { text: string }).text !== expectedOwnershipMarker
+  ) {
+    throw new Error(
+      `platform: Active Worker version ${versionId} for ${workerName} does not belong to this installation.`,
+    );
+  }
+  if ((await readActiveVersion()) !== versionId) {
+    throw new Error(
+      `platform: Worker ${workerName} changed concurrently while its active version was inspected.`,
+    );
   }
   const annotations = (value as { annotations?: unknown }).annotations;
   const message =

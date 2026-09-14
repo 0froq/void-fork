@@ -65,6 +65,14 @@ describe('platform installation planning', () => {
     expect(applied.deployment.resources).toEqual(planned.deployment.resources);
   });
 
+  it('uses an explicit unpredictable suffix for a provisioning plan', async () => {
+    const plan = await createPlatformInstallPlan(client(), input, null, {
+      provisioningSuffix: '0123456789ab',
+    });
+    expect(plan.deployment.resources.apiWorker).toBe('void-example-0123456789ab-api');
+    expect(plan.deployment.resources.dispatchWorker).toBe('void-example-0123456789ab-dispatch');
+  });
+
   it('fails closed on an unowned deterministic-name collision', async () => {
     const fake = client({
       listKvNamespaces: async (_account: string, title: string) =>
@@ -175,7 +183,9 @@ describe('platform installation planning', () => {
   });
 
   it('refuses an intent-only resource after an ambiguous create response', async () => {
-    const initial = await createPlatformInstallPlan(client(), input, null);
+    const initial = await createPlatformInstallPlan(client(), input, null, {
+      provisioningSuffix: '0123456789ab',
+    });
     let manifest = createPlatformInstallationManifest({
       account: initial.account,
       createdAt: '2026-09-14T00:00:00.000Z',

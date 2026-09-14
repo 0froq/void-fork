@@ -1,5 +1,6 @@
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { encodeCloudflareVersionMessage } from '@void/deploy-cloudflare';
 import {
   createApplicationRoutes,
   createPlatformDeploymentManifest,
@@ -34,6 +35,7 @@ import {
   mergePreservedTriggerRoutes,
   preparePlatformDatabaseConnection,
   readPlatformDatabaseLifecycleManifestConnection,
+  readActivePlatformWorkerSnapshot,
   resolvePlatformPreviousTriggerConfig,
   resolveBootstrapGitHubId,
   stablePublicEndpointState,
@@ -88,6 +90,70 @@ function planningClient() {
 describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('binds an existing Worker snapshot to its immutable ownership marker', async () => {
+    const versionId = '11111111-1111-4111-8111-111111111111';
+    const marker = '{"installationId":"ours"}';
+    const triggerConfig = {
+      crons: [],
+      preview_urls: true,
+      queueConsumers: [],
+      routes: [],
+      workers_dev: true,
+      workflows: [],
+    };
+    const runner = async (args: ReadonlyArray<string>) => ({
+      status: 0,
+      stderr: '',
+      stdout:
+        args[0] === 'deployments'
+          ? JSON.stringify({ versions: [{ percentage: 100, version_id: versionId }] })
+          : JSON.stringify({
+              annotations: {
+                'workers/message': encodeCloudflareVersionMessage([], triggerConfig),
+              },
+              resources: {
+                bindings: [{ name: 'PLATFORM_OWNERSHIP_MARKER', type: 'plain_text', text: marker }],
+              },
+            }),
+    });
+
+    await expect(
+      readActivePlatformWorkerSnapshot('wrangler.json', 'account', 'worker', marker, runner),
+    ).resolves.toEqual({ triggerConfig, versionId });
+    await expect(
+      readActivePlatformWorkerSnapshot(
+        'wrangler.json',
+        'account',
+        'worker',
+        '{"installationId":"replacement"}',
+        runner,
+      ),
+    ).rejects.toThrow('does not belong to this installation');
+  });
+
+  it('rejects a Worker replacement during immutable version inspection', async () => {
+    const versions = [
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+    ];
+    const runner = async (args: ReadonlyArray<string>) => ({
+      status: 0,
+      stderr: '',
+      stdout:
+        args[0] === 'deployments'
+          ? JSON.stringify({ versions: [{ percentage: 100, version_id: versions.shift() }] })
+          : JSON.stringify({
+              resources: {
+                bindings: [{ name: 'PLATFORM_OWNERSHIP_MARKER', type: 'plain_text', text: 'ours' }],
+              },
+            }),
+    });
+
+    await expect(
+      readActivePlatformWorkerSnapshot('wrangler.json', 'account', 'worker', 'ours', runner),
+    ).rejects.toThrow('changed concurrently');
+  });
 
   it('preserves unmanaged Worker routes and custom domains across deploy and rollback', async () => {
     const plan = await createPlatformInstallPlan(

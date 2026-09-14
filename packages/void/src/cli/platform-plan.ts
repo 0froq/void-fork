@@ -77,7 +77,11 @@ export async function createPlatformInstallPlan(
   client: PlanningClient,
   input: PlatformInstallPlanInput,
   existing: PlatformInstallationManifest | null,
-  options?: { authoritativeProvisionIntents?: boolean; repairMissing?: boolean },
+  options?: {
+    authoritativeProvisionIntents?: boolean;
+    provisioningSuffix?: string;
+    repairMissing?: boolean;
+  },
 ): Promise<PlatformInstallPlan> {
   await client.verifyToken();
   const accounts = await client.listAccounts();
@@ -117,7 +121,9 @@ export async function createPlatformInstallPlan(
     installationSlug,
     resources:
       existing?.deployment.resources ??
-      createPlatformResourceNames(resourceSlugForInstallation(installationSlug, installationId)),
+      createPlatformResourceNames(
+        resourceSlugForInstallation(installationSlug, installationId, options?.provisioningSuffix),
+      ),
   });
   if (existing && JSON.stringify(existing.deployment) !== JSON.stringify(deployment)) {
     throw new Error(
@@ -485,14 +491,31 @@ export async function revalidatePlatformInstallAction(
   }
 }
 
-function resourceSlugForInstallation(installationSlug: string, installationId: string): string {
-  const suffix = installationId.slice(installationSlug.length + 1);
+function resourceSlugForInstallation(
+  installationSlug: string,
+  installationId: string,
+  provisioningSuffix?: string,
+): string {
+  const suffix = provisioningSuffix ?? installationId.slice(installationSlug.length + 1);
   if (!/^[a-f0-9]{12}$/.test(suffix)) {
     // Existing schema-v1 installations used the human-readable slug directly.
     return installationSlug;
   }
   const readablePrefix = installationSlug.slice(0, 26).replace(/-+$/, '');
   return `${readablePrefix}-${suffix}`;
+}
+
+function resourceSlugForManifest(manifest: PlatformInstallationManifest): string {
+  const apiWorker = manifest.deployment.resources.apiWorker;
+  if (!apiWorker.startsWith('void-') || !apiWorker.endsWith('-api')) {
+    return manifest.deployment.installationSlug;
+  }
+  const resourceSlug = apiWorker.slice('void-'.length, -'-api'.length);
+  const suffix = resourceSlug.slice(resourceSlug.lastIndexOf('-') + 1);
+  if (!/^[a-f0-9]{12}$/.test(suffix)) {
+    return manifest.deployment.installationSlug;
+  }
+  return resourceSlug;
 }
 
 function addDnsPlan(
@@ -762,10 +785,7 @@ function isUniqueProvisionAttempt(
   kind: InstallationResourceKind,
   name: string,
 ): boolean {
-  const resourceSlug = resourceSlugForInstallation(
-    manifest.deployment.installationSlug,
-    manifest.id,
-  );
+  const resourceSlug = resourceSlugForManifest(manifest);
   if (resourceSlug === manifest.deployment.installationSlug) {
     return false;
   }

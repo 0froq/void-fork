@@ -280,7 +280,7 @@ void platform install [options] [--yes]
 
 | Option                            | Purpose                                                                          |
 | --------------------------------- | -------------------------------------------------------------------------------- |
-| `--name <slug>`                   | Deterministic installation/resource prefix                                       |
+| `--name <slug>`                   | Human-readable installation/resource prefix                                      |
 | `--display-name <name>`           | Human-readable platform name                                                     |
 | `--account <id>`                  | Cloudflare account id                                                            |
 | `--application-domain <domain>`   | Base domain for deployed apps                                                    |
