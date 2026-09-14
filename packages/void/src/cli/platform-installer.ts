@@ -191,18 +191,17 @@ export async function installPlatform(
   }
   writePendingInstallationSecrets(manifest, secretCheckpoint(secrets));
 
-  let releaseDatabaseLock: (() => Promise<void>) | null = null;
+  await (dependencies.claimDatabase ?? claimPlatformDatabase)(
+    secrets.databaseUrl,
+    manifest.id,
+    manifest.ownershipNonce,
+  );
+  const releaseDatabaseLock = await dependencies.acquireDatabaseLifecycleLock(
+    secrets.databaseUrl,
+    manifest.id,
+    manifest.ownershipNonce,
+  );
   try {
-    await (dependencies.claimDatabase ?? claimPlatformDatabase)(
-      secrets.databaseUrl,
-      manifest.id,
-      manifest.ownershipNonce,
-    );
-    releaseDatabaseLock = await dependencies.acquireDatabaseLifecycleLock(
-      secrets.databaseUrl,
-      manifest.id,
-      manifest.ownershipNonce,
-    );
     if (manifest.status !== 'provisioning') {
       manifest = transitionInstallation(manifest, 'provisioning', now());
       writeInstallationManifest(manifest);
@@ -427,7 +426,7 @@ export async function installPlatform(
     }
     throw error;
   } finally {
-    await releaseDatabaseLock?.();
+    await releaseDatabaseLock();
   }
 }
 

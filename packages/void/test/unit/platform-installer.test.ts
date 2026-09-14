@@ -134,6 +134,72 @@ describe('platform installer', () => {
     expect(requests).toEqual(['https://api.github.com/users/Octocat']);
   });
 
+  it('does not checkpoint failure when another host owns the lifecycle lock', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-lock-contender-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const plan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      null,
+    );
+    const client = {
+      createAiGateway: async () => ({ id: 'unused', name: 'unused' }),
+      createDispatchNamespace: async () => ({ id: 'unused', name: 'unused' }),
+      createDnsRecord: async () => ({
+        content: '100::',
+        id: 'unused',
+        name: 'unused',
+        proxied: true,
+        type: 'AAAA',
+      }),
+      createHyperdrive: async () => ({ id: 'unused', name: 'unused' }),
+      createKvNamespace: async () => ({ id: 'unused', name: 'unused' }),
+      createQueue: async () => ({ id: 'unused', name: 'unused' }),
+      createR2Bucket: async () => ({ id: 'unused', name: 'unused' }),
+      createZone: async () => ({ id: 'unused', name: 'unused', nameServers: [], status: 'active' }),
+      putKvValue: async () => {},
+      putR2Object: async () => {},
+    };
+
+    await expect(
+      installPlatform(
+        plan,
+        createPlatformInstallationSecrets({
+          bootstrapGitHubId: '583231',
+          bootstrapGitHubLogin: 'octocat',
+          cloudflareApiToken: 'cf-token',
+          databaseUrl: 'postgres://user:password@db.example.com/void',
+          githubClientId: 'github-id',
+          githubClientSecret: 'github-secret',
+          r2AccessKeyId: 'r2-id',
+          r2SecretAccessKey: 'r2-secret',
+        }),
+        null,
+        {
+          acquireDatabaseLifecycleLock: async () => {
+            throw new Error('another host owns the lock');
+          },
+          claimDatabase,
+          client,
+          revalidateBeforeWorkerDeploy: async () => {},
+        },
+      ),
+    ).rejects.toThrow('another host owns the lock');
+    expect(listInstallationManifests(directory)[0]).toMatchObject({
+      resources: [],
+      status: 'planned',
+    });
+  });
+
   it('checkpoints every resource and removes pending secrets only after verification', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-installer-test-'));
     directories.push(directory);
