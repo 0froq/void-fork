@@ -13,6 +13,7 @@ import {
 } from './platform-installer.ts';
 import { createPlatformInstallPlan, formatPlatformInstallPlan } from './platform-plan.ts';
 import {
+  acquirePlatformLifecycleLock,
   readInstallationRecoverySecrets,
   removeInstallationRecoverySecrets,
   removePlatformConnectionForInstallation,
@@ -51,58 +52,76 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   }
   const client = new PlatformCloudflareClient(token);
 
-  if (args.subcommand === 'disable') {
-    await disablePlatform(client, manifest, args.plan);
-    return;
-  }
-  if (args.subcommand === 'uninstall') {
-    await uninstallPlatform(client, manifest, args);
-    return;
-  }
+  const execute = async (currentManifest: PlatformInstallationManifest): Promise<void> => {
+    const manifest = currentManifest;
 
-  const deployment = manifest.deployment;
-  const plan = await createPlatformInstallPlan(
-    client,
-    {
-      accountId: manifest.account.id,
-      applicationDomain: deployment.application.baseDomain,
-      controlPlaneDomain: deployment.controlPlane.apiHostname ?? '',
-      dedicatedZone: deployment.application.dedicatedZone,
-      displayName: deployment.displayName,
-      installationSlug: deployment.installationSlug,
-      zoneName: deployment.application.zoneName,
-    },
-    manifest,
-    { repairMissing: args.subcommand === 'repair' },
-  );
-  note(
-    formatPlatformInstallPlan(plan),
-    args.subcommand === 'upgrade' ? 'Upgrade plan' : 'Repair plan',
-  );
-  if (args.plan) {
-    outro('No Cloudflare or local installation state was changed.');
-    return;
-  }
-  const recovery = readInstallationRecoverySecrets(manifest);
-  const secrets = createPlatformInstallationSecrets({
-    bootstrapGitHubLogin: process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN || '',
-    cloudflareApiToken: token,
-    checkpoint: recovery,
-    databaseUrl: process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || '',
-    githubClientId: process.env.VOID_PLATFORM_GITHUB_CLIENT_ID || '',
-    githubClientSecret: process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET || '',
-    r2AccessKeyId: process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID || '',
-    r2SecretAccessKey: process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY || '',
-  });
-  const result = await installPlatform(plan, secrets, manifest, { client });
-  if (result.waitingForDns) {
-    note(
-      `Wait for ${deployment.application.zoneName} to become active, then rerun this command.`,
-      'Waiting for nameservers',
+    if (args.subcommand === 'disable') {
+      await disablePlatform(client, manifest, args.plan);
+      return;
+    }
+    if (args.subcommand === 'uninstall') {
+      await uninstallPlatform(client, manifest, args);
+      return;
+    }
+
+    const deployment = manifest.deployment;
+    const plan = await createPlatformInstallPlan(
+      client,
+      {
+        accountId: manifest.account.id,
+        applicationDomain: deployment.application.baseDomain,
+        controlPlaneDomain: deployment.controlPlane.apiHostname ?? '',
+        dedicatedZone: deployment.application.dedicatedZone,
+        displayName: deployment.displayName,
+        installationSlug: deployment.installationSlug,
+        zoneName: deployment.application.zoneName,
+      },
+      manifest,
+      { repairMissing: args.subcommand === 'repair' },
     );
+    note(
+      formatPlatformInstallPlan(plan),
+      args.subcommand === 'upgrade' ? 'Upgrade plan' : 'Repair plan',
+    );
+    if (args.plan) {
+      outro('No Cloudflare or local installation state was changed.');
+      return;
+    }
+    const recovery = readInstallationRecoverySecrets(manifest);
+    const secrets = createPlatformInstallationSecrets({
+      bootstrapGitHubLogin: process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN || '',
+      cloudflareApiToken: token,
+      checkpoint: recovery,
+      databaseUrl: process.env.VOID_PLATFORM_DATABASE_URL || process.env.DATABASE_URL || '',
+      githubClientId: process.env.VOID_PLATFORM_GITHUB_CLIENT_ID || '',
+      githubClientSecret: process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET || '',
+      r2AccessKeyId: process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID || '',
+      r2SecretAccessKey: process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY || '',
+    });
+    const result = await installPlatform(plan, secrets, manifest, { client });
+    if (result.waitingForDns) {
+      note(
+        `Wait for ${deployment.application.zoneName} to become active, then rerun this command.`,
+        'Waiting for nameservers',
+      );
+      return;
+    }
+    log.success(`${deployment.displayName} is healthy at ${plan.apiUrl}.`);
+  };
+
+  if (args.plan) {
+    await execute(manifest);
     return;
   }
-  log.success(`${deployment.displayName} is healthy at ${plan.apiUrl}.`);
+  const release = acquirePlatformLifecycleLock(
+    manifest.account.id,
+    manifest.deployment.installationSlug,
+  );
+  try {
+    await execute(resolveInstallationManifest(args.selector));
+  } finally {
+    release();
+  }
 }
 
 export async function disablePlatform(

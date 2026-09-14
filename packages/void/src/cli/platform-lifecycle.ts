@@ -6,6 +6,7 @@ import { PlatformCloudflareClient, type CloudflareAccount } from './platform-clo
 import { createPlatformInstallationSecrets, installPlatform } from './platform-installer.ts';
 import { createPlatformInstallPlan, formatPlatformInstallPlan } from './platform-plan.ts';
 import {
+  acquirePlatformLifecycleLock,
   listInstallationManifests,
   readPendingInstallationSecrets,
   resolveInstallationManifest,
@@ -98,83 +99,88 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     }
     dedicatedZone = catchAll;
   }
-  const plan = await createPlatformInstallPlan(
-    client,
-    {
-      accountId,
-      applicationDomain,
-      controlPlaneDomain,
-      dedicatedZone,
-      displayName,
-      installationSlug,
-      zoneName,
-    },
-    existing,
-  );
-  note(
-    formatPlatformInstallPlan(plan),
-    args.plan ? 'Read-only installation plan' : 'Installation plan',
-  );
-  if (args.plan) {
-    outro('No Cloudflare or local installation state was changed.');
-    return;
-  }
-  if (process.stdin.isTTY) {
-    const proceed = await confirm({ message: 'Apply this plan?', initialValue: false });
-    if (isCancel(proceed) || !proceed) {
-      outro('No changes made.');
+  const release = args.plan ? null : acquirePlatformLifecycleLock(accountId, installationSlug);
+  try {
+    const plan = await createPlatformInstallPlan(
+      client,
+      {
+        accountId,
+        applicationDomain,
+        controlPlaneDomain,
+        dedicatedZone,
+        displayName,
+        installationSlug,
+        zoneName,
+      },
+      existing,
+    );
+    note(
+      formatPlatformInstallPlan(plan),
+      args.plan ? 'Read-only installation plan' : 'Installation plan',
+    );
+    if (args.plan) {
+      outro('No Cloudflare or local installation state was changed.');
       return;
     }
-  }
+    if (process.stdin.isTTY) {
+      const proceed = await confirm({ message: 'Apply this plan?', initialValue: false });
+      if (isCancel(proceed) || !proceed) {
+        outro('No changes made.');
+        return;
+      }
+    }
 
-  const checkpoint = existing ? readPendingInstallationSecrets(existing) : null;
-  note(
-    `Create a GitHub OAuth App with this callback URL:\n${plan.apiUrl}/auth/callback\n\n` +
-      'For direct asset uploads, create an R2 API token with Object Read & Write access to this account.',
-    'Authentication setup',
-  );
-  const secrets = createPlatformInstallationSecrets({
-    bootstrapGitHubLogin:
-      checkpoint?.bootstrapGitHubLogin ||
-      process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN ||
-      (await promptSecret('Initial administrator GitHub username:', false)),
-    cloudflareApiToken: token,
-    checkpoint,
-    databaseUrl:
-      checkpoint?.databaseUrl ||
-      process.env.VOID_PLATFORM_DATABASE_URL ||
-      process.env.DATABASE_URL ||
-      (await promptSecret('PostgreSQL DATABASE_URL:')),
-    githubClientId:
-      checkpoint?.githubClientId ||
-      process.env.VOID_PLATFORM_GITHUB_CLIENT_ID ||
-      (await promptSecret('GitHub OAuth client ID:', false)),
-    githubClientSecret:
-      checkpoint?.githubClientSecret ||
-      process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET ||
-      (await promptSecret('GitHub OAuth client secret:')),
-    r2AccessKeyId:
-      checkpoint?.r2AccessKeyId ||
-      process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID ||
-      (await promptSecret('R2 access key ID:', false)),
-    r2SecretAccessKey:
-      checkpoint?.r2SecretAccessKey ||
-      process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY ||
-      (await promptSecret('R2 secret access key:')),
-  });
-  const result = await installPlatform(plan, secrets, existing, { client });
-  if (result.waitingForDns) {
+    const checkpoint = existing ? readPendingInstallationSecrets(existing) : null;
     note(
-      result.zoneNameServers.length > 0
-        ? `Update the domain at your registrar to use:\n${result.zoneNameServers.join('\n')}\n\nThen rerun: void platform install --resume --name ${result.manifest.id}`
-        : `Wait for ${zoneName} to become active, then rerun:\nvoid platform install --resume --name ${result.manifest.id}`,
-      'Waiting for nameservers',
+      `Create a GitHub OAuth App with this callback URL:\n${plan.apiUrl}/auth/callback\n\n` +
+        'For direct asset uploads, create an R2 API token with Object Read & Write access to this account.',
+      'Authentication setup',
     );
-    outro(`Installation ${result.manifest.id} is safely checkpointed.`);
-    return;
+    const secrets = createPlatformInstallationSecrets({
+      bootstrapGitHubLogin:
+        checkpoint?.bootstrapGitHubLogin ||
+        process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN ||
+        (await promptSecret('Initial administrator GitHub username:', false)),
+      cloudflareApiToken: token,
+      checkpoint,
+      databaseUrl:
+        checkpoint?.databaseUrl ||
+        process.env.VOID_PLATFORM_DATABASE_URL ||
+        process.env.DATABASE_URL ||
+        (await promptSecret('PostgreSQL DATABASE_URL:')),
+      githubClientId:
+        checkpoint?.githubClientId ||
+        process.env.VOID_PLATFORM_GITHUB_CLIENT_ID ||
+        (await promptSecret('GitHub OAuth client ID:', false)),
+      githubClientSecret:
+        checkpoint?.githubClientSecret ||
+        process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET ||
+        (await promptSecret('GitHub OAuth client secret:')),
+      r2AccessKeyId:
+        checkpoint?.r2AccessKeyId ||
+        process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID ||
+        (await promptSecret('R2 access key ID:', false)),
+      r2SecretAccessKey:
+        checkpoint?.r2SecretAccessKey ||
+        process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY ||
+        (await promptSecret('R2 secret access key:')),
+    });
+    const result = await installPlatform(plan, secrets, existing, { client });
+    if (result.waitingForDns) {
+      note(
+        result.zoneNameServers.length > 0
+          ? `Update the domain at your registrar to use:\n${result.zoneNameServers.join('\n')}\n\nThen rerun: void platform install --resume --name ${result.manifest.id}`
+          : `Wait for ${zoneName} to become active, then rerun:\nvoid platform install --resume --name ${result.manifest.id}`,
+        'Waiting for nameservers',
+      );
+      outro(`Installation ${result.manifest.id} is safely checkpointed.`);
+      return;
+    }
+    log.success(`${result.manifest.deployment.displayName} is installed at ${plan.apiUrl}.`);
+    outro('Run `void auth login`, then deploy an app with `void deploy --platform void`.');
+  } finally {
+    release?.();
   }
-  log.success(`${result.manifest.deployment.displayName} is installed at ${plan.apiUrl}.`);
-  outro('Run `void auth login`, then deploy an app with `void deploy --platform void`.');
 }
 
 async function readAccounts(

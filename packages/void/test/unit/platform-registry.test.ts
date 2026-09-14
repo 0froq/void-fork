@@ -8,6 +8,7 @@ import {
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
+  acquirePlatformLifecycleLock,
   getActivePlatformConnection,
   listInstallationManifests,
   listPlatformConnections,
@@ -37,6 +38,19 @@ afterEach(() => {
 });
 
 describe('platform registry', () => {
+  it('serializes mutating lifecycle operations per installation', () => {
+    const directory = temporaryRegistry();
+    const release = acquirePlatformLifecycleLock('account_123', 'example', directory);
+    expect(() => acquirePlatformLifecycleLock('account_123', 'example', directory)).toThrow(
+      'Another lifecycle operation is active',
+    );
+    const releaseOther = acquirePlatformLifecycleLock('account_123', 'other', directory);
+    releaseOther();
+    release();
+    const releaseAgain = acquirePlatformLifecycleLock('account_123', 'example', directory);
+    releaseAgain();
+  });
+
   it('normalizes and validates API origins', () => {
     expect(normalizePlatformApiUrl('https://platform.example.com/')).toBe(
       'https://platform.example.com',

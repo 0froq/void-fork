@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import {
   parsePlatformInstallationManifest,
   type PlatformInstallationManifest,
@@ -182,6 +182,70 @@ function writeJsonAtomically(path: string, value: unknown): void {
   } finally {
     rmSync(temporary, { force: true });
   }
+}
+
+export function acquirePlatformLifecycleLock(
+  accountId: string,
+  installationSlug: string,
+  directory: string = platformRegistryDirectory(),
+): () => void {
+  if (!/^[A-Za-z0-9_-]+$/.test(accountId) || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(installationSlug)) {
+    throw new Error('platform: Invalid lifecycle lock identity.');
+  }
+  const lockDirectory = join(directory, 'locks');
+  mkdirSync(lockDirectory, { recursive: true, mode: 0o700 });
+  const lockPath = join(lockDirectory, `${accountId}-${installationSlug}.lock`);
+  const acquire = (): number => {
+    try {
+      const descriptor = openSync(lockPath, 'wx', 0o600);
+      writeFileSync(
+        descriptor,
+        `${JSON.stringify({ host: hostname(), pid: process.pid, startedAt: new Date().toISOString() })}\n`,
+      );
+      return descriptor;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+      let stale = false;
+      try {
+        const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as {
+          host?: unknown;
+          pid?: unknown;
+          startedAt?: unknown;
+        };
+        if (owner.host === hostname() && typeof owner.pid === 'number') {
+          try {
+            process.kill(owner.pid, 0);
+          } catch (ownerError) {
+            stale = (ownerError as NodeJS.ErrnoException).code === 'ESRCH';
+          }
+        } else {
+          const startedAt = typeof owner.startedAt === 'string' ? Date.parse(owner.startedAt) : NaN;
+          stale = Number.isFinite(startedAt) && Date.now() - startedAt > 2 * 60 * 60 * 1000;
+        }
+      } catch {
+        stale = Date.now() - statSync(lockPath).mtimeMs > 2 * 60 * 60 * 1000;
+      }
+      if (!stale) {
+        throw new Error(
+          `platform: Another lifecycle operation is active for ${installationSlug} in account ${accountId}.`,
+        );
+      }
+      rmSync(lockPath, { force: true });
+      return acquire();
+    }
+  };
+  const descriptor = acquire();
+  let released = false;
+  return () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    closeSync(descriptor);
+    rmSync(lockPath, { force: true });
+  };
 }
 
 export function listPlatformConnections(
