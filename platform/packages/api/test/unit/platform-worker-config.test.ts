@@ -36,6 +36,9 @@ describe('platform Worker configuration', () => {
       AI_GATEWAY_ID: deployment.resources.aiGateway,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
     });
+    expect(configs.tail.vars).toEqual({
+      PLATFORM_DISPATCH_WORKER_NAME: deployment.resources.dispatchWorker,
+    });
     expect(configs.dispatch.routes).toEqual([
       { pattern: '*.apps.example.com/*', zone_name: 'example.com' },
       { pattern: '*.apps.example.com', zone_name: 'example.com' },

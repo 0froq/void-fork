@@ -138,6 +138,7 @@ export function createPlatformWorkerConfigs(input: {
       main: runtimeEntrypoints.tail,
       no_bundle: true,
       analytics_engine_datasets: [{ binding: 'ANALYTICS', dataset: names.logsDataset }],
+      vars: { PLATFORM_DISPATCH_WORKER_NAME: names.dispatchWorker },
     },
     dispatch: {
       ...common,
