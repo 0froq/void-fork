@@ -1,8 +1,12 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { normalizeApplicationDomain } from '@void/platform';
 import { join, dirname } from 'pathslash';
+import { normalizePlatformApiUrl } from './platform-registry.ts';
 import type { DeployTarget } from './types.ts';
 
 export type ProjectConfig = {
+  applicationDomain?: string;
+  platformUrl?: string;
   projectId: string;
   slug: string;
   voidInternalStaging?: boolean;
@@ -13,7 +17,9 @@ export type DeploymentPlatform = DeployTarget | 'none';
 const PROJECT_FILE = '.void/project.json';
 
 type ProjectConfigFile = {
+  applicationDomain?: unknown;
   platform?: unknown;
+  platformUrl?: unknown;
   projectId?: unknown;
   slug?: unknown;
   voidInternalStaging?: unknown;
@@ -47,6 +53,12 @@ export function readProjectConfig(root: string): ProjectConfig | null {
     projectId: config.projectId,
     slug: config.slug,
   };
+  if (typeof config.platformUrl === 'string') {
+    result.platformUrl = normalizePlatformApiUrl(config.platformUrl);
+  }
+  if (typeof config.applicationDomain === 'string') {
+    result.applicationDomain = normalizeApplicationDomain(config.applicationDomain);
+  }
   if (config.voidInternalStaging === true) {
     result.voidInternalStaging = true;
   }
@@ -88,6 +100,12 @@ export function writeDeploymentPlatform(root: string, platform: DeploymentPlatfo
   if (typeof existing?.projectId === 'string') {
     next.projectId = existing.projectId;
   }
+  if (typeof existing?.platformUrl === 'string') {
+    next.platformUrl = existing.platformUrl;
+  }
+  if (typeof existing?.applicationDomain === 'string') {
+    next.applicationDomain = existing.applicationDomain;
+  }
   if (typeof existing?.slug === 'string') {
     next.slug = existing.slug;
   }
@@ -106,6 +124,16 @@ export function isVoidInternalStaging(root: string): boolean {
   return readProjectConfigFile(root)?.voidInternalStaging === true;
 }
 
+export function readProjectPlatformUrl(root: string): string | null {
+  const value = readProjectConfigFile(root)?.platformUrl;
+  return typeof value === 'string' && value !== '' ? normalizePlatformApiUrl(value) : null;
+}
+
+export function readProjectApplicationDomain(root: string): string | null {
+  const value = readProjectConfigFile(root)?.applicationDomain;
+  return typeof value === 'string' && value !== '' ? normalizeApplicationDomain(value) : null;
+}
+
 /**
  * Write the project config to the project root.
  */
@@ -117,6 +145,16 @@ export function writeProjectConfig(root: string, config: ProjectConfig): void {
     projectId: config.projectId,
     slug: config.slug,
   };
+  if (config.platformUrl) {
+    next.platformUrl = normalizePlatformApiUrl(config.platformUrl);
+  } else if (typeof existing?.platformUrl === 'string') {
+    next.platformUrl = existing.platformUrl;
+  }
+  if (config.applicationDomain) {
+    next.applicationDomain = normalizeApplicationDomain(config.applicationDomain);
+  } else if (typeof existing?.applicationDomain === 'string') {
+    next.applicationDomain = existing.applicationDomain;
+  }
   if (config.voidInternalStaging === true || existing?.voidInternalStaging === true) {
     next.voidInternalStaging = true;
   }

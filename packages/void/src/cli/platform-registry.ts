@@ -22,6 +22,7 @@ export const PLATFORM_REGISTRY_SCHEMA_VERSION = 1 as const;
 export type PlatformConnection = Readonly<{
   accountId: string | null;
   apiUrl: string;
+  applicationDomain: string | null;
   displayName: string;
   id: string;
   installationId: string | null;
@@ -42,7 +43,7 @@ const DEFAULT_REGISTRY: PlatformConnectionRegistry = {
 };
 
 export function platformRegistryDirectory(): string {
-  return join(homedir(), '.void', 'platforms');
+  return process.env.VOID_PLATFORM_REGISTRY_DIR ?? join(homedir(), '.void', 'platforms');
 }
 
 export function normalizePlatformApiUrl(value: string): string {
@@ -97,6 +98,7 @@ function parseConnection(value: unknown): PlatformConnection {
   return {
     accountId: optionalString(entry.accountId),
     apiUrl,
+    applicationDomain: optionalString(entry.applicationDomain),
     displayName:
       typeof entry.displayName === 'string' && entry.displayName.trim()
         ? entry.displayName.trim()

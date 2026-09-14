@@ -57,6 +57,7 @@ describe('platform registry', () => {
       {
         accountId: null,
         apiUrl: 'https://one.example.com',
+        applicationDomain: null,
         displayName: 'One',
         installationId: null,
         kind: 'connected',
@@ -68,6 +69,7 @@ describe('platform registry', () => {
       {
         accountId: null,
         apiUrl: 'https://two.example.com',
+        applicationDomain: null,
         displayName: 'Two',
         installationId: null,
         kind: 'connected',

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { getApiUrl } from '../../src/cli/auth.ts';
+import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
 import {
   isVoidInternalStaging,
   readDeploymentPlatform,
@@ -28,6 +29,7 @@ function writeProjectJson(root: string, value: unknown): void {
 describe('project config', () => {
   afterEach(() => {
     delete process.env.VOID_API_URL;
+    delete process.env.VOID_PLATFORM_REGISTRY_DIR;
     while (roots.length > 0) {
       rmSync(roots.pop()!, { recursive: true, force: true });
     }
@@ -98,6 +100,23 @@ describe('project config', () => {
     });
   });
 
+  it('stores the linked platform origin and application domain', () => {
+    const root = makeRoot();
+    writeProjectConfig(root, {
+      applicationDomain: 'Apps.Example.com.',
+      platformUrl: 'https://platform.example.com/',
+      projectId: 'proj_123',
+      slug: 'demo',
+    });
+
+    expect(readProjectConfig(root)).toEqual({
+      applicationDomain: 'apps.example.com',
+      platformUrl: 'https://platform.example.com',
+      projectId: 'proj_123',
+      slug: 'demo',
+    });
+  });
+
   it('uses the staging API from the internal project flag unless explicitly overridden', () => {
     const root = makeRoot();
     writeProjectJson(root, { voidInternalStaging: true });
@@ -106,5 +125,23 @@ describe('project config', () => {
 
     process.env.VOID_API_URL = 'https://api.example.test';
     expect(getApiUrl(root)).toBe('https://api.example.test');
+  });
+
+  it('uses an active platform connection but keeps internal staging isolated', () => {
+    const root = makeRoot();
+    const registry = makeRoot();
+    process.env.VOID_PLATFORM_REGISTRY_DIR = registry;
+    savePlatformConnection({
+      accountId: null,
+      apiUrl: 'https://platform.example.test',
+      applicationDomain: 'apps.example.test',
+      displayName: 'Example',
+      installationId: null,
+      kind: 'connected',
+    });
+    expect(getApiUrl(root)).toBe('https://platform.example.test');
+
+    writeProjectJson(root, { voidInternalStaging: true });
+    expect(getApiUrl(root)).toBe('https://api.staging.void.cloud');
   });
 });

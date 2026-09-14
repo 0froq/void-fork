@@ -6,7 +6,16 @@ import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensureCloudflaredToken } from './cf-access.ts';
 import { pc } from './output.ts';
-import { isVoidInternalStaging } from './project.ts';
+import {
+  getActivePlatformConnection,
+  normalizePlatformApiUrl,
+  platformCredentialAccount,
+} from './platform-registry.ts';
+import {
+  isVoidInternalStaging,
+  readProjectApplicationDomain,
+  readProjectPlatformUrl,
+} from './project.ts';
 
 const CONFIG_DIR = join(homedir(), '.void');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
@@ -52,6 +61,7 @@ function keyringDelete(account: string): boolean {
 type Config = {
   token?: string;
   stagingToken?: string;
+  tokens?: Record<string, string>;
   api?: string;
 };
 
@@ -73,7 +83,12 @@ export function isStagingMode(root: string = process.cwd()): boolean {
 }
 
 export function getSiteDomain(root: string = process.cwd()): string {
-  return isStagingMode(root) ? 'staging.void.app' : 'void.app';
+  return (
+    readProjectApplicationDomain(root) ??
+    (isStagingMode(root)
+      ? 'staging.void.app'
+      : (getActivePlatformConnection()?.applicationDomain ?? 'void.app'))
+  );
 }
 
 /**
@@ -86,7 +101,8 @@ export function getToken(root: string = process.cwd()): string | null {
     return envToken;
   }
 
-  const account = isStagingMode(root) ? 'stagingToken' : 'token';
+  const apiUrl = getApiUrl(root);
+  const account = platformCredentialAccount(apiUrl);
 
   // Try keyring first
   const keyringToken = keyringGet(account);
@@ -94,15 +110,15 @@ export function getToken(root: string = process.cwd()): string | null {
     return keyringToken;
   }
 
-  // File fallback — auto-migrate to keyring if available
   const config = readConfig();
-  const fileToken = config[account];
+  const normalizedApiUrl = normalizePlatformApiUrl(apiUrl);
+  const fileToken = config.tokens?.[normalizedApiUrl];
   if (fileToken) {
     if (keyringSet(account, fileToken)) {
-      // Successfully migrated — best-effort cleanup of the config-file copy.
-      // Failures here (read-only FS, permission denied, full disk) must not
-      // crash callers. Token stays in the file; next invocation will retry.
-      delete config[account];
+      delete config.tokens![normalizedApiUrl];
+      if (Object.keys(config.tokens!).length === 0) {
+        delete config.tokens;
+      }
       try {
         writeConfig(config);
       } catch {
@@ -110,6 +126,35 @@ export function getToken(root: string = process.cwd()): string | null {
       }
     }
     return fileToken;
+  }
+
+  const legacyAccount = legacyCredentialAccount(root, normalizedApiUrl, config);
+  if (legacyAccount) {
+    const legacyKeyringToken = keyringGet(legacyAccount);
+    if (legacyKeyringToken) {
+      keyringSet(account, legacyKeyringToken);
+      return legacyKeyringToken;
+    }
+  }
+
+  // File fallback — auto-migrate to the origin-scoped keyring entry if applicable.
+  if (!legacyAccount) {
+    return null;
+  }
+  const legacyFileToken = config[legacyAccount];
+  if (legacyFileToken) {
+    if (keyringSet(account, legacyFileToken)) {
+      // Successfully migrated — best-effort cleanup of the config-file copy.
+      // Failures here (read-only FS, permission denied, full disk) must not
+      // crash callers. Token stays in the file; next invocation will retry.
+      delete config[legacyAccount];
+      try {
+        writeConfig(config);
+      } catch {
+        // Ignore — migration is best-effort.
+      }
+    }
+    return legacyFileToken;
   }
 
   return null;
@@ -120,7 +165,8 @@ export function getTokenSource(): 'ci' | 'manual' {
 }
 
 export function saveToken(token: string, root: string = process.cwd()): void {
-  const account = isStagingMode(root) ? 'stagingToken' : 'token';
+  const apiUrl = normalizePlatformApiUrl(getApiUrl(root));
+  const account = platformCredentialAccount(apiUrl);
   if (keyringSet(account, token)) {
     return;
   }
@@ -128,26 +174,42 @@ export function saveToken(token: string, root: string = process.cwd()): void {
   // Keyring unavailable — fall back to file
   console.warn(pc.yellow('System keychain unavailable, storing token in ~/.void/config.json'));
   const config = readConfig();
-  config[account] = token;
+  config.tokens = { ...config.tokens, [apiUrl]: token };
   writeConfig(config);
 }
 
 export function removeToken(root: string = process.cwd()): boolean {
-  const account = isStagingMode(root) ? 'stagingToken' : 'token';
+  const apiUrl = normalizePlatformApiUrl(getApiUrl(root));
+  const account = platformCredentialAccount(apiUrl);
   let removed = false;
 
   // Remove from keyring
   if (keyringDelete(account)) {
     removed = true;
   }
-
   // Also clean up config file if token exists there
   try {
     const config = readConfig();
-    if (config[account]) {
-      delete config[account];
-      writeConfig(config);
+    let configChanged = false;
+    const legacyAccount = legacyCredentialAccount(root, apiUrl, config);
+    if (legacyAccount && keyringDelete(legacyAccount)) {
       removed = true;
+    }
+    if (legacyAccount && config[legacyAccount]) {
+      delete config[legacyAccount];
+      configChanged = true;
+      removed = true;
+    }
+    if (config.tokens?.[apiUrl]) {
+      delete config.tokens[apiUrl];
+      if (Object.keys(config.tokens).length === 0) {
+        delete config.tokens;
+      }
+      configChanged = true;
+      removed = true;
+    }
+    if (configChanged) {
+      writeConfig(config);
     }
   } catch {
     // ignore
@@ -158,6 +220,23 @@ export function removeToken(root: string = process.cwd()): boolean {
 
 const DEFAULT_API_URL = 'https://api.void.cloud';
 const STAGING_API_URL = 'https://api.staging.void.cloud';
+
+function legacyCredentialAccount(
+  root: string,
+  normalizedApiUrl: string,
+  config: Config,
+): 'token' | 'stagingToken' | null {
+  const account = isStagingMode(root) ? 'stagingToken' : 'token';
+  let configuredUrl: string;
+  try {
+    configuredUrl = normalizePlatformApiUrl(
+      config.api ?? (isStagingMode(root) ? STAGING_API_URL : DEFAULT_API_URL),
+    );
+  } catch {
+    return null;
+  }
+  return configuredUrl === normalizedApiUrl ? account : null;
+}
 
 function base64Url(buffer: Buffer): string {
   return buffer.toString('base64').replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -220,8 +299,11 @@ async function exchangeLoginCode(
 export function getApiUrl(root: string = process.cwd()): string {
   return (
     process.env.VOID_API_URL ??
+    readProjectPlatformUrl(root) ??
+    (isStagingMode(root) ? STAGING_API_URL : undefined) ??
+    getActivePlatformConnection()?.apiUrl ??
     readConfig().api ??
-    (isStagingMode(root) ? STAGING_API_URL : DEFAULT_API_URL)
+    DEFAULT_API_URL
   );
 }
 
