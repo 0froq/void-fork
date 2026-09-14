@@ -72,6 +72,28 @@ describe('platform Cloudflare client', () => {
     expect(requests[0]).not.toContain('/zones/');
   });
 
+  it('continues removing custom domains when the zone disappears concurrently', async () => {
+    const requests: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes('/zones/')) {
+          return Response.json(
+            { errors: [{ message: 'missing' }], result: null, success: false },
+            { status: 404 },
+          );
+        }
+        return Response.json({ result: [], success: true });
+      },
+    });
+
+    await client.removeRoutes('account', 'removed-zone', new Set(['void-api']));
+
+    expect(requests.some((url) => url.includes('/zones/removed-zone/workers/routes'))).toBe(true);
+    expect(requests.some((url) => url.includes('/accounts/account/workers/domains'))).toBe(true);
+  });
+
   it('treats a missing Worker as already disabled but not as enabled', async () => {
     const client = new PlatformCloudflareClient('token', {
       fetcher: async () =>

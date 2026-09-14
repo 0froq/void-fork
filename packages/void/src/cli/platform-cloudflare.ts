@@ -671,21 +671,34 @@ export class PlatformCloudflareClient {
     workerNames: ReadonlySet<string>,
   ): Promise<void> {
     if (zoneId !== null) {
-      const routes = await this.request<ReadonlyArray<{ id?: unknown; script?: unknown }>>(
-        `/zones/${encodeURIComponent(zoneId)}/workers/routes`,
-      );
+      let routes: ReadonlyArray<{ id?: unknown; script?: unknown }> = [];
+      try {
+        routes = await this.request<ReadonlyArray<{ id?: unknown; script?: unknown }>>(
+          `/zones/${encodeURIComponent(zoneId)}/workers/routes`,
+        );
+      } catch (error) {
+        if (!(error instanceof PlatformCloudflareApiError && error.status === 404)) {
+          throw error;
+        }
+      }
       for (const route of routes) {
         if (
           typeof route.id === 'string' &&
           typeof route.script === 'string' &&
           workerNames.has(route.script)
         ) {
-          await this.request(
-            `/zones/${encodeURIComponent(zoneId)}/workers/routes/${encodeURIComponent(route.id)}`,
-            {
-              method: 'DELETE',
-            },
-          );
+          try {
+            await this.request(
+              `/zones/${encodeURIComponent(zoneId)}/workers/routes/${encodeURIComponent(route.id)}`,
+              {
+                method: 'DELETE',
+              },
+            );
+          } catch (error) {
+            if (!(error instanceof PlatformCloudflareApiError && error.status === 404)) {
+              throw error;
+            }
+          }
         }
       }
     }
@@ -702,10 +715,16 @@ export class PlatformCloudflareClient {
           !removedDomainIds.has(domain.id)
         ) {
           removedDomainIds.add(domain.id);
-          await this.request(
-            `/accounts/${encodeURIComponent(accountId)}/workers/domains/${encodeURIComponent(domain.id)}`,
-            { method: 'DELETE' },
-          );
+          try {
+            await this.request(
+              `/accounts/${encodeURIComponent(accountId)}/workers/domains/${encodeURIComponent(domain.id)}`,
+              { method: 'DELETE' },
+            );
+          } catch (error) {
+            if (!(error instanceof PlatformCloudflareApiError && error.status === 404)) {
+              throw error;
+            }
+          }
         }
       }
     }
