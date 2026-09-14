@@ -259,6 +259,31 @@ describe('platform lifecycle management', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('restores an uninitialized live routing checkpoint only from database authority', async () => {
+    const manifest = installedManifest();
+    const fake = client(manifest);
+    fake.getKvValue = async () => null;
+
+    await expect(verifyPlatformInstallationOwnership(fake, manifest)).rejects.toThrow(
+      'remote installation checkpoint is missing',
+    );
+    await expect(
+      verifyPlatformInstallationOwnership(fake, manifest, {
+        allowUninitializedRoutingCheckpoint: true,
+      }),
+    ).resolves.toBeUndefined();
+
+    fake.listKvNamespaces = async () =>
+      namedResources(manifest, 'kv-namespace').map((resource) =>
+        resource.id === 'routing-kv-id' ? { ...resource, id: 'replacement-id' } : resource,
+      );
+    await expect(
+      verifyPlatformInstallationOwnership(fake, manifest, {
+        allowUninitializedRoutingCheckpoint: true,
+      }),
+    ).rejects.toThrow('remote installation checkpoint is missing');
+  });
+
   it('still rejects a replacement R2 bucket while repairing a missing routing checkpoint', async () => {
     const manifest = installedManifest();
     const fake = client(manifest);

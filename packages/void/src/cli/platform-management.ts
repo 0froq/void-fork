@@ -78,7 +78,10 @@ export type PlatformOwnershipClient = Pick<
 export async function verifyPlatformInstallationOwnership(
   client: PlatformOwnershipClient,
   manifest: PlatformInstallationManifest,
-  options: { allowMissingRoutingCheckpoint?: boolean } = {},
+  options: {
+    allowMissingRoutingCheckpoint?: boolean;
+    allowUninitializedRoutingCheckpoint?: boolean;
+  } = {},
 ): Promise<void> {
   const ready = manifest.resources.filter(
     (resource) => resource.state === 'ready' && isOwnershipVerifiableKind(resource.kind),
@@ -151,6 +154,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   const execute = async (
     currentManifest: PlatformInstallationManifest,
     databaseCheckpoint?: (manifest: PlatformInstallationManifest) => Promise<void>,
+    databaseCheckpointExists = false,
   ): Promise<void> => {
     const manifest = currentManifest;
 
@@ -211,7 +215,11 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
           .filter((resource) => isOwnershipVerifiableKind(resource.kind))
           .map((resource) => resource.key),
       ),
-      { allowMissingRoutingCheckpoint: repairingMissingRoutingCheckpoint },
+      {
+        allowMissingRoutingCheckpoint: repairingMissingRoutingCheckpoint,
+        allowUninitializedRoutingCheckpoint:
+          args.subcommand === 'repair' && databaseCheckpointExists,
+      },
     );
     const installation =
       args.subcommand === 'enable'
@@ -284,6 +292,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     );
     try {
       const authoritative = releaseDatabase.authoritativeManifest;
+      const databaseCheckpointExists = authoritative !== null && authoritative !== undefined;
       const currentManifest = selectAuthoritativePlatformManifest(current, authoritative);
       if (authoritative && JSON.stringify(authoritative) !== JSON.stringify(current)) {
         writeInstallationManifest(authoritative);
@@ -291,7 +300,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       if (!authoritative) {
         await releaseDatabase.checkpoint?.(currentManifest);
       }
-      await execute(currentManifest, releaseDatabase.checkpoint);
+      await execute(currentManifest, releaseDatabase.checkpoint, databaseCheckpointExists);
     } finally {
       await releaseDatabase();
     }
@@ -751,6 +760,7 @@ async function verifyPlatformMutationOwnership(
   options: {
     allowDeletedRoutingCheckpoint?: boolean;
     allowMissingRoutingCheckpoint?: boolean;
+    allowUninitializedRoutingCheckpoint?: boolean;
   } = {},
 ): Promise<ReadonlySet<string>> {
   const routing = requireResource(manifest, 'routing-kv');
@@ -788,15 +798,26 @@ async function verifyPlatformMutationOwnership(
     }
   }
   if (rawRemote === null) {
-    if (options.allowMissingRoutingCheckpoint && routing.ownership === 'created') {
+    if (
+      (options.allowMissingRoutingCheckpoint || options.allowUninitializedRoutingCheckpoint) &&
+      routing.ownership === 'created'
+    ) {
       const namespaces = await client.listKvNamespaces(manifest.account.id);
-      const routingStillExists = namespaces.some(
+      const routingMatches = namespaces.some(
+        (entry) => entry.id === routing.id && entry.name === routing.name,
+      );
+      const routingIdentityCollides = namespaces.some(
         (entry) => entry.id === routing.id || entry.name === routing.name,
       );
-      if (!routingStillExists) {
+      if (
+        (options.allowMissingRoutingCheckpoint && !routingIdentityCollides) ||
+        (options.allowUninitializedRoutingCheckpoint && routingMatches)
+      ) {
         // The caller holds the authoritative PostgreSQL lifecycle lock. Repair
-        // may use that manifest as the replacement checkpoint, but every
-        // surviving resource must still pass fresh inventory and marker checks.
+        // or resume may use that manifest as the replacement checkpoint, but
+        // every surviving resource must still pass fresh inventory and marker
+        // checks. An existing routing namespace is accepted only with the
+        // exact id and name recorded by the database-authoritative manifest.
         remote = manifest;
         replacingMissingRoutingCheckpoint = true;
       }

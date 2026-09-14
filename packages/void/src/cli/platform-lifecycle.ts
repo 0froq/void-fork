@@ -111,8 +111,6 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     }
     if (existing && !args.plan) {
       existing = resolveInstallationManifest(existing.id);
-      const { verifyPlatformInstallationOwnership } = await import('./platform-management.ts');
-      await verifyPlatformInstallationOwnership(client, existing);
     }
     const plan = await createPlatformInstallPlan(
       client,
@@ -189,6 +187,12 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       client,
       revalidateBeforeWorkerDeploy: (manifest, action) =>
         revalidatePlatformInstallAction(client, plan, manifest, action),
+      verifyExistingOwnership: async (manifest, databaseCheckpointExists) => {
+        const { verifyPlatformInstallationOwnership } = await import('./platform-management.ts');
+        await verifyPlatformInstallationOwnership(client, manifest, {
+          allowUninitializedRoutingCheckpoint: databaseCheckpointExists,
+        });
+      },
     });
     if (result.waitingForDns) {
       note(

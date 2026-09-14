@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
+  recordInstallationResource,
+  recordInstallationStep,
   setInstallationDesiredState,
   transitionInstallation,
 } from '@void/platform';
@@ -15,8 +17,14 @@ import {
   createPlatformInstallationSecrets,
   resolveBootstrapGitHubId,
 } from '../../src/cli/platform-installer.ts';
-import { createPlatformInstallPlan } from '../../src/cli/platform-plan.ts';
-import { listInstallationManifests } from '../../src/cli/platform-registry.ts';
+import {
+  createPlatformInstallPlan,
+  platformProvisionIntentHash,
+} from '../../src/cli/platform-plan.ts';
+import {
+  listInstallationManifests,
+  writeInstallationManifest,
+} from '../../src/cli/platform-registry.ts';
 
 const directories: Array<string> = [];
 
@@ -260,6 +268,133 @@ describe('platform installer', () => {
       resources: [],
       status: 'planned',
     });
+  });
+
+  it('validates a resume only after reading the authoritative database checkpoint', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-authoritative-resume-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const deployment = createPlatformDeploymentManifest({
+      application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+      displayName: 'Example',
+      installationSlug: 'example',
+    });
+    let manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment,
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = transitionInstallation(manifest, 'planned', '2026-09-14T00:00:01.000Z');
+    manifest = transitionInstallation(manifest, 'provisioning', '2026-09-14T00:00:02.000Z');
+    const routingName = deployment.resources.routingKv;
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-09-14T00:00:03.000Z',
+        key: 'provision-intent:routing-kv',
+        resultHash: platformProvisionIntentHash(
+          manifest,
+          'routing-kv',
+          'kv-namespace',
+          routingName,
+        ),
+      },
+      '2026-09-14T00:00:03.000Z',
+    );
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: 'hash',
+        id: 'routing-kv-id',
+        key: 'routing-kv',
+        kind: 'kv-namespace',
+        name: routingName,
+        ownership: 'created',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:04.000Z',
+    );
+    manifest = transitionInstallation(manifest, 'failed', '2026-09-14T00:00:05.000Z');
+    writeInstallationManifest(manifest);
+    const planner = {
+      ...planningClient(),
+      listKvNamespaces: async (_accountId: string, title?: string) =>
+        title === routingName ? [{ id: 'routing-kv-id', name: routingName }] : [],
+    };
+    const plan = await createPlatformInstallPlan(
+      planner,
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      manifest,
+    );
+    let released = false;
+    const lock = Object.assign(
+      async () => {
+        released = true;
+      },
+      { authoritativeManifest: manifest },
+    );
+
+    await expect(
+      installPlatform(
+        plan,
+        createPlatformInstallationSecrets({
+          bootstrapGitHubId: '583231',
+          bootstrapGitHubLogin: 'octocat',
+          cloudflareApiToken: 'cf-token',
+          databaseUrl: 'postgres://user:password@db.example.com/void',
+          githubClientId: 'github-id',
+          githubClientSecret: 'github-secret',
+          r2AccessKeyId: 'r2-id',
+          r2SecretAccessKey: 'r2-secret',
+        }),
+        manifest,
+        {
+          acquireDatabaseLifecycleLock: async () => lock,
+          claimDatabase,
+          client: {
+            createAiGateway: async () => ({ id: 'unused', name: 'unused' }),
+            createDispatchNamespace: async () => ({ id: 'unused', name: 'unused' }),
+            createDnsRecord: async () => ({
+              content: '100::',
+              id: 'unused',
+              name: 'unused',
+              proxied: true,
+              type: 'AAAA',
+            }),
+            createHyperdrive: async () => ({ id: 'unused', name: 'unused' }),
+            createKvNamespace: async () => ({ id: 'unused', name: 'unused' }),
+            createQueue: async () => ({ id: 'unused', name: 'unused' }),
+            createR2Bucket: async () => ({ id: 'unused', name: 'unused' }),
+            createZone: async () => ({
+              id: 'unused',
+              name: 'unused',
+              nameServers: [],
+              status: 'active',
+            }),
+            putKvValue: async () => {},
+            putR2Object: async () => {},
+          },
+          revalidateBeforeWorkerDeploy: async () => {},
+          verifyExistingOwnership: async (candidate, databaseCheckpointExists) => {
+            expect(candidate).toEqual(manifest);
+            expect(databaseCheckpointExists).toBe(true);
+            throw new Error('ownership-checked');
+          },
+        },
+      ),
+    ).rejects.toThrow('ownership-checked');
+    expect(released).toBe(true);
   });
 
   it('checkpoints every resource and removes pending secrets only after verification', async () => {

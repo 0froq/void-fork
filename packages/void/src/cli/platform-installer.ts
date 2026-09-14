@@ -90,6 +90,10 @@ export type PlatformInstallerDependencies = Readonly<{
     manifest: PlatformInstallationManifest,
     action: PlatformInstallPlanAction,
   ) => Promise<void>;
+  verifyExistingOwnership?: (
+    manifest: PlatformInstallationManifest,
+    databaseCheckpointExists: boolean,
+  ) => Promise<void>;
   verifyHealth?: (apiUrl: string, installationId: string) => Promise<void>;
 }>;
 
@@ -224,6 +228,12 @@ export async function installPlatform(
     );
   }
   try {
+    if (existing) {
+      await dependencies.verifyExistingOwnership?.(
+        manifest,
+        authoritative !== null && authoritative !== undefined,
+      );
+    }
     if (manifest.platformVersion !== version) {
       manifest = { ...manifest, platformVersion: version, updatedAt: now() };
       writeInstallationManifest(manifest);
