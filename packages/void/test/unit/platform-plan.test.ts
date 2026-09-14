@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import {
   createPlatformInstallPlan,
   platformProvisionIntentHash,
+  revalidatePlatformInstallAction,
 } from '../../src/cli/platform-plan.ts';
 
 function client(overrides: Record<string, unknown> = {}) {
@@ -265,6 +266,56 @@ describe('platform installation planning', () => {
         manifest,
       ),
     ).rejects.toThrow('not owned');
+  });
+
+  it('refuses to deploy over a Worker replaced after planning', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null);
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    const workerName = manifest.deployment.resources.apiWorker;
+    manifest = recordInstallationResource(
+      manifest,
+      {
+        configHash: 'hash',
+        id: workerName,
+        key: 'api-worker',
+        kind: 'worker',
+        name: workerName,
+        ownership: 'created',
+        state: 'ready',
+      },
+      '2026-09-14T00:00:01.000Z',
+    );
+    const marker = JSON.stringify(
+      createPlatformResourceOwnershipMarker({
+        accountId: manifest.account.id,
+        installationId: manifest.id,
+        ownershipNonce: manifest.ownershipNonce,
+        resourceId: workerName,
+        resourceKey: 'api-worker',
+        resourceKind: 'worker',
+        resourceName: workerName,
+      }),
+    );
+    let liveMarker: string | undefined = marker;
+    const fake = client({
+      getWorkerPlainTextBindings: async () =>
+        liveMarker ? { PLATFORM_OWNERSHIP_MARKER: liveMarker } : {},
+      listWorkerNames: async () => [workerName],
+    });
+    const original = await createPlatformInstallPlan(fake, input, manifest);
+    const action = original.actions.find((entry) => entry.key === 'api-worker')!;
+    liveMarker = undefined;
+
+    await expect(revalidatePlatformInstallAction(fake, original, manifest, action)).rejects.toThrow(
+      "no longer has this installation's ownership marker",
+    );
   });
 
   it('resumes resources proven by the remote ownership checkpoint', async () => {

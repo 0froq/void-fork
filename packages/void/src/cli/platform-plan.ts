@@ -453,6 +453,19 @@ export async function revalidatePlatformInstallAction(
       `platform: Cloudflare changed after the installation plan was approved for ${action.kind} ${JSON.stringify(action.name)}. Review a new plan before retrying.`,
     );
   }
+  if (action.kind === 'worker' && action.action === 'update') {
+    const bindings = await client.getWorkerPlainTextBindings(original.account.id, action.name);
+    if (
+      !matchesResourceMarker(bindings.PLATFORM_OWNERSHIP_MARKER, manifest, action.key, 'worker', {
+        id: action.name,
+        name: action.name,
+      })
+    ) {
+      throw new Error(
+        `platform: Cloudflare Worker ${JSON.stringify(action.name)} no longer has this installation's ownership marker. Review a new plan before retrying.`,
+      );
+    }
+  }
 }
 
 function resourceSlugForInstallation(installationSlug: string, installationId: string): string {
