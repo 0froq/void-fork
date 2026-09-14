@@ -96,10 +96,12 @@ function persist(manifest: PlatformInstallationManifest): void {
 
 function client() {
   const deleted: Array<[string, string]> = [];
+  const emptiedBuckets: Array<string> = [];
   const remoteWrites: Array<string> = [];
   let removedRoutes = 0;
   return {
     deleted,
+    emptiedBuckets,
     remoteWrites,
     get removedRoutes() {
       return removedRoutes;
@@ -109,6 +111,9 @@ function client() {
     },
     deleteResource: async (_account: string, kind: string, id: string) => {
       deleted.push([kind, id]);
+    },
+    emptyR2Bucket: async (_account: string, bucket: string) => {
+      emptiedBuckets.push(bucket);
     },
     putKvValue: async (_account: string, _namespace: string, _key: string, value: string) => {
       remoteWrites.push(value);
@@ -197,6 +202,7 @@ describe('platform lifecycle management', () => {
       },
     );
     expect(fake.deleted).toHaveLength(14);
+    expect(fake.emptiedBuckets).toEqual(['assets-bucket']);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
   });
 

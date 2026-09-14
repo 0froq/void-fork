@@ -3,6 +3,7 @@ const DEFAULT_API_BASE = 'https://api.cloudflare.com/client/v4';
 type CloudflareEnvelope<T> = Readonly<{
   errors?: ReadonlyArray<{ code?: number; message?: string }>;
   result?: T;
+  result_info?: { cursor?: string };
   success?: boolean;
 }>;
 
@@ -402,6 +403,78 @@ export class PlatformCloudflareClient {
         return;
       }
       throw error;
+    }
+  }
+
+  async emptyR2Bucket(accountId: string, bucketName: string): Promise<void> {
+    let cursor = '';
+    const observedCursors = new Set<string>();
+    for (;;) {
+      const query = new URLSearchParams({ per_page: '1000' });
+      if (cursor) {
+        query.set('cursor', cursor);
+      }
+      const response = await this.#fetcher(
+        `${this.#apiBase}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects?${query}`,
+        {
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${this.#token}`,
+          },
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+      if (response.status === 404) {
+        return;
+      }
+      const envelope = (await response.json()) as CloudflareEnvelope<
+        ReadonlyArray<{ key?: unknown }>
+      >;
+      if (!response.ok || envelope.success !== true || !Array.isArray(envelope.result)) {
+        const details =
+          envelope.errors
+            ?.map((error) => error.message)
+            .filter(Boolean)
+            .join(', ') || `HTTP ${response.status}`;
+        throw new PlatformCloudflareApiError(
+          `Cloudflare API error listing R2 objects: ${details}`,
+          response.status,
+        );
+      }
+      const keys = envelope.result.map((object) => requiredString(object.key, 'R2 object key'));
+      for (let offset = 0; offset < keys.length; offset += 25) {
+        await Promise.all(
+          keys
+            .slice(offset, offset + 25)
+            .map((key) => this.deleteR2Object(accountId, bucketName, key)),
+        );
+      }
+      const nextCursor = envelope.result_info?.cursor ?? '';
+      if (!nextCursor) {
+        return;
+      }
+      if (observedCursors.has(nextCursor)) {
+        throw new Error('platform: Cloudflare returned a repeated R2 object cursor.');
+      }
+      observedCursors.add(nextCursor);
+      cursor = nextCursor;
+    }
+  }
+
+  private async deleteR2Object(accountId: string, bucketName: string, key: string): Promise<void> {
+    const response = await this.#fetcher(
+      `${this.#apiBase}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+      {
+        headers: { Authorization: `Bearer ${this.#token}` },
+        method: 'DELETE',
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    if (!response.ok && response.status !== 404) {
+      throw new PlatformCloudflareApiError(
+        `Cloudflare API error deleting an R2 object (HTTP ${response.status}).`,
+        response.status,
+      );
     }
   }
 

@@ -111,6 +111,35 @@ describe('platform Cloudflare client', () => {
     expect(cursors).toEqual(['', 'bucket-0999']);
   });
 
+  it('empties every paginated R2 object before bucket deletion', async () => {
+    const deleted: Array<string> = [];
+    const cursors: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input, init) => {
+        const url = new URL(String(input));
+        if (init?.method === 'DELETE') {
+          deleted.push(decodeURIComponent(url.pathname.split('/objects/')[1]!));
+          return new Response(null, { status: 204 });
+        }
+        const cursor = url.searchParams.get('cursor') ?? '';
+        cursors.push(cursor);
+        return Response.json(
+          cursor
+            ? { success: true, result: [{ key: 'nested/c.txt' }] }
+            : {
+                success: true,
+                result: [{ key: 'a.txt' }, { key: 'b.txt' }],
+                result_info: { cursor: 'next-page' },
+              },
+        );
+      },
+    });
+
+    await client.emptyR2Bucket('account', 'void-assets');
+    expect(cursors).toEqual(['', 'next-page']);
+    expect(deleted.sort()).toEqual(['a.txt', 'b.txt', 'nested/c.txt']);
+  });
+
   it('uses the documented AI Gateway lifecycle endpoints and creation shape', async () => {
     const requests: Array<{ body: unknown; method: string; pathname: string }> = [];
     const client = new PlatformCloudflareClient('token', {

@@ -175,4 +175,4 @@ To delete installer-owned data:
 void platform uninstall [id] --purge-data
 ```
 
-`--purge-data` is destructive, but still never deletes external PostgreSQL, adopted resources, or a zone unless zone deletion is selected separately. Uninstall checkpoints each deletion, so rerunning after a failure skips completed work and continues safely.
+`--purge-data` is destructive, but still never deletes external PostgreSQL, adopted resources, or a zone unless zone deletion is selected separately. It paginates through and deletes every object in the installer-owned R2 bucket before deleting the bucket. Uninstall checkpoints each resource deletion, so rerunning after a failure skips completed work and safely continues an interrupted bucket purge.

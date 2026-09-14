@@ -22,7 +22,7 @@ import {
 
 type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
-  'deleteKvValue' | 'deleteResource' | 'putKvValue' | 'removeRoutes'
+  'deleteKvValue' | 'deleteResource' | 'emptyR2Bucket' | 'putKvValue' | 'removeRoutes'
 >;
 
 export type PlatformManagementDependencies = Readonly<{
@@ -245,6 +245,9 @@ export async function uninstallPlatform(
         next = updateResourceState(next, resource.key, 'retained');
         writeInstallationManifest(next);
         continue;
+      }
+      if (resource.kind === 'r2-bucket') {
+        await client.emptyR2Bucket(next.account.id, resource.name);
       }
       await client.deleteResource(next.account.id, resource.kind, resource.id, zone?.id);
       next = updateResourceState(next, resource.key, 'deleted');
