@@ -341,10 +341,7 @@ export async function disablePlatform(
   if (manifest !== initialManifest) {
     writeInstallationManifest(manifest);
   }
-  if (manifest.status === 'disabled') {
-    log.info(`${manifest.deployment.displayName} is already disabled.`);
-    return;
-  }
+  const alreadyDisabled = manifest.status === 'disabled';
   const missing = await verifyPlatformMutationOwnership(
     client,
     manifest,
@@ -358,29 +355,31 @@ export async function disablePlatform(
   );
   let next = setInstallationDesiredState(manifest, 'disabled', new Date().toISOString());
   writeInstallationManifest(next);
-  next = transitionInstallation(next, 'disabling', new Date().toISOString());
-  writeInstallationManifest(next);
+  if (!alreadyDisabled) {
+    next = transitionInstallation(next, 'disabling', new Date().toISOString());
+    writeInstallationManifest(next);
+  }
   try {
     await writeRemoteManifestIfPresent(client, next);
     const zone = requireResource(next, 'zone');
     const trafficGeneration = currentTrafficGeneration(next);
+    await client.removeRoutes(next.account.id, missing.has(zone.key) ? null : zone.id, workers);
     if (!hasLifecycleStep(next, `disable:${trafficGeneration}:routes`)) {
-      await client.removeRoutes(next.account.id, missing.has(zone.key) ? null : zone.id, workers);
       next = recordLifecycleStep(next, `disable:${trafficGeneration}:routes`);
-      await writeLifecycleCheckpoint(client, next);
     }
+    await writeLifecycleCheckpoint(client, next);
     for (const worker of workers) {
       const step = `disable:${trafficGeneration}:workers.dev:${worker}`;
-      if (!hasLifecycleStep(next, step)) {
-        const resource = next.resources.find(
-          (entry) => entry.kind === 'worker' && entry.name === worker,
-        )!;
-        if (!missing.has(resource.key)) {
-          await client.setWorkerSubdomain(next.account.id, worker, false);
-        }
-        next = recordLifecycleStep(next, step);
-        await writeLifecycleCheckpoint(client, next);
+      const resource = next.resources.find(
+        (entry) => entry.kind === 'worker' && entry.name === worker,
+      )!;
+      if (!missing.has(resource.key)) {
+        await client.setWorkerSubdomain(next.account.id, worker, false);
       }
+      if (!hasLifecycleStep(next, step)) {
+        next = recordLifecycleStep(next, step);
+      }
+      await writeLifecycleCheckpoint(client, next);
     }
     next = transitionInstallation(next, 'disabled', new Date().toISOString());
     await writeLifecycleCheckpoint(client, next);

@@ -788,4 +788,19 @@ describe('platform lifecycle management', () => {
     expect(second.removedRoutes).toBe(1);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
   });
+
+  it('reasserts every public endpoint when disabling an already-disabled installation', async () => {
+    const manifest = installedManifest();
+    persist(manifest);
+    const first = client(manifest);
+    await disablePlatform(first, manifest, false);
+
+    const disabled = listInstallationManifests()[0]!;
+    const second = client(disabled);
+    await disablePlatform(second, disabled, false);
+
+    expect(second.removedRoutes).toBe(1);
+    expect(second.subdomains).toHaveLength(4);
+    expect(listInstallationManifests()[0]?.status).toBe('disabled');
+  });
 });
