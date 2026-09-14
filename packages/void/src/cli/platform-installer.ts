@@ -824,12 +824,73 @@ export async function acquirePlatformDatabaseLifecycleLock(
   }
 }
 
+export async function readPlatformDatabaseLifecycleManifest(
+  databaseUrl: string,
+  installationId: string,
+  ownershipNonce: string,
+): Promise<PlatformInstallationManifest | null> {
+  const { Pool } = await import('pg');
+  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+  try {
+    return await readPlatformDatabaseLifecycleManifestConnection(
+      pool,
+      installationId,
+      ownershipNonce,
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('platform:')) {
+      throw error;
+    }
+    throw new Error(
+      `platform: Could not read the PostgreSQL lifecycle checkpoint: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    await pool.end();
+  }
+}
+
 type DatabaseClaimConnection = Readonly<{
   query: <Row extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
     values?: ReadonlyArray<unknown>,
   ) => Promise<{ rows: ReadonlyArray<Row> }>;
 }>;
+
+export async function readPlatformDatabaseLifecycleManifestConnection(
+  client: DatabaseClaimConnection,
+  installationId: string,
+  ownershipNonce: string,
+): Promise<PlatformInstallationManifest | null> {
+  const result = await client.query<{
+    installation_id: string;
+    lifecycle_manifest: unknown;
+    ownership_nonce: string;
+  }>(
+    `SELECT "installation_id", "ownership_nonce", "lifecycle_manifest"
+     FROM "__void_platform_installation"
+     WHERE "singleton" = true`,
+  );
+  const row = result.rows[0];
+  if (
+    result.rows.length !== 1 ||
+    row?.installation_id !== installationId ||
+    row.ownership_nonce !== ownershipNonce
+  ) {
+    throw new Error(
+      'platform: The PostgreSQL database ownership claim does not match this installation.',
+    );
+  }
+  if (row.lifecycle_manifest === null || row.lifecycle_manifest === undefined) {
+    return null;
+  }
+  const manifest = parsePlatformInstallationManifest(row.lifecycle_manifest);
+  if (manifest.id !== installationId || manifest.ownershipNonce !== ownershipNonce) {
+    throw new Error(
+      'platform: The PostgreSQL lifecycle checkpoint does not match this installation.',
+    );
+  }
+  return manifest;
+}
 
 export async function acquirePlatformDatabaseLifecycleLockConnection(
   client: DatabaseClaimConnection,

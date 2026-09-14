@@ -188,7 +188,10 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         zoneName: deployment.application.zoneName,
       },
       manifest,
-      { repairMissing: args.subcommand === 'repair' },
+      {
+        authoritativeProvisionIntents: databaseCheckpointExists,
+        repairMissing: args.subcommand === 'repair',
+      },
     );
     note(
       formatPlatformInstallPlan(plan),

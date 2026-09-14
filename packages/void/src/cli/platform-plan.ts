@@ -77,7 +77,7 @@ export async function createPlatformInstallPlan(
   client: PlanningClient,
   input: PlatformInstallPlanInput,
   existing: PlatformInstallationManifest | null,
-  options?: { repairMissing?: boolean },
+  options?: { authoritativeProvisionIntents?: boolean; repairMissing?: boolean },
 ): Promise<PlatformInstallPlan> {
   await client.verifyToken();
   const accounts = await client.listAccounts();
@@ -431,7 +431,7 @@ export async function revalidatePlatformInstallAction(
   original: PlatformInstallPlan,
   manifest: PlatformInstallationManifest,
   action: PlatformInstallPlanAction,
-  options?: { repairMissing?: boolean },
+  options?: { authoritativeProvisionIntents?: boolean; repairMissing?: boolean },
 ): Promise<void> {
   const deployment = original.deployment;
   const refreshed = await createPlatformInstallPlan(
@@ -489,7 +489,7 @@ function addDnsPlan(
   existing: PlatformInstallationManifest | null,
   name: string,
   records: ReadonlyArray<CloudflareDnsRecord>,
-  options?: { repairMissing?: boolean },
+  options?: { authoritativeProvisionIntents?: boolean; repairMissing?: boolean },
 ): void {
   const compatible = records.filter((record) => record.proxied);
   if (records.some((record) => !record.proxied)) {
@@ -568,7 +568,7 @@ function addNamedPlan(
   name: string,
   matches: ReadonlyArray<CloudflareNamedResource>,
   existingAction: 'reuse' | 'update' = 'reuse',
-  options?: { repairMissing?: boolean },
+  options?: { authoritativeProvisionIntents?: boolean; repairMissing?: boolean },
   remoteOwnership?: PlatformInstallationManifest | null,
   intentProofs: ReadonlySet<string> = new Set(),
 ): void {
@@ -590,7 +590,7 @@ function addNamedPlan(
       existing !== null &&
       isUniqueProvisionAttempt(existing, key, kind, name) &&
       hasUnrecordedProvisionIntent(existing, key, kind, name) &&
-      intentProofs.has(key);
+      (intentProofs.has(key) || options?.authoritativeProvisionIntents === true);
     if (
       (!recorded || recorded.id !== remote.id || recorded.kind !== kind) &&
       !remotelyOwned &&

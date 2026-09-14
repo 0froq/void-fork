@@ -7,6 +7,7 @@ import {
   acquirePlatformDatabaseLifecycleLock,
   createPlatformInstallationSecrets,
   installPlatform,
+  readPlatformDatabaseLifecycleManifest,
   resolveBootstrapGitHubId,
 } from './platform-installer.ts';
 import {
@@ -19,6 +20,7 @@ import {
   assertPlatformInstallationSlugAvailable,
   readPendingInstallationSecrets,
   resolveInstallationManifest,
+  writeInstallationManifest,
 } from './platform-registry.ts';
 
 export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<void> {
@@ -112,6 +114,34 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     if (existing && !args.plan) {
       existing = resolveInstallationManifest(existing.id);
     }
+    const checkpoint = existing ? readPendingInstallationSecrets(existing) : null;
+    let authoritativeProvisionIntents = false;
+    if (existing) {
+      const databaseUrl =
+        checkpoint?.databaseUrl ||
+        process.env.VOID_PLATFORM_DATABASE_URL ||
+        process.env.DATABASE_URL ||
+        '';
+      if (!databaseUrl) {
+        throw new Error(
+          'platform: DATABASE_URL is required to verify an interrupted installation before resuming it.',
+        );
+      }
+      const authoritative = await readPlatformDatabaseLifecycleManifest(
+        databaseUrl,
+        existing.id,
+        existing.ownershipNonce,
+      );
+      if (authoritative) {
+        const { selectAuthoritativePlatformManifest } = await import('./platform-management.ts');
+        const selected = selectAuthoritativePlatformManifest(existing, authoritative);
+        authoritativeProvisionIntents = true;
+        if (!args.plan && JSON.stringify(selected) !== JSON.stringify(existing)) {
+          writeInstallationManifest(selected);
+        }
+        existing = selected;
+      }
+    }
     const plan = await createPlatformInstallPlan(
       client,
       {
@@ -124,6 +154,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         zoneName,
       },
       existing,
+      { authoritativeProvisionIntents },
     );
     note(
       formatPlatformInstallPlan(plan),
@@ -141,7 +172,6 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       }
     }
 
-    const checkpoint = existing ? readPendingInstallationSecrets(existing) : null;
     note(
       `Create a GitHub OAuth App with this callback URL:\n${plan.apiUrl}/auth/callback\n\n` +
         'For direct asset uploads, create an R2 API token with Object Read & Write access to this account.',

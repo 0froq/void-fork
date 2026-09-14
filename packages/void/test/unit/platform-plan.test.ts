@@ -210,6 +210,21 @@ describe('platform installation planning', () => {
         manifest,
       ),
     ).rejects.toThrow('not owned');
+
+    const recovered = await createPlatformInstallPlan(
+      client({
+        listKvNamespaces: async (_account: string, title: string) =>
+          title === resourceName ? [{ id: 'created-before-crash', name: title }] : [],
+      }),
+      input,
+      manifest,
+      { authoritativeProvisionIntents: true },
+    );
+    expect(recovered.actions.find((action) => action.key === 'routing-kv')).toMatchObject({
+      action: 'reuse',
+      id: 'created-before-crash',
+      reason: 'Recover the uniquely named resource from an interrupted provisioning attempt.',
+    });
   });
 
   it('recovers only an intent-only Worker with its matching durable marker', async () => {

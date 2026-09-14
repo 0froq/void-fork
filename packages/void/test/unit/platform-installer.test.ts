@@ -15,6 +15,7 @@ import {
   installPlatform,
   claimPlatformDatabaseConnection,
   createPlatformInstallationSecrets,
+  readPlatformDatabaseLifecycleManifestConnection,
   resolveBootstrapGitHubId,
 } from '../../src/cli/platform-installer.ts';
 import {
@@ -101,6 +102,43 @@ describe('platform installer', () => {
     expect(queries.find(({ sql }) => sql.includes('pg_try_advisory_lock'))?.values).toEqual([
       'void-platform-lifecycle-v1:install-one:nonce-one',
     ]);
+  });
+
+  it('reads and validates the authoritative lifecycle checkpoint without mutating it', async () => {
+    const ownershipNonce = '0123456789abcdef0123456789abcdef';
+    const manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'install-one',
+      ownershipNonce,
+      platformVersion: '1.0.0',
+    });
+    const queries: Array<string> = [];
+    const connection = {
+      query: async <Row extends Record<string, unknown>>(sql: string) => {
+        queries.push(sql);
+        return {
+          rows: [
+            {
+              installation_id: 'install-one',
+              lifecycle_manifest: manifest,
+              ownership_nonce: ownershipNonce,
+            },
+          ] as unknown as ReadonlyArray<Row>,
+        };
+      },
+    };
+
+    await expect(
+      readPlatformDatabaseLifecycleManifestConnection(connection, 'install-one', ownershipNonce),
+    ).resolves.toEqual(manifest);
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toMatch(/^SELECT/);
   });
 
   it('reads and writes authoritative lifecycle state while holding the database lock', async () => {
