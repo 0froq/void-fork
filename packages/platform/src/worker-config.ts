@@ -1,3 +1,4 @@
+import { createPlatformResourceOwnershipMarker } from './installation.ts';
 import { createApplicationRoutes, type PlatformDeploymentManifest } from './manifest.ts';
 
 export type PlatformProvisionedResourceIds = Readonly<{
@@ -17,6 +18,7 @@ export function createPlatformWorkerConfigs(input: {
   apiUrl: string;
   deployment: PlatformDeploymentManifest;
   installationId: string;
+  ownershipNonce: string;
   platformVersion: string;
   publicEndpoints?: boolean;
   proxyUrl: string;
@@ -28,6 +30,7 @@ export function createPlatformWorkerConfigs(input: {
     apiUrl,
     deployment,
     installationId,
+    ownershipNonce,
     platformVersion,
     proxyUrl,
     resources,
@@ -35,6 +38,19 @@ export function createPlatformWorkerConfigs(input: {
   } = input;
   const publicEndpoints = input.publicEndpoints ?? true;
   const names = deployment.resources;
+  const ownershipVars = (resourceKey: string, resourceName: string) => ({
+    PLATFORM_OWNERSHIP_MARKER: JSON.stringify(
+      createPlatformResourceOwnershipMarker({
+        accountId,
+        installationId,
+        ownershipNonce,
+        resourceId: resourceName,
+        resourceKey,
+        resourceKind: 'worker',
+        resourceName,
+      }),
+    ),
+  });
   const common = {
     account_id: accountId,
     compatibility_date: '2026-02-24',
@@ -94,6 +110,7 @@ export function createPlatformWorkerConfigs(input: {
       PLATFORM_DISPLAY_NAME: deployment.displayName,
       PLATFORM_ENV: 'production',
       PLATFORM_INSTALLATION_ID: installationId,
+      ...ownershipVars('api-worker', names.apiWorker),
       PLATFORM_VERSION: platformVersion,
       PROXY_URL: proxyUrl,
       R2_STATIC_ASSETS_BUCKET: names.assetsBucket,
@@ -130,6 +147,7 @@ export function createPlatformWorkerConfigs(input: {
     vars: {
       AI_GATEWAY_ID: names.aiGateway,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
+      ...ownershipVars('proxy-worker', names.proxyWorker),
     },
   };
   if (publicEndpoints && deployment.controlPlane.proxyHostname) {
@@ -145,7 +163,10 @@ export function createPlatformWorkerConfigs(input: {
       main: runtimeEntrypoints.tail,
       no_bundle: true,
       analytics_engine_datasets: [{ binding: 'ANALYTICS', dataset: names.logsDataset }],
-      vars: { PLATFORM_DISPATCH_WORKER_NAME: names.dispatchWorker },
+      vars: {
+        PLATFORM_DISPATCH_WORKER_NAME: names.dispatchWorker,
+        ...ownershipVars('tail-worker', names.tailWorker),
+      },
     },
     dispatch: {
       ...common,
@@ -169,7 +190,10 @@ export function createPlatformWorkerConfigs(input: {
       ],
       queues: { producers: [{ binding: 'USAGE_QUEUE', queue: names.usageQueue }] },
       tail_consumers: [{ service: names.tailWorker }],
-      vars: { BASE_HOSTNAME: deployment.application.baseDomain },
+      vars: {
+        BASE_HOSTNAME: deployment.application.baseDomain,
+        ...ownershipVars('dispatch-worker', names.dispatchWorker),
+      },
     },
   };
 }

@@ -78,6 +78,7 @@ describe('platform installer', () => {
     });
     const deployed: Array<string> = [];
     let apiSecrets: Record<string, string> | null = null;
+    let r2OwnershipMarker = '';
     const routingValues = new Map<string, string>();
     let remoteManifest = '';
     const result = await installPlatform(
@@ -117,6 +118,9 @@ describe('platform installer', () => {
               remoteManifest = value;
             }
           },
+          putR2Object: async (_account, _bucket, _key, value) => {
+            r2OwnershipMarker = value;
+          },
         },
         deployWorker: async (config, secrets) => {
           deployed.push(String(config.name));
@@ -138,6 +142,12 @@ describe('platform installer', () => {
       result.manifest.deployment.resources.dispatchWorker,
     ]);
     expect(apiSecrets).toMatchObject({ PLATFORM_BOOTSTRAP_GITHUB_ID: '583231' });
+    expect(JSON.parse(r2OwnershipMarker)).toMatchObject({
+      accountId: 'account',
+      installationId: result.manifest.id,
+      ownershipNonce: result.manifest.ownershipNonce,
+      resourceKey: 'assets-bucket',
+    });
     expect(JSON.parse(remoteManifest)).toMatchObject({
       id: result.manifest.id,
       status: 'installed',
@@ -212,6 +222,9 @@ describe('platform installer', () => {
           putKvValue: async () => {
             throw new Error('must wait for DNS');
           },
+          putR2Object: async () => {
+            throw new Error('must wait for DNS');
+          },
         },
       },
     );
@@ -268,6 +281,7 @@ describe('platform installer', () => {
         createDispatchNamespace: create,
         createHyperdrive: async (account, name) => create(account, name),
         putKvValue: async () => {},
+        putR2Object: async () => {},
       },
       deployWorker: async () => {},
       migrateDatabase: async () => {},
@@ -343,6 +357,7 @@ describe('platform installer', () => {
       putKvValue: async (_account: string, _namespace: string, key: string) => {
         upgradeKvWrites.push(key);
       },
+      putR2Object: async () => {},
     };
     const upgraded = await installPlatform(upgradedPlan, secrets, installed.manifest, {
       client: upgradeClient,

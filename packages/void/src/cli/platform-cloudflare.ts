@@ -392,6 +392,74 @@ export class PlatformCloudflareClient {
     return response.text();
   }
 
+  async putR2Object(
+    accountId: string,
+    bucketName: string,
+    key: string,
+    value: string,
+  ): Promise<void> {
+    const response = await this.#fetcher(
+      `${this.#apiBase}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+      {
+        body: value,
+        headers: {
+          Authorization: `Bearer ${this.#token}`,
+          'Content-Type': 'application/json',
+        },
+        method: 'PUT',
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    if (!response.ok) {
+      throw new PlatformCloudflareApiError(
+        `Cloudflare API error writing the R2 ownership marker (HTTP ${response.status}).`,
+        response.status,
+      );
+    }
+  }
+
+  async getR2Object(accountId: string, bucketName: string, key: string): Promise<string | null> {
+    const response = await this.#fetcher(
+      `${this.#apiBase}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+      {
+        headers: { Authorization: `Bearer ${this.#token}` },
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new PlatformCloudflareApiError(
+        `Cloudflare API error reading the R2 ownership marker (HTTP ${response.status}).`,
+        response.status,
+      );
+    }
+    return response.text();
+  }
+
+  async getWorkerPlainTextBindings(
+    accountId: string,
+    workerName: string,
+  ): Promise<Readonly<Record<string, string>>> {
+    const settings = await this.request<{
+      bindings?: ReadonlyArray<{ name?: unknown; text?: unknown; type?: unknown }>;
+    }>(
+      `/accounts/${encodeURIComponent(accountId)}/workers/scripts/${encodeURIComponent(workerName)}/settings`,
+    );
+    const bindings: Record<string, string> = {};
+    for (const binding of settings.bindings ?? []) {
+      if (
+        binding.type === 'plain_text' &&
+        typeof binding.name === 'string' &&
+        typeof binding.text === 'string'
+      ) {
+        bindings[binding.name] = binding.text;
+      }
+    }
+    return bindings;
+  }
+
   async deleteKvValue(accountId: string, namespaceId: string, key: string): Promise<void> {
     try {
       await this.request(

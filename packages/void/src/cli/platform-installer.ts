@@ -4,7 +4,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   createPlatformInstallationManifest,
+  createPlatformResourceOwnershipMarker,
   createPlatformWorkerConfigs,
+  PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   recordInstallationResource,
   recordInstallationStep,
@@ -56,6 +58,7 @@ type InstallerClient = Pick<
   | 'createR2Bucket'
   | 'createZone'
   | 'putKvValue'
+  | 'putR2Object'
 >;
 
 export type PlatformInstallerDependencies = Readonly<{
@@ -243,6 +246,28 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
 
+    const assetsBucket = manifest.resources.find(
+      (resource) => resource.key === 'assets-bucket' && resource.state === 'ready',
+    );
+    if (assetsBucket?.ownership === 'created') {
+      await dependencies.client.putR2Object(
+        plan.account.id,
+        assetsBucket.name,
+        PLATFORM_R2_OWNERSHIP_MARKER_KEY,
+        JSON.stringify(
+          createPlatformResourceOwnershipMarker({
+            accountId: plan.account.id,
+            installationId: manifest.id,
+            ownershipNonce: manifest.ownershipNonce,
+            resourceId: assetsBucket.id,
+            resourceKey: assetsBucket.key,
+            resourceKind: assetsBucket.kind,
+            resourceName: assetsBucket.name,
+          }),
+        ),
+      );
+    }
+
     const runtimeDirectory = getPlatformRuntimeDirectory();
     const migrationHash = hash(
       readFileSync(join(runtimeDirectory, 'drizzle', 'meta', '_journal.json')),
@@ -300,6 +325,7 @@ export async function installPlatform(
       apiUrl: plan.apiUrl,
       deployment: plan.deployment,
       installationId: manifest.id,
+      ownershipNonce: manifest.ownershipNonce,
       platformVersion: version,
       publicEndpoints: !preserveDisabled,
       proxyUrl: plan.proxyUrl,

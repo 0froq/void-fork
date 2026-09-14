@@ -2,6 +2,8 @@ import { parsePlatformDeploymentManifest, type PlatformDeploymentManifest } from
 
 export const PLATFORM_INSTALLATION_SCHEMA_VERSION = 1 as const;
 export const PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY = '__void/platform/installation/v1';
+export const PLATFORM_R2_OWNERSHIP_MARKER_KEY = '__void/platform/ownership/v1';
+export const PLATFORM_RESOURCE_OWNERSHIP_SCHEMA_VERSION = 1 as const;
 
 export type InstallationStatus =
   | 'draft'
@@ -75,6 +77,17 @@ export type PlatformInstallationManifest = Readonly<{
   updatedAt: string;
 }>;
 
+export type PlatformResourceOwnershipMarker = Readonly<{
+  accountId: string;
+  installationId: string;
+  ownershipNonce: string;
+  resourceId: string;
+  resourceKey: string;
+  resourceKind: InstallationResourceKind;
+  resourceName: string;
+  schemaVersion: typeof PLATFORM_RESOURCE_OWNERSHIP_SCHEMA_VERSION;
+}>;
+
 const STATUS_TRANSITIONS: Readonly<Record<InstallationStatus, ReadonlyArray<InstallationStatus>>> =
   {
     draft: ['planned', 'failed', 'uninstalling'],
@@ -142,6 +155,53 @@ function assertTimestamp(value: string, label: string): string {
     throw new Error(`${label} must be an ISO timestamp.`);
   }
   return value;
+}
+
+export function createPlatformResourceOwnershipMarker(input: {
+  accountId: string;
+  installationId: string;
+  ownershipNonce: string;
+  resourceId: string;
+  resourceKey: string;
+  resourceKind: InstallationResourceKind;
+  resourceName: string;
+}): PlatformResourceOwnershipMarker {
+  if (!isResourceKind(input.resourceKind)) {
+    throw new Error('Invalid ownership marker resource kind.');
+  }
+  return {
+    accountId: requiredString(input.accountId, 'ownership accountId'),
+    installationId: requiredString(input.installationId, 'ownership installationId'),
+    ownershipNonce: requiredString(input.ownershipNonce, 'ownership ownershipNonce'),
+    resourceId: requiredString(input.resourceId, 'ownership resourceId'),
+    resourceKey: requiredString(input.resourceKey, 'ownership resourceKey'),
+    resourceKind: input.resourceKind,
+    resourceName: requiredString(input.resourceName, 'ownership resourceName'),
+    schemaVersion: PLATFORM_RESOURCE_OWNERSHIP_SCHEMA_VERSION,
+  };
+}
+
+export function parsePlatformResourceOwnershipMarker(
+  value: unknown,
+): PlatformResourceOwnershipMarker {
+  assertRecord(value, 'Platform resource ownership marker');
+  if (value.schemaVersion !== PLATFORM_RESOURCE_OWNERSHIP_SCHEMA_VERSION) {
+    throw new Error(
+      `Unsupported platform resource ownership schema version: ${String(value.schemaVersion)}.`,
+    );
+  }
+  if (!isResourceKind(value.resourceKind)) {
+    throw new Error('Invalid ownership marker resource kind.');
+  }
+  return createPlatformResourceOwnershipMarker({
+    accountId: requiredString(value.accountId, 'ownership accountId'),
+    installationId: requiredString(value.installationId, 'ownership installationId'),
+    ownershipNonce: requiredString(value.ownershipNonce, 'ownership ownershipNonce'),
+    resourceId: requiredString(value.resourceId, 'ownership resourceId'),
+    resourceKey: requiredString(value.resourceKey, 'ownership resourceKey'),
+    resourceKind: value.resourceKind,
+    resourceName: requiredString(value.resourceName, 'ownership resourceName'),
+  });
 }
 
 export function createPlatformInstallationManifest(input: {

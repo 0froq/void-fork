@@ -15,8 +15,12 @@ export {
 } from './manifest.ts';
 export {
   PLATFORM_INSTALLATION_SCHEMA_VERSION,
+  PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
+  PLATFORM_RESOURCE_OWNERSHIP_SCHEMA_VERSION,
+  createPlatformResourceOwnershipMarker,
   createPlatformInstallationManifest,
+  parsePlatformResourceOwnershipMarker,
   parsePlatformInstallationManifest,
   recordInstallationResource,
   recordInstallationStep,
@@ -29,6 +33,7 @@ export {
   type InstallationStep,
   type PlatformInstallationManifest,
   type PlatformInstallationEndpoints,
+  type PlatformResourceOwnershipMarker,
   type ResourceOwnership,
 } from './installation.ts';
 export {

@@ -13,6 +13,7 @@ describe('platform Worker configuration', () => {
       apiUrl: 'https://void-example-api.example.workers.dev',
       deployment,
       installationId: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
       platformVersion: '1.0.0',
       proxyUrl: 'https://void-example-proxy.example.workers.dev',
       resources: {
@@ -33,13 +34,23 @@ describe('platform Worker configuration', () => {
     expect(configs.api).not.toHaveProperty('containers');
     expect(JSON.stringify(configs)).not.toContain('BuildManager');
     expect(JSON.stringify(configs)).not.toContain('BUILD_SCHEDULER');
-    expect(configs.proxy.vars).toEqual({
+    expect(configs.proxy.vars).toMatchObject({
       AI_GATEWAY_ID: deployment.resources.aiGateway,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
     });
-    expect(configs.tail.vars).toEqual({
+    expect(configs.tail.vars).toMatchObject({
       PLATFORM_DISPATCH_WORKER_NAME: deployment.resources.dispatchWorker,
     });
+    for (const config of Object.values(configs)) {
+      expect(
+        JSON.parse(String((config.vars as Record<string, unknown>).PLATFORM_OWNERSHIP_MARKER)),
+      ).toMatchObject({
+        accountId: 'account',
+        installationId: 'example-a1b2c3d4',
+        ownershipNonce: '0123456789abcdef0123456789abcdef',
+        resourceKind: 'worker',
+      });
+    }
     expect(configs.api.vars).toMatchObject({
       LOGS_DATASET: deployment.resources.logsDataset,
       REQUESTS_DATASET: deployment.resources.requestsDataset,
@@ -62,6 +73,7 @@ describe('platform Worker configuration', () => {
       apiUrl: 'https://api.example.com',
       deployment,
       installationId: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
       platformVersion: '1.0.0',
       proxyUrl: 'https://proxy.example.com',
       publicEndpoints: false,

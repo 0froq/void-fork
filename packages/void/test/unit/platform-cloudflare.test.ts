@@ -111,6 +111,58 @@ describe('platform Cloudflare client', () => {
     expect(cursors).toEqual(['', 'bucket-0999']);
   });
 
+  it('writes and reads reserved R2 ownership markers', async () => {
+    const requests: Array<{ body: string; method: string; pathname: string }> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: String(init?.body ?? ''),
+          method: init?.method ?? 'GET',
+          pathname: url.pathname,
+        });
+        return init?.method === 'PUT'
+          ? new Response(null, { status: 200 })
+          : new Response('marker');
+      },
+    });
+
+    await client.putR2Object('account', 'bucket/name', 'reserved/key', 'marker');
+    await expect(client.getR2Object('account', 'bucket/name', 'reserved/key')).resolves.toBe(
+      'marker',
+    );
+    expect(requests).toEqual([
+      {
+        body: 'marker',
+        method: 'PUT',
+        pathname: '/client/v4/accounts/account/r2/buckets/bucket%2Fname/objects/reserved%2Fkey',
+      },
+      {
+        body: '',
+        method: 'GET',
+        pathname: '/client/v4/accounts/account/r2/buckets/bucket%2Fname/objects/reserved%2Fkey',
+      },
+    ]);
+  });
+
+  it('reads only plain-text Worker ownership bindings', async () => {
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async () =>
+        Response.json({
+          success: true,
+          result: {
+            bindings: [
+              { name: 'PLATFORM_OWNERSHIP_MARKER', text: 'owned', type: 'plain_text' },
+              { name: 'SECRET', type: 'secret_text' },
+            ],
+          },
+        }),
+    });
+    await expect(client.getWorkerPlainTextBindings('account', 'worker')).resolves.toEqual({
+      PLATFORM_OWNERSHIP_MARKER: 'owned',
+    });
+  });
+
   it('empties every paginated R2 object before bucket deletion', async () => {
     const deleted: Array<ReadonlyArray<string>> = [];
     const cursors: Array<string> = [];
