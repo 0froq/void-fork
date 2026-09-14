@@ -44,6 +44,7 @@ export type PlatformInstallationSecrets = Readonly<{
 type InstallerClient = Pick<
   PlatformCloudflareClient,
   | 'createDispatchNamespace'
+  | 'createAiGateway'
   | 'createHyperdrive'
   | 'createKvNamespace'
   | 'createQueue'
@@ -338,6 +339,8 @@ async function createResource(
   databaseUrl: string,
 ): Promise<{ id: string; name: string }> {
   switch (action.kind) {
+    case 'ai-gateway':
+      return client.createAiGateway(plan.account.id, action.name);
     case 'kv-namespace':
       return client.createKvNamespace(plan.account.id, action.name);
     case 'r2-bucket':

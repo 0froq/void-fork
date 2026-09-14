@@ -43,6 +43,7 @@ export interface SandboxConcurrencyCounterRpc extends Rpc.DurableObjectBranded {
 
 export type Env = Readonly<{
   AI: AiBinding;
+  AI_GATEWAY_ID?: string;
   JWT_SECRET: string;
   ROUTING: KVNamespace;
 

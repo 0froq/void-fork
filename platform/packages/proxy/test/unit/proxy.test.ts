@@ -579,6 +579,27 @@ describe('proxy worker', () => {
       );
     });
 
+    it('uses the installation-specific AI Gateway', async () => {
+      const env = { ...createEnv(), AI_GATEWAY_ID: 'void-team' };
+      await worker.fetch(
+        post('/ai/run', {
+          model: 'm',
+          inputs: {},
+          projectId: 'proj_42',
+          aiToken: aiTokens['proj_42'],
+        }),
+        env,
+      );
+
+      expect(env.AI.run).toHaveBeenCalledWith(
+        'm',
+        {},
+        {
+          gateway: { id: 'void-team', metadata: { projectId: 'proj_42' } },
+        },
+      );
+    });
+
     it('preserves user gateway options while forcing Void gateway id and project metadata', async () => {
       const env = createEnv();
       await worker.fetch(
@@ -837,6 +858,26 @@ describe('proxy worker', () => {
         model: 'gpt-4o',
         messages: [{ role: 'user', content: 'Hello' }],
       });
+    });
+
+    it('uses the installation-specific gateway for provider requests', async () => {
+      mockProviderFetch('{}', { headers: { 'content-type': 'application/json' } });
+      const { gateway } = mockProviderGateway();
+      const env = { ...createEnv({ gateway }), AI_GATEWAY_ID: 'void-team' };
+
+      const response = await worker.fetch(
+        post('/ai/provider', {
+          provider: 'openai',
+          path: '/chat/completions',
+          providerKey: 'key',
+          projectId: 'proj_1',
+          aiToken: aiTokens['proj_1'],
+        }),
+        env,
+      );
+
+      expect(response.status).toBe(200);
+      expect(gateway).toHaveBeenCalledWith('void-team');
     });
 
     it('uses Google AI Studio API-key header for provider-native requests', async () => {

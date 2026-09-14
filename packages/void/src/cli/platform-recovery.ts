@@ -17,6 +17,7 @@ type RecoveryClient = Pick<
   | 'getKvValue'
   | 'getWorkersSubdomain'
   | 'listAccounts'
+  | 'listAiGateways'
   | 'listDispatchNamespaces'
   | 'listHyperdriveConfigs'
   | 'listKvNamespaces'

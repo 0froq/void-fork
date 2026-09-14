@@ -214,11 +214,12 @@ export async function uninstallPlatform(
     const deletionPriority: Record<string, number> = {
       worker: 0,
       queue: 1,
-      'dispatch-namespace': 2,
-      hyperdrive: 3,
-      'kv-namespace': 4,
-      'r2-bucket': 5,
-      zone: 6,
+      'ai-gateway': 2,
+      'dispatch-namespace': 3,
+      hyperdrive: 4,
+      'kv-namespace': 5,
+      'r2-bucket': 6,
+      zone: 7,
     };
     const resources = [...next.resources].sort(
       (left, right) => (deletionPriority[left.kind] ?? 99) - (deletionPriority[right.kind] ?? 99),

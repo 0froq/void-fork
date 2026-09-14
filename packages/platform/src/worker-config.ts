@@ -80,6 +80,7 @@ export function createPlatformWorkerConfigs(input: {
     triggers: { crons: ['0 * * * *'] },
     vars: {
       AUTH_REDIRECT_URI: `${apiUrl}/auth/callback`,
+      AI_GATEWAY_ID: names.aiGateway,
       CRON_FIRES_QUEUE_NAME: names.cronQueue,
       DISPATCH_NAMESPACE: names.dispatchNamespace,
       DISPATCH_WORKER_NAME: names.dispatchWorker,
@@ -119,7 +120,10 @@ export function createPlatformWorkerConfigs(input: {
         },
       ],
     },
-    vars: { PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities) },
+    vars: {
+      AI_GATEWAY_ID: names.aiGateway,
+      PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
+    },
   };
   if (deployment.controlPlane.proxyHostname) {
     proxy.routes = [{ pattern: deployment.controlPlane.proxyHostname, custom_domain: true }];

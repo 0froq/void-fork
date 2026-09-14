@@ -33,6 +33,7 @@ describe('platform Worker configuration', () => {
     expect(JSON.stringify(configs)).not.toContain('BuildManager');
     expect(JSON.stringify(configs)).not.toContain('BUILD_SCHEDULER');
     expect(configs.proxy.vars).toEqual({
+      AI_GATEWAY_ID: deployment.resources.aiGateway,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
     });
     expect(configs.dispatch.routes).toEqual([

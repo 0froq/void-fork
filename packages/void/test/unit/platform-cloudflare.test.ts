@@ -55,4 +55,59 @@ describe('platform Cloudflare client', () => {
     await expect(client.listKvNamespaces('account')).resolves.toHaveLength(101);
     expect(pages).toEqual(['1', '2']);
   });
+
+  it('uses the documented AI Gateway lifecycle endpoints and creation shape', async () => {
+    const requests: Array<{ body: unknown; method: string; pathname: string }> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+          method: init?.method ?? 'GET',
+          pathname: url.pathname,
+        });
+        const result =
+          init?.method === 'POST'
+            ? { id: 'void-team' }
+            : init?.method === 'DELETE'
+              ? null
+              : [{ id: 'void-team' }];
+        return Response.json({ success: true, result });
+      },
+    });
+
+    await expect(client.listAiGateways('account')).resolves.toEqual([
+      { id: 'void-team', name: 'void-team' },
+    ]);
+    await expect(client.createAiGateway('account', 'void-team')).resolves.toEqual({
+      id: 'void-team',
+      name: 'void-team',
+    });
+    await client.deleteResource('account', 'ai-gateway', 'void-team');
+
+    expect(requests).toEqual([
+      {
+        body: null,
+        method: 'GET',
+        pathname: '/client/v4/accounts/account/ai-gateway/gateways',
+      },
+      {
+        body: {
+          cache_invalidate_on_update: false,
+          cache_ttl: null,
+          collect_logs: true,
+          id: 'void-team',
+          rate_limiting_interval: null,
+          rate_limiting_limit: null,
+        },
+        method: 'POST',
+        pathname: '/client/v4/accounts/account/ai-gateway/gateways',
+      },
+      {
+        body: null,
+        method: 'DELETE',
+        pathname: '/client/v4/accounts/account/ai-gateway/gateways/void-team',
+      },
+    ]);
+  });
 });

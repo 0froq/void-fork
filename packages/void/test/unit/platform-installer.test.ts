@@ -23,6 +23,7 @@ function planningClient() {
     verifyToken: async () => {},
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'workers-subdomain',
+    listAiGateways: async () => [],
     findZone: async () => ({
       id: 'zone-id',
       name: 'example.com',
@@ -76,6 +77,7 @@ describe('platform installer', () => {
       null,
       {
         client: {
+          createAiGateway: created,
           createZone: async () => {
             throw new Error('existing zone must not be created');
           },
@@ -97,7 +99,7 @@ describe('platform installer', () => {
     );
 
     expect(result.manifest.status).toBe('installed');
-    expect(result.manifest.resources).toHaveLength(13);
+    expect(result.manifest.resources).toHaveLength(14);
     expect(deployed).toEqual([
       'void-example-api',
       'void-example-proxy',
@@ -144,6 +146,9 @@ describe('platform installer', () => {
       null,
       {
         client: {
+          createAiGateway: async () => {
+            throw new Error('must wait for DNS');
+          },
           createZone: async () => ({
             id: 'new-zone',
             name: 'example.net',

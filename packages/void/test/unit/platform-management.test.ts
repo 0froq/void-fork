@@ -43,6 +43,7 @@ function installedManifest(zoneOwnership: ResourceOwnership = 'created') {
   });
   const resources: Array<[string, InstallationResourceKind, ResourceOwnership]> = [
     ['zone', 'zone', zoneOwnership],
+    ['ai-gateway', 'ai-gateway', 'created'],
     ['routing-kv', 'kv-namespace', 'created'],
     ['isr-cache-kv', 'kv-namespace', 'created'],
     ['legacy-assets-kv', 'kv-namespace', 'created'],
@@ -145,7 +146,7 @@ describe('platform lifecycle management', () => {
       countProjects: async () => 0,
       interactive: false,
     });
-    expect(fake.deleted).toHaveLength(12);
+    expect(fake.deleted).toHaveLength(13);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
     const result = listInstallationManifests()[0]!;
     expect(result.status).toBe('uninstalled');
@@ -161,6 +162,7 @@ describe('platform lifecycle management', () => {
       interactive: false,
     });
     expect(fake.deleted.map(([kind]) => kind).sort()).toEqual([
+      'ai-gateway',
       'queue',
       'queue',
       'worker',
@@ -188,7 +190,7 @@ describe('platform lifecycle management', () => {
         interactive: false,
       },
     );
-    expect(fake.deleted).toHaveLength(12);
+    expect(fake.deleted).toHaveLength(13);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
   });
 });

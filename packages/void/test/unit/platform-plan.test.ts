@@ -11,6 +11,7 @@ function client(overrides: Record<string, unknown> = {}) {
     verifyToken: async () => {},
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'example',
+    listAiGateways: async () => [],
     findZone: async () => null,
     listKvNamespaces: async () => [],
     listR2Buckets: async () => [],
@@ -37,7 +38,7 @@ describe('platform installation planning', () => {
     const fake = client();
     const plan = await createPlatformInstallPlan(fake, input, null);
     expect(plan.apiUrl).toBe('https://void-example-api.example.workers.dev');
-    expect(plan.actions).toHaveLength(13);
+    expect(plan.actions).toHaveLength(14);
     expect(plan.actions.every((action) => action.action === 'create')).toBe(true);
     expect(Object.keys(fake)).not.toContain('createZone');
   });

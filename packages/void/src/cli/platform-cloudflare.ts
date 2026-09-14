@@ -96,6 +96,37 @@ export class PlatformCloudflareClient {
     return requiredString(result.subdomain, 'Cloudflare workers.dev subdomain');
   }
 
+  async listAiGateways(accountId: string): Promise<ReadonlyArray<CloudflareNamedResource>> {
+    const result = await this.request<ReadonlyArray<{ id?: unknown }>>(
+      `/accounts/${encodeURIComponent(accountId)}/ai-gateway/gateways`,
+    );
+    return result.map((entry) => ({
+      id: requiredString(entry.id, 'AI Gateway id'),
+      name: requiredString(entry.id, 'AI Gateway id'),
+    }));
+  }
+
+  async createAiGateway(accountId: string, id: string): Promise<CloudflareNamedResource> {
+    const result = await this.request<{ id?: unknown }>(
+      `/accounts/${encodeURIComponent(accountId)}/ai-gateway/gateways`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          cache_invalidate_on_update: false,
+          cache_ttl: null,
+          collect_logs: true,
+          id,
+          rate_limiting_interval: null,
+          rate_limiting_limit: null,
+        }),
+      },
+    );
+    return {
+      id: requiredString(result.id, 'AI Gateway id'),
+      name: id,
+    };
+  }
+
   async findZone(accountId: string, name: string): Promise<CloudflareZone | null> {
     const result = await this.request<ReadonlyArray<Record<string, unknown>>>(
       `/zones?account.id=${encodeURIComponent(accountId)}&name=${encodeURIComponent(name)}&per_page=50`,
@@ -315,19 +346,21 @@ export class PlatformCloudflareClient {
     const path =
       kind === 'kv-namespace'
         ? `/accounts/${account}/storage/kv/namespaces/${encoded}`
-        : kind === 'r2-bucket'
-          ? `/accounts/${account}/r2/buckets/${encoded}`
-          : kind === 'queue'
-            ? `/accounts/${account}/queues/${encoded}`
-            : kind === 'dispatch-namespace'
-              ? `/accounts/${account}/workers/dispatch/namespaces/${encoded}`
-              : kind === 'hyperdrive'
-                ? `/accounts/${account}/hyperdrive/configs/${encoded}`
-                : kind === 'worker'
-                  ? `/accounts/${account}/workers/scripts/${encoded}`
-                  : kind === 'zone'
-                    ? `/zones/${encoded}`
-                    : null;
+        : kind === 'ai-gateway'
+          ? `/accounts/${account}/ai-gateway/gateways/${encoded}`
+          : kind === 'r2-bucket'
+            ? `/accounts/${account}/r2/buckets/${encoded}`
+            : kind === 'queue'
+              ? `/accounts/${account}/queues/${encoded}`
+              : kind === 'dispatch-namespace'
+                ? `/accounts/${account}/workers/dispatch/namespaces/${encoded}`
+                : kind === 'hyperdrive'
+                  ? `/accounts/${account}/hyperdrive/configs/${encoded}`
+                  : kind === 'worker'
+                    ? `/accounts/${account}/workers/scripts/${encoded}`
+                    : kind === 'zone'
+                      ? `/zones/${encoded}`
+                      : null;
     if (!path) {
       throw new Error(`platform: Unsupported Cloudflare deletion kind ${kind}.`);
     }

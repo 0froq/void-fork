@@ -44,6 +44,7 @@ type PlanningClient = Pick<
   PlatformCloudflareClient,
   | 'findZone'
   | 'getWorkersSubdomain'
+  | 'listAiGateways'
   | 'listAccounts'
   | 'listDispatchNamespaces'
   | 'listHyperdriveConfigs'
@@ -92,6 +93,7 @@ export async function createPlatformInstallPlan(
   const [
     workersSubdomain,
     zone,
+    aiGateways,
     routingKv,
     isrKv,
     legacyKv,
@@ -104,6 +106,7 @@ export async function createPlatformInstallPlan(
   ] = await Promise.all([
     client.getWorkersSubdomain(account.id),
     client.findZone(account.id, deployment.application.zoneName),
+    client.listAiGateways(account.id),
     client.listKvNamespaces(account.id, names.routingKv),
     client.listKvNamespaces(account.id, names.isrCacheKv),
     client.listKvNamespaces(account.id, names.legacyAssetsKv),
@@ -150,6 +153,16 @@ export async function createPlatformInstallPlan(
           ? 'Use the existing zone without taking ownership.'
           : 'Create the requested zone.',
   });
+  addNamedPlan(
+    actions,
+    existing,
+    'ai-gateway',
+    'ai-gateway',
+    names.aiGateway,
+    aiGateways.filter((resource) => resource.id === names.aiGateway),
+    'reuse',
+    options,
+  );
   addNamedPlan(
     actions,
     existing,

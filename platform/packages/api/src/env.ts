@@ -32,6 +32,7 @@ export type ApiEnv = Env & {
     CF_API_TOKEN: string;
     CF_ACCOUNT_ID: string;
     CF_ZONE_ID: string;
+    AI_GATEWAY_ID?: string;
     JWT_SECRET: string;
     GITHUB_CLIENT_ID: string;
     GITHUB_CLIENT_SECRET: string;

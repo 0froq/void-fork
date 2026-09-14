@@ -42,6 +42,7 @@ function remoteManifest() {
   });
   const resources: Array<[string, InstallationResourceKind, string, string]> = [
     ['zone', 'zone', 'zone-id', 'example.com'],
+    ['ai-gateway', 'ai-gateway', deployment.resources.aiGateway, deployment.resources.aiGateway],
     ['routing-kv', 'kv-namespace', 'routing-id', deployment.resources.routingKv],
     ['isr-cache-kv', 'kv-namespace', 'isr-id', deployment.resources.isrCacheKv],
     ['legacy-assets-kv', 'kv-namespace', 'legacy-id', deployment.resources.legacyAssetsKv],
@@ -111,6 +112,12 @@ function client(manifest = remoteManifest()) {
     verifyToken: async () => {},
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'example-workers',
+    listAiGateways: async () => [
+      {
+        id: manifest.deployment.resources.aiGateway,
+        name: manifest.deployment.resources.aiGateway,
+      },
+    ],
     findZone: async () => ({
       id: 'zone-id',
       name: 'example.com',
