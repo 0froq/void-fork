@@ -34,4 +34,25 @@ describe('platform Cloudflare client', () => {
     expect(message).not.toContain(token);
     expect(message).toContain('non-JSON');
   });
+
+  it('paginates namespace discovery without a title filter', async () => {
+    const pages: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        const url = new URL(String(input));
+        pages.push(url.searchParams.get('page') ?? '');
+        const page = url.searchParams.get('page');
+        const result =
+          page === '1'
+            ? Array.from({ length: 100 }, (_, index) => ({
+                id: `id-${index}`,
+                title: `namespace-${index}`,
+              }))
+            : [{ id: 'id-100', title: 'namespace-100' }];
+        return Response.json({ success: true, result });
+      },
+    });
+    await expect(client.listKvNamespaces('account')).resolves.toHaveLength(101);
+    expect(pages).toEqual(['1', '2']);
+  });
 });

@@ -12,6 +12,27 @@ import {
 } from './platform-registry.ts';
 
 export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<void> {
+  if (args.subcommand === 'discover') {
+    const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || '';
+    if (!token) {
+      throw new Error('platform: Export CLOUDFLARE_API_TOKEN before discovering installations.');
+    }
+    const client = new PlatformCloudflareClient(token);
+    const accounts = await readAccounts(client);
+    const accountId = await selectAccount(accounts, args.account);
+    const { recoverPlatformInstallations } = await import('./platform-recovery.ts');
+    const recovered = await recoverPlatformInstallations(client, accountId);
+    if (recovered.length === 0) {
+      log.info(`No recoverable Void platform installations were found in ${accountId}.`);
+      return;
+    }
+    for (const manifest of recovered) {
+      log.success(
+        `Recovered ${manifest.deployment.displayName} (${manifest.id}) at ${manifest.endpoints.apiUrl}.`,
+      );
+    }
+    return;
+  }
   if (args.subcommand !== 'install') {
     const { runInstalledPlatformCommand } = await import('./platform-management.ts');
     await runInstalledPlatformCommand(args);

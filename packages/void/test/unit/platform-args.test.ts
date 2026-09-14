@@ -12,6 +12,10 @@ describe('platform args', () => {
       selector: 'example-a1b2c3d4',
       plan: true,
     });
+    expect(parsePlatformArgs(['discover', '--account', 'account-id'])).toEqual({
+      subcommand: 'discover',
+      account: 'account-id',
+    });
   });
 
   it('parses safe uninstall choices explicitly', () => {

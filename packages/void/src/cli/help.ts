@@ -93,6 +93,7 @@ const HELP_TREE: HelpTree = {
       { command: 'list', description: 'List installed and connected platforms' },
       { command: 'use [id]', description: 'Select the default Void platform' },
       { command: 'status [id]', description: 'Inspect a platform and its health' },
+      { command: 'discover', description: 'Recover installations from a Cloudflare account' },
       { command: 'install', description: 'Install a Void platform in Cloudflare' },
       { command: 'upgrade [id]', description: 'Upgrade an installed Void platform' },
       { command: 'repair [id]', description: 'Reconcile an installed Void platform' },
@@ -107,6 +108,11 @@ const HELP_TREE: HelpTree = {
       list: basicSubcommand('List installed and connected platforms.', 'void platform list'),
       use: basicSubcommand('Select the default Void platform.', 'void platform use [id]'),
       status: basicSubcommand('Inspect a platform and its health.', 'void platform status [id]'),
+      discover: {
+        summary: 'Recover owned platform installations from Cloudflare.',
+        usage: ['void platform discover [--account <id>]'],
+        options: [{ command: '--account <id>', description: 'Cloudflare account id' }],
+      },
       install: {
         summary: 'Install or resume a Void platform in Cloudflare.',
         usage: ['void platform install [options]'],

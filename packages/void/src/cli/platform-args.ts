@@ -5,6 +5,7 @@ export const platformSubcommands: Array<SubcommandDef> = [
   { name: 'list', description: 'List installed and connected platforms' },
   { name: 'use', arg: '[id]', description: 'Select the default Void platform' },
   { name: 'status', arg: '[id]', description: 'Inspect a platform and its health' },
+  { name: 'discover', description: 'Recover installations from a Cloudflare account' },
   { name: 'install', description: 'Install a Void platform in Cloudflare' },
   { name: 'upgrade', arg: '[id]', description: 'Upgrade an installed Void platform' },
   { name: 'repair', arg: '[id]', description: 'Reconcile an installed Void platform' },
@@ -17,6 +18,7 @@ export type PlatformArgs =
   | { subcommand: 'list' }
   | { subcommand: 'use'; selector: string }
   | { subcommand: 'status'; selector: string }
+  | { subcommand: 'discover'; account: string }
   | {
       subcommand: 'install';
       account: string;
@@ -93,6 +95,15 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     }
     return { subcommand, selector };
   }
+  if (subcommand === 'discover') {
+    if (rest.length === 0) {
+      return { subcommand, account: '' };
+    }
+    if (rest.length === 2 && rest[0] === '--account' && rest[1] && !rest[1].startsWith('-')) {
+      return { subcommand, account: rest[1] };
+    }
+    throw new Error('platform: Usage: void platform discover [--account <id>].');
+  }
   if (subcommand === 'upgrade' || subcommand === 'repair' || subcommand === 'disable') {
     const { selector, plan } = parseSelector(rest, subcommand);
     return { subcommand, selector, plan };
@@ -161,6 +172,6 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   }
 
   throw new Error(
-    'platform: Usage: void platform <connect|list|use|status|install|upgrade|repair|disable|uninstall>.',
+    'platform: Usage: void platform <connect|list|use|status|discover|install|upgrade|repair|disable|uninstall>.',
   );
 }

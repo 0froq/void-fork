@@ -115,12 +115,23 @@ export class PlatformCloudflareClient {
 
   async listKvNamespaces(
     accountId: string,
-    title: string,
+    title?: string,
   ): Promise<ReadonlyArray<CloudflareNamedResource>> {
-    const result = await this.request<ReadonlyArray<{ id?: unknown; title?: unknown }>>(
-      `/accounts/${encodeURIComponent(accountId)}/storage/kv/namespaces?title=${encodeURIComponent(title)}&per_page=100`,
-    );
-    return result.map((entry) => ({
+    const entries: Array<{ id?: unknown; title?: unknown }> = [];
+    for (let page = 1; ; page++) {
+      const query = new URLSearchParams({ page: String(page), per_page: '100' });
+      if (title) {
+        query.set('title', title);
+      }
+      const result = await this.request<ReadonlyArray<{ id?: unknown; title?: unknown }>>(
+        `/accounts/${encodeURIComponent(accountId)}/storage/kv/namespaces?${query}`,
+      );
+      entries.push(...result);
+      if (result.length < 100) {
+        break;
+      }
+    }
+    return entries.map((entry) => ({
       id: requiredString(entry.id, 'KV namespace id'),
       name: requiredString(entry.title, 'KV namespace title'),
     }));
