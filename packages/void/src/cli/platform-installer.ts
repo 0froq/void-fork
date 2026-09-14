@@ -16,6 +16,7 @@ import {
   createPlatformResourceOwnershipMarker,
   createPlatformWorkerConfigs,
   parsePlatformInstallationManifest,
+  parsePlatformResourceOwnershipMarker,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   recordInstallationResource,
@@ -77,7 +78,16 @@ type InstallerClient = Pick<
   | 'putKvValue'
   | 'putR2Object'
 > &
-  Partial<Pick<PlatformCloudflareClient, 'deleteResource' | 'removeRoutes'>>;
+  Partial<
+    Pick<
+      PlatformCloudflareClient,
+      'deleteResource' | 'getWorkerPlainTextBindings' | 'listWorkerNames' | 'removeRoutes'
+    >
+  >;
+
+type WorkerInspectionClient = Partial<
+  Pick<PlatformCloudflareClient, 'getWorkerPlainTextBindings' | 'listWorkerNames'>
+>;
 
 type PlatformWorkerRollback = () => Promise<void>;
 
@@ -520,6 +530,14 @@ export async function installPlatform(
             previousConfig: previousRecoveryConfig,
             previousTriggers: snapshot.previousTriggers,
             previousVersionId: snapshot.previousVersionId,
+            inspectNewWorker: () =>
+              inspectNewPlatformWorker(
+                dependencies.client,
+                plan.account.id,
+                manifest!,
+                `${key}-worker`,
+                snapshot.workerName,
+              ),
             removeCustomDomains: async () => {
               if (!dependencies.client.removeRoutes) {
                 throw new Error('platform: Cloudflare route removal is unavailable.');
@@ -593,6 +611,14 @@ export async function installPlatform(
             },
             previousConfig: previousConfigs[key],
             previousPublicEndpoints,
+            inspectNewWorker: () =>
+              inspectNewPlatformWorker(
+                dependencies.client,
+                plan.account.id,
+                manifest!,
+                action.key,
+                action.name,
+              ),
             removeCustomDomains: async () => {
               if (!dependencies.client.removeRoutes) {
                 throw new Error('platform: Cloudflare route removal is unavailable.');
@@ -1292,6 +1318,7 @@ export async function claimPlatformDatabaseConnection(
 }
 
 type PlatformWorkerDeploymentOptions = Readonly<{
+  inspectNewWorker: () => Promise<'missing' | 'owned'>;
   onStaged: (
     previousVersionId: string | null,
     stagedVersionId: string,
@@ -1417,6 +1444,7 @@ async function deployPlatformWorker(
         previousConfig: options.previousConfig,
         previousTriggers,
         previousVersionId,
+        inspectNewWorker: options.inspectNewWorker,
         removeCustomDomains: options.removeCustomDomains,
         removeNewWorker: options.removeNewWorker,
         workerExisted: options.workerExisted,
@@ -1435,13 +1463,12 @@ async function deployPlatformWorker(
           previousConfig: options.previousConfig,
           previousTriggers,
           previousVersionId,
+          inspectNewWorker: options.inspectNewWorker,
           removeCustomDomains: options.removeCustomDomains,
           removeNewWorker: options.removeNewWorker,
           workerExisted: options.workerExisted,
           workerName,
         });
-      } else if (!options.workerExisted && uploadedVersionId) {
-        await options.removeNewWorker();
       }
     } catch (rollbackError) {
       recoveryError = rollbackError;
@@ -1466,6 +1493,7 @@ async function rollbackPlatformWorker(input: {
   previousConfig: Record<string, unknown>;
   previousTriggers: ReturnType<typeof readCloudflareTriggerConfig>;
   previousVersionId: string | null;
+  inspectNewWorker: () => Promise<'missing' | 'owned'>;
   removeCustomDomains: () => Promise<void>;
   removeNewWorker: () => Promise<void>;
   workerExisted: boolean;
@@ -1475,21 +1503,31 @@ async function rollbackPlatformWorker(input: {
   try {
     const configPath = join(directory, 'wrangler.json');
     writeFileSync(configPath, `${JSON.stringify(input.config, null, 2)}\n`, { mode: 0o600 });
-    const currentVersionId = await readActivePlatformWorkerVersion(
-      configPath,
-      input.accountId,
-      input.workerName,
-      !input.workerExisted,
-    );
     if (!input.workerExisted) {
-      if (currentVersionId !== null && currentVersionId !== input.activatedVersionId) {
+      if ((await input.inspectNewWorker()) === 'missing') {
+        return;
+      }
+      const currentVersionId = await readActivePlatformWorkerVersion(
+        configPath,
+        input.accountId,
+        input.workerName,
+      );
+      if (currentVersionId !== input.activatedVersionId) {
         throw new Error(
-          `Worker ${input.workerName} changed concurrently from installer version ${input.activatedVersionId} to ${currentVersionId}; refusing to delete it.`,
+          `Worker ${input.workerName} changed concurrently from installer version ${input.activatedVersionId} to ${currentVersionId ?? 'no active version'}; refusing to delete it.`,
         );
+      }
+      if ((await input.inspectNewWorker()) === 'missing') {
+        return;
       }
       await input.removeNewWorker();
       return;
     }
+    const currentVersionId = await readActivePlatformWorkerVersion(
+      configPath,
+      input.accountId,
+      input.workerName,
+    );
     if (
       currentVersionId !== input.previousVersionId &&
       currentVersionId !== input.activatedVersionId
@@ -1594,7 +1632,6 @@ async function readActivePlatformWorkerVersion(
   configPath: string,
   accountId: string,
   workerName: string,
-  allowMissing = false,
 ): Promise<string | null> {
   const result = await runPlatformWrangler(
     ['deployments', 'status', '--config', configPath, '--name', workerName, '--json'],
@@ -1603,9 +1640,6 @@ async function readActivePlatformWorkerVersion(
     true,
   );
   if (result.status !== 0) {
-    if (allowMissing) {
-      return null;
-    }
     assertCleanPlatformWrangler(result, `read active version for ${workerName}`);
   }
   let value: unknown;
@@ -1634,6 +1668,56 @@ async function readActivePlatformWorkerVersion(
     return null;
   }
   return (active[0] as { version_id: string }).version_id;
+}
+
+export async function inspectNewPlatformWorker(
+  client: WorkerInspectionClient,
+  accountId: string,
+  manifest: PlatformInstallationManifest,
+  resourceKey: string,
+  workerName: string,
+): Promise<'missing' | 'owned'> {
+  if (!client.listWorkerNames || !client.getWorkerPlainTextBindings) {
+    throw new Error('platform: Cloudflare Worker ownership inspection is unavailable.');
+  }
+  const workerNames = await client.listWorkerNames(accountId);
+  if (!workerNames.includes(workerName)) {
+    return 'missing';
+  }
+  const bindings = await client.getWorkerPlainTextBindings(accountId, workerName);
+  let marker;
+  try {
+    marker = parsePlatformResourceOwnershipMarker(
+      JSON.parse(bindings.PLATFORM_OWNERSHIP_MARKER ?? 'null'),
+    );
+  } catch {
+    throw new Error(
+      `platform: Worker ${workerName} no longer has this installation's ownership marker; refusing to delete it.`,
+    );
+  }
+  const expected = createPlatformResourceOwnershipMarker({
+    accountId,
+    installationId: manifest.id,
+    ownershipNonce: manifest.ownershipNonce,
+    resourceId: workerName,
+    resourceKey,
+    resourceKind: 'worker',
+    resourceName: workerName,
+  });
+  if (
+    marker.accountId !== expected.accountId ||
+    marker.installationId !== expected.installationId ||
+    marker.ownershipNonce !== expected.ownershipNonce ||
+    marker.resourceId !== expected.resourceId ||
+    marker.resourceKey !== expected.resourceKey ||
+    marker.resourceKind !== expected.resourceKind ||
+    marker.resourceName !== expected.resourceName
+  ) {
+    throw new Error(
+      `platform: Worker ${workerName} no longer has this installation's ownership marker; refusing to delete it.`,
+    );
+  }
+  return 'owned';
 }
 
 async function readActivePlatformWorkerSnapshot(

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
+  createPlatformResourceOwnershipMarker,
   recordInstallationResource,
   recordInstallationStep,
   setInstallationDesiredState,
@@ -15,6 +16,7 @@ import {
   installPlatform,
   claimPlatformDatabaseConnection,
   createPlatformInstallationSecrets,
+  inspectNewPlatformWorker,
   readPlatformDatabaseLifecycleManifestConnection,
   resolvePlatformPreviousTriggerConfig,
   resolveBootstrapGitHubId,
@@ -70,6 +72,52 @@ function planningClient() {
 describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('requires the installation ownership marker before deleting a new Worker', async () => {
+    const manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    const marker = createPlatformResourceOwnershipMarker({
+      accountId: 'account',
+      installationId: manifest.id,
+      ownershipNonce: manifest.ownershipNonce,
+      resourceId: 'void-example-api',
+      resourceKey: 'api-worker',
+      resourceKind: 'worker',
+      resourceName: 'void-example-api',
+    });
+    const workerClient = {
+      getWorkerPlainTextBindings: async () => ({
+        PLATFORM_OWNERSHIP_MARKER: JSON.stringify(marker),
+      }),
+      listWorkerNames: async () => ['void-example-api'],
+    };
+
+    await expect(
+      inspectNewPlatformWorker(workerClient, 'account', manifest, 'api-worker', 'void-example-api'),
+    ).resolves.toBe('owned');
+
+    workerClient.getWorkerPlainTextBindings = async () => ({
+      PLATFORM_OWNERSHIP_MARKER: JSON.stringify({ ...marker, ownershipNonce: 'replacement' }),
+    });
+    await expect(
+      inspectNewPlatformWorker(workerClient, 'account', manifest, 'api-worker', 'void-example-api'),
+    ).rejects.toThrow('refusing to delete');
+
+    workerClient.listWorkerNames = async () => [];
+    await expect(
+      inspectNewPlatformWorker(workerClient, 'account', manifest, 'api-worker', 'void-example-api'),
+    ).resolves.toBe('missing');
+  });
 
   it('keeps disabled lifecycle traffic authoritative over stale Worker metadata', () => {
     const installed = {
