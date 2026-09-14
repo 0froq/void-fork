@@ -392,4 +392,47 @@ describe('platform recovery', () => {
     ).resolves.toEqual([local]);
     expect(listInstallationManifests()).toEqual([local]);
   });
+
+  it('rejects a locally advanced manifest with a different proxy origin', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const remote = remoteManifest();
+    const local = {
+      ...remote,
+      endpoints: { ...remote.endpoints, proxyUrl: 'https://attacker.example' },
+      status: 'failed' as const,
+      updatedAt: '2026-09-14T00:00:04.000Z',
+    };
+    writeInstallationManifest(local);
+
+    await expect(
+      recoverPlatformInstallations(client(remote), 'account', async () => {}),
+    ).rejects.toThrow('inconsistent proxy metadata');
+    expect(listPlatformConnections()).toEqual([]);
+    expect(listInstallationManifests()).toEqual([local]);
+  });
+
+  it('accepts a deterministic endpoint advancement from a local checkpoint', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const complete = remoteManifest();
+    const remote = {
+      ...complete,
+      endpoints: { apiUrl: null, dashboardUrl: null, proxyUrl: null },
+      status: 'deploying' as const,
+    };
+    const local = {
+      ...remote,
+      endpoints: complete.endpoints,
+      updatedAt: '2026-09-14T00:00:04.000Z',
+    };
+    writeInstallationManifest(local);
+
+    await expect(
+      recoverPlatformInstallations(client(remote), 'account', async () => {}),
+    ).resolves.toEqual([local]);
+    expect(listPlatformConnections()).toHaveLength(1);
+  });
 });

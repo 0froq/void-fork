@@ -10,7 +10,7 @@ import {
   recoverDurablyMarkedProvisionIntents,
   verifyPlatformInstallationOwnership,
 } from './platform-management.ts';
-import { createPlatformInstallPlan } from './platform-plan.ts';
+import { createPlatformInstallPlan, type PlatformInstallPlan } from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
   listInstallationManifests,
@@ -55,7 +55,10 @@ export async function recoverPlatformInstallations(
   const namespaces = (await client.listKvNamespaces(accountId)).filter((namespace) =>
     /^void-[a-z0-9-]+-routing$/.test(namespace.name),
   );
-  const recovered: Array<PlatformInstallationManifest> = [];
+  const recovered: Array<{
+    manifest: PlatformInstallationManifest;
+    plan: PlatformInstallPlan;
+  }> = [];
   for (const namespace of namespaces) {
     const value = await client.getKvValue(
       accountId,
@@ -104,30 +107,16 @@ export async function recoverPlatformInstallations(
       manifest,
     );
     manifest = await recoverDurablyMarkedProvisionIntents(client, manifest);
-    if (manifest.endpoints.apiUrl !== null && manifest.endpoints.apiUrl !== plan.apiUrl) {
-      throw new Error(`platform: Installation ${manifest.id} has inconsistent API metadata.`);
-    }
-    if (manifest.endpoints.apiUrl !== null && manifest.endpoints.proxyUrl === null) {
-      manifest = setInstallationEndpoints(
-        manifest,
-        { ...manifest.endpoints, proxyUrl: plan.proxyUrl },
-        manifest.updatedAt,
-      );
-    } else if (
-      manifest.endpoints.proxyUrl !== null &&
-      manifest.endpoints.proxyUrl !== plan.proxyUrl
-    ) {
-      throw new Error(`platform: Installation ${manifest.id} has inconsistent proxy metadata.`);
-    }
+    manifest = reconcileRecoveredEndpoints(manifest, plan);
     await verifyPlatformInstallationOwnership(client, manifest);
     if (manifest.desiredState === 'enabled' && manifest.status === 'installed') {
       await verifyEndpoint(manifest);
     }
-    recovered.push(manifest);
+    recovered.push({ manifest, plan });
   }
 
   const resolved: Array<PlatformInstallationManifest> = [];
-  for (const recoveredManifest of recovered) {
+  for (const { manifest: recoveredManifest, plan } of recovered) {
     let manifest = recoveredManifest;
     const release = acquirePlatformLifecycleLock(
       manifest.account.id,
@@ -154,7 +143,10 @@ export async function recoverPlatformInstallations(
           );
         }
       }
+      manifest = reconcileRecoveredEndpoints(manifest, plan);
       if (!collision) {
+        writeInstallationManifest(manifest);
+      } else if (JSON.stringify(collision) !== JSON.stringify(manifest)) {
         writeInstallationManifest(manifest);
       }
       if (manifest.endpoints.apiUrl !== null && manifest.endpoints.proxyUrl !== null) {
@@ -174,6 +166,26 @@ export async function recoverPlatformInstallations(
     }
   }
   return resolved;
+}
+
+function reconcileRecoveredEndpoints(
+  manifest: PlatformInstallationManifest,
+  plan: PlatformInstallPlan,
+): PlatformInstallationManifest {
+  if (manifest.endpoints.apiUrl !== null && manifest.endpoints.apiUrl !== plan.apiUrl) {
+    throw new Error(`platform: Installation ${manifest.id} has inconsistent API metadata.`);
+  }
+  if (manifest.endpoints.proxyUrl !== null && manifest.endpoints.proxyUrl !== plan.proxyUrl) {
+    throw new Error(`platform: Installation ${manifest.id} has inconsistent proxy metadata.`);
+  }
+  if (manifest.endpoints.apiUrl !== null && manifest.endpoints.proxyUrl === null) {
+    return setInstallationEndpoints(
+      manifest,
+      { ...manifest.endpoints, proxyUrl: plan.proxyUrl },
+      manifest.updatedAt,
+    );
+  }
+  return manifest;
 }
 
 async function verifyInstallationEndpoint(manifest: PlatformInstallationManifest): Promise<void> {
