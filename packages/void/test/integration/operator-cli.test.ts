@@ -359,24 +359,24 @@ describe('operator CLI (real subprocess and HTTP)', () => {
   it('follows build logs to a terminal state with JSON Lines output', async () => {
     reply = () => ({
       body: {
-        lines: [{ seq: 1, text: 'Build complete' }],
+        lines: [{ seq: 1, line: 'Build complete', stream: 'stdout', ts: 1 }],
         lastSeq: 1,
         terminal: true,
+        logsComplete: true,
         status: 'completed',
       },
     });
-    const result = await run(['build', 'logs', 'build-1', '--follow', '--json']);
+    const result = await run(['build', 'logs', 'build-1', '--follow', '--since', '0', '--json']);
     expect(result.code).toBe(0);
     expect(
       result.stdout
         .trim()
         .split('\n')
         .map((line) => JSON.parse(line)),
-    ).toEqual([
-      expect.objectContaining({ lastSeq: 1, terminal: true }),
-      expect.objectContaining({ lastSeq: 1, terminal: true }),
+    ).toEqual([expect.objectContaining({ lastSeq: 1, terminal: true, logsComplete: true })]);
+    expect(requests).toEqual([
+      expect.objectContaining({ path: '/operator/v1/builds/build-1/logs?since=0' }),
     ]);
-    expect(requests[0]?.path).toBe('/operator/v1/builds/build-1/logs');
   });
   it('renders human tables and fails unhealthy monitoring checks without losing details', async () => {
     const users = await run(['user', 'list']);
