@@ -2,6 +2,13 @@ name: Platform Smoke Test
 
 on:
   workflow_call:
+    secrets:
+      CF_ACCESS_CLIENT_ID_STAGING:
+        required: true
+      CF_ACCESS_CLIENT_SECRET_STAGING:
+        required: true
+      VOID_TOKEN_STAGING:
+        required: true
   schedule:
     - cron: '0 0 * * *' # daily at 8am SGT (midnight UTC)
   workflow_dispatch:
@@ -21,8 +28,8 @@ jobs:
     if: ${{ vars.VOID_PLATFORM_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
     needs: check-ref
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    # Configure all three smoke-test credentials in this environment. Reusable
-    # callers do not forward or inherit secrets.
+    # Configure all three credentials in Staging. Reusable callers must declare
+    # these secret names explicitly for GitHub to resolve the environment values.
     environment: Staging
     timeout-minutes: 15
     permissions:

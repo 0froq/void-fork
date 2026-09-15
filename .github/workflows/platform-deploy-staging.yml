@@ -69,3 +69,9 @@ jobs:
     uses: ./.github/workflows/platform-smoke-test.yml
     permissions:
       contents: read
+    # Pass only the smoke-test credentials. The called job resolves their values
+    # from Staging; omitting this mapping leaves them empty on reusable runs.
+    secrets:
+      CF_ACCESS_CLIENT_ID_STAGING: ${{ secrets.CF_ACCESS_CLIENT_ID_STAGING }}
+      CF_ACCESS_CLIENT_SECRET_STAGING: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}
+      VOID_TOKEN_STAGING: ${{ secrets.VOID_TOKEN_STAGING }}
