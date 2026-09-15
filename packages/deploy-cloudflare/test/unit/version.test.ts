@@ -124,6 +124,83 @@ function runner(overrides?: {
 }
 
 describe('Cloudflare version activation', () => {
+  it('links an existing version without publishing routes or Worker settings', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-link-version-'));
+    const configPath = join(directory, 'wrangler.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        name: 'my-worker',
+        account_id: 'account',
+        observability: { enabled: false },
+        logpush: false,
+      }),
+    );
+    try {
+      const base = runner({ versions: ok(JSON.stringify([{ id: CURRENT, annotations: {} }])) });
+      const validateUploadedVersion = vi.fn().mockResolvedValue(undefined);
+      const runWrangler = vi.fn((args: Array<string>) => {
+        if (args[0] === 'versions' && args[1] === 'deploy') {
+          const config = JSON.parse(readFileSync(args[args.indexOf('-c') + 1]!, 'utf8'));
+          expect(config).toEqual({ account_id: 'account', name: 'my-worker' });
+        }
+        return base(args);
+      });
+      const result = await activateCloudflareVersion({
+        runWrangler,
+        configPath,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        preserveTriggers: true,
+        expectedPreviousVersionId: CURRENT,
+        validateUploadedVersion,
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => Response.json({ ready: true }),
+      });
+      expect(result).toMatchObject({ ok: true, previousVersionId: CURRENT, versionId: NEXT });
+      expect(validateUploadedVersion).toHaveBeenCalledWith(NEXT);
+      expect(
+        runWrangler.mock.calls.some(([args]) =>
+          ['triggers', 'deploy', 'secret'].includes(args[0]!),
+        ),
+      ).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not activate a candidate with changed bindings or upload over a changed baseline', async () => {
+    const runWrangler = runner();
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        preserveTriggers: true,
+        expectedPreviousVersionId: CURRENT,
+        message: encodeCloudflareVersionMessage([]),
+        validateUploadedVersion: async () => {
+          throw new Error('bindings changed');
+        },
+      }),
+    ).rejects.toThrow('bindings changed');
+    expect(
+      runWrangler.mock.calls.some(([args]) => args[0] === 'versions' && args[1] === 'deploy'),
+    ).toBe(false);
+    runWrangler.mockClear();
+    expect(
+      await activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        preserveTriggers: true,
+        expectedPreviousVersionId: CONCURRENT,
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).toMatchObject({ ok: false, reason: 'deployment-changed' });
+    expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
+  });
+
   it('snapshots and restores effective workers.dev and preview URL defaults', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-version-defaults-'));
     const configPath = join(directory, 'wrangler.json');
@@ -166,7 +243,9 @@ describe('Cloudflare version activation', () => {
         configPath,
         triggerConfig,
       });
-      expect(applied).toMatchObject({ workers_dev: true, preview_urls: true });
+      expect(applied).not.toHaveProperty('workers_dev');
+      expect(applied).not.toHaveProperty('preview_urls');
+      expect(applied).not.toHaveProperty('routes');
       expect(applied).toMatchObject({ name: 'app', account_id: 'account' });
       expect(applied).not.toHaveProperty('assets');
       expect(applied).not.toHaveProperty('main');
