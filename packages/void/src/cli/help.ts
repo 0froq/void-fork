@@ -65,6 +65,11 @@ function operatorHelpTree(): HelpTree {
                           description:
                             'Apply after preview without prompting; required in unattended scripts',
                         },
+                        {
+                          command: '--timeout <seconds>',
+                          description:
+                            'Mutation deadline (default 300 seconds; maximum 3600 seconds)',
+                        },
                       ]
                     : []),
                   ...(['list', 'events', 'logs'].includes(entry.action)

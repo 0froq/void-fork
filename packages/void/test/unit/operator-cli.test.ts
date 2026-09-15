@@ -88,6 +88,9 @@ describe('operator argument and help coverage', () => {
       body: { type: 'email', pattern: '*@example.com', note: 'Operators only' },
       plan: true,
     });
+    expect(parsePlatformArgs(['--timeout', '600', 'user', 'delete', 'id'])).toMatchObject({
+      timeoutMs: 600_000,
+    });
   });
   it.each([
     ['user', 'list', '--limit', '101'],
@@ -103,6 +106,10 @@ describe('operator argument and help coverage', () => {
     ['worker', 'rollback', 'api', 'version', '--environment', 'preview'],
     ['signup', 'allow', 'typo', '*'],
     ['auth', 'login', '--yes'],
+    ['user', 'delete', 'id', '--timeout', '0'],
+    ['user', 'delete', 'id', '--timeout', '3601'],
+    ['user', 'delete', 'id', '--timeout', '1.5'],
+    ['user', 'show', 'id', '--timeout', '60'],
   ])('rejects malformed command %j', (...args) => {
     expect(() => parseOperatorArgs(args)).toThrow();
   });
@@ -175,6 +182,52 @@ describe('operator transport and execution', () => {
       }),
     ).rejects.toMatchObject({ code: 'partial_failure', details });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it('uses short read deadlines, longer mutation deadlines, and bounded overrides', async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+      const signal = init?.signal as AbortSignal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    });
+    const client = new OperatorClient('https://one.example', 'operator', fetcher);
+
+    await expect(
+      client.request('/users/id/delete', { method: 'POST', body: {}, timeoutMs: 3_600_001 }),
+    ).rejects.toMatchObject({ code: 'invalid_timeout' });
+    expect(fetcher).not.toHaveBeenCalled();
+
+    const read = client.request('/users');
+    const readFailure = expect(read).rejects.toMatchObject({
+      code: 'request_timeout',
+      message: expect.stringContaining('Check connectivity'),
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await readFailure;
+
+    const mutation = client.request('/users/id/delete', { method: 'POST', body: {} });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((fetcher.mock.calls[1]![1]!.signal as AbortSignal).aborted).toBe(false);
+    const mutationFailure = expect(mutation).rejects.toMatchObject({
+      code: 'request_timeout',
+      message: expect.stringContaining('outcome may be unknown'),
+    });
+    await vi.advanceTimersByTimeAsync(270_000);
+    await mutationFailure;
+
+    const overridden = client.request('/users/id/delete', {
+      method: 'POST',
+      body: {},
+      timeoutMs: 2_000,
+    });
+    const overrideFailure = expect(overridden).rejects.toMatchObject({
+      code: 'request_timeout',
+      message: expect.stringContaining('2-second timeout'),
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await overrideFailure;
+    vi.useRealTimers();
   });
   it('requires authorization before preview and validates preview before executing', async () => {
     vi.stubEnv('VOID_API_URL', 'https://one.example');

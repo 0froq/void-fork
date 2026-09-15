@@ -1,3 +1,5 @@
+import { OPERATOR_MAX_TIMEOUT_MS } from './operator-client.ts';
+
 /** Public operator commands. This table also drives nested CLI help. */
 export type OperatorCommand = {
   group: string;
@@ -297,6 +299,7 @@ export type OperatorArgs = {
   follow: boolean;
   tokenStdin: boolean;
   provider: string;
+  timeoutMs?: number;
   method: 'GET' | 'POST';
   path: string;
   query: Record<string, string>;
@@ -374,6 +377,7 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
   const paged = action === 'list' || action === 'events' || action === 'logs';
   const allowed = new Set([
     'connection',
+    ...(command.method ? ['timeout'] : []),
     ...Object.keys(command.values ?? {}),
     ...(paged ? ['limit', ...(action !== 'logs' ? ['page'] : [])] : []),
   ]);
@@ -414,6 +418,14 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
   }
   for (const [name, value] of Object.entries(values)) {
     if (name === 'connection' || name === 'provider') {
+      continue;
+    }
+    if (name === 'timeout') {
+      const maximum = OPERATOR_MAX_TIMEOUT_MS / 1_000;
+      if (!/^[1-9]\d*$/.test(value) || Number(value) > maximum) {
+        throw new Error(`platform: --timeout must be an integer from 1 to ${maximum} seconds.`);
+      }
+      parsed.timeoutMs = Number(value) * 1_000;
       continue;
     }
     if (name === 'page' || name === 'limit') {

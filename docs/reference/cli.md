@@ -386,7 +386,10 @@ sequence cursor and drain remaining pages before following stops.
 Mutations first validate and preview the affected objects, then ask for
 confirmation. `--plan` prints the preview and exits without writes. `--yes`
 confirms execution for scripts; noninteractive mutations require one of these
-flags. For example:
+flags. Mutation requests have a five-minute deadline. Use `--timeout <seconds>`
+to raise or lower it from 1 to 3600 seconds for operations with unusually large
+resource sets. Read and log-poll requests retain their short fixed deadline. For
+example:
 
 ```sh
 void platform user suspend <user-id> --reason "Abuse investigation" --plan

@@ -462,6 +462,7 @@ export async function runOperatorCommand(args: OperatorArgs): Promise<void> {
     const preview = await client.request(args.path, {
       method: 'POST',
       body: { ...args.body, dryRun: true },
+      timeoutMs: args.timeoutMs,
     });
     if (
       preview.dryRun !== true ||
@@ -482,7 +483,10 @@ export async function runOperatorCommand(args: OperatorArgs): Promise<void> {
         ? { versions: preview.versions }
         : {}),
     };
-    output(await client.request(args.path, { method: 'POST', body }), args.json);
+    output(
+      await client.request(args.path, { method: 'POST', body, timeoutMs: args.timeoutMs }),
+      args.json,
+    );
   } else if (args.follow) {
     await followOperatorLogs(client, args);
   } else {

@@ -116,7 +116,7 @@ function parseLifecycleSelector(
 export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   if (
     operatorGroups.includes(args[0] ?? '') ||
-    ['--connection', '--json', '--plan', '--yes'].includes(args[0] ?? '')
+    ['--connection', '--json', '--plan', '--yes', '--timeout'].includes(args[0] ?? '')
   ) {
     return parseOperatorArgs(args);
   }
