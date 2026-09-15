@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { confirm, isCancel } from '@clack/prompts';
+import { log } from '@clack/prompts';
 import { resolveWranglerArgv } from './preset.ts';
 
 export type CloudflareAccount = Readonly<{
@@ -26,7 +26,6 @@ export type CloudflareAuthSession = Readonly<{
 
 export type EnsureCloudflareAuthenticationOptions = Readonly<{
   beforeRun?: () => boolean;
-  confirmLogin?: () => Promise<boolean>;
   interactive?: boolean;
   /** Require whoami JSON to contain at least one account (account onboarding). */
   requireAccounts?: boolean;
@@ -36,7 +35,7 @@ export type EnsureCloudflareAuthenticationOptions = Readonly<{
 
 export class CloudflareAuthenticationError extends Error {
   override name = 'CloudflareAuthenticationError';
-  readonly reason: 'cancelled' | 'keyring' | 'login' | 'not-authenticated' | 'uploader-changed';
+  readonly reason: 'keyring' | 'login' | 'not-authenticated' | 'uploader-changed';
 
   constructor(message: string, reason: CloudflareAuthenticationError['reason']) {
     super(message);
@@ -99,16 +98,7 @@ export async function ensureCloudflareAuthentication(
     );
   }
 
-  const approved = options.confirmLogin
-    ? await options.confirmLogin()
-    : await confirmCloudflareLogin();
-  if (!approved) {
-    throw new CloudflareAuthenticationError(
-      'Cloudflare sign-in was cancelled. Run `void cloudflare login` when you are ready.',
-      'cancelled',
-    );
-  }
-
+  announceCloudflareLogin();
   const login = await run(['login', '--use-keyring'], false);
   if (!isCleanExit(login)) {
     throw new CloudflareAuthenticationError(
@@ -212,10 +202,6 @@ function isCleanExit(result: CloudflareAuthRunResult): boolean {
   );
 }
 
-async function confirmCloudflareLogin(): Promise<boolean> {
-  const result = await confirm({
-    message: 'Log in to Cloudflare now?',
-    initialValue: true,
-  });
-  return !isCancel(result) && typeof result !== 'symbol' && result;
+export function announceCloudflareLogin(): void {
+  log.info('Opening Cloudflare login in your browser. Press Ctrl+C to cancel.');
 }

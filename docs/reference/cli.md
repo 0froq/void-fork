@@ -151,6 +151,7 @@ Void ships and invokes its own compatible Cloudflare tooling. Users do not need 
 - `void cloudflare logout` — remove the local browser session.
 
 Interactive `void init` and `void deploy --platform cloudflare` invoke the same login flow automatically when necessary. Non-interactive CI must set `CLOUDFLARE_API_TOKEN`.
+When a browser session is required, Void opens Cloudflare login immediately and prints `Press Ctrl+C to cancel`; there is no redundant terminal confirmation.
 
 ## Project commands
 

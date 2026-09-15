@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vite-plus/test';
+import { log } from '@clack/prompts';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   cloudflareAuthEnvironment,
   ensureCloudflareAuthentication,
@@ -10,23 +11,25 @@ const SESSION = JSON.stringify({
   accounts: [{ id: 'account-1', name: 'Example' }],
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('Cloudflare authentication', () => {
-  it('uses an existing secure session without prompting', async () => {
-    const confirmLogin = vi.fn();
+  it('uses an existing secure session without opening browser login', async () => {
     const runWrangler = vi.fn(() => ({ status: 0, stderr: '', stdout: SESSION }));
 
-    await expect(ensureCloudflareAuthentication({ confirmLogin, runWrangler })).resolves.toEqual({
+    await expect(ensureCloudflareAuthentication({ runWrangler })).resolves.toEqual({
       accounts: [{ id: 'account-1', name: 'Example' }],
     });
     expect(runWrangler).toHaveBeenCalledTimes(1);
-    expect(confirmLogin).not.toHaveBeenCalled();
   });
 
   it('signs in with the bundled secure flow and resumes', async () => {
+    const loginNotice = vi.spyOn(log, 'info').mockImplementation(() => {});
     const calls: Array<string> = [];
     let whoamiCalls = 0;
     const session = await ensureCloudflareAuthentication({
-      confirmLogin: async () => true,
       interactive: true,
       requireAccounts: true,
       runWrangler: (args) => {
@@ -48,6 +51,9 @@ describe('Cloudflare authentication', () => {
       'login --use-keyring',
       'whoami --json',
     ]);
+    expect(loginNotice).toHaveBeenCalledWith(
+      'Opening Cloudflare login in your browser. Press Ctrl+C to cancel.',
+    );
   });
 
   it('requires a token or a prior browser session outside a terminal', async () => {

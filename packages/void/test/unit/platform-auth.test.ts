@@ -1,3 +1,4 @@
+import { log } from '@clack/prompts';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   readWranglerOAuthCredential,
@@ -8,6 +9,7 @@ import {
 afterEach(() => {
   delete process.env.CLOUDFLARE_API_TOKEN;
   delete process.env.CF_API_TOKEN;
+  vi.restoreAllMocks();
 });
 
 describe('platform Cloudflare authentication', () => {
@@ -32,10 +34,10 @@ describe('platform Cloudflare authentication', () => {
   });
 
   it('enables keyring storage before browser login', async () => {
+    const loginNotice = vi.spyOn(log, 'info').mockImplementation(() => {});
     const calls: Array<string> = [];
     let tokenAttempts = 0;
     const credential = await resolvePlatformCloudflareCredential({
-      confirmLogin: async () => true,
       interactive: true,
       runWrangler: (args) => {
         calls.push(args.join(' '));
@@ -60,6 +62,9 @@ describe('platform Cloudflare authentication', () => {
       'login --use-keyring',
       'auth token --json',
     ]);
+    expect(loginNotice).toHaveBeenCalledWith(
+      'Opening Cloudflare login in your browser. Press Ctrl+C to cancel.',
+    );
   });
 
   it('requires an explicit environment token in non-interactive environments', async () => {

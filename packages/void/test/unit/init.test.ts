@@ -2760,7 +2760,7 @@ export default config;
     }
   });
 
-  it('defaults deployment setup to Cloudflare and offers its GitHub workflow', async () => {
+  it('defaults deployment setup to Cloudflare, opens login, and offers its GitHub workflow', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       writeExistingAstroProject(root);
@@ -2771,9 +2771,6 @@ export default config;
           : { status: 0, stdout: '', stderr: '' },
       );
       mockConfirm.mockImplementation((options: { message?: string }) => {
-        if (options.message === 'Log in to Cloudflare now?') {
-          return false;
-        }
         if (
           options.message ===
           'Create .github/workflows/void-deploy.yml to deploy on pushes to main?'
@@ -2801,10 +2798,10 @@ export default config;
         expect.arrayContaining(['whoami', '--json', '-c', join(root, 'wrangler.jsonc')]),
         expect.objectContaining({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }),
       );
-      expect(mockSpawnSync).not.toHaveBeenCalledWith(
+      expect(mockSpawnSync).toHaveBeenCalledWith(
         process.execPath,
         expect.arrayContaining(['login']),
-        expect.anything(),
+        expect.objectContaining({ cwd: root, stdio: 'inherit' }),
       );
       expect(mockNote).toHaveBeenCalledWith(
         expect.stringContaining('Run `void init` again'),
@@ -2843,8 +2840,10 @@ export default config;
       expect(wrangler).toContain('"EXAMPLE": "yes"');
       expect(wrangler).toContain('"compatibility_date":');
       expect(wrangler).toContain('"account_id": "account-1"');
-      expect(mockConfirm).not.toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Log in to Cloudflare now?' }),
+      expect(mockSpawnSync).not.toHaveBeenCalledWith(
+        process.execPath,
+        expect.arrayContaining(['login']),
+        expect.anything(),
       );
       expect(mockSelect).not.toHaveBeenCalledWith(
         expect.objectContaining({ message: 'Choose a Cloudflare account:' }),
@@ -2854,14 +2853,11 @@ export default config;
     }
   });
 
-  it('logs in with Wrangler, rereads accounts, and stores the selected account', async () => {
+  it('opens Cloudflare browser login, rereads accounts, and stores the selected account', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       writeExistingAstroProject(root);
       selectCloudflareDuringInit('account-2');
-      mockConfirm.mockImplementation((options: { message?: string }) =>
-        options.message === 'Log in to Cloudflare now?' ? true : undefined,
-      );
       let whoamiCalls = 0;
       mockSpawnSync.mockImplementation((_command, args) => {
         if (Array.isArray(args) && args.includes('whoami')) {
@@ -2943,9 +2939,6 @@ export default config;
     try {
       writeExistingAstroProject(root);
       selectCloudflareDuringInit();
-      mockConfirm.mockImplementation((options: { message?: string }) =>
-        options.message === 'Log in to Cloudflare now?' ? true : undefined,
-      );
       mockSpawnSync.mockImplementation((_command, args) =>
         Array.isArray(args) && args.includes('login')
           ? { status: 1, stdout: '', stderr: 'Login failed' }
@@ -3002,9 +2995,6 @@ export default config;
           ([, args]) => Array.isArray(args) && (args.includes('whoami') || args.includes('login')),
         ),
       ).toBe(false);
-      expect(mockConfirm).not.toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Log in to Cloudflare now?' }),
-      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

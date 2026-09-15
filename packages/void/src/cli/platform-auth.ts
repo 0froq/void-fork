@@ -1,5 +1,8 @@
-import { confirm, isCancel } from '@clack/prompts';
-import { cloudflareAuthEnvironment, createBundledCloudflareAuthRunner } from './cloudflare-auth.ts';
+import {
+  announceCloudflareLogin,
+  cloudflareAuthEnvironment,
+  createBundledCloudflareAuthRunner,
+} from './cloudflare-auth.ts';
 
 export type PlatformCloudflareCredential = Readonly<{
   source: 'environment' | 'oauth';
@@ -13,7 +16,6 @@ type WranglerAuthResult = Readonly<{
 }>;
 
 export type PlatformCloudflareAuthDependencies = Readonly<{
-  confirmLogin?: () => Promise<boolean>;
   interactive?: boolean;
   runWrangler?: (args: ReadonlyArray<string>, capture: boolean) => WranglerAuthResult;
 }>;
@@ -36,7 +38,7 @@ export async function resolvePlatformCloudflareCredential(
   const keyring = runWrangler(['auth', 'keyring', 'enable'], true);
   if (keyring.status !== 0) {
     throw new Error(
-      'platform: Could not enable Wrangler keyring storage. Refusing to use a plaintext Cloudflare OAuth credential.',
+      'platform: Could not enable secure Cloudflare credential storage. Refusing to use a plaintext OAuth credential.',
     );
   }
   const existing = readWranglerOAuthCredential(runWrangler);
@@ -44,13 +46,7 @@ export async function resolvePlatformCloudflareCredential(
     return existing;
   }
 
-  const approved = dependencies.confirmLogin
-    ? await dependencies.confirmLogin()
-    : await confirmCloudflareLogin();
-  if (!approved) {
-    throw new Error('platform: Cloudflare login was cancelled.');
-  }
-
+  announceCloudflareLogin();
   const login = runWrangler(['login', '--use-keyring'], false);
   if (login.status !== 0) {
     throw new Error('platform: Cloudflare browser login did not complete.');
@@ -81,17 +77,6 @@ export function readWranglerOAuthCredential(
   } catch {
     return null;
   }
-}
-
-async function confirmCloudflareLogin(): Promise<boolean> {
-  const result = await confirm({
-    message: 'Log in to Cloudflare now?',
-    initialValue: true,
-  });
-  if (isCancel(result) || typeof result === 'symbol') {
-    return false;
-  }
-  return result;
 }
 
 function defaultWranglerAuthRunner(
