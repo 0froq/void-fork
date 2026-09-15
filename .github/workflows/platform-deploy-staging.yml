@@ -50,7 +50,6 @@ jobs:
       VOID_PLATFORM_R2_ACCESS_KEY_ID: ${{ secrets.STAGING_R2_ACCESS_KEY_ID }}
       VOID_PLATFORM_R2_SECRET_ACCESS_KEY: ${{ secrets.STAGING_R2_SECRET_ACCESS_KEY }}
       VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_RUNTIME_CLOUDFLARE_API_TOKEN }}
-      VOID_PLATFORM_REGISTRY_DIR: ${{ runner.temp }}/void-platform-registry
       VOID_PLATFORM_STAGING_INSTALLATION: ${{ vars.VOID_PLATFORM_STAGING_INSTALLATION }}
     permissions:
       contents: read
@@ -84,6 +83,7 @@ jobs:
           recovery_key="$(openssl rand -base64 32)"
           echo "::add-mask::$recovery_key"
           echo "VOID_PLATFORM_RECOVERY_KEY=$recovery_key" >> "$GITHUB_ENV"
+          echo "VOID_PLATFORM_REGISTRY_DIR=$RUNNER_TEMP/void-platform-registry" >> "$GITHUB_ENV"
       - name: Build the staging runtime
         run: vp run build
         env:
@@ -110,4 +110,7 @@ jobs:
     uses: ./.github/workflows/platform-smoke-test.yml
     permissions:
       contents: read
-    secrets: inherit
+    secrets:
+      CF_ACCESS_CLIENT_ID_STAGING: ${{ secrets.CF_ACCESS_CLIENT_ID_STAGING }}
+      CF_ACCESS_CLIENT_SECRET_STAGING: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}
+      VOID_TOKEN_STAGING: ${{ secrets.VOID_TOKEN_STAGING }}
