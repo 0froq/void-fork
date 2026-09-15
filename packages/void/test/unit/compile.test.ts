@@ -512,7 +512,7 @@ describe('compileRouteTable', () => {
           hasAuthGate: true,
         },
       ],
-      middleware: [],
+      middleware: [{ order: 1, filePath: '01.auth.ts' }],
       jobs: [],
       queues: [],
       pages: { pages: [], layouts: [], namedLayouts: [] },
@@ -532,9 +532,14 @@ describe('compileRouteTable', () => {
     expect(code).toContain('createWebSocketDurableObject');
     expect(code).toContain('export const ChatRoomWs = __createWebSocketDurableObject');
     expect(code).toContain('const __voidWebSocketRoutes = [{"pattern":"/chat/:room"');
-    expect(code).toContain('export async function __voidHandleWebSocket(request, env)');
     expect(code).toContain('app.all("/chat/:room"');
+    expect(code).toContain(
+      'if (c.req.raw.headers.get("upgrade")?.toLowerCase() !== "websocket") return next()',
+    );
     expect(code).toContain('__forwardWebSocketRequest');
+    expect(code.indexOf('app.use(middleware0)')).toBeLessThan(
+      code.indexOf('app.all("/chat/:room"'),
+    );
   });
 
   it('exports tombstones for removed websocket Durable Object classes', () => {
@@ -2293,10 +2298,10 @@ describe('compileWorkerEntry', () => {
       webSocketClasses: ['ChatRoomWs'],
     });
 
-    expect(code).toContain('__voidHandleWebSocket');
+    expect(code).not.toContain('__voidHandleWebSocket');
     expect(code).toContain('ChatRoomWs');
     expect(code).toContain('export { ChatRoomWs };');
-    expect(code).toContain('const ws = await __voidHandleWebSocket(request, env);');
+    expect(code).toContain('await app.fetch(request, userEnv, ctx)');
   });
 
   it('re-exports the live Durable Object class when enabled', () => {
@@ -2979,7 +2984,8 @@ describe('compileWorkerEntry — ISR wiring', () => {
       "import { __VOID_ISR_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes'",
     );
     // Render path threaded through handleIsr, guarded on the ISR_CACHE binding.
-    expect(code).toContain('if (env.ISR_CACHE)');
+    expect(code).toContain('if (env.ISR_CACHE &&');
+    expect(code).toContain('request.headers.get("upgrade")?.toLowerCase() !== "websocket"');
     expect(code).toContain(
       'handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: {"/search":["q"]} }, __render)',
     );

@@ -20,7 +20,7 @@ Commit subjects start with a capital letter and end with a period.
 - [ ] 4. Separate GitHub installation visibility from installation authority.
 - [x] 5. Enforce administrator suspension in browser auth and OAuth issuance.
 - [x] 6. Bind environment developer tokens to the selected platform origin.
-- [ ] 7. Apply global authorization middleware to WebSocket upgrades.
+- [x] 7. Apply global authorization middleware to WebSocket upgrades.
 - [ ] 8. Preserve transactional remote D1 batches and resolve active Workers.
 - [ ] 9. Dispatch queue consumers by unambiguous names.
 - [ ] 10. Preserve live platform secrets during routine upgrades.

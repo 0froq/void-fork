@@ -801,7 +801,7 @@ export function compileRouteTable(
     options.webSocketRuntimePath
   ) {
     lines.push(
-      `import { createWebSocketDurableObject as __createWebSocketDurableObject, createWebSocketTombstoneDurableObject as __createWebSocketTombstoneDurableObject, handleWebSocketUpgrade as __handleWebSocketUpgrade, forwardWebSocketRequest as __forwardWebSocketRequest } from ${JSON.stringify(options.webSocketRuntimePath)};`,
+      `import { createWebSocketDurableObject as __createWebSocketDurableObject, createWebSocketTombstoneDurableObject as __createWebSocketTombstoneDurableObject, forwardWebSocketRequest as __forwardWebSocketRequest } from ${JSON.stringify(options.webSocketRuntimePath)};`,
     );
   }
   if (options.hasLive && options.liveRuntimePath) {
@@ -1109,6 +1109,25 @@ export function compileRouteTable(
     lines.push('');
   }
 
+  // WebSocket upgrades must enter the Hono app so global auth and user
+  // middleware run before the Durable Object receives the request. Register
+  // them before HTTP routes to preserve WebSocket priority when both route
+  // kinds share a path, while non-upgrade requests continue through normally.
+  for (let i = 0; i < webSockets.length; i++) {
+    const route = webSockets[i];
+    lines.push(`app.all(${JSON.stringify(route.pattern)}, async (c, next) => {`);
+    lines.push(
+      `  if (c.req.raw.headers.get("upgrade")?.toLowerCase() !== "websocket") return next();`,
+    );
+    lines.push(
+      `  return __forwardWebSocketRequest(c.req.raw, c.env, __voidWebSocketRoutes[${i}]);`,
+    );
+    lines.push('});');
+  }
+  if (webSockets.length > 0) {
+    lines.push('');
+  }
+
   if (auth) {
     lines.push('app.all("/api/auth", async (c) => {');
     lines.push(
@@ -1189,21 +1208,6 @@ export function compileRouteTable(
         })),
       )};`,
     );
-    lines.push('export async function __voidHandleWebSocket(request, env) {');
-    lines.push('  return __handleWebSocketUpgrade(request, env, __voidWebSocketRoutes);');
-    lines.push('}');
-    lines.push('');
-    for (let i = 0; i < webSockets.length; i++) {
-      const route = webSockets[i];
-      lines.push(`app.all(${JSON.stringify(route.pattern)}, async (c) => {`);
-      lines.push(
-        `  return __forwardWebSocketRequest(c.req.raw, c.env, __voidWebSocketRoutes[${i}]);`,
-      );
-      lines.push('});');
-    }
-    lines.push('');
-  } else {
-    lines.push('export async function __voidHandleWebSocket() { return null; }');
     lines.push('');
   }
   for (const className of options.webSocketTombstones ?? []) {
@@ -2805,7 +2809,7 @@ function __filterInternalBindings(env) {
   // closure is threaded through the ISR cache ladder (only when ISR_CACHE binds).
   const renderBlock = isr
     ? `      const __render = async (req) => serveWithAssets(req, env, await app.fetch(req, userEnv, ctx));
-      if (env.ISR_CACHE) {
+      if (env.ISR_CACHE && request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         const __isr = await handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: ${JSON.stringify(isr?.queryAllowlist)} }, __render);
         if (__isr) return __isr;
       }
@@ -2814,9 +2818,7 @@ function __filterInternalBindings(env) {
 
   const fetchHandler = remotePath
     ? `async (request, env, ctx) => {
-${envValidateCall}  const ws = await __voidHandleWebSocket(request, env);
-  if (ws) return ws;
-  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};
+${envValidateCall}  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};
 ${isrEnvCapture}  return __withRawEnv(env, () => {
     const userEnv = __filterInternalBindings(env);
     return withRuntimeEnv(env, async () => {
@@ -2827,9 +2829,7 @@ ${renderBlock}
   });
 }`
     : `async (request, env, ctx) => {
-${envValidateCall}  const ws = await __voidHandleWebSocket(request, env);
-  if (ws) return ws;
-${isrEnvCapture}  return __withRawEnv(env, () => {
+${envValidateCall}${isrEnvCapture}  return __withRawEnv(env, () => {
     const userEnv = __filterInternalBindings(env);
     return withRuntimeEnv(env, async () => {
       const internal = await __handleInternal(request, env, ctx);
@@ -2934,7 +2934,7 @@ ${envValidateCall}  const userEnv = __filterInternalBindings(env);
 ${queueMethodBody}${emailMethodBody}}`;
 
   if (hasQueues) {
-    return `${sandboxImport}${entryImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __voidHandleWebSocket, __withRawEnv, __processQueue${emailImport}${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
+    return `${sandboxImport}${entryImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __withRawEnv, __processQueue${emailImport}${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
 ${durableObjectImports}\n${runtimeEnvImport}${emailProxyImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${fetchDeclaration}
@@ -2967,7 +2967,7 @@ ${sandboxExport}
 ${durableObjectExports}
 ${entryClass}`;
   }
-  return `${sandboxImport}${entryImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __voidHandleWebSocket, __withRawEnv${emailImport}${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
+  return `${sandboxImport}${entryImport}${liveRuntimeImport}import app, { scheduled, __voidCollectPrerenderPaths, __voidHandleInternalRoute, __withRawEnv${emailImport}${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:void-routes';
 ${durableObjectImports}\n${runtimeEnvImport}${emailProxyImport}${envSchemaImport}${remoteImport}${isrImport}${filterBindingsHelper}${assetHelper}
 ${internalRouteHelper}
 ${fetchDeclaration}
