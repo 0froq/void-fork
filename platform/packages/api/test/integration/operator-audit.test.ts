@@ -86,7 +86,7 @@ test('previews and reads produce no audit or configuration writes', async () => 
 });
 
 test('records actor, target, and success without recording credentials', async () => {
-  const res = await request('/signup/restrict', {});
+  const res = await request('/signup/restrict', { credential: 'must-not-be-audited' });
   expect(res.status).toBe(200);
   expect(res.headers.get('X-Void-Audit-Id')).toBeTruthy();
   const events = await env.db.select().from(operatorEvents);
@@ -94,10 +94,12 @@ test('records actor, target, and success without recording credentials', async (
   expect(events[0]).toMatchObject({
     login: 'audit-admin',
     action: 'signup/restrict',
+    target: JSON.stringify({ restrictionsEnabled: true }),
     status: 'success',
     http_status: 200,
   });
   expect(JSON.stringify(events)).not.toContain(token);
+  expect(JSON.stringify(events)).not.toContain('must-not-be-audited');
   const page = await request('/system/events?limit=1');
   expect(await page.json()).toMatchObject({ total: 1, limit: 1, page: 1 });
 });
@@ -107,7 +109,11 @@ test('records failed validation as a failed mutation attempt', async () => {
   expect(res.status).toBe(400);
   const events = await env.db.select().from(operatorEvents);
   expect(events).toHaveLength(1);
-  expect(events[0]).toMatchObject({ status: 'failed', http_status: 400 });
+  expect(events[0]).toMatchObject({
+    target: JSON.stringify({ type: 'invalid', pattern: 'anything' }),
+    status: 'failed',
+    http_status: 400,
+  });
 });
 
 test('records complete and partial 207 mutation outcomes as failed', async () => {
@@ -167,4 +173,55 @@ test('records a successful 200 mutation outcome as successful', async () => {
       http_status: 200,
     }),
   ]);
+});
+
+test('records sanitized action targets and change arguments', async () => {
+  await request('/signup/allow', {
+    type: 'email',
+    pattern: 'Alice@Example.com',
+    note: 'First cohort',
+  });
+  await request('/signup/allow', { type: 'email', pattern: 'Bob@Example.com' });
+  await env.db.delete(operatorEvents);
+
+  expect(
+    (await request('/signup/remove', { type: 'email', pattern: 'Alice@Example.com' })).status,
+  ).toBe(200);
+  expect(
+    (await request('/signup/remove', { type: 'email', pattern: 'Bob@Example.com' })).status,
+  ).toBe(200);
+  expect(
+    (
+      await request('/invitations/send', {
+        emails: ['Invite-One@Example.com', 'invite-two@example.com'],
+      })
+    ).status,
+  ).toBe(200);
+
+  const user = await createTestUser(env.db, 'audit-target-user');
+  expect((await request(`/users/${user.id}/plan`, { plan: 'pro' })).status).toBe(200);
+  expect(
+    (await request(`/users/${user.id}/suspend`, { reason: 'abuse investigation' })).status,
+  ).toBe(200);
+
+  const events = await env.db.select().from(operatorEvents);
+  const targets = Object.fromEntries(
+    events.map((event) => [event.action, JSON.parse(event.target)]),
+  );
+  expect(targets).toMatchObject({
+    'signup/remove': { type: 'email', pattern: 'bob@example.com' },
+    'invitations/send': {
+      emails: ['invite-one@example.com', 'invite-two@example.com'],
+    },
+    [`users/${user.id}/plan`]: { userId: user.id, plan: 'pro' },
+    [`users/${user.id}/suspend`]: {
+      userId: user.id,
+      reason: 'abuse investigation',
+    },
+  });
+  expect(
+    events
+      .filter((event) => event.action === 'signup/remove')
+      .map((event) => JSON.parse(event.target).pattern),
+  ).toEqual(['alice@example.com', 'bob@example.com']);
 });
