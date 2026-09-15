@@ -26,7 +26,7 @@ Commit subjects start with a capital letter and end with a period.
 - [x] 10. Preserve live platform secrets during routine upgrades.
 - [x] 11. Restore captured live traffic configuration after failed deployment.
 - [x] 12. Allow invited account deletion while preserving invitation history.
-- [ ] 13. Store full OAuth tokens in generated MySQL auth schemas.
+- [x] 13. Store full OAuth tokens in generated MySQL auth schemas.
 - [ ] 14. Scope PostgreSQL/MySQL clients to the request using them.
 - [ ] 15. Share local D1 identity/persistence across dev and database tooling.
 - [ ] 16. Support Durable State methods through real Cloudflare RPC.
