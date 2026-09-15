@@ -1,4 +1,4 @@
-import { requireRuntimeBinding } from './env.ts';
+import { requireRuntimeBinding, withRuntimeEnv } from './env.ts';
 
 const DEFAULT_STORAGE_KEY = '__void_durable_state';
 
@@ -152,7 +152,9 @@ export function defineDurableState<
       private readonly objectState: DurableObjectState,
       private readonly env: TEnv,
     ) {
-      this.ready = objectState.blockConcurrencyWhile(() => this.load());
+      this.ready = objectState.blockConcurrencyWhile(() =>
+        withRuntimeEnv(this.env, () => this.load()),
+      );
     }
 
     private async load(): Promise<void> {
@@ -215,23 +217,25 @@ export function defineDurableState<
     }
 
     private run<TResult>(operation: () => Promise<TResult>): Promise<TResult> {
-      const result = this.queue.then(async () => {
-        await this.ready;
-        const previousValue = structuredClone(this.value);
-        try {
-          const operationResult = await operation();
-          await this.persist();
-          return operationResult;
-        } catch (error) {
-          this.value = previousValue;
-          throw error;
-        }
+      return withRuntimeEnv(this.env, () => {
+        const result = this.queue.then(async () => {
+          await this.ready;
+          const previousValue = structuredClone(this.value);
+          try {
+            const operationResult = await operation();
+            await this.persist();
+            return operationResult;
+          } catch (error) {
+            this.value = previousValue;
+            throw error;
+          }
+        });
+        this.queue = result.then(
+          () => undefined,
+          () => undefined,
+        );
+        return result;
       });
-      this.queue = result.then(
-        () => undefined,
-        () => undefined,
-      );
-      return result;
     }
 
     fetch(request: Request): Promise<Response> {
