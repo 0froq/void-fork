@@ -483,19 +483,10 @@ async function runNodePrerenderRunner<T>(root: string, config: NodeRunnerConfig)
     `
 import { pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 const config = JSON.parse(process.argv[2]);
 const { mode, ssrDir, clientDir } = config;
-
-if (clientDir) {
-  try {
-    const manifestPath = join(clientDir, ".vite", "manifest.json");
-    globalThis.__VITE_MANIFEST__ = JSON.parse(readFileSync(manifestPath, "utf-8"));
-  } catch {
-    // Ignore missing manifests so prerender can continue without client assets.
-  }
-}
 
 const appUrl = pathToFileURL(join(ssrDir, "app.js")).href;
 const app = await import(appUrl);

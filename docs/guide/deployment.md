@@ -216,4 +216,6 @@ See the [Cloudflare guide](../integrations/cloudflare.md#deploy-to-your-own-clou
 
 Set [`target`](../reference/config.md#target) in `void.json` to build a standalone server for Node.js, Bun, or Deno. You can run the result on your own server or in a container.
 
+Deploy `dist/ssr` and `dist/client` together. The server loads the Pages client manifest and assets relative to its emitted module; start it from the app root with `node dist/ssr/index.js`, `bun dist/ssr/index.js`, or `deno run -A dist/ssr/index.js`.
+
 These targets don't provide Cloudflare bindings such as D1, KV, R2, and Workers AI. See the [Node.js, Bun, and Deno guide](../integrations/nodejs-bun-deno.md) for the features available on each target.

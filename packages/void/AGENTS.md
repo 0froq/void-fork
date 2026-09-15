@@ -20,6 +20,8 @@ voidPlugin() → [routingPlugin, prerenderPlugin, nodeTargetPlugin()]
 
 Non-CF targets disable CF-only bindings (`void/db`, `void/kv`, `void/auth`, `void/storage`, `void/ai`, `void/env`, `void/ws`) at compile time. The `nodeTargetPlugin` provides a binding guard (compile-time errors for CF imports), a Vite dev server middleware (SSR-loads the Hono app), and a build entry generator for the target runtime.
 
+Production non-CF Pages pass a filesystem-backed `ASSETS` provider to the generated routes so manifest loading, hydration tags, public assets, and prerendering share the production path. `nodeTargetPlugin.renderChunk` resolves the client directory relative to the actual emitted chunk (including shared chunks under `ssr/assets/`), independently of `process.cwd()`. Keep `dist/ssr` and `dist/client` together.
+
 ### Runtime Framework
 
 **Hono** is used as the runtime framework. The generated virtual module creates a Hono app with file-based routes and middleware. Route handlers receive a Hono `Context` object (`c`) and can use the full Hono API (`c.json()`, `c.text()`, `c.req.param()`, etc.) plus the Hono middleware ecosystem.

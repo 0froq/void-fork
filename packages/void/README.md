@@ -97,6 +97,8 @@ Self-hosted platform upgrades verify every packaged PostgreSQL migration and req
 - apps can opt into PostgreSQL or MySQL mode
 - route types, DB types, and queue types are generated into `.void/*.d.ts`
 
+Node.js, Bun, and Deno Pages builds include production hydration assets. Deploy `dist/ssr` together with `dist/client`; the server loads its manifest and assets relative to the emitted module.
+
 ## Documentation
 
 Full docs live at [void.cloud/guide](https://void.cloud/guide).

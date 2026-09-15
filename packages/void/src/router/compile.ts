@@ -3021,9 +3021,15 @@ export function compileNodeApp(
     : '';
 
   return `${staticImport}
+import { fileURLToPath } from "node:url";
 import { Hono } from ${JSON.stringify(honoPath)};
 import innerApp, { __voidCollectPrerenderPaths } from "virtual:void-routes";
 ${envSchemaImport}
+// Resolved by nodeTargetPlugin for this emitted chunk, including shared chunks.
+const clientRoot = fileURLToPath(import.meta.voidClientDirectory);
+const assetApp = new Hono();
+assetApp.get("*", serveStatic({ root: clientRoot }));
+const assets = { fetch: (request) => assetApp.fetch(request) };
 const app = new Hono();
 ${envMiddleware}app.post("/__void/prerender-paths", async (c) => {
   const __expected = c.env?.__VOID_PROXY_TOKEN;
@@ -3034,8 +3040,8 @@ ${envMiddleware}app.post("/__void/prerender-paths", async (c) => {
   const paths = await __voidCollectPrerenderPaths(c.req.raw);
   return c.json({ paths });
 });
-app.use("/assets/*", serveStatic({ root: "./client" }));
-app.all("*", (c) => innerApp.fetch(c.req.raw));
+app.get("/assets/*", (c) => assets.fetch(c.req.raw));
+app.all("*", (c) => innerApp.fetch(c.req.raw, { ...c.env, ASSETS: assets }));
 export default app;`;
 }
 

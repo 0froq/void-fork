@@ -62,3 +62,5 @@ A fork installs or upgrades its own platform with `void platform` and an explici
 `--runtime` directory, preserving the installer's ownership and migration checks.
 
 Now ask me what I want to build.
+
+For Node.js, Bun, or Deno targets, build and deploy both `dist/ssr` and `dist/client`. Start `dist/ssr/index.js` with the selected runtime from the app root. Production Pages loads its client manifest and hydration assets automatically.

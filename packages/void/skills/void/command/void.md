@@ -7,3 +7,5 @@
 5. Execute, verify, and report concise next actions.
 
 Local D1 commands use development’s configured binding ID (preview ID first) and persistence directory. After setting or changing `voidPlugin({ persistTo })`, run `void dev` to refresh the recorded path before using `void db`.
+
+For Node.js, Bun, and Deno Pages apps, deploy both `dist/ssr` and `dist/client`. Start `dist/ssr/index.js` with the selected runtime; production manifest and asset lookup is relative to the emitted server module.

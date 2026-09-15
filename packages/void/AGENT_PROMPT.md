@@ -61,3 +61,5 @@ are not published to npm; the deployable core is packaged in `@void/platform`.
 The upstream Void Cloud deployment scripts are for that existing deployment.
 A fork installs or upgrades its own platform with `void platform` and an explicit
 `--runtime` directory, preserving the installer's ownership and migration checks.
+
+For Node.js, Bun, or Deno Pages builds, deploy `dist/ssr` and `dist/client` together. Start the generated `dist/ssr/index.js` with the selected runtime from the app root; the server loads its client manifest and assets relative to its emitted module.
