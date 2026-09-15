@@ -2771,7 +2771,7 @@ export default config;
           : { status: 0, stdout: '', stderr: '' },
       );
       mockConfirm.mockImplementation((options: { message?: string }) => {
-        if (options.message === 'Sign in to Cloudflare in your browser?') {
+        if (options.message === 'Log in to Cloudflare now?') {
           return false;
         }
         if (
@@ -2844,7 +2844,7 @@ export default config;
       expect(wrangler).toContain('"compatibility_date":');
       expect(wrangler).toContain('"account_id": "account-1"');
       expect(mockConfirm).not.toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Sign in to Cloudflare in your browser?' }),
+        expect.objectContaining({ message: 'Log in to Cloudflare now?' }),
       );
       expect(mockSelect).not.toHaveBeenCalledWith(
         expect.objectContaining({ message: 'Choose a Cloudflare account:' }),
@@ -2860,7 +2860,7 @@ export default config;
       writeExistingAstroProject(root);
       selectCloudflareDuringInit('account-2');
       mockConfirm.mockImplementation((options: { message?: string }) =>
-        options.message === 'Sign in to Cloudflare in your browser?' ? true : undefined,
+        options.message === 'Log in to Cloudflare now?' ? true : undefined,
       );
       let whoamiCalls = 0;
       mockSpawnSync.mockImplementation((_command, args) => {
@@ -2944,7 +2944,7 @@ export default config;
       writeExistingAstroProject(root);
       selectCloudflareDuringInit();
       mockConfirm.mockImplementation((options: { message?: string }) =>
-        options.message === 'Sign in to Cloudflare in your browser?' ? true : undefined,
+        options.message === 'Log in to Cloudflare now?' ? true : undefined,
       );
       mockSpawnSync.mockImplementation((_command, args) =>
         Array.isArray(args) && args.includes('login')
@@ -3003,7 +3003,7 @@ export default config;
         ),
       ).toBe(false);
       expect(mockConfirm).not.toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Sign in to Cloudflare in your browser?' }),
+        expect.objectContaining({ message: 'Log in to Cloudflare now?' }),
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

@@ -85,7 +85,7 @@ export function readWranglerOAuthCredential(
 
 async function confirmCloudflareLogin(): Promise<boolean> {
   const result = await confirm({
-    message: 'Sign in to Cloudflare in your browser?',
+    message: 'Log in to Cloudflare now?',
     initialValue: true,
   });
   if (isCancel(result) || typeof result === 'symbol') {
