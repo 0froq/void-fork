@@ -19,6 +19,7 @@ import {
   getPlatformRuntimeDirectory,
   platformDatabaseSchemaDigest,
   readPlatformRuntimeManifest,
+  resolvePlatformRuntime,
   type PlatformRuntimeDatabaseManifest,
 } from '@void/platform/installer';
 import { join } from 'pathslash';
@@ -69,6 +70,8 @@ const directories: Array<string> = [];
 
 afterEach(() => {
   delete process.env.VOID_PLATFORM_REGISTRY_DIR;
+  delete process.env.CF_ACCESS_CLIENT_ID;
+  delete process.env.CF_ACCESS_CLIENT_SECRET;
   for (const directory of directories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -851,6 +854,38 @@ describe('platform installer', () => {
       requests.every((entry) => entry.headers.get('X-Void-Platform-Probe') === 'probe-token'),
     ).toBe(true);
     expect(requests.every((entry) => !entry.headers.has('X-Health-Check'))).toBe(true);
+  });
+
+  it('authenticates lifecycle health probes to Access-gated hosted staging', async () => {
+    process.env.CF_ACCESS_CLIENT_ID = 'service-id';
+    process.env.CF_ACCESS_CLIENT_SECRET = 'service-secret';
+    const requests: Array<Headers> = [];
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push(new Headers(init?.headers));
+      return Response.json(
+        String(input).endsWith('/.well-known/void-platform')
+          ? { installationId: 'example-a1b2c3d4', platformVersion: '1.2.3' }
+          : { ok: true },
+      );
+    }) as typeof fetch;
+
+    await verifyPlatformHealth(
+      'https://api.staging.void.cloud',
+      'example-a1b2c3d4',
+      'https://proxy.staging.void.cloud',
+      'staging.void.app',
+      '1.2.3',
+      'probe-token',
+      fetcher,
+    );
+
+    expect(
+      requests.every(
+        (headers) =>
+          headers.get('CF-Access-Client-Id') === 'service-id' &&
+          headers.get('CF-Access-Client-Secret') === 'service-secret',
+      ),
+    ).toBe(true);
   });
 
   it('derives an installation-specific high-entropy health probe token', () => {
@@ -2075,6 +2110,7 @@ describe('platform installer', () => {
         migrations++;
       },
       revalidateBeforeWorkerDeploy: async () => {},
+      runtime: resolvePlatformRuntime(getPlatformRuntimeDirectory()),
       verifyHealth: async () => {},
     });
 
@@ -2088,6 +2124,10 @@ describe('platform installer', () => {
     expect(new Set(upgradeKvWrites)).toEqual(new Set(['__void/platform/installation/v1']));
     expect(upgraded.manifest.status).toBe('installed');
     expect(upgraded.manifest.platformVersion).toBe(readPlatformRuntimeManifest().platformVersion);
+    expect(upgraded.manifest.runtime).toMatchObject({
+      manifestSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      source: 'custom',
+    });
     expect(upgraded.manifest.resources).toHaveLength(15);
 
     const repairedWorkerConfigs: Array<Record<string, unknown>> = [];

@@ -3,6 +3,7 @@ import {
   setInstallationEndpoints,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import { cfAccessHeaders } from '../shared/cf-access.ts';
 import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import { REMOTE_INSTALLATION_MANIFEST_KEY } from './platform-installer.ts';
 import {
@@ -47,6 +48,7 @@ export async function recoverPlatformInstallations(
   verifyEndpoint: (
     manifest: PlatformInstallationManifest,
   ) => Promise<void> = verifyInstallationEndpoint,
+  selector = '',
 ): Promise<ReadonlyArray<PlatformInstallationManifest>> {
   await client.verifyToken();
   const accounts = await client.listAccounts();
@@ -79,6 +81,14 @@ export async function recoverPlatformInstallations(
       throw new Error(
         `platform: Routing namespace ${namespace.name} contains invalid Void ownership metadata: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+    if (
+      selector &&
+      manifest.id !== selector &&
+      manifest.deployment.installationSlug !== selector &&
+      manifest.deployment.displayName.toLowerCase() !== selector.toLowerCase()
+    ) {
+      continue;
     }
     const routing = manifest.resources.find((resource) => resource.key === 'routing-kv');
     if (
@@ -192,9 +202,19 @@ function reconcileRecoveredEndpoints(
   return manifest;
 }
 
-async function verifyInstallationEndpoint(manifest: PlatformInstallationManifest): Promise<void> {
-  const response = await fetch(`${manifest.endpoints.apiUrl}/.well-known/void-platform`, {
-    headers: { Accept: 'application/json' },
+export async function verifyInstallationEndpoint(
+  manifest: PlatformInstallationManifest,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const apiUrl = manifest.endpoints.apiUrl;
+  if (!apiUrl) {
+    throw new Error(`platform: Installation ${manifest.id} has no API endpoint.`);
+  }
+  const response = await fetcher(`${apiUrl}/.well-known/void-platform`, {
+    headers: {
+      Accept: 'application/json',
+      ...cfAccessHeaders(process.env, apiUrl),
+    },
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) {

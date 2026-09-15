@@ -1,13 +1,16 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import {
   getPlatformRuntimeDirectory,
   parsePlatformRuntimeManifest,
   platformDatabaseSchemaDigest,
   readPlatformRuntimeManifest,
+  resolvePlatformRuntime,
 } from '@void/platform/installer';
 import { join } from 'pathslash';
 import { describe, expect, it } from 'vite-plus/test';
+import { loadPlatformRuntime } from '../../src/cli/platform-installer.ts';
 
 describe('platform runtime manifest', () => {
   it('binds every packaged migration and Worker artifact to the manifest', () => {
@@ -67,6 +70,39 @@ describe('platform runtime manifest', () => {
         },
       }),
     ).toThrow('compatibility entries must be unique');
+    expect(() =>
+      parsePlatformRuntimeManifest({ ...manifest, sourceRevision: 'revision with spaces' }),
+    ).toThrow('sourceRevision is invalid');
+  });
+
+  it('resolves packaged and explicit runtime directories with provenance', () => {
+    const packaged = resolvePlatformRuntime();
+    const custom = resolvePlatformRuntime(getPlatformRuntimeDirectory());
+
+    expect(packaged.source).toBe('package');
+    expect(custom.source).toBe('custom');
+    expect(custom.directory).toBe(packaged.directory);
+    expect(custom.manifest).toEqual(packaged.manifest);
+    expect(custom.manifestSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(custom.manifestSha256).toBe(packaged.manifestSha256);
+    expect(() => resolvePlatformRuntime('does-not-exist')).toThrow(
+      'runtime directory is unavailable',
+    );
+  });
+
+  it('rejects a custom runtime whose artifacts changed after its manifest was built', () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'void-custom-runtime-test-'));
+    const runtimeDirectory = join(temporary, 'runtime');
+    try {
+      cpSync(getPlatformRuntimeDirectory(), runtimeDirectory, { recursive: true });
+      const runtime = loadPlatformRuntime(runtimeDirectory);
+      const apiPath = join(runtimeDirectory, runtime.manifest.artifacts.api.path);
+      writeFileSync(apiPath, `${readFileSync(apiPath, 'utf8')}\n// changed\n`);
+
+      expect(() => loadPlatformRuntime(runtimeDirectory)).toThrow('integrity verification');
+    } finally {
+      rmSync(temporary, { force: true, recursive: true });
+    }
   });
 });
 

@@ -19,7 +19,10 @@ import { hyperdriveOriginConfigHash } from '../../src/cli/platform-cloudflare.ts
 import { REMOTE_INSTALLATION_MANIFEST_KEY } from '../../src/cli/platform-installer.ts';
 import { disablePlatform } from '../../src/cli/platform-management.ts';
 import { platformProvisionIntentHash } from '../../src/cli/platform-plan.ts';
-import { recoverPlatformInstallations } from '../../src/cli/platform-recovery.ts';
+import {
+  recoverPlatformInstallations,
+  verifyInstallationEndpoint,
+} from '../../src/cli/platform-recovery.ts';
 import {
   listInstallationManifests,
   listPlatformConnections,
@@ -30,6 +33,8 @@ const directories: Array<string> = [];
 
 afterEach(() => {
   delete process.env.VOID_PLATFORM_REGISTRY_DIR;
+  delete process.env.CF_ACCESS_CLIENT_ID;
+  delete process.env.CF_ACCESS_CLIENT_SECRET;
   for (const directory of directories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -260,6 +265,43 @@ function ownershipMarker(
 }
 
 describe('platform recovery', () => {
+  it('authenticates endpoint verification to Access-gated hosted staging', async () => {
+    process.env.CF_ACCESS_CLIENT_ID = 'service-id';
+    process.env.CF_ACCESS_CLIENT_SECRET = 'service-secret';
+    const manifest = {
+      ...remoteManifest(),
+      endpoints: {
+        ...remoteManifest().endpoints,
+        apiUrl: 'https://api.staging.void.cloud',
+      },
+    };
+    let headers = new Headers();
+
+    await verifyInstallationEndpoint(manifest, (async (_input, init) => {
+      headers = new Headers(init?.headers);
+      return Response.json({ installationId: manifest.id });
+    }) as typeof fetch);
+
+    expect(headers.get('CF-Access-Client-Id')).toBe('service-id');
+    expect(headers.get('CF-Access-Client-Secret')).toBe('service-secret');
+  });
+
+  it('limits shared-account discovery before verifying unrelated endpoints', async () => {
+    let verified = false;
+    await expect(
+      recoverPlatformInstallations(
+        client(),
+        'account',
+        async () => {
+          verified = true;
+          throw new Error('must not verify an unrelated installation');
+        },
+        'different-installation',
+      ),
+    ).resolves.toEqual([]);
+    expect(verified).toBe(false);
+  });
+
   it('recovers a fully verified remote ownership manifest', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-platform-recovery-test-'));
     directories.push(directory);

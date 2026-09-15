@@ -12,18 +12,58 @@ describe('platform args', () => {
       subcommand: 'repair',
       selector: 'example-a1b2c3d4',
       plan: true,
+      runtime: '',
       yes: false,
     });
     expect(parsePlatformArgs(['enable', 'example-a1b2c3d4'])).toEqual({
       subcommand: 'enable',
       selector: 'example-a1b2c3d4',
       plan: false,
+      runtime: '',
       yes: false,
     });
     expect(parsePlatformArgs(['discover', '--account', 'account-id'])).toEqual({
       subcommand: 'discover',
       account: 'account-id',
+      selector: '',
     });
+    expect(
+      parsePlatformArgs([
+        'discover',
+        '--installation',
+        'staging-a1b2c3d4',
+        '--account',
+        'account-id',
+      ]),
+    ).toEqual({
+      subcommand: 'discover',
+      account: 'account-id',
+      selector: 'staging-a1b2c3d4',
+    });
+  });
+
+  it('parses custom runtimes for lifecycle commands that deploy Workers', () => {
+    expect(
+      parsePlatformArgs([
+        'upgrade',
+        'example-a1b2c3d4',
+        '--runtime',
+        'packages/platform/dist/runtime',
+        '--yes',
+      ]),
+    ).toEqual({
+      subcommand: 'upgrade',
+      selector: 'example-a1b2c3d4',
+      plan: false,
+      runtime: 'packages/platform/dist/runtime',
+      yes: true,
+    });
+    expect(
+      parsePlatformArgs(['install', '--runtime', '/tmp/void-runtime', '--plan']),
+    ).toMatchObject({ runtime: '/tmp/void-runtime' });
+    expect(() => parsePlatformArgs(['disable', '--runtime', '/tmp/void-runtime'])).toThrow(
+      "Unknown flag '--runtime'",
+    );
   });
 
   it('parses safe uninstall choices explicitly', () => {

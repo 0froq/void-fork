@@ -35,6 +35,7 @@ export {
   type InstallationStep,
   type PlatformInstallationManifest,
   type PlatformInstallationEndpoints,
+  type PlatformRuntimeProvenance,
   type PlatformResourceOwnershipMarker,
   type ResourceOwnership,
 } from './installation.ts';

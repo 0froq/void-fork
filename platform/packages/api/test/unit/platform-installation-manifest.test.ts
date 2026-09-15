@@ -59,6 +59,25 @@ describe('platform installation manifest', () => {
     expect(parsePlatformInstallationManifest(legacy).desiredState).toBe('disabled');
   });
 
+  it('preserves validated runtime provenance while accepting older manifests', () => {
+    expect(parsePlatformInstallationManifest(installation()).runtime).toBeNull();
+    const withRuntime = {
+      ...installation(),
+      runtime: {
+        manifestSha256: 'a'.repeat(64),
+        source: 'custom',
+        sourceRevision: 'abc1234',
+      },
+    };
+    expect(parsePlatformInstallationManifest(withRuntime).runtime).toEqual(withRuntime.runtime);
+    expect(() =>
+      parsePlatformInstallationManifest({
+        ...withRuntime,
+        runtime: { ...withRuntime.runtime, manifestSha256: 'not-a-digest' },
+      }),
+    ).toThrow('SHA-256');
+  });
+
   it('rejects invalid state transitions', () => {
     expect(() => transitionInstallation(installation(), 'installed', now)).toThrow(
       'draft -> installed',

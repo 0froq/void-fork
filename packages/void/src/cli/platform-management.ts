@@ -25,6 +25,7 @@ import {
   acquirePlatformDatabaseLifecycleLock,
   createPlatformInstallationSecrets,
   installPlatform,
+  loadPlatformRuntime,
   REMOTE_INSTALLATION_MANIFEST_KEY,
   resolveBootstrapGitHubId,
 } from './platform-installer.ts';
@@ -171,6 +172,10 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     throw new Error('platform: Export CLOUDFLARE_API_TOKEN to manage an installed platform.');
   }
   const client = new PlatformCloudflareClient(token);
+  const runtime =
+    args.subcommand === 'uninstall' || args.subcommand === 'disable'
+      ? null
+      : loadPlatformRuntime(args.runtime);
 
   const execute = async (
     currentManifest: PlatformInstallationManifest,
@@ -225,6 +230,15 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         : args.subcommand === 'enable'
           ? 'Enable plan'
           : 'Repair plan',
+    );
+    note(
+      [
+        `Version: ${runtime!.manifest.platformVersion}`,
+        `Source: ${runtime!.source}`,
+        `Revision: ${runtime!.manifest.sourceRevision ?? 'not recorded'}`,
+        `Manifest SHA-256: ${runtime!.manifestSha256}`,
+      ].join('\n'),
+      'Platform runtime',
     );
     if (args.plan) {
       outro('No Cloudflare or local installation state was changed.');
@@ -292,6 +306,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       acquireDatabaseLifecycleLock: async () =>
         Object.assign(async () => {}, { checkpoint: databaseCheckpoint }),
       client,
+      runtime: runtime!,
       replanWorkers: async (recoveryManifest) =>
         (
           await createPlatformInstallPlan(client, planInput, recoveryManifest, {

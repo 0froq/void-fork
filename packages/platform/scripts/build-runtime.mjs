@@ -73,6 +73,7 @@ try {
     database,
     platformVersion: packageJson.version,
     schemaVersion: 2,
+    sourceRevision: process.env.VOID_PLATFORM_SOURCE_REVISION || null,
   });
   writeFileSync(join(runtimeRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 } finally {

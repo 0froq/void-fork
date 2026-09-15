@@ -111,8 +111,14 @@ const HELP_TREE: HelpTree = {
       status: basicSubcommand('Inspect a platform and its health.', 'void platform status [id]'),
       discover: {
         summary: 'Recover owned platform installations from Cloudflare.',
-        usage: ['void platform discover [--account <id>]'],
-        options: [{ command: '--account <id>', description: 'Cloudflare account id' }],
+        usage: ['void platform discover [--account <id>] [--installation <id-or-name>]'],
+        options: [
+          { command: '--account <id>', description: 'Cloudflare account id' },
+          {
+            command: '--installation <id-or-name>',
+            description: 'Recover only one installation from a shared account',
+          },
+        ],
       },
       install: {
         summary: 'Install or resume a Void platform in Cloudflare.',
@@ -130,6 +136,10 @@ const HELP_TREE: HelpTree = {
           { command: '--control-plane-domain <domain>', description: 'Optional API hostname' },
           { command: '--plan', description: 'Print the exact plan without changing Cloudflare' },
           { command: '--resume', description: 'Resume the matching local installation' },
+          {
+            command: '--runtime <path>',
+            description: 'Deploy an integrity-checked runtime directory instead of the package',
+          },
           { command: '--yes', description: 'Acknowledge changes without an interactive prompt' },
         ],
       },
@@ -700,9 +710,19 @@ function lifecycleHelp(
 ): HelpPage {
   return {
     summary,
-    usage: [`void platform ${command} [id] [--plan] [--yes]`],
+    usage: [
+      `void platform ${command} [id] [--plan]${command === 'disable' ? '' : ' [--runtime <path>]'} [--yes]`,
+    ],
     options: [
       { command: '--plan', description: 'Print the exact plan without making changes' },
+      ...(command === 'disable'
+        ? []
+        : [
+            {
+              command: '--runtime <path>',
+              description: 'Deploy an integrity-checked runtime directory instead of the package',
+            },
+          ]),
       { command: '--yes', description: 'Acknowledge non-interactive Cloudflare changes' },
     ],
   };

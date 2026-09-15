@@ -19,7 +19,7 @@ export type PlatformArgs =
   | { subcommand: 'list' }
   | { subcommand: 'use'; selector: string }
   | { subcommand: 'status'; selector: string }
-  | { subcommand: 'discover'; account: string }
+  | { subcommand: 'discover'; account: string; selector: string }
   | {
       subcommand: 'install';
       account: string;
@@ -30,6 +30,7 @@ export type PlatformArgs =
       name: string;
       plan: boolean;
       resume: boolean;
+      runtime: string;
       yes: boolean;
       zone: string;
     }
@@ -37,6 +38,7 @@ export type PlatformArgs =
       subcommand: 'upgrade' | 'repair' | 'disable' | 'enable';
       selector: string;
       plan: boolean;
+      runtime: string;
       yes: boolean;
     }
   | {
@@ -83,6 +85,29 @@ function parseSelector(
   return { selector, plan, yes };
 }
 
+function parseLifecycleSelector(
+  rest: Array<string>,
+  subcommand: 'upgrade' | 'repair' | 'disable' | 'enable',
+): { selector: string; plan: boolean; runtime: string; yes: boolean } {
+  const positional: Array<string> = [];
+  let runtime = '';
+  for (let index = 0; index < rest.length; index++) {
+    const arg = rest[index]!;
+    if (arg === '--runtime') {
+      if (subcommand === 'disable') {
+        throw new Error("platform: Unknown flag '--runtime'.");
+      }
+      const [value, next] = readValue(rest, index, arg);
+      runtime = value;
+      index = next;
+    } else {
+      positional.push(arg);
+    }
+  }
+  const parsed = parseSelector(positional, subcommand, { allowYes: true });
+  return { ...parsed, runtime };
+}
+
 export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   const [subcommand, ...rest] = args;
 
@@ -108,13 +133,25 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     return { subcommand, selector };
   }
   if (subcommand === 'discover') {
-    if (rest.length === 0) {
-      return { subcommand, account: '' };
+    let account = '';
+    let selector = '';
+    for (let index = 0; index < rest.length; index++) {
+      const arg = rest[index]!;
+      if (arg === '--account' || arg === '--installation') {
+        const [value, next] = readValue(rest, index, arg);
+        if (arg === '--account') {
+          account = value;
+        } else {
+          selector = value;
+        }
+        index = next;
+      } else {
+        throw new Error(
+          'platform: Usage: void platform discover [--account <id>] [--installation <id-or-name>].',
+        );
+      }
     }
-    if (rest.length === 2 && rest[0] === '--account' && rest[1] && !rest[1].startsWith('-')) {
-      return { subcommand, account: rest[1] };
-    }
-    throw new Error('platform: Usage: void platform discover [--account <id>].');
+    return { subcommand, account, selector };
   }
   if (
     subcommand === 'upgrade' ||
@@ -122,8 +159,8 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     subcommand === 'disable' ||
     subcommand === 'enable'
   ) {
-    const { selector, plan, yes } = parseSelector(rest, subcommand, { allowYes: true });
-    return { subcommand, selector, plan, yes };
+    const { selector, plan, runtime, yes } = parseLifecycleSelector(rest, subcommand);
+    return { subcommand, selector, plan, runtime, yes };
   }
   if (subcommand === 'uninstall') {
     const parsed = parseSelector(
@@ -159,6 +196,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       '--control-plane-domain',
       '--display-name',
       '--name',
+      '--runtime',
       '--zone',
     ]);
     for (let i = 0; i < rest.length; i++) {
@@ -189,6 +227,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       name: values.get('--name') ?? '',
       plan,
       resume,
+      runtime: values.get('--runtime') ?? '',
       yes,
       zone: values.get('--zone') ?? '',
     };

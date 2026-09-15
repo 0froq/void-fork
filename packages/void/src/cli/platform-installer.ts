@@ -36,17 +36,15 @@ import {
   type InstallationResource,
   type PlatformInstallationManifest,
 } from '@void/platform';
-import {
-  getPlatformRuntimeDirectory,
-  platformDatabaseSchemaDigest,
-  readPlatformRuntimeManifest,
-} from '@void/platform/installer';
+import { platformDatabaseSchemaDigest, resolvePlatformRuntime } from '@void/platform/installer';
 import type {
+  PlatformRuntime,
   PlatformRuntimeDatabaseManifest,
   PlatformRuntimeManifest,
   PlatformRuntimeMigration,
 } from '@void/platform/installer';
 import { join } from 'pathslash';
+import { cfAccessHeaders } from '../shared/cf-access.ts';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
@@ -193,6 +191,7 @@ export type PlatformInstallerDependencies = Readonly<{
     manifest: PlatformInstallationManifest,
     action: PlatformInstallPlanAction,
   ) => Promise<void>;
+  runtime?: PlatformRuntime;
   verifyExistingOwnership?: (
     manifest: PlatformInstallationManifest,
     databaseCheckpointExists: boolean,
@@ -216,6 +215,12 @@ export type PlatformInstallationResult = Readonly<{
   waitingForDns: boolean;
   zoneNameServers: ReadonlyArray<string>;
 }>;
+
+export function loadPlatformRuntime(customRuntimeDirectory: string): PlatformRuntime {
+  const runtime = resolvePlatformRuntime(customRuntimeDirectory || undefined);
+  verifyRuntimeArtifacts(runtime.directory, runtime.manifest);
+  return runtime;
+}
 
 export function createPlatformInstallationSecrets(input: {
   bootstrapGitHubId: string;
@@ -314,9 +319,15 @@ export async function installPlatform(
   const cloudflareApiBaseUrl = dependencies.client.apiBaseUrl ?? resolvePinnedApiBaseUrl();
   const runPinnedPlatformWrangler: typeof runPlatformWrangler = (args, accountId, cwd, capture) =>
     runPlatformWranglerAtApiBase(args, accountId, cwd, capture, cloudflareApiBaseUrl);
-  const runtimeDirectory = getPlatformRuntimeDirectory();
-  const runtime = readPlatformRuntimeManifest();
+  const resolvedRuntime = dependencies.runtime ?? resolvePlatformRuntime();
+  const runtimeDirectory = resolvedRuntime.directory;
+  const runtime = resolvedRuntime.manifest;
   verifyRuntimeArtifacts(runtimeDirectory, runtime);
+  const runtimeProvenance = {
+    manifestSha256: resolvedRuntime.manifestSha256,
+    source: resolvedRuntime.source,
+    sourceRevision: runtime.sourceRevision,
+  } as const;
   const version = runtime.platformVersion;
   const sourcePlatformVersion = existing?.platformVersion ?? null;
   const hadPriorWorkers =
@@ -963,7 +974,12 @@ export async function installPlatform(
         now(),
       );
       manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, false, now());
-      manifest = { ...manifest, platformVersion: version, updatedAt: now() };
+      manifest = {
+        ...manifest,
+        platformVersion: version,
+        runtime: runtimeProvenance,
+        updatedAt: now(),
+      };
       manifest = transitionInstallation(manifest, 'disabled', now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -1154,7 +1170,12 @@ export async function installPlatform(
     workerDeploymentCommitted = true;
     manifest = recordWorkerCutoverResolution(manifest, workerCutoverGeneration, 'committed', now());
     manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, true, now());
-    manifest = { ...manifest, platformVersion: version, updatedAt: now() };
+    manifest = {
+      ...manifest,
+      platformVersion: version,
+      runtime: runtimeProvenance,
+      updatedAt: now(),
+    };
     manifest = transitionInstallation(manifest, 'installed', now());
     writeInstallationManifest(manifest);
     await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -3358,12 +3379,20 @@ function readTriggerConfigFromObject(config: Record<string, unknown>) {
   }
 }
 
-function verifyRuntimeArtifacts(runtimeDirectory: string, manifest: PlatformRuntimeManifest): void {
+export function verifyRuntimeArtifacts(
+  runtimeDirectory: string,
+  manifest: PlatformRuntimeManifest,
+): void {
   for (const artifact of Object.values(manifest.artifacts)) {
     const path = join(runtimeDirectory, artifact.path);
-    const contents = readFileSync(path);
+    let contents: Buffer;
+    try {
+      contents = readFileSync(path);
+    } catch (error) {
+      throw new Error(`platform: Runtime Worker artifact is missing: ${errorMessage(error)}`);
+    }
     if (contents.byteLength !== artifact.size || hash(contents) !== artifact.sha256) {
-      throw new Error(`platform: Packaged Worker artifact failed integrity verification: ${path}.`);
+      throw new Error(`platform: Runtime Worker artifact failed integrity verification: ${path}.`);
     }
   }
   verifyPlatformDatabaseArtifacts(runtimeDirectory, manifest.database);
@@ -3379,12 +3408,12 @@ export function verifyPlatformDatabaseArtifacts(
     journal = readFileSync(journalPath);
   } catch (error) {
     throw new Error(
-      `platform: Packaged database migration journal is missing: ${errorMessage(error)}`,
+      `platform: Runtime database migration journal is missing: ${errorMessage(error)}`,
     );
   }
   if (hash(journal) !== database.journalSha256) {
     throw new Error(
-      `platform: Packaged database migration journal failed integrity verification: ${journalPath}.`,
+      `platform: Runtime database migration journal failed integrity verification: ${journalPath}.`,
     );
   }
   for (const migration of database.migrations) {
@@ -3393,11 +3422,11 @@ export function verifyPlatformDatabaseArtifacts(
     try {
       contents = readFileSync(path);
     } catch (error) {
-      throw new Error(`platform: Packaged database migration is missing: ${errorMessage(error)}`);
+      throw new Error(`platform: Runtime database migration is missing: ${errorMessage(error)}`);
     }
     if (hash(contents) !== migration.sha256) {
       throw new Error(
-        `platform: Packaged database migration failed integrity verification: ${path}.`,
+        `platform: Runtime database migration failed integrity verification: ${path}.`,
       );
     }
   }
@@ -3741,7 +3770,10 @@ export async function verifyPlatformHealth(
 ): Promise<void> {
   const request = (url: string) =>
     fetcher(url, {
-      headers: { 'X-Void-Platform-Probe': healthProbeToken },
+      headers: {
+        'X-Void-Platform-Probe': healthProbeToken,
+        ...cfAccessHeaders(process.env, url),
+      },
       signal: AbortSignal.timeout(30_000),
     });
   const [health, discovery, proxy, dispatch] = await Promise.all([

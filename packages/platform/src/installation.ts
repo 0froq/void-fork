@@ -60,6 +60,12 @@ export type PlatformInstallationEndpoints = Readonly<{
   proxyUrl: string | null;
 }>;
 
+export type PlatformRuntimeProvenance = Readonly<{
+  manifestSha256: string;
+  source: 'custom' | 'package';
+  sourceRevision: string | null;
+}>;
+
 export type PlatformInstallationManifest = Readonly<{
   account: Readonly<{
     id: string;
@@ -73,6 +79,7 @@ export type PlatformInstallationManifest = Readonly<{
   ownershipNonce: string;
   platformVersion: string;
   resources: ReadonlyArray<InstallationResource>;
+  runtime: PlatformRuntimeProvenance | null;
   schemaVersion: typeof PLATFORM_INSTALLATION_SCHEMA_VERSION;
   status: InstallationStatus;
   steps: ReadonlyArray<InstallationStep>;
@@ -243,6 +250,7 @@ export function createPlatformInstallationManifest(input: {
     ownershipNonce: input.ownershipNonce,
     platformVersion: requiredString(input.platformVersion, 'platformVersion'),
     resources: [],
+    runtime: null,
     schemaVersion: PLATFORM_INSTALLATION_SCHEMA_VERSION,
     status: 'draft',
     steps: [],
@@ -371,6 +379,7 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
     ownershipNonce: requiredString(value.ownershipNonce, 'ownershipNonce'),
     platformVersion: requiredString(value.platformVersion, 'platformVersion'),
   });
+  const runtime = parsePlatformRuntimeProvenance(value.runtime);
   const updatedAt = assertTimestamp(requiredString(value.updatedAt, 'updatedAt'), 'updatedAt');
   let next: PlatformInstallationManifest = setInstallationEndpoints(
     {
@@ -382,6 +391,7 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
             ? 'disabled'
             : 'enabled',
       status: value.status,
+      runtime,
       updatedAt,
     },
     {
@@ -436,4 +446,29 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
     );
   }
   return { ...next, updatedAt };
+}
+
+function parsePlatformRuntimeProvenance(value: unknown): PlatformRuntimeProvenance | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  assertRecord(value, 'runtime');
+  if (value.source !== 'custom' && value.source !== 'package') {
+    throw new Error('runtime.source must be custom or package.');
+  }
+  const manifestSha256 = requiredString(value.manifestSha256, 'runtime.manifestSha256');
+  if (!/^[0-9a-f]{64}$/.test(manifestSha256)) {
+    throw new Error('runtime.manifestSha256 must be a SHA-256 digest.');
+  }
+  const sourceRevision =
+    value.sourceRevision === null || value.sourceRevision === undefined
+      ? null
+      : requiredString(value.sourceRevision, 'runtime.sourceRevision');
+  if (
+    sourceRevision !== null &&
+    (sourceRevision.length > 200 || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(sourceRevision))
+  ) {
+    throw new Error('runtime.sourceRevision is invalid.');
+  }
+  return { manifestSha256, source: value.source, sourceRevision };
 }

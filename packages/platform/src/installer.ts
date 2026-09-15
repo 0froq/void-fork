@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'pathslash';
+import { dirname, isAbsolute, join, resolve } from 'pathslash';
 
 export type PlatformRuntimeArtifact = Readonly<{
   path: string;
@@ -35,6 +35,14 @@ export type PlatformRuntimeManifest = Readonly<{
   database: PlatformRuntimeDatabaseManifest;
   platformVersion: string;
   schemaVersion: 2;
+  sourceRevision: string | null;
+}>;
+
+export type PlatformRuntime = Readonly<{
+  directory: string;
+  manifest: PlatformRuntimeManifest;
+  manifestSha256: string;
+  source: 'custom' | 'package';
 }>;
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -150,6 +158,10 @@ export function parsePlatformRuntimeManifest(value: unknown): PlatformRuntimeMan
     },
     platformVersion: nonemptyString(root.platformVersion, 'runtime manifest platformVersion'),
     schemaVersion: 2,
+    sourceRevision:
+      root.sourceRevision === undefined || root.sourceRevision === null
+        ? null
+        : sourceRevision(root.sourceRevision),
   };
 }
 
@@ -157,8 +169,10 @@ export function getPlatformRuntimeDirectory(): string {
   return join(dirname(fileURLToPath(import.meta.url)), 'runtime');
 }
 
-export function readPlatformRuntimeManifest(): PlatformRuntimeManifest {
-  const path = join(getPlatformRuntimeDirectory(), 'manifest.json');
+export function readPlatformRuntimeManifest(
+  runtimeDirectory: string = getPlatformRuntimeDirectory(),
+): PlatformRuntimeManifest {
+  const path = join(runtimeDirectory, 'manifest.json');
   try {
     return parsePlatformRuntimeManifest(JSON.parse(readFileSync(path, 'utf8')));
   } catch (error) {
@@ -166,6 +180,44 @@ export function readPlatformRuntimeManifest(): PlatformRuntimeManifest {
       `Void Platform deployment artifacts are missing or invalid at ${path}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+export function resolvePlatformRuntime(
+  customRuntimeDirectory?: string,
+  baseDirectory: string = process.cwd(),
+): PlatformRuntime {
+  const source = customRuntimeDirectory ? 'custom' : 'package';
+  const requestedDirectory = customRuntimeDirectory
+    ? isAbsolute(customRuntimeDirectory)
+      ? customRuntimeDirectory
+      : resolve(baseDirectory, customRuntimeDirectory)
+    : getPlatformRuntimeDirectory();
+  let directory: string;
+  try {
+    directory = realpathSync(requestedDirectory);
+    if (!statSync(directory).isDirectory()) {
+      throw new Error('not a directory');
+    }
+  } catch (error) {
+    throw new Error(
+      `Void Platform runtime directory is unavailable at ${requestedDirectory}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const manifestPath = join(directory, 'manifest.json');
+  let manifestContents: Buffer;
+  try {
+    manifestContents = readFileSync(manifestPath);
+  } catch (error) {
+    throw new Error(
+      `Void Platform deployment artifacts are missing or invalid at ${manifestPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  return {
+    directory,
+    manifest: readPlatformRuntimeManifest(directory),
+    manifestSha256: createHash('sha256').update(manifestContents).digest('hex'),
+    source,
+  };
 }
 
 function parseArtifact(value: unknown, name: string): PlatformRuntimeArtifact {
@@ -226,6 +278,14 @@ function nonemptyString(value: unknown, name: string): string {
     throw new Error(`${name} must be a non-empty string`);
   }
   return value;
+}
+
+function sourceRevision(value: unknown): string {
+  const revision = nonemptyString(value, 'runtime manifest sourceRevision');
+  if (revision.length > 200 || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(revision)) {
+    throw new Error('runtime manifest sourceRevision is invalid');
+  }
+  return revision;
 }
 
 function safeInteger(value: unknown, name: string): number {

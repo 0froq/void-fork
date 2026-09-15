@@ -12,6 +12,7 @@ import {
   acquirePlatformDatabaseLifecycleLock,
   createPlatformInstallationSecrets,
   installPlatform,
+  loadPlatformRuntime,
   readPlatformDatabaseLifecycleManifest,
   resolveBootstrapGitHubId,
 } from './platform-installer.ts';
@@ -80,7 +81,12 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     const accounts = await readAccounts(client);
     const accountId = await selectAccount(accounts, args.account);
     const { recoverPlatformInstallations } = await import('./platform-recovery.ts');
-    const recovered = await recoverPlatformInstallations(client, accountId);
+    const recovered = await recoverPlatformInstallations(
+      client,
+      accountId,
+      undefined,
+      args.selector,
+    );
     if (recovered.length === 0) {
       log.info(`No recoverable Void platform installations were found in ${accountId}.`);
       return;
@@ -97,6 +103,8 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     await runInstalledPlatformCommand(args);
     return;
   }
+
+  const runtime = loadPlatformRuntime(args.runtime);
 
   assertNoninteractivePlatformMutationAcknowledged(args, process.stdin.isTTY === true);
 
@@ -207,6 +215,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       formatPlatformInstallPlan(plan),
       args.plan ? 'Read-only installation plan' : 'Installation plan',
     );
+    note(formatPlatformRuntime(runtime), 'Platform runtime');
     if (args.plan) {
       outro('No Cloudflare or local installation state was changed.');
       return;
@@ -261,6 +270,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     const result = await installPlatform(plan, secrets, existing, {
       acquireDatabaseLifecycleLock: acquirePlatformDatabaseLifecycleLock,
       client,
+      runtime,
       replanWorkers: async (manifest) =>
         (
           await createPlatformInstallPlan(client, planInput, manifest, {
@@ -302,6 +312,15 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   } finally {
     release?.();
   }
+}
+
+function formatPlatformRuntime(runtime: ReturnType<typeof loadPlatformRuntime>): string {
+  return [
+    `Version: ${runtime.manifest.platformVersion}`,
+    `Source: ${runtime.source}`,
+    `Revision: ${runtime.manifest.sourceRevision ?? 'not recorded'}`,
+    `Manifest SHA-256: ${runtime.manifestSha256}`,
+  ].join('\n');
 }
 
 export function assertNoninteractivePlatformMutationAcknowledged(
