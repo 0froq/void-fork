@@ -13,6 +13,8 @@ import {
 import { OperatorClient, OperatorClientError } from './operator-client.ts';
 
 const MAX_RUNTIME_FOLLOW_ROWS = 10_000;
+export const BUILD_LOG_DRAIN_TIMEOUT_MS: number = 2 * 60_000;
+export const LEGACY_BUILD_LOG_QUIET_MS: number = 30_000;
 
 function printable(value: unknown): string {
   if (value === null || value === undefined) {
@@ -310,7 +312,9 @@ export async function followOperatorLogs(
   process.once('SIGINT', stop);
   const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   const query = { ...args.query };
-  let drainingBuild = false;
+  let terminalBuildSince: number | null = null;
+  let legacyQuietSince: number | null = null;
+  let legacyQuietSeq: number | null = null;
   let previousRuntimeRows = new Map<string, number>();
   let currentRuntimeRows = new Map<string, number>();
   let currentRuntimeRowCount = 0;
@@ -363,12 +367,43 @@ export async function followOperatorLogs(
           }
           continue;
         }
+        if (
+          result.logsComplete !== undefined &&
+          result.logsComplete !== null &&
+          typeof result.logsComplete !== 'boolean'
+        ) {
+          throw new OperatorClientError(
+            'Build log response has an invalid completion state.',
+            'invalid_response',
+          );
+        }
         if (result.terminal === true) {
-          if (drainingBuild && result.lastSeq === previousSeq) {
+          if (result.logsComplete === true) {
             return;
           }
-          drainingBuild = true;
-          continue;
+          const now = Date.now();
+          terminalBuildSince ??= now;
+          if (now - terminalBuildSince >= BUILD_LOG_DRAIN_TIMEOUT_MS) {
+            throw new OperatorClientError(
+              'Build finished, but its log producer did not confirm completion. Retry the command to recover the final log tail.',
+              'invalid_response',
+            );
+          }
+          if (result.logsComplete === null || result.logsComplete === undefined) {
+            if (legacyQuietSeq !== result.lastSeq) {
+              legacyQuietSeq = result.lastSeq;
+              legacyQuietSince = now;
+            } else {
+              legacyQuietSince ??= now;
+              if (now - legacyQuietSince >= LEGACY_BUILD_LOG_QUIET_MS) {
+                return;
+              }
+            }
+          }
+        } else {
+          terminalBuildSince = null;
+          legacyQuietSince = null;
+          legacyQuietSeq = null;
         }
       } else {
         if (typeof result.nextCursor === 'string' && result.nextCursor) {

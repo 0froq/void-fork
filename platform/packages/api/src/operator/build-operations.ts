@@ -34,6 +34,7 @@ export async function buildLogs(
       external: build.logs_url ?? null,
       status: build.status,
       terminal,
+      logsComplete: terminal,
     };
   }
   if (!getPlatformCapabilities(env).managedBuilds) {
@@ -57,8 +58,16 @@ export async function buildLogs(
     lastSeq: number;
     status?: string | null;
     terminal?: boolean;
+    logsComplete?: boolean | null;
   };
-  if (!Array.isArray(body.lines) || !Number.isSafeInteger(body.lastSeq) || body.lastSeq < 0) {
+  if (
+    !Array.isArray(body.lines) ||
+    !Number.isSafeInteger(body.lastSeq) ||
+    body.lastSeq < 0 ||
+    (body.logsComplete !== undefined &&
+      body.logsComplete !== null &&
+      typeof body.logsComplete !== 'boolean')
+  ) {
     throw new OperatorError(502, 'Build log service returned an invalid response.');
   }
   const lines = limit === undefined ? body.lines : body.lines.slice(0, limit);
@@ -74,5 +83,8 @@ export async function buildLogs(
     lastSeq: Math.max(since, lastSeq!),
     status: body.status ?? build.status,
     terminal: body.terminal === true || terminal,
+    // A terminal row that was never claimed could not have had a container log
+    // producer. For started builds, terminal status alone is not drain proof.
+    logsComplete: body.logsComplete ?? (terminal && build.started_at === null ? true : null),
   };
 }

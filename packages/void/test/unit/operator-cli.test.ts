@@ -399,17 +399,93 @@ describe('operator transport and execution', () => {
 
   it('follows build log sequence and stops when terminal', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const fetcher = vi
-      .fn<typeof fetch>()
-      .mockImplementation(async () =>
-        Response.json({ lines: [{ seq: 3, text: 'done' }], lastSeq: 3, terminal: true }),
-      );
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      Response.json({
+        lines: [{ seq: 3, text: 'done' }],
+        lastSeq: 3,
+        terminal: true,
+        logsComplete: true,
+      }),
+    );
     await followOperatorLogs(
       new OperatorClient('https://one.example', 'token', fetcher),
       parseOperatorArgs(['build', 'logs', 'id', '--follow', '--since', '2', '--json']),
     );
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(1);
     expect(String(fetcher.mock.calls[0]![0])).toContain('since=2');
-    expect(String(fetcher.mock.calls[1]![0])).toContain('since=3');
+  });
+
+  it('waits for drain completion across stable terminal pages and prints a delayed marker', async () => {
+    const write = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ lines: [], lastSeq: 3, terminal: true, logsComplete: false }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ lines: [], lastSeq: 3, terminal: true, logsComplete: false }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          lines: [{ seq: 4, line: '[build-manager] container terminated: timed out' }],
+          lastSeq: 4,
+          terminal: true,
+          logsComplete: true,
+        }),
+      );
+
+    await followOperatorLogs(
+      new OperatorClient('https://one.example', 'token', fetcher),
+      parseOperatorArgs(['build', 'logs', 'id', '--follow', '--since', '3', '--json']),
+      undefined,
+      0,
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(
+      fetcher.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('since')),
+    ).toEqual(['3', '3', '3']);
+    expect(write.mock.calls.map(([line]) => String(line)).join('\n')).toContain(
+      'container terminated: timed out',
+    );
+  });
+
+  it('fails within a bound when a terminal producer never confirms completion', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
+      now += 60_000;
+      return Response.json({ lines: [], lastSeq: 3, terminal: true, logsComplete: false });
+    });
+
+    await expect(
+      followOperatorLogs(
+        new OperatorClient('https://one.example', 'token', fetcher),
+        parseOperatorArgs(['build', 'logs', 'id', '--follow', '--since', '3', '--json']),
+        undefined,
+        0,
+      ),
+    ).rejects.toThrow('did not confirm completion');
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('uses a bounded quiet window for legacy terminal responses without completion state', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => {
+      now += 10_000;
+      return Response.json({ lines: [], lastSeq: 3, terminal: true });
+    });
+
+    await followOperatorLogs(
+      new OperatorClient('https://one.example', 'token', fetcher),
+      parseOperatorArgs(['build', 'logs', 'id', '--follow', '--since', '3', '--json']),
+      undefined,
+      0,
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 });

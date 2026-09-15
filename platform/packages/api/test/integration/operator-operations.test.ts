@@ -246,13 +246,19 @@ describe('operator build operations', () => {
       lastSeq: 11,
       terminal: true,
       status: 'failed',
+      logsComplete: true,
     });
     const response = await req(`/builds/${build.id}/logs?since=10`, undefined, {
       BUILD_MANAGER: base.ns,
       BUILD_MANAGER_LARGE: large.ns,
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ lastSeq: 11, terminal: true, status: 'failed' });
+    expect(await response.json()).toMatchObject({
+      lastSeq: 11,
+      terminal: true,
+      status: 'failed',
+      logsComplete: true,
+    });
     expect(large.fetch).toHaveBeenCalledWith('http://manager/logs?since=10');
     expect(base.fetch).not.toHaveBeenCalled();
     expect((await req(`/builds/${build.id}/logs?since=-1`)).status).toBe(400);
@@ -273,6 +279,7 @@ describe('operator build operations', () => {
       lastSeq: 6,
       terminal: true,
       status: 'complete',
+      logsComplete: false,
     });
     const response = await req(`/builds/${build.id}/logs?since=3&limit=2`, undefined, {
       BUILD_MANAGER: logs.ns,
@@ -283,6 +290,7 @@ describe('operator build operations', () => {
       lastSeq: 5,
       hasMore: true,
       terminal: true,
+      logsComplete: false,
     });
     expect((await req(`/builds/${build.id}/logs?limit=501`)).status).toBe(400);
     expect(logs.fetch).toHaveBeenCalledTimes(1);
