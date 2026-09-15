@@ -159,7 +159,6 @@ function client(manifest = remoteManifest()) {
     deleteResource: async () => {},
     deleteR2Object: async () => {},
     emptyR2Bucket: async () => {},
-    verifyToken: async () => {},
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'example-workers',
     listAiGateways: async () => [

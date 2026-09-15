@@ -39,7 +39,6 @@ type RecoveryClient = Pick<
   | 'listWorkerNames'
   | 'listWorkerDomains'
   | 'listWorkerRoutes'
-  | 'verifyToken'
 >;
 
 export async function recoverPlatformInstallations(
@@ -50,7 +49,6 @@ export async function recoverPlatformInstallations(
   ) => Promise<void> = verifyInstallationEndpoint,
   selector = '',
 ): Promise<ReadonlyArray<PlatformInstallationManifest>> {
-  await client.verifyToken();
   const accounts = await client.listAccounts();
   if (!accounts.some((account) => account.id === accountId)) {
     throw new Error(`platform: Cloudflare account ${JSON.stringify(accountId)} is unavailable.`);

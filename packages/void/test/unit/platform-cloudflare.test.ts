@@ -157,7 +157,7 @@ describe('platform Cloudflare client', () => {
     });
     let message = '';
     try {
-      await client.verifyToken();
+      await client.listAccounts();
     } catch (error) {
       message = String(error);
     }

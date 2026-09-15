@@ -391,7 +391,8 @@ async function createInitialPlatformInstallPlan(
 async function readAccounts(
   client: PlatformCloudflareClient,
 ): Promise<ReadonlyArray<CloudflareAccount>> {
-  await client.verifyToken();
+  // Listing authorized accounts works for browser OAuth and both account- and
+  // user-scoped API tokens. /user/tokens/verify only understands the latter.
   const accounts = await client.listAccounts();
   if (accounts.length === 0) {
     throw new Error('platform: This Cloudflare token has no accessible accounts.');

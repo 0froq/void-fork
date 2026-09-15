@@ -70,7 +70,6 @@ type PlanningClient = Pick<
   | 'listWorkerNames'
   | 'listWorkerDomains'
   | 'listWorkerRoutes'
-  | 'verifyToken'
 >;
 
 export async function createPlatformInstallPlan(
@@ -83,7 +82,6 @@ export async function createPlatformInstallPlan(
     repairMissing?: boolean;
   },
 ): Promise<PlatformInstallPlan> {
-  await client.verifyToken();
   const accounts = await client.listAccounts();
   const account = resolveAccount(accounts, input.accountId);
   if (existing && existing.account.id !== account.id) {

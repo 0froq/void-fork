@@ -7,15 +7,16 @@ import {
   recordInstallationStep,
 } from '@void/platform';
 import { describe, expect, it } from 'vite-plus/test';
+import { PlatformCloudflareClient } from '../../src/cli/platform-cloudflare.ts';
 import {
   createPlatformInstallPlan,
   platformProvisionIntentHash,
   revalidatePlatformInstallAction,
 } from '../../src/cli/platform-plan.ts';
+import { recoverPlatformInstallations } from '../../src/cli/platform-recovery.ts';
 
 function client(overrides: Record<string, unknown> = {}) {
   return {
-    verifyToken: async () => {},
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'example',
     getKvValue: async () => null,
@@ -54,6 +55,64 @@ function r2ConfigHash(name: string, fingerprint: string): string {
 }
 
 describe('platform installation planning', () => {
+  it.each(['oauth-access-token', 'account-api-token'])(
+    'plans and discovers using authorized accounts for %s',
+    async (token) => {
+      const requests: Array<string> = [];
+      const remote = new PlatformCloudflareClient(token, {
+        apiBase: 'https://cloudflare.example.test/client/v4',
+        fetcher: async (url, init) => {
+          requests.push(String(url));
+          expect(init?.method ?? 'GET').toBe('GET');
+          // These valid credential kinds cannot use the user API-token endpoint.
+          if (String(url).includes('/user/tokens/verify')) {
+            return Response.json(
+              { success: false, errors: [{ code: 1000, message: 'Invalid API Token' }] },
+              { status: 401 },
+            );
+          }
+          expect(String(url)).toContain('/accounts?');
+          return Response.json({ success: true, result: [{ id: 'account', name: 'Account' }] });
+        },
+      });
+      const fake = Object.assign(
+        remote,
+        Object.fromEntries(Object.entries(client()).filter(([name]) => name !== 'listAccounts')),
+      );
+      const plan = await createPlatformInstallPlan(fake, input, null);
+      expect(plan.account.id).toBe('account');
+      await expect(recoverPlatformInstallations(fake, 'account')).resolves.toEqual([]);
+      expect(requests).toHaveLength(2);
+      expect(requests.every((url) => url.includes('/accounts?'))).toBe(true);
+    },
+  );
+
+  it('rejects credentials without account access before planning resources', async () => {
+    const remote = new PlatformCloudflareClient('expired-token', {
+      apiBase: 'https://cloudflare.example.test/client/v4',
+      fetcher: async (url) => {
+        expect(String(url)).toContain('/accounts?');
+        return Response.json(
+          { success: false, errors: [{ message: 'invalid credentials' }] },
+          { status: 401 },
+        );
+      },
+    });
+    const fake = Object.assign(
+      remote,
+      Object.fromEntries(Object.entries(client()).filter(([name]) => name !== 'listAccounts')),
+    );
+    fake.getWorkersSubdomain = async () => {
+      throw new Error('resource access must not run');
+    };
+    await expect(createPlatformInstallPlan(fake, input, null)).rejects.toThrow(
+      'invalid credentials',
+    );
+    await expect(recoverPlatformInstallations(fake, 'account')).rejects.toThrow(
+      'invalid credentials',
+    );
+  });
+
   it('builds a read-only core plan without containers', async () => {
     const fake = client();
     const plan = await createPlatformInstallPlan(fake, input, null);

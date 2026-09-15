@@ -86,7 +86,6 @@ afterEach(() => {
 
 function planningClient() {
   return {
-    verifyToken: async () => {},
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'workers-subdomain',
     getKvValue: async () => null,

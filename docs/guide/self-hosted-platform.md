@@ -20,6 +20,7 @@ You need:
 
 - A Cloudflare account with Workers for Platforms and the products represented in the footprint below.
 - Access to create the platform's resources in that account. Void opens your browser to sign in and stores the session in your system keychain. CI uses `CLOUDFLARE_API_TOKEN`.
+- CI can use a user-scoped or account-scoped API token. Void checks the accounts and resources the credential can access; a browser OAuth session works through the same account checks.
 - A Cloudflare API token for the running platform. This is separate from your administrator login: the platform uses it to manage resources when developers deploy apps. See the permissions below.
 - An empty PostgreSQL database reachable through Cloudflare Hyperdrive, dedicated to this installation. Void records the installation in that database and won't let another platform share it. You manage the database itself.
 - An application base domain such as `apps.example.com`. Its containing Cloudflare zone may already exist or the installer can create it.

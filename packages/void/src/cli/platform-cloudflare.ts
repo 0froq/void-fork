@@ -149,10 +149,6 @@ export class PlatformCloudflareClient {
     return { result: envelope.result, resultInfo: envelope.result_info };
   }
 
-  async verifyToken(): Promise<void> {
-    await this.request('/user/tokens/verify');
-  }
-
   async listAccounts(): Promise<ReadonlyArray<CloudflareAccount>> {
     const entries: Array<{ id?: unknown; name?: unknown }> = [];
     for (let page = 1; ; page++) {
