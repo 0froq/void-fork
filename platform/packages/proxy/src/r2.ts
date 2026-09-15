@@ -23,7 +23,9 @@ r2.post('/get', async (context) => {
   }
 
   // Try WfP dispatch first
-  const dispatchRes = await dispatchToWorker(context.env, projectId, '/r2/get', body);
+  const dispatchRes = await dispatchToWorker(context.env, projectId, '/r2/get', body, {
+    fallbackOnDispatchError: true,
+  });
   if (dispatchRes) {
     return dispatchRes;
   }
@@ -192,7 +194,9 @@ r2.post('/list', async (context) => {
   }
 
   // Try WfP dispatch first
-  const dispatchRes = await dispatchToWorker(context.env, projectId, '/r2/list', body);
+  const dispatchRes = await dispatchToWorker(context.env, projectId, '/r2/list', body, {
+    fallbackOnDispatchError: true,
+  });
   if (dispatchRes) {
     return dispatchRes;
   }
@@ -265,7 +269,9 @@ r2.post('/head', async (context) => {
   }
 
   // Try WfP dispatch first
-  const dispatchRes = await dispatchToWorker(context.env, projectId, '/r2/head', body);
+  const dispatchRes = await dispatchToWorker(context.env, projectId, '/r2/head', body, {
+    fallbackOnDispatchError: true,
+  });
   if (dispatchRes) {
     return dispatchRes;
   }

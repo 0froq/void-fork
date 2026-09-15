@@ -64,4 +64,5 @@ When the dev server starts with remote mode active, it prints:
 - **Network latency:** each binding call makes a network request, so responses may be slower than local development.
 - **R2 multipart uploads:** `createMultipartUpload()` and `resumeMultipartUpload()` are not supported in remote mode.
 - **D1 dump:** `db.dump()` is not supported in remote mode.
+- **D1 batch compatibility:** `db.batch()` requires an active deployment with the native remote-binding handler. Void does not split a batch into REST calls because that would lose D1's atomic all-or-nothing behavior.
 - **Writes affect real data:** remote mode connects to your actual deployed resources. Inserts, updates, and deletes are real, so use it carefully or point it at a staging project.

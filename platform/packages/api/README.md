@@ -106,7 +106,7 @@ The webhook and OIDC endpoints return `503` when the GitHub App secrets are unse
 
 - `POST /internal/revalidate/:projectId`
 - `POST /internal/resolve-resource/:projectId`
-- `POST /internal/resolve-worker/:projectId`
+- `POST /internal/resolve-worker/:projectId` — resolve the active deployment's versioned worker; static active deployments report that no worker exists
 
 ### Operator API
 
