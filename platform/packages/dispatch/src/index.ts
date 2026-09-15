@@ -87,6 +87,7 @@ type QueueRoutingEntry = Readonly<{
 
 const CLIENT_REVALIDATE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 const STATIC_ASSET_HEDGE_DELAY_MS = 1000;
+const PLATFORM_QUEUE_RETRY_DELAY_SECONDS = 300;
 const PLATFORM_STATIC_ASSET_TIMEOUT: FailureKind = 'platform-static-asset-timeout';
 const PLATFORM_STATIC_ASSET_ERROR: FailureKind = 'platform-static-asset-error';
 const PLATFORM_STATIC_ASSET_MISSING: FailureKind = 'platform-static-asset-missing';
@@ -1755,6 +1756,34 @@ export default {
   },
 
   async queue(batch: MessageBatch, env: Env): Promise<void> {
+    if (env.PLATFORM_TRAFFIC_STATE === 'staging') {
+      console.warn(
+        `[queue-relay] platform traffic is staging; retrying queue="${batch.queue}" in ${PLATFORM_QUEUE_RETRY_DELAY_SECONDS}s`,
+      );
+      batch.retryAll({ delaySeconds: PLATFORM_QUEUE_RETRY_DELAY_SECONDS });
+      return;
+    }
+    if (env.PLATFORM_INSTALLATION_ID) {
+      let disabled: string | null;
+      try {
+        disabled = await env.ROUTING.get(PLATFORM_DISABLED_KEY);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(
+          `[queue-relay] platform traffic gate read failed; retrying queue="${batch.queue}" in ${PLATFORM_QUEUE_RETRY_DELAY_SECONDS}s error=${JSON.stringify(message)}`,
+        );
+        batch.retryAll({ delaySeconds: PLATFORM_QUEUE_RETRY_DELAY_SECONDS });
+        return;
+      }
+      if (disabled === PLATFORM_DISABLED_VALUE) {
+        console.warn(
+          `[queue-relay] platform traffic is disabled; retrying queue="${batch.queue}" in ${PLATFORM_QUEUE_RETRY_DELAY_SECONDS}s`,
+        );
+        batch.retryAll({ delaySeconds: PLATFORM_QUEUE_RETRY_DELAY_SECONDS });
+        return;
+      }
+    }
+
     // Look up which user worker handles this queue
     const routingRaw = await env.ROUTING.get(`queue:${batch.queue}`, { cacheTtl: 60 });
     if (!routingRaw) {

@@ -175,6 +175,8 @@ void platform enable [id]
 
 Add `--yes` to a mutating lifecycle command when running it non-interactively.
 
+Disable also blocks queue batches from reaching application Workers. Dispatch retries those batches after five minutes, but delivery remains subject to each Queue consumer's configured retry count and Cloudflare's retention and dead-letter policy. Plan a dead-letter queue or another recovery path when an installation may stay disabled long enough to exhaust those limits.
+
 Preview uninstall first:
 
 ```sh
