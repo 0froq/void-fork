@@ -142,13 +142,14 @@ The API Worker uses four Durable Object classes for usage, cron scheduling, erro
 The CLI selects your platform after installation. A developer, or an administrator on another workstation, can connect using its API URL:
 
 ```sh
-void platform connect https://void-company-api.example.workers.dev
-void auth login
+void connect https://void-company-api.example.workers.dev
 void project link
 void deploy --platform void
 ```
 
-New projects need a platform connection. The CLI selects your only configured platform automatically, or shows a picker if you have several. In CI, select one with `void platform use <id-or-url>`. Older project files already linked to Void Cloud continue to work.
+`void connect` validates the platform and signs you in when needed. With no URL, it offers Cloudflare or a Void platform; `void connect --platform void` offers saved platforms and an option to enter another URL. New projects need a platform connection. Connecting elsewhere preserves an existing project link and explains which destination the project still uses.
+
+In CI, use `void connect <url> --no-login` to register the platform, and supply `VOID_TOKEN` and `VOID_API_URL` for deployment. To verify authentication during connection, omit `--no-login` and set both variables to credentials for that same platform. Older project files already linked to Void Cloud continue to work.
 
 Use these commands to inspect connections and installations:
 

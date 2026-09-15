@@ -223,6 +223,8 @@ void deploy
 
 Void opens your browser to sign in when needed. If you have access to several accounts, it asks which one to use and saves the account in your root `wrangler.jsonc`. Credentials are stored in your operating system's keychain. Press Ctrl+C to cancel login, or manage your session with `void cloudflare login`, `status`, and `logout`.
 
+To configure deployment separately from project setup, run `void connect --platform cloudflare`. It uses the same browser login and account selection as `void init`, and saves Cloudflare as the target for subsequent `void deploy` commands.
+
 ### One command: `void deploy --platform cloudflare`
 
 You can also choose Cloudflare for a single deploy:

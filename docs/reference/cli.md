@@ -32,7 +32,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void auth login`                 | Authenticate with Void                                          |
 | `void cloudflare login`           | Authenticate with Cloudflare through Void                       |
 | `void platform install`           | Install a company Void platform in Cloudflare                   |
-| `void platform connect <url>`     | Connect the CLI to a Void platform                              |
+| `void connect <url>`              | Connect the CLI to a Void platform                              |
 | `void project link`               | Link directory to a project                                     |
 | `void project logs`               | Show runtime logs from deployed project                         |
 | `void project requests`           | Show request-level traffic (status, method, timing)             |
@@ -130,13 +130,32 @@ Generates the project-local `.void/` artifacts used by TypeScript and runtime co
 
 This is the intended command for CI, fresh clones, editor bootstrap, and any workflow that needs `routes.d.ts`, `db.d.ts`, `queues.d.ts`, `env.d.ts`, and `.void/tsconfig.json` in place before typechecking.
 
+## Connect
+
+```sh
+void connect
+void connect https://platform.example.com
+void connect --platform cloudflare
+void connect --platform void
+```
+
+Connect a project to its deployment destination. With no arguments, choose Cloudflare or a Void platform interactively. A URL selects a Void platform directly. `--platform void` offers saved platforms and an option to enter another URL.
+
+For Cloudflare, Void signs in through the browser when needed, selects an accessible account, and saves `account_id` in the root `wrangler.jsonc` or `wrangler.json`. It shares this setup with `void init`. An existing account selection is preserved; conflicting or inaccessible account settings must be resolved before continuing.
+
+For a Void platform, Void validates its discovery document, reuses a valid session or opens browser login using the platform's supported providers, and saves the verified API and proxy origins. Credentials are stored in the operating-system keychain for that API origin. A sole login provider is selected automatically.
+
+The deployment preference is saved in `.void/project.json`. Connecting to another Void platform preserves an existing project link; the CLI explains when that link or an environment override still selects a different destination. Use `void project link` to explicitly choose a project. Cloudflare selection also retains existing Void project metadata so you can switch back later.
+
+In a non-interactive shell, supply a URL or explicit target. Cloudflare requires usable credentials and an unambiguous account (`CLOUDFLARE_ACCOUNT_ID` when needed). For a Void platform, provide `VOID_TOKEN` with a matching `VOID_API_URL`, or reuse a valid origin-scoped keychain session. Use `void connect <url> --no-login` to save the verified connection without authenticating; this option is only available for Void platforms.
+
 ## Auth
 
 ### `void auth login`
 
 OAuth login. You choose GitHub or Google at the prompt, and the token is saved in the operating-system keychain, scoped to the platform origin. Login fails closed when no keychain is available instead of writing the token to a plaintext file; headless environments use `VOID_TOKEN` from their secret manager.
 
-This is optional if you already completed auth during the interactive `void init` flow.
+This is optional if you already completed auth during `void connect` or the interactive `void init` flow.
 
 ### `void auth logout`
 
@@ -158,7 +177,7 @@ Void ships and invokes compatible Cloudflare tooling itself. Users do not need t
 - `void cloudflare status` — show the accessible Cloudflare accounts without exposing credentials.
 - `void cloudflare logout` — remove the local browser session.
 
-Interactive `void init` and `void deploy --platform cloudflare` invoke the same login flow automatically when necessary. Non-interactive CI must set `CLOUDFLARE_API_TOKEN`.
+Interactive `void connect --platform cloudflare`, `void init`, and `void deploy --platform cloudflare` invoke the same login flow automatically when necessary. Non-interactive CI must set `CLOUDFLARE_API_TOKEN`.
 When a browser session is required, Void opens Cloudflare login immediately and prints `Press Ctrl+C to cancel`; there is no redundant terminal confirmation.
 
 ## Project commands
@@ -283,18 +302,17 @@ This command is currently hosted-only. Direct Cloudflare cache purge fails close
 
 ## Platform management
 
-Void-managed projects deploy to an explicitly selected platform. Connections are stored per API origin, and credentials are scoped to that origin.
+Void-managed projects deploy to an explicitly selected platform. Join one with [`void connect`](#connect). Connections are stored per API origin, and credentials are scoped to that origin.
 
 ### Connection commands
 
 ```sh
-void platform connect [url]
 void platform list
 void platform use [id]
 void platform status [id]
 ```
 
-`connect` fetches and validates `/.well-known/void-platform` before saving anything. If the URL is omitted it prompts interactively. `use` and `status` auto-select the only configured platform; with multiple platforms they show a picker interactively and require an id or URL in non-interactive use.
+`use` and `status` auto-select the only configured platform; with multiple platforms they show a picker interactively and require an id or URL in non-interactive use. A project with a recorded platform URL keeps using that platform when the global default changes.
 
 ### `void platform install`
 

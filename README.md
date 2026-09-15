@@ -81,6 +81,8 @@ pnpm void deploy
 
 Full docs at [void.cloud](https://void.cloud). Run `vp run dev:docs` in this repo to view the documentation locally.
 
+Run `void connect` to choose a deployment destination and sign in, `void connect --platform cloudflare` for your own account, or `void connect <url>` for your team's platform. See the [connection reference](./docs/reference/cli.md#connect).
+
 To install a shared company platform, start with `void platform install --plan`. It packages the core API, routing, proxy, and telemetry Workers without requiring the dashboard, GitHub App, or build Containers. See [Self-host a Void platform](./docs/guide/self-hosted-platform.md).
 
 Platform upgrades verify migrations and check the new Workers before completing the rollout. If a rollout fails, Void can restore the previous Workers against the compatible database schema. See the platform guide for recovery and upgrade details.

@@ -32,6 +32,7 @@ const referenceItems = [
     collapsed: true,
     items: [
       { text: 'void init', link: '/reference/cli#setup' },
+      { text: 'void connect', link: '/reference/cli#connect' },
       { text: 'void auth', link: '/reference/cli#auth' },
       { text: 'void cloudflare', link: '/reference/cli#cloudflare-authentication' },
       { text: 'void platform', link: '/reference/cli#platform-management' },

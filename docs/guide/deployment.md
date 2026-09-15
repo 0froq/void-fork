@@ -21,11 +21,11 @@ During setup, Void asks where you want to deploy:
 
 - **Cloudflare:** sign in through your browser and choose an account. Void saves the account in `wrangler.jsonc`.
 - **Void:** connect to a platform, sign in, and link or create a project.
-- **Skip:** set up deployment later with `void deploy --platform cloudflare` or `void deploy --platform void`.
+- **Skip:** set up deployment later with `void connect`.
 
 Your choice is saved in `.void/project.json`, so the next deploy is just `void deploy`.
 
-To connect to your team's platform, run `void platform connect <url>` using the URL from your administrator. New projects need a platform connection. Older projects already linked to Void Cloud continue to use it.
+To connect to your team's platform and sign in, run `void connect <url>` using the URL from your administrator. Use `void connect --platform cloudflare` to set up your own Cloudflare account. Connecting preserves existing project links. New Void projects need a platform connection. Older projects already linked to Void Cloud continue to use it.
 
 ### Migrations
 

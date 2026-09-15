@@ -12,7 +12,7 @@ Calls such as `db.select()` and `env.KV.get()` use the deployed resources withou
 
 Before enabling remote mode, you need:
 
-1. Connect to your team's platform with `void platform connect <url>` and sign in with `void auth login`.
+1. Connect to your team's platform with `void connect <url>`. It signs you in when needed.
 2. Link a project with `void project link`. Deploy it at least once so its resources exist.
 
 ## Enabling Remote Mode

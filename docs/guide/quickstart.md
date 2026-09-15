@@ -174,8 +174,7 @@ void deploy --platform cloudflare
 Void opens your browser to sign in when needed. To use your team's platform, connect using the API URL from your administrator:
 
 ```sh
-void platform connect https://platform.example.com
-void auth login
+void connect https://platform.example.com
 void project link
 ```
 
