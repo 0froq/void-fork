@@ -1333,6 +1333,16 @@ async function restorePreviousVersionAndTriggers(
     }
     targetTriggerConfig = metadata.triggerConfig;
   }
+  // A preserve marker records that the previous version inherited live trigger
+  // state; its routes, schedules, queue consumers, and workflows are therefore
+  // intentionally opaque. The traffic snapshot can restore workers.dev, preview
+  // visibility, and routes for version activation, but merging those fields into
+  // this marker does not turn the unknown trigger surfaces into a restorable
+  // snapshot. Traffic is already back on the previous version at this point, so
+  // report trigger recovery as unavailable without publishing invented state.
+  if (targetTriggerConfig.preserve) {
+    return 'unavailable';
+  }
   if (!options.verifyUploader()) {
     return 'unsafe';
   }

@@ -1785,6 +1785,66 @@ describe('Cloudflare version activation', () => {
     expect(publications[1].queues).toEqual({ consumers: [] });
   });
 
+  it('does not claim opaque trigger recovery succeeded after restoring live traffic', async () => {
+    const opaque = {
+      preserve: true,
+      preserveRoutes: true,
+      preserveWorkersDev: true,
+      preservePreviewUrls: true,
+      workers_dev: true,
+      preview_urls: true,
+      routes: [],
+      crons: [],
+      queueConsumers: [],
+      workflows: [],
+    };
+    const liveTraffic = {
+      workers_dev: false,
+      preview_urls: false,
+      routes: [{ pattern: 'production.example.com', custom_domain: true }],
+    };
+    const runWrangler = runner({
+      versions: ok(
+        JSON.stringify([
+          {
+            id: CURRENT,
+            number: 1,
+            annotations: {
+              'workers/message': encodeCloudflareVersionMessage([], opaque),
+            },
+          },
+        ]),
+      ),
+      triggers: { ...ok(), status: 1 },
+    });
+
+    const result = await activateCloudflareVersion({
+      runWrangler,
+      verifyUploader: () => true,
+      workerName: 'my-worker',
+      previousTrafficConfig: liveTraffic,
+      message: encodeCloudflareVersionMessage([], {
+        ...opaque,
+        preserve: undefined,
+        crons: ['*/10 * * * *'],
+      }),
+      fetch: async () => Response.json({ ready: true }),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'triggers-failed',
+      rollback: 'unavailable',
+      previousVersionId: CURRENT,
+    });
+    expect(
+      runWrangler.mock.calls.some(([args]) =>
+        args.some((argument) => argument === `${CURRENT}@100`),
+      ),
+    ).toBe(true);
+    expect(runWrangler.mock.calls.filter(([args]) => args[0] === 'triggers')).toHaveLength(1);
+  });
+
   it('does not claim trigger rollback succeeded without prior trigger metadata', async () => {
     const runWrangler = runner({
       triggers: { ...ok(), status: 1 },

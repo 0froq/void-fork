@@ -5885,7 +5885,9 @@ export function formatCloudflareActivationError(
         result.rollback === 'succeeded'
           ? 'Traffic was restored to the previous version.'
           : result.rollback === 'unavailable'
-            ? 'This was the first deployment, so no previous version was available to restore.'
+            ? result.previousVersionId === null
+              ? 'This was the first deployment, so no previous version was available to restore.'
+              : 'Traffic was restored to the previous version, but its trigger configuration was unavailable. Inspect its routes, schedules, queues, and workflows in Cloudflare before retrying.'
             : 'Automatic traffic restoration failed; inspect `void project status` immediately.';
       return `deploy: the Worker activated, but Cloudflare trigger synchronization failed${status}. ${rollback}`;
     }

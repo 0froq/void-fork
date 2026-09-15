@@ -151,6 +151,27 @@ describe('Cloudflare activation diagnostics', () => {
       }),
     ).toContain('did not invoke the changed Wrangler binary');
   });
+
+  it('distinguishes opaque trigger recovery from a first deployment', () => {
+    const opaque = formatCloudflareActivationError({
+      ok: false,
+      reason: 'triggers-failed',
+      rollback: 'unavailable',
+      previousVersionId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(opaque).toContain('Traffic was restored to the previous version');
+    expect(opaque).toContain('trigger configuration was unavailable');
+    expect(opaque).not.toContain('first deployment');
+
+    expect(
+      formatCloudflareActivationError({
+        ok: false,
+        reason: 'triggers-failed',
+        rollback: 'unavailable',
+        previousVersionId: null,
+      }),
+    ).toContain('This was the first deployment');
+  });
 });
 
 /** No-schema (nothing-to-gate) env-insensitive facts. */
