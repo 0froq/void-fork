@@ -42,7 +42,7 @@ function rollbackVersions(value: unknown) {
   return Object.keys(versions).length > 0 ? versions : undefined;
 }
 
-function auditTarget(path: string, body: Record<string, unknown>) {
+function auditTarget(path: string, body: Record<string, unknown>, platformEnvironment?: unknown) {
   const segments = path.split('/');
   const id = pathIdentifier(segments[1]);
   if (segments[0] === 'users' && id) {
@@ -89,7 +89,7 @@ function auditTarget(path: string, body: Record<string, unknown>) {
     return JSON.stringify({ entries: 'queue:*' });
   }
   if (segments[0] === 'workers') {
-    const environment = boundedString(body.environment, 512) ?? 'production';
+    const environment = boundedString(body.environment ?? platformEnvironment, 512) ?? 'production';
     if (segments[1] === 'rollback-all') {
       return JSON.stringify({ environment, versions: rollbackVersions(body.versions) });
     }
@@ -142,7 +142,7 @@ export const operatorAudit: MiddlewareHandler<ApiEnv> = async (context, next) =>
     user_id: user.id,
     login: user.login,
     action: path,
-    target: auditTarget(path, body),
+    target: auditTarget(path, body, context.env.PLATFORM_ENV),
     status: 'pending',
   });
   await next();

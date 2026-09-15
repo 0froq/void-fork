@@ -27,14 +27,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function request(path: string, body?: unknown) {
+function request(path: string, body?: unknown, bindings: TestEnv = env) {
   return app.fetch(
     new Request(`http://localhost/operator/v1${path}`, {
       method: body === undefined ? 'GET' : 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }),
-    env,
+    bindings,
   );
 }
 
@@ -172,6 +172,41 @@ test('records a successful 200 mutation outcome as successful', async () => {
       status: 'success',
       http_status: 200,
     }),
+  ]);
+});
+
+test('records the effective worker environment for implicit and explicit rollbacks', async () => {
+  cloudflareWorkerStub();
+  const staging = { ...env, PLATFORM_ENV: 'staging' };
+  const versions = {
+    dispatch: 'previous',
+    dashboard: 'previous',
+    api: 'previous',
+    tail: 'previous',
+    proxy: 'previous',
+  };
+
+  expect(
+    await (await request('/workers/api/rollback', { versionId: 'previous' }, staging)).json(),
+  ).toMatchObject({ environment: 'staging' });
+  expect(
+    await (await request('/workers/rollback-all', { versions }, staging)).json(),
+  ).toMatchObject({ environment: 'staging' });
+  expect(
+    await (
+      await request(
+        '/workers/api/rollback',
+        { environment: 'production', versionId: 'previous' },
+        staging,
+      )
+    ).json(),
+  ).toMatchObject({ environment: 'production' });
+
+  const events = await env.db.select().from(operatorEvents);
+  expect(events.map((event) => JSON.parse(event.target).environment)).toEqual([
+    'staging',
+    'staging',
+    'production',
   ]);
 });
 
