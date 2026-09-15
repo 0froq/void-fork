@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   createPlatformDeploymentManifest,
@@ -6,7 +6,7 @@ import {
   setInstallationEndpoints,
 } from '@void/platform';
 import { join } from 'pathslash';
-import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import {
   acquirePlatformLifecycleLock,
   assertPlatformInstallationSlugAvailable,
@@ -26,6 +26,10 @@ import {
 
 const roots: Array<string> = [];
 
+beforeEach(() => {
+  process.env.VOID_PLATFORM_RECOVERY_KEY = Buffer.alloc(32, 7).toString('base64');
+});
+
 function temporaryRegistry(): string {
   const directory = mkdtempSync(join(tmpdir(), 'void-platform-registry-'));
   roots.push(directory);
@@ -33,6 +37,7 @@ function temporaryRegistry(): string {
 }
 
 afterEach(() => {
+  delete process.env.VOID_PLATFORM_RECOVERY_KEY;
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -169,8 +174,9 @@ describe('platform registry', () => {
       databaseUrl: 'postgres://secret',
     });
     promoteInstallationSecrets(manifest, directory);
-    const recoveryPath = join(directory, 'account_123', 'example-a1b2c3d4.recovery');
+    const recoveryPath = join(directory, 'account_123', 'example-a1b2c3d4.recovery.enc');
     expect(statSync(recoveryPath).mode & 0o777).toBe(0o600);
+    expect(readFileSync(recoveryPath, 'utf8')).not.toContain('postgres://secret');
     expect(readInstallationRecoverySecrets(manifest, directory)).toEqual({
       databaseUrl: 'postgres://secret',
     });
@@ -181,5 +187,60 @@ describe('platform registry', () => {
     });
     removeInstallationRecoverySecrets(manifest, directory);
     expect(readInstallationRecoverySecrets(manifest, directory)).toBeNull();
+  });
+
+  it('migrates legacy plaintext recovery material to an encrypted envelope', () => {
+    const directory = temporaryRegistry();
+    const manifest = createPlatformInstallationManifest({
+      account: { id: 'account_123', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    writeInstallationManifest(manifest, directory);
+    const legacyPath = join(directory, 'account_123', 'example-a1b2c3d4.recovery');
+    writeFileSync(legacyPath, JSON.stringify({ databaseUrl: 'postgres://legacy-secret' }), {
+      mode: 0o600,
+    });
+
+    expect(readInstallationRecoverySecrets(manifest, directory)).toEqual({
+      databaseUrl: 'postgres://legacy-secret',
+    });
+    expect(existsSync(legacyPath)).toBe(false);
+    expect(
+      readFileSync(join(directory, 'account_123', 'example-a1b2c3d4.recovery.enc'), 'utf8'),
+    ).not.toContain('legacy-secret');
+  });
+
+  it('authenticates encrypted recovery material to the installation identity', () => {
+    const directory = temporaryRegistry();
+    const manifest = createPlatformInstallationManifest({
+      account: { id: 'account_123', name: 'Account' },
+      createdAt: '2026-09-14T00:00:00.000Z',
+      deployment: createPlatformDeploymentManifest({
+        application: { baseDomain: 'example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      }),
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    writeInstallationManifest(manifest, directory);
+    writePendingInstallationSecrets(manifest, { databaseUrl: 'postgres://secret' }, directory);
+    promoteInstallationSecrets(manifest, directory);
+
+    expect(() =>
+      readInstallationRecoverySecrets(
+        { ...manifest, ownershipNonce: 'fedcba9876543210fedcba9876543210' },
+        directory,
+      ),
+    ).toThrow('Could not read encrypted recovery material');
   });
 });

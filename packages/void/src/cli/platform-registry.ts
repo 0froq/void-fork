@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import {
   closeSync,
   mkdirSync,
@@ -15,7 +15,8 @@ import {
   parsePlatformInstallationManifest,
   type PlatformInstallationManifest,
 } from '@void/platform';
-import { join } from 'pathslash';
+import { join, resolve } from 'pathslash';
+import { readKeyringPassword, writeKeyringPassword } from './keyring.ts';
 
 export const PLATFORM_REGISTRY_SCHEMA_VERSION = 1 as const;
 
@@ -42,6 +43,17 @@ const DEFAULT_REGISTRY: PlatformConnectionRegistry = {
   connections: [],
   schemaVersion: PLATFORM_REGISTRY_SCHEMA_VERSION,
 };
+
+const PLATFORM_RECOVERY_KEYRING_SERVICE = 'dev.void.cli.platform';
+const PLATFORM_RECOVERY_ENVELOPE_VERSION = 1 as const;
+
+type PlatformRecoveryEnvelope = Readonly<{
+  algorithm: 'aes-256-gcm';
+  ciphertext: string;
+  iv: string;
+  schemaVersion: typeof PLATFORM_RECOVERY_ENVELOPE_VERSION;
+  tag: string;
+}>;
 
 export function platformRegistryDirectory(): string {
   return process.env.VOID_PLATFORM_REGISTRY_DIR ?? join(homedir(), '.void', 'platforms');
@@ -427,35 +439,21 @@ export function writePendingInstallationSecrets(
   directory: string = platformRegistryDirectory(),
 ): void {
   const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
-  writeJsonAtomically(manifestPath.replace(/\.json$/, '.secrets'), secrets);
+  writeEncryptedRecoveryMaterial(
+    manifest,
+    'pending',
+    manifestPath.replace(/\.json$/, '.secrets.enc'),
+    secrets,
+    directory,
+  );
+  rmSync(manifestPath.replace(/\.json$/, '.secrets'), { force: true });
 }
 
 export function readPendingInstallationSecrets(
   manifest: PlatformInstallationManifest,
   directory: string = platformRegistryDirectory(),
 ): Record<string, string> | null {
-  const path = installationManifestPath(manifest.account.id, manifest.id, directory).replace(
-    /\.json$/,
-    '.secrets',
-  );
-  try {
-    const value = JSON.parse(readFileSync(path, 'utf8')) as unknown;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new Error('secret checkpoint must be an object');
-    }
-    const entries = Object.entries(value);
-    if (entries.some(([, entry]) => typeof entry !== 'string')) {
-      throw new Error('secret checkpoint values must be strings');
-    }
-    return Object.fromEntries(entries) as Record<string, string>;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
-    }
-    throw new Error(
-      `platform: Could not read pending installation secrets: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  return readRecoveryMaterial(manifest, 'pending', directory);
 }
 
 export function removePendingInstallationSecrets(
@@ -463,6 +461,7 @@ export function removePendingInstallationSecrets(
   directory: string = platformRegistryDirectory(),
 ): void {
   const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
+  rmSync(manifestPath.replace(/\.json$/, '.secrets.enc'), { force: true });
   rmSync(manifestPath.replace(/\.json$/, '.secrets'), { force: true });
 }
 
@@ -471,35 +470,25 @@ export function promoteInstallationSecrets(
   directory: string = platformRegistryDirectory(),
 ): void {
   const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
-  const pending = manifestPath.replace(/\.json$/, '.secrets');
-  const recovery = manifestPath.replace(/\.json$/, '.recovery');
-  renameSync(pending, recovery);
+  const values = readPendingInstallationSecrets(manifest, directory);
+  if (!values) {
+    throw new Error('platform: Pending installation recovery material is missing.');
+  }
+  const recovery = manifestPath.replace(/\.json$/, '.recovery.enc');
+  writeEncryptedRecoveryMaterial(manifest, 'recovery', recovery, values, directory);
+  rmSync(manifestPath.replace(/\.json$/, '.secrets.enc'), { force: true });
+  rmSync(manifestPath.replace(/\.json$/, '.secrets'), { force: true });
+  rmSync(manifestPath.replace(/\.json$/, '.recovery'), { force: true });
 }
 
 export function readInstallationRecoverySecrets(
   manifest: PlatformInstallationManifest,
   directory: string = platformRegistryDirectory(),
 ): Record<string, string> | null {
-  const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
-  const recovery = manifestPath.replace(/\.json$/, '.recovery');
-  try {
-    const value = JSON.parse(readFileSync(recovery, 'utf8')) as unknown;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new Error('recovery material must be an object');
-    }
-    const entries = Object.entries(value);
-    if (entries.some(([, entry]) => typeof entry !== 'string')) {
-      throw new Error('recovery material values must be strings');
-    }
-    return Object.fromEntries(entries) as Record<string, string>;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return readPendingInstallationSecrets(manifest, directory);
-    }
-    throw new Error(
-      `platform: Could not read installation recovery material: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  return (
+    readRecoveryMaterial(manifest, 'recovery', directory) ??
+    readPendingInstallationSecrets(manifest, directory)
+  );
 }
 
 export function removeInstallationRecoverySecrets(
@@ -507,8 +496,160 @@ export function removeInstallationRecoverySecrets(
   directory: string = platformRegistryDirectory(),
 ): void {
   const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
+  rmSync(manifestPath.replace(/\.json$/, '.recovery.enc'), { force: true });
+  rmSync(manifestPath.replace(/\.json$/, '.secrets.enc'), { force: true });
   rmSync(manifestPath.replace(/\.json$/, '.recovery'), { force: true });
   rmSync(manifestPath.replace(/\.json$/, '.secrets'), { force: true });
+}
+
+function readRecoveryMaterial(
+  manifest: PlatformInstallationManifest,
+  kind: 'pending' | 'recovery',
+  directory: string,
+): Record<string, string> | null {
+  const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
+  const encryptedPath = manifestPath.replace(
+    /\.json$/,
+    `.${kind === 'pending' ? 'secrets' : 'recovery'}.enc`,
+  );
+  try {
+    const envelope = parseRecoveryEnvelope(JSON.parse(readFileSync(encryptedPath, 'utf8')));
+    const key = platformRecoveryKey(directory, false);
+    if (!key) {
+      throw new Error(
+        'the encryption key is unavailable; restore it from the system keychain or set VOID_PLATFORM_RECOVERY_KEY',
+      );
+    }
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
+    decipher.setAAD(recoveryAad(manifest, kind));
+    decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
+      decipher.final(),
+    ]);
+    return parseRecoveryValues(JSON.parse(plaintext.toString('utf8')), `${kind} recovery material`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw new Error(
+        `platform: Could not read encrypted ${kind} material: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const legacyPath = manifestPath.replace(/\.json$/, kind === 'pending' ? '.secrets' : '.recovery');
+  try {
+    const values = parseRecoveryValues(
+      JSON.parse(readFileSync(legacyPath, 'utf8')),
+      `legacy ${kind} recovery material`,
+    );
+    writeEncryptedRecoveryMaterial(manifest, kind, encryptedPath, values, directory);
+    rmSync(legacyPath, { force: true });
+    return values;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw new Error(
+      `platform: Could not migrate legacy ${kind} material: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function writeEncryptedRecoveryMaterial(
+  manifest: PlatformInstallationManifest,
+  kind: 'pending' | 'recovery',
+  path: string,
+  values: Record<string, string>,
+  directory: string,
+): void {
+  const key = platformRecoveryKey(directory, true)!;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(recoveryAad(manifest, kind));
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(parseRecoveryValues(values, `${kind} recovery material`)), 'utf8'),
+    cipher.final(),
+  ]);
+  const envelope: PlatformRecoveryEnvelope = {
+    algorithm: 'aes-256-gcm',
+    ciphertext: ciphertext.toString('base64'),
+    iv: iv.toString('base64'),
+    schemaVersion: PLATFORM_RECOVERY_ENVELOPE_VERSION,
+    tag: cipher.getAuthTag().toString('base64'),
+  };
+  writeJsonAtomically(path, envelope);
+}
+
+function recoveryAad(manifest: PlatformInstallationManifest, kind: 'pending' | 'recovery'): Buffer {
+  return Buffer.from(
+    `void-platform-recovery-v1\0${manifest.account.id}\0${manifest.id}\0${manifest.ownershipNonce}\0${kind}`,
+  );
+}
+
+function platformRecoveryKey(directory: string, create: boolean): Buffer | null {
+  const fromEnvironment = process.env.VOID_PLATFORM_RECOVERY_KEY;
+  if (fromEnvironment) {
+    return parseRecoveryKey(fromEnvironment, 'VOID_PLATFORM_RECOVERY_KEY');
+  }
+  const account = `recovery:${createHash('sha256').update(resolve(directory)).digest('hex')}`;
+  const saved = readKeyringPassword(PLATFORM_RECOVERY_KEYRING_SERVICE, account);
+  if (saved) {
+    return parseRecoveryKey(saved, 'system keychain recovery key');
+  }
+  if (!create) {
+    return null;
+  }
+  const generated = randomBytes(32);
+  if (
+    !writeKeyringPassword(PLATFORM_RECOVERY_KEYRING_SERVICE, account, generated.toString('base64'))
+  ) {
+    throw new Error(
+      'platform: The system keychain is unavailable. Refusing to write platform secrets to disk. Configure a system keychain or set a base64-encoded 32-byte VOID_PLATFORM_RECOVERY_KEY from your secret manager.',
+    );
+  }
+  return generated;
+}
+
+function parseRecoveryKey(value: string, name: string): Buffer {
+  const key = Buffer.from(value, 'base64');
+  if (key.byteLength !== 32 || key.toString('base64') !== value) {
+    throw new Error(`platform: ${name} must be a canonical base64-encoded 32-byte key.`);
+  }
+  return key;
+}
+
+function parseRecoveryEnvelope(value: unknown): PlatformRecoveryEnvelope {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('encrypted recovery envelope must be an object');
+  }
+  const envelope = value as Record<string, unknown>;
+  if (
+    envelope.schemaVersion !== PLATFORM_RECOVERY_ENVELOPE_VERSION ||
+    envelope.algorithm !== 'aes-256-gcm' ||
+    typeof envelope.ciphertext !== 'string' ||
+    typeof envelope.iv !== 'string' ||
+    typeof envelope.tag !== 'string'
+  ) {
+    throw new Error('encrypted recovery envelope is invalid');
+  }
+  if (Buffer.from(envelope.iv, 'base64').byteLength !== 12) {
+    throw new Error('encrypted recovery IV is invalid');
+  }
+  if (Buffer.from(envelope.tag, 'base64').byteLength !== 16) {
+    throw new Error('encrypted recovery tag is invalid');
+  }
+  return envelope as PlatformRecoveryEnvelope;
+}
+
+function parseRecoveryValues(value: unknown, name: string): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${name} must be an object`);
+  }
+  const entries = Object.entries(value);
+  if (entries.some(([, entry]) => typeof entry !== 'string')) {
+    throw new Error(`${name} values must be strings`);
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
 }
 
 export function removePlatformConnectionForInstallation(

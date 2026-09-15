@@ -49,6 +49,7 @@ jobs:
       VOID_PLATFORM_PROJECT_SECRET_KEY: ${{ secrets.STAGING_PROJECT_SECRET_KEY }}
       VOID_PLATFORM_R2_ACCESS_KEY_ID: ${{ secrets.STAGING_R2_ACCESS_KEY_ID }}
       VOID_PLATFORM_R2_SECRET_ACCESS_KEY: ${{ secrets.STAGING_R2_SECRET_ACCESS_KEY }}
+      VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_RUNTIME_CLOUDFLARE_API_TOKEN }}
       VOID_PLATFORM_REGISTRY_DIR: ${{ runner.temp }}/void-platform-registry
       VOID_PLATFORM_STAGING_INSTALLATION: ${{ vars.VOID_PLATFORM_STAGING_INSTALLATION }}
     permissions:
@@ -65,10 +66,7 @@ jobs:
         run: |
           required=(
             CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
-            VOID_PLATFORM_ADMIN_GITHUB_LOGIN VOID_PLATFORM_DATABASE_URL
-            VOID_PLATFORM_GITHUB_CLIENT_ID VOID_PLATFORM_GITHUB_CLIENT_SECRET
-            VOID_PLATFORM_JWT_SECRET VOID_PLATFORM_PROJECT_SECRET_KEY
-            VOID_PLATFORM_R2_ACCESS_KEY_ID VOID_PLATFORM_R2_SECRET_ACCESS_KEY
+            VOID_PLATFORM_DATABASE_URL
             VOID_PLATFORM_STAGING_INSTALLATION
           )
           missing=()
@@ -81,6 +79,11 @@ jobs:
             echo "::error::The Staging environment is missing: ${missing[*]}"
             exit 1
           fi
+      - name: Prepare ephemeral recovery encryption
+        run: |
+          recovery_key="$(openssl rand -base64 32)"
+          echo "::add-mask::$recovery_key"
+          echo "VOID_PLATFORM_RECOVERY_KEY=$recovery_key" >> "$GITHUB_ENV"
       - name: Build the staging runtime
         run: vp run build
         env:

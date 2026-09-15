@@ -6,6 +6,8 @@ outline: deep
 
 A self-hosted Void platform gives a company one shared control plane in its own Cloudflare account. Developers connect the normal `void` CLI to it, log in with GitHub, create projects, and run `void deploy --platform void`. This is different from `void deploy --platform cloudflare`, which deploys one app directly and does not install a control plane.
 
+Developer and administrator platform sessions created by `void auth login` are stored in the operating-system keychain, scoped to the platform origin. Void refuses to create a new plaintext token file when the keychain is unavailable; headless environments provide `VOID_TOKEN` from a secret manager.
+
 The core installation intentionally excludes the user dashboard, Deploy on GitHub, GitHub App webhooks, build Containers, email, Google OAuth, custom project domains, and sandbox orchestration. Those are optional platform modules, not prerequisites for deploying an app. GitHub OAuth login, CLI deploys, D1, KV, R2, Queues, cron jobs, Workers AI, WebSockets, SSE, ISR, routing, logs, and rollback use the same platform components as Void Cloud.
 
 ## Prerequisites
@@ -13,7 +15,8 @@ The core installation intentionally excludes the user dashboard, Deploy on GitHu
 You need:
 
 - A Cloudflare account with Workers for Platforms and the products represented in the footprint below.
-- A scoped Cloudflare API token. The installer and installed control plane use it to manage Workers scripts, Workers for Platforms, Worker routes and custom domains, KV, R2, Queues, Hyperdrive, AI Gateway, DNS, and zones. Scope it to the selected account and only the zones the platform will use. The exact permission labels can vary in Cloudflare's token UI; the installation plan is read-only and is a useful permission check before applying anything.
+- A Cloudflare user who can create the resources represented in the footprint below. Interactive lifecycle commands authenticate in the browser through Wrangler OAuth and enable Wrangler's OS-keychain storage before login. CI uses `CLOUDFLARE_API_TOKEN` instead.
+- A separate, scoped Cloudflare runtime API token for the installed control plane. It manages application Workers, D1, KV, R2, Queues, Analytics, and certificates after installation; it is never used as the human operator credential. Give it account-level Workers Scripts: Edit, Workers Tail: Read, D1: Edit, Workers KV Storage: Edit, Workers R2 Storage: Edit, Queues: Edit, and Account Analytics: Read, plus zone-level SSL and Certificates: Edit on the application zone. The installer prints a direct account-token dashboard link and accepts the value through a masked prompt.
 - A dedicated, empty external PostgreSQL database reachable through Cloudflare Hyperdrive. Void never creates or deletes this database. The installer transactionally claims it for one platform installation and refuses to share it with another installation.
 - An application base domain such as `apps.example.com`. Its containing Cloudflare zone may already exist or the installer can create it.
 - A GitHub OAuth App for login. The installer prints the exact callback URL before asking for its client credentials.
@@ -26,7 +29,6 @@ Workers for Platforms is a platform-level Cloudflare product. This requirement d
 Run the interactive installer with `--plan` first:
 
 ```sh
-export CLOUDFLARE_API_TOKEN=your-scoped-management-token
 void platform install --plan
 ```
 
@@ -67,10 +69,11 @@ The interactive command asks for every missing value:
 void platform install
 ```
 
-For non-interactive installation, provide the plan flags above and these environment variables:
+For non-interactive installation, provide the plan flags above and these environment variables. `CLOUDFLARE_API_TOKEN` is the CI/operator credential; `VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN` is the distinct token installed into the platform Workers:
 
 ```sh
 export CLOUDFLARE_API_TOKEN=your-scoped-management-token
+export VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN=your-scoped-runtime-token
 export VOID_PLATFORM_DATABASE_URL='postgresql://user:password@host/database?sslmode=require'
 export VOID_PLATFORM_GITHUB_CLIENT_ID=your-github-oauth-client-id
 export VOID_PLATFORM_GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
@@ -141,7 +144,9 @@ void platform status [id]
 
 ## Resume, repair, recover, and upgrade
 
-Local state lives under `~/.void/platforms/`. Manifests and recovery material are written atomically; secret recovery files use owner-only mode (`0600`). Keep this directory secure and back it up like any other local credential store.
+Local state lives under `~/.void/platforms/`. Manifests contain no credentials. Recovery material is encrypted with AES-256-GCM in owner-only `.recovery.enc` files; the randomly generated encryption key lives in the operating-system keychain. Existing plaintext `.recovery` files are encrypted and deleted on first read. A lifecycle operation refuses to write secrets when the keychain is unavailable instead of falling back to plaintext.
+
+Headless environments may set `VOID_PLATFORM_RECOVERY_KEY` to a canonical base64-encoded 32-byte key supplied by their secret manager. Ephemeral CI jobs may generate a new key for each run because their original platform secrets remain in protected CI secrets and deployed Worker secrets are preserved during upgrades.
 
 - Resume an interrupted install with `void platform install --resume --name <id>`.
 - Before the initial PostgreSQL claim succeeds, an explicit database URL may correct a mistyped or unreachable URL. After the claim succeeds—or Hyperdrive has been provisioned—the recorded URL is pinned; resume refuses a different `DATABASE_URL` instead of splitting lifecycle state from the database used by deployed Workers.
@@ -157,9 +162,9 @@ Local state lives under `~/.void/platforms/`. Manifests and recovery material ar
 - Upgrade, repair, enable, and interrupted-cutover recovery inventory every existing platform Worker before publishing triggers. Routes and custom domains outside the installation manifest are carried into both the new version and its rollback snapshot, so lifecycle operations do not erase manually attached traffic.
 - The manifest fingerprints the Hyperdrive PostgreSQL origin without storing its password. Before migrations or Worker upload, Void fetches the exact Hyperdrive configuration and requires its scheme, host, port, database, and (when Cloudflare returns it) user to match the pinned recovery database. If an administrator retargeted Hyperdrive, the command stops before mutation.
 - Recover a lost local manifest from the installation marker in Cloudflare with `void platform discover [--account <id>]`. In an account containing several platforms, add `--installation <id-or-name>` to recover and verify only the intended installation.
-- On a newly discovered workstation, export `VOID_PLATFORM_DATABASE_URL`, `VOID_PLATFORM_JWT_SECRET`, and `VOID_PLATFORM_PROJECT_SECRET_KEY` before repair, upgrade, enable, or install resume. The JWT and base64-encoded 32-byte project-secret key must be the original values from the backed-up recovery material; Void refuses to generate replacements for an existing installation. Install, repair, upgrade, enable, disable, and uninstall hold a PostgreSQL session advisory lock so two hosts cannot mutate one installation concurrently. The claimed database row also stores the secret-free authoritative lifecycle manifest, which prevents a host with stale local or Workers KV state from undoing a newer operation.
+- On a newly discovered workstation, provide `VOID_PLATFORM_DATABASE_URL` for database locking and migrations. Normal upgrades preserve the existing encrypted Worker secrets, so GitHub, R2, JWT, project-encryption, and runtime-token values do not need to be re-entered. If repair must recreate a missing API or proxy Worker, restore the original values through the documented `VOID_PLATFORM_*` variables; Void fails before creating an unusable Worker when they are absent. Install, repair, upgrade, enable, disable, and uninstall hold a PostgreSQL session advisory lock so two hosts cannot mutate one installation concurrently. The claimed database row also stores the secret-free authoritative lifecycle manifest, which prevents a host with stale local or Workers KV state from undoing a newer operation.
 
-Discovery verifies the account, every recorded Cloudflare resource, and the routing namespace ownership marker before writing local state. It also verifies the live endpoint identity for a completed enabled installation; interrupted and disabled installations remain recoverable when no endpoint is available. Cloudflare does not expose the PostgreSQL, GitHub OAuth, R2, JWT, or project-encryption secret values. Back up the owner-only recovery material: without the original JWT and project-secret key, Void deliberately blocks any operation that would redeploy an existing API Worker rather than invalidate sessions or make stored project secrets unreadable.
+Discovery verifies the account, every recorded Cloudflare resource, and the routing namespace ownership marker before writing local state. It also verifies the live endpoint identity for a completed enabled installation; interrupted and disabled installations remain recoverable when no endpoint is available. Cloudflare does not expose secret values. Keep the database URL and original runtime secrets in an organizational secret manager for disaster recovery; routine source and package upgrades preserve those deployed secrets without downloading them.
 
 ## Continuously deploy a source build
 
@@ -170,6 +175,7 @@ export VOID_PLATFORM_SOURCE_REVISION="$GITHUB_SHA"
 vp run build
 
 export VOID_PLATFORM_REGISTRY_DIR="$RUNNER_TEMP/void-platform-registry"
+export VOID_PLATFORM_RECOVERY_KEY="$(openssl rand -base64 32)"
 void platform discover --account "$CLOUDFLARE_ACCOUNT_ID"
 void platform upgrade "$VOID_PLATFORM_INSTALLATION" \
   --runtime packages/platform/dist/runtime --plan
@@ -177,7 +183,7 @@ void platform upgrade "$VOID_PLATFORM_INSTALLATION" \
   --runtime packages/platform/dist/runtime --yes
 ```
 
-The installation selector may be omitted when the account contains only one discoverable installation. Serialize deployments for one installation: database migrations and Worker cutover must never be cancelled midway by a newer CI run. Keep the management token, database URL, OAuth and R2 credentials, JWT secret, and project-secret key in a protected CI environment. Never generate new JWT or project-secret keys during an upgrade.
+The installation selector may be omitted when the account contains only one discoverable installation. Serialize deployments for one installation: database migrations and Worker cutover must never be cancelled midway by a newer CI run. Keep the CI management token and database URL in a protected environment. Existing Worker secrets are inherited by new versions; provide the other original secrets only when a repair must recreate a missing Worker or when performing an explicit credential rotation.
 
 ## Disable and safely uninstall
 

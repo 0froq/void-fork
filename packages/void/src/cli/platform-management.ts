@@ -15,6 +15,7 @@ import {
   type PlatformInstallationManifest,
 } from '@void/platform';
 import type { PlatformArgs } from './platform-args.ts';
+import { resolvePlatformCloudflareCredential } from './platform-auth.ts';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
@@ -167,11 +168,8 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   }
   assertNoninteractivePlatformMutationAcknowledged(args, process.stdin.isTTY === true);
   const manifest = await resolveInstalledPlatformManifest(args.selector);
-  const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || '';
-  if (!token) {
-    throw new Error('platform: Export CLOUDFLARE_API_TOKEN to manage an installed platform.');
-  }
-  const client = new PlatformCloudflareClient(token);
+  const operatorCredential = await resolvePlatformCloudflareCredential();
+  const client = new PlatformCloudflareClient(operatorCredential.token);
   const runtime =
     args.subcommand === 'uninstall' || args.subcommand === 'disable'
       ? null
@@ -285,11 +283,11 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     const bootstrapGitHubId =
       process.env.VOID_PLATFORM_ADMIN_GITHUB_ID ||
       recovery?.bootstrapGitHubId ||
-      (await resolveBootstrapGitHubId(bootstrapGitHubLogin));
+      (bootstrapGitHubLogin ? await resolveBootstrapGitHubId(bootstrapGitHubLogin) : '');
     const secrets = createPlatformInstallationSecrets({
       bootstrapGitHubId,
       bootstrapGitHubLogin,
-      cloudflareApiToken: token,
+      cloudflareApiToken: process.env.VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN || '',
       checkpoint: recovery,
       databaseUrl,
       existingInstallation: true,

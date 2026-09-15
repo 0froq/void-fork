@@ -15,7 +15,7 @@ import {
   type ResourceOwnership,
 } from '@void/platform';
 import { join } from 'pathslash';
-import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import {
   disablePlatform,
   resolveInstalledPlatformManifest,
@@ -38,7 +38,12 @@ import { recordPlatformWorkerTraffic } from '../../src/cli/platform-traffic.ts';
 
 const directories: Array<string> = [];
 
+beforeEach(() => {
+  process.env.VOID_PLATFORM_RECOVERY_KEY = Buffer.alloc(32, 7).toString('base64');
+});
+
 afterEach(() => {
+  delete process.env.VOID_PLATFORM_RECOVERY_KEY;
   delete process.env.VOID_PLATFORM_REGISTRY_DIR;
   for (const directory of directories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });

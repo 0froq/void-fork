@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { Entry } from '@napi-rs/keyring';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from '../shared/proxy.ts';
@@ -11,7 +10,7 @@ import {
   VOID_CLOUD_PLATFORM,
   VOID_CLOUD_STAGING_PLATFORM,
 } from './hosted-platform.ts';
-import { pc } from './output.ts';
+import { deleteKeyringPassword, readKeyringPassword, writeKeyringPassword } from './keyring.ts';
 import {
   getActivePlatformConnection,
   listPlatformConnections,
@@ -35,29 +34,15 @@ const KEYRING_SERVICE = 'dev.void.cli';
 // ---------------------------------------------------------------------------
 
 function keyringGet(account: string): string | null {
-  try {
-    return new Entry(KEYRING_SERVICE, account).getPassword();
-  } catch {
-    return null;
-  }
+  return readKeyringPassword(KEYRING_SERVICE, account);
 }
 
 function keyringSet(account: string, password: string): boolean {
-  try {
-    new Entry(KEYRING_SERVICE, account).setPassword(password);
-    return true;
-  } catch {
-    return false;
-  }
+  return writeKeyringPassword(KEYRING_SERVICE, account, password);
 }
 
 function keyringDelete(account: string): boolean {
-  try {
-    new Entry(KEYRING_SERVICE, account).deletePassword();
-    return true;
-  } catch {
-    return false;
-  }
+  return deleteKeyringPassword(KEYRING_SERVICE, account);
 }
 
 // ---------------------------------------------------------------------------
@@ -187,18 +172,19 @@ export function getTokenSource(): 'ci' | 'manual' {
   return process.env.VOID_TOKEN ? 'ci' : 'manual';
 }
 
-export function saveToken(token: string, root: string = process.cwd()): void {
+export function saveToken(
+  token: string,
+  root: string = process.cwd(),
+  dependencies: { keyringSet?: (account: string, password: string) => boolean } = {},
+): void {
   const apiUrl = normalizePlatformApiUrl(getApiUrl(root));
   const account = platformCredentialAccount(apiUrl);
-  if (keyringSet(account, token)) {
+  if ((dependencies.keyringSet ?? keyringSet)(account, token)) {
     return;
   }
-
-  // Keyring unavailable — fall back to file
-  console.warn(pc.yellow('System keychain unavailable, storing token in ~/.void/config.json'));
-  const config = readConfig();
-  config.tokens = { ...config.tokens, [apiUrl]: token };
-  writeConfig(config);
+  throw new Error(
+    'auth: The system keychain is unavailable. Refusing to store your platform token in plaintext. Configure a system keychain, or set VOID_TOKEN from a secret manager in headless environments.',
+  );
 }
 
 export function removeToken(root: string = process.cwd()): boolean {

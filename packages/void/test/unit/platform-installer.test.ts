@@ -23,13 +23,15 @@ import {
   type PlatformRuntimeDatabaseManifest,
 } from '@void/platform/installer';
 import { join } from 'pathslash';
-import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
 } from '../../src/cli/platform-cloudflare.ts';
 import {
   acquirePlatformDatabaseLifecycleLockConnection,
+  apiWorkerSecrets,
+  assertRequiredPlatformSecrets,
   classifyPlatformWorkerDeploymentLineage,
   installPlatform,
   claimPlatformDatabaseConnection,
@@ -68,7 +70,12 @@ import {
 
 const directories: Array<string> = [];
 
+beforeEach(() => {
+  process.env.VOID_PLATFORM_RECOVERY_KEY = Buffer.alloc(32, 7).toString('base64');
+});
+
 afterEach(() => {
+  delete process.env.VOID_PLATFORM_RECOVERY_KEY;
   delete process.env.VOID_PLATFORM_REGISTRY_DIR;
   delete process.env.CF_ACCESS_CLIENT_ID;
   delete process.env.CF_ACCESS_CLIENT_SECRET;
@@ -1229,7 +1236,7 @@ describe('platform installer', () => {
     expect(requests).toEqual(['https://api.github.com/users/Octocat']);
   });
 
-  it('never rotates runtime keys while resuming an existing installation', () => {
+  it('preserves deployed secrets and never rotates restored runtime keys', () => {
     const input = {
       bootstrapGitHubId: '583231',
       bootstrapGitHubLogin: 'octocat',
@@ -1241,12 +1248,10 @@ describe('platform installer', () => {
       r2AccessKeyId: 'r2-id',
       r2SecretAccessKey: 'r2-secret',
     };
-    expect(() => createPlatformInstallationSecrets(input)).toThrow(
-      'VOID_PLATFORM_JWT_SECRET is required',
-    );
-    expect(() =>
-      createPlatformInstallationSecrets({ ...input, jwtSecret: 'existing-jwt-secret' }),
-    ).toThrow('VOID_PLATFORM_PROJECT_SECRET_KEY is required');
+    expect(createPlatformInstallationSecrets(input)).toMatchObject({
+      jwtSecret: '',
+      projectSecretKey: '',
+    });
 
     const projectSecretKey = Buffer.alloc(32, 7).toString('base64');
     expect(
@@ -1262,6 +1267,7 @@ describe('platform installer', () => {
       createPlatformInstallationSecrets({
         ...input,
         checkpoint: {
+          cloudflareApiToken: 'old-cf-token',
           jwtSecret: 'recovered-jwt-secret',
           projectSecretKey: recoveredProjectSecretKey,
         },
@@ -1269,9 +1275,77 @@ describe('platform installer', () => {
         projectSecretKey: Buffer.alloc(32, 3).toString('base64'),
       }),
     ).toMatchObject({
+      cloudflareApiToken: 'cf-token',
       jwtSecret: 'recovered-jwt-secret',
       projectSecretKey: recoveredProjectSecretKey,
     });
+  });
+
+  it('omits unavailable composite secrets so Cloudflare preserves deployed values', () => {
+    const secrets = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      cloudflareApiToken: '',
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      existingInstallation: true,
+      githubClientId: '',
+      githubClientSecret: '',
+      r2AccessKeyId: '',
+      r2SecretAccessKey: '',
+    });
+
+    expect(apiWorkerSecrets(secrets, 'account', 'zone')).toEqual({
+      CF_ACCOUNT_ID: 'account',
+      CF_ZONE_ID: 'zone',
+    });
+  });
+
+  it('requires restored runtime secrets before recreating a missing platform Worker', async () => {
+    const plan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      null,
+    );
+    let manifest = createPlatformInstallationManifest({
+      account: plan.account,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      deployment: plan.deployment,
+      id: plan.installationId,
+      ownershipNonce: 'ownership-nonce-0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    manifest = recordInstallationStep(
+      manifest,
+      {
+        completedAt: '2026-01-01T00:00:00.000Z',
+        key: 'bootstrap-access:v1',
+        resultHash: 'bootstrap-hash',
+      },
+      '2026-01-01T00:00:00.000Z',
+    );
+    const secrets = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      cloudflareApiToken: '',
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      existingInstallation: true,
+      githubClientId: '',
+      githubClientSecret: '',
+      r2AccessKeyId: '',
+      r2SecretAccessKey: '',
+    });
+
+    expect(() => assertRequiredPlatformSecrets(plan, manifest, secrets)).toThrow(
+      'Creating a missing platform Worker requires: VOID_PLATFORM_GITHUB_CLIENT_ID',
+    );
   });
 
   it('does not checkpoint failure when another host owns the lifecycle lock', async () => {

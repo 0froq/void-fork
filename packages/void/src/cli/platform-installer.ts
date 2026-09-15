@@ -246,52 +246,72 @@ export function createPlatformInstallationSecrets(input: {
   // Runtime signing/encryption keys are installation identity, not rotating
   // configuration. Once recovery material exists, an unrelated exported key
   // must never replace it during repair, upgrade, enable, or resume.
-  const jwtSecret = input.existingInstallation
-    ? checkpoint.jwtSecret || input.jwtSecret || ''
-    : input.jwtSecret || checkpoint.jwtSecret || '';
-  const projectSecretKey = input.existingInstallation
-    ? checkpoint.projectSecretKey || input.projectSecretKey || ''
-    : input.projectSecretKey || checkpoint.projectSecretKey || '';
+  const existingInstallation = input.existingInstallation === true;
+  const restoredIdentity = (explicit: string, name: string): string =>
+    existingInstallation ? checkpoint[name] || explicit || '' : explicit || checkpoint[name] || '';
+  const configured = (explicit: string, name: string): string => explicit || checkpoint[name] || '';
+  const jwtSecret = restoredIdentity(input.jwtSecret || '', 'jwtSecret');
+  const projectSecretKey = restoredIdentity(input.projectSecretKey || '', 'projectSecretKey');
   const resolvedJwtSecret = input.existingInstallation
-    ? required(jwtSecret, 'VOID_PLATFORM_JWT_SECRET')
+    ? jwtSecret
     : jwtSecret || randomBytes(32).toString('base64url');
   const resolvedProjectSecretKey = input.existingInstallation
-    ? required(projectSecretKey, 'VOID_PLATFORM_PROJECT_SECRET_KEY')
+    ? projectSecretKey
     : projectSecretKey || randomBytes(32).toString('base64');
-  if (Buffer.from(resolvedProjectSecretKey, 'base64').byteLength !== 32) {
+  if (
+    resolvedProjectSecretKey &&
+    Buffer.from(resolvedProjectSecretKey, 'base64').byteLength !== 32
+  ) {
     throw new Error(
       'platform: VOID_PLATFORM_PROJECT_SECRET_KEY must be a base64-encoded 32-byte key.',
     );
   }
   return {
-    bootstrapGitHubId: required(
-      input.bootstrapGitHubId || checkpoint.bootstrapGitHubId || '',
-      'resolved administrator GitHub account id',
-    ),
-    bootstrapGitHubLogin: required(
-      input.bootstrapGitHubLogin || checkpoint.bootstrapGitHubLogin || '',
-      'VOID_PLATFORM_ADMIN_GITHUB_LOGIN',
-    ),
-    cloudflareApiToken: required(input.cloudflareApiToken, 'CLOUDFLARE_API_TOKEN'),
+    bootstrapGitHubId: existingInstallation
+      ? configured(input.bootstrapGitHubId, 'bootstrapGitHubId')
+      : required(
+          configured(input.bootstrapGitHubId, 'bootstrapGitHubId'),
+          'resolved administrator GitHub account id',
+        ),
+    bootstrapGitHubLogin: existingInstallation
+      ? configured(input.bootstrapGitHubLogin, 'bootstrapGitHubLogin')
+      : required(
+          configured(input.bootstrapGitHubLogin, 'bootstrapGitHubLogin'),
+          'VOID_PLATFORM_ADMIN_GITHUB_LOGIN',
+        ),
+    cloudflareApiToken: existingInstallation
+      ? configured(input.cloudflareApiToken, 'cloudflareApiToken')
+      : required(
+          configured(input.cloudflareApiToken, 'cloudflareApiToken'),
+          'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN',
+        ),
     databaseUrl: required(input.databaseUrl || checkpoint.databaseUrl || '', 'DATABASE_URL'),
-    githubClientId: required(
-      input.githubClientId || checkpoint.githubClientId || '',
-      'VOID_PLATFORM_GITHUB_CLIENT_ID',
-    ),
-    githubClientSecret: required(
-      input.githubClientSecret || checkpoint.githubClientSecret || '',
-      'VOID_PLATFORM_GITHUB_CLIENT_SECRET',
-    ),
+    githubClientId: existingInstallation
+      ? configured(input.githubClientId, 'githubClientId')
+      : required(
+          configured(input.githubClientId, 'githubClientId'),
+          'VOID_PLATFORM_GITHUB_CLIENT_ID',
+        ),
+    githubClientSecret: existingInstallation
+      ? configured(input.githubClientSecret, 'githubClientSecret')
+      : required(
+          configured(input.githubClientSecret, 'githubClientSecret'),
+          'VOID_PLATFORM_GITHUB_CLIENT_SECRET',
+        ),
     jwtSecret: resolvedJwtSecret,
     projectSecretKey: resolvedProjectSecretKey,
-    r2AccessKeyId: required(
-      input.r2AccessKeyId || checkpoint.r2AccessKeyId || '',
-      'VOID_PLATFORM_R2_ACCESS_KEY_ID',
-    ),
-    r2SecretAccessKey: required(
-      input.r2SecretAccessKey || checkpoint.r2SecretAccessKey || '',
-      'VOID_PLATFORM_R2_SECRET_ACCESS_KEY',
-    ),
+    r2AccessKeyId: existingInstallation
+      ? configured(input.r2AccessKeyId, 'r2AccessKeyId')
+      : required(
+          configured(input.r2AccessKeyId, 'r2AccessKeyId'),
+          'VOID_PLATFORM_R2_ACCESS_KEY_ID',
+        ),
+    r2SecretAccessKey: existingInstallation
+      ? configured(input.r2SecretAccessKey, 'r2SecretAccessKey')
+      : required(
+          configured(input.r2SecretAccessKey, 'r2SecretAccessKey'),
+          'VOID_PLATFORM_R2_SECRET_ACCESS_KEY',
+        ),
   };
 }
 
@@ -299,6 +319,7 @@ function secretCheckpoint(secrets: PlatformInstallationSecrets): Record<string, 
   return {
     bootstrapGitHubId: secrets.bootstrapGitHubId,
     bootstrapGitHubLogin: secrets.bootstrapGitHubLogin,
+    cloudflareApiToken: secrets.cloudflareApiToken,
     databaseUrl: secrets.databaseUrl,
     githubClientId: secrets.githubClientId,
     githubClientSecret: secrets.githubClientSecret,
@@ -363,6 +384,7 @@ export async function installPlatform(
     manifest = setInstallationDesiredState(manifest, 'disabled', now());
     writeInstallationManifest(manifest);
   }
+  assertRequiredPlatformSecrets(plan, manifest, secrets);
   const pendingSecrets = secretCheckpoint(secrets);
   writePendingInstallationSecrets(manifest, {
     ...pendingSecrets,
@@ -1717,12 +1739,12 @@ function requireId(ids: Record<string, string>, key: string): string {
   return id;
 }
 
-function apiWorkerSecrets(
+export function apiWorkerSecrets(
   secrets: PlatformInstallationSecrets,
   accountId: string,
   zoneId: string,
 ): Record<string, string> {
-  return {
+  return withoutEmptySecrets({
     CF_ACCOUNT_ID: accountId,
     CF_API_TOKEN: secrets.cloudflareApiToken,
     CF_ZONE_ID: zoneId,
@@ -1730,11 +1752,15 @@ function apiWorkerSecrets(
     GITHUB_CLIENT_SECRET: secrets.githubClientSecret,
     JWT_SECRET: secrets.jwtSecret,
     PLATFORM_BOOTSTRAP_GITHUB_ID: secrets.bootstrapGitHubId,
-    PROJECT_SECRET_ACTIVE_KEY_VERSION: 'v1',
-    PROJECT_SECRET_KEYS_JSON: JSON.stringify({ v1: secrets.projectSecretKey }),
+    ...(secrets.projectSecretKey
+      ? {
+          PROJECT_SECRET_ACTIVE_KEY_VERSION: 'v1',
+          PROJECT_SECRET_KEYS_JSON: JSON.stringify({ v1: secrets.projectSecretKey }),
+        }
+      : {}),
     R2_ACCESS_KEY_ID: secrets.r2AccessKeyId,
     R2_SECRET_ACCESS_KEY: secrets.r2SecretAccessKey,
-  };
+  });
 }
 
 export async function resolveBootstrapGitHubId(
@@ -1775,11 +1801,60 @@ function proxyWorkerSecrets(
   secrets: PlatformInstallationSecrets,
   accountId: string,
 ): Record<string, string> {
-  return {
+  return withoutEmptySecrets({
     CF_ACCOUNT_ID: accountId,
     CF_API_TOKEN: secrets.cloudflareApiToken,
     JWT_SECRET: secrets.jwtSecret,
+  });
+}
+
+function withoutEmptySecrets(secrets: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(secrets).filter(([, value]) => value !== ''));
+}
+
+export function assertRequiredPlatformSecrets(
+  plan: PlatformInstallPlan,
+  manifest: PlatformInstallationManifest,
+  secrets: PlatformInstallationSecrets,
+): void {
+  const missing = new Set<string>();
+  const requireSecret = (value: string, name: string) => {
+    if (!value) {
+      missing.add(name);
+    }
   };
+  if (!manifest.steps.some((step) => step.key === 'bootstrap-access:v1')) {
+    requireSecret(secrets.bootstrapGitHubId, 'VOID_PLATFORM_ADMIN_GITHUB_ID');
+    requireSecret(secrets.bootstrapGitHubLogin, 'VOID_PLATFORM_ADMIN_GITHUB_LOGIN');
+  }
+  if (
+    plan.actions.some(
+      (action) =>
+        action.key === 'api-worker' && action.kind === 'worker' && action.action === 'create',
+    )
+  ) {
+    requireSecret(secrets.cloudflareApiToken, 'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN');
+    requireSecret(secrets.githubClientId, 'VOID_PLATFORM_GITHUB_CLIENT_ID');
+    requireSecret(secrets.githubClientSecret, 'VOID_PLATFORM_GITHUB_CLIENT_SECRET');
+    requireSecret(secrets.jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
+    requireSecret(secrets.projectSecretKey, 'VOID_PLATFORM_PROJECT_SECRET_KEY');
+    requireSecret(secrets.r2AccessKeyId, 'VOID_PLATFORM_R2_ACCESS_KEY_ID');
+    requireSecret(secrets.r2SecretAccessKey, 'VOID_PLATFORM_R2_SECRET_ACCESS_KEY');
+  }
+  if (
+    plan.actions.some(
+      (action) =>
+        action.key === 'proxy-worker' && action.kind === 'worker' && action.action === 'create',
+    )
+  ) {
+    requireSecret(secrets.cloudflareApiToken, 'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN');
+    requireSecret(secrets.jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
+  }
+  if (missing.size > 0) {
+    throw new Error(
+      `platform: Creating a missing platform Worker requires: ${[...missing].sort().join(', ')}. Restore these values from your secret manager and retry.`,
+    );
+  }
 }
 
 export async function claimPlatformDatabase(

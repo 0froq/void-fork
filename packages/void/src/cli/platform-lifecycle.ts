@@ -7,6 +7,7 @@ import {
 } from '@void/platform';
 import { cliTitle } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
+import { resolvePlatformCloudflareCredential } from './platform-auth.ts';
 import { PlatformCloudflareClient, type CloudflareAccount } from './platform-cloudflare.ts';
 import {
   acquirePlatformDatabaseLifecycleLock,
@@ -73,11 +74,8 @@ export function resolvePlatformInstallDatabaseUrl(
 
 export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<void> {
   if (args.subcommand === 'discover') {
-    const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || '';
-    if (!token) {
-      throw new Error('platform: Export CLOUDFLARE_API_TOKEN before discovering installations.');
-    }
-    const client = new PlatformCloudflareClient(token);
+    const credential = await resolvePlatformCloudflareCredential();
+    const client = new PlatformCloudflareClient(credential.token);
     const accounts = await readAccounts(client);
     const accountId = await selectAccount(accounts, args.account);
     const { recoverPlatformInstallations } = await import('./platform-recovery.ts');
@@ -110,13 +108,8 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
 
   console.log();
   intro(cliTitle('platform install'));
-  const token = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || '';
-  if (!token) {
-    throw new Error(
-      'platform: Export CLOUDFLARE_API_TOKEN before installing. This token is also stored as an encrypted Worker secret so the platform can provision app resources.',
-    );
-  }
-  const client = new PlatformCloudflareClient(token);
+  const operatorCredential = await resolvePlatformCloudflareCredential();
+  const client = new PlatformCloudflareClient(operatorCredential.token);
   let existing = args.resume ? resolveInstallationManifest(args.name) : null;
   if (existing?.endpoints.apiUrl && !readPendingInstallationSecrets(existing)) {
     throw new Error(
@@ -216,6 +209,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       args.plan ? 'Read-only installation plan' : 'Installation plan',
     );
     note(formatPlatformRuntime(runtime), 'Platform runtime');
+    note(formatPlatformAuthenticationSetup(plan.apiUrl, accountId), 'Authentication setup');
     if (args.plan) {
       outro('No Cloudflare or local installation state was changed.');
       return;
@@ -228,11 +222,10 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       }
     }
 
-    note(
-      `Create a GitHub OAuth App with this callback URL:\n${plan.apiUrl}/auth/callback\n\n` +
-        'For direct asset uploads, create an R2 API token with Object Read & Write access to this account.',
-      'Authentication setup',
-    );
+    const runtimeCloudflareApiToken =
+      checkpoint?.cloudflareApiToken ||
+      process.env.VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN ||
+      (await promptSecret('Void runtime Cloudflare API token:'));
     const bootstrapGitHubLogin =
       checkpoint?.bootstrapGitHubLogin ||
       process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN ||
@@ -244,7 +237,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     const secrets = createPlatformInstallationSecrets({
       bootstrapGitHubId,
       bootstrapGitHubLogin,
-      cloudflareApiToken: token,
+      cloudflareApiToken: runtimeCloudflareApiToken,
       checkpoint,
       databaseUrl: databaseUrl || (await promptSecret('PostgreSQL DATABASE_URL:')),
       githubClientId:
@@ -312,6 +305,22 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   } finally {
     release?.();
   }
+}
+
+function platformRuntimeTokenUrl(accountId: string): string {
+  const query = new URLSearchParams({ name: 'Void Platform Runtime' });
+  return `https://dash.cloudflare.com/?to=/${encodeURIComponent(accountId)}/api-tokens&${query}`;
+}
+
+function formatPlatformAuthenticationSetup(apiUrl: string, accountId: string): string {
+  return (
+    `Create a GitHub OAuth App with this callback URL:\n${apiUrl}/auth/callback\n\n` +
+    'For direct asset uploads, create an R2 API token with Object Read & Write access to this account.\n\n' +
+    `Create a separate, scoped Void runtime API token here:\n${platformRuntimeTokenUrl(accountId)}\n` +
+    'Account permissions: Workers Scripts: Edit, Workers Tail: Read, D1: Edit, Workers KV Storage: Edit, Workers R2 Storage: Edit, Queues: Edit, Account Analytics: Read.\n' +
+    'Zone permission for the application zone: SSL and Certificates: Edit.\n' +
+    'The runtime token provisions application resources; your browser OAuth session is used only for platform lifecycle operations.'
+  );
 }
 
 function formatPlatformRuntime(runtime: ReturnType<typeof loadPlatformRuntime>): string {
