@@ -20,6 +20,7 @@ describe('platform runtime manifest', () => {
     const manifest = readPlatformRuntimeManifest();
 
     expect(manifest.schemaVersion).toBe(2);
+    expect(manifest.usageProtocolVersion).toBe(1);
     expect(manifest.database.schemaDigest).toBe(
       platformDatabaseSchemaDigest(manifest.database.lineage, manifest.database.migrations),
     );
@@ -75,6 +76,11 @@ describe('platform runtime manifest', () => {
     expect(() =>
       parsePlatformRuntimeManifest({ ...manifest, sourceRevision: 'revision with spaces' }),
     ).toThrow('sourceRevision is invalid');
+    expect(() => parsePlatformRuntimeManifest({ ...manifest, usageProtocolVersion: 2 })).toThrow(
+      'usageProtocolVersion must be 0 or 1',
+    );
+    const { usageProtocolVersion: _usageProtocolVersion, ...legacy } = manifest;
+    expect(parsePlatformRuntimeManifest(legacy).usageProtocolVersion).toBe(0);
   });
 
   it('resolves packaged and explicit runtime directories with provenance', () => {

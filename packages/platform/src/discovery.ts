@@ -12,6 +12,7 @@ export type PlatformDiscoveryDocument = Readonly<{
   platformVersion: string;
   proxyUrl: string;
   schemaVersion: typeof PLATFORM_DISCOVERY_SCHEMA_VERSION;
+  usageProtocolVersion: 0 | 1;
 }>;
 
 function normalizeOrigin(value: string, name: 'apiUrl' | 'proxyUrl'): string {
@@ -34,13 +35,22 @@ function normalizeOrigin(value: string, name: 'apiUrl' | 'proxyUrl'): string {
 }
 
 export function createPlatformDiscoveryDocument(
-  input: Omit<PlatformDiscoveryDocument, 'schemaVersion'>,
+  input: Omit<PlatformDiscoveryDocument, 'schemaVersion' | 'usageProtocolVersion'> & {
+    usageProtocolVersion?: 0 | 1;
+  },
 ): PlatformDiscoveryDocument {
   if (!input.displayName.trim()) {
     throw new Error('displayName must not be empty.');
   }
   if (!input.platformVersion.trim()) {
     throw new Error('platformVersion must not be empty.');
+  }
+  if (
+    input.usageProtocolVersion !== undefined &&
+    input.usageProtocolVersion !== 0 &&
+    input.usageProtocolVersion !== 1
+  ) {
+    throw new Error('usageProtocolVersion must be 0 or 1.');
   }
   if (input.authenticationProviders.length === 0) {
     throw new Error('At least one authentication provider is required.');
@@ -61,6 +71,7 @@ export function createPlatformDiscoveryDocument(
     platformVersion: input.platformVersion.trim(),
     proxyUrl: normalizeOrigin(input.proxyUrl, 'proxyUrl'),
     schemaVersion: PLATFORM_DISCOVERY_SCHEMA_VERSION,
+    usageProtocolVersion: input.usageProtocolVersion ?? 0,
   };
 }
 
@@ -128,5 +139,16 @@ export function parsePlatformDiscoveryDocument(value: unknown): PlatformDiscover
     installationId: document.installationId === null ? null : string('installationId'),
     platformVersion: string('platformVersion'),
     proxyUrl,
+    usageProtocolVersion: parseUsageProtocolVersion(document.usageProtocolVersion),
   });
+}
+
+function parseUsageProtocolVersion(value: unknown): 0 | 1 {
+  if (value === undefined || value === 0) {
+    return 0;
+  }
+  if (value === 1) {
+    return 1;
+  }
+  throw new Error('usageProtocolVersion must be 0 or 1.');
 }

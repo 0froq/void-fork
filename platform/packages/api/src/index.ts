@@ -85,7 +85,7 @@ import { operatorSessions } from './schema.ts';
 import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
 import type { Domain, Project } from './types.ts';
-import { ensureUsageSigningKey } from './usage-auth.ts';
+import { ensureUsageSigningKey, USAGE_PROTOCOL_VERSION } from './usage-auth.ts';
 import { UsageCounter } from './usage-counter.ts';
 import { replayFailedWebhookDeliveries } from './webhook-replay.ts';
 
@@ -183,6 +183,7 @@ const app = new Hono<ApiEnv>()
           (context.env.PLATFORM_ENV === 'staging'
             ? 'https://proxy.staging.void.cloud'
             : 'https://proxy.void.cloud'),
+        usageProtocolVersion: USAGE_PROTOCOL_VERSION,
       }),
     );
   })

@@ -84,7 +84,7 @@ for native app deployment and avoid introducing dependencies without checking
 their current npm versions.
 
 - [ ] Final full verification passed.
-- [ ] Four GPT-5.6 Sol/high agents reviewed the complete commit range.
+- [x] Four GPT-5.6 Sol/high agents reviewed the complete commit range.
 - [ ] Review P1 findings fixed individually and verified again.
 
 ## Review follow-ups
@@ -95,7 +95,11 @@ identified the following remaining work:
 
 - [x] Validate explicit deploy tokens through the shared origin guard while
       preserving GitHub OIDC precedence.
-- [ ] Do not report successful trigger recovery from an opaque handoff snapshot.
+- [x] Do not report successful trigger recovery from an opaque handoff snapshot.
+- [ ] Treat `Set-Cookie` responses as private in every hosted shared-cache path
+      and exclude entries written under the older unsafe cache policy.
+- [x] Fence interrupted transitions from unsigned to authenticated usage so
+      old live dispatch cannot feed frames that the new consumer discards.
 - [ ] Tie managed Sandbox admission, lifetime, and metering to a platform-owned
       controller. Tenant-owned acquire/release calls cannot establish authority,
       and lazy reservations must not be charged as running containers.

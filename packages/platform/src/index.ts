@@ -20,6 +20,7 @@ export {
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   PLATFORM_RESOURCE_OWNERSHIP_SCHEMA_VERSION,
+  PLATFORM_USAGE_PROTOCOL_VERSION,
   createPlatformResourceOwnershipMarker,
   createPlatformInstallationManifest,
   parsePlatformResourceOwnershipMarker,

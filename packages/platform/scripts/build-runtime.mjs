@@ -14,6 +14,9 @@ const drizzleRoot = join(repositoryRoot, 'platform', 'packages', 'api', 'drizzle
 const { parsePlatformRuntimeManifest, platformDatabaseSchemaDigest } = await import(
   pathToFileURL(join(packageRoot, 'dist', 'installer.mjs')).href
 );
+const { PLATFORM_USAGE_PROTOCOL_VERSION } = await import(
+  pathToFileURL(join(packageRoot, 'dist', 'index.mjs')).href
+);
 
 const workers = [
   ['api', join(repositoryRoot, 'platform', 'packages', 'api', 'src', 'worker', 'index.ts')],
@@ -74,6 +77,7 @@ try {
     platformVersion: packageJson.version,
     schemaVersion: 2,
     sourceRevision: process.env.VOID_PLATFORM_SOURCE_REVISION || null,
+    usageProtocolVersion: PLATFORM_USAGE_PROTOCOL_VERSION,
   });
   writeFileSync(join(runtimeRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 } finally {

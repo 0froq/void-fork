@@ -36,6 +36,8 @@ export type PlatformRuntimeManifest = Readonly<{
   platformVersion: string;
   schemaVersion: 2;
   sourceRevision: string | null;
+  /** Queue payload contract shared by the API consumer and trusted producers. */
+  usageProtocolVersion: 0 | 1;
 }>;
 
 export type PlatformRuntime = Readonly<{
@@ -162,7 +164,22 @@ export function parsePlatformRuntimeManifest(value: unknown): PlatformRuntimeMan
       root.sourceRevision === undefined || root.sourceRevision === null
         ? null
         : sourceRevision(root.sourceRevision),
+    // Runtime manifests released before authenticated usage envelopes did not
+    // declare a protocol. Keep them usable for explicit rollback while making
+    // the installer treat every move to or from that legacy contract as a
+    // traffic-fenced transition.
+    usageProtocolVersion: usageProtocolVersion(root.usageProtocolVersion),
   };
+}
+
+function usageProtocolVersion(value: unknown): 0 | 1 {
+  if (value === undefined || value === 0) {
+    return 0;
+  }
+  if (value === 1) {
+    return 1;
+  }
+  throw new Error('runtime manifest usageProtocolVersion must be 0 or 1');
 }
 
 export function getPlatformRuntimeDirectory(): string {

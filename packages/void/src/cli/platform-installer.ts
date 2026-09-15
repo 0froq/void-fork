@@ -215,6 +215,7 @@ export type PlatformInstallerDependencies = Readonly<{
     proxyUrl: string,
     applicationBaseDomain: string,
     platformVersion: string,
+    usageProtocolVersion: 0 | 1,
     healthProbeToken: string,
   ) => Promise<void>;
   verifyWorkerCutover?: (
@@ -374,6 +375,7 @@ export async function installPlatform(
     sourceRevision: runtime.sourceRevision,
   } as const;
   const version = runtime.platformVersion;
+  const targetUsageProtocolVersion = runtime.usageProtocolVersion;
   const sourcePlatformVersion = existing?.platformVersion ?? null;
   const hadPriorWorkers =
     existing !== null &&
@@ -695,7 +697,8 @@ export async function installPlatform(
       !previousPublicEndpoints ||
       recoveringUnsafeTraffic ||
       createsWorker ||
-      recoveringCreatedWorker;
+      recoveringCreatedWorker ||
+      manifest.usageProtocolVersion !== targetUsageProtocolVersion;
     if (requiresTrafficGuard) {
       await dependencies.client.putKvValue(
         plan.account.id,
@@ -1026,6 +1029,7 @@ export async function installPlatform(
         platformVersion: version,
         runtime: runtimeProvenance,
         updatedAt: now(),
+        usageProtocolVersion: targetUsageProtocolVersion,
       };
       manifest = transitionInstallation(manifest, 'disabled', now());
       writeInstallationManifest(manifest);
@@ -1042,6 +1046,7 @@ export async function installPlatform(
       plan.proxyUrl,
       plan.deployment.application.baseDomain,
       version,
+      targetUsageProtocolVersion,
       createPlatformHealthProbeToken(manifest.ownershipNonce),
     );
     if (requiresStagedCommit) {
@@ -1211,6 +1216,7 @@ export async function installPlatform(
         plan.proxyUrl,
         plan.deployment.application.baseDomain,
         version,
+        targetUsageProtocolVersion,
         createPlatformHealthProbeToken(manifest.ownershipNonce),
       );
       await verifyCurrentWorkerCutover();
@@ -1223,6 +1229,7 @@ export async function installPlatform(
       platformVersion: version,
       runtime: runtimeProvenance,
       updatedAt: now(),
+      usageProtocolVersion: targetUsageProtocolVersion,
     };
     manifest = transitionInstallation(manifest, 'installed', now());
     writeInstallationManifest(manifest);
@@ -3900,6 +3907,7 @@ export async function verifyPlatformHealth(
   proxyUrl: string,
   applicationBaseDomain: string,
   platformVersion: string,
+  usageProtocolVersion: 0 | 1,
   healthProbeToken: string,
   fetcher: typeof fetch = fetch,
 ): Promise<void> {
@@ -3926,12 +3934,18 @@ export async function verifyPlatformHealth(
   const body = (await discovery.json()) as {
     installationId?: unknown;
     platformVersion?: unknown;
+    usageProtocolVersion?: unknown;
   };
   if (body.installationId !== installationId) {
     throw new Error('platform: Deployed API discovery identity does not match this installation.');
   }
   if (body.platformVersion !== platformVersion) {
     throw new Error('platform: Deployed API discovery version does not match this release.');
+  }
+  if ((body.usageProtocolVersion ?? 0) !== usageProtocolVersion) {
+    throw new Error(
+      'platform: Deployed API usage protocol does not match this runtime. Traffic remains disabled.',
+    );
   }
   if (!proxy.ok) {
     throw new Error(`platform: Proxy health check failed at ${proxyUrl} (HTTP ${proxy.status}).`);

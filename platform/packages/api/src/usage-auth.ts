@@ -1,3 +1,7 @@
+import { PLATFORM_USAGE_PROTOCOL_VERSION } from '@void/platform';
+
+export const USAGE_PROTOCOL_VERSION = PLATFORM_USAGE_PROTOCOL_VERSION;
+
 export const USAGE_SIGNING_KEY_KV_KEY = '__void:usage-signing-key:v1';
 /** Operational usage intervals and their replay receipts share one validity window. */
 export const SANDBOX_USAGE_RETENTION_MS = 8 * 24 * 60 * 60_000;
@@ -5,7 +9,7 @@ export const SANDBOX_USAGE_RETENTION_MS = 8 * 24 * 60 * 60_000;
 export type UsageEventSource = 'dispatch' | 'sandbox-counter';
 
 export type SignedUsageEnvelope<T = unknown> = Readonly<{
-  version: 1;
+  version: typeof USAGE_PROTOCOL_VERSION;
   source: UsageEventSource;
   eventId: string;
   event: T;
@@ -66,7 +70,7 @@ export async function readUsageSigningKey(routing: KVNamespace): Promise<string 
 }
 
 function signedPayload<T>(source: UsageEventSource, eventId: string, event: T): string {
-  return JSON.stringify([1, source, eventId, event]);
+  return JSON.stringify([USAGE_PROTOCOL_VERSION, source, eventId, event]);
 }
 
 export async function signUsageEvent<T>(
@@ -76,7 +80,7 @@ export async function signUsageEvent<T>(
   event: T,
 ): Promise<SignedUsageEnvelope<T>> {
   return {
-    version: 1,
+    version: USAGE_PROTOCOL_VERSION,
     source,
     eventId,
     event,
@@ -93,7 +97,7 @@ export async function verifyUsageEnvelope<T>(
   }
   const envelope = value as Record<string, unknown>;
   if (
-    envelope.version !== 1 ||
+    envelope.version !== USAGE_PROTOCOL_VERSION ||
     (envelope.source !== 'dispatch' && envelope.source !== 'sandbox-counter') ||
     typeof envelope.eventId !== 'string' ||
     envelope.eventId.length === 0 ||

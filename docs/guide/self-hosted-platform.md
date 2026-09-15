@@ -226,6 +226,8 @@ void platform upgrade [id]
 
 An upgrade validates the runtime, applies supported pending migrations, deploys the Workers, and checks their health. Existing Worker secrets are preserved.
 
+When a release changes the authenticated usage protocol shared by the platform Workers, the installer briefly puts the platform into maintenance mode before updating the first Worker. It restores traffic only after the API reports the target protocol and every Worker version in the runtime has been verified. If the command is interrupted, traffic stays blocked; rerun the same upgrade to resume. The installer never opens a compatibility window for unsigned usage messages.
+
 To update the runtime Cloudflare token, GitHub OAuth credentials, or R2 credentials,
 provide their `VOID_PLATFORM_*` environment variables when running the upgrade.
 Only the supplied values replace live credentials. Recovery data from an older
@@ -261,7 +263,7 @@ Platform commands hold a PostgreSQL advisory lock so two administrators can't ch
 
 Before migrations or uploads, Void checks that Hyperdrive still points at the recorded database, including its scheme, host, port, database name, and user when Cloudflare provides it. The recorded fingerprint excludes the password. A changed origin stops the operation.
 
-New, resumed, and previously disabled installations block user traffic before Worker uploads begin. Only the installer's health probes can pass until the complete runtime is verified. An interrupted or ambiguous upload leaves setup resumable with traffic blocked.
+New, resumed, and previously disabled installations block user traffic before Worker uploads begin. Upgrades also block traffic when the runtime changes its authenticated usage protocol. Only the installer's health probes can pass until the complete runtime is verified. An interrupted or ambiguous guarded upload leaves setup resumable with traffic blocked.
 
 Void preserves manually attached routes and custom domains in both the new configuration and rollback state. R2 recovery checks the bucket's recorded creation identity before completing an interrupted ownership marker write. It won't overwrite a replacement bucket or another installation's marker.
 

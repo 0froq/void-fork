@@ -837,7 +837,11 @@ describe('platform installer', () => {
       requests.push({ headers: new Headers(init?.headers), url });
       return Response.json(
         url.endsWith('/.well-known/void-platform')
-          ? { installationId: 'example-a1b2c3d4', platformVersion: '1.2.3' }
+          ? {
+              installationId: 'example-a1b2c3d4',
+              platformVersion: '1.2.3',
+              usageProtocolVersion: 1,
+            }
           : { ok: true },
       );
     }) as typeof fetch;
@@ -848,6 +852,7 @@ describe('platform installer', () => {
       'https://proxy.example.com',
       'apps.example.com',
       '1.2.3',
+      1,
       'probe-token',
       fetcher,
     );
@@ -872,7 +877,11 @@ describe('platform installer', () => {
       requests.push(new Headers(init?.headers));
       return Response.json(
         String(input).endsWith('/.well-known/void-platform')
-          ? { installationId: 'example-a1b2c3d4', platformVersion: '1.2.3' }
+          ? {
+              installationId: 'example-a1b2c3d4',
+              platformVersion: '1.2.3',
+              usageProtocolVersion: 1,
+            }
           : { ok: true },
       );
     }) as typeof fetch;
@@ -883,6 +892,7 @@ describe('platform installer', () => {
       'https://proxy.staging.void.cloud',
       'staging.void.app',
       '1.2.3',
+      1,
       'probe-token',
       fetcher,
     );
@@ -894,6 +904,38 @@ describe('platform installer', () => {
           headers.get('CF-Access-Client-Secret') === 'service-secret',
       ),
     ).toBe(true);
+  });
+
+  it('requires the live API to report the target usage protocol before traffic opens', async () => {
+    const legacyFetcher = (async (input: string | URL | Request) =>
+      Response.json(
+        String(input).endsWith('/.well-known/void-platform')
+          ? { installationId: 'example-a1b2c3d4', platformVersion: '1.2.3' }
+          : { ok: true },
+      )) as typeof fetch;
+
+    await verifyPlatformHealth(
+      'https://api.example.com',
+      'example-a1b2c3d4',
+      'https://proxy.example.com',
+      'apps.example.com',
+      '1.2.3',
+      0,
+      'probe-token',
+      legacyFetcher,
+    );
+    await expect(
+      verifyPlatformHealth(
+        'https://api.example.com',
+        'example-a1b2c3d4',
+        'https://proxy.example.com',
+        'apps.example.com',
+        '1.2.3',
+        1,
+        'probe-token',
+        legacyFetcher,
+      ),
+    ).rejects.toThrow('usage protocol does not match');
   });
 
   it('derives an installation-specific high-entropy health probe token', () => {
@@ -912,7 +954,11 @@ describe('platform installer', () => {
       }
       return Response.json(
         url.endsWith('/.well-known/void-platform')
-          ? { installationId: 'example-a1b2c3d4', platformVersion: '1.2.3' }
+          ? {
+              installationId: 'example-a1b2c3d4',
+              platformVersion: '1.2.3',
+              usageProtocolVersion: 1,
+            }
           : { ok: true },
       );
     }) as typeof fetch;
@@ -924,6 +970,7 @@ describe('platform installer', () => {
         'https://proxy.example.com',
         'apps.example.com',
         '1.2.3',
+        1,
         'probe-token',
         fetcher,
       ),
@@ -2213,6 +2260,52 @@ describe('platform installer', () => {
       putR2Object: async () => {},
     };
     const sourceManifest = { ...installed.manifest, platformVersion: '0.10.13' };
+    const interruptedProtocolEvents: Array<string> = [];
+    const legacySourceManifest = {
+      ...sourceManifest,
+      usageProtocolVersion: 0 as const,
+    };
+    await expect(
+      installPlatform(upgradedPlan, secrets, legacySourceManifest, {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: {
+          ...upgradeClient,
+          putKvValue: async (_account, _namespace, key) => {
+            if (key === PLATFORM_DISABLED_KEY) {
+              interruptedProtocolEvents.push('gate:closed');
+            }
+          },
+        },
+        deployWorker: async (config) => {
+          const name = String(config.name);
+          interruptedProtocolEvents.push(`deploy:${name}`);
+          if (name === deployment.resources.proxyWorker) {
+            throw new Error('interrupted after API activation');
+          }
+          return async () => {
+            interruptedProtocolEvents.push(`rollback:${name}`);
+          };
+        },
+        migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async () => {
+          throw new Error('health must not run before every Worker is staged');
+        },
+      }),
+    ).rejects.toThrow('interrupted after API activation');
+    expect(interruptedProtocolEvents).toEqual([
+      'gate:closed',
+      `deploy:${deployment.resources.apiWorker}`,
+      `deploy:${deployment.resources.proxyWorker}`,
+      'gate:closed',
+      `rollback:${deployment.resources.apiWorker}`,
+    ]);
+    expect(listInstallationManifests(directory)[0]).toMatchObject({
+      status: 'failed',
+      usageProtocolVersion: 0,
+    });
+
     let verifiedTargetVersion = '';
     await expect(
       installPlatform(upgradedPlan, secrets, sourceManifest, {
@@ -2262,6 +2355,50 @@ describe('platform installer', () => {
       source: 'custom',
     });
     expect(upgraded.manifest.resources).toHaveLength(15);
+
+    const downgradeEvents: Array<string> = [];
+    const currentRuntime = resolvePlatformRuntime(getPlatformRuntimeDirectory());
+    const downgraded = await installPlatform(upgradedPlan, secrets, upgraded.manifest, {
+      acquireDatabaseLifecycleLock,
+      claimDatabase,
+      client: {
+        ...upgradeClient,
+        deleteKvValue: async (_account, _namespace, key) => {
+          if (key === PLATFORM_DISABLED_KEY) {
+            downgradeEvents.push('gate:open');
+          }
+        },
+        putKvValue: async (_account, _namespace, key) => {
+          if (key === PLATFORM_DISABLED_KEY) {
+            downgradeEvents.push('gate:closed');
+          }
+        },
+      },
+      deployWorker: async (config) => {
+        downgradeEvents.push(`deploy:${String(config.name)}`);
+      },
+      migrateDatabase: async () => {},
+      revalidateBeforeWorkerDeploy: async () => {},
+      runtime: {
+        ...currentRuntime,
+        manifest: { ...currentRuntime.manifest, usageProtocolVersion: 0 },
+      },
+      verifyHealth: async () => {
+        downgradeEvents.push('health');
+      },
+      verifyWorkerCutover: async () => {
+        downgradeEvents.push('cutover');
+      },
+    });
+    expect(downgradeEvents[0]).toBe('gate:closed');
+    expect(downgradeEvents.filter((event) => event.startsWith('deploy:'))).toHaveLength(8);
+    expect(downgradeEvents.indexOf('gate:open')).toBeGreaterThan(
+      downgradeEvents.lastIndexOf(`deploy:${deployment.resources.dispatchWorker}`),
+    );
+    expect(downgradeEvents.indexOf('gate:open')).toBeGreaterThan(
+      downgradeEvents.indexOf('cutover'),
+    );
+    expect(downgraded.manifest.usageProtocolVersion).toBe(0);
 
     const repairedWorkerConfigs: Array<Record<string, unknown>> = [];
     const repairEvents: Array<string> = [];

@@ -6,6 +6,7 @@ export const PLATFORM_DISABLED_VALUE = 'disabled';
 export const PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY = '__void/platform/installation/v1';
 export const PLATFORM_R2_OWNERSHIP_MARKER_KEY = '__void/platform/ownership/v1';
 export const PLATFORM_RESOURCE_OWNERSHIP_SCHEMA_VERSION = 1 as const;
+export const PLATFORM_USAGE_PROTOCOL_VERSION = 1 as const;
 
 export type InstallationStatus =
   | 'draft'
@@ -84,6 +85,8 @@ export type PlatformInstallationManifest = Readonly<{
   status: InstallationStatus;
   steps: ReadonlyArray<InstallationStep>;
   updatedAt: string;
+  /** Last usage protocol proven live across the installed Worker set. */
+  usageProtocolVersion: 0 | 1;
 }>;
 
 export type PlatformResourceOwnershipMarker = Readonly<{
@@ -227,6 +230,7 @@ export function createPlatformInstallationManifest(input: {
   id: string;
   ownershipNonce: string;
   platformVersion: string;
+  usageProtocolVersion?: 0 | 1;
 }): PlatformInstallationManifest {
   const createdAt = assertTimestamp(input.createdAt, 'createdAt');
   if (!/^[a-z0-9][a-z0-9-]{7,79}$/.test(input.id)) {
@@ -255,6 +259,7 @@ export function createPlatformInstallationManifest(input: {
     status: 'draft',
     steps: [],
     updatedAt: createdAt,
+    usageProtocolVersion: input.usageProtocolVersion ?? 0,
   };
 }
 
@@ -378,6 +383,7 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
     id: requiredString(value.id, 'id'),
     ownershipNonce: requiredString(value.ownershipNonce, 'ownershipNonce'),
     platformVersion: requiredString(value.platformVersion, 'platformVersion'),
+    usageProtocolVersion: parseUsageProtocolVersion(value.usageProtocolVersion),
   });
   const runtime = parsePlatformRuntimeProvenance(value.runtime);
   const updatedAt = assertTimestamp(requiredString(value.updatedAt, 'updatedAt'), 'updatedAt');
@@ -446,6 +452,16 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
     );
   }
   return { ...next, updatedAt };
+}
+
+function parseUsageProtocolVersion(value: unknown): 0 | 1 {
+  if (value === undefined || value === 0) {
+    return 0;
+  }
+  if (value === 1) {
+    return 1;
+  }
+  throw new Error('usageProtocolVersion must be 0 or 1.');
 }
 
 function parsePlatformRuntimeProvenance(value: unknown): PlatformRuntimeProvenance | null {

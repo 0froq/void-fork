@@ -89,6 +89,8 @@ Direct Cloudflare deployments also support D1, KV, R2, Queues, Hyperdrive, auth,
 
 Self-hosted platform upgrades verify every packaged PostgreSQL migration and require the live Drizzle history to be an exact prefix. Pending SQL is allowed only for an explicitly attested old-version/schema compatibility edge, runs in one transaction, and leaves the old Worker version authoritative until the target runtime passes discovery and health checks.
 
+An upgrade that changes the authenticated usage protocol briefly gates application traffic while it verifies the complete Worker set. An interruption leaves the gate closed for the next resumable upgrade instead of enabling an unsigned compatibility path.
+
 ## Database Model
 
 `void/db` is Drizzle-first.
