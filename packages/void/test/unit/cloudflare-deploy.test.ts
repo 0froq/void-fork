@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { log } from '@clack/prompts';
 import { dirname, join } from 'pathslash';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { readCloudflareLink } from '../../src/cli/cloudflare-link.ts';
 import {
   assertMigrationsProduceAuthSchema,
   assertNoConfigOverrideInProjectDotenv,
@@ -526,6 +527,46 @@ describe('existing Cloudflare site handoff', () => {
     await runCloudflareDeploy(root, {}, silentCliLog, deps);
     expect(readExistingWorker).toHaveBeenCalledTimes(2);
     expect(existsSync(join(root, '.void/cloudflare-link.json'))).toBe(false);
+  });
+  it('retries only through candidates recorded after uploaded Worker validation', async () => {
+    const root = site();
+    const activateVersion = vi
+      .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
+      .mockImplementationOnce(async (options) => {
+        await options.validateUploadedVersion?.('candidate');
+        await options.recordVerifiedCandidate?.('candidate');
+        return {
+          ok: false,
+          reason: 'readiness-failed',
+          versionId: 'candidate',
+          previousVersionId: 'original',
+          rollback: 'not-needed',
+        };
+      })
+      .mockImplementationOnce(async (options) => {
+        expect(options.trustedInheritanceVersionIds).toEqual(['candidate']);
+        return {
+          ok: true,
+          versionId: 'retry',
+          previousVersionId: 'original',
+          previewUrl: 'https://site.example.com',
+        };
+      });
+    const { deps } = harness({
+      readExistingWorker: async () => existing,
+      runBuild: () => build(root),
+      activateVersion,
+    });
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(readCloudflareLink(root)?.candidateReceipt).toEqual({
+      parentVersionId: 'original',
+      versionIds: ['candidate'],
+    });
+    await runCloudflareDeploy(root, {}, silentCliLog, deps);
+    expect(activateVersion).toHaveBeenCalledTimes(2);
+    expect(readCloudflareLink(root)).toBeNull();
   });
   it('rejects a newly inferred resource before provisioning and build', async () => {
     const root = site();

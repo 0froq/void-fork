@@ -123,6 +123,7 @@ import {
   readCloudflareLink,
   prepareExistingCloudflareDeploy,
   completeCloudflareLink,
+  recordCloudflareCandidate,
 } from './cloudflare-link.ts';
 import { createCloudflareEmptyDomainPublisher } from './cloudflare-operations.ts';
 import {
@@ -5107,6 +5108,7 @@ export async function runCloudflareDeploy(
     ((projectRoot) => readGeneratedDeployConfig(projectRoot).path)
   )(root);
   const queueConsumerCleanup = readWranglerManagedQueueCleanupCandidates(configPath);
+  const candidateReceipt = readCloudflareLink(root)?.candidateReceipt;
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: assertUploaderStillPinned,
@@ -5114,6 +5116,10 @@ export async function runCloudflareDeploy(
     configPath: generatedConfigPath,
     preserveTriggers: existingWorker !== null,
     expectedPreviousVersionId: existingWorker?.versionId,
+    trustedInheritanceVersionIds:
+      existingWorker && candidateReceipt?.parentVersionId === existingWorker.versionId
+        ? candidateReceipt.versionIds
+        : undefined,
     validateUploadedVersion: existingWorker
       ? async (versionId) => {
           if (!assertUploaderStillPinned()) {
@@ -5127,6 +5133,18 @@ export async function runCloudflareDeploy(
           });
           assertCloudflareBindingsPreserved(existingWorker, uploaded);
         }
+      : undefined,
+    recordVerifiedCandidate: existingWorker
+      ? (versionId) =>
+          recordCloudflareCandidate(
+            root,
+            {
+              accountId,
+              workerName,
+              parentVersionId: existingWorker.versionId,
+            },
+            versionId,
+          )
       : undefined,
     message: encodeCloudflareVersionMessage(
       migrations.map((migration) => migration.name),
@@ -5682,12 +5700,17 @@ async function runCloudflareStaticDeploy(
   });
 
   const queueConsumerCleanup = readWranglerManagedQueueCleanupCandidates(configPath);
+  const candidateReceipt = readCloudflareLink(root)?.candidateReceipt;
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: uploaderIsPinned,
     configPath: staticConfigPath,
     preserveTriggers: existingWorker !== null,
     expectedPreviousVersionId: existingWorker?.versionId,
+    trustedInheritanceVersionIds:
+      existingWorker && candidateReceipt?.parentVersionId === existingWorker.versionId
+        ? candidateReceipt.versionIds
+        : undefined,
     validateUploadedVersion: existingWorker
       ? async (versionId) => {
           if (!uploaderIsPinned()) {
@@ -5701,6 +5724,18 @@ async function runCloudflareStaticDeploy(
           });
           assertCloudflareBindingsPreserved(existingWorker, uploaded);
         }
+      : undefined,
+    recordVerifiedCandidate: existingWorker
+      ? (versionId) =>
+          recordCloudflareCandidate(
+            root,
+            {
+              accountId,
+              workerName,
+              parentVersionId: existingWorker.versionId,
+            },
+            versionId,
+          )
       : undefined,
     workerName,
     message: encodeCloudflareVersionMessage([], {

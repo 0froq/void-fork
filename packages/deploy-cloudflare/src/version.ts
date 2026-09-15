@@ -96,7 +96,6 @@ type ProductionDeployment = Readonly<{
 type RecentCloudflareVersion = Readonly<{
   id: string;
   number: number;
-  voidOwned: boolean;
 }>;
 
 /** Encode migration state into Cloudflare's version annotation for safe rollback diagnostics. */
@@ -634,6 +633,8 @@ export async function activateCloudflareVersion(options: {
   /** Reuse an inspected Worker without republishing its domains or other triggers. */
   preserveTriggers?: boolean;
   expectedPreviousVersionId?: string;
+  trustedInheritanceVersionIds?: ReadonlyArray<string>;
+  recordVerifiedCandidate?: (versionId: string) => void | Promise<void>;
   validateUploadedVersion?: (versionId: string) => Promise<void>;
   runWrangler: CloudflareCommandRunner;
   verifyUploader: () => boolean;
@@ -701,13 +702,13 @@ export async function activateCloudflareVersion(options: {
     }
     const activeIndex = recent.findIndex((version) => version.id === previous.versionId);
     const inheritedChain = activeIndex < 0 ? [] : recent.slice(activeIndex);
+    const inheritedCandidates = inheritedChain.slice(1).map((version) => version.id);
     const safeInheritanceChain =
       inheritedChain.length > 0 &&
       inheritedChain.every(
-        (version, index) =>
-          (index === 0 || version.voidOwned) &&
-          (index === 0 || version.number === inheritedChain[index - 1]!.number + 1),
-      );
+        (version, index) => index === 0 || version.number === inheritedChain[index - 1]!.number + 1,
+      ) &&
+      arraysEqual(inheritedCandidates, options.trustedInheritanceVersionIds ?? []);
     if (!safeInheritanceChain) {
       return {
         ok: false,
@@ -869,6 +870,12 @@ export async function activateCloudflareVersion(options: {
     }
   }
   await options.validateUploadedVersion?.(versionId);
+  if (options.recordVerifiedCandidate) {
+    if (!options.validateUploadedVersion) {
+      throw new Error('A Worker candidate cannot be recorded without validating its upload.');
+    }
+    await options.recordVerifiedCandidate(versionId);
+  }
   const reportedPreviewUrl = output.match(PREVIEW_URL_RE)?.[1];
   let authenticatedWorkersDevSubdomain = reportedPreviewUrl
     ? extractWorkersDevSubdomain(reportedPreviewUrl)
@@ -1331,15 +1338,10 @@ async function readRecentCloudflareVersionIds(
     ) {
       return null;
     }
-    return versions.map((version) => {
-      const annotations = isRecord(version.annotations) ? version.annotations : {};
-      const message = annotations['workers/message'];
-      return {
-        id: version.id as string,
-        number: version.number as number,
-        voidOwned: typeof message === 'string' && parseCloudflareVersionMessage(message) !== null,
-      };
-    });
+    return versions.map((version) => ({
+      id: version.id as string,
+      number: version.number as number,
+    }));
   } catch {
     return null;
   }

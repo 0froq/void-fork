@@ -232,6 +232,37 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
   });
 
+  it('does not trust an unpublished version with a copied Void annotation', async () => {
+    const unpublished = '44444444-4444-4444-8444-444444444444';
+    const runWrangler = runner({
+      versions: ok(
+        JSON.stringify([
+          { id: CURRENT, number: 1 },
+          {
+            id: unpublished,
+            number: 2,
+            annotations: { 'workers/message': encodeCloudflareVersionMessage([]) },
+          },
+        ]),
+      ),
+    });
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        preserveTriggers: true,
+        expectedPreviousVersionId: CURRENT,
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'inheritance-source-changed',
+      activeVersionId: unpublished,
+    });
+    expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
+  });
+
   it('does not activate when another version is uploaded during secret inheritance', async () => {
     const concurrent = '44444444-4444-4444-8444-444444444444';
     let listed = 0;
@@ -298,10 +329,9 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'deploy')).toBe(false);
   });
 
-  it('can retry through a consecutive inactive version uploaded by Void', async () => {
+  it('can retry through a consecutive inactive version with a local verification receipt', async () => {
     let listed = 0;
     const failedCandidate = CONCURRENT;
-    const failedMessage = encodeCloudflareVersionMessage([]);
     const base = runner();
     const runWrangler = vi.fn((args: Array<string>) => {
       if (args[0] === 'versions' && args[1] === 'list') {
@@ -311,19 +341,11 @@ describe('Cloudflare version activation', () => {
             listed === 1
               ? [
                   { id: CURRENT, number: 1 },
-                  {
-                    id: failedCandidate,
-                    number: 2,
-                    annotations: { 'workers/message': failedMessage },
-                  },
+                  { id: failedCandidate, number: 2 },
                 ]
               : [
                   { id: CURRENT, number: 1 },
-                  {
-                    id: failedCandidate,
-                    number: 2,
-                    annotations: { 'workers/message': failedMessage },
-                  },
+                  { id: failedCandidate, number: 2 },
                   { id: NEXT, number: 3 },
                 ],
           ),
@@ -338,6 +360,7 @@ describe('Cloudflare version activation', () => {
         verifyUploader: () => true,
         preserveTriggers: true,
         expectedPreviousVersionId: CURRENT,
+        trustedInheritanceVersionIds: [failedCandidate],
         message: encodeCloudflareVersionMessage([]),
         fetch: async () => Response.json({ ready: true }),
       }),

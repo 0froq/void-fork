@@ -12,7 +12,14 @@ import type { RunDeployOptions } from './deploy.ts';
 import { readDeploymentPlatform, writeDeploymentPlatform } from './project.ts';
 
 const LINK_FILE = '.void/cloudflare-link.json';
-export type CloudflareLink = { accountId: string; workerName: string };
+export type CloudflareLink = {
+  accountId: string;
+  workerName: string;
+  candidateReceipt?: {
+    parentVersionId: string;
+    versionIds: Array<string>;
+  };
+};
 
 /** A pending handoff survives a failed build, so retrying cannot provision replacements. */
 export function readCloudflareLink(root: string): CloudflareLink | null {
@@ -22,13 +29,38 @@ export function readCloudflareLink(root: string): CloudflareLink | null {
   }
   try {
     const value = JSON.parse(readFileSync(path, 'utf8'));
+    const receipt = value.candidateReceipt;
+    const validReceipt =
+      receipt === undefined ||
+      (typeof receipt === 'object' &&
+        receipt !== null &&
+        typeof receipt.parentVersionId === 'string' &&
+        receipt.parentVersionId.length > 0 &&
+        Array.isArray(receipt.versionIds) &&
+        receipt.versionIds.length > 0 &&
+        receipt.versionIds.every(
+          (versionId: unknown) => typeof versionId === 'string' && versionId.length > 0,
+        ) &&
+        new Set(receipt.versionIds).size === receipt.versionIds.length);
     if (
       typeof value.accountId === 'string' &&
       value.accountId &&
       typeof value.workerName === 'string' &&
-      value.workerName
+      value.workerName &&
+      validReceipt
     ) {
-      return value;
+      return {
+        accountId: value.accountId,
+        workerName: value.workerName,
+        ...(receipt === undefined
+          ? {}
+          : {
+              candidateReceipt: {
+                parentVersionId: receipt.parentVersionId,
+                versionIds: [...receipt.versionIds],
+              },
+            }),
+      };
     }
   } catch {
     /* Invalid state must never turn into an ordinary provisioning deploy. */
@@ -42,6 +74,31 @@ export function saveCloudflareLink(root: string, link: CloudflareLink): void {
   mkdirSync(join(root, '.void'), { recursive: true });
   writeFileSync(join(root, LINK_FILE), `${JSON.stringify(link)}\n`, { mode: 0o600 });
   writeDeploymentPlatform(root, 'cloudflare');
+}
+
+/** Trust a failed candidate on retry only after this process validated its bindings and handlers. */
+export function recordCloudflareCandidate(
+  root: string,
+  target: { accountId: string; workerName: string; parentVersionId: string },
+  versionId: string,
+): void {
+  const link = readCloudflareLink(root);
+  if (
+    !link ||
+    link.accountId !== target.accountId ||
+    link.workerName !== target.workerName ||
+    (link.candidateReceipt && link.candidateReceipt.parentVersionId !== target.parentVersionId)
+  ) {
+    throw new Error('The pending Cloudflare handoff changed before its candidate was recorded.');
+  }
+  const versionIds = [...(link.candidateReceipt?.versionIds ?? [])];
+  if (!versionIds.includes(versionId)) {
+    versionIds.push(versionId);
+  }
+  saveCloudflareLink(root, {
+    ...link,
+    candidateReceipt: { parentVersionId: target.parentVersionId, versionIds },
+  });
 }
 
 export function completeCloudflareLink(root: string): void {
@@ -94,7 +151,11 @@ export async function prepareExistingCloudflareDeploy(options: {
     );
   }
   // Save the guard before the destination so a retry cannot enter provisioning unguarded.
-  saveCloudflareLink(options.root, { accountId: options.accountId, workerName: config.name });
+  saveCloudflareLink(options.root, {
+    ...(pending ?? {}),
+    accountId: options.accountId,
+    workerName: config.name,
+  });
   writeFileSync(options.configPath, updated);
   return existing;
 }
