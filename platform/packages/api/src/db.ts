@@ -46,6 +46,11 @@ import {
 } from './schema.ts';
 import type { DomainVerificationData, GitHubInstallationRepository } from './schema.ts';
 import type { AllowlistEntry } from './signup-allowlist.ts';
+import {
+  isAdminSuspended,
+  REASON_REQUESTS_EXCEEDED,
+  REASON_SANDBOX_RUNTIME_EXCEEDED,
+} from './suspension.ts';
 import type { PlanId } from './tiers.ts';
 import type {
   Build,
@@ -2249,8 +2254,85 @@ export async function getCliVersionDeploymentStats(
     .orderBy(desc(sql`count(*)`));
 }
 
+export class LastAdminError extends Error {
+  constructor() {
+    super('The last active administrator cannot be deleted, suspended, or demoted.');
+    this.name = 'LastAdminError';
+  }
+}
+
+/** Keep this transaction limited to database work, never external cleanup. */
+async function withAdminRemovalGuard<T>(
+  db: Db,
+  id: string,
+  change: (db: Db, user: User | null) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    // Serialize the check and access change with other removals and bootstrap.
+    // A count outside this lock lets two administrators remove each other.
+    await tx.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
+    const transactionDb = tx as unknown as Db;
+    const user = await getUser(transactionDb, id);
+    if (user?.role === 'admin') {
+      const others = await tx
+        .select({ suspended_reason: users.suspended_reason })
+        .from(users)
+        .where(and(eq(users.role, 'admin'), ne(users.id, id)));
+      if (!others.some((admin) => !isAdminSuspended(admin.suspended_reason))) {
+        throw new LastAdminError();
+      }
+    }
+    return change(transactionDb, user);
+  });
+}
+
+/**
+ * Revoke administrator access before external deletion/suspension work begins.
+ * This durable change prevents another removal from counting this administrator
+ * while cleanup is in flight. Keep it on cleanup failure so retries stay safe.
+ */
+export async function prepareUserRemoval(
+  db: Db,
+  id: string,
+  action: { kind: 'delete' } | { kind: 'suspend'; reason: string },
+  dryRun = false,
+): Promise<User | null> {
+  return withAdminRemovalGuard(db, id, async (tx, user) => {
+    if (user?.role === 'admin' && !dryRun) {
+      await tx
+        .update(users)
+        .set(action.kind === 'delete' ? { role: 'user' } : { suspended_reason: action.reason })
+        .where(eq(users.id, id));
+    }
+    return user;
+  });
+}
+
 export async function suspendUser(db: Db, id: string, reason: string): Promise<void> {
-  await db.update(users).set({ suspended_reason: reason }).where(eq(users.id, id));
+  const suspend = async (target: Db) => {
+    await target.update(users).set({ suspended_reason: reason }).where(eq(users.id, id));
+  };
+  if (isAdminSuspended(reason)) {
+    await withAdminRemovalGuard(db, id, suspend);
+  } else {
+    // Usage limits suspend app traffic, not administrator access. A delayed
+    // quota write must not undo an administrator's manual access revocation.
+    await db
+      .update(users)
+      .set({ suspended_reason: reason })
+      .where(
+        and(
+          eq(users.id, id),
+          or(
+            isNull(users.suspended_reason),
+            inArray(users.suspended_reason, [
+              REASON_REQUESTS_EXCEEDED,
+              REASON_SANDBOX_RUNTIME_EXCEEDED,
+            ]),
+          ),
+        ),
+      );
+  }
 }
 
 export async function unsuspendUser(db: Db, id: string): Promise<void> {
@@ -2258,11 +2340,20 @@ export async function unsuspendUser(db: Db, id: string): Promise<void> {
 }
 
 export async function updateUserRole(db: Db, id: string, role: 'user' | 'admin'): Promise<void> {
-  await db.update(users).set({ role }).where(eq(users.id, id));
+  const update = async (target: Db) => {
+    await target.update(users).set({ role }).where(eq(users.id, id));
+  };
+  if (role === 'user') {
+    await withAdminRemovalGuard(db, id, update);
+  } else {
+    await update(db);
+  }
 }
 
 export async function deleteUser(db: Db, id: string): Promise<void> {
-  await db.delete(users).where(eq(users.id, id));
+  await withAdminRemovalGuard(db, id, async (tx) => {
+    await tx.delete(users).where(eq(users.id, id));
+  });
 }
 
 export async function getAllProjects(

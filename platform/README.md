@@ -110,6 +110,11 @@ is served at `/operator/v1` and records changes in `operator_events`. Apply
 `0033_operator_sessions_and_events` before deploying the API; the migration adds
 tables and indexes that remain compatible with existing Workers.
 
+Both interfaces prevent deletion or suspension of the last active administrator.
+Allowed administrator removals revoke access before resource cleanup and preserve
+that revocation if cleanup fails, so concurrent removals cannot lock out the
+remaining administrator.
+
 ## Local Development
 
 With a local PostgreSQL server running, build the shared packages and set up the API:

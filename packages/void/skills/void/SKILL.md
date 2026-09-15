@@ -26,6 +26,9 @@ Platform administration uses `void platform auth login` and the nested
 hosted-only `worker` groups. Open the operator section of `docs/reference/cli.md`
 before running these commands. Use `--json` for structured reads and `--plan`
 to inspect mutations; approved noninteractive mutations require `--yes`.
+The last active administrator cannot be deleted or suspended. If an allowed
+administrator removal reports partial cleanup, access remains revoked; use a
+remaining administrator to inspect the result and retry.
 Operator credentials are separate from application deployment credentials and
 ignore repository platform selections. `VOID_OPERATOR_TOKEN` requires an
 explicit `VOID_API_URL` or `--connection`; credentials must never be written to

@@ -384,6 +384,11 @@ void platform user delete <id>
 
 Suspending a user blocks their applications. Deleting a user also deletes their project resources. A plan change updates resource limits while preserving any administrator suspension.
 
+The last active administrator cannot be deleted or suspended. Both previews and
+actual mutations enforce this rule, including in the browser admin UI. Allowed
+administrator removals revoke administrator access before resource cleanup; if
+cleanup fails, access stays revoked and the partial result reports it.
+
 #### Projects {#operator-projects}
 
 List projects across the platform, filter them by owner, or inspect one project's resources:

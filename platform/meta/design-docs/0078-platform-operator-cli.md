@@ -90,3 +90,25 @@ commits, with regression coverage.
   Sol/high agents fixed the reported P2 issues individually. A final focused
   Astra/high review of the last four commits found no P1 or actionable P2
   regressions.
+
+## Last-administrator protection
+
+The beta review found that user deletion and suspension could remove the only
+administrator. The requested fix prohibits removing the last active
+administrator; it adds no recovery or role-promotion endpoint.
+
+A short PostgreSQL transaction locks user writes, verifies another administrator
+still has access, and revokes the target's access before external cleanup.
+Deletion first demotes the target; suspension persists its manual reason. Those
+changes survive failed cleanup and partial results report them. Project deletion
+keeps its existing independently committed checkpoints. Low-level deletion,
+demotion, and suspension helpers enforce the same guard, and automatic quota
+updates cannot overwrite a manual suspension. Dry runs perform the check without
+revoking access.
+
+Verification: 14 new regressions passed against a disposable PostgreSQL instance,
+including concurrent removals, browser/CLI parity, quota ordering, and failed
+cleanup. The full suite passed with 428 files, 8,172 passing tests, and 9 skipped
+tests (live Cloudflare and unavailable Deno cases). All 29 workspace typechecks,
+the packaged CLI/runtime and documentation builds, lint, and formatting passed. A focused review
+found no remaining blocking issue after the quota-ordering correction.

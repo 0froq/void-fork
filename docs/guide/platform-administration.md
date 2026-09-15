@@ -102,6 +102,16 @@ void platform project show <project-id>
 
 Project details include resources, domains, and recent builds and deployments. The [command reference](../reference/cli.md#operator-commands) also covers suspending and restoring users, deleting projects, and removing accounts.
 
+The last active administrator cannot be deleted or suspended, including through
+the browser admin UI. Another administrator must still have access. Automatic
+usage limits do not remove administrator access and do not count as a manual
+suspension.
+
+When removing another administrator, Void revokes their administrator access
+before changing application traffic or deleting resources. If cleanup fails,
+access stays revoked and the error describes the partial result. A remaining
+administrator can inspect it and retry cleanup.
+
 ## Previewing Changes
 
 Commands that change the platform show the affected objects before asking for confirmation. To inspect a change without applying it, add `--plan`:

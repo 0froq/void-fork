@@ -132,6 +132,15 @@ to 32 KiB, list pages to 100 rows, and responses disable caching.
 Integration tests cover operator authentication, tenant operations, operational
 parity, dry runs, and capability guards in `test/integration/operator-*.test.ts`.
 
+User deletion, demotion, and manual suspension preserve at least one active
+administrator. Short PostgreSQL transactions serialize the check and access
+revocation before external cleanup. Deleting an administrator first demotes the
+account; failed cleanup retains that revocation and reports it as a partial
+result. Project teardown checkpoints still commit independently. Automatic quota
+suspensions retain administrator access and cannot overwrite manual suspension.
+The CLI and browser UI return the same last-administrator rejection, with no
+recovery or promotion bypass.
+
 ### Admin UI
 
 - `/admin/users`
