@@ -86,3 +86,24 @@ their current npm versions.
 - [ ] Final full verification passed.
 - [ ] Four GPT-5.6 Sol/high agents reviewed the complete commit range.
 - [ ] Review P1 findings fixed individually and verified again.
+
+## Review follow-ups
+
+The first review pass covers `f41bfffa..23eec36d`. Builds, workspace checks,
+lint, formatting, and the full suite passed (8,146 tests, 6 skipped). The review
+identified the following remaining work:
+
+- [x] Validate explicit deploy tokens through the shared origin guard while
+      preserving GitHub OIDC precedence.
+- [ ] Do not report successful trigger recovery from an opaque handoff snapshot.
+- [ ] Tie managed Sandbox admission, lifetime, and metering to a platform-owned
+      controller. Tenant-owned acquire/release calls cannot establish authority,
+      and lazy reservations must not be charged as running containers.
+
+The Sandbox design decision is pending user input. The proposed complete cutover
+uses a fixed platform-owned runtime Worker per Sandbox deployment, preserving
+custom registry images and sizes. Tenant code receives only a restricted service
+interface used by `getSandbox()`. Raw namespace access remains available for
+native Cloudflare deployments; managed deployments cannot receive the raw
+controller stub or lifecycle methods. This adds one regular Worker per managed
+Sandbox deployment and requires owned-resource cleanup and legacy rollout guards.

@@ -6474,16 +6474,13 @@ async function runManagedDeploy(
       //   3. saved keychain / config file  (local dev)
       //
       // OIDC MUST beat an AMBIENT saved token here. `getToken()` returns the env
-      // token AND a keychain/config-file token, so calling it first would let a
-      // leftover `void auth login` credential on a self-hosted / reused runner
-      // preempt OIDC — silently deploying with a broad, long-lived `aud:'api'`
-      // user token (or failing outright if it is stale) instead of the
-      // short-lived, project-scoped `aud:'deploy'` token the workflow's
-      // `id-token: write` intends. So we read the EXPLICIT env directly (NOT via
-      // getToken), then OIDC, then the saved token. This matches the old
-      // scaffold, which exported the freshly exchanged token as `VOID_TOKEN`
-      // before `void deploy` so the deploy token always won inside Actions.
-      let token = process.env.VOID_TOKEN ?? null;
+      // token AND a keychain/config-file token, so calling it unconditionally
+      // first would let a leftover `void auth login` credential on a self-hosted
+      // / reused runner preempt OIDC. Only consult it before OIDC when the user
+      // supplied an explicit env token; that still applies the shared origin
+      // guard before any platform client can receive the credential. With no env
+      // token, mint OIDC first and consult the saved credential only as fallback.
+      let token = process.env.VOID_TOKEN ? getToken(root) : null;
       if (!token && isGithubActionsOidcAvailable()) {
         // Running inside GitHub Actions with no explicit VOID_TOKEN: mint a
         // GitHub OIDC token and exchange it for a short-lived, project-scoped

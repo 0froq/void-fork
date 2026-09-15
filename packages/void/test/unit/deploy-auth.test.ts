@@ -238,6 +238,48 @@ describe('runDeploy GitHub Actions OIDC exchange', () => {
     expect(process.env.VOID_TOKEN).toBe('explicit-env-token');
   });
 
+  it('rejects an explicit token before constructing a client when a custom origin is selected', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-deploy-origin-guard-'));
+    const registry = join(root, 'registry');
+    const savedRegistry = process.env.VOID_PLATFORM_REGISTRY_DIR;
+    const fetcher = vi.spyOn(globalThis, 'fetch');
+    try {
+      process.env.VOID_PLATFORM_REGISTRY_DIR = registry;
+      process.env.VOID_TOKEN = 'unbound-production-token';
+      const { getToken: realGetToken } =
+        await vi.importActual<typeof import('../../src/cli/auth.ts')>('../../src/cli/auth.ts');
+      const { savePlatformConnection } = await vi.importActual<
+        typeof import('../../src/cli/platform-registry.ts')
+      >('../../src/cli/platform-registry.ts');
+      savePlatformConnection({
+        accountId: null,
+        apiUrl: 'https://platform.example.test',
+        applicationDomain: 'apps.example.test',
+        displayName: 'Company Void',
+        installationId: null,
+        kind: 'connected',
+        proxyUrl: 'https://proxy.example.test',
+      });
+      mockGetToken.mockImplementation((tokenRoot: string) => realGetToken(tokenRoot));
+
+      await expect(runDeploy(root, { platform: 'void', projectSlug: 'my-app' })).rejects.toThrow(
+        'VOID_TOKEN is not bound to https://platform.example.test',
+      );
+
+      expect(mockGetToken).toHaveBeenCalledWith(root);
+      expect(mockClientCtor).not.toHaveBeenCalled();
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      fetcher.mockRestore();
+      if (savedRegistry === undefined) {
+        delete process.env.VOID_PLATFORM_REGISTRY_DIR;
+      } else {
+        process.env.VOID_PLATFORM_REGISTRY_DIR = savedRegistry;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('errors when in Actions but the project is unknown', async () => {
     mockGetToken.mockReturnValue(null);
     mockIsOidcAvailable.mockReturnValue(true);
