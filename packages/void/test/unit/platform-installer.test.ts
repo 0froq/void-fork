@@ -50,6 +50,7 @@ import {
   retainReplacedInstallationResource,
   resolvePlatformPreviousTriggerConfig,
   resolveBootstrapGitHubId,
+  restorePlatformWorkerDeployment,
   stablePublicEndpointState,
   verifyPlatformHealth,
   withConditionalPlatformWorkerCreate,
@@ -376,6 +377,176 @@ describe('platform installer', () => {
     expect(
       classifyPlatformWorkerDeploymentLineage(raced, 'version-ours', 'deployment-previous'),
     ).toEqual({ kind: 'concurrent-after' });
+  });
+
+  it('restores the exact prior traffic split with supported Wrangler version activation', async () => {
+    const previous = {
+      created_on: '2026-09-15T01:00:00.000Z',
+      id: 'deployment-intervening',
+      versions: [
+        { percentage: 25, version_id: 'version-a' },
+        { percentage: 75, version_id: 'version-b' },
+      ],
+    };
+    const ours = {
+      created_on: '2026-09-15T01:01:00.000Z',
+      id: 'deployment-ours',
+      versions: [{ percentage: 100, version_id: 'version-ours' }],
+    };
+    const commands: Array<ReadonlyArray<string>> = [];
+    let restored = false;
+    await restorePlatformWorkerDeployment({
+      accountId: 'account',
+      configPath: '/tmp/wrangler.json',
+      directory: '/tmp',
+      expectedActiveDeploymentId: 'deployment-ours',
+      expectedActiveVersionId: 'version-ours',
+      restoration: {
+        id: previous.id,
+        versions: previous.versions.map((version) => ({
+          percentage: version.percentage,
+          versionId: version.version_id,
+        })),
+      },
+      runner: async (args) => {
+        commands.push(args);
+        if (args[0] === 'versions') {
+          restored = true;
+          return { status: 0, stderr: '', stdout: '' };
+        }
+        return {
+          status: 0,
+          stderr: '',
+          stdout: JSON.stringify(
+            restored
+              ? [
+                  previous,
+                  ours,
+                  {
+                    ...previous,
+                    created_on: '2026-09-15T01:02:00.000Z',
+                    id: 'deployment-restored',
+                  },
+                ]
+              : [previous, ours],
+          ),
+        };
+      },
+      workerName: 'void-api',
+    });
+
+    expect(commands[1]).toEqual([
+      'versions',
+      'deploy',
+      'version-a@25',
+      'version-b@75',
+      '--config',
+      '/tmp/wrangler.json',
+      '--message',
+      'Void platform restoration deployment-intervening',
+      '--yes',
+    ]);
+    expect(commands.some((args) => args.includes('delete'))).toBe(false);
+  });
+
+  it('does not restore over a known newer deployment', async () => {
+    const commands: Array<ReadonlyArray<string>> = [];
+    await expect(
+      restorePlatformWorkerDeployment({
+        accountId: 'account',
+        configPath: '/tmp/wrangler.json',
+        directory: '/tmp',
+        expectedActiveDeploymentId: 'deployment-ours',
+        expectedActiveVersionId: 'version-ours',
+        restoration: {
+          id: 'deployment-intervening',
+          versions: [{ percentage: 100, versionId: 'version-intervening' }],
+        },
+        runner: async (args) => {
+          commands.push(args);
+          return {
+            status: 0,
+            stderr: '',
+            stdout: JSON.stringify([
+              {
+                created_on: '2026-09-15T01:00:00.000Z',
+                id: 'deployment-intervening',
+                versions: [{ percentage: 100, version_id: 'version-intervening' }],
+              },
+              {
+                created_on: '2026-09-15T01:01:00.000Z',
+                id: 'deployment-ours',
+                versions: [{ percentage: 100, version_id: 'version-ours' }],
+              },
+              {
+                created_on: '2026-09-15T01:02:00.000Z',
+                id: 'deployment-newer',
+                versions: [{ percentage: 100, version_id: 'version-newer' }],
+              },
+            ]),
+          };
+        },
+        workerName: 'void-api',
+      }),
+    ).rejects.toThrow('refusing to overwrite the newer deployment');
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.slice(0, 2)).toEqual(['deployments', 'list']);
+  });
+
+  it('stops when restoration is superseded without attempting another mutation', async () => {
+    const previous = {
+      created_on: '2026-09-15T01:00:00.000Z',
+      id: 'deployment-previous',
+      versions: [{ percentage: 100, version_id: 'version-previous' }],
+    };
+    const ours = {
+      created_on: '2026-09-15T01:01:00.000Z',
+      id: 'deployment-ours',
+      versions: [{ percentage: 100, version_id: 'version-ours' }],
+    };
+    const commands: Array<ReadonlyArray<string>> = [];
+    let activationAttempted = false;
+    await expect(
+      restorePlatformWorkerDeployment({
+        accountId: 'account',
+        configPath: '/tmp/wrangler.json',
+        directory: '/tmp',
+        expectedActiveDeploymentId: 'deployment-ours',
+        expectedActiveVersionId: 'version-ours',
+        restoration: {
+          id: 'deployment-previous',
+          versions: [{ percentage: 100, versionId: 'version-previous' }],
+        },
+        runner: async (args) => {
+          commands.push(args);
+          if (args[0] === 'versions') {
+            activationAttempted = true;
+            return { status: 0, stderr: '', stdout: '' };
+          }
+          return {
+            status: 0,
+            stderr: '',
+            stdout: JSON.stringify(
+              activationAttempted
+                ? [
+                    previous,
+                    ours,
+                    {
+                      created_on: '2026-09-15T01:02:00.000Z',
+                      id: 'deployment-newer',
+                      versions: [{ percentage: 100, version_id: 'version-newer' }],
+                    },
+                  ]
+                : [previous, ours],
+            ),
+          };
+        },
+        workerName: 'void-api',
+      }),
+    ).rejects.toThrow('restoration was superseded');
+
+    expect(commands.filter((args) => args[0] === 'versions')).toHaveLength(1);
+    expect(commands.some((args) => args.includes('delete'))).toBe(false);
   });
 
   it('binds an existing Worker snapshot to its immutable ownership marker', async () => {

@@ -740,6 +740,7 @@ export async function installPlatform(
             nextTriggers: readTriggerConfigFromObject(recoveryTraffic.wranglerConfig),
             previousConfig: previousRecoveryConfig,
             previousCustomDomains: previousRecoveryTraffic.customDomains,
+            previousDeployment: null,
             previousTriggers: mergePreservedTriggerRoutes(
               withoutPlatformCustomDomainTriggers(snapshot.previousTriggers),
               preservedRoutes,
@@ -2235,6 +2236,7 @@ async function deployPlatformWorker(
   let activatedVersionId: string | null = null;
   let activatedDeploymentId: string | null = null;
   let uploadedVersionId: string | null = null;
+  let previousDeployment: PlatformWorkerDeployment | null = null;
   let previousDeploymentId: string | null = null;
   let previousVersionId: string | null = null;
   const nextTraffic = isolatePlatformWorkerCustomDomains(config);
@@ -2267,7 +2269,8 @@ async function deployPlatformWorker(
           `platform: Worker ${workerName} changed concurrently while its deployment lineage was inspected.`,
         );
       }
-      previousDeploymentId = deployments[0]!.id;
+      previousDeployment = deployments[0]!;
+      previousDeploymentId = previousDeployment.id;
       previousTriggers = resolvePlatformPreviousTriggerConfig(
         withoutPlatformCustomDomainTriggers(previous.triggerConfig),
         previousTriggers,
@@ -2371,29 +2374,43 @@ async function deployPlatformWorker(
     }
     activatedDeploymentId = lineage.deploymentId;
     if (lineage.kind === 'intervening') {
-      const removed = await options.runner(
-        [
-          'deployments',
-          'delete',
-          activatedDeploymentId,
-          '--config',
-          configPath,
-          '--name',
-          workerName,
-          '--yes',
-        ],
-        accountId,
-        directory,
-        true,
-      );
-      assertCleanPlatformWrangler(
-        removed,
-        `remove raced deployment ${activatedDeploymentId} from ${workerName}`,
-      );
+      const interveningDeployment = deploymentsAfterActivation[1];
       activatedVersionId = null;
       activatedDeploymentId = null;
+      if (!interveningDeployment) {
+        throw new PlatformWorkerRecoveryIncompleteError(
+          `platform: Worker ${workerName} lost its previous deployment during activation. The cutover cannot be recovered automatically.`,
+        );
+      }
+      try {
+        await restorePlatformWorkerDeployment({
+          accountId,
+          configPath,
+          directory,
+          expectedActiveDeploymentId: lineage.deploymentId,
+          expectedActiveVersionId: uploadedVersionId,
+          restoration: interveningDeployment,
+          runner: options.runner,
+          workerName,
+        });
+      } catch (recoveryError) {
+        const recoveryFailures = await recoverFailedPlatformWorkerDeployment({
+          checkpointUnsafeTraffic: options.onUnsafeTraffic,
+          closeRoutingGate: options.retainNewWorker,
+          rollback: null,
+          unsafeTraffic: true,
+        });
+        throw new PlatformWorkerRecoveryIncompleteError(
+          `platform: Worker ${workerName} changed concurrently during activation, and restoring intervening deployment ${interveningDeployment.id} failed: ${errorMessage(recoveryError)}${
+            recoveryFailures.length > 0
+              ? ` Safety recovery also failed: ${recoveryFailures.join('; ')}`
+              : ''
+          }`,
+          { cause: recoveryError },
+        );
+      }
       throw new Error(
-        `platform: Worker ${workerName} changed concurrently during activation. The installer deployment was removed and the intervening deployment was restored.`,
+        `platform: Worker ${workerName} changed concurrently during activation. The intervening deployment was restored without deleting deployment history.`,
       );
     }
     const triggers = await stabilizeCloudflareVersionTriggers({
@@ -2430,6 +2447,7 @@ async function deployPlatformWorker(
         nextTriggers,
         previousConfig: options.previousConfig,
         previousCustomDomains: previousTraffic.customDomains,
+        previousDeployment,
         previousTriggers,
         previousVersionId,
         preserveCustomDomains: false,
@@ -2460,6 +2478,7 @@ async function deployPlatformWorker(
               nextTriggers: readTriggerConfigFromObject(nextTraffic.wranglerConfig),
               previousConfig: options.previousConfig,
               previousCustomDomains: previousTraffic.customDomains,
+              previousDeployment,
               previousTriggers,
               previousVersionId,
               preserveCustomDomains: unsafeTraffic,
@@ -2524,6 +2543,7 @@ async function rollbackPlatformWorker(input: {
   nextTriggers: ReturnType<typeof readCloudflareTriggerConfig>;
   previousConfig: Record<string, unknown>;
   previousCustomDomains: ReadonlyArray<CloudflareWorkerCustomDomainOrigin>;
+  previousDeployment: PlatformWorkerDeployment | null;
   previousTriggers: ReturnType<typeof readCloudflareTriggerConfig>;
   previousVersionId: string | null;
   preserveCustomDomains: boolean;
@@ -2594,31 +2614,29 @@ async function rollbackPlatformWorker(input: {
         input.runner,
       );
       const activeDeploymentId = input.activatedDeploymentId ?? currentDeployments[0]?.id ?? null;
+      const restoration = input.previousDeployment ?? currentDeployments[1];
       if (
         !activeDeploymentId ||
         currentDeployments[0]?.id !== activeDeploymentId ||
-        !deploymentRunsOnlyVersion(currentDeployments[0], input.activatedVersionId)
+        !deploymentRunsOnlyVersion(currentDeployments[0], input.activatedVersionId) ||
+        !restoration ||
+        currentDeployments[1]?.id !== restoration.id ||
+        !deploymentRunsOnlyVersion(restoration, input.previousVersionId)
       ) {
         throw new Error(
           `Worker ${input.workerName} changed concurrently after installer deployment; refusing to alter its deployment history.`,
         );
       }
-      const restored = await input.runner(
-        [
-          'deployments',
-          'delete',
-          activeDeploymentId,
-          '--config',
-          configPath,
-          '--name',
-          input.workerName,
-          '--yes',
-        ],
-        input.accountId,
+      await restorePlatformWorkerDeployment({
+        accountId: input.accountId,
+        configPath,
         directory,
-        true,
-      );
-      assertCleanPlatformWrangler(restored, `restore ${input.workerName}`);
+        expectedActiveDeploymentId: activeDeploymentId,
+        expectedActiveVersionId: input.activatedVersionId,
+        restoration,
+        runner: input.runner,
+        workerName: input.workerName,
+      });
       const restoredVersionId = await readActivePlatformWorkerVersion(
         configPath,
         input.accountId,
@@ -2627,7 +2645,7 @@ async function rollbackPlatformWorker(input: {
       );
       if (restoredVersionId !== input.previousVersionId) {
         throw new Error(
-          `Worker ${input.workerName} did not restore immutable version ${input.previousVersionId} after removing installer deployment ${activeDeploymentId}.`,
+          `Worker ${input.workerName} did not restore immutable version ${input.previousVersionId} after rolling back installer deployment ${activeDeploymentId}.`,
         );
       }
     }
@@ -3033,6 +3051,100 @@ export async function readPlatformWorkerDeployments(
     })
     .sort((left, right) => right.createdAt - left.createdAt || left.index - right.index)
     .map(({ id, versions }) => ({ id, versions }));
+}
+
+function samePlatformWorkerTraffic(
+  left: PlatformWorkerDeployment | undefined,
+  right: PlatformWorkerDeployment,
+): boolean {
+  if (!left) {
+    return false;
+  }
+  const normalize = (deployment: PlatformWorkerDeployment) =>
+    deployment.versions
+      .filter((version) => version.percentage > 0)
+      .map((version) => `${version.versionId}@${version.percentage}`)
+      .sort();
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
+
+export async function restorePlatformWorkerDeployment(input: {
+  accountId: string;
+  configPath: string;
+  directory: string;
+  expectedActiveDeploymentId: string;
+  expectedActiveVersionId: string;
+  restoration: PlatformWorkerDeployment;
+  runner: typeof runPlatformWrangler;
+  workerName: string;
+}): Promise<void> {
+  const restorationVersions = input.restoration.versions.filter(
+    (version) => version.percentage > 0,
+  );
+  const totalPercentage = restorationVersions.reduce(
+    (total, version) => total + version.percentage,
+    0,
+  );
+  if (
+    restorationVersions.length === 0 ||
+    restorationVersions.length > 2 ||
+    restorationVersions.some(
+      (version, index) =>
+        version.percentage > 100 ||
+        restorationVersions.findIndex((entry) => entry.versionId === version.versionId) !== index,
+    ) ||
+    Math.abs(totalPercentage - 100) > 0.001
+  ) {
+    throw new Error(
+      `Worker ${input.workerName} deployment ${input.restoration.id} has an unsupported traffic distribution.`,
+    );
+  }
+  const before = await readPlatformWorkerDeployments(
+    input.configPath,
+    input.accountId,
+    input.workerName,
+    input.runner,
+  );
+  if (
+    before[0]?.id !== input.expectedActiveDeploymentId ||
+    !deploymentRunsOnlyVersion(before[0], input.expectedActiveVersionId) ||
+    before[1]?.id !== input.restoration.id ||
+    !samePlatformWorkerTraffic(before[1], input.restoration)
+  ) {
+    throw new Error(
+      `Worker ${input.workerName} changed concurrently before deployment restoration; refusing to overwrite the newer deployment.`,
+    );
+  }
+  const restored = await input.runner(
+    [
+      'versions',
+      'deploy',
+      ...restorationVersions.map((version) => `${version.versionId}@${version.percentage}`),
+      '--config',
+      input.configPath,
+      '--message',
+      `Void platform restoration ${input.restoration.id}`,
+      '--yes',
+    ],
+    input.accountId,
+    input.directory,
+    true,
+  );
+  assertCleanPlatformWrangler(restored, `restore deployment ${input.restoration.id}`);
+  const after = await readPlatformWorkerDeployments(
+    input.configPath,
+    input.accountId,
+    input.workerName,
+    input.runner,
+  );
+  if (
+    !samePlatformWorkerTraffic(after[0], input.restoration) ||
+    after[1]?.id !== input.expectedActiveDeploymentId
+  ) {
+    throw new Error(
+      `Worker ${input.workerName} deployment restoration was superseded or did not restore deployment ${input.restoration.id}.`,
+    );
+  }
 }
 
 function deploymentRunsOnlyVersion(
