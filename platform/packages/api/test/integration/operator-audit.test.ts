@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, expect, test } from 'vite-plus/test';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vite-plus/test';
 import { app } from '../../src/index.ts';
 import { operatorEvents } from '../../src/schema.ts';
 import {
@@ -23,6 +23,9 @@ beforeEach(async () => {
   const user = await createTestUser(env.db, 'audit-admin', 'github', undefined, 'free', 'admin');
   token = await createOperatorToken(env.db, user);
 });
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function request(path: string, body?: unknown) {
   return app.fetch(
@@ -33,6 +36,43 @@ function request(path: string, body?: unknown) {
     }),
     env,
   );
+}
+
+function cloudflareWorkerStub(failScript?: string) {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input);
+    const script = /\/scripts\/([^/]+)/.exec(url)?.[1];
+    if (init?.method === 'POST') {
+      if (script === failScript) {
+        return Response.json(
+          { success: false, errors: [{ message: 'Permission denied' }] },
+          { status: 403 },
+        );
+      }
+      return Response.json({
+        success: true,
+        result: { id: 'new-deployment', versions: JSON.parse(String(init.body)).versions },
+      });
+    }
+    if (url.endsWith('/versions')) {
+      return Response.json({
+        success: true,
+        result: { items: [{ id: 'previous' }, { id: 'current' }] },
+      });
+    }
+    if (url.endsWith('/deployments')) {
+      return Response.json({
+        success: true,
+        result: {
+          deployments: [
+            { id: 'current-deploy', versions: [{ version_id: 'current', percentage: 100 }] },
+            { id: 'previous-deploy', versions: [{ version_id: 'previous', percentage: 100 }] },
+          ],
+        },
+      });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  });
 }
 
 test('previews and reads produce no audit or configuration writes', async () => {
@@ -68,4 +108,63 @@ test('records failed validation as a failed mutation attempt', async () => {
   const events = await env.db.select().from(operatorEvents);
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({ status: 'failed', http_status: 400 });
+});
+
+test('records complete and partial 207 mutation outcomes as failed', async () => {
+  cloudflareWorkerStub('void-api');
+  const failed = await request('/workers/api/rollback', {
+    environment: 'production',
+    versionId: 'previous',
+  });
+  expect(failed.status).toBe(207);
+  expect(await failed.json()).toMatchObject({ ok: false, partial: false });
+
+  vi.restoreAllMocks();
+  cloudflareWorkerStub('void-dashboard-staging');
+  const partial = await request('/workers/rollback-all', {
+    environment: 'staging',
+    versions: {
+      dispatch: 'previous',
+      dashboard: 'previous',
+      api: 'previous',
+      tail: 'previous',
+      proxy: 'previous',
+    },
+  });
+  expect(partial.status).toBe(207);
+  expect(await partial.json()).toMatchObject({ ok: false, partial: true });
+
+  const events = await env.db.select().from(operatorEvents);
+  expect(events).toHaveLength(2);
+  expect(events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        action: 'workers/api/rollback',
+        status: 'failed',
+        http_status: 207,
+      }),
+      expect.objectContaining({
+        action: 'workers/rollback-all',
+        status: 'failed',
+        http_status: 207,
+      }),
+    ]),
+  );
+});
+
+test('records a successful 200 mutation outcome as successful', async () => {
+  cloudflareWorkerStub();
+  const response = await request('/workers/api/rollback', {
+    environment: 'production',
+    versionId: 'previous',
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ ok: true, partial: false });
+  expect(await env.db.select().from(operatorEvents)).toEqual([
+    expect.objectContaining({
+      action: 'workers/api/rollback',
+      status: 'success',
+      http_status: 200,
+    }),
+  ]);
 });

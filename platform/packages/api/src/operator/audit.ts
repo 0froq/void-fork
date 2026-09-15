@@ -4,6 +4,26 @@ import type { ApiEnv } from '../env.ts';
 import { operatorEvents } from '../schema.ts';
 import { dryRun, pagination, readBody } from './common.ts';
 
+async function mutationSucceeded(response: Response) {
+  if (!response.ok) {
+    return false;
+  }
+  if (!response.headers.get('Content-Type')?.includes('application/json')) {
+    return true;
+  }
+  try {
+    const result: unknown = await response.clone().json();
+    return !(
+      typeof result === 'object' &&
+      result !== null &&
+      'ok' in result &&
+      result.ok === false
+    );
+  } catch {
+    return true;
+  }
+}
+
 /** Persist intent before a mutation so an interrupted request stays observable. */
 export const operatorAudit: MiddlewareHandler<ApiEnv> = async (context, next) => {
   if (context.req.method !== 'POST' || context.req.path.endsWith('/session/logout')) {
@@ -27,10 +47,11 @@ export const operatorAudit: MiddlewareHandler<ApiEnv> = async (context, next) =>
   });
   await next();
   try {
+    const succeeded = await mutationSucceeded(context.res);
     await db
       .update(operatorEvents)
       .set({
-        status: context.res.ok ? 'success' : 'failed',
+        status: succeeded ? 'success' : 'failed',
         http_status: context.res.status,
       })
       .where(eq(operatorEvents.id, id));
