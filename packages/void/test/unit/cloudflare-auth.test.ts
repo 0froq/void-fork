@@ -66,6 +66,24 @@ describe('Cloudflare authentication', () => {
     ).rejects.toThrow('CLOUDFLARE_API_TOKEN');
   });
 
+  it('accepts an explicit API token for a pinned operation without account discovery', async () => {
+    const previous = process.env.CLOUDFLARE_API_TOKEN;
+    process.env.CLOUDFLARE_API_TOKEN = 'scoped-token';
+    const runWrangler = vi.fn(() => ({ status: 1, stderr: '', stdout: '' }));
+    try {
+      await expect(
+        ensureCloudflareAuthentication({ acceptApiToken: true, runWrangler }),
+      ).resolves.toEqual({ accounts: [] });
+      expect(runWrangler).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CLOUDFLARE_API_TOKEN;
+      } else {
+        process.env.CLOUDFLARE_API_TOKEN = previous;
+      }
+    }
+  });
+
   it('parses only valid account records', () => {
     expect(
       parseCloudflareAccounts(

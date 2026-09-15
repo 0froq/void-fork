@@ -25,6 +25,11 @@ export type CloudflareAuthSession = Readonly<{
 }>;
 
 export type EnsureCloudflareAuthenticationOptions = Readonly<{
+  /**
+   * Treat an explicit API token as sufficient for a pinned, non-discovery operation.
+   * The operation itself remains the authoritative permission and validity check.
+   */
+  acceptApiToken?: boolean;
   beforeRun?: () => boolean;
   interactive?: boolean;
   /** Require whoami JSON to contain at least one account (account onboarding). */
@@ -53,6 +58,13 @@ export class CloudflareAuthenticationError extends Error {
 export async function ensureCloudflareAuthentication(
   options: EnsureCloudflareAuthenticationOptions,
 ): Promise<CloudflareAuthSession> {
+  if (
+    options.acceptApiToken &&
+    !options.requireAccounts &&
+    (process.env.CLOUDFLARE_API_TOKEN?.trim() || process.env.CF_API_TOKEN?.trim())
+  ) {
+    return { accounts: [] };
+  }
   const run = async (
     args: ReadonlyArray<string>,
     capture: boolean,

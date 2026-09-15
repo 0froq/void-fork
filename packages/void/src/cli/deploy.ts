@@ -4076,6 +4076,7 @@ export async function runCloudflareDeploy(
   }
   try {
     await ensureCloudflareAuthentication({
+      acceptApiToken: true,
       beforeRun: assertUploaderStillPinned,
       runWrangler: (args, capture) => runWrangler([...args], { capture }),
       whoamiArgs: [...existingWranglerConfigArgs(configPath), '--env='],
@@ -5465,6 +5466,7 @@ async function runCloudflareStaticDeploy(
   }
   try {
     await ensureCloudflareAuthentication({
+      acceptApiToken: true,
       beforeRun: uploaderIsPinned,
       runWrangler: (args, capture) => runWrangler([...args], { capture }),
       whoamiArgs: [...existingWranglerConfigArgs(configPath), '--env='],
