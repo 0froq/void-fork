@@ -20,6 +20,7 @@ It owns platform auth, projects, deployments, domains, secrets, provisioning, ro
 ```text
 src/
   index.ts                    # Hono app, Drizzle setup, scheduled(), queue()
+  worker/index.ts             # Deploy entry: default handler and Durable Object exports only
   env.ts                      # Worker env types
   schema.ts                   # Drizzle schema
   db.ts                       # Query layer
