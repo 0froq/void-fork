@@ -366,7 +366,7 @@ describe('Cloudflare version activation', () => {
     expect(result).toEqual({
       ok: true,
       versionId: NEXT,
-      previewUrl: 'https://ready.example.workers.dev',
+      previewUrl: 'https://my-worker.example.workers.dev',
       previousVersionId: CURRENT,
       workersDevSubdomain: 'example',
     });
@@ -1037,7 +1037,10 @@ describe('Cloudflare version activation', () => {
         allowFirstDeploymentBootstrap: true,
         fetch: async () => Response.json({ ready: true }),
       }),
-    ).resolves.toMatchObject({ ok: true, previewUrl: 'https://first.example.workers.dev' });
+    ).resolves.toMatchObject({
+      ok: true,
+      previewUrl: 'https://first-with-secret.example.workers.dev',
+    });
     expect(runWrangler.mock.calls.map(([args]) => args[0])).toEqual([
       'deployments',
       'versions',
@@ -1237,7 +1240,9 @@ describe('Cloudflare version activation', () => {
         stderr: 'Durable Object migrations require deploy. [code: 10211]',
         status: 1,
       },
-      bootstrap: ok(`Current Version ID: ${NEXT}\nhttps://first.example.workers.dev`),
+      bootstrap: ok(
+        `Current Version ID: ${NEXT}\nVersion Preview URL: https://2e209d56-first.example.workers.dev`,
+      ),
     });
     const fetcher = vi.fn(async () => Response.json({ ready: true }));
 
