@@ -229,6 +229,39 @@ describe('operator transport and execution', () => {
     expect(String(fetcher.mock.calls[1]![0])).toContain('cursor=page-2');
     expect(String(fetcher.mock.calls[1]![0])).toContain('since=1h');
   });
+  it('renders deployment status, log messages, and exceptions in human output', async () => {
+    vi.stubEnv('VOID_API_URL', 'https://one.example');
+    vi.stubEnv('VOID_OPERATOR_TOKEN', 'operator');
+    const write = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({
+          data: [
+            {
+              timestamp: 1234,
+              method: 'GET',
+              url: '/broken',
+              status: '503',
+              outcome: 'exception',
+              logs: [{ level: 'error', message: 'request failed' }],
+              exceptions: [{ name: 'TypeError', message: 'missing value' }],
+            },
+          ],
+          nextCursor: null,
+          watermark: '1235',
+        }),
+      ),
+    );
+
+    await runOperatorCommand(parseOperatorArgs(['deployment', 'logs', 'deployment-1']));
+
+    expect(write.mock.calls.map(([line]) => String(line))).toEqual([
+      '1234 GET /broken 503',
+      '  [error] request failed',
+      '  TypeError: missing value',
+    ]);
+  });
 
   it('follows build log sequence and stops when terminal', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});

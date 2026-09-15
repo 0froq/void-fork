@@ -128,11 +128,29 @@ function outputLogs(result: Record<string, unknown>, json: boolean): void {
       }
       const row = entry as Record<string, unknown>;
       console.log(
-        `${printable(row.timestamp ?? row.ts)} ${printable(row.method)} ${printable(row.url)} ${printable(row.statusCode ?? row.outcome)}`,
+        `${printable(row.timestamp ?? row.ts)} ${printable(row.method)} ${printable(row.url)} ${printable(row.status ?? row.statusCode ?? row.outcome)}`,
       );
-      for (const key of ['logData', 'exceptionData']) {
-        if (row[key] && row[key] !== '[]') {
-          console.log(`  ${printable(row[key])}`);
+      if (Array.isArray(row.logs)) {
+        for (const log of row.logs) {
+          if (log && typeof log === 'object') {
+            const record = log as Record<string, unknown>;
+            console.log(
+              `  ${record.level ? `[${printable(record.level)}] ` : ''}${printable(record.message ?? log)}`,
+            );
+          } else {
+            console.log(`  ${printable(log)}`);
+          }
+        }
+      }
+      if (Array.isArray(row.exceptions)) {
+        for (const exception of row.exceptions) {
+          if (exception && typeof exception === 'object') {
+            const record = exception as Record<string, unknown>;
+            const name = record.name ? `${printable(record.name)}: ` : '';
+            console.log(`  ${name}${printable(record.message ?? exception)}`);
+          } else {
+            console.log(`  ${printable(exception)}`);
+          }
         }
       }
     }
