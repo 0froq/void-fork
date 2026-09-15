@@ -289,6 +289,7 @@ void platform install [options] [--yes]
 | `--control-plane-domain <domain>` | Optional API custom hostname; defaults to `workers.dev`                          |
 | `--plan`                          | Resolve and print a read-only plan                                               |
 | `--resume`                        | Continue the matching checkpointed installation                                  |
+| `--runtime <path>`                | Deploy a locally built, integrity-checked runtime directory                      |
 | `--yes`                           | Acknowledge Cloudflare changes in non-interactive use                            |
 
 The installer requires `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) and prompts for a dedicated empty PostgreSQL database, GitHub OAuth, and R2 credentials. It transactionally claims that database for exactly one platform installation. An explicit URL can replace a failed, unverified initial connection; after a successful claim or Hyperdrive provisioning, resume pins the recorded database URL and rejects a different environment value. Non-interactive use supplies `--yes`, `VOID_PLATFORM_DATABASE_URL`, `VOID_PLATFORM_GITHUB_CLIENT_ID`, `VOID_PLATFORM_GITHUB_CLIENT_SECRET`, `VOID_PLATFORM_R2_ACCESS_KEY_ID`, and `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`. Resuming or redeploying an installation after local recovery material was lost also requires its original `VOID_PLATFORM_JWT_SECRET` and base64-encoded 32-byte `VOID_PLATFORM_PROJECT_SECRET_KEY`; replacements are never generated for an existing installation.
@@ -306,15 +307,19 @@ See [Self-host a Void platform](../guide/self-hosted-platform.md) for prerequisi
 Traffic cleanup is fail-closed. New installs checkpoint every published route and custom-domain Cloudflare id, but Cloudflare cannot condition attachment deletion on that immutable identity. Disable, rollback, and uninstall therefore retain those attachments for explicit dashboard cleanup while the routing flag blocks requests.
 
 ```sh
-void platform discover [--account <id>]
-void platform upgrade [id] [--plan] [--yes]
-void platform repair [id] [--plan] [--yes]
+void platform discover [--account <id>] [--installation <id-or-name>]
+void platform upgrade [id] [--runtime <path>] [--plan] [--yes]
+void platform repair [id] [--runtime <path>] [--plan] [--yes]
 void platform disable [id] [--plan] [--yes]
-void platform enable [id] [--plan] [--yes]
+void platform enable [id] [--runtime <path>] [--plan] [--yes]
 void platform uninstall [id] [--plan] [--purge-data] [--keep-zone] [--yes]
 ```
 
+`discover --installation` limits recovery and endpoint verification to one installation in a shared Cloudflare account.
+
 An omitted id auto-selects one local installation and prompts when several exist. Non-interactive use with multiple installations requires an id. Every non-interactive mutating lifecycle command also requires `--yes`; `--plan` is read-only and needs no acknowledgement. `discover` verifies remote ownership before recovering local metadata and verifies endpoint identity for completed enabled installations; interrupted or disabled installations do not require a reachable endpoint. `repair` recreates missing installer-owned resources only. `disable` writes an installation-owned routing flag that rejects platform traffic without deleting data. Fresh, resumed, and previously disabled installations establish that gate before the first Worker mutation, admit only the installer's bounded health probes, and remove it after every target Worker passes verification. Routes and custom domains remain attached: Cloudflare exposes no immutable-generation precondition for their deletion, so Void records them as retained and leaves explicit dashboard cleanup to the operator. `enable` removes the routing gate and restores `workers.dev` access. Repair, enable, upgrade, and cutover recovery preserve live Worker routes and custom domains in their trigger snapshots. Before migrations or Worker upload, lifecycle commands also require the recorded Hyperdrive origin to match the pinned recovery database and stop if it was retargeted. Mutating lifecycle commands hold a session advisory lock in the installation's PostgreSQL database, preventing two workstations from changing the same platform concurrently. The same claimed row stores a secret-free authoritative lifecycle manifest so stale hosts cannot reverse newer operations. Owner-only local recovery material supplies the secrets; after discovery on a new workstation, provide `VOID_PLATFORM_DATABASE_URL` and, for operations that redeploy an existing API Worker, the original `VOID_PLATFORM_JWT_SECRET` and `VOID_PLATFORM_PROJECT_SECRET_KEY`.
+
+`--runtime` accepts a directory containing `manifest.json`, the four bundled Worker artifacts, and the declared Drizzle migrations. Relative paths resolve from the current directory. The CLI validates every recorded size and SHA-256 digest before planning or mutating Cloudflare. Without this option it uses the runtime bundled in the installed `@void/platform` package. Successful lifecycle checkpoints record whether the runtime was packaged or custom, its manifest digest, and its optional source revision.
 
 Platform upgrade SQL is forward-only. The packaged runtime hashes its journal and every migration, and the installer requires the live Drizzle records to be an exact ordered prefix. Pending migrations for an installation with existing Workers run only when the release contains an exact rollback-compatibility edge for the old platform version and current schema digest; otherwise the command stops before database or Worker mutation and requires a supported intermediate version. Pending SQL executes in one transaction. The old platform version remains authoritative until target-version discovery and health checks pass, so a failed cutover can restore old Workers against an explicitly expand-compatible schema and retry without reapplying migrations.
 

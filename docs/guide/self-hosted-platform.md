@@ -148,6 +148,7 @@ Local state lives under `~/.void/platforms/`. Manifests and recovery material ar
 - Inspect drift without changes with `void platform repair [id] --plan`.
 - Recreate only missing installer-owned resources with `void platform repair [id]`. Missing adopted or external resources fail closed.
 - Deploy the packaged current platform runtime and pending database migrations with `void platform upgrade [id]`. Upgrade and repair preserve whether traffic is currently enabled or disabled.
+- To test or operate a source build, run `vp run --filter @void/platform build`, then pass `--runtime packages/platform/dist/runtime` to install, upgrade, repair, or enable. Custom runtimes use the same integrity verification, migration safety, staged cutover, health checks, and rollback path as packaged releases. The successful installation checkpoint records the runtime manifest digest, whether it was custom or packaged, and `VOID_PLATFORM_SOURCE_REVISION` when that value was present during the runtime build.
 - Platform database upgrades are forward-only and fail closed. The published runtime manifest hashes the migration journal and every SQL file; the installer requires PostgreSQL's Drizzle history to be an exact ordered prefix before it changes the database. Edited, forked, out-of-order, or package-newer histories are rejected.
 - When existing platform Workers need pending migrations, the target release must explicitly attest that its final schema remains compatible with the exact old Worker version and current schema digest. If that edge is absent, upgrade stops before the database or Workers change and asks you to use a supported intermediate release. Maintainers must ship expand-compatible schema changes during this rollback-capable transition; destructive contract changes belong in a later release after old Workers can no longer be restored.
 - All pending platform migrations run in one PostgreSQL transaction under the lifecycle lock. Worker deployment starts only after the target schema digest is verified and checkpointed. The installation keeps reporting the old platform version until every Worker is deployed and target-version health succeeds. If cutover fails, Void restores the old Workers against the explicitly compatible expanded schema; retry recognizes the completed schema and does not rerun migrations.
@@ -155,10 +156,28 @@ Local state lives under `~/.void/platforms/`. Manifests and recovery material ar
 - R2 creation checkpoints the bucket's Cloudflare creation fingerprint before writing its ownership marker. If that marker write fails, resume repairs only the still-missing marker on the exact checkpointed bucket generation; a replacement bucket or foreign marker is never overwritten.
 - Upgrade, repair, enable, and interrupted-cutover recovery inventory every existing platform Worker before publishing triggers. Routes and custom domains outside the installation manifest are carried into both the new version and its rollback snapshot, so lifecycle operations do not erase manually attached traffic.
 - The manifest fingerprints the Hyperdrive PostgreSQL origin without storing its password. Before migrations or Worker upload, Void fetches the exact Hyperdrive configuration and requires its scheme, host, port, database, and (when Cloudflare returns it) user to match the pinned recovery database. If an administrator retargeted Hyperdrive, the command stops before mutation.
-- Recover a lost local manifest from the installation marker in Cloudflare with `void platform discover [--account <id>]`.
+- Recover a lost local manifest from the installation marker in Cloudflare with `void platform discover [--account <id>]`. In an account containing several platforms, add `--installation <id-or-name>` to recover and verify only the intended installation.
 - On a newly discovered workstation, export `VOID_PLATFORM_DATABASE_URL`, `VOID_PLATFORM_JWT_SECRET`, and `VOID_PLATFORM_PROJECT_SECRET_KEY` before repair, upgrade, enable, or install resume. The JWT and base64-encoded 32-byte project-secret key must be the original values from the backed-up recovery material; Void refuses to generate replacements for an existing installation. Install, repair, upgrade, enable, disable, and uninstall hold a PostgreSQL session advisory lock so two hosts cannot mutate one installation concurrently. The claimed database row also stores the secret-free authoritative lifecycle manifest, which prevents a host with stale local or Workers KV state from undoing a newer operation.
 
 Discovery verifies the account, every recorded Cloudflare resource, and the routing namespace ownership marker before writing local state. It also verifies the live endpoint identity for a completed enabled installation; interrupted and disabled installations remain recoverable when no endpoint is available. Cloudflare does not expose the PostgreSQL, GitHub OAuth, R2, JWT, or project-encryption secret values. Back up the owner-only recovery material: without the original JWT and project-secret key, Void deliberately blocks any operation that would redeploy an existing API Worker rather than invalidate sessions or make stored project secrets unreadable.
+
+## Continuously deploy a source build
+
+A CI runner does not need a persisted `~/.void/platforms` directory. It can rebuild local state from the installer-owned Cloudflare checkpoint, supply the original secrets from its protected environment, preview the change, and upgrade from a workspace runtime:
+
+```sh
+export VOID_PLATFORM_SOURCE_REVISION="$GITHUB_SHA"
+vp run build
+
+export VOID_PLATFORM_REGISTRY_DIR="$RUNNER_TEMP/void-platform-registry"
+void platform discover --account "$CLOUDFLARE_ACCOUNT_ID"
+void platform upgrade "$VOID_PLATFORM_INSTALLATION" \
+  --runtime packages/platform/dist/runtime --plan
+void platform upgrade "$VOID_PLATFORM_INSTALLATION" \
+  --runtime packages/platform/dist/runtime --yes
+```
+
+The installation selector may be omitted when the account contains only one discoverable installation. Serialize deployments for one installation: database migrations and Worker cutover must never be cancelled midway by a newer CI run. Keep the management token, database URL, OAuth and R2 credentials, JWT secret, and project-secret key in a protected CI environment. Never generate new JWT or project-secret keys during an upgrade.
 
 ## Disable and safely uninstall
 
