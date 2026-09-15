@@ -397,7 +397,9 @@ export async function activateCloudflareExistingVersion(
   if (
     target.metadata?.schema !== 2 ||
     target.metadata.triggerConfig.preserve ||
-    (current && (current.metadata?.schema !== 2 || current.metadata.triggerConfig.preserve))
+    !current ||
+    current.metadata?.schema !== 2 ||
+    current.metadata.triggerConfig.preserve
   ) {
     const owner = await readActiveCloudflareVersionId(context);
     if (current && owner !== current.id) {

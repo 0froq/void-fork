@@ -48,6 +48,8 @@ import { provisionCloudflareResources, type ProvisionResult } from '../../src/cl
 import {
   FRIENDLY_BINDING_NAMES,
   readWranglerManagedQueueCleanupCandidates,
+  readWranglerPublishedTrafficSnapshot,
+  writeWranglerPublishedTrafficSnapshot,
 } from '../../src/cli/wrangler.ts';
 import { readConfig } from '../../src/config.ts';
 
@@ -415,7 +417,7 @@ describe('existing Cloudflare site handoff', () => {
   const existing = {
     versionId: 'original',
     bindings: [],
-    runtime: { compatibility_date: '2026-02-24', compatibility_flags: [] },
+    runtime: { compatibility_date: '2026-02-24', compatibility_flags: ['nodejs_compat'] },
     script: { handlers: ['fetch', 'scheduled'] },
   };
   function site() {
@@ -427,11 +429,18 @@ describe('existing Cloudflare site handoff', () => {
         name: 'site',
         account_id: 'personal',
         compatibility_date: '2026-02-24',
+        compatibility_flags: ['nodejs_compat'],
       }),
     });
   }
   function build(root: string) {
     const config = parseRootWranglerConfig(join(root, 'wrangler.jsonc'));
+    // The real Cloudflare Vite build currently materializes the root flag and Void's inferred
+    // flag separately. Cloudflare treats the duplicate array as the same semantic flag set.
+    config.compatibility_flags = ['nodejs_compat', 'nodejs_compat'];
+    config.triggers = { crons: [] };
+    config.queues = { consumers: [], producers: [] };
+    config.durable_objects = { bindings: [] };
     mkdirSync(join(root, 'dist/ssr'), { recursive: true });
     mkdirSync(join(root, '.wrangler/deploy'), { recursive: true });
     writeFileSync(join(root, 'dist/ssr/wrangler.json'), JSON.stringify(config));
@@ -468,6 +477,37 @@ describe('existing Cloudflare site handoff', () => {
       'cloudflare',
     );
     expect(existsSync(join(root, '.void/cloudflare-link.json'))).toBe(false);
+  });
+  it('records the resolved traffic snapshot across ordinary deployments', async () => {
+    const root = site();
+    const trafficConfig = {
+      workers_dev: false,
+      preview_urls: true,
+      routes: [{ pattern: 'site.example.com', custom_domain: true }],
+    };
+    writeWranglerPublishedTrafficSnapshot(join(root, 'wrangler.jsonc'), trafficConfig);
+    const activateVersion = vi
+      .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
+      .mockImplementation(async (options) => {
+        expect(options.previousTrafficConfig).toEqual(trafficConfig);
+        return {
+          ok: true,
+          versionId: 'new',
+          previousVersionId: 'original',
+          previewUrl: 'https://site.example.com',
+          trafficConfig,
+        };
+      });
+    const { deps } = harness({
+      runBuild: () => build(root),
+      activateVersion,
+    });
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(readWranglerPublishedTrafficSnapshot(join(root, 'wrangler.jsonc'))).toEqual(
+      trafficConfig,
+    );
+    expect(activateVersion).toHaveBeenCalledTimes(2);
   });
   it('retains the link guard after a failed build and verifies the Worker again on retry', async () => {
     const root = site();

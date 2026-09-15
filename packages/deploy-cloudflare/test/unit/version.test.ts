@@ -87,6 +87,7 @@ function runner(overrides?: {
           JSON.stringify([
             {
               id: CURRENT,
+              number: 1,
               annotations: {
                 'workers/message': encodeCloudflareVersionMessage([], {
                   workers_dev: true,
@@ -98,7 +99,7 @@ function runner(overrides?: {
                 }),
               },
             },
-            ...(uploaded ? [{ id: NEXT, annotations: {} }] : []),
+            ...(uploaded ? [{ id: NEXT, number: 2, annotations: {} }] : []),
           ]),
         )
       );
@@ -207,7 +208,12 @@ describe('Cloudflare version activation', () => {
   it('does not inherit secrets from an unpublished Worker version', async () => {
     const unpublished = '44444444-4444-4444-8444-444444444444';
     const runWrangler = runner({
-      versions: ok(JSON.stringify([{ id: CURRENT }, { id: unpublished }])),
+      versions: ok(
+        JSON.stringify([
+          { id: CURRENT, number: 1 },
+          { id: unpublished, number: 2 },
+        ]),
+      ),
     });
     await expect(
       activateCloudflareVersion({
@@ -235,7 +241,13 @@ describe('Cloudflare version activation', () => {
         listed++;
         return ok(
           JSON.stringify(
-            listed === 1 ? [{ id: CURRENT }] : [{ id: CURRENT }, { id: concurrent }, { id: NEXT }],
+            listed === 1
+              ? [{ id: CURRENT, number: 1 }]
+              : [
+                  { id: CURRENT, number: 1 },
+                  { id: concurrent, number: 2 },
+                  { id: NEXT, number: 3 },
+                ],
           ),
         );
       }
@@ -252,6 +264,84 @@ describe('Cloudflare version activation', () => {
       }),
     ).resolves.toMatchObject({ ok: false, reason: 'inheritance-source-changed' });
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'deploy')).toBe(false);
+  });
+
+  it('detects an intervening version even when it is deleted before the second list', async () => {
+    let listed = 0;
+    const base = runner();
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'list') {
+        listed++;
+        return ok(
+          JSON.stringify(
+            listed === 1
+              ? [{ id: CURRENT, number: 1 }]
+              : [
+                  { id: CURRENT, number: 1 },
+                  { id: NEXT, number: 3 },
+                ],
+          ),
+        );
+      }
+      return base(args);
+    });
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        preserveTriggers: true,
+        expectedPreviousVersionId: CURRENT,
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toMatchObject({ ok: false, reason: 'inheritance-source-changed' });
+    expect(runWrangler.mock.calls.some(([args]) => args[1] === 'deploy')).toBe(false);
+  });
+
+  it('can retry through a consecutive inactive version uploaded by Void', async () => {
+    let listed = 0;
+    const failedCandidate = CONCURRENT;
+    const failedMessage = encodeCloudflareVersionMessage([]);
+    const base = runner();
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'list') {
+        listed++;
+        return ok(
+          JSON.stringify(
+            listed === 1
+              ? [
+                  { id: CURRENT, number: 1 },
+                  {
+                    id: failedCandidate,
+                    number: 2,
+                    annotations: { 'workers/message': failedMessage },
+                  },
+                ]
+              : [
+                  { id: CURRENT, number: 1 },
+                  {
+                    id: failedCandidate,
+                    number: 2,
+                    annotations: { 'workers/message': failedMessage },
+                  },
+                  { id: NEXT, number: 3 },
+                ],
+          ),
+        );
+      }
+      return base(args);
+    });
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        preserveTriggers: true,
+        expectedPreviousVersionId: CURRENT,
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, versionId: NEXT });
   });
 
   it('snapshots and restores effective workers.dev and preview URL defaults', async () => {
@@ -436,6 +526,79 @@ describe('Cloudflare version activation', () => {
       }),
     ).resolves.toMatchObject({ ok: true, preservedTriggers: true });
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
+  });
+
+  it('continues an opaque handoff with unchanged explicit routes', async () => {
+    const route = { pattern: 'app.example.com', custom_domain: true };
+    const preserved = {
+      preserve: true,
+      preserveWorkersDev: true,
+      preservePreviewUrls: true,
+      workers_dev: false,
+      preview_urls: false,
+      routes: [route],
+      crons: [],
+      queueConsumers: [],
+      workflows: [],
+    };
+    const runWrangler = runner({
+      versions: ok(
+        JSON.stringify([
+          {
+            id: CURRENT,
+            annotations: { 'workers/message': encodeCloudflareVersionMessage([], preserved) },
+          },
+        ]),
+      ),
+    });
+    const { preserve: _preserve, ...next } = preserved;
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        configPath: '/app/wrangler.json',
+        verifyUploader: () => true,
+        message: encodeCloudflareVersionMessage([], next),
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, preservedTriggers: true });
+    expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
+  });
+
+  it('does not silently suppress changed settings after an opaque handoff', async () => {
+    const preserved = {
+      preserve: true,
+      preserveRoutes: true,
+      preserveWorkersDev: true,
+      preservePreviewUrls: true,
+      settingsHash: 'before',
+      workers_dev: true,
+      preview_urls: true,
+      routes: [],
+      crons: [],
+      queueConsumers: [],
+      workflows: [],
+    };
+    const runWrangler = runner({
+      versions: ok(
+        JSON.stringify([
+          {
+            id: CURRENT,
+            annotations: { 'workers/message': encodeCloudflareVersionMessage([], preserved) },
+          },
+        ]),
+      ),
+    });
+    const { preserve: _preserve, ...next } = preserved;
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        message: encodeCloudflareVersionMessage([], { ...next, settingsHash: 'after' }),
+      }),
+    ).resolves.toMatchObject({ ok: false, reason: 'traffic-preservation-unavailable' });
+    expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
   });
 
   it('preserves Wrangler route-aware traffic defaults', () => {
@@ -631,6 +794,11 @@ describe('Cloudflare version activation', () => {
       versionId: NEXT,
       previewUrl: 'https://my-worker.example.workers.dev',
       previousVersionId: CURRENT,
+      trafficConfig: {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+      },
       workersDevSubdomain: 'example',
     });
     expect(fetcher).toHaveBeenCalledWith(

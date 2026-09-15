@@ -5164,14 +5164,13 @@ export async function runCloudflareDeploy(
   }
   acknowledgeWranglerManagedQueueRemovals(configPath, queueConsumerCleanup);
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
-  const publishedTraffic = readCloudflareTriggerConfig(generatedConfigPath, configPath);
-  if (!existingWorker && !execution.preservedTriggers) {
+  if (execution.trafficConfig) {
     writeWranglerPublishedTrafficSnapshot(
       configPath,
       {
-        workers_dev: publishedTraffic.workers_dev,
-        preview_urls: publishedTraffic.preview_urls,
-        routes: [...publishedTraffic.routes],
+        workers_dev: execution.trafficConfig.workers_dev,
+        preview_urls: execution.trafficConfig.preview_urls,
+        routes: [...execution.trafficConfig.routes],
       },
       { create: false },
     );
@@ -5733,14 +5732,13 @@ async function runCloudflareStaticDeploy(
   }
   acknowledgeWranglerManagedQueueRemovals(configPath, queueConsumerCleanup);
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
-  const publishedTraffic = readCloudflareTriggerConfig(staticConfigPath, configPath);
-  if (!existingWorker && !execution.preservedTriggers) {
+  if (execution.trafficConfig) {
     writeWranglerPublishedTrafficSnapshot(
       configPath,
       {
-        workers_dev: publishedTraffic.workers_dev,
-        preview_urls: publishedTraffic.preview_urls,
-        routes: [...publishedTraffic.routes],
+        workers_dev: execution.trafficConfig.workers_dev,
+        preview_urls: execution.trafficConfig.preview_urls,
+        routes: [...execution.trafficConfig.routes],
       },
       { create: false },
     );
