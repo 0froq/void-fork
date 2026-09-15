@@ -6,6 +6,8 @@ User-facing CLI output and documentation describe Cloudflare operations through 
 
 ## Architecture
 
+Unlinked projects with a root `wrangler.jsonc` or `wrangler.json` get a link-and-deploy prompt from `cli/cloudflare-link.ts` before the hosted fallback in `runDeployInner`. Honor explicit platform/project selections and saved destinations. Acceptance verifies the existing Worker, saves Cloudflare, and continues in the same invocation. `.void/cloudflare-link.json` keeps the handoff guard across failed builds; remove it only after successful activation. The handoff reuses resource IDs and remote secrets, blocks provisioning and schema/secret changes, and skips trigger/settings publication. `@void/deploy-cloudflare` validates the active and uploaded bindings. Older versions without complete trigger metadata use traffic-only rollback, retaining current domains and schedules. Existing TOML configs are detected and rejected before generating a competing config; named environments remain unsupported.
+
 The main export `voidPlugin()` returns an array of Vite plugins. For the default Cloudflare target, this includes the `cloudflare()` plugin. For non-CF targets (`node`, `bun`, `deno`), it replaces `cloudflare()` with `nodeTargetPlugin()`:
 
 ```
