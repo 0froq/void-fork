@@ -58,6 +58,7 @@ import {
   stablePublicEndpointState,
   verifyPlatformHealth,
   withConditionalPlatformWorkerCreate,
+  withoutCompletedPlatformWorkerMigrations,
   withoutPlatformWorkerTrafficAttachments,
 } from '../../src/cli/platform-installer.ts';
 import {
@@ -581,6 +582,7 @@ describe('platform installer', () => {
               annotations: {
                 'workers/message': encodeCloudflareVersionMessage([], triggerConfig),
               },
+              script: { migration_tag: 'v4' },
               resources: {
                 bindings: [{ name: 'PLATFORM_OWNERSHIP_MARKER', type: 'plain_text', text: marker }],
               },
@@ -589,7 +591,7 @@ describe('platform installer', () => {
 
     await expect(
       readActivePlatformWorkerSnapshot('wrangler.json', 'account', 'worker', marker, runner),
-    ).resolves.toEqual({ triggerConfig, versionId });
+    ).resolves.toEqual({ migrationTag: 'v4', triggerConfig, versionId });
     await expect(
       readActivePlatformWorkerSnapshot(
         'wrangler.json',
@@ -599,6 +601,21 @@ describe('platform installer', () => {
         runner,
       ),
     ).rejects.toThrow('does not belong to this installation');
+  });
+
+  it('omits completed Durable Object migrations without rewriting earlier history', () => {
+    const migrations = [
+      { tag: 'v1', new_sqlite_classes: ['UsageCounter'] },
+      { tag: 'v2', new_sqlite_classes: ['CronScheduler'] },
+      { tag: 'v3', new_sqlite_classes: ['ErrorAlertMonitor'] },
+      { tag: 'v4', new_sqlite_classes: ['SandboxConcurrencyCounter'] },
+    ];
+    const config = { migrations, name: 'void-api' };
+
+    expect(withoutCompletedPlatformWorkerMigrations(config, 'v4')).toEqual({ name: 'void-api' });
+    expect(withoutCompletedPlatformWorkerMigrations(config, 'v3')).toBe(config);
+    expect(withoutCompletedPlatformWorkerMigrations(config, null)).toBe(config);
+    expect(config.migrations).toBe(migrations);
   });
 
   it('rejects a Worker replacement during immutable version inspection', async () => {

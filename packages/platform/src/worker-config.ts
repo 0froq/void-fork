@@ -90,10 +90,10 @@ export function createPlatformWorkerConfigs(input: {
       ],
     },
     migrations: [
-      { tag: 'v1', new_classes: ['UsageCounter'] },
-      { tag: 'v2', new_classes: ['CronScheduler'] },
-      { tag: 'v3', new_classes: ['ErrorAlertMonitor'] },
-      { tag: 'v4', new_classes: ['SandboxConcurrencyCounter'] },
+      { tag: 'v1', new_sqlite_classes: ['UsageCounter'] },
+      { tag: 'v2', new_sqlite_classes: ['CronScheduler'] },
+      { tag: 'v3', new_sqlite_classes: ['ErrorAlertMonitor'] },
+      { tag: 'v4', new_sqlite_classes: ['SandboxConcurrencyCounter'] },
     ],
     queues: {
       producers: [

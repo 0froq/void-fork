@@ -43,4 +43,42 @@ describe('platform usage queue bindings', () => {
     expect(configs.proxy.queues).toBeUndefined();
     expect(configs.tail.queues).toBeUndefined();
   });
+
+  it('creates core Durable Objects with SQLite while preserving migration tags', () => {
+    const deployment = createPlatformDeploymentManifest({
+      application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+      displayName: 'Example',
+      installationSlug: 'example',
+    });
+    const configs = createPlatformWorkerConfigs({
+      accountId: 'account',
+      apiUrl: 'https://api.example.com',
+      deployment,
+      healthProbeToken: 'probe',
+      installationId: 'installation',
+      ownershipNonce: 'ownership',
+      platformVersion: '1.0.0',
+      proxyUrl: 'https://proxy.example.com',
+      resources: {
+        hyperdrive: 'hyperdrive-id',
+        isrCacheKv: 'isr-id',
+        legacyAssetsKv: 'assets-id',
+        routingKv: 'routing-id',
+        zone: 'zone-id',
+      },
+      runtimeEntrypoints: {
+        api: 'api.mjs',
+        dispatch: 'dispatch.mjs',
+        proxy: 'proxy.mjs',
+        tail: 'tail.mjs',
+      },
+    });
+
+    expect(configs.api.migrations).toEqual([
+      { tag: 'v1', new_sqlite_classes: ['UsageCounter'] },
+      { tag: 'v2', new_sqlite_classes: ['CronScheduler'] },
+      { tag: 'v3', new_sqlite_classes: ['ErrorAlertMonitor'] },
+      { tag: 'v4', new_sqlite_classes: ['SandboxConcurrencyCounter'] },
+    ]);
+  });
 });

@@ -2404,7 +2404,7 @@ async function deployPlatformWorker(
   let previousVersionId: string | null = null;
   const nextTraffic = isolatePlatformWorkerCustomDomains(config);
   const previousTraffic = isolatePlatformWorkerCustomDomains(options.previousConfig);
-  const uploadConfig = withoutPlatformWorkerTrafficAttachments(nextTraffic.wranglerConfig);
+  let uploadConfig = withoutPlatformWorkerTrafficAttachments(nextTraffic.wranglerConfig);
   const nextTriggers = readTriggerConfigFromObject(nextTraffic.wranglerConfig);
   let previousTriggers = readTriggerConfigFromObject(previousTraffic.wranglerConfig);
   try {
@@ -2434,6 +2434,10 @@ async function deployPlatformWorker(
       }
       previousDeployment = deployments[0]!;
       previousDeploymentId = previousDeployment.id;
+      uploadConfig = withoutCompletedPlatformWorkerMigrations(uploadConfig, previous.migrationTag);
+      writeFileSync(configPath, `${JSON.stringify(uploadConfig, null, 2)}\n`, {
+        mode: 0o600,
+      });
       previousTriggers = resolvePlatformPreviousTriggerConfig(
         withoutPlatformCustomDomainTriggers(previous.triggerConfig),
         previousTriggers,
@@ -3407,7 +3411,11 @@ export async function readActivePlatformWorkerSnapshot(
   workerName: string,
   expectedOwnershipMarker: string,
   runner: typeof runPlatformWrangler = runPlatformWrangler,
-): Promise<{ triggerConfig: CloudflareTriggerConfig; versionId: string }> {
+): Promise<{
+  migrationTag: string | null;
+  triggerConfig: CloudflareTriggerConfig;
+  versionId: string;
+}> {
   const readActiveVersion = () =>
     readActivePlatformWorkerVersion(configPath, accountId, workerName, runner);
   const versionId = await readActiveVersion();
@@ -3473,7 +3481,35 @@ export async function readActivePlatformWorkerSnapshot(
       `platform: Active Worker ${workerName} predates safe trigger snapshots. Refusing to upgrade because its routes, cron, and queue consumers could not be restored after a failed cutover.`,
     );
   }
-  return { triggerConfig: metadata.triggerConfig, versionId };
+  const script = (value as { script?: unknown }).script;
+  const migrationTag =
+    script &&
+    typeof script === 'object' &&
+    !Array.isArray(script) &&
+    typeof (script as { migration_tag?: unknown }).migration_tag === 'string'
+      ? (script as { migration_tag: string }).migration_tag
+      : null;
+  return { migrationTag, triggerConfig: metadata.triggerConfig, versionId };
+}
+
+export function withoutCompletedPlatformWorkerMigrations(
+  config: Record<string, unknown>,
+  activeMigrationTag: string | null,
+): Record<string, unknown> {
+  const migrations = Array.isArray(config.migrations) ? config.migrations : [];
+  const target = migrations.at(-1);
+  if (
+    activeMigrationTag === null ||
+    !target ||
+    typeof target !== 'object' ||
+    Array.isArray(target) ||
+    (target as { tag?: unknown }).tag !== activeMigrationTag
+  ) {
+    return config;
+  }
+  const result = { ...config };
+  delete result.migrations;
+  return result;
 }
 
 function parseUploadedPlatformWorkerVersion(output: string): string | null {
