@@ -25,7 +25,7 @@ Commit subjects start with a capital letter and end with a period.
 - [ ] 9. Dispatch queue consumers by unambiguous names.
 - [ ] 10. Preserve live platform secrets during routine upgrades.
 - [ ] 11. Restore captured live traffic configuration after failed deployment.
-- [ ] 12. Allow invited account deletion while preserving invitation history.
+- [x] 12. Allow invited account deletion while preserving invitation history.
 - [ ] 13. Store full OAuth tokens in generated MySQL auth schemas.
 - [ ] 14. Scope PostgreSQL/MySQL clients to the request using them.
 - [ ] 15. Share local D1 identity/persistence across dev and database tooling.

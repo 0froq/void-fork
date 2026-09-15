@@ -197,6 +197,13 @@
       "when": 1789475317696,
       "tag": "0034_email_destinations",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1789481093243,
+      "tag": "0035_invitation_actor_history",
+      "breakpoints": true
     }
   ]
 }

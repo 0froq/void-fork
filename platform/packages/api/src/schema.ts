@@ -787,12 +787,12 @@ export const invitations = pgTable(
     id: text('id').primaryKey(),
     email: text('email').notNull(),
     status: text('status').notNull().default('pending').$type<InvitationStatus>(),
-    invited_by: text('invited_by')
-      .notNull()
-      .references(() => users.id),
-    accepted_by: text('accepted_by').references(() => users.id),
+    // Invitation actor ids are durable audit data. They deliberately outlive
+    // the corresponding user rows, like operator_events.user_id.
+    invited_by: text('invited_by').notNull(),
+    accepted_by: text('accepted_by'),
     revoked_at: timestamp('revoked_at', { mode: 'string' }),
-    revoked_by: text('revoked_by').references(() => users.id),
+    revoked_by: text('revoked_by'),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
     accepted_at: timestamp('accepted_at', { mode: 'string' }),
   },

@@ -5,6 +5,10 @@
     {
       "platformVersion": "0.10.14",
       "schemaDigest": "9631e7ad6596fc8cd12715d5263d32e94aafd398e5b1689321038232f64dcd74"
+    },
+    {
+      "platformVersion": "0.10.14",
+      "schemaDigest": "6a8a3e502f01162731bdf0bdc8b2e86beac443f87629789ee312bfbc03125e47"
     }
   ]
 }

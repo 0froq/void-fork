@@ -78,6 +78,9 @@ void platform signup show
 void platform invitation list
 ```
 
+Invitation history remains available after an involved account is removed. The stored actor ID
+remains visible when that account's login no longer exists.
+
 `void platform signup open` allows anyone to sign up. Use `void platform signup restrict` to require an allowlist match again. Removing an allowlist entry affects future signup; it does not suspend an existing account.
 
 ## Managing Users and Projects
