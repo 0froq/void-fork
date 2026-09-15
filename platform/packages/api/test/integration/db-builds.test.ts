@@ -7,7 +7,7 @@ import {
   claimBuildForStartWithinLimit,
   countUserActiveBuilds,
   createBuild,
-  createGitHubConnection,
+  createGitHubConnection as createGitHubConnectionRecord,
   createGithubActionsBuildWithinLimit,
   deleteGitHubConnection,
   deleteProjectCascade,
@@ -20,6 +20,7 @@ import {
   getGitHubConnectionsByRepo,
   getGitHubInstallation,
   getGitHubInstallationsByUser,
+  getProject,
   getProjectBuilds,
   getProjectResources,
   getQueuedBuilds,
@@ -86,6 +87,21 @@ async function clearBuildTables(db: Db): Promise<void> {
 // repositoryId arg is non-null (a null id fails closed).
 const DEFAULT_REPO_ID = '42';
 
+async function createGitHubConnection(
+  db: Db,
+  args: Parameters<typeof createGitHubConnectionRecord>[1],
+) {
+  const project = await getProject(db, args.projectId);
+  if (!project) {
+    throw new Error('test project missing');
+  }
+  return createGitHubConnectionRecord(db, {
+    ...args,
+    authorizedByUserId:
+      args.authorizedByUserId === undefined ? project.user_id : args.authorizedByUserId,
+  });
+}
+
 // Seed an ACTIVE GitHub App installation so the in-tx re-check
 // (`installationCoversRepoInTx`) passes. Defaults to an `all`-repos install
 // (membership not enforced); pass `repositories` for a `selected` install.
@@ -100,7 +116,7 @@ async function seedActiveInstall(
     userId: null,
     accountLogin: `acct-${installationId}`,
     accountId: installationId,
-    accountType: 'User',
+    accountType: 'Organization',
     repositories,
     repositorySelection,
   });
@@ -2241,6 +2257,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       repoFullName: 'acme/cap-other',
       buildExecutor: 'github_actions',
     });
+    await seedActiveInstall(env.db, 'inst-cap-other');
     const capped = await createGithubActionsBuildWithinLimit(env.db, {
       projectId: otherProject.id,
       connectionId: (await getGitHubConnection(env.db, otherProject.id))!.id,
@@ -2248,7 +2265,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
       limit: 1,
       branch: 'main',
       githubRunId: '4003',
-      installationId: 'inst-cap',
+      installationId: 'inst-cap-other',
       repositoryId: DEFAULT_REPO_ID,
       expectedWorkflowPath: '.github/workflows/void-deploy.yml',
     });

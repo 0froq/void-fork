@@ -1513,12 +1513,14 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       // no container to tear down.
       const covered = await installationCoversRepo(
         this.db(),
+        config.connectionId,
+        config.projectId,
         config.installationId,
         config.repositoryId,
       );
       if (!covered) {
         const won = await markBuildTerminalIfActive(this.db(), config.buildId, 'cancelled', {
-          error: 'github app installation no longer covers this repository',
+          error: 'github repository authorization is no longer valid; reconnect the repository',
           completedAt: new Date().toISOString(),
         });
         await this.setStatus('cancelled');

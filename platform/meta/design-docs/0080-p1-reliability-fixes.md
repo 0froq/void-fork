@@ -17,7 +17,7 @@ Commit subjects start with a capital letter and end with a period.
 - [x] 1. Exclude authenticated/dynamic pages from the static cache.
 - [x] 2. Respect response cache opt-outs and API eligibility in direct ISR.
 - [ ] 3. Move authoritative sandbox usage production out of tenant Workers.
-- [ ] 4. Separate GitHub installation visibility from installation authority.
+- [x] 4. Separate GitHub installation visibility from installation authority.
 - [x] 5. Enforce administrator suspension in browser auth and OAuth issuance.
 - [x] 6. Bind environment developer tokens to the selected platform origin.
 - [x] 7. Apply global authorization middleware to WebSocket upgrades.

@@ -219,7 +219,13 @@ vi.mock('../../src/db.ts', () => ({
   // JIT App-installation coverage recheck (fresh, non-locking Postgres read).
   // Fails closed on a null repository id, exactly like the real helper.
   installationCoversRepo: vi.fn(
-    async (_db: unknown, _installationId: string, repositoryId: string | null) => {
+    async (
+      _db: unknown,
+      _connectionId: string | undefined,
+      _projectId: string,
+      _installationId: string,
+      repositoryId: string | null,
+    ) => {
       if (repositoryId === null) {
         return false;
       }
@@ -530,6 +536,7 @@ function makeConfig(overrides: Partial<BuildConfig> = {}): BuildConfig {
     branch: 'main',
     repoFullName: 'owner/repo',
     installationId: 'inst1',
+    connectionId: 'connection-1',
     repositoryId: 'repo1',
     instanceType: 'standard-1',
     timeoutMinutes: 10,
@@ -1443,7 +1450,7 @@ describe('BuildManager.startBuild installation coverage recheck (TOCTOU)', () =>
     const cancelled = lastWrite('cancelled');
     expect(cancelled).toBeDefined();
     expect(cancelled?.id).toBe('b1');
-    expect(cancelled?.opts?.error).toMatch(/installation no longer covers/i);
+    expect(cancelled?.opts?.error).toMatch(/reconnect the repository/i);
     expect(dbState.status.get('b1')).toBe('cancelled');
     // NO deploy token minted and NO container started.
     expect(vi.mocked(signDeployToken)).not.toHaveBeenCalled();
@@ -1452,6 +1459,8 @@ describe('BuildManager.startBuild installation coverage recheck (TOCTOU)', () =>
     // The coverage helper was consulted with this build's installation + repo id.
     expect(vi.mocked(installationCoversRepo)).toHaveBeenCalledWith(
       expect.anything(),
+      'connection-1',
+      'p1',
       'inst1',
       'repo1',
     );
@@ -1487,6 +1496,8 @@ describe('BuildManager.startBuild installation coverage recheck (TOCTOU)', () =>
 
     expect(vi.mocked(installationCoversRepo)).toHaveBeenCalledWith(
       expect.anything(),
+      'connection-1',
+      'p1',
       'inst1',
       'repo1',
     );

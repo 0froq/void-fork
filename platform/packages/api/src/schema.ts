@@ -536,6 +536,14 @@ export const githubConnections = pgTable(
     // name fallback left is for callers with no id at all (malformed/partial
     // webhook). A `repo_full_name` match is used solely in that no-id case.
     repository_id: text('repository_id'),
+    // The project owner whose own GitHub OAuth token proved access to this
+    // organization repository during connect. NULL on legacy rows and personal
+    // installations. Runtime authorization accepts an organization connection
+    // only when this still names the owning Void user; rows created before the
+    // per-repository proof flow therefore fail closed until reconnected.
+    authorized_by_user_id: text('authorized_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     branch: text('branch').notNull().default('main'),
     build_executor: text('build_executor')
       .notNull()

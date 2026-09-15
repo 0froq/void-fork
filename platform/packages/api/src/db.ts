@@ -3287,16 +3287,32 @@ export async function findNonTerminalBuildForCommit(
  * BEFORE this tx is caught. The same lock order in both paths means no deadlock,
  * and the plain read avoids any lock-order concern on `github_installations`.
  *
- * FAILS CLOSED: returns false unless the row exists AND `status === 'active'` AND
- * the repo is still in the install's selection — an `all`-repos install grants
- * every repo (membership not enforced, so the repo id is irrelevant), a `selected`
- * install requires the repo's immutable numeric id to be in the cached set. A null
- * `repositoryId` fails closed for a `selected` install (membership unprovable by
- * id) but an active `all` install still grants coverage. Mirrors the membership
- * predicate in `getGitHubActionsConnectionsByRepo` / `getGitHubConnectionsByRepo`.
+ * FAILS CLOSED unless the exact connection still belongs to the project, has
+ * durable authority, and its active installation still covers the repo. Personal
+ * authority is the installation owner matching the project owner. Organization
+ * authority is `authorized_by_user_id` matching the project owner, written only
+ * after per-repo OAuth proof. Legacy organization rows are null and stop here.
+ * An `all` install covers every repo; a `selected` install requires the immutable
+ * repo id in its cache. This is the shared predicate used by webhook and OIDC
+ * resolvers as well as enqueue and final startup checks.
  */
+function githubConnectionAuthorityClause() {
+  return or(
+    and(
+      eq(githubInstallations.account_type, 'User'),
+      eq(githubInstallations.user_id, projects.user_id),
+    ),
+    and(
+      eq(githubInstallations.account_type, 'Organization'),
+      eq(githubConnections.authorized_by_user_id, projects.user_id),
+    ),
+  );
+}
+
 async function installationCoversRepoInTx(
   tx: Db,
+  connectionId: string,
+  projectId: string,
   installationId: string,
   repositoryId: string | null,
 ): Promise<boolean> {
@@ -3306,15 +3322,20 @@ async function installationCoversRepoInTx(
   // BEFORE the `all` branch (the old unconditional `return false`) wrongly treated
   // a legacy null-id connection on an `all` install as install-revoked.
   const [row] = await tx
-    .select({
-      status: githubInstallations.status,
-      repository_selection: githubInstallations.repository_selection,
-    })
-    .from(githubInstallations)
+    .select({ id: githubConnections.id })
+    .from(githubConnections)
+    .innerJoin(projects, eq(githubConnections.project_id, projects.id))
+    .innerJoin(
+      githubInstallations,
+      eq(githubConnections.installation_id, githubInstallations.installation_id),
+    )
     .where(
       and(
+        eq(githubConnections.id, connectionId),
+        eq(githubConnections.project_id, projectId),
         eq(githubInstallations.installation_id, installationId),
         eq(githubInstallations.status, 'active'),
+        githubConnectionAuthorityClause(),
         or(
           eq(githubInstallations.repository_selection, 'all'),
           repositoryId === null
@@ -3346,24 +3367,34 @@ async function installationCoversRepoInTx(
  */
 export async function installationCoversRepo(
   db: Db,
+  connectionId: string | null | undefined,
+  projectId: string,
   installationId: string,
   repositoryId: string | null,
 ): Promise<boolean> {
+  if (!connectionId) {
+    return false;
+  }
   // An `all`-repos install grants every repo regardless of id; only a `selected`
   // install needs the immutable numeric id in the cached set, so a null repo id
   // can't match there and fails closed via the `false` arm below. Checking null
   // BEFORE the `all` branch (the old unconditional `return false`) wrongly treated
   // a legacy null-id connection on an `all` install as install-revoked.
   const [row] = await db
-    .select({
-      status: githubInstallations.status,
-      repository_selection: githubInstallations.repository_selection,
-    })
-    .from(githubInstallations)
+    .select({ id: githubConnections.id })
+    .from(githubConnections)
+    .innerJoin(projects, eq(githubConnections.project_id, projects.id))
+    .innerJoin(
+      githubInstallations,
+      eq(githubConnections.installation_id, githubInstallations.installation_id),
+    )
     .where(
       and(
+        eq(githubConnections.id, connectionId),
+        eq(githubConnections.project_id, projectId),
         eq(githubInstallations.installation_id, installationId),
         eq(githubInstallations.status, 'active'),
+        githubConnectionAuthorityClause(),
         or(
           eq(githubInstallations.repository_selection, 'all'),
           repositoryId === null
@@ -3471,6 +3502,8 @@ export async function supersedeAndCreateContainerBuild(
     if (
       !(await installationCoversRepoInTx(
         tx as unknown as Db,
+        args.connectionId,
+        args.projectId,
         args.installationId,
         args.repositoryId,
       ))
@@ -4007,6 +4040,8 @@ export async function createGithubActionsBuildWithinLimit(
     if (
       !(await installationCoversRepoInTx(
         tx as unknown as Db,
+        args.connectionId,
+        args.projectId,
         args.installationId,
         args.repositoryId,
       ))
@@ -4248,6 +4283,10 @@ export async function createGitHubConnection(
     // pre-existing callers/tests compile; the connect handler always supplies it
     // and webhook/OIDC resolution keys on it (full_name is mutable).
     repositoryId?: string | null;
+    // Set only after an organization repository was proven with the project
+    // owner's own GitHub OAuth token. Legacy organization connections remain
+    // null and are rejected by every runtime resolver until reconnected.
+    authorizedByUserId?: string | null;
     branch?: string;
     buildExecutor?: GitHubConnection['build_executor'];
     // The `.github/workflows/*.yml` file the OIDC exchange binds the deploy
@@ -4266,6 +4305,7 @@ export async function createGitHubConnection(
       installation_id: args.installationId,
       repo_full_name: args.repoFullName,
       repository_id: args.repositoryId ?? null,
+      authorized_by_user_id: args.authorizedByUserId ?? null,
       branch: args.branch ?? 'main',
       build_executor: args.buildExecutor ?? 'container',
       ...(args.workflowPath !== undefined ? { workflow_path: args.workflowPath } : {}),
@@ -4283,6 +4323,58 @@ export async function getGitHubConnection(
     .from(githubConnections)
     .where(eq(githubConnections.project_id, projectId))
     .limit(1);
+  return row ?? null;
+}
+
+export async function hasGitHubConnectionAuthority(
+  db: Db,
+  connectionId: string,
+  projectId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: githubConnections.id })
+    .from(githubConnections)
+    .innerJoin(projects, eq(githubConnections.project_id, projects.id))
+    .innerJoin(
+      githubInstallations,
+      eq(githubConnections.installation_id, githubInstallations.installation_id),
+    )
+    .where(
+      and(
+        eq(githubConnections.id, connectionId),
+        eq(githubConnections.project_id, projectId),
+        githubConnectionAuthorityClause(),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+export async function authorizeGitHubOrganizationConnection(
+  db: Db,
+  args: {
+    projectId: string;
+    installationId: string;
+    repoFullName: string;
+    repositoryId: string;
+    userId: string;
+  },
+): Promise<GitHubConnection | null> {
+  const [row] = await db
+    .update(githubConnections)
+    .set({
+      authorized_by_user_id: args.userId,
+      repository_id: args.repositoryId,
+      updated_at: sql`now()`,
+    })
+    .where(
+      and(
+        eq(githubConnections.project_id, args.projectId),
+        eq(githubConnections.installation_id, args.installationId),
+        eq(githubConnections.repo_full_name, args.repoFullName),
+      ),
+    )
+    .returning();
   return row ?? null;
 }
 
@@ -4349,6 +4441,7 @@ export async function getGitHubConnectionsByRepo(
         eq(githubConnections.installation_id, installationId),
         matchClause,
         eq(githubInstallations.status, 'active'),
+        githubConnectionAuthorityClause(),
         or(
           // "all repositories" install => every repo is granted.
           eq(githubInstallations.repository_selection, 'all'),
@@ -4469,6 +4562,7 @@ export async function getGitHubActionsConnectionsByRepo(
           : eq(githubInstallations.account_id, repositoryOwnerId),
         eq(githubConnections.build_executor, 'github_actions'),
         eq(githubInstallations.status, 'active'),
+        githubConnectionAuthorityClause(),
         or(
           // "all repositories" install => every repo is granted.
           eq(githubInstallations.repository_selection, 'all'),
@@ -4640,7 +4734,9 @@ export async function getGitHubInstallationsByUser(
   db: Db,
   userId: string,
 ): Promise<ReadonlyArray<GitHubInstallation>> {
-  // Owner OR active member. The EXISTS correlates on the NUMERIC
+  // Personal-account owner OR active member. Organization `user_id` values
+  // written by older code are visibility hints, not authority, so they never
+  // satisfy this query without a live membership. The EXISTS correlates on the NUMERIC
   // `installation_id` (githubInstallations.installation_id) — the key the
   // membership cache is stored under — NOT the surrogate `.id`. The membership
   // arm honors the TTL (`expires_at > now()`, DB clock). owner-OR-EXISTS yields
@@ -4651,7 +4747,7 @@ export async function getGitHubInstallationsByUser(
     .from(githubInstallations)
     .where(
       or(
-        eq(githubInstallations.user_id, userId),
+        and(eq(githubInstallations.account_type, 'User'), eq(githubInstallations.user_id, userId)),
         sql`EXISTS (SELECT 1 FROM ${githubInstallationMembers} m
              WHERE m.installation_id = ${githubInstallations.installation_id}
                AND m.user_id = ${userId}
@@ -4755,7 +4851,13 @@ export async function linkGitHubInstallationToUser(
   await db
     .update(githubInstallations)
     .set({ user_id: userId, updated_at: sql`now()` })
-    .where(and(eq(githubInstallations.account_id, accountId), isNull(githubInstallations.user_id)));
+    .where(
+      and(
+        eq(githubInstallations.account_id, accountId),
+        eq(githubInstallations.account_type, 'User'),
+        isNull(githubInstallations.user_id),
+      ),
+    );
 }
 
 /**

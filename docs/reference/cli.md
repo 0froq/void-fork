@@ -1077,7 +1077,7 @@ List all GitHub App installations linked to your account. Each entry includes th
 void github join
 ```
 
-Join the GitHub App installations your organization already has. If a teammate installed the Void GitHub App on a shared GitHub organization, run `void github join` to gain access to those installations without re-installing. Void opens your browser to authorize (a localhost + PKCE handshake, the same mechanics as `void github link`), confirms with GitHub which installations you can manage, and records your membership. Afterwards `void github installations` lists them and `void github connect` can connect your own projects to their repositories.
+Join the GitHub App installations your organization already has. If a teammate installed the Void GitHub App on a shared GitHub organization, run `void github join` to discover those installations without re-installing. Void opens your browser to authorize (a localhost + PKCE handshake, the same mechanics as `void github link`), confirms which installations GitHub makes visible to you, and records that visibility. Afterwards `void github installations` lists them without exposing the installation-wide private repository list; `void github connect` separately proves access to the repository you name.
 
 In an interactive terminal you rarely need to run this yourself — `void github connect` runs the same join automatically when no active installations are linked to your account. Running `void github join` yourself matters mainly for non-interactive use (without a TTY, `void github connect` never opens a browser), or to link installations ahead of time.
 
@@ -1123,7 +1123,9 @@ void github connect my-app \
 
 **Connecting as an organization member**
 
-If you are a member of a GitHub organization but not the person who installed the App, `void github connect` first confirms that you personally have access to the specific repository. Interactively (TTY), when it detects this it opens your browser once to authorize access to that repo on GitHub (a localhost + PKCE handshake), then completes the connection automatically — no extra flags. Without a TTY, this per-repo authorization never opens a browser: connect fails closed with an error explaining that the installation requires per-repo authorization, which needs an interactive browser sign-in, and telling you to run `void github connect` locally to authorize, then retry. Interactively, connect joins the shared installation automatically when your account has no active installations linked, so running `void github join` first is optional — useful mainly to see the installation in `void github installations` beforehand. You can only connect repositories you can access on GitHub; one you cannot see is refused with a clear message.
+For every organization installation, `void github connect` confirms that you personally have access to the specific repository, including when you originally installed the App. Interactively (TTY), it opens your browser once to authorize access to that repo on GitHub (a localhost + PKCE handshake), then completes the connection automatically. Without a TTY, this per-repo authorization never opens a browser: connect fails closed with an error explaining that the installation requires per-repo authorization and telling you to run `void github connect` locally. Interactively, connect joins the shared installation automatically when your account has no active installations linked, so running `void github join` first is optional. You can only connect repositories you can access on GitHub; seeing the organization installation never grants access to its other private repositories.
+
+After upgrading from a platform version that treated an organization installer as an owner, existing organization connections show **Reconnect required** and stop starting builds until their repository access is proven. Run `void github connect <project> --repo <owner/repo>` again. The command reauthorizes the same connection in place after the browser proof; if the repository or installation changed, disconnect it first and connect the intended repository.
 
 ### `void github update`
 
@@ -1156,7 +1158,7 @@ void github update my-app --executor github_actions
 void github status [project]
 ```
 
-Show a project's current GitHub connection: the connected **repository**, the deploy **branch**, the **build executor** (`container` or `github_actions`), and the authorized **deploy workflow file**. Read-only — it never changes anything. The workflow file is the OIDC pin used only for `github_actions` builds; on a `container` connection it is still shown but marked unused. The project must already be connected (run `void github connect` first, otherwise it reports that and exits).
+Show a project's current GitHub connection: the connected **repository**, the deploy **branch**, the **build executor** (`container` or `github_actions`), and the authorized **deploy workflow file**. Read-only — it never changes anything. The workflow file is the OIDC pin used only for `github_actions` builds; on a `container` connection it is still shown but marked unused. Legacy organization connections also show **Reconnect required** until `void github connect` proves current access to that repository. The project must already be connected (run `void github connect` first, otherwise it reports that and exits).
 
 **Options**
 
