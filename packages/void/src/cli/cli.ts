@@ -55,8 +55,11 @@ async function runSubcommandGroup<T>(
 ) {
   const root = process.cwd();
   const sub = args[1];
+  const hasNamedSubcommand = args
+    .slice(1)
+    .some((arg) => subcommands.some(({ name }) => name === arg));
   try {
-    if ((!sub || sub.startsWith('-')) && process.stdin.isTTY) {
+    if ((!sub || (sub.startsWith('-') && !hasNamedSubcommand)) && process.stdin.isTTY) {
       const { promptSubcommand } = await import('./subcommand-prompt.ts');
       const result = await promptSubcommand(command, subcommands);
       if (!result) {

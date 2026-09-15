@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  openSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
@@ -94,6 +102,43 @@ function run(
   });
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function runPty(args: Array<string>): Promise<{ output: string; code: number }> {
+  return new Promise((resolve, reject) => {
+    const command = [process.execPath, CLI_ENTRY, 'platform', ...args];
+    const scriptArgs =
+      process.platform === 'darwin'
+        ? ['-q', '-e', '/dev/null', ...command]
+        : ['-q', '-e', '-c', command.map(shellQuote).join(' '), '/dev/null'];
+    const input = openSync('/dev/null', 'r');
+    const child = spawn('/usr/bin/script', scriptArgs, {
+      cwd: directory,
+      env: {
+        PATH: process.env.PATH,
+        HOME: directory,
+        USERPROFILE: directory,
+        VOID_PLATFORM_REGISTRY_DIR: join(directory, 'registry'),
+        VOID_API_URL: origin,
+        VOID_OPERATOR_TOKEN: 'test-operator',
+      },
+      stdio: [input, 'pipe', 'pipe'],
+    });
+    closeSync(input);
+    let output = '';
+    child.stdout.on('data', (data) => {
+      output += String(data);
+    });
+    child.stderr.on('data', (data) => {
+      output += String(data);
+    });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ output, code: code ?? 1 }));
+  });
+}
+
 describe('operator CLI (real subprocess and HTTP)', () => {
   it('ignores repository platform metadata and emits clean paginated JSON', async () => {
     mkdirSync(join(directory, '.void'));
@@ -114,6 +159,20 @@ describe('operator CLI (real subprocess and HTTP)', () => {
       authorization: 'Bearer test-operator',
     });
   });
+  it.runIf(process.platform !== 'win32' && existsSync('/usr/bin/script'))(
+    'honors leading operator flags in a real pseudo-terminal',
+    async () => {
+      const result = await runPty(['--json', 'user', 'list']);
+      expect(result.code, result.output).toBe(0);
+      const jsonStart = result.output.indexOf('{');
+      expect(jsonStart, result.output).toBeGreaterThanOrEqual(0);
+      expect(JSON.parse(result.output.slice(jsonStart).trim())).toMatchObject({
+        users: [{ id: 'user-1' }],
+        page: 1,
+      });
+      expect(requests).toHaveLength(1);
+    },
+  );
   it('validates and previews without mutation, then applies exactly once with explicit yes', async () => {
     const blocked = await run(['user', 'delete', 'user-1', '--json']);
     expect(blocked.code).toBe(1);
