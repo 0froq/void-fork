@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import { confirm, isCancel, log } from '@clack/prompts';
 import {
   assertExistingCloudflareConfig,
@@ -76,28 +77,35 @@ export function saveCloudflareLink(root: string, link: CloudflareLink): void {
   writeDeploymentPlatform(root, 'cloudflare');
 }
 
+export function assertCloudflareLinkUnchanged(root: string, expected: CloudflareLink | null): void {
+  if (!isDeepStrictEqual(readCloudflareLink(root), expected)) {
+    throw new Error(
+      'The pending Cloudflare handoff changed while project code was running. Restore .void/cloudflare-link.json and retry.',
+    );
+  }
+}
+
 /** Trust a failed candidate on retry only after this process validated its bindings and handlers. */
 export function recordCloudflareCandidate(
   root: string,
-  target: { accountId: string; workerName: string; parentVersionId: string },
+  expectedLink: CloudflareLink,
+  parentVersionId: string,
   versionId: string,
 ): void {
-  const link = readCloudflareLink(root);
+  assertCloudflareLinkUnchanged(root, expectedLink);
   if (
-    !link ||
-    link.accountId !== target.accountId ||
-    link.workerName !== target.workerName ||
-    (link.candidateReceipt && link.candidateReceipt.parentVersionId !== target.parentVersionId)
+    expectedLink.candidateReceipt &&
+    expectedLink.candidateReceipt.parentVersionId !== parentVersionId
   ) {
     throw new Error('The pending Cloudflare handoff changed before its candidate was recorded.');
   }
-  const versionIds = [...(link.candidateReceipt?.versionIds ?? [])];
+  const versionIds = [...(expectedLink.candidateReceipt?.versionIds ?? [])];
   if (!versionIds.includes(versionId)) {
     versionIds.push(versionId);
   }
   saveCloudflareLink(root, {
-    ...link,
-    candidateReceipt: { parentVersionId: target.parentVersionId, versionIds },
+    ...expectedLink,
+    candidateReceipt: { parentVersionId, versionIds },
   });
 }
 
@@ -113,10 +121,17 @@ export async function prepareExistingCloudflareDeploy(options: {
   configPath: string;
   accountId: string;
   reuse?: boolean;
+  pinnedLink?: CloudflareLink | null;
   runWrangler: CloudflareCommandRunner;
   readExistingWorker?: typeof readExistingCloudflareWorker;
 }): Promise<ExistingCloudflareWorker | null> {
-  const pending = readCloudflareLink(options.root);
+  const onDiskLink = readCloudflareLink(options.root);
+  const pending = options.pinnedLink === undefined ? onDiskLink : options.pinnedLink;
+  if (options.pinnedLink !== undefined && !isDeepStrictEqual(onDiskLink, options.pinnedLink)) {
+    throw new Error(
+      'The pending Cloudflare handoff changed while project code was running. Restore .void/cloudflare-link.json and retry.',
+    );
+  }
   if (!options.reuse && !pending) {
     return null;
   }

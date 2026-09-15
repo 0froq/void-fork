@@ -153,17 +153,11 @@ describe('verified existing Worker link', () => {
   it('persists verified candidate receipts across handoff preparation retries', async () => {
     const deps = options();
     await prepareExistingCloudflareDeploy(deps);
-    recordCloudflareCandidate(
-      root,
-      { accountId: 'personal', workerName: 'site', parentVersionId: 'original' },
-      'candidate-1',
-    );
+    const initialLink = readCloudflareLink(root)!;
+    recordCloudflareCandidate(root, initialLink, 'original', 'candidate-1');
     await prepareExistingCloudflareDeploy({ ...deps, reuse: false });
-    recordCloudflareCandidate(
-      root,
-      { accountId: 'personal', workerName: 'site', parentVersionId: 'original' },
-      'candidate-2',
-    );
+    const retryLink = readCloudflareLink(root)!;
+    recordCloudflareCandidate(root, retryLink, 'original', 'candidate-2');
     expect(readCloudflareLink(root)).toEqual({
       accountId: 'personal',
       workerName: 'site',
@@ -176,24 +170,13 @@ describe('verified existing Worker link', () => {
   it('rejects candidate receipts for a different target or active parent', async () => {
     const deps = options();
     await prepareExistingCloudflareDeploy(deps);
+    const link = readCloudflareLink(root)!;
     expect(() =>
-      recordCloudflareCandidate(
-        root,
-        { accountId: 'other', workerName: 'site', parentVersionId: 'original' },
-        'candidate',
-      ),
+      recordCloudflareCandidate(root, { ...link, accountId: 'other' }, 'original', 'candidate'),
     ).toThrow('changed');
-    recordCloudflareCandidate(
-      root,
-      { accountId: 'personal', workerName: 'site', parentVersionId: 'original' },
-      'candidate',
-    );
+    recordCloudflareCandidate(root, link, 'original', 'candidate');
     expect(() =>
-      recordCloudflareCandidate(
-        root,
-        { accountId: 'personal', workerName: 'site', parentVersionId: 'different' },
-        'candidate-2',
-      ),
+      recordCloudflareCandidate(root, readCloudflareLink(root)!, 'different', 'candidate-2'),
     ).toThrow('changed');
   });
 });

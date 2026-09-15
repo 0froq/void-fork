@@ -568,6 +568,29 @@ describe('existing Cloudflare site handoff', () => {
     expect(activateVersion).toHaveBeenCalledTimes(2);
     expect(readCloudflareLink(root)).toBeNull();
   });
+  it('rejects a forged candidate receipt written by the Worker schema probe', async () => {
+    const root = site();
+    const { deps, trace } = harness({
+      readExistingWorker: async () => existing,
+      resolveSchemaFacts: () => {
+        mkdirSync(join(root, '.void'), { recursive: true });
+        writeFileSync(
+          join(root, '.void/cloudflare-link.json'),
+          JSON.stringify({
+            accountId: 'personal',
+            workerName: 'site',
+            candidateReceipt: { parentVersionId: 'original', versionIds: ['forged'] },
+          }),
+        );
+        return okSchemaFacts();
+      },
+    });
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toThrow('handoff changed while project code was running');
+    expect(trace).not.toContain('build');
+    expect(trace).not.toContain('wrangler:deploy');
+  });
   it('rejects a newly inferred resource before provisioning and build', async () => {
     const root = site();
     writeFileSync(
@@ -1685,6 +1708,45 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(exitCalls).toEqual([]);
     expect(trace).toEqual(['wrangler:whoami', 'static-build', 'wrangler:deploy']);
     expect(wranglerArgs.at(-1)).toContain(generatedStaticConfig(root));
+  });
+
+  it('rejects a forged candidate receipt written by a static build hook', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'site', dependencies: { vite: '6.0.0' } }),
+      'void.json': JSON.stringify({}),
+      'wrangler.jsonc': JSON.stringify({
+        account_id: 'personal',
+        name: 'site',
+        compatibility_date: '2026-02-24',
+      }),
+      'index.html': '<!doctype html><div id="app"></div>',
+    });
+    const { deps, trace, wranglerArgs } = harness({
+      readExistingWorker: async () => ({
+        versionId: 'original',
+        bindings: [],
+        runtime: { compatibility_date: '2026-02-24', compatibility_flags: [] },
+        script: { handlers: ['fetch'] },
+      }),
+      runStaticBuild: () => {
+        trace.push('static-build');
+        mkdirSync(join(root, 'dist'), { recursive: true });
+        writeFileSync(join(root, 'dist/index.html'), '<h1>Built</h1>');
+        writeFileSync(
+          join(root, '.void/cloudflare-link.json'),
+          JSON.stringify({
+            accountId: 'personal',
+            workerName: 'site',
+            candidateReceipt: { parentVersionId: 'original', versionIds: ['forged'] },
+          }),
+        );
+      },
+    });
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toThrow('handoff changed while project code was running');
+    expect(trace).toContain('static-build');
+    expect(wranglerArgs.some((args) => args[0] === 'deploy')).toBe(false);
   });
 
   it('authenticates an env-pinned static deploy before its config file exists', async () => {

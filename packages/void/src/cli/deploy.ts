@@ -124,6 +124,8 @@ import {
   prepareExistingCloudflareDeploy,
   completeCloudflareLink,
   recordCloudflareCandidate,
+  assertCloudflareLinkUnchanged,
+  type CloudflareLink,
 } from './cloudflare-link.ts';
 import { createCloudflareEmptyDomainPublisher } from './cloudflare-operations.ts';
 import {
@@ -3842,6 +3844,7 @@ export async function runCloudflareDeploy(
   cliLog: CliLogger,
   deps: CloudflareDeployDeps = {},
 ): Promise<void> {
+  const initialCloudflareLink = readCloudflareLink(root);
   const exit = deps.exit ?? ((code: number): never => process.exit(code));
   const voidConfig = readConfig(root);
   const detectedFramework = detectFramework(root);
@@ -3869,7 +3872,15 @@ export async function runCloudflareDeploy(
     resolveCloudflareStaticPreset(root, voidConfig, options) ??
     (await resolveCloudflareVoidStaticPreset(root, voidConfig));
   if (staticPreset) {
-    return runCloudflareStaticDeploy(root, options, voidConfig, staticPreset, cliLog, deps);
+    return runCloudflareStaticDeploy(
+      root,
+      options,
+      voidConfig,
+      staticPreset,
+      cliLog,
+      deps,
+      initialCloudflareLink,
+    );
   }
 
   // 0. Flag guard — `--skip-build` cannot be honored by this backend, so REJECT the
@@ -4006,7 +4017,7 @@ export async function runCloudflareDeploy(
       deps.runWrangler ?? createDeployWranglerRunner(root, undefined, apiBaseUrl);
     try {
       accountId = await chooseCloudflareDeployAccount({
-        persist: !(options.reuseExistingWorker || readCloudflareLink(root)),
+        persist: !(options.reuseExistingWorker || initialCloudflareLink),
         beforeWranglerRun: assertUploaderStillPinned,
         configPath,
         root,
@@ -4108,7 +4119,8 @@ export async function runCloudflareDeploy(
   }
 
   let existingWorker: ExistingCloudflareWorker | null = null;
-  if (options.reuseExistingWorker || readCloudflareLink(root)) {
+  let pinnedHandoffLink: CloudflareLink | null = null;
+  if (options.reuseExistingWorker || initialCloudflareLink) {
     if (
       authEnabled ||
       needsSandbox ||
@@ -4126,9 +4138,14 @@ export async function runCloudflareDeploy(
       configPath,
       accountId,
       reuse: options.reuseExistingWorker,
+      pinnedLink: initialCloudflareLink,
       runWrangler,
       readExistingWorker: deps.readExistingWorker,
     });
+    pinnedHandoffLink = readCloudflareLink(root);
+    if (!pinnedHandoffLink) {
+      throw new Error('The pending Cloudflare handoff was not saved before deployment.');
+    }
     rootConfig = parseRootWranglerConfig(configPath);
   }
 
@@ -5108,7 +5125,10 @@ export async function runCloudflareDeploy(
     ((projectRoot) => readGeneratedDeployConfig(projectRoot).path)
   )(root);
   const queueConsumerCleanup = readWranglerManagedQueueCleanupCandidates(configPath);
-  const candidateReceipt = readCloudflareLink(root)?.candidateReceipt;
+  if (existingWorker) {
+    assertCloudflareLinkUnchanged(root, pinnedHandoffLink);
+  }
+  const candidateReceipt = pinnedHandoffLink?.candidateReceipt;
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: assertUploaderStillPinned,
@@ -5136,15 +5156,7 @@ export async function runCloudflareDeploy(
       : undefined,
     recordVerifiedCandidate: existingWorker
       ? (versionId) =>
-          recordCloudflareCandidate(
-            root,
-            {
-              accountId,
-              workerName,
-              parentVersionId: existingWorker.versionId,
-            },
-            versionId,
-          )
+          recordCloudflareCandidate(root, pinnedHandoffLink!, existingWorker.versionId, versionId)
       : undefined,
     message: encodeCloudflareVersionMessage(
       migrations.map((migration) => migration.name),
@@ -5521,6 +5533,7 @@ async function runCloudflareStaticDeploy(
   preset: StaticPreset,
   cliLog: CliLogger,
   deps: CloudflareDeployDeps,
+  initialCloudflareLink: CloudflareLink | null,
 ): Promise<void> {
   const exit = deps.exit ?? ((code: number): never => process.exit(code));
   const configPath = discoverRootWranglerConfig(root);
@@ -5556,7 +5569,7 @@ async function runCloudflareStaticDeploy(
       deps.runWrangler ?? createDeployWranglerRunner(root, undefined, apiBaseUrl);
     try {
       accountId = await chooseCloudflareDeployAccount({
-        persist: !(options.reuseExistingWorker || readCloudflareLink(root)),
+        persist: !(options.reuseExistingWorker || initialCloudflareLink),
         beforeWranglerRun: uploaderIsPinned,
         configPath,
         root,
@@ -5602,9 +5615,14 @@ async function runCloudflareStaticDeploy(
     configPath,
     accountId,
     reuse: options.reuseExistingWorker,
+    pinnedLink: initialCloudflareLink,
     runWrangler,
     readExistingWorker: deps.readExistingWorker,
   });
+  const pinnedHandoffLink = existingWorker ? readCloudflareLink(root) : null;
+  if (existingWorker && !pinnedHandoffLink) {
+    throw new Error('The pending Cloudflare handoff was not saved before deployment.');
+  }
   rootConfig = parseRootWranglerConfig(configPath);
   const rootConfigBeforeBuild = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
   if (preset.buildCommand && !options.skipBuild) {
@@ -5700,7 +5718,10 @@ async function runCloudflareStaticDeploy(
   });
 
   const queueConsumerCleanup = readWranglerManagedQueueCleanupCandidates(configPath);
-  const candidateReceipt = readCloudflareLink(root)?.candidateReceipt;
+  if (existingWorker) {
+    assertCloudflareLinkUnchanged(root, pinnedHandoffLink);
+  }
+  const candidateReceipt = pinnedHandoffLink?.candidateReceipt;
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
     runWrangler,
     verifyUploader: uploaderIsPinned,
@@ -5727,15 +5748,7 @@ async function runCloudflareStaticDeploy(
       : undefined,
     recordVerifiedCandidate: existingWorker
       ? (versionId) =>
-          recordCloudflareCandidate(
-            root,
-            {
-              accountId,
-              workerName,
-              parentVersionId: existingWorker.versionId,
-            },
-            versionId,
-          )
+          recordCloudflareCandidate(root, pinnedHandoffLink!, existingWorker.versionId, versionId)
       : undefined,
     workerName,
     message: encodeCloudflareVersionMessage([], {
