@@ -24,14 +24,23 @@ concurrency:
 permissions: {}
 
 jobs:
+  check-ref:
+    if: ${{ vars.VOID_PLATFORM_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      # Actions string comparisons ignore case. Check before entering Staging.
+      - name: Verify the exact staging branch
+        run: test "$GITHUB_REF" = 'refs/heads/main'
+
   ci:
-    if: ${{ vars.VOID_PLATFORM_DEPLOY_ENABLED == 'true' }}
+    if: ${{ vars.VOID_PLATFORM_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
+    needs: check-ref
     uses: ./.github/workflows/platform-ci.yml
     permissions:
       contents: read
 
   deploy:
-    if: ${{ vars.VOID_PLATFORM_DEPLOY_ENABLED == 'true' }}
+    if: ${{ vars.VOID_PLATFORM_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
     needs: ci
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: Staging
@@ -55,12 +64,8 @@ jobs:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
 
   smoke-test:
-    if: ${{ vars.VOID_PLATFORM_DEPLOY_ENABLED == 'true' }}
+    if: ${{ vars.VOID_PLATFORM_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
     needs: deploy
     uses: ./.github/workflows/platform-smoke-test.yml
     permissions:
       contents: read
-    secrets:
-      CF_ACCESS_CLIENT_ID_STAGING: ${{ secrets.CF_ACCESS_CLIENT_ID_STAGING }}
-      CF_ACCESS_CLIENT_SECRET_STAGING: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}
-      VOID_TOKEN_STAGING: ${{ secrets.VOID_TOKEN_STAGING }}
