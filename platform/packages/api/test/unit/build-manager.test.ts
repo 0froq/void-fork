@@ -21,6 +21,21 @@ const containerCalls = {
   baseAlarms: 0,
 };
 type ScheduledTask = { whenSeconds: number; callback: string };
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 vi.mock('@cloudflare/containers', () => ({
   Container: class {
     ctx: unknown;
@@ -1261,6 +1276,306 @@ describe('BuildManager.startBuild', () => {
         .get,
     ).toHaveBeenCalled();
   });
+
+  it('does not launch after cancellation completes while the source token is awaiting', async () => {
+    const tokenStarted = createDeferred<void>();
+    const releaseToken = createDeferred<void>();
+    vi.mocked(getInstallationToken).mockImplementationOnce(async () => {
+      tokenStarted.resolve(undefined);
+      await releaseToken.promise;
+      return 'late-install-token';
+    });
+
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    const starting = m.startBuild(makeConfig());
+    await tokenStarted.promise;
+
+    await m.cancelBuild('build superseded');
+    expect(dbState.status.get('b1')).toBe('cancelled');
+    releaseToken.resolve(undefined);
+    await starting;
+
+    // The cancelled build-bound deploy token stays revoked and the continuation
+    // holding the newly returned source token never consumes fleet capacity.
+    expect(containerCalls.started).toBe(0);
+    expect(containerCalls.stopped).toBe(0);
+    expect(dbState.writes.some((write) => write.status === 'building')).toBe(false);
+    expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'cancelled' });
+    expect(ctx._kv.get('logDrainState')).toMatchObject({ state: 'complete' });
+    expect(
+      (env as unknown as { BUILD_SCHEDULER: { get: ReturnType<typeof vi.fn> } }).BUILD_SCHEDULER
+        .get,
+    ).toHaveBeenCalled();
+  });
+
+  it('does not mint a source token when cancellation finishes during deploy-token signing', async () => {
+    const signing = createDeferred<void>();
+    const releaseToken = createDeferred<string>();
+    vi.mocked(signDeployToken).mockImplementationOnce(async () => {
+      signing.resolve(undefined);
+      return releaseToken.promise;
+    });
+    const ctx = makeStubCtx();
+    const m = makeManager(ctx, makeEnv());
+    const starting = m.startBuild(makeConfig());
+    await signing.promise;
+    await m.cancelBuild('build superseded');
+    releaseToken.resolve('late-deploy-token');
+    await starting;
+
+    expect(getInstallationToken).not.toHaveBeenCalled();
+    expect(containerCalls.started).toBe(0);
+    expect(dbState.status.get('b1')).toBe('cancelled');
+    expect(ctx._kv.get('logDrainState')).toMatchObject({ state: 'complete' });
+  });
+
+  it('coalesces duplicate scheduler deliveries and allows a fresh capacity retry', async () => {
+    const tokenStarted = createDeferred<void>();
+    const releaseToken = createDeferred<string>();
+    vi.mocked(getInstallationToken).mockImplementationOnce(async () => {
+      tokenStarted.resolve(undefined);
+      return releaseToken.promise;
+    });
+    const m = makeManager(makeStubCtx(), makeEnv());
+    const startSpy = vi
+      .spyOn(m as unknown as { start: () => Promise<void> }, 'start')
+      .mockRejectedValueOnce(
+        new Error('there is no container instance that can be provided to this durable object'),
+      );
+    const first = m.startBuild(makeConfig());
+    const firstResult = expect(first).rejects.toThrow('no container instance');
+    await tokenStarted.promise;
+    const duplicate = m.startBuild(makeConfig());
+    const duplicateResult = expect(duplicate).rejects.toThrow('no container instance');
+    releaseToken.resolve('install-token');
+    await Promise.all([firstResult, duplicateResult]);
+    expect(getInstallationToken).toHaveBeenCalledOnce();
+    expect(startSpy).toHaveBeenCalledOnce();
+    expect(dbState.status.get('b1')).toBe('starting');
+
+    // The scheduler reclaims the requeued row before its next RPC. The rejected
+    // attempt must release the coalescing gate and its aborted generation.
+    startSpy.mockRestore();
+    await m.startBuild(makeConfig());
+    expect(getInstallationToken).toHaveBeenCalledTimes(2);
+    expect(containerCalls.started).toBe(1);
+    expect(dbState.status.get('b1')).toBe('building');
+  });
+
+  it('kills a producer launched after cancellation saw no container, before completing its logs', async () => {
+    const preparingLaunch = createDeferred<void>();
+    const releaseLaunch = createDeferred<void>();
+    const ctx = makeStubCtx();
+    ctx._kv.set('checkRunId', '99001');
+    const m = makeManager(ctx, makeEnv());
+    const startSpy = vi
+      .spyOn(
+        m as unknown as {
+          start: (options?: unknown, wait?: { signal?: AbortSignal }) => Promise<void>;
+        },
+        'start',
+      )
+      .mockImplementationOnce(async (_options, wait) => {
+        // The real base awaits scheduleNextAlarm/refreshOutboundInterception
+        // before container.start(), and checks abort only during readiness.
+        preparingLaunch.resolve(undefined);
+        await releaseLaunch.promise;
+        containerCalls.started += 1;
+        (m as unknown as { _containerRunning: boolean })._containerRunning = true;
+        expect(wait?.signal?.aborted).toBe(true);
+        throw new Error('Aborted waiting for container to start');
+      });
+    const starting = m.startBuild(makeConfig());
+    await preparingLaunch.promise;
+    await m.cancelBuild('build superseded');
+    expect(containerCalls.started).toBe(0);
+    expect(containerCalls.stopped).toBe(0);
+    expect(ctx._kv.get('logDrainState')).toMatchObject({ state: 'open' });
+    expect(completeCheckRun).not.toHaveBeenCalled();
+
+    releaseLaunch.resolve(undefined);
+    await starting;
+
+    expect(dbState.status.get('b1')).toBe('cancelled');
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+    expect((m as unknown as { _containerRunning: boolean })._containerRunning).toBe(false);
+    expect(ctx._logs.filter((row) => row.line.includes('container terminated'))).toEqual([
+      expect.objectContaining({
+        line: '[build-manager] container terminated: build superseded',
+      }),
+    ]);
+    expect(ctx._kv.get('logDrainState')).toMatchObject({
+      state: 'complete',
+      finalSeq: ctx._logs.at(-1)?.seq,
+    });
+    expect(completeCheckRun).toHaveBeenCalledOnce();
+    expect(vi.mocked(completeCheckRun).mock.calls[0][4]).toMatchObject({
+      conclusion: 'cancelled',
+      text: expect.stringContaining('container terminated: build superseded'),
+    });
+    expect(scheduledTasks(m).some((task) => task.callback === 'enforceTimeout')).toBe(false);
+    startSpy.mockRestore();
+  });
+
+  it.each(['cancelled', 'failed', 'complete', 'queued', null])(
+    'tears down an unclaimed launch when onStart finds an out-of-band %s row',
+    async (status) => {
+      const tokenStarted = createDeferred<void>();
+      const releaseToken = createDeferred<string>();
+      vi.mocked(getInstallationToken).mockImplementationOnce(async () => {
+        tokenStarted.resolve(undefined);
+        return releaseToken.promise;
+      });
+      const ctx = makeStubCtx();
+      ctx._kv.set('checkRunId', '99001');
+      const m = makeManager(ctx, makeEnv());
+      const starting = m.startBuild(makeConfig());
+      await tokenStarted.promise;
+      // The transaction committed, but its best-effort cancel RPC has not
+      // arrived. Only the onStart CAS can detect this remote winner.
+      if (status === null) {
+        dbState.status.delete('b1');
+      } else {
+        dbState.status.set('b1', status);
+      }
+      releaseToken.resolve('install-token');
+      await starting;
+
+      expect(containerCalls.started).toBe(1);
+      expect(containerCalls.stopped).toBe(1);
+      expect(containerCalls.destroyed).toBe(1);
+      expect(dbState.status.get('b1')).toBe(status ?? undefined);
+      expect(dbState.writes).toEqual([]);
+      expect(ctx._logs.filter((row) => row.line.includes('container terminated'))).toHaveLength(1);
+      expect(ctx._kv.get('logDrainState')).toMatchObject({ state: 'complete' });
+      expect(scheduledTasks(m).some((task) => task.callback === 'enforceTimeout')).toBe(false);
+      if (status === 'cancelled' || status === 'failed' || status === 'complete') {
+        expect(completeCheckRun).toHaveBeenCalledOnce();
+        expect(vi.mocked(completeCheckRun).mock.calls[0][4]).toMatchObject({
+          conclusion:
+            status === 'complete' ? 'success' : status === 'failed' ? 'failure' : 'cancelled',
+        });
+      }
+    },
+  );
+
+  it('bounds a hung startup CAS and tears down before its late result can restore authority', async () => {
+    vi.useFakeTimers();
+    const claimed = createDeferred<void>();
+    const releaseClaim = createDeferred<void>();
+    vi.mocked(markBuildBuildingIfStarting).mockImplementationOnce(async (_db, id) => {
+      claimed.resolve(undefined);
+      await releaseClaim.promise;
+      // Model the real guarded UPDATE when it finally acquires its row lock.
+      if (dbState.status.get(id) !== 'starting') {
+        return false;
+      }
+      dbState.status.set(id, 'building');
+      return true;
+    });
+    const ctx = makeStubCtx();
+    const m = makeManager(ctx, makeEnv());
+    try {
+      const starting = m.startBuild(makeConfig());
+      const result = expect(starting).rejects.toThrow('startup claim did not settle');
+      await claimed.promise;
+      await vi.advanceTimersByTimeAsync(TERMINAL_WRITE_TIMEOUT_MS);
+      await result;
+      expect(dbState.status.get('b1')).toBe('failed');
+      expect(containerCalls.stopped).toBe(1);
+      expect(containerCalls.destroyed).toBe(1);
+      releaseClaim.resolve(undefined);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(dbState.status.get('b1')).toBe('failed');
+      expect(ctx._kv.get('logDrainState')).toMatchObject({ state: 'complete' });
+    } finally {
+      releaseClaim.resolve(undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it('tears down a cancelled launch when the real-class start order reaches onStart late', async () => {
+    const launched = createDeferred<void>();
+    const releaseOnStart = createDeferred<void>();
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    const startSpy = vi
+      .spyOn(
+        m as unknown as {
+          start: (options?: unknown, wait?: { signal?: AbortSignal }) => Promise<void>;
+        },
+        'start',
+      )
+      .mockImplementationOnce(async (_options, wait) => {
+        // Match @cloudflare/containers: launch first, await readiness, then call
+        // onStart before resolving. Cancellation lands in that middle window.
+        containerCalls.started += 1;
+        (m as unknown as { _containerRunning: boolean })._containerRunning = true;
+        launched.resolve(undefined);
+        await releaseOnStart.promise;
+        expect(wait?.signal?.aborted).toBe(true);
+        await m.onStart();
+      });
+
+    const starting = m.startBuild(makeConfig());
+    await launched.promise;
+    await m.cancelBuild('build superseded');
+    releaseOnStart.resolve(undefined);
+    await starting;
+
+    expect(dbState.status.get('b1')).toBe('cancelled');
+    expect(dbState.writes.some((write) => write.status === 'building')).toBe(false);
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+    expect((m as unknown as { _containerRunning: boolean })._containerRunning).toBe(false);
+    expect(ctx._kv.get('logDrainState')).toMatchObject({ state: 'complete' });
+    expect(ctx._logs.filter((row) => row.line.includes('container terminated'))).toHaveLength(1);
+    expect(scheduledTasks(m).some((task) => task.callback === 'enforceTimeout')).toBe(false);
+    startSpy.mockRestore();
+  });
+
+  it('still tears down a cancelled launch when the Postgres revocation fails', async () => {
+    const launched = createDeferred<void>();
+    const releaseOnStart = createDeferred<void>();
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    vi.mocked(markBuildTerminalIfActive).mockRejectedValueOnce(
+      new Error('postgres cancellation failed'),
+    );
+    const startSpy = vi
+      .spyOn(m as unknown as { start: () => Promise<void> }, 'start')
+      .mockImplementationOnce(async () => {
+        containerCalls.started += 1;
+        (m as unknown as { _containerRunning: boolean })._containerRunning = true;
+        launched.resolve(undefined);
+        await releaseOnStart.promise;
+        await m.onStart();
+      });
+
+    const starting = m.startBuild(makeConfig());
+    await launched.promise;
+    await expect(m.cancelBuild('build superseded')).rejects.toThrow('postgres cancellation failed');
+    releaseOnStart.resolve(undefined);
+    await starting;
+
+    // Database uncertainty never gates fleet cleanup, and the aborted late
+    // onStart callback cannot restore `building` authority afterward.
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+    expect((m as unknown as { _containerRunning: boolean })._containerRunning).toBe(false);
+    expect(dbState.writes.some((write) => write.status === 'building')).toBe(false);
+    expect(ctx._kv.get('buildConfig')).toMatchObject({ status: 'cancelled' });
+    expect(
+      (env as unknown as { BUILD_SCHEDULER: { get: ReturnType<typeof vi.fn> } }).BUILD_SCHEDULER
+        .get,
+    ).toHaveBeenCalled();
+    startSpy.mockRestore();
+  });
 });
 
 // The container build agent uses SOURCE_TOKEN only as the Bearer to download
@@ -2004,6 +2319,26 @@ describe('BuildManager.onError', () => {
 // compare-and-set in db.ts (markBuildBuildingIfStarting / markBuildTerminalIfActive),
 // not the in-memory `config.status` early-returns (which only see the DO copy).
 describe('BuildManager lifecycle status-race CAS guards', () => {
+  it.each(['building', 'deploying'])(
+    'preserves a legitimate late onStart callback for %s',
+    async (status) => {
+      const ctx = makeStubCtx();
+      const m = makeManager(ctx, makeEnv());
+      await m.startBuild(makeConfig());
+      dbState.status.set('b1', status);
+      dbState.writes = [];
+
+      await m.onStart();
+
+      expect(dbState.status.get('b1')).toBe(status);
+      expect(ctx._kv.get('buildConfig')).toMatchObject({ status });
+      expect(containerCalls.stopped).toBe(0);
+      expect(containerCalls.destroyed).toBe(0);
+      expect(dbState.writes).toEqual([]);
+      expect(ctx._kv.get('logDrainState')).toMatchObject({ state: 'open' });
+    },
+  );
+
   it('a fast-exit onStop right after startBuild lands a terminal row that is never reset to starting', async () => {
     const ctx = makeStubCtx();
     const env = makeEnv();
@@ -2156,6 +2491,9 @@ describe('BuildManager timeout integration (base-owned alarm + scheduled enforce
     const m = makeManager(ctx, env);
     await m.startBuild(makeConfig());
     await m.onStop({ exitCode: 0, reason: 'exit' });
+    // A real onStop callback means the producer is already gone. The unit stub
+    // calls the hook directly, so model that base-class liveness transition.
+    (m as unknown as { _containerRunning: boolean })._containerRunning = false;
     dbState.writes = [];
     containerCalls.stopped = 0;
 
@@ -2164,6 +2502,77 @@ describe('BuildManager timeout integration (base-owned alarm + scheduled enforce
     expect(containerCalls.stopped).toBe(0);
     expect(dbState.writes).toEqual([]);
   });
+
+  it('recovers a live producer even when local cancellation was already persisted', async () => {
+    const ctx = makeStubCtx();
+    const env = makeEnv();
+    const m = makeManager(ctx, env);
+    await m.startBuild(makeConfig());
+    ctx._kv.set('checkRunId', '99001');
+
+    // Model an interrupted cancellation invocation: local durable state reached
+    // terminal, but the producer is still live and Postgres is still active.
+    await ctx.storage.put('buildConfig', {
+      ...makeConfig(),
+      status: 'cancelled',
+    });
+    dbState.status.set('b1', 'building');
+    dbState.writes = [];
+    containerCalls.stopped = 0;
+    containerCalls.destroyed = 0;
+
+    await m.enforceTimeout();
+
+    // Recovery revokes the build-bound token before teardown, releases the
+    // global container slot, publishes the producer barrier, and re-arms queue
+    // progress rather than returning until sleepAfter.
+    expect(dbState.status.get('b1')).toBe('cancelled');
+    expect(lastWrite('cancelled')).toBeDefined();
+    expect(containerCalls.stopped).toBe(1);
+    expect(containerCalls.destroyed).toBe(1);
+    expect(ctx._kv.get('logDrainState')).toMatchObject({ state: 'complete' });
+    expect(completeCheckRun).toHaveBeenCalledOnce();
+    expect(vi.mocked(completeCheckRun).mock.calls[0][4]).toMatchObject({
+      conclusion: 'cancelled',
+      text: expect.stringContaining('container terminated'),
+    });
+    expect(
+      (env as unknown as { BUILD_SCHEDULER: { get: ReturnType<typeof vi.fn> } }).BUILD_SCHEDULER
+        .get,
+    ).toHaveBeenCalled();
+  });
+
+  it.each(['failed', 'cancelled'])(
+    'recovers a locally %s producer when its Postgres revocation rejects',
+    async (status) => {
+      const ctx = makeStubCtx();
+      const env = makeEnv();
+      const m = makeManager(ctx, env);
+      await m.startBuild(makeConfig());
+      // Interruption between a real terminal path's local write and its signal.
+      await ctx.storage.put('buildConfig', { ...makeConfig(), status });
+      vi.mocked(markBuildTerminalIfActive).mockRejectedValueOnce(new Error('postgres offline'));
+      const portFetch = vi.fn();
+      (m as unknown as { _portFetch: unknown })._portFetch = portFetch;
+
+      await expect(m.enforceTimeout()).rejects.toThrow('postgres offline');
+
+      expect(dbState.status.get('b1')).toBe('building');
+      expect(containerCalls.stopped).toBe(1);
+      expect(containerCalls.destroyed).toBe(1);
+      // An uncertain revocation must not open another log fetch with live token
+      // authority. The durable reconciler observes any later terminal write.
+      expect(portFetch).not.toHaveBeenCalled();
+      expect(ctx._kv.get('logDrainState')).toMatchObject({ state: 'complete' });
+      expect(scheduledTasks(m).some((task) => task.callback === 'reconcileTerminalWrite')).toBe(
+        true,
+      );
+      expect(
+        (env as unknown as { BUILD_SCHEDULER: { get: ReturnType<typeof vi.fn> } }).BUILD_SCHEDULER
+          .get,
+      ).toHaveBeenCalled();
+    },
+  );
 
   it('stops the container AND pokes the scheduler even when the terminal DB write throws', async () => {
     // `markBuildTerminalIfActive` has no internal try/catch: a Hyperdrive/Postgres
