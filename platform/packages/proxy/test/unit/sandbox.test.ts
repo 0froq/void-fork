@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from 'vite-plus/test';
+import { SandboxConcurrencyCounter } from '../../../api/src/sandbox-concurrency-counter.ts';
 import worker from '../../src/index.ts';
 
 const JWT_SECRET = 'test-secret-key';
@@ -76,6 +77,39 @@ function createMockCounter(opts?: {
   return { namespace, stub, lastIdFromName };
 }
 
+function createActualCounterNamespace() {
+  const counters = new Map<string, SandboxConcurrencyCounter>();
+  const idFromName = vi.fn((name: string) => ({ name }));
+  const get = vi.fn((id: { name: string }) => {
+    let counter = counters.get(id.name);
+    if (counter) {
+      return counter;
+    }
+    const data = new Map<string, unknown>();
+    let alarm: number | null = null;
+    const storage = {
+      get: async <T>(key: string): Promise<T | undefined> => {
+        const value = data.get(key);
+        return value === undefined ? undefined : (structuredClone(value) as T);
+      },
+      put: async (key: string, value: unknown) => {
+        data.set(key, structuredClone(value));
+      },
+      getAlarm: async () => alarm,
+      setAlarm: async (when: number) => {
+        alarm = when;
+      },
+    };
+    const ctx = { storage } as never;
+    counter = new SandboxConcurrencyCounter(ctx, {} as never);
+    (counter as unknown as { ctx: unknown; env: unknown }).ctx = ctx;
+    (counter as unknown as { ctx: unknown; env: unknown }).env = {};
+    counters.set(id.name, counter);
+    return counter;
+  });
+  return { namespace: { idFromName, get }, counters };
+}
+
 function createEnv(opts?: {
   kvData?: Record<string, string>;
   counter?: ReturnType<typeof createMockCounter>;
@@ -116,6 +150,10 @@ function projectKv(userId: string, plan: string): string {
   return JSON.stringify({ userId, plan });
 }
 
+function leaseId(projectId: string, sandboxId: string): string {
+  return JSON.stringify([projectId, sandboxId]);
+}
+
 // --- Tests ---
 
 describe('proxy sandbox routes', () => {
@@ -123,6 +161,7 @@ describe('proxy sandbox routes', () => {
 
   beforeAll(async () => {
     aiTokens = {
+      proj_other: await signAiToken('proj_other', JWT_SECRET),
       proj_solo: await signAiToken('proj_solo', JWT_SECRET),
       proj_pro: await signAiToken('proj_pro', JWT_SECRET),
       proj_unknown: await signAiToken('proj_unknown', JWT_SECRET),
@@ -147,6 +186,48 @@ describe('proxy sandbox routes', () => {
   });
 
   describe('POST /sandbox/acquire', () => {
+    it('counts same-named instances from two projects separately and scopes release/refresh', async () => {
+      const counter = createActualCounterNamespace();
+      const sharedOpaqueInstanceId = 'a'.repeat(64);
+      const env = createEnv({
+        kvData: {
+          'project:proj_solo': projectKv('user_shared', 'free'),
+          'project:proj_other': projectKv('user_shared', 'free'),
+        },
+      });
+      env.SANDBOX_CONCURRENCY_COUNTER = counter.namespace as never;
+
+      const request = (projectId: 'proj_solo' | 'proj_other', path: string) =>
+        worker.fetch(
+          post(`/sandbox/${path}`, {
+            sandboxId: sharedOpaqueInstanceId,
+            projectId,
+            aiToken: aiTokens[projectId],
+            // Untrusted identity hints must not influence account or lease scope.
+            userId: 'attacker-selected',
+            slug: 'attacker-selected',
+          }),
+          env,
+        );
+
+      expect((await request('proj_solo', 'acquire')).status).toBe(200);
+      expect(await (await request('proj_other', 'acquire')).json()).toEqual({
+        reason: 'concurrency',
+      });
+
+      // Project B never held this lease. Its release cannot remove project A's
+      // slot even though it submits the same opaque instance id.
+      expect((await request('proj_other', 'release')).status).toBe(204);
+      expect(await (await request('proj_solo', 'refresh')).json()).toEqual({ ok: true });
+      expect((await request('proj_solo', 'acquire')).status).toBe(200);
+      expect(await (await request('proj_other', 'acquire')).json()).toEqual({
+        reason: 'concurrency',
+      });
+
+      expect(counter.namespace.idFromName).toHaveBeenCalledWith('account:user_shared');
+      expect(counter.counters.size).toBe(1);
+    });
+
     it('returns 200 with empty body when under the plan limit', async () => {
       const counter = createMockCounter();
       const env = createEnv({
@@ -167,7 +248,7 @@ describe('proxy sandbox routes', () => {
       expect(await res.json()).toEqual({});
       expect(counter.namespace.idFromName).toHaveBeenCalledWith('account:user_solo');
       // solo plan = 2 concurrent sandboxes
-      expect(counter.stub.acquire).toHaveBeenCalledWith('sb-1', 2);
+      expect(counter.stub.acquire).toHaveBeenCalledWith(leaseId('proj_solo', 'sb-1'), 2);
     });
 
     it('returns 409 {reason:"concurrency"} when DO reports concurrency cap reached', async () => {
@@ -191,7 +272,7 @@ describe('proxy sandbox routes', () => {
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ reason: 'concurrency' });
       // pro plan = 10 concurrent sandboxes
-      expect(counter.stub.acquire).toHaveBeenCalledWith('sb-2', 10);
+      expect(counter.stub.acquire).toHaveBeenCalledWith(leaseId('proj_pro', 'sb-2'), 10);
     });
 
     it('returns 409 {reason:"runtime_budget"} when sandbox-block KV key is set (before DO call)', async () => {
@@ -334,7 +415,7 @@ describe('proxy sandbox routes', () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
       expect(counter.namespace.idFromName).toHaveBeenCalledWith('account:user_solo');
-      expect(counter.stub.refresh).toHaveBeenCalledWith('sb-1');
+      expect(counter.stub.refresh).toHaveBeenCalledWith(leaseId('proj_solo', 'sb-1'));
     });
 
     it('relays {ok:false, reason:"not_held"} when the DO reports the slot was missing', async () => {
@@ -414,7 +495,7 @@ describe('proxy sandbox routes', () => {
       expect(res.status).toBe(204);
       expect(await res.text()).toBe('');
       expect(counter.namespace.idFromName).toHaveBeenCalledWith('account:user_solo');
-      expect(counter.stub.release).toHaveBeenCalledWith('sb-1');
+      expect(counter.stub.release).toHaveBeenCalledWith(leaseId('proj_solo', 'sb-1'));
     });
 
     it('is idempotent — second release call still returns 204', async () => {

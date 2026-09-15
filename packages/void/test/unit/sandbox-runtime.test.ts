@@ -5,15 +5,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 // `getSandboxImpl` so individual tests can change its behaviour without
 // re-stubbing the module.
 //
-// The runtime now reads `stub.id.name` to derive the normalized sandbox id
-// for the gate call, so the default impl returns a stub that mirrors the SDK
-// shape: the id is lowercased when `normalizeId: true` is passed, matching
-// the SDK's `effectiveId = sanitizedId.toLowerCase()` path.
-function makeDefaultStub(...args: ReadonlyArray<unknown>): { id: { name: string | undefined } } {
+function opaqueId(seed: string): string {
+  const encoded = [...seed].map((character) => character.codePointAt(0)!.toString(16)).join('');
+  return encoded.repeat(Math.ceil(64 / encoded.length)).slice(0, 64);
+}
+
+// A real DurableObjectId exposes the optional human-readable name and a
+// namespace-specific 64-digit opaque string. The gate must use the latter.
+function makeDefaultStub(...args: ReadonlyArray<unknown>): {
+  id: { name: string | undefined; toString: () => string };
+} {
   const callerId = args[1] as string | undefined;
   const options = args[2] as { normalizeId?: boolean } | undefined;
   const effectiveId = callerId && options?.normalizeId ? callerId.toLowerCase() : callerId;
-  return { id: { name: effectiveId } };
+  return {
+    id: {
+      name: effectiveId,
+      toString: () => opaqueId(`namespace:${effectiveId ?? 'default'}`),
+    },
+  };
 }
 let getSandboxImpl: (...args: ReadonlyArray<unknown>) => unknown = makeDefaultStub;
 
@@ -46,14 +56,14 @@ vi.mock('@cloudflare/sandbox', () => {
 
 // Inline storage stand-in for `DurableObjectState.storage`.
 type StorageMap = Map<string, unknown>;
-function createMockCtx(idName?: string) {
+function createMockCtx(idName?: string, idString = opaqueId(`namespace:${idName ?? 'default'}`)) {
   const storage: StorageMap = new Map();
   const alarms: Array<number> = [];
   const waitUntilTasks: Array<Promise<unknown>> = [];
   return {
     id: {
       name: idName,
-      toString: () => idName ?? 'do-id-stringified',
+      toString: () => idString,
     },
     storage: {
       get: vi.fn(async (keyOrKeys: string | Array<string>) => {
@@ -119,7 +129,10 @@ describe('runtime sandbox: getSandbox()', () => {
     const { getSandbox } = await import('../../src/runtime/sandbox.ts');
 
     const namespaceMarker = Symbol('namespace');
-    const stub = { __returned: true, id: { name: 'my-id' } };
+    const stub = {
+      __returned: true,
+      id: { name: 'my-id', toString: () => opaqueId('local:my-id') },
+    };
     const stubFn = vi.fn((..._args: ReadonlyArray<unknown>) => stub);
     getSandboxImpl = stubFn;
 
@@ -141,7 +154,11 @@ describe('runtime sandbox: getSandbox()', () => {
     const { envContext } = await import('../../src/runtime/env-raw.ts');
     const { getSandbox } = await import('../../src/runtime/sandbox.ts');
 
-    const stub = { __with_gate: true, id: { name: 'sb-1' } };
+    const sandboxInstanceId = opaqueId('deployment-a:sb-1');
+    const stub = {
+      __with_gate: true,
+      id: { name: 'sb-1', toString: () => sandboxInstanceId },
+    };
     const stubFn = vi.fn((..._args: ReadonlyArray<unknown>) => stub);
     getSandboxImpl = stubFn;
 
@@ -173,8 +190,44 @@ describe('runtime sandbox: getSandbox()', () => {
     expect(JSON.parse(init.body as string)).toEqual({
       projectId: 'proj-1',
       aiToken: 'token-1',
-      sandboxId: 'sb-1',
+      sandboxId: sandboxInstanceId,
     });
+  });
+
+  it('sends distinct opaque identities for the same name in different DO namespaces', async () => {
+    vi.resetModules();
+    const { envContext } = await import('../../src/runtime/env-raw.ts');
+    const { getSandbox } = await import('../../src/runtime/sandbox.ts');
+
+    const deploymentAId = '1'.repeat(64);
+    const deploymentBId = '2'.repeat(64);
+    const stubs = [
+      { id: { name: 'default', toString: () => deploymentAId } },
+      { id: { name: 'default', toString: () => deploymentBId } },
+    ];
+    getSandboxImpl = () => stubs.shift();
+    const gateFetch = vi.fn(
+      async (..._args: ReadonlyArray<unknown>) => new Response(null, { status: 200 }),
+    );
+
+    await envContext.run(
+      {
+        SANDBOX: { __ns: true },
+        __VOID_PROXY: { fetch: gateFetch },
+        __PROJECT_ID: 'proj-shared-name',
+        __VOID_PROXY_TOKEN: 'token-shared-name',
+      },
+      async () => {
+        await getSandbox();
+        await getSandbox();
+      },
+    );
+
+    const sandboxIds = gateFetch.mock.calls.map((call) => {
+      const body = JSON.parse((call[1] as RequestInit).body as string) as { sandboxId: string };
+      return body.sandboxId;
+    });
+    expect(sandboxIds).toEqual([deploymentAId, deploymentBId]);
   });
 
   it('throws SandboxLimitError(concurrency) when the gate denies with 409', async () => {
@@ -237,7 +290,10 @@ describe('runtime sandbox: getSandbox()', () => {
     const { envContext } = await import('../../src/runtime/env-raw.ts');
     const { getSandbox } = await import('../../src/runtime/sandbox.ts');
 
-    const stub = { __fail_open: true, id: { name: 'sb-any' } };
+    const stub = {
+      __fail_open: true,
+      id: { name: 'sb-any', toString: () => opaqueId('deployment-a:sb-any') },
+    };
     const stubFn = vi.fn((..._args: ReadonlyArray<unknown>) => stub);
     getSandboxImpl = stubFn;
 
@@ -269,7 +325,10 @@ describe('runtime sandbox: getSandbox()', () => {
     const { envContext } = await import('../../src/runtime/env-raw.ts');
     const { getSandbox } = await import('../../src/runtime/sandbox.ts');
 
-    const stub = { __fail_open_throw: true, id: { name: 'sb-throw' } };
+    const stub = {
+      __fail_open_throw: true,
+      id: { name: 'sb-throw', toString: () => opaqueId('deployment-a:sb-throw') },
+    };
     const stubFn = vi.fn((..._args: ReadonlyArray<unknown>) => stub);
     getSandboxImpl = stubFn;
 
@@ -298,22 +357,21 @@ describe('runtime sandbox: getSandbox()', () => {
     expect(stubFn).toHaveBeenCalledOnce();
   });
 
-  it('uses the normalized DO name (lowercase) as the gate sandboxId so acquire matches release', async () => {
+  it('uses the opaque DO identity as the gate sandboxId so acquire matches release', async () => {
     vi.resetModules();
     const { envContext } = await import('../../src/runtime/env-raw.ts');
     const { getSandbox, VoidPlatformSandbox } = await import('../../src/runtime/sandbox.ts');
 
-    // The SDK lowercases the id when `normalizeId: true`, so the resulting
-    // DO is keyed by `myproject-123`. Inside the DO, `ctx.id.name` reports
-    // the normalized form — `notifyGateRelease()` posts that form back to
-    // the gate. Acquire MUST use the same key, otherwise the lease leaks
-    // until the gate's TTL sweeps it. We assert both halves here.
+    // The name remains useful for addressing inside one namespace, but the
+    // opaque id is what distinguishes the same name across deployments.
     const CALLER_ID = 'MyProject-123';
     const NORMALIZED_ID = 'myproject-123';
+    const INSTANCE_ID = opaqueId('deployment-b:myproject-123');
 
-    // Mock the SDK stub so its id.name is the normalized form (matching the
-    // real SDK behaviour). getSandbox() should read that for the gate body.
-    const stub = { __normalized: true, id: { name: NORMALIZED_ID } };
+    const stub = {
+      __normalized: true,
+      id: { name: NORMALIZED_ID, toString: () => INSTANCE_ID },
+    };
     getSandboxImpl = (..._args: ReadonlyArray<unknown>) => stub;
 
     const gateFetch = vi.fn(
@@ -332,8 +390,8 @@ describe('runtime sandbox: getSandbox()', () => {
         // 1. Acquire with the mixed-case caller id.
         await getSandbox(CALLER_ID);
 
-        // 2. Release via the DO lifecycle — ctx.id.name is the normalized form.
-        releaseCtx = createMockCtx(NORMALIZED_ID);
+        // 2. Release via the DO lifecycle — ctx.id exposes the same opaque id.
+        releaseCtx = createMockCtx(NORMALIZED_ID, INSTANCE_ID);
         const env = {
           __VOID_PROXY: { fetch: gateFetch },
           __PROJECT_ID: 'proj-norm',
@@ -355,8 +413,8 @@ describe('runtime sandbox: getSandbox()', () => {
     const releaseBody = JSON.parse((gateFetch.mock.calls[1][1] as RequestInit).body as string) as {
       sandboxId: string;
     };
-    expect(acquireBody.sandboxId).toBe(NORMALIZED_ID);
-    expect(releaseBody.sandboxId).toBe(NORMALIZED_ID);
+    expect(acquireBody.sandboxId).toBe(INSTANCE_ID);
+    expect(releaseBody.sandboxId).toBe(INSTANCE_ID);
     expect(acquireBody.sandboxId).toBe(releaseBody.sandboxId);
   });
 
@@ -365,7 +423,10 @@ describe('runtime sandbox: getSandbox()', () => {
     const { envContext } = await import('../../src/runtime/env-raw.ts');
     const { getSandbox } = await import('../../src/runtime/sandbox.ts');
 
-    const stub = { __no_token: true, id: { name: 'sb-skip' } };
+    const stub = {
+      __no_token: true,
+      id: { name: 'sb-skip', toString: () => opaqueId('deployment-a:sb-skip') },
+    };
     const stubFn = vi.fn((..._args: ReadonlyArray<unknown>) => stub);
     getSandboxImpl = stubFn;
 
@@ -455,7 +516,7 @@ describe('runtime sandbox: VoidPlatformSandbox', () => {
       responseBytes: number;
     };
     expect(event.sandboxRuntimeSeconds).toBeGreaterThan(0);
-    expect(event.sandboxInstanceId).toBe('sandbox-instance-B');
+    expect(event.sandboxInstanceId).toBe(opaqueId('namespace:sandbox-instance-B'));
     expect(event.requests).toBe(0);
     expect(event.responseBytes).toBe(0);
     // Storage cleared on stop.
@@ -499,7 +560,7 @@ describe('runtime sandbox: VoidPlatformSandbox', () => {
     expect(JSON.parse(releaseInit.body as string)).toEqual({
       projectId: 'proj-release',
       aiToken: 'token-release',
-      sandboxId: 'sandbox-instance-C',
+      sandboxId: opaqueId('namespace:sandbox-instance-C'),
     });
   });
 
@@ -652,7 +713,7 @@ describe('runtime sandbox: VoidPlatformSandbox', () => {
     expect(JSON.parse(refreshInit.body as string)).toEqual({
       projectId: 'proj-refresh',
       aiToken: 'token-refresh',
-      sandboxId: 'sandbox-instance-refresh',
+      sandboxId: opaqueId('namespace:sandbox-instance-refresh'),
     });
   });
 
@@ -697,7 +758,7 @@ describe('runtime sandbox: VoidPlatformSandbox', () => {
     expect(JSON.parse(releaseInit.body as string)).toEqual({
       projectId: 'proj-fail',
       aiToken: 'token-fail',
-      sandboxId: 'sandbox-instance-startup-fail',
+      sandboxId: opaqueId('namespace:sandbox-instance-startup-fail'),
     });
   });
 });

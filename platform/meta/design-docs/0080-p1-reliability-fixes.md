@@ -34,7 +34,7 @@ Commit subjects start with a capital letter and end with a period.
 - [x] 18. Support valid account/OAuth credentials in platform lifecycle reads.
 - [x] 19. Verify certificate coverage for nested application domains before provisioning.
 - [ ] 20. Prevent canceled builds from launching untracked containers.
-- [ ] 21. Give sandbox concurrency leases globally unique instance identities.
+- [x] 21. Give sandbox concurrency leases globally unique instance identities.
 
 Root owns token/lifecycle/traffic fixes (6, 10, 11, 18, 19) and integration.
 Independent implementation agents own edge/proxy/sandbox (1, 2, 3, 8, 21),

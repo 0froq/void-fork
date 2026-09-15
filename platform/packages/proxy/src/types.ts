@@ -45,11 +45,13 @@ declare const SANDBOX_DO_BRAND: unique symbol;
 export interface SandboxConcurrencyCounterRpc extends Rpc.DurableObjectBranded {
   [SANDBOX_DO_BRAND]: never;
   acquire(
-    sandboxInstanceId: string,
+    projectScopedSandboxInstanceId: string,
     planLimit: number,
   ): Promise<{ ok: true } | { ok: false; reason: 'concurrency' }>;
-  refresh(sandboxInstanceId: string): Promise<{ ok: true } | { ok: false; reason: 'not_held' }>;
-  release(sandboxInstanceId: string): Promise<void>;
+  refresh(
+    projectScopedSandboxInstanceId: string,
+  ): Promise<{ ok: true } | { ok: false; reason: 'not_held' }>;
+  release(projectScopedSandboxInstanceId: string): Promise<void>;
 }
 
 export type Env = Readonly<{

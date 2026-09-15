@@ -67,24 +67,24 @@ export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']>
   }
 
   /**
-   * Try to claim a sandbox slot for `sandboxInstanceId`.
+   * Try to claim a sandbox slot for `projectScopedSandboxInstanceId`.
    *
    * `planLimit` is the per-account cap (`PlanLimits.sandboxMaxConcurrentInstances`).
    * A value of `0` follows the project's standard "0 means unlimited"
    * convention used elsewhere in `tiers.ts` / `isWithinLimit`.
    *
-   * Idempotent: if `sandboxInstanceId` is already held, the call refreshes
+   * Idempotent: if `projectScopedSandboxInstanceId` is already held, the call refreshes
    * its `acquiredAt` timestamp (which keeps the alarm sweep from reaping a
    * still-live session) and returns `{ ok: true }` without double-counting.
    */
-  async acquire(sandboxInstanceId: string, planLimit: number): Promise<AcquireResult> {
+  async acquire(projectScopedSandboxInstanceId: string, planLimit: number): Promise<AcquireResult> {
     const entries = await this.getEntries();
 
     // Idempotent refresh — don't double-count an already-held slot. Avoids
     // a leak when the proxy retries `acquire` for the same sandbox after a
     // transient network error.
-    if (entries[sandboxInstanceId]) {
-      entries[sandboxInstanceId] = { acquiredAt: Date.now() };
+    if (entries[projectScopedSandboxInstanceId]) {
+      entries[projectScopedSandboxInstanceId] = { acquiredAt: Date.now() };
       await this.saveEntries(entries);
       await this.ensureAlarm();
       return { ok: true };
@@ -96,7 +96,7 @@ export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']>
       return { ok: false, reason: 'concurrency' };
     }
 
-    entries[sandboxInstanceId] = { acquiredAt: Date.now() };
+    entries[projectScopedSandboxInstanceId] = { acquiredAt: Date.now() };
     await this.saveEntries(entries);
     await this.ensureAlarm();
     return { ok: true };
@@ -117,28 +117,28 @@ export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']>
    * which keeps the DO's accounting simple (no surprise re-claim that
    * bypasses the planLimit check on the acquire path).
    */
-  async refresh(sandboxInstanceId: string): Promise<RefreshResult> {
+  async refresh(projectScopedSandboxInstanceId: string): Promise<RefreshResult> {
     const entries = await this.getEntries();
-    if (!entries[sandboxInstanceId]) {
+    if (!entries[projectScopedSandboxInstanceId]) {
       return { ok: false, reason: 'not_held' };
     }
-    entries[sandboxInstanceId] = { acquiredAt: Date.now() };
+    entries[projectScopedSandboxInstanceId] = { acquiredAt: Date.now() };
     await this.saveEntries(entries);
     await this.ensureAlarm();
     return { ok: true };
   }
 
   /**
-   * Release the slot held by `sandboxInstanceId`. Idempotent: missing ids
+   * Release the slot held by `projectScopedSandboxInstanceId`. Idempotent: missing ids
    * are a no-op so the proxy can call `release` from both happy-path and
    * cleanup code paths without coordination.
    */
-  async release(sandboxInstanceId: string): Promise<void> {
+  async release(projectScopedSandboxInstanceId: string): Promise<void> {
     const entries = await this.getEntries();
-    if (!(sandboxInstanceId in entries)) {
+    if (!(projectScopedSandboxInstanceId in entries)) {
       return;
     }
-    delete entries[sandboxInstanceId];
+    delete entries[projectScopedSandboxInstanceId];
     await this.saveEntries(entries);
   }
 

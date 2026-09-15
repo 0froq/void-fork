@@ -56,6 +56,11 @@ function planLimit(plan: string): number {
   return (limits ?? PLAN_LIMITS.free).sandboxMaxConcurrentInstances;
 }
 
+/** Bind an opaque DO id to the project authenticated by the proxy middleware. */
+function sandboxLeaseId(projectId: string, sandboxId: string): string {
+  return JSON.stringify([projectId, sandboxId]);
+}
+
 /**
  * POST /sandbox/acquire
  *
@@ -97,7 +102,7 @@ app.post('/acquire', async (context) => {
     const stub = context.env.SANDBOX_CONCURRENCY_COUNTER.get(
       context.env.SANDBOX_CONCURRENCY_COUNTER.idFromName(`account:${account.userId}`),
     );
-    const result = await stub.acquire(sandboxId, limit);
+    const result = await stub.acquire(sandboxLeaseId(projectId, sandboxId), limit);
     if (result.ok) {
       return context.json({}, 200);
     }
@@ -142,7 +147,7 @@ app.post('/refresh', async (context) => {
     const stub = context.env.SANDBOX_CONCURRENCY_COUNTER.get(
       context.env.SANDBOX_CONCURRENCY_COUNTER.idFromName(`account:${account.userId}`),
     );
-    const result = await stub.refresh(sandboxId);
+    const result = await stub.refresh(sandboxLeaseId(projectId, sandboxId));
     return context.json(result, 200);
   } catch (error) {
     console.error('[proxy/sandbox] refresh failed:', error);
@@ -179,7 +184,7 @@ app.post('/release', async (context) => {
     const stub = context.env.SANDBOX_CONCURRENCY_COUNTER.get(
       context.env.SANDBOX_CONCURRENCY_COUNTER.idFromName(`account:${account.userId}`),
     );
-    await stub.release(sandboxId);
+    await stub.release(sandboxLeaseId(projectId, sandboxId));
     return new Response(null, { status: 204 });
   } catch (error) {
     console.error('[proxy/sandbox] release failed:', error);

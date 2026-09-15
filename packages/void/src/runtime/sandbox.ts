@@ -74,7 +74,7 @@ function getUsageContext(): { userId?: string; projectId?: string; slug?: string
 }
 
 function getSandboxInstanceId(ctx: DurableObjectState): string {
-  return ctx.id.name ?? ctx.id.toString();
+  return ctx.id.toString();
 }
 
 /**
@@ -346,12 +346,11 @@ export class VoidPlatformSandbox<Env = unknown> extends Sandbox<Env> {
  * missing (partial deploy), the gate check is skipped entirely and we
  * return the stub directly.
  *
- * The stub is constructed BEFORE calling the gate so we can derive the
- * normalized DO name (`stub.id.name`) and pass it to the gate as the
- * `sandboxId`. This keeps acquire and release using the same key — without
- * it, mixed-case caller ids (e.g. `MyProject-123`) would acquire a lease
- * under the raw id but release it under the normalized lowercase form that
- * `ctx.id.name` reports inside the DO, leaking the lease until TTL.
+ * The stub is constructed BEFORE calling the gate so we can pass its opaque,
+ * namespace-specific Durable Object id (`stub.id.toString()`) as `sandboxId`.
+ * The same id is available as `ctx.id.toString()` inside lifecycle hooks, so
+ * acquire, heartbeat, and release use one globally unique instance identity
+ * even when separate projects or deployments both request the name `default`.
  * Constructing the stub does NOT start a container — that only happens on
  * the first method call against the stub.
  */
@@ -366,9 +365,10 @@ export async function getSandbox<T extends Sandbox = Sandbox>(
     normalizeId: true,
     ...sandboxOptions,
   });
-  // Use the stub's normalized DO id (matches what `ctx.id.name` reports
-  // inside the DO) so acquire and release agree on the lease key.
-  const sandboxId = (stub as unknown as DurableObjectStub).id.name ?? id;
+  // The opaque id includes the DO namespace identity. Human-readable names
+  // such as `default` are only unique within a namespace and cannot safely
+  // key an account-wide concurrency counter.
+  const sandboxId = (stub as unknown as DurableObjectStub).id.toString();
 
   const identity = resolveGateIdentity();
   if (identity) {
