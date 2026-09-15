@@ -619,7 +619,7 @@ describe('handleIsr', () => {
     expect([...store.keys()].filter((k) => k.startsWith(isrPrefix(DPL))).length).toBe(1);
   });
 
-  it('MISS whose render sets Set-Cookie → client keeps EVERY cookie; KV + edge copies stay stripped', async () => {
+  it('does not share a MISS whose render sets Set-Cookie', async () => {
     const { store, kv } = createKvMock();
     const env = makeEnv(kv);
     // The live render emits TWO DISTINCT Set-Cookie headers (session + CSRF).
@@ -638,30 +638,53 @@ describe('handleIsr', () => {
 
     const res = await handleIsr(htmlRequest(), env, ctx, OPTS, render);
     expect(res).not.toBeNull();
-    expect(res!.headers.get('x-isr-cache')).toBe('MISS');
+    expect(res!.headers.get('x-isr-cache')).toBeNull();
     expect(spy).toHaveBeenCalledTimes(1);
 
-    // (1) The CLIENT response carries BOTH Set-Cookie headers, verbatim. Without
-    // the fix the client headers are cloned from the already-stripped cache copy,
-    // so `getSetCookie()` would be empty here and this assertion would fail.
+    // The client receives the authoritative response and every cookie.
     expect(res!.headers.getSetCookie()).toEqual([
       'sid=secret; Path=/; HttpOnly',
       'csrf=tok; Path=/',
     ]);
 
     await flush();
-    // (2) The shared KV copy is stripped — a shared cache must never store cookies.
+    // A Set-Cookie response is private to this render, so neither HTML nor its
+    // embedded Pages JSON may enter a shared cache.
     const entry = await readIsrCache(env, HOST, '/blog/post');
-    expect(entry).not.toBeNull();
-    expect(entry!.headers['set-cookie']).toBeUndefined();
-    expect(await new Response(entry!.body).text()).toBe('<html>live</html>');
-    expect([...store.keys()].filter((k) => k.startsWith(isrPrefix(DPL))).length).toBe(1);
-    // (3) The edge (caches.default) copy is stripped too.
-    const warmed = edge.store.get(htmlEdgeKey(HOST, '/blog/post', DPL));
-    expect(warmed).toBeDefined();
-    expect(warmed!.headers.getSetCookie()).toEqual([]);
-    expect(warmed!.headers.has('set-cookie')).toBe(false);
+    expect(entry).toBeNull();
+    expect([...store.keys()].filter((k) => k.startsWith(isrPrefix(DPL)))).toEqual([]);
+    expect(edge.store.has(htmlEdgeKey(HOST, '/blog/post', DPL))).toBe(false);
+    expect(edge.store.has(jsonEdgeKey(HOST, '/blog/post', DPL))).toBe(false);
   });
+
+  it.each(['private', 'no-store', 'no-cache'])(
+    'does not share a MISS with Cache-Control: %s through HTML or Pages JSON',
+    async (cacheControl) => {
+      const { store, kv } = createKvMock();
+      const env = makeEnv(kv);
+      const { render } = createRender(
+        () =>
+          new Response('<html>private</html>', {
+            headers: {
+              'Cache-Control': cacheControl,
+              'content-type': 'text/html',
+              'x-void-page-data': '{"component":"Private","props":{"user":"alice"}}',
+            },
+          }),
+      );
+      const { ctx, flush } = createCtx();
+
+      const response = await handleIsr(htmlRequest(), env, ctx, OPTS, render);
+      expect(await response!.text()).toBe('<html>private</html>');
+      expect(response!.headers.get('Cache-Control')).toBe(cacheControl);
+      expect(response!.headers.get('x-isr-cache')).toBeNull();
+
+      await flush();
+      expect(store.has(isrKey(DPL, HOST, '/blog/post'))).toBe(false);
+      expect(edge.store.has(htmlEdgeKey(HOST, '/blog/post', DPL))).toBe(false);
+      expect(edge.store.has(jsonEdgeKey(HOST, '/blog/post', DPL))).toBe(false);
+    },
+  );
 
   it('KV HIT (fresh) → serves HIT from KV without a live render and warms the edge', async () => {
     const { kv, store } = createKvMock();
@@ -730,14 +753,9 @@ describe('handleIsr', () => {
     // the gate is still closed, yet the client already has its answer.
     expect(res!.headers.get('x-isr-cache')).toBe('STALE');
     expect(await res!.text()).toBe('<html>stale</html>');
-    // (b) BOTH background tasks are registered via ctx.waitUntil on the stale
-    // path: the revalidation AND the edge-cache warm. Asserting the EXACT count
-    // (2), not >= 1, is what protects the registration: a regression that fired
-    // `revalidateInBackground` as an untracked floating promise would leave only
-    // the edge-warm tracked, dropping this to 1 and failing here. That matters
-    // because production Workers terminate untracked background work after the
-    // response, so the revalidation MUST go through waitUntil to survive.
-    expect(tasks.length).toBe(2);
+    // The revalidation is the one tracked background task. A stale edge warm
+    // here would race a private/no-store revalidation that evicts the old page.
+    expect(tasks.length).toBe(1);
     // The revalidation was KICKED OFF (render invoked) but NOT awaited inline:
     // KV still holds the ORIGINAL stale entry because the gate hasn't opened.
     expect(spy).toHaveBeenCalledTimes(1);
@@ -966,9 +984,99 @@ describe('handleIsr', () => {
     // JSON edge variant is only touched by the purge → deterministically removed.
     expect(edge.store.has(jsonEdgeKey(HOST, '/blog/post', DPL))).toBe(false);
     expect(edge.delete).toHaveBeenCalledWith(jsonEdgeKey(HOST, '/blog/post', DPL));
-    // HTML edge purge is issued; its final state races the concurrent stale-warm
-    // put, so assert the delete call rather than the (racey) final map state.
+    // No stale edge warm races the purge, so the HTML variant stays absent.
+    expect(edge.store.has(htmlEdgeKey(HOST, '/blog/post', DPL))).toBe(false);
     expect(edge.delete).toHaveBeenCalledWith(htmlEdgeKey(HOST, '/blog/post', DPL));
+  });
+
+  it.each([
+    ['private', { 'Cache-Control': 'private' }],
+    ['no-store', { 'Cache-Control': 'no-store' }],
+    ['no-cache', { 'Cache-Control': 'no-cache' }],
+    ['Set-Cookie', { 'Set-Cookie': 'sid=private; Path=/; HttpOnly' }],
+  ])(
+    'authoritative %s background response evicts previously public HTML, JSON, and KV',
+    async (_policy, headers) => {
+      const { store, kv, delete: kvDelete } = createKvMock();
+      const env = makeEnv(kv);
+      seedEntry(store, '/blog/post', {
+        body: '<html>public</html>',
+        createdAt: BASE,
+        ttl: 60,
+      });
+      vi.setSystemTime(BASE + 200_000);
+      edge.store.set(jsonEdgeKey(HOST, '/blog/post', DPL), new Response('{"user":null}'));
+
+      const { render, spy } = createRender(
+        () =>
+          new Response('<html>private</html>', {
+            headers: {
+              ...headers,
+              'content-type': 'text/html',
+              'x-void-page-data': '{"component":"Private","props":{"user":"alice"}}',
+            },
+          }),
+      );
+      const first = createCtx();
+
+      const stale = await handleIsr(htmlRequest(), env, first.ctx, OPTS, render);
+      expect(stale!.headers.get('x-isr-cache')).toBe('STALE');
+      expect(await stale!.text()).toBe('<html>public</html>');
+      await first.flush();
+
+      expect(store.has(isrKey(DPL, HOST, '/blog/post'))).toBe(false);
+      expect(kvDelete).toHaveBeenCalledWith(isrKey(DPL, HOST, '/blog/post'));
+      expect(edge.store.has(htmlEdgeKey(HOST, '/blog/post', DPL))).toBe(false);
+      expect(edge.store.has(jsonEdgeKey(HOST, '/blog/post', DPL))).toBe(false);
+
+      // With all old variants gone, the next request renders the authoritative
+      // private response and still does not repopulate shared storage.
+      const second = createCtx();
+      const live = await handleIsr(htmlRequest(), env, second.ctx, OPTS, render);
+      expect(await live!.text()).toBe('<html>private</html>');
+      expect(live!.headers.get('x-isr-cache')).toBeNull();
+      await second.flush();
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(store.has(isrKey(DPL, HOST, '/blog/post'))).toBe(false);
+      expect(edge.store.size).toBe(0);
+    },
+  );
+
+  it('bypasses a signed-preview API under a global TTL, so no-store data cannot reach an unauthorized request', async () => {
+    const { store, kv, getWithMetadata } = createKvMock();
+    const env = makeEnv(kv);
+    const { render, spy } = createRender((request) => {
+      const signed = request.headers.get('X-Preview-Signature') === 'valid';
+      return signed
+        ? new Response('{"draft":"secret"}', {
+            headers: { 'Cache-Control': 'no-store', 'content-type': 'application/json' },
+          })
+        : new Response('{"error":"unauthorized"}', {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          });
+    });
+    const serve = async (request: Request): Promise<Response> => {
+      const requestCtx = createCtx();
+      const cached = await handleIsr(request, env, requestCtx.ctx, OPTS, render);
+      const response = cached ?? (await render(request));
+      await requestCtx.flush();
+      return response;
+    };
+
+    const signed = await serve(
+      htmlRequest('/api/signed-preview', { 'X-Preview-Signature': 'valid' }),
+    );
+    expect(await signed.text()).toBe('{"draft":"secret"}');
+    expect(signed.headers.get('Cache-Control')).toBe('no-store');
+
+    const unauthorized = await serve(htmlRequest('/api/signed-preview'));
+    expect(unauthorized.status).toBe(401);
+    expect(await unauthorized.text()).toBe('{"error":"unauthorized"}');
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(getWithMetadata).not.toHaveBeenCalled();
+    expect(store.size).toBe(0);
+    expect(edge.store.size).toBe(0);
   });
 
   it('returns null (caller renders live) for non-GET, credentialed, and non-ISR paths', async () => {
@@ -987,9 +1095,18 @@ describe('handleIsr', () => {
         render,
       ),
     ).toBeNull();
-    // Credentialed (Cookie) requests bypass ISR.
+    // Credentialed requests bypass ISR.
     expect(
       await handleIsr(htmlRequest('/blog/post', { Cookie: 'sid=1' }), env, ctx, OPTS, render),
+    ).toBeNull();
+    expect(
+      await handleIsr(
+        htmlRequest('/blog/post', { Authorization: 'Bearer private' }),
+        env,
+        ctx,
+        OPTS,
+        render,
+      ),
     ).toBeNull();
     // Path with no configured TTL.
     expect(

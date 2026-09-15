@@ -226,6 +226,26 @@ export function shouldBypassIsr(request: Request): boolean {
   );
 }
 
+/** Return whether a response explicitly forbids storage in a shared cache. */
+export function hasSharedCacheOptOut(response: Response): boolean {
+  if (response.headers.has('Set-Cookie')) {
+    return true;
+  }
+  const cacheControl = response.headers.get('Cache-Control');
+  if (!cacheControl) {
+    return false;
+  }
+  return cacheControl.split(',').some((part) => {
+    const directive = part.split('=', 1)[0]?.trim().toLowerCase();
+    return directive === 'private' || directive === 'no-store' || directive === 'no-cache';
+  });
+}
+
+/** Return whether a complete render may be persisted in the shared ISR cache. */
+export function isSharedCacheableResponse(response: Response): boolean {
+  return response.status === 200 && !hasSharedCacheOptOut(response);
+}
+
 /** Resolve the first matching path TTL using Void route-pattern semantics. */
 export function resolvePathTtl(
   revalidate: number | Record<string, number> | undefined,
