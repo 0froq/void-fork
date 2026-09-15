@@ -44,4 +44,13 @@ Logs: surface app-level errors via `import { logger } from "void/log"` and `logg
 
 CI / fresh clones: run `void prepare` after install to generate `.void/routes.d.ts`, `.void/db.d.ts`, `.void/queues.d.ts`, `.void/env.d.ts`, and `.void/tsconfig.json` without booting Vite. `vite dev` / `vite build` populate these during normal app workflows.
 
+
+Platform source and forks: the framework and platform share this repository.
+Use `docs/guide/platform-development.md` for local API/dashboard development,
+fork CI, and source-built runtime installation. Workspace `@voidcloud/*` packages
+are not published to npm; the deployable core is packaged in `@void/platform`.
+The upstream Void Cloud deployment scripts are for that existing deployment.
+A fork installs or upgrades its own platform with `void platform` and an explicit
+`--runtime` directory, preserving the installer's ownership and migration checks.
+
 Now ask me what I want to build.

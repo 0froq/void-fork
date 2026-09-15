@@ -8,6 +8,10 @@ If you run a team platform, `void platform` also lets you give people access,
 manage their projects, and investigate deployments from the terminal. Start with
 [Platform Administration](./docs/guide/platform-administration.md).
 
+The platform implementation is included in this repository. To change it or
+deploy a runtime from your own fork, follow
+[Platform Development](./docs/guide/platform-development.md).
+
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite';
