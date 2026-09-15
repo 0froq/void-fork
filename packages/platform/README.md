@@ -2,11 +2,11 @@
 
 Public, target-neutral contracts and packaged runtime artifacts for installing a Void company platform in a Cloudflare account.
 
-The packaged API includes `/operator/v1` for `void platform` administration:
-revocable administrator sessions, tenant operations, logs, access management,
-health, and mutation audit records. Its additive PostgreSQL migration is included
-in the runtime migration manifest and applied through the same lifecycle checks.
-Hosted worker rollback operations remain disabled on installed company platforms.
+The packaged API also serves the `void platform` commands for managing users,
+projects, access, and logs. The installer applies the database migration needed
+for administrator sessions and audit records. See
+[Platform Administration](../../docs/guide/platform-administration.md) to operate
+an installed platform from your terminal.
 
 The package contains:
 

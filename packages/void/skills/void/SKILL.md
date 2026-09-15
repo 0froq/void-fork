@@ -73,7 +73,8 @@ Then ask what to do next.
 | Rewrites, redirects, fallbacks             | `docs/guide/edge/rewrites.md`, `docs/guide/edge/redirects.md`, `docs/reference/config.md` |
 | Static site generation                     | `docs/guide/ssg.md`                                                                       |
 | Deployment and CI                          | `docs/guide/deployment.md`, `docs/reference/cli.md`                                       |
-| Install or manage a company Void platform  | `docs/guide/self-hosted-platform.md`, `docs/reference/cli.md`                             |
+| Install or maintain a company platform     | `docs/guide/self-hosted-platform.md`, `docs/reference/cli.md`                             |
+| Platform administration                    | `docs/guide/platform-administration.md`, `docs/reference/cli.md`                          |
 | Self-host deploy to own Cloudflare account | `docs/integrations/cloudflare.md`, `docs/reference/cli.md`                                |
 | Project status, deployment history         | `docs/reference/cli.md`                                                                   |
 | Cache purging                              | `docs/reference/cli.md`                                                                   |

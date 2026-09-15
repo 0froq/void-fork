@@ -238,6 +238,7 @@ export default extendConfig(
               { text: 'Remote Development', link: '/guide/remote-dev' },
               { text: 'Deployment', link: '/guide/deployment' },
               { text: 'Self-hosted Platform', link: '/guide/self-hosted-platform' },
+              { text: 'Platform Administration', link: '/guide/platform-administration' },
             ],
           },
         ],

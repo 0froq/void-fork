@@ -316,106 +316,179 @@ void platform status [id]
 
 ### Operator commands
 
-Administer users, projects, deployments, and signup access through the selected
-platform's operator API. These commands require an administrator account:
+Use `void platform` to administer the users and apps on your selected platform. Start with the [Platform Administration guide](../guide/platform-administration.md) for signing in, giving people access, and investigating deployments.
+
+Every command below accepts `--connection <registered-id-or-url>` to select a platform and `--json` for structured output. Without `--connection`, Void uses `VOID_API_URL` if set, then the active platform connection. Application project files do not change this selection.
+
+#### Making Changes
+
+Commands that change users, projects, signup access, invitations, or Workers show a preview before asking for confirmation:
 
 ```sh
-void platform auth login
+void platform user plan <user-id> pro --plan
+void platform user plan <user-id> pro --yes
+```
+
+`--plan` validates the change and prints its effect without applying it. `--yes` applies the change without prompting, which is required in scripts. Use one or the other; they cannot be combined. These flags also apply to deployment cancellation and maintenance commands, but not to authentication commands.
+
+Each preview and apply request allows five minutes. Set `--timeout <seconds>` to an integer from 1 to 3600 to change that limit. Read requests and individual log polls allow 30 seconds.
+
+Void does not automatically retry changes. If a request loses its connection or times out, inspect the affected objects and `void platform system events` before repeating it. Partial results describe the work that completed and exit with a nonzero status.
+
+#### Authentication {#operator-authentication}
+
+Sign in, inspect your session, or sign out:
+
+```sh
+void platform auth login [--provider github|google] [--token-stdin]
 void platform auth status
-void platform user list --limit 50 --json
-void platform project list --user <user-id>
-void platform deployment logs <deployment-id> --follow
+void platform auth logout
+void platform auth token [--token-stdin]
 ```
 
-Operator commands use the active platform connection. Pass
-`--connection <registered-id-or-url>` to choose another one, or set `VOID_API_URL`
-explicitly. Project files do not choose the destination for operator credentials.
-Use `void platform use <id>` to change the default connection.
+Browser login defaults to GitHub; Google is available when enabled on the platform. Login saves a one-hour administrator session in your system keychain. Logout revokes that session and removes its local credential.
 
-| Command                                                                  | Purpose                                                                                 |
-| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `auth login [--provider github\|google]`                                 | Sign in and store a separate operator session in the system keychain                    |
-| `auth status`                                                            | Show administrator identity, expiry, and platform capabilities                          |
-| `auth logout`                                                            | Revoke the current operator session and remove its local credential                     |
-| `auth token [--token-stdin]`                                             | Print the current operator token, or exchange a full API login token from stdin         |
-| `user list [--search <text>]`                                            | List users across the platform                                                          |
-| `user show <id>`                                                         | Inspect a user's projects and usage                                                     |
-| `user plan <id> <plan>`                                                  | Change a user's plan and update resource limits                                         |
-| `user suspend <id> [--reason <text>]`                                    | Suspend a user and their applications                                                   |
-| `user restore <id>`                                                      | Restore a suspended user                                                                |
-| `user delete <id>`                                                       | Delete a user and all their project resources                                           |
-| `project list [--user <id>] [--search <text>]`                           | List projects across owners                                                             |
-| `project show <id>`                                                      | Inspect resources, domains, builds, and deployments                                     |
-| `project delete <id>`                                                    | Delete a project and its resources                                                      |
-| `deployment list [--project <id>] [--status <status>] [--search <text>]` | List deployments across projects                                                        |
-| `deployment show <id>`                                                   | Inspect a deployment and its manifest                                                   |
-| `deployment cancel <id>`                                                 | Cancel an active deployment                                                             |
-| `deployment logs <id> [--follow]`                                        | Read historical runtime logs or poll for new logs                                       |
-| `build show <id>`                                                        | Inspect a managed build                                                                 |
-| `build logs <id> [--since <sequence>] [--follow]`                        | Read build output; stop following when the build finishes                               |
-| `signup show`                                                            | Inspect signup restrictions and allowlist entries                                       |
-| `signup open`                                                            | Allow anyone to sign up                                                                 |
-| `signup restrict`                                                        | Permit signup only for allowlisted identities                                           |
-| `signup allow <github\|email> <pattern> [--note <text>]`                 | Add an allowlist pattern                                                                |
-| `signup remove <github\|email> <pattern>`                                | Remove entries by their identity and pattern                                            |
-| `invitation list`                                                        | List invitation status                                                                  |
-| `invitation send <email[,email...]>`                                     | Create invitations and grant signup access; report email delivery separately            |
-| `invitation revoke <id>`                                                 | Revoke a pending invitation and remove its exact email grant                            |
-| `system overview`                                                        | Inspect platform totals and recent activity                                             |
-| `system health`                                                          | Probe configured platform services and the database                                     |
-| `system cli-versions`                                                    | Inspect CLI versions used by deployments                                                |
-| `system events`                                                          | List operator mutation audit records                                                    |
-| `system backfill-queue-tokens`                                           | Repair queue relay entries missing authentication tokens                                |
-| `worker list`                                                            | List hosted platform workers                                                            |
-| `worker show <name>`                                                     | Inspect hosted worker versions and deployments                                          |
-| `worker rollback <name> <version-id>`                                    | Activate a specific hosted worker version                                               |
-| `worker rollback-all`                                                    | Roll hosted workers back in dependency order using the versions selected by the preview |
-| `worker events [batch-id]`                                               | Inspect hosted rollback activity                                                        |
+`auth token` prints your current operator token. With `--token-stdin`, it exchanges a full administrator API login session from standard input for a new operator token. `auth login --token-stdin` saves the exchanged token to the keychain instead of printing it.
 
-All commands in this table follow `void platform`. Use `--help` at any group or
-action for its exact flags. List commands accept `--page` and `--limit` (maximum
-100). Runtime logs also accept time filters; build logs use a sequence cursor.
-External GitHub Actions builds return their log URL.
+For automation, supply `VOID_OPERATOR_TOKEN` with an explicit `VOID_API_URL` or `--connection`. Operator tokens are stored separately from application deployment credentials. The API checks your current administrator access on every request. See [Using Scripts](../guide/platform-administration.md#using-scripts) for an example.
 
-Runtime log following advances on Analytics ingestion time and re-queries the
-previous five minutes on every poll. The CLI removes overlap replays while
-preserving distinct identical events. Rows delayed by more than five minutes
-can still require a later historical query. Build logs use the persisted
-sequence cursor and drain remaining pages before following stops.
+#### Users {#operator-users}
 
-Mutations first validate and preview the affected objects, then ask for
-confirmation. `--plan` prints the preview and exits without writes. `--yes`
-confirms execution for scripts; noninteractive mutations require one of these
-flags. Mutation requests have a five-minute deadline. Use `--timeout <seconds>`
-to raise or lower it from 1 to 3600 seconds for operations with unusually large
-resource sets. Read and log-poll requests retain their short fixed deadline. For
-example:
+Find a user by login, email, or ID, then inspect their projects and usage:
 
 ```sh
-void platform user suspend <user-id> --reason "Abuse investigation" --plan
-void platform user suspend <user-id> --reason "Abuse investigation" --yes
-void platform system events --json
+void platform user list [--search <text>] [--page <n>] [--limit <n>]
+void platform user show <id>
 ```
 
-`--json` writes machine-readable results to stdout; errors are JSON objects on
-stderr with a nonzero exit code. Following logs produces one JSON object per poll.
-Partial failures produce a nonzero exit code with the completed work described in
-the error details. Mutations do not retry automatically. If a connection fails
-during a mutation, inspect the object and audit events before retrying.
+Use the same ID to change a plan, suspend or restore the account, or delete it:
 
-Operator sessions expire after one hour. Each request checks the current account
-role and administrator suspension state. Ordinary deployment tokens and browser
-admin cookies cannot call operator endpoints. In a headless environment, set
-`VOID_OPERATOR_TOKEN` from a secret manager together with an explicit `VOID_API_URL`
-or `--connection`. To obtain a short-lived operator token, pipe a full API session
-for an administrator into `void platform auth token --token-stdin`; the token goes
-to stdout. `auth login --token-stdin` instead saves the exchanged token to the
-system keychain. Avoid placing credentials in command arguments or project files.
+```sh
+void platform user plan <id> <free|solo|pro|sponsored|custom>
+void platform user suspend <id> [--reason <text>]
+void platform user restore <id>
+void platform user delete <id>
+```
 
-Hosted `worker` commands accept `--environment production|staging` and reject
-self-hosted installations before contacting Cloudflare. Manage a self-hosted
-installation's Worker lifecycle with `void platform upgrade`, `repair`, `disable`,
-and `enable`. Build operations require the corresponding platform capability.
+Suspending a user blocks their applications. Deleting a user also deletes their project resources. A plan change updates resource limits while preserving any administrator suspension.
+
+#### Projects {#operator-projects}
+
+List projects across the platform, filter them by owner, or inspect one project's resources:
+
+```sh
+void platform project list [--user <user-id>] [--search <text>] [--page <n>] [--limit <n>]
+void platform project show <id>
+void platform project delete <id>
+```
+
+Search matches a project's slug, ID, or owner's login. `show` includes resources, domains, the latest 10 deployments, and the latest 20 builds. `delete` removes the project and its resources.
+
+#### Deployments {#operator-deployments}
+
+Find a deployment, inspect its manifest, or request cancellation:
+
+```sh
+void platform deployment list [--project <id-or-slug>] [--status <status>] [--search <text>] [--page <n>] [--limit <n>]
+void platform deployment show <id>
+void platform deployment cancel <id>
+```
+
+Cancellation applies while a deployment is pending, uploading, migrating, or prerendering, and can be requested again while it is canceling. A deployment that has begun switching traffic, is compensating for a failure, or has finished cannot be canceled through this command.
+
+Read its runtime logs with:
+
+```sh
+void platform deployment logs <id> [--since <time>] [--cursor <cursor>] [--limit <n>] [--follow]
+```
+
+The default is the last hour, oldest first, with up to 100 records. `--since` accepts a duration such as `10m`, `2h`, or `1d`, an ISO date, or epoch milliseconds. Set `--limit` from 1 to 500 and pass the response's `nextCursor` as `--cursor` to read another page.
+
+`--follow` reads the remaining pages and checks for new logs every two seconds until you press Ctrl+C. It checks a five-minute overlap for delayed records and suppresses replayed rows. Records that arrive later may need a subsequent historical query. Following stops with an error if a window exceeds 10,000 records; use a narrower historical query in that case.
+
+#### Builds {#operator-builds}
+
+Inspect a build or read its output:
+
+```sh
+void platform build show <id>
+void platform build logs <id> [--since <sequence>] [--limit <n>] [--follow]
+```
+
+Build logs start at sequence `0` and return up to 500 lines. Use the returned `lastSeq` as `--since` to continue; `--limit` accepts 1 to 500. Container log retrieval requires managed builds to be enabled. GitHub Actions builds return an external log URL.
+
+Following waits for the final logs after the build becomes terminal. If completion cannot be confirmed within two minutes, the command exits with an error. Older builds without a completion signal may wait for 30 seconds without new lines before following stops.
+
+#### Signup Access {#operator-signup}
+
+Inspect signup restrictions, open signup to everyone, or require an allowlist match:
+
+```sh
+void platform signup show
+void platform signup open
+void platform signup restrict
+```
+
+Add and remove entries by their type and pattern:
+
+```sh
+void platform signup allow <github|email> <pattern> [--note <text>]
+void platform signup remove <github|email> <pattern>
+```
+
+GitHub entries match a login. Email entries match an address or a domain pattern such as `*@example.com`, across sign-in providers. Quote wildcard patterns in your shell. With restrictions enabled and an empty allowlist, nobody new can sign up.
+
+#### Invitations {#operator-invitations}
+
+Invite people by email and track whether they have joined:
+
+```sh
+void platform invitation list [--page <n>] [--limit <n>]
+void platform invitation send <email[,email...]>
+void platform invitation revoke <id>
+```
+
+Send accepts up to 100 comma-separated addresses. Invitations grant signup access even if email delivery is unavailable or fails; delivery is reported separately. Revoking a pending invitation removes its exact email grant. A broader domain entry can still allow that person to sign up.
+
+#### System {#operator-system}
+
+Inspect activity, check service health, or review administrative changes:
+
+```sh
+void platform system overview
+void platform system health
+void platform system cli-versions
+void platform system events [--page <n>] [--limit <n>]
+void platform system backfill-queue-tokens
+```
+
+`overview` shows platform totals and recent activity. `health` checks the configured services and database, and exits with a nonzero status if a check fails. `cli-versions` reports the CLI versions used by deployments.
+
+`events` shows the administrator, target, and outcome of changes. A pending event means the outcome has not been recorded. Previews and session login/logout do not create these events. `backfill-queue-tokens` repairs older queue entries that are missing authentication tokens and supports `--plan` before applying the repair.
+
+#### Hosted Workers {#operator-workers}
+
+Void Cloud operators can inspect the platform's five Workers and their versions:
+
+```sh
+void platform worker list
+void platform worker show <proxy|tail|api|dashboard|dispatch>
+void platform worker rollback <name> <version-id>
+void platform worker rollback-all
+void platform worker events [batch-id]
+```
+
+Each command accepts `--environment production|staging`. By default, it uses the platform's environment; `events <batch-id>` uses the batch's environment. Worker event lists accept `--page` and `--limit` when no batch ID is given. `worker list` always returns the fixed Worker inventory.
+
+Choose a version from `worker show` for a single rollback. `rollback-all` selects the previous version of each Worker, shows those versions in its preview, and rolls them back in dependency order. A failure stops the remaining changes and reports which Workers succeeded, failed, or were skipped. Use `worker events <batch-id>` to inspect the result.
+
+These commands are for Void Cloud's Workers. Self-hosted installations use the [platform lifecycle commands](../guide/self-hosted-platform.md#resume-repair-recover-and-upgrade).
+
+#### Pagination and JSON
+
+User, project, deployment, invitation, and event lists default to page `1` with 20 items. `--limit` accepts 1 to 100 for these lists. Their JSON responses include the page, limit, and total count.
+
+With `--json`, results go to standard output and command errors go to standard error as JSON. Errors and partial failures exit with a nonzero status. An unhealthy `system health` result stays on standard output and also exits nonzero. Log following writes one JSON object per response, including each page and empty responses.
 
 ### `void platform install`
 

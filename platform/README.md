@@ -79,22 +79,25 @@ The `@voidcloud/platform` workspace package retains the dashboard-only `dev` and
 
 ## Operator CLI
 
-`void platform auth login` creates a dedicated, revocable operator session for an
-administrator. The CLI provides user, project, deployment, build, signup,
-invitation, system, and hosted-worker commands over `/operator/v1`. The API and
-browser admin UI share their underlying operations. Operator credentials are
-scoped to the selected origin and never selected by application project files.
+Sign in as an administrator to inspect users, projects, deployments, and platform
+health:
 
-Mutation commands support `--plan` and require `--yes` outside a terminal; JSON
-output is available with `--json`. Mutations write an intent and outcome to
-`operator_events`; a pending event means execution was interrupted or its outcome
-could not be recorded. Runtime migration `0033_operator_sessions_and_events`
-must be applied before the new API is deployed. It only adds tables and indexes,
-so existing Workers remain compatible with the expanded schema.
+```sh
+void platform auth login
+void platform user list
+void platform system health
+```
 
-For self-hosted installations, use the existing ownership-aware lifecycle
-commands for Worker changes. Hosted `void platform worker` operations retain the
-installation guard. See [CLI reference](../docs/reference/cli.md#operator-commands).
+Commands use the selected platform connection. Add `--plan` to preview a change,
+`--yes` to apply it in a script, and `--json` to read structured results. The
+[Platform Administration guide](../docs/guide/platform-administration.md) covers
+the workflows; the [CLI reference](../docs/reference/cli.md#operator-commands)
+lists all commands and options.
+
+The CLI and browser admin UI share the same server operations. The operator API
+is served at `/operator/v1` and records changes in `operator_events`. Apply
+`0033_operator_sessions_and_events` before deploying the API; the migration adds
+tables and indexes that remain compatible with existing Workers.
 
 ## Local Development
 

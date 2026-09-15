@@ -115,36 +115,22 @@ If the requested zone does not exist, Void creates it and stops in a `waiting-fo
 void platform install --resume --name <installation-id>
 ```
 
-After installation, sign in through `void auth login` to deploy applications.
-The initial administrator can operate the platform from the terminal:
+For application traffic, Void creates one proxied wildcard DNS record at `*.application-domain` and the matching Worker routes. A compatible existing proxied record is adopted and is never deleted by Void.
+
+## Managing Access
+
+After installation, sign in with the GitHub account you chose as the first administrator:
 
 ```sh
 void platform auth login
-void platform signup show
-void platform signup allow github teammate --plan
-void platform signup allow github teammate --yes
-void platform user list
-void platform system health
+void platform signup allow github teammate
 ```
 
-Operator login creates a separate, revocable one-hour session. Use
-`void platform auth logout` to revoke it. `--connection <id-or-url>` selects a
-registered installation for one command; operator commands otherwise use the
-active connection and ignore application project files. For automation, supply
-`VOID_OPERATOR_TOKEN` from a secret manager and set `VOID_API_URL` explicitly.
+Void shows the proposed access change and asks you to confirm it. Once approved, `teammate` can connect to the platform's API URL and sign in with GitHub.
 
-`signup restrict` requires identities to match the allowlist; `signup open` allows
-public signup. Changes support `--plan` previews and require `--yes` in scripts.
-Invitations grant access even when the installation has no email service; their
-result reports delivery separately. Inspect mutation outcomes with
-`void platform system events`. See the [operator command reference](../reference/cli.md#operator-commands)
-for users, projects, deployments, logs, and maintenance commands.
+To see who can join, run `void platform signup show`. You can also allow an email address or a domain such as `*@example.com`. `void platform signup open` permits public signup; `void platform signup restrict` requires an allowlist match again.
 
-The same administrator can open `<API origin>/admin/login` to use the browser
-admin UI. Hosted worker rollback commands are unavailable for self-hosted
-installations; use the ownership-aware lifecycle commands below.
-
-For application traffic, Void creates one proxied wildcard DNS record at `*.application-domain` and the matching Worker routes. A compatible existing proxied record is adopted and is never deleted by Void.
+Your administrator session lasts for one hour. Use it to inspect users, projects, logs, and platform health. The [Platform Administration guide](./platform-administration.md) walks through those workflows, previews, and automation. You can also open `<API origin>/admin/login` to use the browser admin UI.
 
 ## Cloudflare footprint
 
