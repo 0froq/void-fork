@@ -128,10 +128,10 @@ function runPty(args: Array<string>): Promise<{ output: string; code: number }> 
     });
     closeSync(input);
     let output = '';
-    child.stdout.on('data', (data) => {
+    child.stdout!.on('data', (data) => {
       output += String(data);
     });
-    child.stderr.on('data', (data) => {
+    child.stderr!.on('data', (data) => {
       output += String(data);
     });
     child.on('error', reject);
