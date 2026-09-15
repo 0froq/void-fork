@@ -229,6 +229,81 @@ describe('operator transport and execution', () => {
     expect(String(fetcher.mock.calls[1]![0])).toContain('cursor=page-2');
     expect(String(fetcher.mock.calls[1]![0])).toContain('since=1h');
   });
+  it('follows ingestion cursors with overlap dedupe and preserves identical row counts', async () => {
+    const controller = new AbortController();
+    const repeated = {
+      timestamp: 1000,
+      ingestedAt: 1900,
+      method: 'GET',
+      url: '/same',
+      status: '200',
+      logs: [],
+      exceptions: [],
+    };
+    const completedLate = {
+      timestamp: 1500,
+      ingestedAt: 2500,
+      method: 'POST',
+      url: '/completed-late',
+      status: '201',
+      logs: [],
+      exceptions: [],
+    };
+    const write = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ data: [repeated], nextCursor: null, watermark: '2000' }),
+      )
+      .mockImplementationOnce(async () => {
+        controller.abort();
+        return Response.json({
+          data: [repeated, repeated, completedLate],
+          nextCursor: null,
+          watermark: '3000',
+        });
+      });
+
+    await followOperatorLogs(
+      new OperatorClient('https://one.example', 'token', fetcher),
+      parseOperatorArgs(['deployment', 'logs', 'id', '--follow', '--since', '1h']),
+      controller.signal,
+      0,
+    );
+
+    const lines = write.mock.calls.map(([line]) => String(line));
+    expect(lines.filter((line) => line.includes('/same'))).toHaveLength(2);
+    expect(lines.filter((line) => line.includes('/completed-late'))).toHaveLength(1);
+    expect(String(fetcher.mock.calls[0]![0])).toContain('since=1h');
+    expect(String(fetcher.mock.calls[1]![0])).toContain('after=2000');
+    expect(String(fetcher.mock.calls[1]![0])).not.toContain('since=');
+  });
+  it('fails explicitly when a runtime follow window exceeds its dedupe bound', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const row = {
+      timestamp: 1000,
+      ingestedAt: 1900,
+      method: 'GET',
+      url: '/same',
+      status: '200',
+      logs: [],
+      exceptions: [],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        data: Array.from({ length: 10_001 }, () => row),
+        nextCursor: null,
+        watermark: '2000',
+      }),
+    );
+
+    await expect(
+      followOperatorLogs(
+        new OperatorClient('https://one.example', 'token', fetcher),
+        parseOperatorArgs(['deployment', 'logs', 'id', '--follow']),
+      ),
+    ).rejects.toMatchObject({ code: 'invalid_response' });
+  });
   it('renders deployment status, log messages, and exceptions in human output', async () => {
     vi.stubEnv('VOID_API_URL', 'https://one.example');
     vi.stubEnv('VOID_OPERATOR_TOKEN', 'operator');

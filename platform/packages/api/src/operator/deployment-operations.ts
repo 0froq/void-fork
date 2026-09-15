@@ -139,6 +139,23 @@ function tryParse(value: string): ReadonlyArray<unknown> {
   }
 }
 
+function analyticsTimestamp(value: string | number): number {
+  if (typeof value === 'number') {
+    if (Number.isSafeInteger(value) && value >= 0) {
+      return value;
+    }
+    throw new OperatorError(502, 'Log query returned an invalid Analytics timestamp.');
+  }
+  const utc = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+  const parsed = Date.parse(utc);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new OperatorError(502, 'Log query returned an invalid Analytics timestamp.');
+  }
+  return parsed;
+}
+
 type LogRow = {
   outcome: string;
   logData: string;
@@ -147,7 +164,21 @@ type LogRow = {
   method: string;
   statusCode: string;
   ts: number;
+  timestamp: string | number;
 };
+
+const FOLLOW_OVERLAP_MS = 5 * 60 * 1000;
+
+function parseFollowAfter(value: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new OperatorError(400, 'Invalid deployment log follow cursor.');
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > Date.now()) {
+    throw new OperatorError(400, 'Invalid deployment log follow cursor.');
+  }
+  return parsed;
+}
 
 /** Historical Analytics Engine pages use a fixed upper bound; clients exhaust nextCursor before advancing to watermark. */
 export async function deploymentLogs(
@@ -159,6 +190,7 @@ export async function deploymentLogs(
     limit?: number;
     cursor?: string;
     order?: 'oldest-first' | 'newest-first';
+    after?: string;
   } = {},
 ) {
   const { deployment, project } = await deploymentDetail(db, id);
@@ -169,8 +201,12 @@ export async function deploymentLogs(
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
     throw new OperatorError(400, 'limit must be between 1 and 500.');
   }
-  let since = parseSince(options.since ?? '1h');
-  let until = Date.now();
+  const clock: 'event' | 'ingestion' = options.after === undefined ? 'event' : 'ingestion';
+  let since =
+    options.after === undefined
+      ? parseSince(options.since ?? '1h')
+      : Math.max(0, parseFollowAfter(options.after) - FOLLOW_OVERLAP_MS);
+  let until = Math.floor(Date.now() / 1000) * 1000;
   let offset = 0;
   if (options.cursor) {
     try {
@@ -179,9 +215,11 @@ export async function deploymentLogs(
         since: unknown;
         until: unknown;
         offset: unknown;
+        clock: unknown;
       };
       if (
         parsed.id !== id ||
+        parsed.clock !== clock ||
         ![parsed.since, parsed.until, parsed.offset].every(
           (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
         ) ||
@@ -211,11 +249,20 @@ export async function deploymentLogs(
     throw new OperatorError(500, 'Invalid logs dataset configuration.');
   }
   const sinceStr = new Date(since).toISOString().replace('T', ' ').slice(0, 19);
+  const untilStr = new Date(until).toISOString().replace('T', ' ').slice(0, 19);
   const direction = options.order === 'newest-first' ? 'DESC' : 'ASC';
+  const timeFilter =
+    clock === 'ingestion'
+      ? `timestamp >= toDateTime(${sqlString(sinceStr)}) AND timestamp < toDateTime(${sqlString(untilStr)})`
+      : `timestamp >= toDateTime(${sqlString(sinceStr)}) AND timestamp < toDateTime(${sqlString(untilStr)}) AND double1 >= ${since} AND double1 < ${until}`;
+  const order =
+    clock === 'ingestion'
+      ? `timestamp ${direction}, double1 ${direction}`
+      : `double1 ${direction}, timestamp ${direction}`;
   const query = `SELECT blob1 as outcome, blob2 as logData, blob3 as exceptionData, blob4 as url, blob5 as method, blob6 as statusCode, double1 as ts, timestamp
     FROM ${dataset} WHERE index1 = ${sqlString(`user-${project.slug}`)} AND blob7 = ${sqlString(deployment.id)}
-    AND timestamp >= toDateTime(${sqlString(sinceStr)}) AND double1 >= ${since} AND double1 < ${until}
-    ORDER BY double1 ${direction}, timestamp ${direction}, blob1 ${direction}, blob2 ${direction}, blob3 ${direction}, blob4 ${direction}, blob5 ${direction}, blob6 ${direction} LIMIT ${limit + 1} OFFSET ${offset}`;
+    AND ${timeFilter}
+    ORDER BY ${order}, blob1 ${direction}, blob2 ${direction}, blob3 ${direction}, blob4 ${direction}, blob5 ${direction}, blob6 ${direction} LIMIT ${limit + 1} OFFSET ${offset}`;
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/analytics_engine/sql`,
     {
@@ -231,7 +278,9 @@ export async function deploymentLogs(
   const result = (await response.json()) as { data?: ReadonlyArray<LogRow> };
   const rows = result.data ?? [];
   const nextCursor =
-    rows.length > limit ? btoa(JSON.stringify({ id, since, until, offset: offset + limit })) : null;
+    rows.length > limit
+      ? btoa(JSON.stringify({ id, since, until, offset: offset + limit, clock }))
+      : null;
   return {
     data: rows.slice(0, limit).map((row) => ({
       timestamp: Number(row.ts),
@@ -241,6 +290,7 @@ export async function deploymentLogs(
       url: row.url,
       method: row.method,
       status: row.statusCode,
+      ingestedAt: analyticsTimestamp(row.timestamp),
     })),
     nextCursor,
     watermark: String(until),
@@ -336,5 +386,5 @@ function mockLogData() {
       method: 'POST',
       status: '499',
     },
-  ];
+  ].map((entry) => ({ ...entry, ingestedAt: entry.timestamp }));
 }

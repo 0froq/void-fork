@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { OperatorArgs } from './operator-args.ts';
@@ -10,6 +11,8 @@ import {
   saveOperatorToken,
 } from './operator-auth.ts';
 import { OperatorClient, OperatorClientError } from './operator-client.ts';
+
+const MAX_RUNTIME_FOLLOW_ROWS = 10_000;
 
 function printable(value: unknown): string {
   if (value === null || value === undefined) {
@@ -175,6 +178,26 @@ function outputLogs(result: Record<string, unknown>, json: boolean): void {
   }
 }
 
+function runtimeLogFingerprint(row: unknown): string {
+  const ingestedAt =
+    row && typeof row === 'object' && !Array.isArray(row)
+      ? (row as Record<string, unknown>).ingestedAt
+      : undefined;
+  if (
+    !row ||
+    typeof row !== 'object' ||
+    Array.isArray(row) ||
+    typeof ingestedAt !== 'number' ||
+    !Number.isSafeInteger(ingestedAt)
+  ) {
+    throw new OperatorClientError(
+      'Runtime log response has an invalid ingestion cursor.',
+      'invalid_response',
+    );
+  }
+  return createHash('sha256').update(JSON.stringify(row)).digest('base64url');
+}
+
 export async function confirmOperatorMutation(
   origin: string,
   preview: Record<string, unknown>,
@@ -280,6 +303,7 @@ export async function followOperatorLogs(
   client: OperatorClient,
   args: OperatorArgs,
   signal?: AbortSignal,
+  pollIntervalMs = 2_000,
 ): Promise<void> {
   const controller = new AbortController();
   const stop = () => controller.abort();
@@ -287,10 +311,36 @@ export async function followOperatorLogs(
   const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   const query = { ...args.query };
   let drainingBuild = false;
+  let previousRuntimeRows = new Map<string, number>();
+  let currentRuntimeRows = new Map<string, number>();
+  let currentRuntimeRowCount = 0;
   try {
     while (!combined.aborted) {
       const result = await client.request(args.path, { query, signal: combined });
-      outputLogs(result, args.json);
+      let visibleResult = result;
+      if (args.group === 'deployment') {
+        if (!Array.isArray(result.data)) {
+          throw new OperatorClientError(
+            'Runtime log response is missing its data rows.',
+            'invalid_response',
+          );
+        }
+        const data = result.data.filter((row) => {
+          currentRuntimeRowCount++;
+          if (currentRuntimeRowCount > MAX_RUNTIME_FOLLOW_ROWS) {
+            throw new OperatorClientError(
+              `Runtime log follow window exceeded ${MAX_RUNTIME_FOLLOW_ROWS} rows. Retry without --follow and query a narrower history.`,
+              'invalid_response',
+            );
+          }
+          const fingerprint = runtimeLogFingerprint(row);
+          const occurrence = (currentRuntimeRows.get(fingerprint) ?? 0) + 1;
+          currentRuntimeRows.set(fingerprint, occurrence);
+          return occurrence > (previousRuntimeRows.get(fingerprint) ?? 0);
+        });
+        visibleResult = { ...result, data };
+      }
+      outputLogs(visibleResult, args.json);
       if (args.group === 'build') {
         if (
           typeof result.lastSeq !== 'number' ||
@@ -338,9 +388,13 @@ export async function followOperatorLogs(
             'invalid_response',
           );
         }
-        query.since = String(result.watermark);
+        previousRuntimeRows = currentRuntimeRows;
+        currentRuntimeRows = new Map();
+        currentRuntimeRowCount = 0;
+        query.after = String(result.watermark);
+        delete query.since;
       }
-      await delay(2_000, undefined, { signal: combined });
+      await delay(pollIntervalMs, undefined, { signal: combined });
     }
   } catch (error) {
     if (!combined.aborted) {

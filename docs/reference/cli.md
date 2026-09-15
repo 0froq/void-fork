@@ -377,10 +377,11 @@ action for its exact flags. List commands accept `--page` and `--limit` (maximum
 100). Runtime logs also accept time filters; build logs use a sequence cursor.
 External GitHub Actions builds return their log URL.
 
-Runtime log following polls Analytics Engine and is best-effort: recently emitted
-logs can arrive after a polling window because ingestion is eventually
-consistent. Build logs use the persisted sequence cursor and drain remaining
-pages before following stops.
+Runtime log following advances on Analytics ingestion time and re-queries the
+previous five minutes on every poll. The CLI removes overlap replays while
+preserving distinct identical events. Rows delayed by more than five minutes
+can still require a later historical query. Build logs use the persisted
+sequence cursor and drain remaining pages before following stops.
 
 Mutations first validate and preview the affected objects, then ask for
 confirmation. `--plan` prints the preview and exits without writes. `--yes`

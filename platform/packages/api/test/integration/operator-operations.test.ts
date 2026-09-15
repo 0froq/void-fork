@@ -149,6 +149,7 @@ describe('operator deployment operations', () => {
     const deployment = await createTestDeployment(env.db, project.id, 'live');
     const row = {
       ts: Date.now() - 1000,
+      timestamp: new Date(Date.now() - 500).toISOString(),
       outcome: 'ok',
       logData: '[]',
       exceptionData: '[]',
@@ -178,10 +179,55 @@ describe('operator deployment operations', () => {
     expect(last).toMatchObject({ nextCursor: null, watermark: page.watermark });
     expect(last.data).toHaveLength(1);
     expect(fetch.mock.calls[0][1]?.body).toContain('ORDER BY double1 ASC, timestamp ASC');
+    expect(fetch.mock.calls[0][1]?.body).toMatch(/double1 >= \d+ AND double1 < \d+/);
     expect(fetch.mock.calls[1][1]?.body).toContain('OFFSET 2');
     expect((await req(`/deployments/${deployment.id}/logs?cursor=garbage`)).status).toBe(400);
     expect((await req(`/deployments/${deployment.id}/logs?limit=-1`)).status).toBe(400);
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  test('follow windows use ingestion time with bounded overlap after the initial history', async () => {
+    const project = await createTestProject(env.db, ownerId);
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    vi.spyOn(Date, 'now').mockReturnValue(600_000);
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json({
+        data: [
+          {
+            ts: 120_000,
+            timestamp: '1970-01-01 00:09:00',
+            outcome: 'ok',
+            logData: '[]',
+            exceptionData: '[]',
+            url: '/completed-late',
+            method: 'GET',
+            statusCode: '200',
+          },
+        ],
+      }),
+    );
+
+    const response = await req(`/deployments/${deployment.id}/logs?after=480000`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: [
+        {
+          timestamp: 120_000,
+          ingestedAt: 540_000,
+          url: '/completed-late',
+        },
+      ],
+      watermark: '600000',
+    });
+    const query = String(fetch.mock.calls[0][1]?.body);
+    expect(query).toContain(
+      "timestamp >= toDateTime('1970-01-01 00:03:00') AND timestamp < toDateTime('1970-01-01 00:10:00')",
+    );
+    expect(query).toContain('ORDER BY timestamp ASC, double1 ASC');
+    expect(query).not.toContain('double1 >= 480000');
+    expect((await req(`/deployments/${deployment.id}/logs?after=garbage`)).status).toBe(400);
+    expect((await req(`/deployments/${deployment.id}/logs?after=600001`)).status).toBe(400);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
 

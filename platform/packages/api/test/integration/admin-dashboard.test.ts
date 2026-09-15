@@ -1361,6 +1361,7 @@ describe('GET /admin/deployments/:id/logs', () => {
               method: 'GET',
               statusCode: '200',
               ts: 1709312585000,
+              timestamp: '2024-03-01 23:43:05',
             },
           ],
         });

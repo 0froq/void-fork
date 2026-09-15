@@ -57,6 +57,7 @@ operationsRoutes.get('/deployments/:id/logs', async (context) =>
       since: context.req.query('since'),
       limit: Number(context.req.query('limit') ?? 100),
       cursor: context.req.query('cursor'),
+      after: context.req.query('after'),
     }),
   ),
 );
