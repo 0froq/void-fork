@@ -214,6 +214,52 @@ describe('operator CLI (real subprocess and HTTP)', () => {
     });
     expect(requests).toHaveLength(2);
   });
+  it('fails degraded worker reads with readable human and JSON details', async () => {
+    reply = (path) =>
+      path === '/operator/v1/workers/api'
+        ? {
+            body: {
+              ok: false,
+              partial: true,
+              worker: { name: 'api' },
+              versions: [{ id: 'version-1' }],
+              error: 'Cloudflare versions unavailable.',
+            },
+          }
+        : {
+            body: {
+              ok: false,
+              partial: true,
+              workers: [
+                { worker: { name: 'api' }, error: 'Cloudflare deployments unavailable.' },
+                { worker: { name: 'dashboard' }, deployment: { id: 'deployment-1' } },
+              ],
+            },
+          };
+
+    const human = await run(['worker', 'show', 'api']);
+    expect(human.code).toBe(1);
+    expect(human.stdout).toBe('');
+    expect(human.stderr).toContain('The operation did not fully complete.');
+    expect(human.stderr).toContain('"id": "version-1"');
+    expect(human.stderr).toContain('Cloudflare versions unavailable.');
+
+    const json = await run(['worker', 'list', '--json']);
+    expect(json.code).toBe(1);
+    expect(json.stdout).toBe('');
+    expect(JSON.parse(json.stderr)).toMatchObject({
+      error: 'partial_failure',
+      details: {
+        ok: false,
+        partial: true,
+        workers: expect.arrayContaining([
+          expect.objectContaining({ error: 'Cloudflare deployments unavailable.' }),
+          expect.objectContaining({ deployment: { id: 'deployment-1' } }),
+        ]),
+      },
+    });
+    expect(requests).toHaveLength(2);
+  });
   it('prints every rollback outcome when a human mutation partially fails', async () => {
     reply = (_path, body) =>
       body.dryRun

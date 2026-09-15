@@ -56,16 +56,18 @@ export async function workerDetail(
     listWorkerVersions(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, scriptName),
     listWorkerDeployments(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, scriptName),
   ]);
+  const failures = results.flatMap((result) =>
+    result.status === 'rejected' ? [toErrorMessage(result.reason)] : [],
+  );
   return {
+    ok: failures.length === 0,
+    partial: failures.length > 0 && failures.length < results.length,
     worker,
     scriptName,
     environment,
     versions: results[0].status === 'fulfilled' ? results[0].value.items : [],
     deployment: results[1].status === 'fulfilled' ? results[1].value.deployments[0] : undefined,
-    error:
-      results
-        .flatMap((result) => (result.status === 'rejected' ? [toErrorMessage(result.reason)] : []))
-        .join('; ') || undefined,
+    error: failures.join('; ') || undefined,
   };
 }
 
@@ -102,7 +104,13 @@ export async function workerList(env: ApiEnv['Bindings'], environment: PlatformE
           error: toErrorMessage(result.reason),
         },
   );
-  return { workers, environment };
+  const failureCount = results.filter((result) => result.status === 'rejected').length;
+  return {
+    ok: failureCount === 0,
+    partial: failureCount > 0 && failureCount < results.length,
+    workers,
+    environment,
+  };
 }
 
 export type RollbackTarget = {
@@ -141,7 +149,16 @@ export async function prepareAllWorkerRollbacks(
   requireHostedPlatform(env);
   let versions: Record<string, unknown>;
   if (input === undefined) {
-    const { workers } = await workerList(env, environment);
+    const inventory = await workerList(env, environment);
+    if (!inventory.ok) {
+      throw new OperatorError(
+        502,
+        'Could not inspect every hosted worker. Retry the preview after Cloudflare recovers.',
+        'worker_read_failed',
+        { partial: inventory.partial, workers: inventory.workers },
+      );
+    }
+    const { workers } = inventory;
     versions = Object.fromEntries(
       workers.map((entry) => [
         entry.worker.name,

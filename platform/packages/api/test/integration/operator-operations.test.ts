@@ -386,6 +386,61 @@ describe('operator installation-aware system and worker operations', () => {
     expect((await req('/workers/rollback-all', { dryRun: true }, installation)).status).toBe(501);
     expect(fetch).not.toHaveBeenCalled();
   });
+  test('worker reads preserve available data and report Cloudflare failures', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/scripts/void-api/deployments')) {
+        return Response.json(
+          { success: false, errors: [{ message: 'Permission denied' }] },
+          { status: 403 },
+        );
+      }
+      if (url.endsWith('/versions')) {
+        return Response.json({ success: true, result: { items: [{ id: 'current' }] } });
+      }
+      if (url.endsWith('/deployments')) {
+        return Response.json({
+          success: true,
+          result: {
+            deployments: [
+              { id: 'current-deploy', versions: [{ version_id: 'current', percentage: 100 }] },
+            ],
+          },
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    const detail = await req('/workers/api');
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({
+      ok: false,
+      partial: true,
+      versions: [{ id: 'current' }],
+      error: 'Cloudflare API error: Permission denied',
+    });
+
+    const list = await req('/workers');
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({
+      ok: false,
+      partial: true,
+      workers: expect.arrayContaining([
+        expect.objectContaining({
+          worker: expect.objectContaining({ name: 'api' }),
+          error: 'Cloudflare API error: Permission denied',
+        }),
+        expect.objectContaining({
+          worker: expect.objectContaining({ name: 'dashboard' }),
+          deployment: expect.objectContaining({ id: 'current-deploy' }),
+        }),
+      ]),
+    });
+
+    const preview = await req('/workers/rollback-all', { dryRun: true });
+    expect(preview.status).toBe(502);
+    expect(await preview.json()).toMatchObject({ error: 'worker_read_failed' });
+  });
   test('worker previews validate versions without POST calls or audit-event mutations', async () => {
     const fetch = cloudflareWorkerStub();
     expect(
