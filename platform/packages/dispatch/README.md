@@ -97,10 +97,17 @@ Because the failure is swallowed, the row must never be one Analytics Engine wou
 - **Versioned static assets**: `s-maxage=31536000, max-age=0, must-revalidate`
 - **ISR HTML/JSON**: edge cache backed by `ISR_CACHE` KV
 
+The deploy-versioned static cache accepts only uncredentialed GET requests. In
+SSR deployments, a dotted URL is cached there only when the deployment's asset
+manifest contains that exact path. Unknown legacy assets render through the
+worker without entering this shared cache. Hashed assets use their earlier
+content-addressed cache path.
+
 Not cached:
 
 - `/api/*`
 - non-GET requests
+- requests with `Cookie`, `Authorization`, `Range`, Pages protocol, or EventSource semantics
 - private/no-store/no-cache responses
 - SSR pages without ISR
 

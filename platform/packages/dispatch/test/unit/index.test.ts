@@ -42,6 +42,7 @@ type RoutingEntry = {
   suspended?: string;
   hashedAssetsPrefix?: string;
   staticDeploymentId?: string;
+  assetManifestId?: string;
   headerRules?: Array<{ pattern: string; headers: Array<[string, string]> }>;
   redirectRules?: Array<{ source: string; destination: string; status: number; host?: string }>;
   fallbackRules?: Array<{ source: string; destination: string; status: number; host?: string }>;
@@ -88,6 +89,7 @@ function packMockEntry(entry: MockIsrEntry): {
 function createEnv(options: {
   routing: RoutingEntry;
   assets?: Record<string, MockIsrEntry>;
+  assetManifest?: Record<string, string>;
   workerResponse?: Response;
   workerFetchImpl?: () => Promise<Response>;
 }): {
@@ -119,7 +121,10 @@ function createEnv(options: {
 
   const env = {
     ROUTING: {
-      get: async () => JSON.stringify(options.routing),
+      get: async (key: string) =>
+        key.startsWith('manifest:')
+          ? JSON.stringify(options.assetManifest ?? {})
+          : JSON.stringify(options.routing),
     },
     DISPATCH: {
       get: dispatchGet,
@@ -4675,6 +4680,136 @@ describe('rewrite rules', () => {
 });
 
 describe('static asset caching', () => {
+  it('never shares a dotted declared page between authenticated sessions', async () => {
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+      ssr: true,
+      pages: [{ pattern: '/members/:name', revalidate: 60 }],
+    };
+    const { env, workerFetch, kvStore } = createEnv({
+      routing,
+      workerFetchImpl: async () => {
+        const session = workerFetch.mock.calls.at(-1)?.[0].headers.get('cookie');
+        return new Response(`<html>${session}</html>`, {
+          headers: { 'Content-Type': 'text/html' },
+        });
+      },
+    });
+
+    const firstCtx = createCtx();
+    const first = await app.fetch(
+      new Request('https://test.void.app/members/alice.smith', {
+        headers: { Cookie: 'session=alice' },
+      }),
+      env,
+      firstCtx,
+    );
+    await Promise.all(
+      (firstCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]),
+    );
+
+    const secondCtx = createCtx();
+    const second = await app.fetch(
+      new Request('https://test.void.app/members/alice.smith', {
+        headers: { Cookie: 'session=bob' },
+      }),
+      env,
+      secondCtx,
+    );
+    await Promise.all(
+      (secondCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]),
+    );
+
+    expect(await first.text()).toBe('<html>session=alice</html>');
+    expect(await second.text()).toBe('<html>session=bob</html>');
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    expect([...edgeCacheStore.keys()].some((key) => key.includes('?_v='))).toBe(false);
+    expect([...kvStore.keys()].some((key) => key.includes('/members/alice.smith'))).toBe(false);
+  });
+
+  it('ignores a pre-existing dotted static-cache entry for an authorized request', async () => {
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+      ssr: true,
+      pages: [{ pattern: '/members/:name', revalidate: 60 }],
+    };
+    const { env, workerFetch } = createEnv({
+      routing,
+      workerResponse: new Response('<html>bob</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+    edgeCacheStore.set(
+      'https://test.void.app/members/alice.smith?_v=deploy-1',
+      new Response('<html>alice</html>', {
+        headers: {
+          'Content-Type': 'text/html',
+          'Cache-Control': 'public, s-maxage=31536000',
+        },
+      }),
+    );
+
+    const response = await app.fetch(
+      new Request('https://test.void.app/members/alice.smith', {
+        headers: { Authorization: 'Bearer bob' },
+      }),
+      env,
+      createCtx(),
+    );
+
+    expect(await response.text()).toBe('<html>bob</html>');
+    expect(workerFetch).toHaveBeenCalledOnce();
+  });
+
+  it('does not treat a validator-bearing revalidate-0 dotted page as a static asset', async () => {
+    const routing: RoutingEntry = {
+      workerName: 'test-worker',
+      projectId: 'proj-1',
+      version: 'deploy-1',
+      ssr: true,
+      pages: [{ pattern: '/members/:name', revalidate: 0 }],
+    };
+    const { env, workerFetch } = createEnv({
+      routing,
+      workerFetchImpl: async () => {
+        const request = workerFetch.mock.calls.at(-1)?.[0];
+        return new Response(`<html>${new URL(request.url).searchParams.get('viewer')}</html>`, {
+          headers: { 'Content-Type': 'text/html', ETag: '"member-page"' },
+        });
+      },
+    });
+
+    const firstCtx = createCtx();
+    expect(
+      await (
+        await app.fetch(
+          new Request('https://test.void.app/members/alice.smith?viewer=alice'),
+          env,
+          firstCtx,
+        )
+      ).text(),
+    ).toBe('<html>alice</html>');
+    await Promise.all(
+      (firstCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]),
+    );
+
+    expect(
+      await (
+        await app.fetch(
+          new Request('https://test.void.app/members/alice.smith?viewer=bob'),
+          env,
+          createCtx(),
+        )
+      ).text(),
+    ).toBe('<html>bob</html>');
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    expect([...edgeCacheStore.keys()].some((key) => key.includes('?_v='))).toBe(false);
+  });
+
   it('caches static asset on first request, serves from cache on second', async () => {
     const routing: RoutingEntry = {
       workerName: 'test-worker',
@@ -4784,15 +4919,17 @@ describe('static asset caching', () => {
     expect([...edgeCacheStore.keys()].some((k) => k.includes('?_v='))).toBe(false);
   });
 
-  it('still writes a full 200 worker response to the static edge cache (gate does not over-block)', async () => {
+  it('still writes a manifest-backed 200 asset response to the static edge cache', async () => {
     const routing: RoutingEntry = {
       workerName: 'test-worker',
       projectId: 'proj-1',
       version: 'deploy-1',
       ssr: true,
+      assetManifestId: 'deploy-1',
     };
     const { env } = createEnv({
       routing,
+      assetManifest: { '/feed.xml': 'feed-hash' },
       workerResponse: new Response('<rss>feed</rss>', {
         status: 200,
         headers: { 'Content-Type': 'application/xml' },
@@ -4870,14 +5007,19 @@ describe('static asset caching', () => {
     expect(workerFetch).toHaveBeenCalledTimes(2); // no caching for SSR routes
   });
 
-  it('caches file-extension paths in SSR projects', async () => {
+  it('caches manifest-backed non-hashed asset paths in SSR projects', async () => {
     const routing: RoutingEntry = {
       workerName: 'test-worker',
       projectId: 'proj-1',
       version: 'deploy-1',
       ssr: true,
+      assetManifestId: 'deploy-1',
     };
-    const { env, workerFetch } = createEnv({ routing, workerResponse: new Response('icon') });
+    const { env, workerFetch } = createEnv({
+      routing,
+      assetManifest: { '/favicon.ico': 'favicon-hash' },
+      workerResponse: new Response('icon'),
+    });
     const ctx = createCtx();
 
     await app.fetch(new Request('https://test.void.app/favicon.ico'), env, ctx);

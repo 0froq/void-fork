@@ -1315,12 +1315,15 @@ export default {
       }
     }
 
-    // Edge-cache non-hashed static assets using deploy-versioned cache keys
+    // Edge-cache non-hashed static assets using deploy-versioned cache keys.
+    // The same request gate feeds both cache reads and writes. Credentialed,
+    // Range, and Pages-protocol requests must reach the worker instead of a
+    // shared representation. For SSR deployments, a dotted path is only a
+    // candidate when the emitted asset manifest positively identifies it.
+    const staticCachePathname = pathname;
     const isStaticCandidate =
-      request.method === 'GET' &&
-      routing.version &&
-      !(pathname.startsWith('/api/') || pathname === '/api') &&
-      (hasExtension(pathname) || !routing.ssr);
+      isStaticCacheRequestEligible(request, staticCachePathname, routing) &&
+      (await isKnownStaticAssetPath(env, staticCachePathname, routing, timeoutMs));
 
     let staticCacheKey: Request | undefined;
     if (isStaticCandidate) {
@@ -1347,7 +1350,7 @@ export default {
       staticCacheKey = candidateCacheKey;
       const staticCache = caches.default;
       const cached = await staticCache.match(candidateCacheKey);
-      if (cached) {
+      if (cached && isStaticCacheResponseEligible(cached)) {
         requestType = 'static';
         if (!routing.staticDeploymentId) {
           const repairResult = await maybeServeWfpAssetFallback({
@@ -1360,7 +1363,7 @@ export default {
             fallbackPathname: resolveCachedWfpFallbackPathname(pathname, routing, url.hostname),
           });
           if (repairResult.response !== cached) {
-            if (repairResult.response.ok) {
+            if (isStaticCacheResponseEligible(repairResult.response)) {
               const finalRes = applyHeaderRules(
                 repairResult.response,
                 repairResult.pathname,
@@ -1387,6 +1390,11 @@ export default {
           }
         }
         return meter(clientRevalidateResponse(cached));
+      }
+      if (cached) {
+        // Entries written by older dispatch versions may contain an unverified
+        // dynamic response. Do not serve it, and remove it opportunistically.
+        ctx.waitUntil(staticCache.delete(candidateCacheKey));
       }
     }
 
@@ -1511,7 +1519,7 @@ export default {
         (request.method === 'GET'
           ? new Request(`${url.origin}${fallbackOriginPathname}?_v=${routing.staticDeploymentId}`)
           : undefined);
-      if (edgeCacheKey && status === 200) {
+      if (edgeCacheKey && isStaticCacheResponseEligible(finalRes)) {
         const cached = new Response(finalRes.clone().body, finalRes);
         cached.headers.set(
           'Cache-Control',
@@ -1617,12 +1625,7 @@ export default {
       // dotted SSR path skips the ISR ladder and falls through here), poisoning
       // the shared `<path>?_v=` key with a partial body that a later full request
       // could then be served. Mirrors the `status === 200` guard at the ISR sites.
-      if (
-        staticCacheKey &&
-        response.status === 200 &&
-        !isEventStream &&
-        !hasCacheOptOut(response)
-      ) {
+      if (staticCacheKey && !writebackFallbackApplied && isStaticCacheResponseEligible(response)) {
         const res = new Response(response.body, response);
         res.headers.delete('x-void-page-data');
         const finalRes = applyHeaderRules(res, pathname, routing.headerRules);
@@ -2322,4 +2325,68 @@ function hasCacheOptOut(response: Response): boolean {
   // Cache-Control directive names are case-insensitive (RFC 9111 §5.2): a
   // `No-Store` / `PRIVATE` opt-out must be honored exactly like its lowercase form.
   return /\b(private|no-store|no-cache)\b/i.test(cacheControl);
+}
+
+/**
+ * Shared request-side eligibility for the deploy-versioned static cache.
+ * Hashed assets take the earlier content-addressed path and do not use this
+ * heuristic. Every request that reaches this cache must be safe to satisfy
+ * from one shared representation.
+ */
+function isStaticCacheRequestEligible(
+  request: Request,
+  pathname: string,
+  routing: RoutingEntry,
+): boolean {
+  return Boolean(
+    request.method === 'GET' &&
+    routing.version &&
+    !isApiPath(pathname) &&
+    !request.headers.has('Range') &&
+    !request.headers.has('X-VoidPages') &&
+    !shouldBypassIsr(request) &&
+    (hasExtension(pathname) || !routing.ssr),
+  );
+}
+
+async function isKnownStaticAssetPath(
+  env: Env,
+  pathname: string,
+  routing: RoutingEntry,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (routing.staticDeploymentId) {
+    return true;
+  }
+  if (!routing.ssr) {
+    return true;
+  }
+  if (!routing.assetManifestId) {
+    return false;
+  }
+  try {
+    const manifest = await fetchAssetManifest(
+      env,
+      routing.assetManifestId,
+      routing.projectId,
+      Math.min(timeoutMs, STATIC_ASSET_HEDGE_DELAY_MS),
+    );
+    if (!manifest) {
+      return false;
+    }
+    if (Object.hasOwn(manifest, pathname)) {
+      return true;
+    }
+    const decoded = safeDecodePathname(pathname);
+    return decoded !== pathname && Object.hasOwn(manifest, decoded);
+  } catch {
+    // Asset identity is an optimization gate. If the manifest is unavailable,
+    // dispatch the request live instead of guessing from the URL or response.
+    return false;
+  }
+}
+
+/** Apply the same origin/cached response policy to static reads and writes. */
+function isStaticCacheResponseEligible(response: Response): boolean {
+  return response.status === 200 && !isEventStreamResponse(response) && !hasCacheOptOut(response);
 }

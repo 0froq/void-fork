@@ -14,7 +14,7 @@ Commit subjects start with a capital letter and end with a period.
 
 ## Work and commit boundaries
 
-- [ ] 1. Exclude authenticated/dynamic pages from the static cache.
+- [x] 1. Exclude authenticated/dynamic pages from the static cache.
 - [ ] 2. Respect response cache opt-outs and API eligibility in direct ISR.
 - [ ] 3. Move authoritative sandbox usage production out of tenant Workers.
 - [ ] 4. Separate GitHub installation visibility from installation authority.
