@@ -16,7 +16,9 @@
     "./env": "./src/env.ts",
     "./reserved-slugs": "./src/reserved-slugs.ts",
     "./suspension": "./src/suspension.ts",
-    "./routing": "./src/routing.ts"
+    "./routing": "./src/routing.ts",
+    "./usage-auth": "./src/usage-auth.ts",
+    "./sandbox-concurrency-counter": "./src/sandbox-concurrency-counter.ts"
   },
   "scripts": {
     "db:generate": "drizzle-kit generate",

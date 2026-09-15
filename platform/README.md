@@ -251,8 +251,16 @@ The edge router.
 - Reads slug/domain routing from KV.
 - Sends worker projects to Workers for Platforms.
 - Serves current static/SPA deployments directly from R2, while retaining KV reads for small assets carried forward from legacy deploys.
-- Handles ISR, edge caching, redirect/rewrite rules, header rules, and request metering.
+- Handles ISR, edge caching, redirect/rewrite rules, header rules, and signed request metering.
 - Relays Cloudflare Queue batches to user workers.
+
+Request and sandbox usage queue messages are authenticated with a
+purpose-separated key held in the platform's private routing KV. The API health
+check initializes that key before installation traffic is enabled. Sandbox
+elapsed time is measured from API-owned lease transitions; tenant Workers do
+not receive the usage queue producer binding. After an upgrade, unsigned frames
+from older deployed SDK runtimes are acknowledged and ignored. Redeploy those
+apps to remove the dormant legacy binding.
 
 ### `packages/proxy`
 

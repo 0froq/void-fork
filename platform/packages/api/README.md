@@ -30,7 +30,9 @@ src/
   cf-api.ts                   # Cloudflare API helpers
   cron-scheduler.ts           # Durable Object for project crons
   usage-counter.ts            # Durable Object for per-user usage counters
+  sandbox-concurrency-counter.ts # Trusted sandbox leases and server-clock metering
   usage-queue.ts              # Queue consumer logic
+  usage-auth.ts               # Platform-only signing envelope and ROUTING key bootstrap
   tiers.ts                    # Plan limits + helpers (incl. concurrentBuilds, buildTimeoutMinutes; getBuildInstanceType selects the build-container size/class by plan)
   build-scheduler.ts          # Durable Object: global build queue + per-tier concurrency
   build-manager.ts            # Durable Objects (extend @cloudflare/containers Container): BuildManager (free standard-3 = 2/8/16) + BuildManagerLarge (paid standard-4)
@@ -243,8 +245,29 @@ Every admin write is additionally same-origin checked in `admin/middleware/auth.
 
 - **Deploy/day limits** are checked from the platform Postgres database.
 - **Request usage** is counted asynchronously through `USAGE_QUEUE` and the `UsageCounter` DO.
+- **Usage provenance** is authenticated before accounting. The API health check
+  creates a purpose-separated signing key in the private routing KV; dispatch
+  and the API-owned sandbox lease counter sign every accepted queue envelope.
+  The consumer resolves project ownership and the canonical slug from Postgres,
+  validates finite nonnegative quantities, and acknowledges unsigned or invalid
+  frames without applying them.
+- **Sandbox runtime** comes from the API-owned lease clock at acquire, heartbeat,
+  release, and stale-lease cleanup. Each lease generation publishes cumulative
+  intervals, so reordered messages and retries count elapsed time once. Separate
+  durable receipts are committed atomically with account totals and survive billing
+  rollover. Signed intervals and receipts expire after eight days; expired usage
+  cannot be replayed after its receipt has been pruned.
+  Tenant Workers do not receive the usage queue producer or account identity
+  bindings. Workers deployed by older platform versions may still have the
+  dormant producer binding; their unsigned SDK frames are ignored. Redeploying
+  removes those legacy bindings but is not required for trusted gate metering.
 - **Scheduled enforcement** runs hourly from the worker cron and reconciles request/AI usage against plan limits.
 - **Per-request runtime limits** are carried in routing data and enforced by `dispatch`.
+
+Build cancellation invalidates pending startup immediately. If container startup
+has already begun, the manager stops any late producer before publishing final
+log completion. Startup claims and recovery reads are bounded; terminal recovery
+still releases container capacity when Postgres is unavailable.
 
 ## Admin UI
 

@@ -567,8 +567,10 @@ describe('WfP asset fallback on CF stub', () => {
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(res.status).toBe(503);
     expect(res.headers.get('x-void-timeout')).toBe('dispatch');
-    expect(usageSend).toHaveBeenCalledWith(expect.objectContaining({ status: 503 }));
-    expect(usageSend.mock.calls[0]?.[0]).not.toHaveProperty('failureKind');
+    expect(usageSend).toHaveBeenCalledWith(
+      expect.objectContaining({ event: expect.objectContaining({ status: 503 }) }),
+    );
+    expect(usageSend.mock.calls[0]?.[0].event).not.toHaveProperty('failureKind');
     expect(edgeCacheStore.size).toBe(0);
   });
 

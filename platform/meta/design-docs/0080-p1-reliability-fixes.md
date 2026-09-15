@@ -16,7 +16,7 @@ Commit subjects start with a capital letter and end with a period.
 
 - [x] 1. Exclude authenticated/dynamic pages from the static cache.
 - [x] 2. Respect response cache opt-outs and API eligibility in direct ISR.
-- [ ] 3. Move authoritative sandbox usage production out of tenant Workers.
+- [x] 3. Move authoritative sandbox usage production out of tenant Workers.
 - [x] 4. Separate GitHub installation visibility from installation authority.
 - [x] 5. Enforce administrator suspension in browser auth and OAuth issuance.
 - [x] 6. Bind environment developer tokens to the selected platform origin.
@@ -28,12 +28,12 @@ Commit subjects start with a capital letter and end with a period.
 - [x] 12. Allow invited account deletion while preserving invitation history.
 - [x] 13. Store full OAuth tokens in generated MySQL auth schemas.
 - [x] 14. Scope PostgreSQL/MySQL clients to the request using them.
-- [ ] 15. Share local D1 identity/persistence across dev and database tooling.
-- [ ] 16. Support Durable State methods through real Cloudflare RPC.
-- [ ] 17. Wire production Node/Bun/Deno Pages manifests and static assets.
+- [x] 15. Share local D1 identity/persistence across dev and database tooling.
+- [x] 16. Support Durable State methods through real Cloudflare RPC.
+- [x] 17. Wire production Node/Bun/Deno Pages manifests and static assets.
 - [x] 18. Support valid account/OAuth credentials in platform lifecycle reads.
 - [x] 19. Verify certificate coverage for nested application domains before provisioning.
-- [ ] 20. Prevent canceled builds from launching untracked containers.
+- [x] 20. Prevent canceled builds from launching untracked containers.
 - [x] 21. Give sandbox concurrency leases globally unique instance identities.
 
 Root owns token/lifecycle/traffic fixes (6, 10, 11, 18, 19) and integration.
@@ -61,6 +61,13 @@ when a necessary developer-experience or compatibility decision cannot be
 resolved from the task and current behavior.
 
 ## Verification and documentation
+
+Recovery on 2026-09-16 matched the existing commits to 16 completed findings.
+The pending local D1, Durable State, build cancellation, and usage changes were
+preserved and completed; production Node/Bun/Deno asset integration was then
+implemented. The original worktree diff and untracked files were backed up under
+`/tmp` before resuming. All 21 original findings now have implementation commits;
+final full verification and the requested four-agent review remain below.
 
 Each fix includes a regression for the reported supported scenario and appropriate
 failure/concurrency boundaries. Run only relevant `vp test run` selections during

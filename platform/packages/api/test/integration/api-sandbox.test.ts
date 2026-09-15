@@ -772,11 +772,11 @@ describe('per-deploy sandbox integration', () => {
 
   // ----------------------------------------------------------------------
   // deploy-pipeline integration — sandbox-using user worker uploads
-  // include the platform queue + identity bindings, and the routing-switch
+  // exclude platform queue + account identity bindings, and the routing-switch
   // step writes the per-project `{userId, plan}` entry the proxy's sandbox
   // gate reads (packages/proxy/src/sandbox.ts).
   // ----------------------------------------------------------------------
-  it('sandbox deploy injects USAGE_EVENTS_QUEUE + __VOID_USER_ID/__VOID_PROJECT_SLUG and a single __VOID_PROXY', async () => {
+  it('sandbox deploy keeps the usage queue and account identity out of the tenant while injecting one __VOID_PROXY', async () => {
     const user = await createTestUser(env.db, 'sb-p6-user', 'github', undefined, 'pro');
     const project = await createTestProject(env.db, user.id, 'sb-p6');
     const cf = mockCfApi();
@@ -791,25 +791,21 @@ describe('per-deploy sandbox integration', () => {
     expect(userWorker).toBeDefined();
     const bindings = userWorker!.bindings;
 
-    // Queue producer for the framework's container-runtime metering path.
+    // Metering is produced by the trusted API lease counter. Tenant Workers
+    // never receive producer authority, including sandbox-enabled apps.
     const queueBindings = bindings.filter(
       (b) => b.type === 'queue' && b.name === 'USAGE_EVENTS_QUEUE',
     );
-    expect(queueBindings).toHaveLength(1);
-    expect(queueBindings[0].queue_name).toBe('void-usage-events');
+    expect(queueBindings).toHaveLength(0);
 
     // `__VOID_PROXY` is injected once by `provisionBindings` (AI / revalidation
     // / sandbox gate all share the same service binding).
     const proxyBindings = bindings.filter((b) => b.type === 'service' && b.name === '__VOID_PROXY');
     expect(proxyBindings).toHaveLength(1);
 
-    // Identity plain-text bindings the framework's sandbox runtime reads
-    // before publishing to USAGE_EVENTS_QUEUE. Project id is sourced from
-    // the shared `__PROJECT_ID` slot injected by `provisionBindings`.
+    // Account identity stays in platform-owned routing state.
     const userIdBinding = bindings.find((b) => b.name === '__VOID_USER_ID');
-    expect(userIdBinding).toBeDefined();
-    expect(userIdBinding!.type).toBe('plain_text');
-    expect((userIdBinding as { text?: string }).text).toBe(user.id);
+    expect(userIdBinding).toBeUndefined();
 
     const projectIdBinding = bindings.find((b) => b.name === '__PROJECT_ID');
     expect(projectIdBinding).toBeDefined();
@@ -817,9 +813,7 @@ describe('per-deploy sandbox integration', () => {
     expect((projectIdBinding as { text?: string }).text).toBe(project.id);
 
     const slugBinding = bindings.find((b) => b.name === '__VOID_PROJECT_SLUG');
-    expect(slugBinding).toBeDefined();
-    expect(slugBinding!.type).toBe('plain_text');
-    expect((slugBinding as { text?: string }).text).toBe(project.slug);
+    expect(slugBinding).toBeUndefined();
   });
 
   it('sandbox deploy writes `project:{projectId}` routing entry with { userId, plan } shape', async () => {

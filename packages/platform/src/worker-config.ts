@@ -96,7 +96,10 @@ export function createPlatformWorkerConfigs(input: {
       { tag: 'v4', new_classes: ['SandboxConcurrencyCounter'] },
     ],
     queues: {
-      producers: [{ binding: 'CRON_FIRES_QUEUE', queue: names.cronQueue }],
+      producers: [
+        { binding: 'CRON_FIRES_QUEUE', queue: names.cronQueue },
+        { binding: 'USAGE_EVENTS_QUEUE', queue: names.usageQueue },
+      ],
       consumers: [
         { queue: names.usageQueue, max_batch_size: 100, max_batch_timeout: 5 },
         { queue: names.cronQueue, max_batch_size: 50, max_batch_timeout: 1, max_retries: 3 },
@@ -123,7 +126,6 @@ export function createPlatformWorkerConfigs(input: {
       REQUESTS_DATASET: names.requestsDataset,
       SITE_DOMAIN: deployment.application.baseDomain,
       TAIL_SERVICE_NAME: names.tailWorker,
-      USAGE_EVENTS_QUEUE_NAME: names.usageQueue,
       VOID_PROXY_SERVICE: names.proxyWorker,
     },
   };

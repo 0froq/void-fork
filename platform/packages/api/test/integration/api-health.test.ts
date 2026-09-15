@@ -2,6 +2,7 @@ import { PLATFORM_DISABLED_KEY } from '@void/platform';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vite-plus/test';
 import app from '../../src/index.ts';
+import { USAGE_SIGNING_KEY_KV_KEY } from '../../src/usage-auth.ts';
 import { setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
 
 let env: TestEnv;
@@ -103,16 +104,34 @@ describe('GET /health', () => {
     }
   });
 
-  it('does not read the lifecycle gate for hosted Void Cloud', async () => {
-    const get = vi.fn(async () => {
-      throw new Error('hosted health must not read routing KV');
-    });
+  it('initializes trusted usage signing material without reading the lifecycle gate', async () => {
+    const get = vi.fn(async (key: string) =>
+      key === USAGE_SIGNING_KEY_KV_KEY ? 'existing-purpose-separated-key' : null,
+    );
+    const put = vi.fn(async () => {});
     const res = await app.fetch(new Request('http://localhost/health'), {
       ...env,
-      ROUTING: { ...env.ROUTING, get } as typeof env.ROUTING,
+      ROUTING: { ...env.ROUTING, get, put } as unknown as typeof env.ROUTING,
     });
     expect(res.status).toBe(200);
-    expect(get).not.toHaveBeenCalled();
+    expect(get).toHaveBeenCalledExactlyOnceWith(USAGE_SIGNING_KEY_KV_KEY);
+    expect(put).not.toHaveBeenCalled();
+    expect(await res.json()).toEqual({ status: 'ok' });
+  });
+
+  it('fails health rather than enabling traffic when usage signing material cannot initialize', async () => {
+    const res = await app.fetch(new Request('http://localhost/health'), {
+      ...env,
+      ROUTING: {
+        ...env.ROUTING,
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {
+          throw new Error('KV unavailable');
+        }),
+      } as unknown as typeof env.ROUTING,
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ status: 'unhealthy' });
   });
 
   it('verifies a self-hosted installation through its database claim', async () => {

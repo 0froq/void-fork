@@ -47,11 +47,16 @@ export interface SandboxConcurrencyCounterRpc extends Rpc.DurableObjectBranded {
   acquire(
     projectScopedSandboxInstanceId: string,
     planLimit: number,
+    attribution: { projectId: string; userId: string; slug: string },
   ): Promise<{ ok: true } | { ok: false; reason: 'concurrency' }>;
   refresh(
     projectScopedSandboxInstanceId: string,
+    attribution: { projectId: string; userId: string; slug: string },
   ): Promise<{ ok: true } | { ok: false; reason: 'not_held' }>;
-  release(projectScopedSandboxInstanceId: string): Promise<void>;
+  release(
+    projectScopedSandboxInstanceId: string,
+    attribution: { projectId: string; userId: string; slug: string },
+  ): Promise<void>;
 }
 
 export type Env = Readonly<{

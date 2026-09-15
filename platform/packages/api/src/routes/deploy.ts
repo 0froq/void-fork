@@ -1317,52 +1317,6 @@ export function buildSandboxUploadContainers(
   return sandbox ? [{ class_name: sandbox.className }] : undefined;
 }
 
-/**
- * Builds the `USAGE_EVENTS_QUEUE` producer binding sandbox-using user
- * workers need for container-runtime metering. The API itself consumes this
- * queue (see `processUsageEventBatch`). The `__VOID_PROXY` service binding
- * needed for the sandbox gate is injected unconditionally by
- * `provisionBindings`, so it isn't duplicated here.
- *
- * Queue name comes from the API worker env so staging (`*-staging`) and
- * production stay in sync with what the API itself binds.
- */
-export function buildSandboxPlatformBindings(
-  env: Pick<ApiEnv['Bindings'], 'USAGE_EVENTS_QUEUE_NAME'>,
-  sandbox: DeployManifest['sandbox'] | undefined,
-): ReadonlyArray<{ type: 'queue'; name: string; queue_name: string }> {
-  if (!sandbox) {
-    return [];
-  }
-  return [
-    {
-      type: 'queue',
-      name: 'USAGE_EVENTS_QUEUE',
-      queue_name: env.USAGE_EVENTS_QUEUE_NAME ?? 'void-usage-events',
-    },
-  ];
-}
-
-/**
- * Builds the sandbox-only plain-text identity bindings the framework's
- * sandbox runtime reads when emitting metering messages to
- * `USAGE_EVENTS_QUEUE` (see `packages/void/src/runtime/sandbox.ts`).
- * Project id is read from the shared `__PROJECT_ID` slot injected by
- * `provisionBindings` for AI/ISR, and `__VOID_PROJECT_SLUG` likewise — it
- * moved there when `void/email` made it needed on every worker, not just
- * sandbox ones. Two producers of one binding name would upload the name
- * twice, so this builder deliberately no longer emits it.
- */
-export function buildSandboxIdentityBindings(
-  sandbox: DeployManifest['sandbox'] | undefined,
-  identity: { userId: string },
-): ReadonlyArray<{ type: 'plain_text'; name: string; text: string }> {
-  if (!sandbox) {
-    return [];
-  }
-  return [{ type: 'plain_text', name: '__VOID_USER_ID', text: identity.userId }];
-}
-
 export function enrichWebSocketManifest(
   manifest: DeployManifest,
   previousManifest: DeployManifest | null,
@@ -3918,10 +3872,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         const websocketBindings = buildWebSocketUploadBindings(manifest.websocket);
         const sandboxBindings = buildSandboxUploadBindings(manifest.sandbox);
         const liveBindings = buildLiveUploadBindings(manifest.live);
-        const sandboxPlatformBindings = buildSandboxPlatformBindings(context.env, manifest.sandbox);
-        const sandboxIdentityBindings = buildSandboxIdentityBindings(manifest.sandbox, {
-          userId: user.id,
-        });
         // No per-project `send_email` binding is uploaded. The framework's
         // `sendEmail()` POSTs MIME + recipients to `__VOID_PROXY/email/send`;
         // the proxy holds the account-level send_email binding and enforces
@@ -3929,8 +3879,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         // `email-allowlist:<projectId>` KV mirror. See
         // `meta/design-docs/0078-email-cf-native.md` and `packages/proxy/src/email.ts`.
         const allBindings = [
-          ...sandboxIdentityBindings,
-          ...sandboxPlatformBindings,
           ...plainTextBindings,
           ...secretBindings,
           ...workerBindings,

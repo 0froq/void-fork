@@ -101,9 +101,14 @@ function createActualCounterNamespace() {
       },
     };
     const ctx = { storage } as never;
-    counter = new SandboxConcurrencyCounter(ctx, {} as never);
+    const counterEnv = {
+      JWT_SECRET,
+      ROUTING: { get: async () => 'test-usage-key', put: async () => {} },
+      USAGE_EVENTS_QUEUE: { send: async () => {} },
+    };
+    counter = new SandboxConcurrencyCounter(ctx, counterEnv as never);
     (counter as unknown as { ctx: unknown; env: unknown }).ctx = ctx;
-    (counter as unknown as { ctx: unknown; env: unknown }).env = {};
+    (counter as unknown as { ctx: unknown; env: unknown }).env = counterEnv;
     counters.set(id.name, counter);
     return counter;
   });
@@ -152,6 +157,10 @@ function projectKv(userId: string, plan: string): string {
 
 function leaseId(projectId: string, sandboxId: string): string {
   return JSON.stringify([projectId, sandboxId]);
+}
+
+function attribution(projectId: string, userId: string) {
+  return { projectId, userId, slug: projectId };
 }
 
 // --- Tests ---
@@ -248,7 +257,11 @@ describe('proxy sandbox routes', () => {
       expect(await res.json()).toEqual({});
       expect(counter.namespace.idFromName).toHaveBeenCalledWith('account:user_solo');
       // solo plan = 2 concurrent sandboxes
-      expect(counter.stub.acquire).toHaveBeenCalledWith(leaseId('proj_solo', 'sb-1'), 2);
+      expect(counter.stub.acquire).toHaveBeenCalledWith(
+        leaseId('proj_solo', 'sb-1'),
+        2,
+        attribution('proj_solo', 'user_solo'),
+      );
     });
 
     it('returns 409 {reason:"concurrency"} when DO reports concurrency cap reached', async () => {
@@ -272,7 +285,11 @@ describe('proxy sandbox routes', () => {
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ reason: 'concurrency' });
       // pro plan = 10 concurrent sandboxes
-      expect(counter.stub.acquire).toHaveBeenCalledWith(leaseId('proj_pro', 'sb-2'), 10);
+      expect(counter.stub.acquire).toHaveBeenCalledWith(
+        leaseId('proj_pro', 'sb-2'),
+        10,
+        attribution('proj_pro', 'user_pro'),
+      );
     });
 
     it('returns 409 {reason:"runtime_budget"} when sandbox-block KV key is set (before DO call)', async () => {
@@ -415,7 +432,10 @@ describe('proxy sandbox routes', () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
       expect(counter.namespace.idFromName).toHaveBeenCalledWith('account:user_solo');
-      expect(counter.stub.refresh).toHaveBeenCalledWith(leaseId('proj_solo', 'sb-1'));
+      expect(counter.stub.refresh).toHaveBeenCalledWith(
+        leaseId('proj_solo', 'sb-1'),
+        attribution('proj_solo', 'user_solo'),
+      );
     });
 
     it('relays {ok:false, reason:"not_held"} when the DO reports the slot was missing', async () => {
@@ -495,7 +515,10 @@ describe('proxy sandbox routes', () => {
       expect(res.status).toBe(204);
       expect(await res.text()).toBe('');
       expect(counter.namespace.idFromName).toHaveBeenCalledWith('account:user_solo');
-      expect(counter.stub.release).toHaveBeenCalledWith(leaseId('proj_solo', 'sb-1'));
+      expect(counter.stub.release).toHaveBeenCalledWith(
+        leaseId('proj_solo', 'sb-1'),
+        attribution('proj_solo', 'user_solo'),
+      );
     });
 
     it('is idempotent — second release call still returns 204', async () => {

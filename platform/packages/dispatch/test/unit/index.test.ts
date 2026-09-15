@@ -5412,8 +5412,10 @@ describe('static deployment caching (KV/R2)', () => {
       await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
       expect(usageSend).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: 503,
-          failureKind: 'platform-static-asset-timeout',
+          event: expect.objectContaining({
+            status: 503,
+            failureKind: 'platform-static-asset-timeout',
+          }),
         }),
       );
     } finally {
@@ -5450,8 +5452,10 @@ describe('static deployment caching (KV/R2)', () => {
       await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
       expect(usageSend).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: 503,
-          failureKind: 'platform-static-asset-error',
+          event: expect.objectContaining({
+            status: 503,
+            failureKind: 'platform-static-asset-error',
+          }),
         }),
       );
     } finally {
@@ -5486,8 +5490,10 @@ describe('static deployment caching (KV/R2)', () => {
       await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
       expect(usageSend).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: 503,
-          failureKind: 'platform-static-asset-missing',
+          event: expect.objectContaining({
+            status: 503,
+            failureKind: 'platform-static-asset-missing',
+          }),
         }),
       );
     } finally {

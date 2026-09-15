@@ -3,6 +3,7 @@ import {
   sandboxBlockKey,
   type ProjectAccountEntry,
 } from '@voidcloud/api/routing';
+import type { SandboxUsageAttribution } from '@voidcloud/api/sandbox-concurrency-counter';
 import { PLAN_LIMITS, type PlanId } from '@voidcloud/api/tiers';
 import { Hono } from 'hono';
 import { asString } from './body.ts';
@@ -46,6 +47,20 @@ async function lookupProjectAccount(
     return null;
   }
   return { userId, plan };
+}
+
+function usageAttribution(
+  projectId: string,
+  account: ProjectAccountEntry,
+): SandboxUsageAttribution {
+  return {
+    projectId,
+    userId: account.userId,
+    // The consumer replaces this with the database-owned project slug. Older
+    // project-account KV entries do not carry one, so never accept a tenant
+    // body hint as a fallback.
+    slug: projectId,
+  };
 }
 
 function planLimit(plan: string): number {
@@ -102,7 +117,11 @@ app.post('/acquire', async (context) => {
     const stub = context.env.SANDBOX_CONCURRENCY_COUNTER.get(
       context.env.SANDBOX_CONCURRENCY_COUNTER.idFromName(`account:${account.userId}`),
     );
-    const result = await stub.acquire(sandboxLeaseId(projectId, sandboxId), limit);
+    const result = await stub.acquire(
+      sandboxLeaseId(projectId, sandboxId),
+      limit,
+      usageAttribution(projectId, account),
+    );
     if (result.ok) {
       return context.json({}, 200);
     }
@@ -147,7 +166,10 @@ app.post('/refresh', async (context) => {
     const stub = context.env.SANDBOX_CONCURRENCY_COUNTER.get(
       context.env.SANDBOX_CONCURRENCY_COUNTER.idFromName(`account:${account.userId}`),
     );
-    const result = await stub.refresh(sandboxLeaseId(projectId, sandboxId));
+    const result = await stub.refresh(
+      sandboxLeaseId(projectId, sandboxId),
+      usageAttribution(projectId, account),
+    );
     return context.json(result, 200);
   } catch (error) {
     console.error('[proxy/sandbox] refresh failed:', error);
@@ -184,7 +206,7 @@ app.post('/release', async (context) => {
     const stub = context.env.SANDBOX_CONCURRENCY_COUNTER.get(
       context.env.SANDBOX_CONCURRENCY_COUNTER.idFromName(`account:${account.userId}`),
     );
-    await stub.release(sandboxLeaseId(projectId, sandboxId));
+    await stub.release(sandboxLeaseId(projectId, sandboxId), usageAttribution(projectId, account));
     return new Response(null, { status: 204 });
   } catch (error) {
     console.error('[proxy/sandbox] release failed:', error);

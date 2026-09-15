@@ -855,6 +855,9 @@ importers:
       '@void/isr':
         specifier: workspace:*
         version: link:../../../packages/isr
+      '@voidcloud/api':
+        specifier: workspace:*
+        version: link:../api
     devDependencies:
       '@cloudflare/workers-types':
         specifier: catalog:platform

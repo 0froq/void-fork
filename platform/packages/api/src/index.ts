@@ -85,6 +85,7 @@ import { operatorSessions } from './schema.ts';
 import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
 import type { Domain, Project } from './types.ts';
+import { ensureUsageSigningKey } from './usage-auth.ts';
 import { UsageCounter } from './usage-counter.ts';
 import { replayFailedWebhookDeliveries } from './webhook-replay.ts';
 
@@ -131,6 +132,10 @@ const app = new Hono<ApiEnv>()
 
   .get('/health', async (context) => {
     try {
+      // Provision the trusted queue key before an installer enables traffic.
+      // Dispatch receives only this purpose-separated derivative via ROUTING;
+      // tenant Workers receive neither the key nor a ROUTING binding.
+      await ensureUsageSigningKey(context.env.ROUTING, context.env.JWT_SECRET);
       const installationId = context.env.PLATFORM_INSTALLATION_ID;
       if (installationId) {
         const result = await context.get('db').execute<{
