@@ -292,6 +292,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       checkpoint: recovery,
       databaseUrl,
       existingInstallation: true,
+      updateExistingWorkers: true,
       githubClientId: process.env.VOID_PLATFORM_GITHUB_CLIENT_ID || '',
       githubClientSecret: process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET || '',
       jwtSecret: process.env.VOID_PLATFORM_JWT_SECRET || '',

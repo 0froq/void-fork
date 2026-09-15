@@ -31,6 +31,7 @@ import {
 import {
   acquirePlatformDatabaseLifecycleLockConnection,
   apiWorkerSecrets,
+  platformWorkerSecretPayload,
   assertRequiredPlatformSecrets,
   classifyPlatformWorkerDeploymentLineage,
   installPlatform,
@@ -1280,6 +1281,63 @@ describe('platform installer', () => {
     });
   });
 
+  it("does not replay another workstation's stale recovery secrets during an upgrade", () => {
+    const stale = {
+      cloudflareApiToken: 'revoked-old-token',
+      githubClientId: 'old-oauth-id',
+      githubClientSecret: 'old-oauth-secret',
+      r2AccessKeyId: 'old-r2-id',
+      r2SecretAccessKey: 'old-r2-secret',
+      jwtSecret: 'old-jwt',
+      projectSecretKey: Buffer.alloc(32, 9).toString('base64'),
+    };
+    const input = {
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      cloudflareApiToken: '',
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      existingInstallation: true,
+      updateExistingWorkers: true,
+      githubClientId: '',
+      githubClientSecret: '',
+      r2AccessKeyId: '',
+      r2SecretAccessKey: '',
+      checkpoint: stale,
+    };
+    const rotatedOnOtherHost = createPlatformInstallationSecrets({
+      ...input,
+      cloudflareApiToken: 'new-runtime-token',
+    });
+    expect(platformWorkerSecretPayload('api', rotatedOnOtherHost, 'account', 'zone', true)).toEqual(
+      { CF_API_TOKEN: 'new-runtime-token' },
+    );
+    expect(
+      platformWorkerSecretPayload('proxy', rotatedOnOtherHost, 'account', 'zone', true),
+    ).toEqual({ CF_API_TOKEN: 'new-runtime-token' });
+    const routineUpgrade = createPlatformInstallationSecrets(input);
+    expect(routineUpgrade.cloudflareApiToken).toBe(stale.cloudflareApiToken);
+    expect(platformWorkerSecretPayload('api', routineUpgrade, 'account', 'zone', true)).toBeNull();
+    expect(
+      platformWorkerSecretPayload('proxy', routineUpgrade, 'account', 'zone', true),
+    ).toBeNull();
+    // Recovery still supplies the known credentials when a Worker is missing.
+    expect(
+      platformWorkerSecretPayload('api', routineUpgrade, 'account', 'zone', false),
+    ).toMatchObject({
+      CF_API_TOKEN: stale.cloudflareApiToken,
+      JWT_SECRET: stale.jwtSecret,
+      PROJECT_SECRET_KEYS_JSON: JSON.stringify({ v1: stale.projectSecretKey }),
+    });
+    // Resuming install may pass values already read from its checkpoint; these
+    // are not a request to replace secrets on Workers that already exist.
+    const resumed = createPlatformInstallationSecrets({
+      ...input,
+      ...stale,
+      updateExistingWorkers: false,
+    });
+    expect(platformWorkerSecretPayload('api', resumed, 'account', 'zone', true)).toBeNull();
+  });
+
   it('omits unavailable composite secrets so Cloudflare preserves deployed values', () => {
     const secrets = createPlatformInstallationSecrets({
       bootstrapGitHubId: '',
@@ -2176,7 +2234,8 @@ describe('platform installer', () => {
       acquireDatabaseLifecycleLock,
       claimDatabase,
       client: upgradeClient,
-      deployWorker: async (config) => {
+      deployWorker: async (config, secretPayload) => {
+        expect(secretPayload).toBeNull();
         deployed.push(String(config.name));
       },
       migrateDatabase: async () => {

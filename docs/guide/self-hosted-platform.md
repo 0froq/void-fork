@@ -209,6 +209,13 @@ void platform upgrade [id]
 
 An upgrade validates the runtime, applies supported pending migrations, deploys the Workers, and checks their health. Existing Worker secrets are preserved.
 
+To update the runtime Cloudflare token, GitHub OAuth credentials, or R2 credentials,
+provide their `VOID_PLATFORM_*` environment variables when running the upgrade.
+Only the supplied values replace live credentials. Recovery data from an older
+workstation does not overwrite them, and upgrades preserve the live signing keys
+and complete project-encryption keyring. Keep current credentials in your secret
+manager so they can also restore a missing Worker during repair.
+
 Database migrations only move forward. Void checks that the live migration history matches the release's files and order. If migrations are pending, the release must explicitly support running the previous Worker version against the updated schema. Otherwise, upgrade stops and asks you to use an intermediate release.
 
 Pending migrations run in one PostgreSQL transaction. If the Worker rollout fails, Void restores the previous Workers against that compatible schema. A retry recognizes migrations that already succeeded.

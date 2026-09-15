@@ -87,6 +87,19 @@ export type PlatformInstallationSecrets = Readonly<{
   projectSecretKey: string;
   r2AccessKeyId: string;
   r2SecretAccessKey: string;
+  /** Explicit configuration changes only; never populated from recovery data. */
+  workerSecretUpdates?: Readonly<
+    Partial<
+      Record<
+        | 'CF_API_TOKEN'
+        | 'GITHUB_CLIENT_ID'
+        | 'GITHUB_CLIENT_SECRET'
+        | 'R2_ACCESS_KEY_ID'
+        | 'R2_SECRET_ACCESS_KEY',
+        string
+      >
+    >
+  >;
 }>;
 
 export type PlatformDatabaseLifecycleLock = (() => Promise<void>) & {
@@ -230,6 +243,8 @@ export function createPlatformInstallationSecrets(input: {
   githubClientId: string;
   githubClientSecret: string;
   existingInstallation?: boolean;
+  /** The caller supplies current explicit rotation inputs, not resumed inputs. */
+  updateExistingWorkers?: boolean;
   jwtSecret?: string;
   projectSecretKey?: string;
   r2AccessKeyId: string;
@@ -267,6 +282,15 @@ export function createPlatformInstallationSecrets(input: {
     );
   }
   return {
+    workerSecretUpdates: input.updateExistingWorkers
+      ? withoutEmptySecrets({
+          CF_API_TOKEN: input.cloudflareApiToken,
+          GITHUB_CLIENT_ID: input.githubClientId,
+          GITHUB_CLIENT_SECRET: input.githubClientSecret,
+          R2_ACCESS_KEY_ID: input.r2AccessKeyId,
+          R2_SECRET_ACCESS_KEY: input.r2SecretAccessKey,
+        })
+      : {},
     bootstrapGitHubId: existingInstallation
       ? configured(input.bootstrapGitHubId, 'bootstrapGitHubId')
       : required(
@@ -856,12 +880,13 @@ export async function installPlatform(
     workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
     for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
       const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
-      const workerSecrets =
-        key === 'api'
-          ? apiWorkerSecrets(secrets, plan.account.id, zone.id)
-          : key === 'proxy'
-            ? proxyWorkerSecrets(secrets, plan.account.id)
-            : null;
+      const workerSecrets = platformWorkerSecretPayload(
+        key,
+        secrets,
+        plan.account.id,
+        zone.id,
+        action.action !== 'create',
+      );
       manifest = recordProvisionIntent(manifest, action, now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
@@ -1034,12 +1059,13 @@ export async function installPlatform(
       workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
       for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
         const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
-        const workerSecrets =
-          key === 'api'
-            ? apiWorkerSecrets(secrets, plan.account.id, zone.id)
-            : key === 'proxy'
-              ? proxyWorkerSecrets(secrets, plan.account.id)
-              : null;
+        const workerSecrets = platformWorkerSecretPayload(
+          key,
+          secrets,
+          plan.account.id,
+          zone.id,
+          action.action !== 'create',
+        );
         const preservedRoutes = dependencies.deployWorker
           ? []
           : await inventoryUnmanagedPlatformWorkerTraffic(dependencies.client, plan, action.name);
@@ -1761,6 +1787,40 @@ export function apiWorkerSecrets(
     R2_ACCESS_KEY_ID: secrets.r2AccessKeyId,
     R2_SECRET_ACCESS_KEY: secrets.r2SecretAccessKey,
   });
+}
+
+/** Existing Workers inherit live secrets, including complete encryption keyrings. */
+export function platformWorkerSecretPayload(
+  worker: 'api' | 'proxy' | 'tail' | 'dispatch',
+  secrets: PlatformInstallationSecrets,
+  accountId: string,
+  zoneId: string,
+  existingWorker: boolean,
+): Record<string, string> | null {
+  if (worker !== 'api' && worker !== 'proxy') {
+    return null;
+  }
+  if (!existingWorker) {
+    return worker === 'api'
+      ? apiWorkerSecrets(secrets, accountId, zoneId)
+      : proxyWorkerSecrets(secrets, accountId);
+  }
+  const allowed =
+    worker === 'api'
+      ? [
+          'CF_API_TOKEN',
+          'GITHUB_CLIENT_ID',
+          'GITHUB_CLIENT_SECRET',
+          'R2_ACCESS_KEY_ID',
+          'R2_SECRET_ACCESS_KEY',
+        ]
+      : ['CF_API_TOKEN'];
+  const updates = Object.fromEntries(
+    Object.entries(secrets.workerSecretUpdates ?? {}).filter(
+      ([name, value]) => allowed.includes(name) && typeof value === 'string' && value !== '',
+    ),
+  );
+  return Object.keys(updates).length > 0 ? updates : null;
 }
 
 export async function resolveBootstrapGitHubId(
