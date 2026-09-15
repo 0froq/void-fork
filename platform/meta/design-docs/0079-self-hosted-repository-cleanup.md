@@ -1,6 +1,6 @@
 ---
 title: Self-hosted Platform Repository Cleanup
-status: in-progress
+status: implemented
 created: 2026-09-15
 ---
 
@@ -25,26 +25,36 @@ This sweep does not rewrite Git history, alter hosted account settings, or deplo
 
 ## Reviewable Changes
 
-- [ ] Remove the unused private package registry configuration.
-- [ ] Make uncredentialed CI runnable in forks and isolate first-party deployment assumptions.
-- [ ] Replace obsolete repository-split and roadmap material with current architecture and an archive index.
-- [ ] Remove private operational details and update reusable developer scripts.
-- [ ] Rewrite platform/package guidance and add a source-development guide for forks.
-- [ ] Sweep remaining documentation, examples, agent guidance, and comments for obsolete private-platform assumptions.
-- [ ] Verify links, builds, typechecking, relevant tests, and the final full suite.
+- [x] Remove the unused private package registry configuration.
+- [x] Make uncredentialed CI runnable in forks and isolate first-party deployment assumptions.
+- [x] Replace obsolete repository-split and roadmap material with current architecture and an archive index.
+- [x] Remove private operational details and update reusable developer scripts.
+- [x] Rewrite platform/package guidance and add a source-development guide for forks.
+- [x] Sweep remaining documentation, examples, agent guidance, and comments for obsolete private-platform assumptions.
+- [x] Verify links, builds, typechecking, relevant tests, and the final full suite.
 
-Each logical cleanup is committed separately on `main`, with a capitalized
-subject ending in a period. The user has authorized these commits.
+Changes were committed separately by concern: registry setup, signup behavior,
+onboarding, developer tooling, CI, documentation, and historical records.
 
 ## Verification
 
-Use focused tests for script or workflow behavior changes during development.
-Run `vp run check` after implementation batches. Investigate slow or hanging tests
-as they occur. At the end, build the core/platform/docs, check formatting and
-linting, and run `vp test run` for final verification. Review the remaining search
-matches rather than changing valid uses of private npm packages, service-to-service
-APIs, or hosted compatibility defaults.
+- `vp run build:all` passed across packages, platform apps, and playgrounds.
+- `vp run build:core` passed after final source formatting.
+- `vp run build:docs` passed; the new development guide's section anchors were checked in the generated HTML.
+- `vp run check` passed across all 29 workspaces.
+- `vp lint`, `vp run lint:platform`, and `vp fmt --check` passed.
+- Final `vp test run`: 417 test files passed, 7,961 tests passed, and 6 skipped, in 71.86 seconds.
+- Focused regressions cover independent signup allowlists, installation-specific email identity, explicit smoke destinations, operator health forwarding, and Access tokens tied to their selected API origin.
+- Fork CI runner and compatibility-baseline cases were checked locally and the workflow YAML parsed successfully.
+- Final source review found no remaining P1/P2 issues within this cleanup's scope.
 
-Update the root and affected package READMEs, relevant public docs, and the
-bundled skill/agent guidance where the new contributor workflow changes the
-appropriate reference. No new dependencies are planned.
+The production, staging, smoke-deployment, and npm release workflow files were
+handled by a concurrent workflow task. Its changes were preserved; this sweep's
+CI edits are limited to uncredentialed checks and the configurable schema
+compatibility baseline. No hosted account settings or deployed resources were
+changed by this cleanup.
+
+The remaining private-repository terminology describes users' GitHub repositories
+and the authorization needed to access them. Workspace publishing flags,
+service-to-service routes, and intentional hosted compatibility identifiers
+remain part of the implementation.
