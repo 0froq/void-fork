@@ -1260,6 +1260,7 @@ export async function activateCloudflareVersion(options: {
       previous.versionId,
       'trigger activation failed',
       desiredTriggerConfig,
+      versionedPreviousTriggerConfigWithTraffic,
     );
     return {
       ok: false,
@@ -1311,6 +1312,7 @@ async function restorePreviousVersionAndTriggers(
   previousVersionId: string | null,
   cause: string,
   failedTriggerConfig: CloudflareTriggerConfig,
+  capturedTriggerConfig?: CloudflareTriggerConfig,
 ): Promise<'succeeded' | 'failed' | 'unavailable' | 'unsafe'> {
   const traffic = await restorePreviousVersion(options, commonArgs, previousVersionId, cause);
   if (traffic !== 'succeeded' || !previousVersionId) {
@@ -1319,9 +1321,17 @@ async function restorePreviousVersionAndTriggers(
   if (!options.verifyUploader()) {
     return 'unsafe';
   }
-  const metadata = await readCloudflareVersionMetadata(options, commonArgs, previousVersionId);
-  if (metadata?.schema !== 2) {
-    return 'unavailable';
+  // Traffic attachments can change between uploads (for example `void domain
+  // add`). Restore the snapshot captured before this deployment, not the older
+  // immutable version annotation. Cleanup-only queue names are deliberately not
+  // part of this target snapshot.
+  let targetTriggerConfig = capturedTriggerConfig;
+  if (!targetTriggerConfig) {
+    const metadata = await readCloudflareVersionMetadata(options, commonArgs, previousVersionId);
+    if (metadata?.schema !== 2) {
+      return 'unavailable';
+    }
+    targetTriggerConfig = metadata.triggerConfig;
   }
   if (!options.verifyUploader()) {
     return 'unsafe';
@@ -1331,9 +1341,9 @@ async function restorePreviousVersionAndTriggers(
     workerName: options.workerName,
     configPath: options.configPath,
     targetVersionId: previousVersionId,
-    targetTriggerConfig: metadata.triggerConfig,
+    targetTriggerConfig,
     previousTriggerConfig: failedTriggerConfig,
-    knownTriggerConfigs: { [previousVersionId]: metadata.triggerConfig },
+    knownTriggerConfigs: { [previousVersionId]: targetTriggerConfig },
     publishEmptyCustomDomains: options.publishEmptyCustomDomains,
   });
   return triggers.ok && triggers.targetOwnsTraffic ? 'succeeded' : 'failed';

@@ -1725,6 +1725,66 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.filter(([args]) => args[0] === 'triggers')).toHaveLength(2);
   });
 
+  it('restores live traffic changes made after the previous version upload', async () => {
+    const immutable = {
+      workers_dev: true,
+      preview_urls: true,
+      routes: [{ pattern: 'old.example.com', custom_domain: true }],
+      crons: ['0 * * * *'],
+      queueConsumers: [],
+      workflows: [],
+    };
+    const liveTraffic = {
+      workers_dev: false,
+      preview_urls: false,
+      routes: [...immutable.routes, { pattern: 'production.example.com', custom_domain: true }],
+    };
+    const base = runner({
+      versions: ok(
+        JSON.stringify([
+          {
+            id: CURRENT,
+            number: 1,
+            annotations: {
+              'workers/message': encodeCloudflareVersionMessage([], immutable),
+            },
+          },
+        ]),
+      ),
+      triggers: { ...ok(), status: 1 },
+    });
+    const publications: Array<Record<string, unknown>> = [];
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'triggers') {
+        publications.push(JSON.parse(readFileSync(args[args.indexOf('-c') + 1]!, 'utf8')));
+      }
+      return base(args);
+    });
+    const result = await activateCloudflareVersion({
+      runWrangler,
+      verifyUploader: () => true,
+      workerName: 'my-worker',
+      previousTrafficConfig: liveTraffic,
+      queueConsumerCleanup: ['orphaned-queue'],
+      message: encodeCloudflareVersionMessage([], {
+        ...immutable,
+        preserveRoutes: true,
+        preserveWorkersDev: true,
+        preservePreviewUrls: true,
+        crons: ['*/10 * * * *'],
+      }),
+      fetch: async () => Response.json({ ready: true }),
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'triggers-failed', rollback: 'succeeded' });
+    expect(publications).toHaveLength(2);
+    expect(publications[0]).toMatchObject({
+      ...liveTraffic,
+      triggers: { crons: ['*/10 * * * *'] },
+    });
+    expect(publications[1]).toMatchObject({ ...liveTraffic, triggers: { crons: ['0 * * * *'] } });
+    expect(publications[1].queues).toEqual({ consumers: [] });
+  });
+
   it('does not claim trigger rollback succeeded without prior trigger metadata', async () => {
     const runWrangler = runner({
       triggers: { ...ok(), status: 1 },
