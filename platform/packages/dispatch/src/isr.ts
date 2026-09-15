@@ -8,6 +8,7 @@ import {
   packIsrValue,
   resolvePathTtl,
   resolveRevalidateTtl,
+  SHARED_CACHE_POLICY_VERSION,
   serializeHeaders,
   shouldBypassIsr,
   type IsrCacheEntry,
@@ -19,6 +20,8 @@ import { matchSegmentPattern } from './pattern.ts';
 // Re-export so callers that import from `./isr` (tests, index.ts) still work.
 export {
   extractPageDataFromHtml,
+  hasCurrentSharedCachePolicy,
+  hasSharedCacheOptOut,
   isrCacheResponse,
   isStale,
   normalizePageDataForJsonCache,
@@ -27,6 +30,9 @@ export {
   resolveRevalidateTtl,
   serializeHeaders,
   shouldBypassIsr,
+  SHARED_CACHE_POLICY_HEADER,
+  SHARED_CACHE_POLICY_VERSION,
+  markSharedCachePolicy,
   unpackIsrValue,
 } from '@void/isr/core';
 export { isrCacheKey } from '@void/isr';
@@ -123,6 +129,7 @@ export async function writeIsrCache(
       s: status,
       c: Date.now(),
       t: ttl,
+      p: SHARED_CACHE_POLICY_VERSION,
     } satisfies IsrCacheMetadata,
   });
 }

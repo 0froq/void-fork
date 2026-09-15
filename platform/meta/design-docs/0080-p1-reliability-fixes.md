@@ -96,7 +96,7 @@ identified the following remaining work:
 - [x] Validate explicit deploy tokens through the shared origin guard while
       preserving GitHub OIDC precedence.
 - [x] Do not report successful trigger recovery from an opaque handoff snapshot.
-- [ ] Treat `Set-Cookie` responses as private in every hosted shared-cache path
+- [x] Treat `Set-Cookie` responses as private in every hosted shared-cache path
       and exclude entries written under the older unsafe cache policy.
 - [x] Fence interrupted transitions from unsigned to authenticated usage so
       old live dispatch cannot feed frames that the new consumer discards.

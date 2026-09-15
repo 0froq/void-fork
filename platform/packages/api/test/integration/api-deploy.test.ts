@@ -1,3 +1,4 @@
+import { SHARED_CACHE_POLICY_VERSION } from '@void/isr/core';
 import { desc, eq, sql } from 'drizzle-orm';
 import {
   describe,
@@ -4253,7 +4254,7 @@ describe('Deploy with prerendering', () => {
     expect(privateValue).toBeNull();
   });
 
-  it('skips prerender paths whose render opts out (x-revalidate:0 / Cache-Control:private)', async () => {
+  it('skips prerender paths whose render opts out of shared caching', async () => {
     // Parity with dispatch's live-miss/background write gate: a render that opts
     // out at request time — `x-revalidate: 0` or `Cache-Control: private/no-store/
     // no-cache` — must NOT be warmed, even though its path carries a positive
@@ -4278,6 +4279,12 @@ describe('Deploy with prerendering', () => {
           headers: { 'content-type': 'text/html', 'cache-control': 'private' },
         });
       }
+      if (pathname === '/optout-cookie') {
+        return new Response('<html>session</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html', 'set-cookie': 'sid=secret; Path=/' },
+        });
+      }
       return new Response('<html>warm</html>', {
         status: 200,
         headers: { 'content-type': 'text/html' },
@@ -4294,7 +4301,7 @@ describe('Deploy with prerendering', () => {
           version: 3,
           bindings: {},
           revalidate: 3600, // positive TTL for every path — the render decides opt-out
-          prerender: ['/warm', '/optout-header', '/optout-cc'],
+          prerender: ['/warm', '/optout-header', '/optout-cc', '/optout-cookie'],
         },
       }),
       env,
@@ -4303,7 +4310,7 @@ describe('Deploy with prerendering', () => {
     await res.text();
 
     // All three cleared the manifest-TTL gate, so all three were fetched.
-    expect(dispatchFetch).toHaveBeenCalledTimes(3);
+    expect(dispatchFetch).toHaveBeenCalledTimes(4);
 
     const [deployment] = await env.db
       .select({ id: deployments.id })
@@ -4313,8 +4320,11 @@ describe('Deploy with prerendering', () => {
     const base = `${project.id}/isr/v3/${deployment!.id}/${project.slug}.void.app`;
 
     // The normal 200 render is warmed.
-    const { value: warmValue } = await env.ISR_CACHE.getWithMetadata(`${base}/warm`, 'arrayBuffer');
+    const { value: warmValue, metadata: warmMetadata } = await env.ISR_CACHE.getWithMetadata<{
+      p: number;
+    }>(`${base}/warm`, 'arrayBuffer');
     expect(warmValue).not.toBeNull();
+    expect(warmMetadata?.p).toBe(SHARED_CACHE_POLICY_VERSION);
 
     // Neither opt-out render is warmed.
     const { value: headerOptOut } = await env.ISR_CACHE.getWithMetadata(
@@ -4327,6 +4337,11 @@ describe('Deploy with prerendering', () => {
       'arrayBuffer',
     );
     expect(ccOptOut).toBeNull();
+    const { value: cookieOptOut } = await env.ISR_CACHE.getWithMetadata(
+      `${base}/optout-cookie`,
+      'arrayBuffer',
+    );
+    expect(cookieOptOut).toBeNull();
   });
 
   it('resolves an inherit-eligible page against pathRevalidate per-path (object config)', async () => {

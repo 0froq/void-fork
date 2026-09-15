@@ -1,5 +1,23 @@
 import { matchLiteralPattern, matchSegmentPattern } from '@void/edge';
 
+/**
+ * Bump when a cached response accepted by an older writer can no longer be
+ * proven safe to share. Readers reject entries from earlier policies instead
+ * of replaying opaque bodies whose private headers were stripped at write time.
+ */
+export const SHARED_CACHE_POLICY_VERSION = 1 as const;
+export const SHARED_CACHE_POLICY_HEADER = 'x-void-shared-cache-policy';
+
+/** Stamp an internal edge-cache representation with the policy that admitted it. */
+export function markSharedCachePolicy(headers: Headers): void {
+  headers.set(SHARED_CACHE_POLICY_HEADER, String(SHARED_CACHE_POLICY_VERSION));
+}
+
+/** Reject opaque edge entries admitted before the current privacy policy. */
+export function hasCurrentSharedCachePolicy(response: Response): boolean {
+  return response.headers.get(SHARED_CACHE_POLICY_HEADER) === String(SHARED_CACHE_POLICY_VERSION);
+}
+
 export type IsrCacheMetadata = Readonly<{
   /** HTTP status code. */
   s: number;
@@ -7,6 +25,8 @@ export type IsrCacheMetadata = Readonly<{
   c: number;
   /** Freshness lifetime in seconds. */
   t: number;
+  /** Shared-response privacy policy version. */
+  p: typeof SHARED_CACHE_POLICY_VERSION;
 }>;
 
 export type IsrCacheEntry = Readonly<{
@@ -143,7 +163,8 @@ export function decodeIsrCacheEntry(
     !Number.isFinite(metadata.c) ||
     metadata.c <= 0 ||
     !Number.isFinite(metadata.t) ||
-    metadata.t <= 0
+    metadata.t <= 0 ||
+    metadata.p !== SHARED_CACHE_POLICY_VERSION
   ) {
     return null;
   }
@@ -194,6 +215,7 @@ export function isrCacheResponse(
       `public, s-maxage=${remainingSeconds}, max-age=0, must-revalidate`,
     );
   }
+  markSharedCachePolicy(headers);
   return new Response(entry.body, { status: entry.status, headers });
 }
 

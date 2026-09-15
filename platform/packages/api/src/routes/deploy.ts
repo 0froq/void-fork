@@ -5,7 +5,11 @@ import {
   validateManifestShape,
 } from '@void/deploy-core';
 import { isrCacheKey, isrCachePrefix, isrLegacyCachePrefix } from '@void/isr';
-import type { IsrCacheMetadata } from '@void/isr';
+import {
+  hasSharedCacheOptOut,
+  SHARED_CACHE_POLICY_VERSION,
+  type IsrCacheMetadata,
+} from '@void/isr/core';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import {
@@ -4476,7 +4480,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               // dispatch's `resolveRevalidateTtl` does; a full 200 is required
               // (parity with the dispatch write sites — no partial/redirect body).
               const effectiveTtl = resolveRevalidateTtl(response, ttl);
-              if (response.status === 200 && effectiveTtl > 0 && !hasCacheOptOut(response)) {
+              if (response.status === 200 && effectiveTtl > 0 && !hasSharedCacheOptOut(response)) {
                 // Host-scope the warmed key to the slug host implied by the
                 // fetch URL — dispatch reads `<pid>/isr/v3/<did>/<host>/<path>`
                 // keyed on the request hostname, so without this the warmed
@@ -4495,6 +4499,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
                     s: response.status,
                     c: Date.now(),
                     t: effectiveTtl,
+                    p: SHARED_CACHE_POLICY_VERSION,
                   } satisfies IsrCacheMetadata,
                 });
               }
@@ -5631,22 +5636,6 @@ function resolveRevalidateTtl(response: Response, defaultTtl: number): number {
     return defaultTtl;
   }
   return value;
-}
-
-/**
- * True when a response carries a `Cache-Control` opt-out — a mirror of
- * dispatch's `hasCacheOptOut` (`packages/dispatch/src/index.ts`). Directive
- * names are case-insensitive (RFC 9111 §5.2). Kept in sync so a `private` /
- * `no-store` / `no-cache` render is never warmed into ISR KV (dispatch strips
- * `Cache-Control` at write and serves HITs without re-checking, so this gate is
- * the only place the opt-out can be honored for a prewarmed entry).
- */
-function hasCacheOptOut(response: Response): boolean {
-  const cacheControl = response.headers.get('Cache-Control');
-  if (!cacheControl) {
-    return false;
-  }
-  return /\b(private|no-store|no-cache)\b/i.test(cacheControl);
 }
 
 const MAX_CACHE = 256;

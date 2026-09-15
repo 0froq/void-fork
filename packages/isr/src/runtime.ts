@@ -3,14 +3,18 @@ import {
   buildVariantOriginalUrl,
   decodeIsrCacheEntry,
   extractPageDataFromHtml,
+  hasCurrentSharedCachePolicy,
   hasSharedCacheOptOut,
   isSharedCacheableResponse,
   isrCacheResponse,
   isStale,
   normalizePageDataForJsonCache,
   packIsrValue,
+  markSharedCachePolicy,
   resolvePathTtl,
   resolveRevalidateTtl,
+  SHARED_CACHE_POLICY_VERSION,
+  SHARED_CACHE_POLICY_HEADER,
   serializeHeaders,
   shouldBypassIsr,
   type IsrCacheEntry,
@@ -21,16 +25,20 @@ import { isrCacheKey, isrCachePrefix, isrCacheVariantPrefix, isrEdgeCacheUrl } f
 
 export {
   extractPageDataFromHtml,
+  hasCurrentSharedCachePolicy,
   hasSharedCacheOptOut,
   isSharedCacheableResponse,
   isrCacheResponse,
   isStale,
   normalizePageDataForJsonCache,
   packIsrValue,
+  markSharedCachePolicy,
   resolvePathTtl,
   resolveRevalidateTtl,
   serializeHeaders,
   shouldBypassIsr,
+  SHARED_CACHE_POLICY_HEADER,
+  SHARED_CACHE_POLICY_VERSION,
   unpackIsrValue,
   type IsrCacheEntry,
   type IsrCacheMetadata,
@@ -230,6 +238,7 @@ export async function writeIsrCache(
         s: status,
         c: Date.now(),
         t: ttl,
+        p: SHARED_CACHE_POLICY_VERSION,
       } satisfies IsrCacheMetadata,
     });
   } catch {
@@ -339,6 +348,7 @@ const CLIENT_REVALIDATE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 export function clientRevalidateResponse(response: Response): Response {
   const res = new Response(response.body, response);
   res.headers.set('Cache-Control', CLIENT_REVALIDATE_CACHE_CONTROL);
+  res.headers.delete(SHARED_CACHE_POLICY_HEADER);
   return res;
 }
 
@@ -350,7 +360,7 @@ export function isEventStreamResponse(response: Response): boolean {
 }
 
 function jsonCacheResponse(pageData: string, ttl: number, state: 'HIT' | 'MISS'): Response {
-  return new Response(pageData, {
+  const response = new Response(pageData, {
     headers: {
       'content-type': 'application/json',
       // Mirror the live JSON responder `pageJsonResponse` (pages/protocol.ts):
@@ -364,6 +374,8 @@ function jsonCacheResponse(pageData: string, ttl: number, state: 'HIT' | 'MISS')
       'x-isr-cache': state,
     },
   });
+  markSharedCachePolicy(response.headers);
+  return response;
 }
 
 /**
@@ -515,6 +527,7 @@ async function revalidateInBackground(
       const headers = new Headers(response.headers);
       headers.set('x-isr-cache', 'HIT');
       headers.set('Cache-Control', `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
+      markSharedCachePolicy(headers);
       headers.delete('set-cookie');
       headers.delete('x-void-page-data');
       await safeCachePut(
@@ -603,10 +616,11 @@ export async function handleIsr(
   const normalizedVariantUrl = buildVariantOriginalUrl(request.url, pathname, queryAllowlist);
   const variantUrl = new URL(normalizedVariantUrl).search ? normalizedVariantUrl : null;
   const cache = edgeCache();
+  const htmlKey = htmlEdgeKey(host, pathname, deploymentId, variantUrl);
+  const jsonKey = jsonEdgeKey(host, pathname, deploymentId, variantUrl);
 
   // Pages protocol: JSON edge cache only (cold colo re-renders JSON).
   if (request.headers.has('X-VoidPages')) {
-    const jsonKey = jsonEdgeKey(host, pathname, deploymentId, variantUrl);
     let jsonCached: Response | undefined;
     try {
       // `cache?.` — an absent/degraded Cache API (edgeCache() → undefined) is a
@@ -615,19 +629,27 @@ export async function handleIsr(
     } catch {
       return null; // fail open → caller renders live
     }
-    if (jsonCached) {
+    if (jsonCached && hasCurrentSharedCachePolicy(jsonCached)) {
       return clientRevalidateResponse(jsonCached);
+    }
+    if (jsonCached) {
+      await safeCacheDelete(cache, jsonKey);
     }
     // Miss — render live JSON and return it. The JSON path never writes the edge
     // cache: a pages-protocol JSON response carries no embedded page data, so the
     // JSON edge variant is warmed only as a side-effect of the HTML render path
     // (cold colo re-renders JSON). Matches the platform dispatch behavior.
-    return render(request);
+    const response = await render(request);
+    const ttl = resolveRevalidateTtl(response, isrTtl);
+    if (response.status === 200 && (ttl === 0 || hasSharedCacheOptOut(response))) {
+      ctx.waitUntil(
+        deleteSharedIsrVariants(env, cache, host, pathname, { htmlKey, jsonKey }, variantUrl),
+      );
+    }
+    return response;
   }
 
   // HTML path: L1 edge → L2 KV → live render.
-  const htmlKey = htmlEdgeKey(host, pathname, deploymentId, variantUrl);
-  const jsonKey = jsonEdgeKey(host, pathname, deploymentId, variantUrl);
 
   // L1: edge cache (per-colo, sub-ms).
   let edgeCached: Response | undefined;
@@ -639,8 +661,11 @@ export async function handleIsr(
   } catch {
     return null; // fail open → caller renders live
   }
-  if (edgeCached) {
+  if (edgeCached && hasCurrentSharedCachePolicy(edgeCached)) {
     return clientRevalidateResponse(edgeCached);
+  }
+  if (edgeCached) {
+    await safeCacheDelete(cache, htmlKey);
   }
 
   // L2: KV (global, authoritative). `readIsrCache` fails open to null.
@@ -694,6 +719,7 @@ export async function handleIsr(
     const cacheHeaders = new Headers(response.headers);
     cacheHeaders.set('Cache-Control', `public, s-maxage=${ttl}, max-age=0, must-revalidate`);
     cacheHeaders.set('x-isr-cache', 'MISS');
+    markSharedCachePolicy(cacheHeaders);
     cacheHeaders.delete('x-void-page-data');
     cacheHeaders.delete('set-cookie');
     const cacheResponse = new Response(response.clone().body, {
@@ -704,10 +730,16 @@ export async function handleIsr(
 
     const clientHeaders = new Headers(cacheHeaders);
     clientHeaders.set('Cache-Control', CLIENT_REVALIDATE_CACHE_CONTROL);
+    clientHeaders.delete(SHARED_CACHE_POLICY_HEADER);
     return new Response(response.body, {
       status: response.status,
       headers: clientHeaders,
     });
+  }
+  if (response.status === 200 && (ttl === 0 || hasSharedCacheOptOut(response))) {
+    ctx.waitUntil(
+      deleteSharedIsrVariants(env, cache, host, pathname, { htmlKey, jsonKey }, variantUrl),
+    );
   }
   return response;
 }

@@ -2,7 +2,12 @@ import { isrEdgeCacheUrl } from '@void/isr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Env } from '../../src/env.ts';
 import app, { rebuildRequest } from '../../src/index.ts';
-import { isrCacheKey, unpackIsrValue } from '../../src/isr.ts';
+import {
+  SHARED_CACHE_POLICY_VERSION,
+  isrCacheKey,
+  markSharedCachePolicy,
+  unpackIsrValue,
+} from '../../src/isr.ts';
 import { PLATFORM_DISABLED_KEY } from '../../src/platform-lifecycle.ts';
 
 // Mock caches.default (CF edge cache) with a Map-backed store.
@@ -60,6 +65,11 @@ function getSetCookies(headers: Headers): Array<string> {
   return (headers as Headers & { getSetCookie(): Array<string> }).getSetCookie();
 }
 
+function currentSharedCacheResponse(response: Response): Response {
+  markSharedCachePolicy(response.headers);
+  return response;
+}
+
 type MockIsrEntry = {
   body: string;
   status?: number;
@@ -70,7 +80,7 @@ type MockIsrEntry = {
 
 function packMockEntry(entry: MockIsrEntry): {
   value: ArrayBuffer;
-  metadata: { s: number; c: number; t: number };
+  metadata: { s: number; c: number; t: number; p: typeof SHARED_CACHE_POLICY_VERSION };
 } {
   const headers = entry.headers ?? {};
   const headerJson = new TextEncoder().encode(JSON.stringify(headers));
@@ -82,7 +92,12 @@ function packMockEntry(entry: MockIsrEntry): {
   new Uint8Array(buffer, 4 + headerJson.byteLength).set(bodyBytes);
   return {
     value: buffer,
-    metadata: { s: entry.status ?? 200, c: entry.createdAt, t: entry.ttl },
+    metadata: {
+      s: entry.status ?? 200,
+      c: entry.createdAt,
+      t: entry.ttl,
+      p: SHARED_CACHE_POLICY_VERSION,
+    },
   };
 }
 
@@ -96,7 +111,13 @@ function createEnv(options: {
   env: Env;
   workerFetch: ReturnType<typeof vi.fn>;
   dispatchGet: ReturnType<typeof vi.fn>;
-  kvStore: Map<string, { value: ArrayBuffer; metadata: { s: number; c: number; t: number } }>;
+  kvStore: Map<
+    string,
+    {
+      value: ArrayBuffer;
+      metadata: { s: number; c: number; t: number; p: typeof SHARED_CACHE_POLICY_VERSION };
+    }
+  >;
   analyticsWrites: Array<unknown>;
   logWrites: Array<unknown>;
 } {
@@ -105,7 +126,10 @@ function createEnv(options: {
   );
   const kvStore = new Map<
     string,
-    { value: ArrayBuffer; metadata: { s: number; c: number; t: number } }
+    {
+      value: ArrayBuffer;
+      metadata: { s: number; c: number; t: number; p: typeof SHARED_CACHE_POLICY_VERSION };
+    }
   >();
   const analyticsWrites: Array<unknown> = [];
   const logWrites: Array<unknown> = [];
@@ -140,7 +164,12 @@ function createEnv(options: {
       put: async (key: string, value: ArrayBuffer, opts?: { metadata?: unknown }) => {
         kvStore.set(key, {
           value,
-          metadata: opts?.metadata as { s: number; c: number; t: number },
+          metadata: opts?.metadata as {
+            s: number;
+            c: number;
+            t: number;
+            p: typeof SHARED_CACHE_POLICY_VERSION;
+          },
         });
       },
       delete: async (key: string) => {
@@ -853,8 +882,7 @@ describe('ISR (stale-while-revalidate)', () => {
 
     expect(workerFetch).toHaveBeenCalledOnce();
     expect(await response.text()).toBe('<html>no-cache</html>');
-    // No waitUntil calls — analytics is sync, no userId for queue, no ISR cache write
-    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
     expect(kvStore.has('proj_1/isr/v3/legacy/my-app.void.app/dashboard')).toBe(false);
   });
 
@@ -913,52 +941,58 @@ describe('ISR (stale-while-revalidate)', () => {
     );
   });
 
-  it('MISS whose render sets Set-Cookie → client keeps EVERY cookie; KV + edge copies stay stripped', async () => {
-    const { env, kvStore } = createEnv({
+  it('keeps each anonymous Set-Cookie render private across callers', async () => {
+    let render = 0;
+    const { env, workerFetch, kvStore } = createEnv({
       routing: {
         workerName: 'user-app',
         projectId: 'proj_1',
         ssr: true,
         revalidate: 60,
       },
-      // The live worker render emits TWO DISTINCT Set-Cookie headers (session +
-      // CSRF). A `Headers` folds duplicates, so an array init seeds both.
-      workerResponse: new Response('<html>rendered</html>', {
-        headers: [
-          ['Content-Type', 'text/html'],
-          ['set-cookie', 'sid=secret; Path=/; HttpOnly'],
-          ['set-cookie', 'csrf=tok; Path=/'],
-        ],
-      }),
+      workerFetchImpl: async () => {
+        render++;
+        return new Response(`<html>user-${render}</html>`, {
+          headers: [
+            ['Content-Type', 'text/html'],
+            ['set-cookie', `sid=user-${render}; Path=/; HttpOnly`],
+            ['set-cookie', `csrf=tok-${render}; Path=/`],
+          ],
+        });
+      },
     });
 
-    const ctx = createCtx();
-    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get('x-isr-cache')).toBe('MISS');
-    // (1) The CLIENT response carries BOTH Set-Cookie headers verbatim. Without
-    // the fix the client headers clone the already-stripped cache copy, so this
-    // would be [] and the assertion would fail.
-    expect(getSetCookies(response.headers)).toEqual([
-      'sid=secret; Path=/; HttpOnly',
-      'csrf=tok; Path=/',
+    const firstCtx = createCtx();
+    const first = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, firstCtx);
+    expect(await first.text()).toBe('<html>user-1</html>');
+    expect(first.headers.get('x-isr-cache')).toBeNull();
+    expect(getSetCookies(first.headers)).toEqual([
+      'sid=user-1; Path=/; HttpOnly',
+      'csrf=tok-1; Path=/',
     ]);
+    await Promise.all((firstCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
 
-    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    const secondCtx = createCtx();
+    const second = await app.fetch(
+      new Request('https://my-app.void.app/dashboard'),
+      env,
+      secondCtx,
+    );
+    expect(await second.text()).toBe('<html>user-2</html>');
+    expect(getSetCookies(second.headers)).toEqual([
+      'sid=user-2; Path=/; HttpOnly',
+      'csrf=tok-2; Path=/',
+    ]);
+    await Promise.all(
+      (secondCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]),
+    );
 
-    // (2) The shared KV copy is stripped — a shared cache must never store cookies.
-    const packed = kvStore.get('proj_1/isr/v3/legacy/my-app.void.app/dashboard');
-    expect(packed).toBeDefined();
-    const unpacked = unpackIsrValue(packed!.value);
-    expect(unpacked).not.toBeNull();
-    expect(unpacked!.headers['set-cookie']).toBeUndefined();
-
-    // (3) The edge (caches.default) copy is stripped too.
-    const edgeCached = edgeCacheStore.get('https://my-app.void.app/dashboard?__void_isr=legacy');
-    expect(edgeCached).toBeDefined();
-    expect(getSetCookies(edgeCached!.headers)).toEqual([]);
-    expect(edgeCached!.headers.has('set-cookie')).toBe(false);
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    expect(kvStore.has('proj_1/isr/v3/legacy/my-app.void.app/dashboard')).toBe(false);
+    expect(edgeCacheStore.has('https://my-app.void.app/dashboard?__void_isr=legacy')).toBe(false);
+    expect(
+      edgeCacheStore.has('https://my-app.void.app/dashboard?__void=json&__void_isr=legacy'),
+    ).toBe(false);
   });
 
   it('deletes KV entry when background revalidation gets x-revalidate: 0', async () => {
@@ -1034,9 +1068,11 @@ describe('ISR (stale-while-revalidate)', () => {
     // Pre-populate edge cache
     edgeCacheStore.set(
       'https://my-app.void.app/dashboard?__void_isr=legacy',
-      new Response('<html>edge</html>', {
-        headers: { 'x-isr-cache': 'HIT', 'Content-Type': 'text/html' },
-      }),
+      currentSharedCacheResponse(
+        new Response('<html>edge</html>', {
+          headers: { 'x-isr-cache': 'HIT', 'Content-Type': 'text/html' },
+        }),
+      ),
     );
 
     const { env, workerFetch } = createEnv({
@@ -1156,9 +1192,11 @@ describe('ISR (stale-while-revalidate)', () => {
     // cache entry for /en/docs; the rewritten request should miss it.
     edgeCacheStore.set(
       'https://my-app.void.app/en/docs?__void_isr=legacy',
-      new Response('<html>direct</html>', {
-        headers: { 'x-isr-cache': 'HIT', 'Content-Type': 'text/html' },
-      }),
+      currentSharedCacheResponse(
+        new Response('<html>direct</html>', {
+          headers: { 'x-isr-cache': 'HIT', 'Content-Type': 'text/html' },
+        }),
+      ),
     );
 
     const { env, workerFetch } = createEnv({
@@ -2318,6 +2356,45 @@ describe('ISR respects response Cache-Control opt-out', () => {
     expect(await live.text()).toBe('<html>now-private</html>');
   });
 
+  it('background revalidation evicts HTML, JSON, and KV when a public page starts a session', async () => {
+    const kvKey = 'proj_1/isr/v3/legacy/my-app.void.app/dashboard';
+    const htmlEdgeKey = 'https://my-app.void.app/dashboard?__void_isr=legacy';
+    const jsonEdgeKey = 'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy';
+    edgeCacheStore.set(
+      jsonEdgeKey,
+      currentSharedCacheResponse(
+        new Response('{"component":"Dashboard","props":{},"url":"/dashboard"}'),
+      ),
+    );
+
+    const { env, kvStore } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', ssr: true, revalidate: 60 },
+      assets: {
+        [kvKey]: {
+          body: '<html>stale-public</html>',
+          createdAt: Date.now() - 120_000,
+          ttl: 60,
+          headers: { 'Content-Type': 'text/html' },
+        },
+      },
+      workerResponse: new Response('<html>session-user</html>', {
+        headers: {
+          'Content-Type': 'text/html',
+          'Set-Cookie': 'sid=new-session; Path=/; HttpOnly',
+        },
+      }),
+    });
+
+    const ctx = createCtx();
+    const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
+    expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    expect(kvStore.has(kvKey)).toBe(false);
+    expect(edgeCacheStore.has(htmlEdgeKey)).toBe(false);
+    expect(edgeCacheStore.has(jsonEdgeKey)).toBe(false);
+  });
+
   // Positive control: eviction is SPECIFIC to the opt-out. A stale entry whose
   // background re-render returns a CACHEABLE 200 (no Cache-Control opt-out) is
   // REFRESHED in place — the entry stays present, now carrying the fresh body.
@@ -2886,9 +2963,11 @@ describe('ISR JSON edge cache (pages protocol)', () => {
     // Pre-populate JSON edge cache
     edgeCacheStore.set(
       'https://my-app.void.app/dashboard?__void=json&__void_isr=legacy',
-      new Response(pageData, {
-        headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
-      }),
+      currentSharedCacheResponse(
+        new Response(pageData, {
+          headers: { 'content-type': 'application/json', 'x-isr-cache': 'HIT' },
+        }),
+      ),
     );
 
     const { env, workerFetch } = createEnv({ routing: isrRouting });
@@ -3436,6 +3515,36 @@ describe('hashed asset caching', () => {
     );
     expect(res2.status).toBe(200);
     expect(workerFetch).toHaveBeenCalledTimes(1); // still 1 — cache hit
+  });
+
+  it('does not share a hashed-path response that sets a cookie', async () => {
+    let render = 0;
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        hashedAssetsPrefix: 'assets',
+      },
+      workerFetchImpl: async () => {
+        render++;
+        return new Response(`user-${render}`, {
+          headers: { 'Set-Cookie': `sid=user-${render}; Path=/; HttpOnly` },
+        });
+      },
+    });
+    const url = 'https://test.void.app/assets/session-abc.json';
+
+    const firstCtx = createCtx();
+    const first = await app.fetch(new Request(url), env, firstCtx);
+    expect(await first.text()).toBe('user-1');
+    expect(first.headers.get('Set-Cookie')).toContain('sid=user-1');
+    await Promise.all((firstCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const second = await app.fetch(new Request(url), env, createCtx());
+    expect(await second.text()).toBe('user-2');
+    expect(second.headers.get('Set-Cookie')).toContain('sid=user-2');
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    expect(edgeCacheStore.has(url)).toBe(false);
   });
 
   it('returns 429 when worker exceeds CPU limit', async () => {
@@ -4833,6 +4942,62 @@ describe('static asset caching', () => {
     const res2 = await app.fetch(new Request('https://test.void.app/favicon.ico'), env, ctx2);
     expect(res2.status).toBe(200);
     expect(workerFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Set-Cookie responses out of the deploy-versioned static cache', async () => {
+    let render = 0;
+    const { env, workerFetch } = createEnv({
+      routing: { workerName: 'test-worker', projectId: 'proj-1', version: 'deploy-1' },
+      workerFetchImpl: async () => {
+        render++;
+        return new Response(`user-${render}`, {
+          headers: { 'Set-Cookie': `sid=user-${render}; Path=/; HttpOnly` },
+        });
+      },
+    });
+
+    const firstCtx = createCtx();
+    const first = await app.fetch(new Request('https://test.void.app/profile.json'), env, firstCtx);
+    expect(await first.text()).toBe('user-1');
+    expect(first.headers.get('Set-Cookie')).toContain('sid=user-1');
+    await Promise.all((firstCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const second = await app.fetch(
+      new Request('https://test.void.app/profile.json'),
+      env,
+      createCtx(),
+    );
+    expect(await second.text()).toBe('user-2');
+    expect(second.headers.get('Set-Cookie')).toContain('sid=user-2');
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    expect(edgeCacheStore.has('https://test.void.app/profile.json?_v=deploy-1')).toBe(false);
+  });
+
+  it('evicts a legacy static entry that contains Set-Cookie instead of serving it', async () => {
+    const cacheKey = 'https://test.void.app/profile.json?_v=deploy-1';
+    edgeCacheStore.set(
+      cacheKey,
+      new Response('user-alice', {
+        headers: {
+          'Cache-Control': 'public, s-maxage=31536000',
+          'Set-Cookie': 'sid=alice; Path=/; HttpOnly',
+        },
+      }),
+    );
+    const { env, workerFetch } = createEnv({
+      routing: { workerName: 'test-worker', projectId: 'proj-1', version: 'deploy-1' },
+      workerResponse: new Response('user-bob', {
+        headers: { 'Set-Cookie': 'sid=bob; Path=/; HttpOnly' },
+      }),
+    });
+    const ctx = createCtx();
+
+    const response = await app.fetch(new Request('https://test.void.app/profile.json'), env, ctx);
+    expect(await response.text()).toBe('user-bob');
+    expect(response.headers.get('Set-Cookie')).toContain('sid=bob');
+    expect(workerFetch).toHaveBeenCalledOnce();
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+    expect(edgeCacheStore.has(cacheKey)).toBe(false);
   });
 
   it('client response omits s-maxage on static cache miss', async () => {

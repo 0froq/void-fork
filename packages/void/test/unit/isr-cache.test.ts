@@ -11,12 +11,14 @@ import {
   isStale,
   jsonEdgeKey,
   listIsrHosts,
+  markSharedCachePolicy,
   matchLiteralPattern,
   normalizeIsrPath,
   packIsrValue,
   readIsrCache,
   resolvePathTtl,
   resolveRevalidateTtl,
+  SHARED_CACHE_POLICY_VERSION,
   unpackIsrValue,
   writeIsrCache,
   type IsrCacheEntry,
@@ -104,7 +106,7 @@ function seedEntry(
 ): void {
   store.set(isrKey(DPL, HOST, path), {
     value: value ?? packEntry(headers, body),
-    metadata: { s: status, c: createdAt, t: ttl },
+    metadata: { s: status, c: createdAt, t: ttl, p: SHARED_CACHE_POLICY_VERSION },
   });
 }
 
@@ -158,6 +160,11 @@ function createRender(makeResponse: (req: Request) => Response) {
   return { render: spy as unknown as RenderFn, spy, requests };
 }
 
+function currentSharedCacheResponse(response: Response): Response {
+  markSharedCachePolicy(response.headers);
+  return response;
+}
+
 // ---------------------------------------------------------------------------
 // Corrupt-KV fail-open table (critical). A KV entry whose metadata/headers make
 // a Response un-constructible must be rejected at the `readIsrCache` choke point
@@ -167,47 +174,81 @@ function createRender(makeResponse: (req: Request) => Response) {
 // ---------------------------------------------------------------------------
 const corruptCases: Array<{ name: string; seed: () => KvRecord }> = [
   {
+    name: 'legacy entry missing shared-cache policy version',
+    seed: () => ({
+      value: packEntry({}, 'x'),
+      metadata: { s: 200, c: BASE, t: 60 } as unknown as IsrCacheMetadata,
+    }),
+  },
+  {
     name: 'status out of range (s: 999)',
-    seed: () => ({ value: packEntry({}, 'x'), metadata: { s: 999, c: BASE, t: 60 } }),
+    seed: () => ({
+      value: packEntry({}, 'x'),
+      metadata: { s: 999, c: BASE, t: 60, p: SHARED_CACHE_POLICY_VERSION },
+    }),
   },
   {
     name: 'status out of range (s: 0)',
-    seed: () => ({ value: packEntry({}, 'x'), metadata: { s: 0, c: BASE, t: 60 } }),
+    seed: () => ({
+      value: packEntry({}, 'x'),
+      metadata: { s: 0, c: BASE, t: 60, p: SHARED_CACHE_POLICY_VERSION },
+    }),
   },
   {
     name: 'invalid header name',
     seed: () => ({
       value: packEntry({ 'Invalid Header Name': 'x' }, 'x'),
-      metadata: { s: 200, c: BASE, t: 60 },
+      metadata: { s: 200, c: BASE, t: 60, p: SHARED_CACHE_POLICY_VERSION },
     }),
   },
   {
     name: 'createdAt NaN',
-    seed: () => ({ value: packEntry({}, 'x'), metadata: { s: 200, c: NaN, t: 60 } }),
+    seed: () => ({
+      value: packEntry({}, 'x'),
+      metadata: { s: 200, c: NaN, t: 60, p: SHARED_CACHE_POLICY_VERSION },
+    }),
   },
   {
     name: 'createdAt Infinity',
-    seed: () => ({ value: packEntry({}, 'x'), metadata: { s: 200, c: Infinity, t: 60 } }),
+    seed: () => ({
+      value: packEntry({}, 'x'),
+      metadata: { s: 200, c: Infinity, t: 60, p: SHARED_CACHE_POLICY_VERSION },
+    }),
   },
   {
     name: 'createdAt negative',
-    seed: () => ({ value: packEntry({}, 'x'), metadata: { s: 200, c: -1, t: 60 } }),
+    seed: () => ({
+      value: packEntry({}, 'x'),
+      metadata: { s: 200, c: -1, t: 60, p: SHARED_CACHE_POLICY_VERSION },
+    }),
   },
   {
     name: 'ttl NaN',
-    seed: () => ({ value: packEntry({}, 'x'), metadata: { s: 200, c: BASE, t: NaN } }),
+    seed: () => ({
+      value: packEntry({}, 'x'),
+      metadata: { s: 200, c: BASE, t: NaN, p: SHARED_CACHE_POLICY_VERSION },
+    }),
   },
   {
     name: 'ttl zero',
-    seed: () => ({ value: packEntry({}, 'x'), metadata: { s: 200, c: BASE, t: 0 } }),
+    seed: () => ({
+      value: packEntry({}, 'x'),
+      metadata: { s: 200, c: BASE, t: 0, p: SHARED_CACHE_POLICY_VERSION },
+    }),
   },
   {
     name: 'ttl negative',
-    seed: () => ({ value: packEntry({}, 'x'), metadata: { s: 200, c: BASE, t: -5 } }),
+    seed: () => ({
+      value: packEntry({}, 'x'),
+      metadata: { s: 200, c: BASE, t: -5, p: SHARED_CACHE_POLICY_VERSION },
+    }),
   },
   {
     name: 'malformed packed value',
-    seed: () => ({ value: new ArrayBuffer(2), metadata: { s: 200, c: BASE, t: 60 } }),
+    seed: () => ({
+      value: new ArrayBuffer(2),
+      metadata: { s: 200, c: BASE, t: 60, p: SHARED_CACHE_POLICY_VERSION },
+    }),
   },
 ];
 
@@ -442,7 +483,7 @@ describe('writeIsrCache / readIsrCache / deleteIsrCache', () => {
     // Real KV contents: exactly one entry under the collapsed key.
     expect(store.has(isrKey(DPL, HOST, '/blog/post'))).toBe(true);
     const meta = store.get(isrKey(DPL, HOST, '/blog/post'))!.metadata!;
-    expect(meta).toEqual({ s: 200, c: BASE, t: 60 });
+    expect(meta).toEqual({ s: 200, c: BASE, t: 60, p: SHARED_CACHE_POLICY_VERSION });
 
     const entry = await readIsrCache(env, HOST, '/blog/post');
     expect(entry).not.toBeNull();
@@ -797,7 +838,9 @@ describe('handleIsr', () => {
     const env = makeEnv(kv);
     edge.store.set(
       htmlEdgeKey(HOST, '/blog/post', DPL),
-      new Response('<html>edge</html>', { headers: { 'x-isr-cache': 'HIT' } }),
+      currentSharedCacheResponse(
+        new Response('<html>edge</html>', { headers: { 'x-isr-cache': 'HIT' } }),
+      ),
     );
     const { render, spy } = createRender(() => new Response('SHOULD-NOT-RENDER'));
     const { ctx } = createCtx();
@@ -808,6 +851,25 @@ describe('handleIsr', () => {
     expect(spy).not.toHaveBeenCalled();
     expect(getWithMetadata).not.toHaveBeenCalled();
     expect(store.size).toBe(0);
+  });
+
+  it('cold-misses an edge entry written before the current privacy policy', async () => {
+    const { kv } = createKvMock();
+    const env = makeEnv(kv);
+    const key = htmlEdgeKey(HOST, '/blog/post', DPL);
+    edge.store.set(key, new Response('<html>legacy-private-body</html>'));
+    const { render, spy } = createRender(
+      () => new Response('<html>current-public-body</html>', { status: 200 }),
+    );
+    const { ctx, flush } = createCtx();
+
+    const response = await handleIsr(htmlRequest(), env, ctx, OPTS, render);
+    expect(await response!.text()).toBe('<html>current-public-body</html>');
+    expect(response!.headers.get('x-isr-cache')).toBe('MISS');
+    expect(spy).toHaveBeenCalledOnce();
+    await flush();
+
+    expect(await edge.store.get(key)!.text()).toBe('<html>current-public-body</html>');
   });
 
   it('JSON (X-VoidPages) MISS → renders live JSON and never writes the edge or KV', async () => {
@@ -841,7 +903,10 @@ describe('handleIsr', () => {
   it('JSON (X-VoidPages) edge HIT → serves the cached JSON variant, no render', async () => {
     const { kv } = createKvMock();
     const env = makeEnv(kv);
-    edge.store.set(jsonEdgeKey(HOST, '/blog/post', DPL), new Response('{"cached":true}'));
+    edge.store.set(
+      jsonEdgeKey(HOST, '/blog/post', DPL),
+      currentSharedCacheResponse(new Response('{"cached":true}')),
+    );
     const { render, spy } = createRender(() => new Response('SHOULD-NOT-RENDER'));
     const { ctx } = createCtx();
 
