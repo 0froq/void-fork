@@ -111,3 +111,25 @@ interface used by `getSandbox()`. Raw namespace access remains available for
 native Cloudflare deployments; managed deployments cannot receive the raw
 controller stub or lifecycle methods. This adds one regular Worker per managed
 Sandbox deployment and requires owned-resource cleanup and legacy rollout guards.
+
+## Verified recovery checkpoint (2026-09-16)
+
+The five remaining original implementations were committed as `40eb4da1`,
+`378a5175`, `fb4fc093`, `b362e8a3`, and `23eec36d`. Four GPT-5.6 Sol/high
+reviewers inspected the complete original fix series. Their accepted non-Sandbox
+P1 follow-ups were fixed in `2a3037db`, `e901df8c`, `ec7b47b4`, `969fd55c`,
+`08ba930b`, and `d2d6b829`, and received focused reviewer rechecks.
+
+At `d2d6b829`, package/platform/runtime and documentation builds, all 29 workspace
+typechecks, lint, and the full suite passed: 427 test files, 8,161 passing tests,
+and 6 skipped tests. Node, Bun, and Deno production asset/browser coverage ran,
+with the Deno runtime supplied through `VOID_TEST_DENO_BIN`.
+
+The work is **not complete**: managed Sandbox admission and lifetime still derive
+from tenant-controlled calls. The review also confirmed that the current lazy
+reservation can be billed before a container starts. Fix both through the
+platform-owned controller cutover above, or temporarily disable managed Sandboxes
+with an explicit legacy-resource migration. The user has been asked to choose
+because this changes managed deployment footprint and raw namespace access.
+Do not mark the remaining review checkbox complete until this is implemented,
+tested, and reviewed. Preserve native Cloudflare Sandbox behavior.
