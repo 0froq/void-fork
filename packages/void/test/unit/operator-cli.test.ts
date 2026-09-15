@@ -263,6 +263,65 @@ describe('operator transport and execution', () => {
     ]);
   });
 
+  it('renders every worker and audit event field without table-column truncation', async () => {
+    vi.stubEnv('VOID_API_URL', 'https://one.example');
+    vi.stubEnv('VOID_OPERATOR_TOKEN', 'operator');
+    const write = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          batchId: 'batch-1',
+          environment: 'production',
+          events: [
+            {
+              id: 'event-1',
+              batch_id: 'batch-1',
+              action: 'rollback_all',
+              worker_name: 'api',
+              environment: 'production',
+              version_id: 'version-failed',
+              script_name: 'void-api',
+              status: 'failed',
+              error_message: 'Version no longer exists.',
+              auditError: 'Could not persist the outcome.',
+              admin_login: 'operator',
+              created_at: '2030-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          events: [
+            {
+              id: 'audit-1',
+              login: 'operator',
+              action: 'workers/api/rollback',
+              target: '{"worker":"api","versionId":"version-failed"}',
+              status: 'failed',
+              http_status: 207,
+              created_at: '2030-01-01T00:00:00Z',
+            },
+          ],
+          page: 1,
+          limit: 25,
+          total: 1,
+        }),
+      );
+    vi.stubGlobal('fetch', fetcher);
+
+    await runOperatorCommand(parseOperatorArgs(['worker', 'events', 'batch-1']));
+    await runOperatorCommand(parseOperatorArgs(['system', 'events']));
+
+    const rendered = write.mock.calls.map(([line]) => String(line)).join('\n');
+    expect(rendered).toContain('version id: version-failed');
+    expect(rendered).toContain('error message: Version no longer exists.');
+    expect(rendered).toContain('audit Error: Could not persist the outcome.');
+    expect(rendered).toContain('action: workers/api/rollback');
+    expect(rendered).toContain('target: {"worker":"api","versionId":"version-failed"}');
+  });
+
   it('follows build log sequence and stops when terminal', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const fetcher = vi

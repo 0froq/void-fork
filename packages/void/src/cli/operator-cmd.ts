@@ -75,6 +75,16 @@ function table(rows: Array<unknown>, indent: string): Array<string> {
   ];
 }
 
+function eventLines(events: Array<unknown>, indent: string): Array<string> {
+  if (!events.length) {
+    return [`${indent}(none)`];
+  }
+  return events.flatMap((event, index) => [
+    `${indent}${index + 1}.`,
+    ...humanLines(event, `${indent}  `),
+  ]);
+}
+
 function humanLines(value: unknown, indent = ''): Array<string> {
   if (Array.isArray(value)) {
     return table(value, indent);
@@ -85,7 +95,10 @@ function humanLines(value: unknown, indent = ''): Array<string> {
   return Object.entries(value).flatMap(([key, item]) => {
     const label = key.replaceAll('_', ' ').replace(/([a-z])([A-Z])/g, '$1 $2');
     if (Array.isArray(item)) {
-      return [`${indent}${label}:`, ...table(item, `${indent}  `)];
+      return [
+        `${indent}${label}:`,
+        ...(key === 'events' ? eventLines(item, `${indent}  `) : table(item, `${indent}  `)),
+      ];
     }
     if (item && typeof item === 'object') {
       return [`${indent}${label}:`, ...humanLines(item, `${indent}  `)];
