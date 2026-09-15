@@ -22,6 +22,22 @@ type HelpNode = HelpPage & { children?: HelpTree };
 type HelpTree = Record<string, HelpNode>;
 
 const HELP_TREE: HelpTree = {
+  connect: {
+    summary: 'Connect this project to Cloudflare or an existing Void platform.',
+    usage: ['void connect [url] [--platform <cloudflare|void>] [--no-login]'],
+    options: [
+      { command: '--platform <cloudflare|void>', description: 'Choose the deployment destination' },
+      { command: '--no-login', description: 'Save a Void connection without authenticating' },
+    ],
+    examples: [
+      { command: 'void connect', description: 'Choose a destination and sign in' },
+      { command: 'void connect https://platform.example.com', description: 'Join a Void platform' },
+      {
+        command: 'void connect --platform cloudflare',
+        description: 'Sign in and select a Cloudflare account',
+      },
+    ],
+  },
   init: {
     summary: 'Set up Void in a new or existing project.',
     usage: ['void init [options]'],
@@ -103,10 +119,9 @@ const HELP_TREE: HelpTree = {
     },
   },
   platform: {
-    summary: 'Connect, install, and manage Void platforms.',
+    summary: 'Install and manage Void platforms. Use `void connect` to join one.',
     usage: ['void platform <command>'],
     commands: [
-      { command: 'connect [url]', description: 'Connect to an existing Void platform' },
       { command: 'list', description: 'List installed and connected platforms' },
       { command: 'use [id]', description: 'Select the default Void platform' },
       { command: 'status [id]', description: 'Inspect a platform and its health' },
@@ -119,10 +134,6 @@ const HELP_TREE: HelpTree = {
       { command: 'uninstall [id]', description: 'Safely remove an installed Void platform' },
     ],
     children: {
-      connect: basicSubcommand(
-        'Connect to a platform after verifying its discovery document.',
-        'void platform connect [url]',
-      ),
       list: basicSubcommand('List installed and connected platforms.', 'void platform list'),
       use: basicSubcommand('Select the default Void platform.', 'void platform use [id]'),
       status: basicSubcommand('Inspect a platform and its health.', 'void platform status [id]'),
@@ -752,6 +763,9 @@ export function printGlobalHelp(): void {
     [
       globalCommandLine(['init'], 'void init'),
       ...globalOptionLines(['init']),
+      '',
+      globalCommandLine(['connect'], 'void connect [url]'),
+      ...globalOptionLines(['connect']),
       '',
       globalCommandLine(['deploy'], 'void deploy'),
       ...globalOptionLines(['deploy']),

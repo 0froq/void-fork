@@ -9,6 +9,7 @@ import { authSubcommands, parseAuthArgs } from './auth-args.ts';
 import { buildSubcommands, parseBuildArgs } from './build-args.ts';
 import { cloudflareSubcommands, parseCloudflareArgs } from './cloudflare-args.ts';
 import { formatCloudflareUserMessage } from './cloudflare-user-output.ts';
+import { parseConnectArgs } from './connect-args.ts';
 import { dbSubcommands, parseDbArgs } from './db-args.ts';
 import { domainSubcommands, parseDomainArgs } from './domain-args.ts';
 import { envSubcommands, parseEnvArgs } from './env-args.ts';
@@ -112,6 +113,15 @@ if (helpPath) {
       process.exit(1);
     });
   });
+} else if (command === 'connect') {
+  (async () => {
+    const parsed = parseConnectArgs(args.slice(1));
+    const { runConnectCommand } = await import('./connect.ts');
+    await runConnectCommand(process.cwd(), parsed);
+  })().catch((err) => {
+    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  });
 } else if (command === 'auth') {
   runSubcommandGroup('auth', authSubcommands, parseAuthArgs, (root, parsed) =>
     import('./auth-cmd.ts').then(({ runAuthCommand }) => runAuthCommand(root, parsed)),
@@ -199,6 +209,7 @@ if (helpPath) {
   // Interactive top-level prompt
   const topLevelCommands: Array<SubcommandDef> = [
     { name: 'init', description: 'Set up void in a new or existing project' },
+    { name: 'connect', description: 'Connect to Cloudflare or a Void platform' },
     { name: 'deploy', description: 'Build and deploy to the configured platform' },
     {
       name: 'auth',
@@ -207,8 +218,8 @@ if (helpPath) {
     },
     {
       name: 'platform',
-      hint: 'connect | list | use | status | install | upgrade | repair | disable | uninstall',
-      description: 'Connect, install, and manage Void platforms',
+      hint: 'list | use | status | discover | install | upgrade | repair | disable | enable | uninstall',
+      description: 'Install and manage Void platforms',
     },
     {
       name: 'cloudflare',
@@ -271,6 +282,11 @@ if (helpPath) {
     const root = process.cwd();
 
     switch (cmd) {
+      case 'connect': {
+        const { runConnectCommand } = await import('./connect.ts');
+        await runConnectCommand(root, parseConnectArgs([]));
+        return;
+      }
       case 'init': {
         const { runInitCommand, parseInitArgs } = await import('./init.ts');
         await runInitCommand(root, parseInitArgs([]));
