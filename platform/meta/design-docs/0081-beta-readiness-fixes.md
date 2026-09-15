@@ -26,7 +26,7 @@ guard; add no administrator recovery or promotion bypass.
 - [ ] Attach schema secrets to the candidate deployment before activation.
 - [ ] Handle or reject later Durable Object lifecycle changes before mutations.
 - [x] Keep prerelease publishing and scaffolding on the selected release channel.
-- [ ] Require platform tests before publishing the packaged runtime.
+- [x] Require platform tests before publishing the packaged runtime.
 - [ ] Check schema upgrades against an immutable previous runtime and populated data.
 - [ ] Verify packed public packages outside the workspace using public Vite.
 - [ ] Define and enforce the supported Node/CLI/platform compatibility contract.

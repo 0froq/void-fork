@@ -168,4 +168,8 @@ use `next`. The scaffolder installs its exact matching CLI version, so
 `create-void@beta` cannot silently select the stable CLI. Packaged platform
 runtimes record the release commit as their source revision.
 
+Publishing requires both SDK CI and platform CI, including the platform unit and
+API integration suites. Release tags also run the Windows SDK checks; a passing
+SDK-only build cannot publish a changed control plane.
+
 For implementation history, use the design archive at `platform/meta/design-docs/README.md`. Its proposals explain earlier decisions; the source and current guides define the supported behavior.

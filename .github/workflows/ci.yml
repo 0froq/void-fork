@@ -27,9 +27,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows runs on main pushes and on PRs labeled "test: windows",
+        # Windows runs on branch/tag pushes and on PRs labeled "test: windows",
         # unless a reusable workflow caller explicitly disables it.
-        os: '${{ (((github.event_name == ''push'' && startsWith(github.ref, ''refs/heads/'')) || contains(github.event.pull_request.labels.*.name, ''test: windows'')) && !(github.event_name == ''workflow_call'' && inputs.skip_windows)) && fromJSON(''["ubuntu-latest","windows-latest"]'') || fromJSON(''["ubuntu-latest"]'') }}'
+        os: '${{ ((github.event_name == ''push'' || contains(github.event.pull_request.labels.*.name, ''test: windows'')) && !inputs.skip_windows) && fromJSON(''["ubuntu-latest","windows-latest"]'') || fromJSON(''["ubuntu-latest"]'') }}'
         # Unit tests and two integration shards run on separate runners. Each integration
         # shard builds its own checkout first, so generated playground state is never shared.
         shard: [unit, '1/2', '2/2']

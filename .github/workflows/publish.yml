@@ -12,11 +12,14 @@ jobs:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
-    with:
-      skip_windows: true
+
+  platform-ci:
+    uses: ./.github/workflows/platform-ci.yml
+    permissions:
+      contents: read
 
   publish:
-    needs: ci
+    needs: [ci, platform-ci]
     runs-on: ubuntu-latest
     environment: Release
     permissions:
