@@ -33,6 +33,8 @@ const referenceItems = [
     items: [
       { text: 'void init', link: '/reference/cli#setup' },
       { text: 'void auth', link: '/reference/cli#auth' },
+      { text: 'void cloudflare', link: '/reference/cli#cloudflare-authentication' },
+      { text: 'void platform', link: '/reference/cli#platform-management' },
       { text: 'void project', link: '/reference/cli#project-commands' },
       { text: 'void deploy', link: '/reference/cli#deploy' },
       { text: 'void db', link: '/reference/cli#database' },
