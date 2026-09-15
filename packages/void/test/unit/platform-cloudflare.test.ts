@@ -300,7 +300,7 @@ describe('platform Cloudflare client', () => {
     expect(cursors).toEqual(['', 'bucket-0999']);
   });
 
-  it('writes and reads reserved R2 ownership markers', async () => {
+  it('preserves R2 key path separators while encoding reserved characters', async () => {
     const requests: Array<{ body: string; method: string; pathname: string }> = [];
     const client = new PlatformCloudflareClient('token', {
       fetcher: async (input, init) => {
@@ -316,20 +316,38 @@ describe('platform Cloudflare client', () => {
       },
     });
 
-    await client.putR2Object('account', 'bucket/name', 'reserved/key', 'marker');
-    await expect(client.getR2Object('account', 'bucket/name', 'reserved/key')).resolves.toBe(
-      'marker',
-    );
+    await client.putR2Object('account', 'bucket/name', '__void/platform/ownership/v1', 'marker');
+    await expect(
+      client.getR2Object('account', 'bucket/name', '__void/platform/ownership/v1'),
+    ).resolves.toBe('marker');
+    await client.putR2Object('account', 'bucket/name', 'reserved/what? #%.json', 'reserved');
+    await expect(
+      client.getR2Object('account', 'bucket/name', 'reserved/what? #%.json'),
+    ).resolves.toBe('marker');
     expect(requests).toEqual([
       {
         body: 'marker',
         method: 'PUT',
-        pathname: '/client/v4/accounts/account/r2/buckets/bucket%2Fname/objects/reserved%2Fkey',
+        pathname:
+          '/client/v4/accounts/account/r2/buckets/bucket%2Fname/objects/__void/platform/ownership/v1',
       },
       {
         body: '',
         method: 'GET',
-        pathname: '/client/v4/accounts/account/r2/buckets/bucket%2Fname/objects/reserved%2Fkey',
+        pathname:
+          '/client/v4/accounts/account/r2/buckets/bucket%2Fname/objects/__void/platform/ownership/v1',
+      },
+      {
+        body: 'reserved',
+        method: 'PUT',
+        pathname:
+          '/client/v4/accounts/account/r2/buckets/bucket%2Fname/objects/reserved/what%3F%20%23%25.json',
+      },
+      {
+        body: '',
+        method: 'GET',
+        pathname:
+          '/client/v4/accounts/account/r2/buckets/bucket%2Fname/objects/reserved/what%3F%20%23%25.json',
       },
     ]);
   });

@@ -675,7 +675,7 @@ export class PlatformCloudflareClient {
     value: string,
   ): Promise<void> {
     const response = await this.#fetcher(
-      `${this.apiBaseUrl}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+      `${this.apiBaseUrl}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeR2ObjectKey(key)}`,
       {
         body: value,
         headers: {
@@ -696,7 +696,7 @@ export class PlatformCloudflareClient {
 
   async getR2Object(accountId: string, bucketName: string, key: string): Promise<string | null> {
     const response = await this.#fetcher(
-      `${this.apiBaseUrl}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+      `${this.apiBaseUrl}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeR2ObjectKey(key)}`,
       {
         headers: { Authorization: `Bearer ${this.#token}` },
         signal: AbortSignal.timeout(30_000),
@@ -911,6 +911,10 @@ export class PlatformCloudflareClient {
       throw error;
     }
   }
+}
+
+function encodeR2ObjectKey(key: string): string {
+  return key.split('/').map(encodeURIComponent).join('/');
 }
 
 function requiredString(value: unknown, label: string): string {
