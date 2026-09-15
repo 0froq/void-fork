@@ -416,7 +416,7 @@ app.get('/callback', async (context) => {
     if (createdUser) {
       if (context.env.EMAIL) {
         context.executionCtx.waitUntil(
-          sendWelcomeEmail(context.env.EMAIL, email, login).catch((err) =>
+          sendWelcomeEmail(context.env, email, login).catch((err) =>
             console.error(`[welcome-email] Failed for ${email}:`, err),
           ),
         );

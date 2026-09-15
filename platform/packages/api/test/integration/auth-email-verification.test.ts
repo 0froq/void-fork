@@ -315,6 +315,50 @@ describe('email verification gating on account linking', () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/repos/'))).toBe(false);
   });
 
+  it('sends a welcome from the configured platform after a successful signup', async () => {
+    const send = vi.fn(async () => {});
+    const pending: Array<Promise<unknown>> = [];
+    const state = await buildSignedState('github');
+    await seedOAuthNonce(env.db, 'test-nonce');
+    vi.stubGlobal(
+      'fetch',
+      mockGitHubApi({
+        id: 55556,
+        login: 'new-member',
+        email: 'member@example.com',
+        emailVerified: true,
+      }),
+    );
+    const response = await app.fetch(
+      new Request(`https://api.example.com/auth/callback?code=test-code&state=${state}`, {
+        headers: { Cookie: 'oauth_nonce=test-nonce', 'X-Forwarded-Host': 'attacker.example' },
+      }),
+      {
+        ...env,
+        AUTH_REDIRECT_URI: 'https://api.example.com/auth/callback',
+        PLATFORM_DISPLAY_NAME: 'Example Platform',
+        EMAIL_FROM: 'Example Platform <platform@example.com>',
+        EMAIL: { send } as unknown as SendEmail,
+      },
+      {
+        ...executionCtx,
+        waitUntil: (promise: Promise<unknown>) => {
+          pending.push(promise);
+        },
+      },
+    );
+    await Promise.all(pending);
+    expect(response.status).toBe(302);
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: 'Example Platform <platform@example.com>',
+        subject: 'Welcome to Example Platform',
+        text: expect.stringContaining("void connect 'https://api.example.com'"),
+      }),
+    );
+  });
+
   it('does not link a SECOND github identity when the existing account already has one (RFC 0074 one-github invariant)', async () => {
     // Alice signed in via google, then linked github id X.
     const existing = await createTestUser(env.db, 'one-github-alice', 'google', 'google-alice');

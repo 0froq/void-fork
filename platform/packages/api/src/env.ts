@@ -161,6 +161,8 @@ export type ApiEnv = Env & {
      */
     R2_STATIC_ASSETS_BUCKET: string;
     EMAIL?: SendEmail;
+    /** Cloudflare-verified sender address. Required when a self-hosted platform enables email. */
+    EMAIL_FROM?: string;
     /**
      * Test-only override for the deploy handler's heartbeat interval in ms.
      * Falls back to 15_000 when undefined, falsy, or non-positive. Kept on
