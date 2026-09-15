@@ -411,6 +411,97 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
   return { deps, trace, wranglerArgs, exitCalls };
 }
 
+describe('existing Cloudflare site handoff', () => {
+  const existing = {
+    versionId: 'original',
+    bindings: [],
+    runtime: { compatibility_date: '2026-02-24', compatibility_flags: [] },
+    script: { handlers: ['fetch', 'scheduled'] },
+  };
+  function site() {
+    return makeProject({
+      'package.json': JSON.stringify({ name: 'site', dependencies: { void: '*' } }),
+      'void.json': '{}',
+      'routes/index.ts': 'export const GET = () => "site";',
+      'wrangler.jsonc': JSON.stringify({
+        name: 'site',
+        account_id: 'personal',
+        compatibility_date: '2026-02-24',
+      }),
+    });
+  }
+  function build(root: string) {
+    const config = parseRootWranglerConfig(join(root, 'wrangler.jsonc'));
+    mkdirSync(join(root, 'dist/ssr'), { recursive: true });
+    mkdirSync(join(root, '.wrangler/deploy'), { recursive: true });
+    writeFileSync(join(root, 'dist/ssr/wrangler.json'), JSON.stringify(config));
+    writeFileSync(
+      join(root, '.wrangler/deploy/config.json'),
+      JSON.stringify({ configPath: '../../dist/ssr/wrangler.json' }),
+    );
+  }
+  it('reuses the target and completes the same invocation without provisioning or secret writes', async () => {
+    const root = site();
+    const activateVersion = vi
+      .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
+      .mockResolvedValue({
+        ok: true,
+        versionId: 'new',
+        previousVersionId: 'original',
+        previewUrl: 'https://site.example.com',
+      });
+    const { deps, trace, wranglerArgs } = harness({
+      readExistingWorker: async () => existing,
+      runBuild: () => build(root),
+      activateVersion,
+    });
+    await runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps);
+    expect(activateVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ preserveTriggers: true, expectedPreviousVersionId: 'original' }),
+    );
+    expect(trace).not.toContain('provision');
+    expect(trace).not.toContain('auth-secret');
+    expect(wranglerArgs.some((args) => ['d1', 'secret', 'containers'].includes(args[0]!))).toBe(
+      false,
+    );
+    expect(JSON.parse(readFileSync(join(root, '.void/project.json'), 'utf8')).platform).toBe(
+      'cloudflare',
+    );
+    expect(existsSync(join(root, '.void/cloudflare-link.json'))).toBe(false);
+  });
+  it('retains the link guard after a failed build and verifies the Worker again on retry', async () => {
+    const root = site();
+    const readExistingWorker = vi.fn().mockResolvedValue(existing);
+    const { deps } = harness({
+      readExistingWorker,
+      runBuild: () => {
+        throw new Error('build failed');
+      },
+    });
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(existsSync(join(root, '.void/cloudflare-link.json'))).toBe(true);
+    deps.runBuild = () => build(root);
+    await runCloudflareDeploy(root, {}, silentCliLog, deps);
+    expect(readExistingWorker).toHaveBeenCalledTimes(2);
+    expect(existsSync(join(root, '.void/cloudflare-link.json'))).toBe(false);
+  });
+  it('rejects a newly inferred resource before provisioning and build', async () => {
+    const root = site();
+    writeFileSync(
+      join(root, 'routes/index.ts'),
+      'import { kv } from "void/kv"; export const GET = () => kv.get("key");',
+    );
+    const { deps, trace } = harness({ readExistingWorker: async () => existing });
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toThrow('cannot provision');
+    expect(trace).not.toContain('build');
+    expect(trace).not.toContain('provision');
+  });
+});
+
 describe('ensureCloudflareAuthSecret', () => {
   function authSecretProject(): string {
     return makeProject({

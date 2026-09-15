@@ -65,6 +65,29 @@ function project(config?: string): string {
 }
 
 describe('Cloudflare operational parsing', () => {
+  it('rolls back to an original version while preserving current triggers and settings', async () => {
+    const root = project();
+    let active = 'new';
+    const runner = vi.fn<CloudflareOperationRunner>((args) => {
+      if (args[0] === 'deployments') {
+        return ok(JSON.stringify({ versions: [{ version_id: active, percentage: 100 }] }));
+      }
+      if (args[0] === 'versions' && args[1] === 'deploy') {
+        const config = JSON.parse(readFileSync(args[args.indexOf('-c') + 1]!, 'utf8'));
+        expect(config).toEqual({ account_id: 'account-1', name: 'my-worker' });
+        active = 'original';
+        return ok();
+      }
+      throw new Error(`Unexpected mutation ${args.join(' ')}`);
+    });
+    await activateCloudflareExistingVersion(
+      { ...context(runner), configPath: join(root, 'wrangler.jsonc') },
+      { id: 'original', message: null, metadata: null, createdAt: null },
+      { id: 'new', message: null, metadata: null, createdAt: null },
+    );
+    expect(active).toBe('original');
+    expect(runner.mock.calls).toHaveLength(3);
+  });
   it('reads active traffic and Void migration metadata', () => {
     expect(
       parseActiveVersionId(

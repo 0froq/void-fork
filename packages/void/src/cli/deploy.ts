@@ -40,6 +40,10 @@ import {
   stageCloudflareStaticAssets,
   writeCloudflareFrameworkDeployConfig,
   writeCloudflareStaticDeployConfig,
+  readExistingCloudflareWorker,
+  assertExistingCloudflareConfig,
+  assertCloudflareBindingsPreserved,
+  type ExistingCloudflareWorker,
 } from '@void/deploy-cloudflare';
 import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
 import {
@@ -114,6 +118,12 @@ import {
   ensureCloudflareAuthentication,
 } from './cloudflare-auth.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
+import {
+  maybeLinkCloudflareDeploy,
+  readCloudflareLink,
+  prepareExistingCloudflareDeploy,
+  completeCloudflareLink,
+} from './cloudflare-link.ts';
 import { createCloudflareEmptyDomainPublisher } from './cloudflare-operations.ts';
 import {
   rememberCloudflareWorkersDevSubdomain,
@@ -271,6 +281,8 @@ class DeployEventError extends Error {}
 import type { WrapperFeatures } from './wrapper.ts';
 
 export type RunDeployOptions = {
+  /** Accepted the existing-Worker handoff in this invocation. */
+  reuseExistingWorker?: boolean;
   projectSlug?: string;
   dir?: string;
   spa?: boolean;
@@ -2336,6 +2348,7 @@ export type DeployWranglerRun = (
  * units (`cli/env-validation.ts`) use.
  */
 export interface CloudflareDeployDeps {
+  readExistingWorker?: typeof readExistingCloudflareWorker;
   /** wrangler runner for the orchestrator's own whoami/migrate/deploy calls. */
   runWrangler?: DeployWranglerRun;
   /** Run the project's `vite build` (inherited stdio). Throws on a nonzero build. */
@@ -3660,6 +3673,7 @@ function createDeployWranglerRunner(
 }
 
 async function chooseCloudflareDeployAccount(options: {
+  persist?: boolean;
   beforeWranglerRun: () => boolean;
   configPath: string;
   root: string;
@@ -3693,11 +3707,13 @@ async function chooseCloudflareDeployAccount(options: {
     }
     account = accounts.find((candidate) => candidate.id === accountId) ?? account;
   }
-  writeProvisionedWranglerConfig(
-    options.root,
-    { accountId: account.id },
-    { configPath: options.configPath },
-  );
+  if (options.persist !== false) {
+    writeProvisionedWranglerConfig(
+      options.root,
+      { accountId: account.id },
+      { configPath: options.configPath },
+    );
+  }
   log.success(`Configured Cloudflare account: ${account.name}`);
   return account.id;
 }
@@ -3989,6 +4005,7 @@ export async function runCloudflareDeploy(
       deps.runWrangler ?? createDeployWranglerRunner(root, undefined, apiBaseUrl);
     try {
       accountId = await chooseCloudflareDeployAccount({
+        persist: !(options.reuseExistingWorker || readCloudflareLink(root)),
         beforeWranglerRun: assertUploaderStillPinned,
         configPath,
         root,
@@ -4089,6 +4106,31 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
 
+  let existingWorker: ExistingCloudflareWorker | null = null;
+  if (options.reuseExistingWorker || readCloudflareLink(root)) {
+    if (
+      authEnabled ||
+      needsSandbox ||
+      needsAI ||
+      expectedCrons.length ||
+      desired.queues.length ||
+      preBuildMigrations.length
+    ) {
+      throw new Error(
+        'Link the existing site without adding runtime features, auth setup, or database migrations. Make those changes in a later deployment.',
+      );
+    }
+    existingWorker = await prepareExistingCloudflareDeploy({
+      root,
+      configPath,
+      accountId,
+      reuse: options.reuseExistingWorker,
+      runWrangler,
+      readExistingWorker: deps.readExistingWorker,
+    });
+    rootConfig = parseRootWranglerConfig(configPath);
+  }
+
   // 3f. Sandbox is the one public Void feature whose native Cloudflare runtime has a hard
   // Workers Paid dependency: `void/sandbox` emits a Cloudflare Container application. Verify the
   // account entitlement + the active credential BEFORE provisioning any inferred resources or
@@ -4120,6 +4162,11 @@ export async function runCloudflareDeploy(
   // The provisioner is read-first and idempotent, and its local lock/config postconditions remain
   // the single authority for resource creation.
   const provisionAndVerify = async (): Promise<void> => {
+    if (existingWorker) {
+      throw new Error(
+        'Linking cannot provision resources. Configure the existing resource IDs before deploying.',
+      );
+    }
     // Re-verify the uploader immediately before the credentialed provisioner, which runs
     // `wrangler <res> create` with the CF token. Nothing between `whoami` and here runs project
     // code, so this is defense-in-depth against the same probe-swap vector — against the one
@@ -4459,6 +4506,11 @@ export async function runCloudflareDeploy(
   // against exactly what is on disk now, not a pre-build snapshot. This one set feeds both
   // the auth-schema check (8c) and the local migration gates (8d).
   const migrations = collectMigrations(migrationsDir);
+  if (existingWorker && migrations.length) {
+    throw new Error(
+      'The build added database migrations. Link the existing site before making schema changes.',
+    );
+  }
 
   // A build plugin can add migrations after the pre-build source scan. Require the production URL
   // again against the post-build ground truth so no injected migration can be silently skipped.
@@ -4476,6 +4528,10 @@ export async function runCloudflareDeploy(
   // auth-schema check + local migration gates, all against that ground truth. The only
   // project code that runs does so in the isolated `validate-emitted` probe (8b).
   const emitted = (deps.readEmittedWorkerVars ?? readEmittedWorkerVarsDefault)(root);
+  if (existingWorker) {
+    const generated = readGeneratedDeployConfig(root);
+    assertExistingCloudflareConfig(existingWorker, generated.config, true);
+  }
   if (!emitted.ok) {
     log.error(
       [
@@ -4491,6 +4547,11 @@ export async function runCloudflareDeploy(
   const schemaSecretKeys = schemaFacts.hasSchema
     ? schemaFacts.secretKeys.filter((key) => !(authEnabled && key === BETTER_AUTH_SECRET_NAME))
     : [];
+  if (existingWorker && schemaSecretKeys.some((key) => Object.hasOwn(emittedVars, key))) {
+    throw new Error(
+      'Linking preserves existing encrypted secrets. Remove local secret overrides and make secret changes after the handoff.',
+    );
+  }
 
   // Explicit schema secrets are about to be promoted, so classify warnings
   // against the plaintext vars that will actually remain in the artifact.
@@ -5051,9 +5112,28 @@ export async function runCloudflareDeploy(
     verifyUploader: assertUploaderStillPinned,
     workerName,
     configPath: generatedConfigPath,
+    preserveTriggers: existingWorker !== null,
+    expectedPreviousVersionId: existingWorker?.versionId,
+    validateUploadedVersion: existingWorker
+      ? async (versionId) => {
+          if (!assertUploaderStillPinned()) {
+            throw new Error('The deployment uploader changed.');
+          }
+          const uploaded = await (deps.readExistingWorker ?? readExistingCloudflareWorker)({
+            runWrangler,
+            configPath: generatedConfigPath,
+            workerName,
+            versionId,
+          });
+          assertCloudflareBindingsPreserved(existingWorker, uploaded);
+        }
+      : undefined,
     message: encodeCloudflareVersionMessage(
       migrations.map((migration) => migration.name),
-      readCloudflareTriggerConfig(generatedConfigPath),
+      {
+        ...readCloudflareTriggerConfig(generatedConfigPath, configPath),
+        ...(existingWorker ? { preserve: true } : {}),
+      },
     ),
     allowFirstDeploymentBootstrap: workerWasMissingBeforeSecretProvisioning,
     readinessHeaders: cloudflareWorkerReadinessHeaders(),
@@ -5079,9 +5159,12 @@ export async function runCloudflareDeploy(
     );
     return exit(1);
   }
+  if (existingWorker) {
+    completeCloudflareLink(root);
+  }
   acknowledgeWranglerManagedQueueRemovals(configPath, queueConsumerCleanup);
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
-  const publishedTraffic = readCloudflareTriggerConfig(generatedConfigPath);
+  const publishedTraffic = readCloudflareTriggerConfig(generatedConfigPath, configPath);
   writeWranglerPublishedTrafficSnapshot(
     configPath,
     {
@@ -5105,6 +5188,11 @@ export async function runCloudflareDeploy(
  * default wrangler.jsonc path when none exists yet — the provisioner creates it.
  */
 function discoverRootWranglerConfig(root: string): string {
+  if (existsSync(join(root, 'wrangler.toml'))) {
+    throw new Error(
+      'Found wrangler.toml. Direct Cloudflare deployment needs one root wrangler.jsonc or wrangler.json with the same settings. Convert the config before deploying.',
+    );
+  }
   for (const name of ['wrangler.jsonc', 'wrangler.json']) {
     const candidate = join(root, name);
     if (existsSync(candidate)) {
@@ -5405,7 +5493,7 @@ async function runCloudflareStaticDeploy(
 ): Promise<void> {
   const exit = deps.exit ?? ((code: number): never => process.exit(code));
   const configPath = discoverRootWranglerConfig(root);
-  const rootConfig = parseRootWranglerConfig(configPath);
+  let rootConfig = parseRootWranglerConfig(configPath);
   let apiBaseUrl: string;
   try {
     apiBaseUrl = resolveDeployTransport(root, rootConfig);
@@ -5437,6 +5525,7 @@ async function runCloudflareStaticDeploy(
       deps.runWrangler ?? createDeployWranglerRunner(root, undefined, apiBaseUrl);
     try {
       accountId = await chooseCloudflareDeployAccount({
+        persist: !(options.reuseExistingWorker || readCloudflareLink(root)),
         beforeWranglerRun: uploaderIsPinned,
         configPath,
         root,
@@ -5459,8 +5548,6 @@ async function runCloudflareStaticDeploy(
   }
 
   const runWrangler = deps.runWrangler ?? createDeployWranglerRunner(root, accountId, apiBaseUrl);
-  const rootConfigBeforeBuild = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
-
   if (!uploaderIsPinned()) {
     return exit(1);
   }
@@ -5479,6 +5566,16 @@ async function runCloudflareStaticDeploy(
     return exit(1);
   }
 
+  const existingWorker = await prepareExistingCloudflareDeploy({
+    root,
+    configPath,
+    accountId,
+    reuse: options.reuseExistingWorker,
+    runWrangler,
+    readExistingWorker: deps.readExistingWorker,
+  });
+  rootConfig = parseRootWranglerConfig(configPath);
+  const rootConfigBeforeBuild = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
   if (preset.buildCommand && !options.skipBuild) {
     log.step('Building...');
     const buildChildEnv = scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl));
@@ -5561,6 +5658,10 @@ async function runCloudflareStaticDeploy(
     assetConfig: manifest.assetConfig ?? { not_found_handling: 'none' },
   });
 
+  if (existingWorker) {
+    assertExistingCloudflareConfig(existingWorker, parseRootWranglerConfig(staticConfigPath), true);
+  }
+
   const stagedAssetsDirectory = join(root, '.void', 'deploy', 'cloudflare', 'assets');
   stageCloudflareStaticAssets({
     sourceDirectory: preset.outputDir,
@@ -5572,8 +5673,27 @@ async function runCloudflareStaticDeploy(
     runWrangler,
     verifyUploader: uploaderIsPinned,
     configPath: staticConfigPath,
+    preserveTriggers: existingWorker !== null,
+    expectedPreviousVersionId: existingWorker?.versionId,
+    validateUploadedVersion: existingWorker
+      ? async (versionId) => {
+          if (!uploaderIsPinned()) {
+            throw new Error('The deployment uploader changed.');
+          }
+          const uploaded = await (deps.readExistingWorker ?? readExistingCloudflareWorker)({
+            runWrangler,
+            configPath: staticConfigPath,
+            workerName,
+            versionId,
+          });
+          assertCloudflareBindingsPreserved(existingWorker, uploaded);
+        }
+      : undefined,
     workerName,
-    message: encodeCloudflareVersionMessage([], readCloudflareTriggerConfig(staticConfigPath)),
+    message: encodeCloudflareVersionMessage([], {
+      ...readCloudflareTriggerConfig(staticConfigPath, configPath),
+      ...(existingWorker ? { preserve: true } : {}),
+    }),
     assetsDirectoryOverride: stagedAssetsDirectory,
     readinessHeaders: cloudflareWorkerReadinessHeaders(),
     workersDevSubdomain,
@@ -5594,9 +5714,12 @@ async function runCloudflareStaticDeploy(
     log.error(formatCloudflareActivationError(execution));
     return exit(1);
   }
+  if (existingWorker) {
+    completeCloudflareLink(root);
+  }
   acknowledgeWranglerManagedQueueRemovals(configPath, queueConsumerCleanup);
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
-  const publishedTraffic = readCloudflareTriggerConfig(staticConfigPath);
+  const publishedTraffic = readCloudflareTriggerConfig(staticConfigPath, configPath);
   writeWranglerPublishedTrafficSnapshot(
     configPath,
     {
@@ -5697,6 +5820,14 @@ async function runDeployInner(
 ): Promise<void> {
   // A missing field retains the historical Void behavior. New interactive
   // init runs always persist an explicit choice, with Cloudflare preselected.
+  const link = await maybeLinkCloudflareDeploy(root, options);
+  if (link === 'cancelled') {
+    log.info('Deployment cancelled.');
+    return;
+  }
+  if (link === 'existing') {
+    options = { ...options, platform: 'cloudflare', reuseExistingWorker: true };
+  }
   const platform = resolveDeploymentPlatform(root, options);
 
   if (platform === 'none') {
