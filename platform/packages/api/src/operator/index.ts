@@ -4,6 +4,7 @@ import type { ApiEnv } from '../env.ts';
 import { operatorAudit, operatorAuditRoutes } from './audit.ts';
 import { authenticatedSessionRoutes, operatorAuth, operatorSessionRoutes } from './auth.ts';
 import { OperatorError } from './common.ts';
+import { tenantRoutes } from './tenant-routes.ts';
 
 export const operatorApi = new Hono<ApiEnv>();
 operatorApi.onError((error, context) => {
@@ -47,6 +48,7 @@ operatorApi.use('*', operatorAuth);
 operatorApi.route('/', authenticatedSessionRoutes);
 operatorApi.use('*', operatorAudit);
 operatorApi.route('/', operatorAuditRoutes);
+operatorApi.route('/', tenantRoutes);
 operatorApi.notFound((context) =>
   context.json({ error: 'not_found', message: 'Unknown operator API endpoint.' }, 404),
 );
