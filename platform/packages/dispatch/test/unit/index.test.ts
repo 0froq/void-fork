@@ -1056,8 +1056,9 @@ describe('ISR (stale-while-revalidate)', () => {
     expect(response.headers.get('x-isr-cache')).toBe('STALE');
     expect(await response.text()).toBe('<html>stale</html>');
 
-    // Background revalidation + edge cache put
-    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
+    // Revalidation and any allowed stale re-warm share one ordered task, so a
+    // privacy eviction cannot race a separate stale cache put.
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
 
     // Wait for background write
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
@@ -2388,6 +2389,7 @@ describe('ISR respects response Cache-Control opt-out', () => {
     const ctx = createCtx();
     const response = await app.fetch(new Request('https://my-app.void.app/dashboard'), env, ctx);
     expect(response.headers.get('x-isr-cache')).toBe('STALE');
+    expect((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
 
     expect(kvStore.has(kvKey)).toBe(false);

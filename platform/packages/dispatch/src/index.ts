@@ -1145,6 +1145,7 @@ export default {
               );
             }
             if (stale) {
+              const staleCacheResponse = cacheResponse.clone();
               ctx.waitUntil(
                 revalidateInBackground(
                   env,
@@ -1158,13 +1159,14 @@ export default {
                   cached.createdAt + cached.ttl * 1000,
                   isrOriginalUrlVariant,
                   timeoutMs,
-                ),
+                ).then(async (sharedEntryChanged) => {
+                  if (!sharedEntryChanged) {
+                    await cache.put(cacheKey, staleCacheResponse);
+                  }
+                }),
               );
             }
             requestType = 'isr';
-            // A stale copy is being refreshed or evicted. Re-warming it here can
-            // race an authoritative Set-Cookie/private revalidation and restore
-            // the old body after that revalidation deletes every variant.
             if (!stale) {
               ctx.waitUntil(cache.put(cacheKey, cacheResponse.clone()));
             }
@@ -2159,7 +2161,7 @@ async function revalidateInBackground(
   staleSinceMs: number,
   originalUrl?: string | null,
   timeoutMs = 10000,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const worker = getWorker(env, routing);
     const revalidationStartedAt = Date.now();
@@ -2176,7 +2178,7 @@ async function revalidateInBackground(
       'dispatch',
     );
     if (isEventStreamResponse(response)) {
-      return;
+      return false;
     }
     // Capture the ORIGIN page's OWN pre-fallback status. Only a genuine removal
     // signal (404/410 Gone) may later drive grace-eviction; a transient 5xx / 429 /
@@ -2197,7 +2199,7 @@ async function revalidateInBackground(
     });
     response = fallbackResult.response;
     if (isEventStreamResponse(response)) {
-      return;
+      return false;
     }
     const assetFallbackResult = await maybeServeWfpAssetFallback({
       env,
@@ -2209,7 +2211,7 @@ async function revalidateInBackground(
     });
     response = assetFallbackResult.response;
     if (isEventStreamResponse(response)) {
-      return;
+      return false;
     }
     const ttl = resolveRevalidateTtl(response, defaultTtl);
     const cache = caches.default;
@@ -2276,6 +2278,7 @@ async function revalidateInBackground(
         }),
       );
       await populateJsonEdgeCache(cache, jsonCacheKey, response, ttl, 'HIT');
+      return true;
     } else if (
       response.status === 200 &&
       !isApiPath(effectiveBgPathname) &&
@@ -2294,7 +2297,12 @@ async function revalidateInBackground(
       // serving the last known-good entry (stale-while-revalidate resilience). The
       // write gate already refuses to cache non-authoritative content, so eviction
       // must mirror it. Removes R2/KV + HTML + JSON edge.
-      await evictSharedEntry();
+      try {
+        await evictSharedEntry();
+      } catch (error) {
+        console.error('ISR privacy eviction failed:', error);
+      }
+      return true;
     } else if (
       (originalStatus === 404 || originalStatus === 410) &&
       Date.now() - staleSinceMs > ISR_STALE_EVICT_GRACE_SECONDS * 1000
@@ -2311,10 +2319,17 @@ async function revalidateInBackground(
       // request), so it never reaches this branch. Measuring from stale-onset (not
       // creation) means a long-TTL entry still gets the full grace and a transient
       // failure right after expiry keeps serving stale within the grace.
-      await evictSharedEntry();
+      try {
+        await evictSharedEntry();
+      } catch (error) {
+        console.error('ISR stale-entry eviction failed:', error);
+      }
+      return true;
     }
+    return false;
   } catch (err) {
     console.error('ISR revalidation failed:', err);
+    return false;
   }
 }
 
