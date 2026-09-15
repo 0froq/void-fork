@@ -43,6 +43,7 @@ import {
   preparePlatformDatabaseConnection,
   PlatformWorkerRecoveryIncompleteError,
   r2BucketConfigHash,
+  readPlatformWorkerDeployments,
   readPlatformDatabaseLifecycleManifestConnection,
   readActivePlatformWorkerSnapshot,
   recoverFailedPlatformWorkerDeployment,
@@ -308,6 +309,72 @@ describe('platform installer', () => {
         'version-ours',
         'deployment-previous',
       ),
+    ).toEqual({ kind: 'concurrent-after' });
+  });
+
+  it('normalizes Wrangler deployment history to newest first before lineage checks', async () => {
+    const history = [
+      {
+        created_on: '2026-09-15T01:00:00.000Z',
+        id: 'deployment-previous',
+        versions: [{ percentage: 100, version_id: 'version-previous' }],
+      },
+      {
+        created_on: '2026-09-15T01:01:00.000Z',
+        id: 'deployment-staging',
+        versions: [
+          { percentage: 90, version_id: 'version-previous' },
+          { percentage: 10, version_id: 'version-ours' },
+        ],
+      },
+      {
+        created_on: '2026-09-15T01:02:00.000Z',
+        id: 'deployment-enabled',
+        versions: [{ percentage: 100, version_id: 'version-ours' }],
+      },
+    ];
+    const commands: Array<ReadonlyArray<string>> = [];
+    const deployments = await readPlatformWorkerDeployments(
+      '/tmp/wrangler.json',
+      'account',
+      'void-api',
+      async (args) => {
+        commands.push(args);
+        return { status: 0, stderr: '', stdout: JSON.stringify(history) };
+      },
+    );
+
+    expect(commands).toEqual([
+      ['deployments', 'list', '--config', '/tmp/wrangler.json', '--name', 'void-api', '--json'],
+    ]);
+    expect(deployments.map((deployment) => deployment.id)).toEqual([
+      'deployment-enabled',
+      'deployment-staging',
+      'deployment-previous',
+    ]);
+    expect(
+      classifyPlatformWorkerDeploymentLineage(deployments, 'version-ours', 'deployment-previous'),
+    ).toEqual({ deploymentId: 'deployment-enabled', kind: 'intervening' });
+
+    const raced = await readPlatformWorkerDeployments(
+      '/tmp/wrangler.json',
+      'account',
+      'void-api',
+      async () => ({
+        status: 0,
+        stderr: '',
+        stdout: JSON.stringify([
+          ...history,
+          {
+            created_on: '2026-09-15T01:03:00.000Z',
+            id: 'deployment-racer',
+            versions: [{ percentage: 100, version_id: 'version-racer' }],
+          },
+        ]),
+      }),
+    );
+    expect(
+      classifyPlatformWorkerDeploymentLineage(raced, 'version-ours', 'deployment-previous'),
     ).toEqual({ kind: 'concurrent-after' });
   });
 

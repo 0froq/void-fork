@@ -2994,35 +2994,45 @@ export async function readPlatformWorkerDeployments(
   if (!Array.isArray(value)) {
     throw new Error(`platform: Wrangler returned malformed deployment history for ${workerName}.`);
   }
-  return value.map((entry) => {
-    if (
-      !entry ||
-      typeof entry !== 'object' ||
-      typeof (entry as { id?: unknown }).id !== 'string' ||
-      !Array.isArray((entry as { versions?: unknown }).versions)
-    ) {
-      throw new Error(
-        `platform: Wrangler returned malformed deployment history for ${workerName}.`,
-      );
-    }
-    const versions = (entry as { versions: Array<unknown> }).versions.map((version) => {
+  return value
+    .map((entry, index) => {
       if (
-        !version ||
-        typeof version !== 'object' ||
-        typeof (version as { version_id?: unknown }).version_id !== 'string' ||
-        !Number.isFinite(Number((version as { percentage?: unknown }).percentage))
+        !entry ||
+        typeof entry !== 'object' ||
+        typeof (entry as { id?: unknown }).id !== 'string' ||
+        typeof (entry as { created_on?: unknown }).created_on !== 'string' ||
+        !Array.isArray((entry as { versions?: unknown }).versions)
       ) {
         throw new Error(
           `platform: Wrangler returned malformed deployment history for ${workerName}.`,
         );
       }
-      return {
-        percentage: Number((version as { percentage: unknown }).percentage),
-        versionId: (version as { version_id: string }).version_id,
-      };
-    });
-    return { id: (entry as { id: string }).id, versions };
-  });
+      const createdAt = Date.parse((entry as { created_on: string }).created_on);
+      if (!Number.isFinite(createdAt)) {
+        throw new Error(
+          `platform: Wrangler returned malformed deployment history for ${workerName}.`,
+        );
+      }
+      const versions = (entry as { versions: Array<unknown> }).versions.map((version) => {
+        if (
+          !version ||
+          typeof version !== 'object' ||
+          typeof (version as { version_id?: unknown }).version_id !== 'string' ||
+          !Number.isFinite(Number((version as { percentage?: unknown }).percentage))
+        ) {
+          throw new Error(
+            `platform: Wrangler returned malformed deployment history for ${workerName}.`,
+          );
+        }
+        return {
+          percentage: Number((version as { percentage: unknown }).percentage),
+          versionId: (version as { version_id: string }).version_id,
+        };
+      });
+      return { createdAt, id: (entry as { id: string }).id, index, versions };
+    })
+    .sort((left, right) => right.createdAt - left.createdAt || left.index - right.index)
+    .map(({ id, versions }) => ({ id, versions }));
 }
 
 function deploymentRunsOnlyVersion(
