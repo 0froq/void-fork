@@ -36,7 +36,6 @@ export type ApiEnv = Env & {
     JWT_SECRET: string;
     GITHUB_CLIENT_ID: string;
     GITHUB_CLIENT_SECRET: string;
-    GITHUB_PREVIEW_REPO_PAT?: string;
     /**
      * GitHub App credentials for the "Deploy on GitHub" build system. Distinct
      * from the OAuth-login `GITHUB_CLIENT_ID/SECRET` above. All optional so old

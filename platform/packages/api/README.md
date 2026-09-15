@@ -148,8 +148,7 @@ parity, dry runs, and capability guards in `test/integration/operator-*.test.ts`
 3. looks up an existing OAuth account
 4. if needed, links the provider to an existing user with the same email
 5. otherwise creates a new user
-6. for GitHub logins, optionally grants preview access to a configured GitHub repository
-7. signs a JWT and redirects back:
+6. signs a JWT and redirects back:
    - dashboard redirects receive a short-lived `?code=...` for `POST /auth/exchange`
    - new CLI redirects with `code_challenge_method=S256` receive a short-lived `?code=...` for `POST /auth/cli/token`
    - legacy localhost CLI redirects still receive `?token=...`
@@ -258,7 +257,6 @@ Optional vars:
 
 - `AUTH_REDIRECT_URI`
 - `DASHBOARD_URL`
-- `GITHUB_PREVIEW_REPO_PAT`
 - `VOID_PROXY_SERVICE`
 - `SITE_DOMAIN`
 - `GITHUB_APP_ID` — Deploy-on-GitHub App identifier
@@ -268,7 +266,7 @@ Optional vars:
 
 The four `GITHUB_APP_*` secrets are optional: when unset, `/webhooks/github` and `/auth/github-oidc` return `503` and the rest of the worker runs normally. They are the App for Deploy-on-GitHub, separate from the sign-in OAuth app above.
 
-Set `GITHUB_PREVIEW_REPO_PAT` to automatically invite GitHub-authenticated users to `void-sdk/void` with read-only access. The PAT should be a fine-grained token with `Administration` repository permission `write` for that repository.
+Administrators manage access with `void platform signup` and `void platform invitation`. Signup eligibility comes from the installation's own allowlist and bootstrap administrator configuration.
 
 ## Tests
 
