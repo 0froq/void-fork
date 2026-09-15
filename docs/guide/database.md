@@ -288,7 +288,7 @@ INSERT INTO messages (text) VALUES ('Hello from SQL');
 
 ## Schema-Derived Validators
 
-You can derive request validators from your Drizzle tables with [`void/drizzle-zod`](../reference/api.md#subpath-exports), [`void/drizzle-valibot`](../reference/api.md#subpath-exports), or [`void/drizzle-arktype`](../reference/api.md#subpath-exports). These adapters use Void's bundled Drizzle version, keeping the validators compatible with your table types.
+You can derive request validators from your Drizzle tables with [`void/drizzle-zod`](../reference/api.md#user-facing-imports), [`void/drizzle-valibot`](../reference/api.md#user-facing-imports), or [`void/drizzle-arktype`](../reference/api.md#user-facing-imports). These adapters use Void's bundled Drizzle version, keeping the validators compatible with your table types.
 
 ::: code-group
 

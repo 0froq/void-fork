@@ -57,9 +57,9 @@ const referenceItems = [
       { text: 'Fetch Client', link: '/reference/api#fetch-client' },
       { text: 'Database', link: '/reference/api#database' },
       { text: 'Types', link: '/reference/api#types' },
-      { text: 'Environment Types', link: '/reference/api#environment-types' },
+      { text: 'Environment', link: '/reference/api#environment' },
       { text: 'Framework Adaptors', link: '/reference/api#framework-adaptors' },
-      { text: 'Subpath Exports', link: '/reference/api#subpath-exports' },
+      { text: 'User-Facing Imports', link: '/reference/api#user-facing-imports' },
     ],
   },
 ];

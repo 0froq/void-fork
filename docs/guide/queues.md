@@ -14,7 +14,7 @@ Create a file such as `queues/emails.ts` or `queues/order-notifications.ts`. The
 Nested paths become part of the queue name: `queues/order/notifications.ts` produces `"order/notifications"`. That works locally, but Cloudflare rejects `/` in queue names. Use `queues/order-notifications.ts` for a queue you intend to deploy.
 :::
 
-Each queue file should export a default handler wrapped with [`defineQueue`](../reference/api.md#definequeuet-handler). The generic `<T>` parameter defines the message body type. That is the type of each `msg.body` in the batch, and it is also used by the typed `queues` proxy for `send()` calls.
+Each queue file should export a default handler wrapped with [`defineQueue`](../reference/api.md#definequeue-t-handler). The generic `<T>` parameter defines the message body type. That is the type of each `msg.body` in the batch, and it is also used by the typed `queues` proxy for `send()` calls.
 
 ```ts
 // queues/emails.ts

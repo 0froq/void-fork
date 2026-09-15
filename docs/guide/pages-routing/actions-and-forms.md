@@ -263,7 +263,7 @@ const form = useForm('/users/:id?update', { name: '' }, { params: { id } });
 <form action={form.put}>{/* submits to /users/42?update */}</form>
 ```
 
-The URL, body fields, and error keys are typed per action. Each named action gets its own validator schema. See [Type Safety: Action -> useForm](../type-safety#action-useform) for the full typing story.
+Each named action has its own validator schema, which supplies types for its URL, body, and error keys. See [Type Safety](../type-safety#action-%E2%86%92-useform) for an example.
 
 ## `action()` Helper
 
