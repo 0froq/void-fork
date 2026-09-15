@@ -70,7 +70,7 @@ Paths in this file are relative to `platform/` unless they begin with `../`. For
 | `vp run test:all`                           | Run formatting, linting, all builds, typechecks, and all SDK/platform tests |
 | `vp run deploy`                             | Deploy `api` → `proxy` → `tail` → `dispatch` → `dashboard`                  |
 | `vp run deploy:dashboard`                   | Deploy the dashboard only                                                   |
-| `vp run deploy:staging`                     | Legacy/manual per-service staging deploy (CI uses `void platform upgrade`)  |
+| `vp run deploy:staging`                     | Deploy the first-party Void Cloud staging environment                       |
 | `vp run deploy:staging:dashboard`           | Deploy the staging dashboard only                                           |
 
 The `@voidcloud/platform` workspace package retains the dashboard-only `dev` and `build` scripts. Dashboard deploys run after the platform workers in the platform deploy pipeline.
