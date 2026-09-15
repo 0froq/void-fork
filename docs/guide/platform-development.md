@@ -160,4 +160,12 @@ If your fork has a released platform version, set the repository variable `VOID_
 
 The upstream repository also contains workflows for deploying Void Cloud and publishing the official npm packages. Forks should configure their own release workflow around the built CLI and `platform upgrade --runtime`; the [source-build CI example](./self-hosted-platform.md#continuously-deploy-a-source-build) shows the required inputs. Keep production credentials in protected environments restricted to the appropriate release refs.
 
+Public releases use matching versions for the CLI, scaffolder, adapters, and
+packaged platform. The publish workflow rejects mismatched versions and previously
+unpublished `void` versions that npm cannot reuse. Stable versions use `latest`;
+prereleases use their named channel, such as `beta` or `rc`. Numeric prereleases
+use `next`. The scaffolder installs its exact matching CLI version, so
+`create-void@beta` cannot silently select the stable CLI. Packaged platform
+runtimes record the release commit as their source revision.
+
 For implementation history, use the design archive at `platform/meta/design-docs/README.md`. Its proposals explain earlier decisions; the source and current guides define the supported behavior.
