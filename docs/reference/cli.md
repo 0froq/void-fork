@@ -162,6 +162,11 @@ In a non-interactive shell, supply a URL or explicit target. Cloudflare requires
 
 OAuth login. You choose GitHub or Google at the prompt, and the token is saved in the operating-system keychain, scoped to the platform origin. Login fails closed when no keychain is available instead of writing the token to a plaintext file; headless environments use `VOID_TOKEN` from their secret manager.
 
+Set `VOID_API_URL` alongside `VOID_TOKEN` to identify the platform that issued it.
+A token without an API URL is only used for Void Cloud's production API; a saved
+connection or project cannot forward it to another platform. To use a platform's
+saved login instead, unset `VOID_TOKEN`.
+
 This is optional if you already completed auth during `void connect` or the interactive `void init` flow.
 
 ### `void auth logout`

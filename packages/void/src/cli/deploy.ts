@@ -6499,13 +6499,15 @@ async function runManagedDeploy(
           );
         }
         cliLog.info('github_oidc_exchange_start', { slug });
-        token = await exchangeGithubOidcForDeployToken(getApiUrl(root), slug);
+        const tokenOrigin = getApiUrl(root);
+        token = await exchangeGithubOidcForDeployToken(tokenOrigin, slug);
         maskGithubActionsSecret(token);
         // Keep source accounting and expired-token handling consistent with an
         // explicit CI token. `buildEnv()` always removes this value before any
         // project-controlled child starts; managed prerender obtains a separate
         // proxy-only token from the authenticated platform client.
         process.env.VOID_TOKEN = token;
+        process.env.VOID_API_URL = tokenOrigin;
         cliLog.info('github_oidc_exchange_success', { slug });
       }
       // Local dev / non-Actions (or Actions without id-token permission): fall

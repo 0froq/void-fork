@@ -95,19 +95,30 @@ export function getSiteDomain(root: string = process.cwd()): string {
 
 /**
  * Read the deploy token.
- * Priority: VOID_TOKEN env var > system keychain > ~/.void/config.json (auto-migrated)
+ * Priority: origin-bound VOID_TOKEN > system keychain > migrated config.
+ * An unscoped environment token retains its historical Void Cloud destination.
  */
 export function getToken(root: string = process.cwd()): string | null {
   const envToken = process.env.VOID_TOKEN;
-  if (envToken) {
-    return envToken;
-  }
-
   let apiUrl: string;
   try {
     apiUrl = getApiUrl(root);
-  } catch {
+  } catch (error) {
+    if (envToken) {
+      throw error;
+    }
     return null;
+  }
+  if (envToken) {
+    const tokenOrigin = process.env.VOID_API_URL
+      ? normalizePlatformApiUrl(process.env.VOID_API_URL)
+      : DEFAULT_API_URL;
+    if (apiUrl !== tokenOrigin) {
+      throw new Error(
+        `auth: VOID_TOKEN is not bound to ${apiUrl}. Set VOID_API_URL to this platform's URL with its matching token, or unset VOID_TOKEN to use the saved login.`,
+      );
+    }
+    return envToken;
   }
   const account = platformCredentialAccount(apiUrl);
 
