@@ -22,6 +22,11 @@ import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { detectFramework, type DetectedFramework } from '../plugin-inference.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import { detectAgents, getAgentById, getPackageDir, type AgentConfig } from './agents.ts';
+import {
+  cloudflareAuthEnvironment,
+  ensureCloudflareAuthentication,
+  type CloudflareAccount,
+} from './cloudflare-auth.ts';
 import { maybeSetupDeployProject } from './deploy-setup.ts';
 import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { cliTitle } from './output.ts';
@@ -1910,38 +1915,6 @@ export async function ensureVoidPlatformConnection(
   return discovery;
 }
 
-type CloudflareAccount = {
-  id: string;
-  name: string;
-};
-
-function parseCloudflareAccounts(stdout: string): Array<CloudflareAccount> | null {
-  let value: unknown;
-  try {
-    value = JSON.parse(stdout.trim());
-  } catch {
-    return null;
-  }
-  const record = asRecord(value);
-  if (record?.loggedIn !== true || !Array.isArray(record.accounts)) {
-    return null;
-  }
-
-  const accounts: Array<CloudflareAccount> = [];
-  for (const account of record.accounts) {
-    const item = asRecord(account);
-    if (!item || typeof item.id !== 'string' || item.id.length === 0) {
-      continue;
-    }
-    accounts.push({
-      id: item.id,
-      name:
-        typeof item.name === 'string' && item.name.length > 0 ? item.name : 'Cloudflare account',
-    });
-  }
-  return accounts;
-}
-
 function runInitWrangler(
   root: string,
   args: Array<string>,
@@ -1951,6 +1924,7 @@ function runInitWrangler(
   const result = spawnSync(command, [...prefix, ...args], {
     cwd: root,
     encoding: 'utf-8',
+    env: cloudflareAuthEnvironment(),
     stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
   });
   return {
@@ -1971,45 +1945,25 @@ async function setupCloudflareDeployment(root: string): Promise<void> {
     log.info(`${basename(initialWrite.configPath)} is ready for Cloudflare deployment`);
   }
 
-  const readAccounts = (): Array<CloudflareAccount> | null => {
-    const result = runInitWrangler(root, ['whoami', '--json', '-c', initialWrite.configPath], true);
-    return result.status === 0 ? parseCloudflareAccounts(result.stdout) : null;
-  };
-
-  let accounts = readAccounts();
-  if (!accounts) {
-    const shouldLogin = await confirm({
-      message: 'Log in to Cloudflare with Wrangler now?',
-      initialValue: true,
-    });
-    if (isCancel(shouldLogin)) {
-      cancel('Setup cancelled.');
-      process.exit(0);
-    }
-    if (!shouldLogin) {
-      note(
-        `Run \`wrangler login\`, then rerun \`void init\` to select an account.\n${basename(initialWrite.configPath)} is already created.`,
-        'Cloudflare deployment',
-      );
-      return;
-    }
-
-    const login = runInitWrangler(root, ['login'], false);
-    if (login.status !== 0) {
-      log.warn('Wrangler login did not complete. Run `wrangler login`, then rerun `void init`.');
-      return;
-    }
-    accounts = readAccounts();
-    if (!accounts) {
-      log.warn(
-        'Wrangler login completed, but the Cloudflare account could not be read. Rerun `void init`.',
-      );
-      return;
-    }
+  let accounts: ReadonlyArray<CloudflareAccount>;
+  try {
+    ({ accounts } = await ensureCloudflareAuthentication({
+      interactive: true,
+      requireAccounts: true,
+      runWrangler: (args, capture) => runInitWrangler(root, [...args], capture),
+      whoamiArgs: ['-c', initialWrite.configPath],
+    }));
+  } catch (error) {
+    log.warn(error instanceof Error ? error.message : String(error));
+    note(
+      `${basename(initialWrite.configPath)} is ready. Run \`void init\` again when you want to finish Cloudflare setup.`,
+      'Cloudflare deployment',
+    );
+    return;
   }
 
   if (accounts.length === 0) {
-    log.warn('Wrangler is authenticated but returned no Cloudflare accounts.');
+    log.warn('Cloudflare authentication returned no accounts.');
     return;
   }
 

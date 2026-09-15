@@ -2771,7 +2771,7 @@ export default config;
           : { status: 0, stdout: '', stderr: '' },
       );
       mockConfirm.mockImplementation((options: { message?: string }) => {
-        if (options.message === 'Log in to Cloudflare with Wrangler now?') {
+        if (options.message === 'Sign in to Cloudflare in your browser?') {
           return false;
         }
         if (
@@ -2807,7 +2807,7 @@ export default config;
         expect.anything(),
       );
       expect(mockNote).toHaveBeenCalledWith(
-        expect.stringContaining('Run `wrangler login`'),
+        expect.stringContaining('Run `void init` again'),
         'Cloudflare deployment',
       );
       expect(mockGetToken).not.toHaveBeenCalled();
@@ -2844,7 +2844,7 @@ export default config;
       expect(wrangler).toContain('"compatibility_date":');
       expect(wrangler).toContain('"account_id": "account-1"');
       expect(mockConfirm).not.toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Log in to Cloudflare with Wrangler now?' }),
+        expect.objectContaining({ message: 'Sign in to Cloudflare in your browser?' }),
       );
       expect(mockSelect).not.toHaveBeenCalledWith(
         expect.objectContaining({ message: 'Choose a Cloudflare account:' }),
@@ -2860,7 +2860,7 @@ export default config;
       writeExistingAstroProject(root);
       selectCloudflareDuringInit('account-2');
       mockConfirm.mockImplementation((options: { message?: string }) =>
-        options.message === 'Log in to Cloudflare with Wrangler now?' ? true : undefined,
+        options.message === 'Sign in to Cloudflare in your browser?' ? true : undefined,
       );
       let whoamiCalls = 0;
       mockSpawnSync.mockImplementation((_command, args) => {
@@ -2938,13 +2938,13 @@ export default config;
     }
   });
 
-  it('continues without an account when Wrangler login fails', async () => {
+  it('continues without an account when Cloudflare sign-in fails', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
       writeExistingAstroProject(root);
       selectCloudflareDuringInit();
       mockConfirm.mockImplementation((options: { message?: string }) =>
-        options.message === 'Log in to Cloudflare with Wrangler now?' ? true : undefined,
+        options.message === 'Sign in to Cloudflare in your browser?' ? true : undefined,
       );
       mockSpawnSync.mockImplementation((_command, args) =>
         Array.isArray(args) && args.includes('login')
@@ -2966,7 +2966,7 @@ export default config;
         ),
       ).toHaveLength(1);
       expect(mockLogWarn).toHaveBeenCalledWith(
-        'Wrangler login did not complete. Run `wrangler login`, then rerun `void init`.',
+        'Cloudflare browser sign-in did not complete. Run `void cloudflare login` to try again.',
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -3003,7 +3003,7 @@ export default config;
         ),
       ).toBe(false);
       expect(mockConfirm).not.toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Log in to Cloudflare with Wrangler now?' }),
+        expect.objectContaining({ message: 'Sign in to Cloudflare in your browser?' }),
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

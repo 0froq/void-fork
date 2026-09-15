@@ -30,6 +30,7 @@ Use this page as a command reference. If you are setting up a project for the fi
 | `void env types`                  | Regenerate .void/env.d.ts from env.ts                           |
 | `void env example`                | Refresh the void-managed block in .env.example                  |
 | `void auth login`                 | Authenticate with Void                                          |
+| `void cloudflare login`           | Authenticate with Cloudflare through Void                       |
 | `void platform install`           | Install a company Void platform in Cloudflare                   |
 | `void platform connect <url>`     | Connect the CLI to a Void platform                              |
 | `void project link`               | Link directory to a project                                     |
@@ -88,12 +89,12 @@ After that, the full interactive flow walks through:
 3. **Agent instructions:** detects agents once and injects instructions into `CLAUDE.md` or `AGENTS.md`.
 4. **Skills:** links Void skills using the same detected or selected agent context.
 5. **Demo code:** for existing non-Pages projects, optionally scaffolds a `db/migrations/` directory plus an API route and typed fetch example.
-6. **Deployment platform:** asks where `void deploy` should send the app: Cloudflare (the default), Void, or Skip deployment setup. The choice is stored as `platform` in `.void/project.json`. Choosing Cloudflare creates or augments `wrangler.jsonc`, checks `wrangler whoami`, offers to run `wrangler login` when needed, and writes the selected account as `account_id` (automatically when Wrangler returns only one account).
+6. **Deployment platform:** asks where `void deploy` should send the app: Cloudflare (the default), Void, or Skip deployment setup. The choice is stored as `platform` in `.void/project.json`. Choosing Cloudflare creates or augments `wrangler.jsonc`, checks the Cloudflare session through Void's bundled tooling, opens secure browser sign-in when needed, and writes the selected account as `account_id` (automatically when only one account is available).
 7. **GitHub Actions:** optionally creates `.github/workflows/void-deploy.yml` for the selected target. Cloudflare workflows run `void deploy --platform cloudflare` with `CLOUDFLARE_API_TOKEN` and pass the optional `DATABASE_URL` secret needed by PostgreSQL/MySQL apps. Void workflows use the selected platform's API URL and are offered only when its discovery document advertises GitHub Actions support.
 8. **`env.ts` scaffold:** if the project has no `env.ts` but has `.env` / `.env.example` / `.env.local` / `.env.development*` files on disk, generates an `env.ts` pre-populated with their keys. Values get conservative type inference (`boolean`/`url`/`number`/`string`) — the file carries a banner nudging you to tighten anything the heuristic got wrong.
 9. **Void project setup:** when Void is selected, optionally logs you in, lets you select or create a project, and adds the link to `.void/project.json` so your first deploy can just be `void deploy`.
 
-If Cloudflare login is declined or does not complete, initialization still finishes with the Wrangler config in place. Run `wrangler login` and then rerun `void init` to select and save the account.
+If Cloudflare sign-in is declined or does not complete, initialization still finishes with the configuration in place. Rerun `void init`, or use `void cloudflare login`, when you are ready.
 
 If no agent is detected, `void init` asks you to choose one from a short list (Claude, Cursor, Codex, Gemini CLI, Generic). That single choice is reused across all agent steps.
 
@@ -140,6 +141,16 @@ Prints your current login.
 ### `void auth token`
 
 Copies your auth token to the system clipboard. Useful for setting up CI secrets.
+
+## Cloudflare authentication
+
+Void ships and invokes its own compatible Cloudflare tooling. Users do not need to install or run Wrangler directly. Browser credentials are stored in the operating-system keychain.
+
+- `void cloudflare login` — securely sign in with browser OAuth.
+- `void cloudflare status` — show the accessible Cloudflare accounts without exposing credentials.
+- `void cloudflare logout` — remove the local browser session.
+
+Interactive `void init` and `void deploy --platform cloudflare` invoke the same login flow automatically when necessary. Non-interactive CI must set `CLOUDFLARE_API_TOKEN`.
 
 ## Project commands
 
@@ -399,7 +410,7 @@ That fallback is mainly for projects that skipped Void project setup during `voi
 
 ### `void deploy --platform cloudflare`
 
-Deploy the built worker straight to **your own** Cloudflare account instead of the Void platform. This path uses your local `wrangler` auth and your root `wrangler.jsonc` — no Void login or linked project is involved.
+Deploy the built worker straight to **your own** Cloudflare account instead of the Void platform. Void handles Cloudflare authentication through its bundled tooling and uses your root `wrangler.jsonc`; no Void platform login or linked project is involved.
 
 ```
 void deploy --platform cloudflare
@@ -407,14 +418,14 @@ void deploy --platform cloudflare
 
 Prerequisites:
 
-- A Cloudflare account must be **pinned**: set `account_id` in your root `wrangler.jsonc`, or export `CLOUDFLARE_ACCOUNT_ID`. A multi-account token otherwise makes wrangler prompt (or error in CI), which Void cannot intercept.
-- Authenticate wrangler (`wrangler login`, or set `CLOUDFLARE_API_TOKEN`). Deploy needs `Workers Scripts:Edit` plus read on the resources you bind, and per-product `*:Edit` whenever it must create a missing D1 database, KV namespace, R2 bucket, Queue, or Hyperdrive config.
+- On an interactive first deploy, Void signs you in, selects your sole account automatically or shows an account picker, and saves `account_id`. In CI, set `CLOUDFLARE_ACCOUNT_ID` when the token can access multiple accounts.
+- Interactive deploys use secure browser OAuth automatically. CI must set `CLOUDFLARE_API_TOKEN`. Deploy needs `Workers Scripts:Edit` plus read on the resources you bind, and per-product `*:Edit` whenever it must create a missing D1 database, KV namespace, R2 bucket, Queue, or Hyperdrive config.
 - If Cloudflare Access protects the Worker's `workers.dev` hostname, export a complete `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` service-token pair admitted by that Access policy. For an interactive local deploy, `CF_ACCESS_TOKEN="$(cloudflared access token --app=https://<worker>.<account>.workers.dev)"` also accepts the current user's short-lived Access session. Void uses these credentials only for a matching HTTPS readiness probe, does not expose them to project build code or Wrangler, and does not store them.
 - In a fresh CI checkout, set `CLOUDFLARE_WORKERS_SUBDOMAIN` to the account subdomain (for example `my-team`) when the Worker has no version preview URL, as with Durable Objects. Local deploys learn and cache it in ignored `.void/cloudflare.json` from Wrangler's first reported workers.dev URL.
-- `CLOUDFLARE_API_TOKEN` is **required** to provision a Hyperdrive config for the first time — `wrangler login` covers every other resource, but wrangler exposes no machine-readable Hyperdrive list, so Void checks for an existing config over the Cloudflare REST API, which OAuth cannot authenticate. Without a token, automatic provisioning stops before touching your account. Alternatively create the Hyperdrive config yourself and put its id in `wrangler.jsonc` — deploying an already-provisioned Hyperdrive app needs no token.
+- `CLOUDFLARE_API_TOKEN` is **required** to provision a Hyperdrive config for the first time. Browser OAuth covers every other resource, but the available Cloudflare tooling exposes no machine-readable Hyperdrive list, so Void checks for an existing config over the REST API, which OAuth cannot authenticate. Without a token, automatic provisioning stops before touching your account. Alternatively create the Hyperdrive config in the dashboard and put its id in `wrangler.jsonc`; deploying an already-provisioned Hyperdrive app needs no token.
 - `--skip-build` is supported for static, SPA, and SSG deployment when the output directory already exists. It is **not supported for worker-bearing apps**, because that path validates the artifact the build emits (worker `vars` in `dist/ssr/wrangler.json` and the generated auth schema).
 - `--project` is **not supported** with `--platform cloudflare`, because no Void project is resolved. `--dir` and `--spa` are supported and deploy through a thin Worker in front of Cloudflare Workers Assets.
-- Apps that use the sandbox require local Docker and [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans). Before provisioning or building, deploy verifies Containers access with `wrangler containers list`; an API token must include Account / Containers: Edit and Account / Cloudchamber: Edit. Apps without sandbox usage do not run this check.
+- Apps that use the sandbox require local Docker and [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans). Before provisioning or building, Void verifies Containers access automatically; an API token must include Account / Containers: Edit and Account / Cloudchamber: Edit. Apps without sandbox usage do not run this check.
 
 For static, SPA, and SSG apps, Void builds when needed, merges `_headers`, `_redirects`, and `void.json` routing rules, writes a deterministic thin edge Worker, and deploys the asset directory with Workers Assets. A fully prerenderable `output: "static"` Pages app uses this path; a hybrid app with a dynamic page or another runtime feature keeps its generated application Worker. TanStack Start, React Router, vinext App Router and Pages Router, SvelteKit, Nuxt, Analog, and Astro Cloudflare outputs are supported, including their SSR Workers.
 

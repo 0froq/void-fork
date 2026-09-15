@@ -7,6 +7,7 @@ import { getPackageDir } from './agents.ts';
 import { parseDeployArgs } from './args.ts';
 import { authSubcommands, parseAuthArgs } from './auth-args.ts';
 import { buildSubcommands, parseBuildArgs } from './build-args.ts';
+import { cloudflareSubcommands, parseCloudflareArgs } from './cloudflare-args.ts';
 import { dbSubcommands, parseDbArgs } from './db-args.ts';
 import { domainSubcommands, parseDomainArgs } from './domain-args.ts';
 import { envSubcommands, parseEnvArgs } from './env-args.ts';
@@ -118,6 +119,12 @@ if (helpPath) {
   runSubcommandGroup('platform', platformSubcommands, parsePlatformArgs, (root, parsed) =>
     import('./platform-cmd.ts').then(({ runPlatformCommand }) => runPlatformCommand(root, parsed)),
   );
+} else if (command === 'cloudflare') {
+  runSubcommandGroup('cloudflare', cloudflareSubcommands, parseCloudflareArgs, (root, parsed) =>
+    import('./cloudflare-cmd.ts').then(({ runCloudflareCommand }) =>
+      runCloudflareCommand(root, parsed),
+    ),
+  );
 } else if (command === 'project') {
   runSubcommandGroup('project', projectSubcommands, parseProjectArgs, (root, parsed) =>
     import('./project-cmd.ts').then(({ runProjectCommand }) => runProjectCommand(root, parsed)),
@@ -203,6 +210,11 @@ if (helpPath) {
       description: 'Connect, install, and manage Void platforms',
     },
     {
+      name: 'cloudflare',
+      hint: 'login | status | logout',
+      description: 'Manage Cloudflare authentication',
+    },
+    {
       name: 'project',
       hint: 'status | link | list | logs | requests | rollback | cancel | delete | purge-cache',
       description: 'Manage projects and deployments',
@@ -275,6 +287,16 @@ if (helpPath) {
       case 'platform':
         return runSubcommandGroup('platform', platformSubcommands, parsePlatformArgs, (r, p) =>
           import('./platform-cmd.ts').then(({ runPlatformCommand }) => runPlatformCommand(r, p)),
+        );
+      case 'cloudflare':
+        return runSubcommandGroup(
+          'cloudflare',
+          cloudflareSubcommands,
+          parseCloudflareArgs,
+          (r, p) =>
+            import('./cloudflare-cmd.ts').then(({ runCloudflareCommand }) =>
+              runCloudflareCommand(r, p),
+            ),
         );
       case 'project':
         return runSubcommandGroup('project', projectSubcommands, parseProjectArgs, (r, p) =>

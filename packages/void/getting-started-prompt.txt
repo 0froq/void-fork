@@ -12,7 +12,7 @@ In an empty directory, `void init` will add the matching Pages adapter and start
 
 During `void init`, choose Vite+ unless you specifically want plain Vite scripts, then choose a Pages framework (React, Vue, Svelte, or Solid). Choose D1 for a zero-config default, PostgreSQL for existing Postgres, or MySQL for existing MySQL-compatible infrastructure.
 
-At the end of the interactive flow, `void init` asks for Cloudflare (default), Void, or Skip deployment setup and saves the choice in `.void/project.json`. Choosing Cloudflare creates or augments `wrangler.jsonc`, offers Wrangler login, and saves the selected `account_id`. Void-managed deployment requires an explicit platform: connect with `void platform connect <url>`, or preview and install a company control plane with `void platform install --plan` and `void platform install`. Your first app deploy is then just:
+At the end of the interactive flow, `void init` asks for Cloudflare (default), Void, or Skip deployment setup and saves the choice in `.void/project.json`. Choosing Cloudflare creates or augments `wrangler.jsonc`, handles secure browser sign-in through Void's bundled tooling, and saves the selected `account_id`. Void-managed deployment requires an explicit platform: connect with `void platform connect <url>`, or preview and install a company control plane with `void platform install --plan` and `void platform install`. Your first app deploy is then just:
 
 void deploy
 

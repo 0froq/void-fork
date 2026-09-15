@@ -16,7 +16,16 @@ import { basename, dirname, join, normalize, relative, resolve } from 'pathslash
 
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
 const deployDriftCheckDir = join('.void', 'deploy-drift-check');
-import { intro, outro, log, note, confirm, isCancel, type SpinnerResult } from '@clack/prompts';
+import {
+  intro,
+  outro,
+  log,
+  note,
+  confirm,
+  isCancel,
+  select,
+  type SpinnerResult,
+} from '@clack/prompts';
 import {
   activateCloudflareVersion,
   encodeCloudflareVersionMessage,
@@ -100,6 +109,10 @@ import {
   type DeploymentResponse,
   type ManifestOnlyDeployPayload,
 } from './client.ts';
+import {
+  CloudflareAuthenticationError,
+  ensureCloudflareAuthentication,
+} from './cloudflare-auth.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
 import { createCloudflareEmptyDomainPublisher } from './cloudflare-operations.ts';
 import {
@@ -692,7 +705,10 @@ function resolveDeployTransport(root: string, rootConfig: Record<string, unknown
  * untrusted-code children layer {@link scrubWranglerAuthCredentials} on top. Exported so a
  * test can assert that directly.
  */
-export function deployChildEnv(accountId: string, apiBaseUrl: string): NodeJS.ProcessEnv {
+export function deployChildEnv(
+  accountId: string | undefined,
+  apiBaseUrl: string,
+): NodeJS.ProcessEnv {
   const provision = requireProvisionModule();
   const env = provision.provisionEnv({ accountId, apiBaseUrl });
   for (const name of DEPLOY_CONFIG_OVERRIDE_ENV_VARS) {
@@ -706,6 +722,9 @@ export function deployChildEnv(accountId: string, apiBaseUrl: string): NodeJS.Pr
   // the pin on win32; `log` is wrangler's own default level, so normal output is unchanged.
   provision.deleteEnvVarCaseAware(env, 'WRANGLER_LOG');
   env.WRANGLER_LOG = 'log';
+  // Void owns the browser OAuth lifecycle. Never allow Wrangler to fall back to
+  // its plaintext credential file while a Void command is using that session.
+  env.CLOUDFLARE_AUTH_USE_KEYRING = 'true';
   return env;
 }
 
@@ -1602,7 +1621,7 @@ export async function syncCloudflareSchemaSecrets(options: {
       }
       if (error instanceof SelfHostFirstDeployError || error instanceof SelfHostSecretListError) {
         throw new CloudflareSchemaSecretError(
-          'deploy: could not confirm the remote schema secrets. No Worker was uploaded; diagnose with `wrangler secret list -c <config>` and retry.',
+          'deploy: could not confirm the remote schema secrets. No Worker was uploaded; run `void secret list` and retry.',
           allowMissingWorker ? 'list-failed' : 'verification-failed',
         );
       }
@@ -2450,10 +2469,10 @@ export function formatCloudflareSandboxUnavailable(options?: { preflight?: boole
     `Containers pricing: ${CLOUDFLARE_CONTAINERS_PRICING_URL}`,
     '',
     'If this account already has Workers Paid:',
-    '  • Run `wrangler login` again; or',
+    '  • Run `void cloudflare login` again; or',
     '  • Give CLOUDFLARE_API_TOKEN Account / Containers: Edit and Account / Cloudchamber: Edit.',
     '',
-    'Confirm access with `wrangler containers list`, then rerun the deploy.',
+    'Rerun the deploy; Void will verify Containers access automatically.',
     options?.preflight
       ? 'No resources were provisioned and the app was not built or deployed.'
       : 'The Sandbox container was not deployed.',
@@ -3597,7 +3616,7 @@ export async function checkWranglerMigrationApplySet(
  */
 function createDeployWranglerRunner(
   root: string,
-  accountId: string,
+  accountId: string | undefined,
   apiBaseUrl: string,
 ): DeployWranglerRun {
   const launcher = resolveWranglerArgv(root);
@@ -3626,6 +3645,49 @@ function createDeployWranglerRunner(
       error: result.error ? result.error.message : null,
     };
   };
+}
+
+async function chooseCloudflareDeployAccount(options: {
+  beforeWranglerRun: () => boolean;
+  configPath: string;
+  root: string;
+  runWrangler: DeployWranglerRun;
+}): Promise<string> {
+  const session = await ensureCloudflareAuthentication({
+    beforeRun: options.beforeWranglerRun,
+    requireAccounts: true,
+    runWrangler: (args, capture) => options.runWrangler([...args], { capture }),
+    whoamiArgs: [...existingWranglerConfigArgs(options.configPath), '--env='],
+  });
+  const accounts = session.accounts;
+  let account = accounts[0]!;
+  if (accounts.length > 1) {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      throw new Error(
+        'Multiple Cloudflare accounts are available. Set CLOUDFLARE_ACCOUNT_ID in CI, or run `void init` interactively to choose one.',
+      );
+    }
+    const accountId = await select({
+      message: 'Choose a Cloudflare account:',
+      initialValue: account.id,
+      options: accounts.map((candidate) => ({
+        value: candidate.id,
+        label: candidate.name,
+        hint: candidate.id,
+      })),
+    });
+    if (isCancel(accountId) || typeof accountId === 'symbol') {
+      throw new Error('Cloudflare account selection was cancelled.');
+    }
+    account = accounts.find((candidate) => candidate.id === accountId) ?? account;
+  }
+  writeProvisionedWranglerConfig(
+    options.root,
+    { accountId: account.id },
+    { configPath: options.configPath },
+  );
+  log.success(`Configured Cloudflare account: ${account.name}`);
+  return account.id;
 }
 
 /**
@@ -3671,7 +3733,7 @@ export async function ensureCloudflareAuthSecret(options: {
       if (error instanceof SelfHostSecretListError) {
         throw new CloudflareAuthSecretError(
           `deploy: could not confirm the remote ${BETTER_AUTH_SECRET_NAME}. ` +
-            'No worker was uploaded. Run `wrangler secret list -c <config>` to diagnose the Cloudflare response, then retry.',
+            'No worker was uploaded. Run `void secret list` to diagnose the Cloudflare response, then retry.',
           allowMissingWorker ? 'list-failed' : 'verification-failed',
         );
       }
@@ -3697,7 +3759,7 @@ export async function ensureCloudflareAuthSecret(options: {
   } catch {
     throw new CloudflareAuthSecretError(
       `deploy: could not create the remote ${BETTER_AUTH_SECRET_NAME}. ` +
-        `No worker was uploaded. Run \`wrangler secret put ${BETTER_AUTH_SECRET_NAME}\` and retry.`,
+        `No worker was uploaded. Run \`void secret put ${BETTER_AUTH_SECRET_NAME}\` and retry.`,
       'put-failed',
     );
   }
@@ -3705,7 +3767,7 @@ export async function ensureCloudflareAuthSecret(options: {
     throw new CloudflareAuthSecretError(
       `deploy: could not create the remote ${BETTER_AUTH_SECRET_NAME} ` +
         `(wrangler exit ${String(put.status)}). No worker was uploaded. ` +
-        `Run \`wrangler secret put ${BETTER_AUTH_SECRET_NAME}\` and retry.`,
+        `Run \`void secret put ${BETTER_AUTH_SECRET_NAME}\` and retry.`,
       'put-failed',
     );
   }
@@ -3870,7 +3932,7 @@ export async function runCloudflareDeploy(
   // the SAME scrubbed env the build uses — still BEFORE whoami / provision / build / deploy.)
 
   // 3. Preflight — pin ONE transport, pin the account, confirm wrangler auth.
-  const rootConfig = parseRootWranglerConfig(configPath);
+  let rootConfig = parseRootWranglerConfig(configPath);
 
   // 3a. Resolve + pin the ONE transport for the WHOLE deploy (build + whoami + migrate +
   // deploy), reusing the provisioner's resolver + dotenv fence. Fail closed on any
@@ -3884,51 +3946,11 @@ export async function runCloudflareDeploy(
     return exit(1);
   }
 
-  // 3b. Pin the account (static check — no network) BEFORE spawning wrangler.
-  const accountId =
-    readWranglerTopLevelString(rootConfig, 'account_id') ??
-    (process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || undefined);
-  if (!accountId) {
-    log.error(
-      [
-        'deploy: no Cloudflare account is pinned.',
-        'Set `account_id` in your root wrangler.jsonc, or export CLOUDFLARE_ACCOUNT_ID.',
-        'A multi-account token makes wrangler prompt (or error in CI) on its own, which',
-        'void cannot intercept — so the account must be pinned before deploying.',
-      ].join('\n'),
-    );
-    return exit(1);
-  }
-  let workersDevSubdomain: string | undefined;
-  try {
-    workersDevSubdomain = resolveCloudflareWorkersDevSubdomain(root, accountId);
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    return exit(1);
-  }
-
-  // 3b-i. Pin the wrangler UPLOADER bundle NOW — at the START of the credentialed sequence, BEFORE
-  // any project code runs and BEFORE any credentialed wrangler call. The env-schema probe (3c), the
-  // `whoami` auth check (3e), and the automatic provisioner all run before the build,
-  // and the probe executes ARBITRARY project code (the user's Vite config + env.ts). That code runs
-  // with the parent's Cloudflare creds scrubbed so it can only edit FILES — but that INCLUDES the
-  // `wrangler-dist` bundle every credentialed wrangler run executes (whoami, the provisioner's own
-  // `wrangler <res> create`, and the post-build secret list / remote D1 migrate / deploy), so a
-  // probe/build that overwrites it would run attacker code WITH the CF token. Snapshot the bundle's
-  // content hash HERE; this pre-probe snapshot is the SINGLE baseline every later check compares
-  // against — it is never re-baselined (that would bless a mutation). Everything above only
-  // AST-parses source (`computeDesiredCloudflareResources`) or reads config files — no project code
-  // runs — so this is genuinely captured before the FIRST project-code execution. A legitimate
-  // probe/build never touches `node_modules/wrangler`, so the hash is stable from here through every
-  // credentialed run. (This closes the uploader-swap-before-a-credentialed-run vector only; a
-  // fully-compromised build dependency remains a trust boundary.)
+  // Pin the bundled uploader before the first authenticated command, including
+  // first-run account discovery. Every later credentialed invocation checks the
+  // same baseline so project code can never swap the executable under the session.
   const hashUploader = deps.hashWranglerUploader ?? hashWranglerUploader;
   const wranglerUploaderHashBefore = hashUploader(root);
-  // Re-hash the wrangler uploader and assert it still matches the one baseline above. Invoked
-  // IMMEDIATELY BEFORE EACH credentialed run — the pre-build `whoami` and provision, and the
-  // post-build secret list, D1 migrate/list, and deploy — always against this same pre-probe
-  // baseline. Fails closed on any change or an unresolvable/unreadable binary (either hash
-  // `undefined`).
   const assertUploaderStillPinned = (): boolean => {
     const check = assertWranglerUploaderUnchanged(wranglerUploaderHashBefore, hashUploader(root));
     if (check.ok) {
@@ -3944,6 +3966,38 @@ export async function runCloudflareDeploy(
     );
     return false;
   };
+
+  // 3b. Pin the account. On an interactive first deploy Void authenticates,
+  // selects the account, and persists it without exposing Wrangler as a user step.
+  let accountId =
+    readWranglerTopLevelString(rootConfig, 'account_id') ??
+    (process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || undefined);
+  if (!accountId) {
+    const accountRunner =
+      deps.runWrangler ?? createDeployWranglerRunner(root, undefined, apiBaseUrl);
+    try {
+      accountId = await chooseCloudflareDeployAccount({
+        beforeWranglerRun: assertUploaderStillPinned,
+        configPath,
+        root,
+        runWrangler: accountRunner,
+      });
+      rootConfig = parseRootWranglerConfig(configPath);
+    } catch (error) {
+      if (error instanceof CloudflareAuthenticationError && error.reason === 'uploader-changed') {
+        return exit(1);
+      }
+      log.error(`deploy: ${getErrorMessage(error)}`);
+      return exit(1);
+    }
+  }
+  let workersDevSubdomain: string | undefined;
+  try {
+    workersDevSubdomain = resolveCloudflareWorkersDevSubdomain(root, accountId);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    return exit(1);
+  }
 
   // 3c. Derive the env-INSENSITIVE schema facts — the required-secret NAMES + the keys
   // flagged `.secret()` — AND enforce the v1 envDir/mode narrowing, in an ISOLATED
@@ -4008,20 +4062,17 @@ export async function runCloudflareDeploy(
   if (!assertUploaderStillPinned()) {
     return exit(1);
   }
-  const whoami = await Promise.resolve(
-    runWrangler(['whoami', '--json', ...existingWranglerConfigArgs(configPath), '--env='], {
-      capture: true,
-    }),
-  );
-  if (!isCleanWranglerExit(whoami)) {
-    log.error(
-      [
-        'deploy: not authenticated with Cloudflare.',
-        'Run `wrangler login`, or set CLOUDFLARE_API_TOKEN (a token with',
-        'Workers Scripts:Edit + read on your bound resources, plus per-product *:Edit',
-        'for any missing D1/KV/R2/Queue/Hyperdrive resource). Then rerun.',
-      ].join('\n'),
-    );
+  try {
+    await ensureCloudflareAuthentication({
+      beforeRun: assertUploaderStillPinned,
+      runWrangler: (args, capture) => runWrangler([...args], { capture }),
+      whoamiArgs: [...existingWranglerConfigArgs(configPath), '--env='],
+    });
+  } catch (error) {
+    if (error instanceof CloudflareAuthenticationError && error.reason === 'uploader-changed') {
+      return exit(1);
+    }
+    log.error(`deploy: ${getErrorMessage(error)}`);
     return exit(1);
   }
 
@@ -4468,7 +4519,7 @@ export async function runCloudflareDeploy(
         'deploy: these worker vars ship as PLAINTEXT in the deployed config:',
         // Key names + why they were flagged only — never a value.
         ...warnings.secretKeys.map((k) => `  • ${k.key}${PLAINTEXT_WARNING_REASONS[k.reason]}`),
-        'Move real secrets to `wrangler secret put <NAME>` so they are not baked into wrangler.json.',
+        'Move real secrets to `void secret put <NAME>` so they are not baked into wrangler.json.',
       ].join('\n'),
     );
   }
@@ -5349,27 +5400,8 @@ async function runCloudflareStaticDeploy(
     log.error(`deploy: ${getErrorMessage(error)}`);
     return exit(1);
   }
-  const accountId =
-    readWranglerTopLevelString(rootConfig, 'account_id') ??
-    (process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || undefined);
-  if (!accountId) {
-    log.error(
-      'deploy: no Cloudflare account is pinned. Set account_id in wrangler.jsonc or CLOUDFLARE_ACCOUNT_ID.',
-    );
-    return exit(1);
-  }
-  let workersDevSubdomain: string | undefined;
-  try {
-    workersDevSubdomain = resolveCloudflareWorkersDevSubdomain(root, accountId);
-  } catch (error) {
-    log.error(getErrorMessage(error));
-    return exit(1);
-  }
-
-  const runWrangler = deps.runWrangler ?? createDeployWranglerRunner(root, accountId, apiBaseUrl);
   const hashUploader = deps.hashWranglerUploader ?? hashWranglerUploader;
   const uploaderHash = hashUploader(root);
-  const rootConfigBeforeBuild = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
   const uploaderIsPinned = (): boolean => {
     const result = assertWranglerUploaderUnchanged(uploaderHash, hashUploader(root));
     if (!result.ok) {
@@ -5384,17 +5416,52 @@ async function runCloudflareStaticDeploy(
     }
     return result.ok;
   };
+  let accountId =
+    readWranglerTopLevelString(rootConfig, 'account_id') ??
+    (process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || undefined);
+  if (!accountId) {
+    const accountRunner =
+      deps.runWrangler ?? createDeployWranglerRunner(root, undefined, apiBaseUrl);
+    try {
+      accountId = await chooseCloudflareDeployAccount({
+        beforeWranglerRun: uploaderIsPinned,
+        configPath,
+        root,
+        runWrangler: accountRunner,
+      });
+    } catch (error) {
+      if (error instanceof CloudflareAuthenticationError && error.reason === 'uploader-changed') {
+        return exit(1);
+      }
+      log.error(`deploy: ${getErrorMessage(error)}`);
+      return exit(1);
+    }
+  }
+  let workersDevSubdomain: string | undefined;
+  try {
+    workersDevSubdomain = resolveCloudflareWorkersDevSubdomain(root, accountId);
+  } catch (error) {
+    log.error(getErrorMessage(error));
+    return exit(1);
+  }
+
+  const runWrangler = deps.runWrangler ?? createDeployWranglerRunner(root, accountId, apiBaseUrl);
+  const rootConfigBeforeBuild = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
 
   if (!uploaderIsPinned()) {
     return exit(1);
   }
-  const whoami = await Promise.resolve(
-    runWrangler(['whoami', '--json', ...existingWranglerConfigArgs(configPath), '--env='], {
-      capture: true,
-    }),
-  );
-  if (!isCleanWranglerExit(whoami)) {
-    log.error('deploy: not authenticated with Cloudflare. Run `wrangler login` and retry.');
+  try {
+    await ensureCloudflareAuthentication({
+      beforeRun: uploaderIsPinned,
+      runWrangler: (args, capture) => runWrangler([...args], { capture }),
+      whoamiArgs: [...existingWranglerConfigArgs(configPath), '--env='],
+    });
+  } catch (error) {
+    if (error instanceof CloudflareAuthenticationError && error.reason === 'uploader-changed') {
+      return exit(1);
+    }
+    log.error(`deploy: ${getErrorMessage(error)}`);
     return exit(1);
   }
 

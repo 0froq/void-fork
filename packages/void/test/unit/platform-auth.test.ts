@@ -57,7 +57,7 @@ describe('platform Cloudflare authentication', () => {
     expect(calls).toEqual([
       'auth keyring enable',
       'auth token --json',
-      'login',
+      'login --use-keyring',
       'auth token --json',
     ]);
   });
@@ -92,6 +92,10 @@ describe('platform Cloudflare authentication', () => {
         VOID_PLATFORM_GITHUB_CLIENT_SECRET: 'github-secret',
         VOID_PLATFORM_RECOVERY_KEY: 'recovery-secret',
       }),
-    ).toEqual({ CLOUDFLARE_AUTH_USE_KEYRING: 'true', PATH: '/bin' });
+    ).toEqual({
+      CLOUDFLARE_AUTH_USE_KEYRING: 'true',
+      PATH: '/bin',
+      WRANGLER_LOG_SANITIZE: 'true',
+    });
   });
 });

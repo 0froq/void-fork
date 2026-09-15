@@ -80,6 +80,13 @@ describe('CLI help resolver', () => {
     expect(hasHelpPage(['github', 'missing'])).toBe(false);
   });
 
+  it('tracks Cloudflare authentication help pages', () => {
+    expect(hasHelpPage(['cloudflare'])).toBe(true);
+    expect(hasHelpPage(['cloudflare', 'login'])).toBe(true);
+    expect(hasHelpPage(['cloudflare', 'status'])).toBe(true);
+    expect(hasHelpPage(['cloudflare', 'logout'])).toBe(true);
+  });
+
   it.each(['upgrade', 'repair', 'disable', 'enable'] as const)(
     'prints the correct platform %s usage',
     (command) => {

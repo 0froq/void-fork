@@ -1,6 +1,5 @@
-import { spawnSync } from 'node:child_process';
 import { confirm, isCancel } from '@clack/prompts';
-import { resolveWranglerArgv } from './preset.ts';
+import { cloudflareAuthEnvironment, createBundledCloudflareAuthRunner } from './cloudflare-auth.ts';
 
 export type PlatformCloudflareCredential = Readonly<{
   source: 'environment' | 'oauth';
@@ -31,7 +30,7 @@ export async function resolvePlatformCloudflareCredential(
   const runWrangler = dependencies.runWrangler ?? defaultWranglerAuthRunner;
   if (!(dependencies.interactive ?? process.stdin.isTTY === true)) {
     throw new Error(
-      'platform: Cloudflare authentication is required. Run `wrangler login` with keyring storage, or set CLOUDFLARE_API_TOKEN in CI.',
+      'platform: Cloudflare authentication is required. Run `void cloudflare login` interactively, or set CLOUDFLARE_API_TOKEN in CI.',
     );
   }
   const keyring = runWrangler(['auth', 'keyring', 'enable'], true);
@@ -52,13 +51,13 @@ export async function resolvePlatformCloudflareCredential(
     throw new Error('platform: Cloudflare login was cancelled.');
   }
 
-  const login = runWrangler(['login'], false);
+  const login = runWrangler(['login', '--use-keyring'], false);
   if (login.status !== 0) {
     throw new Error('platform: Cloudflare browser login did not complete.');
   }
   const credential = readWranglerOAuthCredential(runWrangler);
   if (!credential) {
-    throw new Error('platform: Wrangler login completed without a usable OAuth credential.');
+    throw new Error('platform: Cloudflare sign-in completed without a usable OAuth credential.');
   }
   return credential;
 }
@@ -99,34 +98,11 @@ function defaultWranglerAuthRunner(
   args: ReadonlyArray<string>,
   capture: boolean,
 ): WranglerAuthResult {
-  const [command, ...prefix] = resolveWranglerArgv(process.cwd());
-  const result = spawnSync(command!, [...prefix, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: wranglerAuthEnvironment(),
-    maxBuffer: 10 * 1024 * 1024,
-    stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-    timeout: 10 * 60 * 1000,
-  });
-  return {
-    status: result.status,
-    stderr: capture ? result.stderr || '' : '',
-    stdout: capture ? result.stdout || '' : '',
-  };
+  return createBundledCloudflareAuthRunner(process.cwd())(args, capture) as WranglerAuthResult;
 }
 
 export function wranglerAuthEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const env = { ...source };
-  for (const key of Object.keys(env)) {
-    if (
-      /^VOID_PLATFORM_/i.test(key) ||
-      /^(?:DATABASE_URL|CF_ACCESS_CLIENT_ID|CF_ACCESS_CLIENT_SECRET|CF_ACCESS_TOKEN)$/i.test(key)
-    ) {
-      delete env[key];
-    }
-  }
-  env.CLOUDFLARE_AUTH_USE_KEYRING = 'true';
-  return env;
+  return cloudflareAuthEnvironment(source);
 }

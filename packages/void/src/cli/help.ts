@@ -85,6 +85,23 @@ const HELP_TREE: HelpTree = {
       token: basicSubcommand('Copy auth token to clipboard.', 'void auth token'),
     },
   },
+  cloudflare: {
+    summary: 'Manage Cloudflare authentication used by Void.',
+    usage: ['void cloudflare <command>'],
+    commands: [
+      { command: 'login', description: 'Sign in securely with browser OAuth' },
+      { command: 'status', description: 'Show authentication and accessible accounts' },
+      { command: 'logout', description: 'Remove the local browser session' },
+    ],
+    children: {
+      login: basicSubcommand('Sign in securely with browser OAuth.', 'void cloudflare login'),
+      status: basicSubcommand(
+        'Show Cloudflare authentication and accessible accounts.',
+        'void cloudflare status',
+      ),
+      logout: basicSubcommand('Remove the local browser session.', 'void cloudflare logout'),
+    },
+  },
   platform: {
     summary: 'Connect, install, and manage Void platforms.',
     usage: ['void platform <command>'],
