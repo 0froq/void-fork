@@ -1,6 +1,6 @@
 ---
 title: Platform Operator CLI
-status: in-progress
+status: implemented
 created: 2026-09-15
 ---
 
@@ -51,8 +51,8 @@ diagnostics go to stderr. IDs/path segments and query values are encoded.
 - [x] Shared deployment/build/system/hosted-worker operations and regression tests.
 - [x] CLI parsing, transport, origin-scoped auth, output, previews and log following.
 - [x] Help, interactive hints, public documentation, package READMEs and agent guidance.
-- [ ] Package builds, typechecking, final full test suite and CLI smoke verification.
-- [ ] Four GPT-6 Astra high reviews, GPT-5.6 Sol high fixes committed individually,
+- [x] Package builds, typechecking, final full test suite and CLI smoke verification.
+- [x] Four GPT-6 Astra high reviews, GPT-5.6 Sol high fixes committed individually,
       and repeated review until no P1 findings remain.
 
 Commit subjects start with a capital letter and end with a period. The user has
@@ -70,3 +70,22 @@ guards before external calls. Preserve admin browser behavior and native
 Cloudflare Free compatibility. Update `README.md`, affected package READMEs,
 `docs/reference/cli.md`, the self-hosted guide, `packages/void/skills/void`,
 `packages/void/AGENT_PROMPT.md`, and `packages/void/getting-started-prompt.txt`.
+
+## Final verification
+
+Implementation and fixes are committed on `codex/platform-operator-cli`.
+The terminal surface adds 37 operator commands alongside the existing platform
+lifecycle commands. All reported review findings were addressed in separate
+commits, with regression coverage.
+
+- `vp run build:core` passed for the distributable CLI and packaged platform runtime.
+- `vp run build:docs` passed.
+- `vp run check` passed across all 29 workspaces.
+- `vp lint`, `vp run lint:platform`, and `vp fmt --check` passed.
+- Final `vp test run`: 413 test files passed, 7,923 tests passed, 6 skipped,
+  in 59.33 seconds. This includes subprocess CLI tests against the actual
+  operator API backed by the integration database and routing fixtures.
+- Two rounds of four GPT-6 Astra/high reviews reported no P1 findings. GPT-5.6
+  Sol/high agents fixed the reported P2 issues individually. A final focused
+  Astra/high review of the last four commits found no P1 or actionable P2
+  regressions.
