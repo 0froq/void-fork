@@ -1349,8 +1349,9 @@ describe('GET /admin/deployments/:id/logs', () => {
     const deployment = await createTestDeployment(env.db, project.id, 'live');
 
     mockCfApi({
-      analyticsQuery: () =>
-        Response.json({
+      analyticsQuery: (_url, init) => {
+        expect(init?.body).toContain('ORDER BY double1 DESC, timestamp DESC');
+        return Response.json({
           data: [
             {
               outcome: 'ok',
@@ -1362,7 +1363,8 @@ describe('GET /admin/deployments/:id/logs', () => {
               ts: 1709312585000,
             },
           ],
-        }),
+        });
+      },
     });
 
     const res = await req(`/admin/deployments/${deployment.id}/logs`, admin.adminJwt);

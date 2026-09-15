@@ -154,7 +154,12 @@ export async function deploymentLogs(
   db: Db,
   env: ApiEnv['Bindings'],
   id: string,
-  options: { since?: string; limit?: number; cursor?: string } = {},
+  options: {
+    since?: string;
+    limit?: number;
+    cursor?: string;
+    order?: 'oldest-first' | 'newest-first';
+  } = {},
 ) {
   const { deployment, project } = await deploymentDetail(db, id);
   if (!project) {
@@ -194,17 +199,23 @@ export async function deploymentLogs(
     }
   }
   if (isDevBypass(env)) {
-    return { data: mockLogData(), nextCursor: null, watermark: String(until) };
+    const data = mockLogData();
+    return {
+      data: options.order === 'newest-first' ? data : data.reverse(),
+      nextCursor: null,
+      watermark: String(until),
+    };
   }
   const dataset = env.LOGS_DATASET ?? 'void_logs';
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(dataset)) {
     throw new OperatorError(500, 'Invalid logs dataset configuration.');
   }
   const sinceStr = new Date(since).toISOString().replace('T', ' ').slice(0, 19);
+  const direction = options.order === 'newest-first' ? 'DESC' : 'ASC';
   const query = `SELECT blob1 as outcome, blob2 as logData, blob3 as exceptionData, blob4 as url, blob5 as method, blob6 as statusCode, double1 as ts, timestamp
     FROM ${dataset} WHERE index1 = ${sqlString(`user-${project.slug}`)} AND blob7 = ${sqlString(deployment.id)}
     AND timestamp >= toDateTime(${sqlString(sinceStr)}) AND double1 >= ${since} AND double1 < ${until}
-    ORDER BY double1 ASC, timestamp ASC, blob1 ASC, blob2 ASC, blob3 ASC, blob4 ASC, blob5 ASC, blob6 ASC LIMIT ${limit + 1} OFFSET ${offset}`;
+    ORDER BY double1 ${direction}, timestamp ${direction}, blob1 ${direction}, blob2 ${direction}, blob3 ${direction}, blob4 ${direction}, blob5 ${direction}, blob6 ${direction} LIMIT ${limit + 1} OFFSET ${offset}`;
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/analytics_engine/sql`,
     {

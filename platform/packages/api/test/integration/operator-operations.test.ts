@@ -177,6 +177,7 @@ describe('operator deployment operations', () => {
     const last = (await second.json()) as { data: Array<unknown> };
     expect(last).toMatchObject({ nextCursor: null, watermark: page.watermark });
     expect(last.data).toHaveLength(1);
+    expect(fetch.mock.calls[0][1]?.body).toContain('ORDER BY double1 ASC, timestamp ASC');
     expect(fetch.mock.calls[1][1]?.body).toContain('OFFSET 2');
     expect((await req(`/deployments/${deployment.id}/logs?cursor=garbage`)).status).toBe(400);
     expect((await req(`/deployments/${deployment.id}/logs?limit=-1`)).status).toBe(400);

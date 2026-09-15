@@ -267,6 +267,7 @@ app.get('/:id/logs', async (context) => {
         since: context.req.query('since'),
         limit: Number(context.req.query('limit') ?? 100),
         cursor: context.req.query('cursor'),
+        order: 'newest-first',
       }),
     );
   } catch (error) {
