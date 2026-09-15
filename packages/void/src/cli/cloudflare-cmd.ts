@@ -28,7 +28,7 @@ export async function runCloudflareCommand(root: string, args: CloudflareArgs): 
       if (keyring.status !== 0) {
         throw new Error('Could not access secure Cloudflare credential storage.');
       }
-      const result = await runWrangler(['logout'], false);
+      const result = await runWrangler(['logout'], true);
       if (result.status !== 0) {
         throw new Error('Could not remove the local Cloudflare browser session.');
       }

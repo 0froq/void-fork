@@ -490,7 +490,7 @@ describe('resolveWranglerArgv (module-resolution launcher)', () => {
       files: { 'node_modules/.bin/wrangler': '#!/bin/sh\n' },
     });
     expect(() => resolveWranglerArgv(root, () => undefined)).toThrow(
-      /could not resolve the "wrangler" package/,
+      /bundled Cloudflare tooling is unavailable/,
     );
   });
 });

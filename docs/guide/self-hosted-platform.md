@@ -15,7 +15,7 @@ The core installation intentionally excludes the user dashboard, Deploy on GitHu
 You need:
 
 - A Cloudflare account with Workers for Platforms and the products represented in the footprint below.
-- A Cloudflare user who can create the resources represented in the footprint below. Interactive lifecycle commands authenticate in the browser through Wrangler OAuth and enable Wrangler's OS-keychain storage before login. CI uses `CLOUDFLARE_API_TOKEN` instead.
+- A Cloudflare user who can create the resources represented in the footprint below. Interactive lifecycle commands open Cloudflare browser OAuth and store the session in the operating-system keychain. CI uses `CLOUDFLARE_API_TOKEN` instead.
 - A separate, scoped Cloudflare runtime API token for the installed control plane. It manages application Workers, D1, KV, R2, Queues, Analytics, and certificates after installation; it is never used as the human operator credential. Give it account-level Workers Scripts: Edit, Workers Tail: Read, D1: Edit, Workers KV Storage: Edit, Workers R2 Storage: Edit, Queues: Edit, and Account Analytics: Read, plus zone-level SSL and Certificates: Edit on the application zone. The installer prints a direct account-token dashboard link and accepts the value through a masked prompt.
 - A dedicated, empty external PostgreSQL database reachable through Cloudflare Hyperdrive. Void never creates or deletes this database. The installer transactionally claims it for one platform installation and refuses to share it with another installation.
 - An application base domain such as `apps.example.com`. Its containing Cloudflare zone may already exist or the installer can create it.

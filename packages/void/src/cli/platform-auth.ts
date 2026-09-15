@@ -47,7 +47,7 @@ export async function resolvePlatformCloudflareCredential(
   }
 
   announceCloudflareLogin();
-  const login = runWrangler(['login', '--use-keyring'], false);
+  const login = runWrangler(['login', '--use-keyring'], true);
   if (login.status !== 0) {
     throw new Error('platform: Cloudflare browser login did not complete.');
   }

@@ -2,6 +2,8 @@
 
 Core Vite plugin — routing, inference, migrations, CLI.
 
+User-facing CLI output and documentation describe Cloudflare operations through Void. Never ask users to install, authenticate, or invoke Wrangler directly. Keep `wrangler.jsonc` / `wrangler.json` and `WRANGLER_*` names only where users must recognize an actual file or environment variable; implementation details may remain in source comments, tests, and debug logs.
+
 ## Architecture
 
 The main export `voidPlugin()` returns an array of Vite plugins. For the default Cloudflare target, this includes the `cloudflare()` plugin. For non-CF targets (`node`, `bun`, `deno`), it replaces `cloudflare()` with `nodeTargetPlugin()`:

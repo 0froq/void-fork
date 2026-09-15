@@ -1608,7 +1608,7 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
   if (result.modified) {
     log.success(
       hadConfig
-        ? 'Updated wrangler config with compatibility_date and nodejs_als'
+        ? 'Updated Cloudflare config with compatibility_date and nodejs_als'
         : 'Created wrangler.jsonc with compatibility_date and nodejs_als',
     );
   } else {

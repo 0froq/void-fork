@@ -846,7 +846,7 @@ export function voidPlugin(options?: {
     const syncFrameworkCompat = (compat: ReturnType<typeof readWranglerCompat>) => {
       const syncedDate = ensureWranglerCompatibilityDate(root, compat.compatibilityDate);
       if (syncedDate) {
-        voidLog('Synced compatibility_date to wrangler config');
+        voidLog('Synced compatibility_date to Cloudflare config');
       }
     };
 
@@ -862,7 +862,7 @@ export function voidPlugin(options?: {
         }
         const synced = ensureWranglerNodejsAlsFlag(root);
         if (synced) {
-          voidLog('Synced nodejs_als to wrangler config');
+          voidLog('Synced nodejs_als to Cloudflare config');
         }
       },
       buildStart() {
@@ -1804,8 +1804,8 @@ export function voidPlugin(options?: {
           notFoundIgnoredWarned = true;
           voidWarn(
             `Void generates no asset routing policy for a ${framework} build, so "routing.notFound" in ` +
-              'void.json is not written to the built worker config. On a self-hosted `vite build && ' +
-              'wrangler deploy` it takes effect only if your own wrangler config declares a complete ' +
+              'void.json is not written to the built worker config. During a self-hosted build and ' +
+              'direct Cloudflare deployment, it takes effect only if your own Cloudflare config declares a complete ' +
               '`assets` policy (`binding`, `directory`, `not_found_handling`, `run_worker_first`); ' +
               "otherwise Cloudflare's default applies. Managed `void deploy` supplies the policy for you.",
           );

@@ -8,6 +8,7 @@ import { parseDeployArgs } from './args.ts';
 import { authSubcommands, parseAuthArgs } from './auth-args.ts';
 import { buildSubcommands, parseBuildArgs } from './build-args.ts';
 import { cloudflareSubcommands, parseCloudflareArgs } from './cloudflare-args.ts';
+import { formatCloudflareUserMessage } from './cloudflare-user-output.ts';
 import { dbSubcommands, parseDbArgs } from './db-args.ts';
 import { domainSubcommands, parseDomainArgs } from './domain-args.ts';
 import { envSubcommands, parseEnvArgs } from './env-args.ts';
@@ -66,7 +67,7 @@ async function runSubcommandGroup<T>(
       await run(root, parsed);
     }
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
     process.exit(1);
   }
 }
@@ -82,7 +83,7 @@ if (helpPath) {
     try {
       printHelpPage(helpPath);
     } catch (err) {
-      log.error(err instanceof Error ? err.message : String(err));
+      log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
       process.exit(1);
     }
   }
@@ -92,7 +93,7 @@ if (helpPath) {
   try {
     deployArgs = parseDeployArgs(args.slice(1));
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
     process.exit(1);
   }
 
@@ -107,7 +108,7 @@ if (helpPath) {
       backend: deployArgs.backend,
       provision: deployArgs.provision,
     }).catch((err) => {
-      log.error(err.message ?? err);
+      log.error(formatCloudflareUserMessage(err.message ?? String(err)));
       process.exit(1);
     });
   });
@@ -163,13 +164,13 @@ if (helpPath) {
   try {
     prepareArgs = parsePrepareArgs(args.slice(1));
   } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
     process.exit(1);
   }
 
   import('./prepare.ts').then(({ runPrepareCommand }) => {
     runPrepareCommand(root, prepareArgs).catch((err) => {
-      log.error(err.message ?? err);
+      log.error(formatCloudflareUserMessage(err.message ?? String(err)));
       process.exit(1);
     });
   });
@@ -180,11 +181,11 @@ if (helpPath) {
     try {
       initArgs = parseInitArgs(args.slice(1));
     } catch (err) {
-      log.error(err instanceof Error ? err.message : String(err));
+      log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
       process.exit(1);
     }
     runInitCommand(root, initArgs).catch((err) => {
-      log.error(err.message ?? err);
+      log.error(formatCloudflareUserMessage(err.message ?? String(err)));
       process.exit(1);
     });
   });
@@ -340,7 +341,7 @@ if (helpPath) {
         return;
     }
   })().catch((err) => {
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
     process.exit(1);
   });
 } else {

@@ -1,6 +1,7 @@
 import { log } from '@clack/prompts';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
+  cloudflareAuthCommandEnvironment,
   cloudflareAuthEnvironment,
   ensureCloudflareAuthentication,
   parseCloudflareAccounts,
@@ -90,5 +91,14 @@ describe('Cloudflare authentication', () => {
       PATH: '/bin',
       WRANGLER_LOG_SANITIZE: 'true',
     });
+  });
+
+  it('suppresses branded login output without suppressing JSON commands', () => {
+    expect(cloudflareAuthCommandEnvironment(['login'], {}).WRANGLER_LOG).toBe('none');
+    expect(cloudflareAuthCommandEnvironment(['logout'], {}).WRANGLER_LOG).toBe('none');
+    expect(cloudflareAuthCommandEnvironment(['whoami', '--json'], {}).WRANGLER_LOG).toBeUndefined();
+    expect(
+      cloudflareAuthCommandEnvironment(['auth', 'token', '--json'], {}).WRANGLER_LOG,
+    ).toBeUndefined();
   });
 });

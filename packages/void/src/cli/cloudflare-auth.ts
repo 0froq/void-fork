@@ -44,7 +44,7 @@ export class CloudflareAuthenticationError extends Error {
 }
 
 /**
- * Authenticate with Cloudflare through Void's bundled Wrangler.
+ * Authenticate with Cloudflare through Void's bundled deployment tooling.
  *
  * The caller owns the runner so deploy can retain its pinned account, API base,
  * config, and uploader-integrity boundary. Interactive sessions recover from an
@@ -99,7 +99,7 @@ export async function ensureCloudflareAuthentication(
   }
 
   announceCloudflareLogin();
-  const login = await run(['login', '--use-keyring'], false);
+  const login = await run(['login', '--use-keyring'], true);
   if (!isCleanExit(login)) {
     throw new CloudflareAuthenticationError(
       'Cloudflare browser sign-in did not complete. Run `void cloudflare login` to try again.',
@@ -153,10 +153,11 @@ export function parseCloudflareAccounts(stdout: string): Array<CloudflareAccount
 export function createBundledCloudflareAuthRunner(root: string): CloudflareAuthRunner {
   const [command, ...prefix] = resolveWranglerArgv(root);
   return (args, capture) => {
+    const env = cloudflareAuthCommandEnvironment(args);
     const result = spawnSync(command!, [...prefix, ...args], {
       cwd: root,
       encoding: 'utf8',
-      env: cloudflareAuthEnvironment(),
+      env,
       maxBuffer: 10 * 1024 * 1024,
       shell: false,
       stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
@@ -171,6 +172,17 @@ export function createBundledCloudflareAuthRunner(root: string): CloudflareAuthR
       error: result.error?.message,
     };
   };
+}
+
+export function cloudflareAuthCommandEnvironment(
+  args: ReadonlyArray<string>,
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const env = cloudflareAuthEnvironment(source);
+  if (args[0] === 'login' || args[0] === 'logout') {
+    env.WRANGLER_LOG = 'none';
+  }
+  return env;
 }
 
 export function cloudflareAuthEnvironment(

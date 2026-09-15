@@ -19,7 +19,7 @@ const deployDriftCheckDir = join('.void', 'deploy-drift-check');
 import {
   intro,
   outro,
-  log,
+  log as clackLog,
   note,
   confirm,
   isCancel,
@@ -119,6 +119,7 @@ import {
   rememberCloudflareWorkersDevSubdomain,
   resolveCloudflareWorkersDevSubdomain,
 } from './cloudflare-readiness.ts';
+import { formatCloudflareUserMessage } from './cloudflare-user-output.ts';
 export { parseRootWranglerConfig } from '@void/deploy-cloudflare';
 import { promptAndCreateProject } from './create-project.ts';
 import {
@@ -256,6 +257,14 @@ import {
   type LiveBindingConfig,
   type WranglerCompat,
 } from './wrangler.ts';
+
+const log = {
+  error: (message: string) => clackLog.error(formatCloudflareUserMessage(message)),
+  info: (message: string) => clackLog.info(formatCloudflareUserMessage(message)),
+  step: (message: string) => clackLog.step(formatCloudflareUserMessage(message)),
+  success: (message: string) => clackLog.success(formatCloudflareUserMessage(message)),
+  warn: (message: string) => clackLog.warn(formatCloudflareUserMessage(message)),
+};
 import { needsWrapper, generateWrapper, bundleEntry, cleanupWrapper } from './wrapper.ts';
 
 class DeployEventError extends Error {}
@@ -3623,6 +3632,9 @@ function createDeployWranglerRunner(
   const [command, ...prefix] = launcher;
   return (args, opts) => {
     const childEnv = deployChildEnv(accountId, apiBaseUrl);
+    if (!opts.capture) {
+      childEnv.WRANGLER_LOG = 'none';
+    }
     const result = spawnSync(command as string, [...prefix, ...args], {
       cwd: root,
       stdio:
