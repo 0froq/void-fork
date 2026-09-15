@@ -16,6 +16,7 @@ import { envSubcommands, parseEnvArgs } from './env-args.ts';
 import { genSubcommands, parseGenArgs } from './gen-args.ts';
 import { githubSubcommands, parseGithubArgs } from './github-args.ts';
 import { getHelpPath, printGlobalHelp, printHelpPage, printVoidHeader } from './help.ts';
+import { OperatorClientError } from './operator-client.ts';
 import { parsePlatformArgs, platformSubcommands } from './platform-args.ts';
 import { parsePrepareArgs } from './prepare-args.ts';
 import { projectSubcommands, parseProjectArgs } from './project-args.ts';
@@ -69,7 +70,6 @@ async function runSubcommandGroup<T>(
     }
   } catch (err) {
     if (command === 'platform' && args.includes('--json')) {
-      const { OperatorClientError } = await import('./operator-client.ts');
       console.error(
         JSON.stringify(
           err instanceof OperatorClientError
@@ -84,7 +84,11 @@ async function runSubcommandGroup<T>(
     }
     const message = formatCloudflareUserMessage(err instanceof Error ? err.message : String(err));
     if (command === 'platform') {
-      console.error(message);
+      console.error(
+        err instanceof OperatorClientError && err.details !== undefined
+          ? `${message}\nPartial result:\n${JSON.stringify(err.details, null, 2)}`
+          : message,
+      );
     } else {
       log.error(message);
     }

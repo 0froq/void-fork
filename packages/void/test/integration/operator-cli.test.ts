@@ -147,10 +147,68 @@ describe('operator CLI (real subprocess and HTTP)', () => {
     const result = await run(['project', 'delete', 'project-1', '--yes', '--json']);
     expect(result.code).toBe(1);
     expect(result.stdout).toBe('');
-    expect(JSON.parse(result.stderr)).toMatchObject({
+    expect(JSON.parse(result.stderr)).toEqual({
       error: 'partial_failure',
-      details: { failed: ['resource-1'] },
+      message: 'The operation did not fully complete. Inspect the partial result before retrying.',
+      status: 207,
+      details: { ok: false, partial: true, failed: ['resource-1'] },
     });
+    expect(requests).toHaveLength(2);
+  });
+  it('prints every rollback outcome when a human mutation partially fails', async () => {
+    reply = (_path, body) =>
+      body.dryRun
+        ? {
+            body: {
+              dryRun: true,
+              action: 'worker.rollback-all',
+              target: 'production',
+              versions: { api: 'version-api', dispatch: 'version-dispatch' },
+            },
+          }
+        : {
+            status: 207,
+            body: {
+              ok: false,
+              partial: true,
+              batchId: 'batch-1',
+              environment: 'production',
+              events: [
+                {
+                  worker_name: 'api',
+                  version_id: 'version-api',
+                  status: 'success',
+                  error_message: null,
+                },
+                {
+                  worker_name: 'dispatch',
+                  version_id: 'version-dispatch',
+                  status: 'failed',
+                  error_message: 'Version no longer exists.',
+                },
+                {
+                  worker_name: 'proxy',
+                  version_id: 'version-proxy',
+                  status: 'skipped',
+                  error_message: null,
+                },
+              ],
+            },
+          };
+
+    const result = await run(['worker', 'rollback-all', '--yes']);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('Partial result:');
+    expect(result.stderr).toContain('"batchId": "batch-1"');
+    expect(result.stderr).toContain('"version_id": "version-api"');
+    expect(result.stderr).toContain('"status": "success"');
+    expect(result.stderr).toContain('"version_id": "version-dispatch"');
+    expect(result.stderr).toContain('"status": "failed"');
+    expect(result.stderr).toContain('"error_message": "Version no longer exists."');
+    expect(result.stderr).toContain('"version_id": "version-proxy"');
+    expect(result.stderr).toContain('"status": "skipped"');
     expect(requests).toHaveLength(2);
   });
   it('rejects redirects and preserves server authentication errors', async () => {
