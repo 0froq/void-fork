@@ -77,6 +77,25 @@ The `@voidcloud/platform` workspace package retains the dashboard-only `dev` and
 
 **Production deploys on push to `prod`; staging deploys every passing `main` runtime through the public `void platform upgrade --runtime` lifecycle.** See [`meta/operations.md`](./meta/operations.md#github-actions) for the workflow triggers and protected-environment requirements. Do not push `prod` or ask to deploy.
 
+## Operator CLI
+
+`void platform auth login` creates a dedicated, revocable operator session for an
+administrator. The CLI provides user, project, deployment, build, signup,
+invitation, system, and hosted-worker commands over `/operator/v1`. The API and
+browser admin UI share their underlying operations. Operator credentials are
+scoped to the selected origin and never selected by application project files.
+
+Mutation commands support `--plan` and require `--yes` outside a terminal; JSON
+output is available with `--json`. Mutations write an intent and outcome to
+`operator_events`; a pending event means execution was interrupted or its outcome
+could not be recorded. Runtime migration `0033_operator_sessions_and_events`
+must be applied before the new API is deployed. It only adds tables and indexes,
+so existing Workers remain compatible with the expanded schema.
+
+For self-hosted installations, use the existing ownership-aware lifecycle
+commands for Worker changes. Hosted `void platform worker` operations retain the
+installation guard. See [CLI reference](../docs/reference/cli.md#operator-commands).
+
 ## Local Development
 
 For the platform API and internal admin UI, start with:

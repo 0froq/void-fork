@@ -107,6 +107,26 @@ The webhook and OIDC endpoints return `503` when the GitHub App secrets are unse
 - `POST /internal/resolve-resource/:projectId`
 - `POST /internal/resolve-worker/:projectId`
 
+### Operator API
+
+`/operator/v1` exposes administrative operations as JSON. `POST /session`
+explicitly exchanges a full API session for an administrator into a one-hour,
+origin-bound `operator` bearer token. The database stores revocable session IDs;
+every request verifies expiry, current role, and administrator suspension.
+`POST /session/logout` revokes the current session. Browser cookies and project
+deploy tokens cannot authenticate this API, including in development bypass mode.
+
+Routes under `src/operator/` share user/project/access and operational services
+with `src/admin/routes/`. Operational POSTs accept `dryRun: true` for validation
+and a concrete preview without side effects. Actual mutations persist an audit
+intent before execution and its outcome afterward. `/system/events` paginates
+those records. JSON errors use `{ error, message, details? }`; partial external
+failures report completed work instead of silently retrying. Requests are bounded
+to 32 KiB, list pages to 100 rows, and responses disable caching.
+
+Integration tests cover operator authentication, tenant operations, operational
+parity, dry runs, and capability guards in `test/integration/operator-*.test.ts`.
+
 ### Admin UI
 
 - `/admin/users`

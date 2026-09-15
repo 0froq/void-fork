@@ -13,6 +13,18 @@ Docs in this skill are bundled from `docs/` during `void` package build and live
 
 ## Command Naming
 
+Platform administration uses `void platform auth login` and the nested
+`user`, `project`, `deployment`, `build`, `signup`, `invitation`, `system`, and
+hosted-only `worker` groups. Open the operator section of `docs/reference/cli.md`
+before running these commands. Use `--json` for structured reads and `--plan`
+to inspect mutations; approved noninteractive mutations require `--yes`.
+Operator credentials are separate from application deployment credentials and
+ignore repository platform selections. `VOID_OPERATOR_TOKEN` requires an
+explicit `VOID_API_URL` or `--connection`; credentials must never be written to
+project files. `signup open` allows public signup and `signup restrict` enforces
+the allowlist. Inspect `system events` and the target object after an ambiguous
+mutation failure before retrying.
+
 Use `void connect` for deployment onboarding: no arguments offers Cloudflare or a Void platform, `--platform cloudflare` signs in and selects an account, and a platform URL verifies discovery and signs in with a supported provider. It preserves existing project links when connecting elsewhere. `--no-login` saves only verified Void connection metadata; authenticated headless connection requires a valid origin-scoped keychain session or `VOID_TOKEN` with matching `VOID_API_URL`. Platform installation and administration use `void platform`.
 
 Use Void commands for every user-facing workflow. Never ask the user to install, authenticate, or run Wrangler directly. Say Cloudflare or Void instead, except when naming literal `wrangler.jsonc` / `wrangler.json` files or `WRANGLER_*` environment variables the user must inspect.

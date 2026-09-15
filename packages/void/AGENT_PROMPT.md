@@ -1,5 +1,17 @@
 ## Void
 
+Platform operations: `void platform auth login` establishes a separate one-hour
+administrator session. Use `void platform user|project|deployment|build|signup|invitation|system|worker`
+for administration, consulting `void platform <group> --help` for exact commands.
+Operator commands ignore repository project metadata: choose `--connection <registered-id-or-url>`,
+set `VOID_API_URL`, or use the active connection. Headless operator credentials
+use `VOID_OPERATOR_TOKEN` with an explicit origin; never use deployment tokens
+directly for administration. Read with `--json`, preview mutations with `--plan`,
+and execute approved mutations with `--yes`. Inspect `system events` after an
+ambiguous failure instead of retrying blindly. `signup open` permits public
+signup and `signup restrict` enforces the allowlist. Hosted `worker` commands do
+not apply to self-hosted installations; use the existing lifecycle commands.
+
 Connect to a deployment destination with `void connect`: choose Cloudflare or a Void platform, pass `--platform cloudflare` to select a Cloudflare account, or pass a platform URL to connect and sign in directly. The CLI reuses valid sessions and opens login when needed. It preserves existing project links when connecting elsewhere. Use `--no-login` only to register a verified Void platform without authentication. Authenticated CI connection requires `VOID_TOKEN` with matching `VOID_API_URL`, or a valid origin-scoped keychain session. Platform installation and administration use `void platform`.
 
 Non-interactive self-hosted platform lifecycle mutations require `--yes`; `--plan` is read-only and needs no acknowledgement. Published routes and custom domains are observed for recovery but retained for explicit dashboard cleanup because Cloudflare cannot condition deletion on an immutable attachment generation.

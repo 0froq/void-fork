@@ -2,6 +2,12 @@
 
 Public, target-neutral contracts and packaged runtime artifacts for installing a Void company platform in a Cloudflare account.
 
+The packaged API includes `/operator/v1` for `void platform` administration:
+revocable administrator sessions, tenant operations, logs, access management,
+health, and mutation audit records. Its additive PostgreSQL migration is included
+in the runtime migration manifest and applied through the same lifecycle checks.
+Hosted worker rollback operations remain disabled on installed company platforms.
+
 The package contains:
 
 - versioned deployment and installation manifests

@@ -2,6 +2,14 @@
 
 Vite plugin and CLI for building and deploying apps on Void.
 
+Platform administrators use `void platform auth login`, then `void platform user`,
+`project`, `deployment`, `build`, `signup`, `invitation`, `system`, or `worker`.
+These command groups expose the platform admin operations with `--json` output,
+`--plan` previews, and `--yes` for noninteractive mutations. Operator sessions are
+revocable, expire after one hour, and live in separate origin-scoped keychain
+entries. Headless callers provide `VOID_OPERATOR_TOKEN` and an explicit platform
+origin. See the [CLI reference](../../docs/reference/cli.md#operator-commands).
+
 ## What It Covers
 
 - file-based API routes from `routes/`

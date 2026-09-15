@@ -115,7 +115,34 @@ If the requested zone does not exist, Void creates it and stops in a `waiting-fo
 void platform install --resume --name <installation-id>
 ```
 
-After installation, sign in through `void auth login`. The initial administrator can also open `<API origin>/admin/login` and use the same GitHub account to manage signup access and inspect the platform.
+After installation, sign in through `void auth login` to deploy applications.
+The initial administrator can operate the platform from the terminal:
+
+```sh
+void platform auth login
+void platform signup show
+void platform signup allow github teammate --plan
+void platform signup allow github teammate --yes
+void platform user list
+void platform system health
+```
+
+Operator login creates a separate, revocable one-hour session. Use
+`void platform auth logout` to revoke it. `--connection <id-or-url>` selects a
+registered installation for one command; operator commands otherwise use the
+active connection and ignore application project files. For automation, supply
+`VOID_OPERATOR_TOKEN` from a secret manager and set `VOID_API_URL` explicitly.
+
+`signup restrict` requires identities to match the allowlist; `signup open` allows
+public signup. Changes support `--plan` previews and require `--yes` in scripts.
+Invitations grant access even when the installation has no email service; their
+result reports delivery separately. Inspect mutation outcomes with
+`void platform system events`. See the [operator command reference](../reference/cli.md#operator-commands)
+for users, projects, deployments, logs, and maintenance commands.
+
+The same administrator can open `<API origin>/admin/login` to use the browser
+admin UI. Hosted worker rollback commands are unavailable for self-hosted
+installations; use the ownership-aware lifecycle commands below.
 
 For application traffic, Void creates one proxied wildcard DNS record at `*.application-domain` and the matching Worker routes. A compatible existing proxied record is adopted and is never deleted by Void.
 

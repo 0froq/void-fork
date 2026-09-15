@@ -4,6 +4,11 @@ Fullstack SDK for Cloudflare Workers, powered by [Vite](https://vite.dev).
 
 Add the Vite plugin to build APIs and server-rendered pages with typed access to databases, storage, and AI. Void detects the resources your code uses and provisions them when you deploy.
 
+Platform administrators can also manage users, signup access, projects,
+deployments, and logs from the terminal. Start with `void platform auth login`;
+operator commands provide previews, JSON output, and mutation audit records.
+See the [operator CLI reference](./docs/reference/cli.md#operator-commands).
+
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite';

@@ -27,7 +27,7 @@ recipient of operator credentials. Existing lifecycle commands remain intact.
 
 Groups: `auth login|logout|status|token`, `user list|show|plan|suspend|restore|delete`,
 `project list|show|delete`, `deployment list|show|cancel|logs`, `build show|logs`,
-`signup show|enable|disable|allow|remove`, `invitation list|send|revoke`,
+`signup show|open|restrict|allow|remove`, `invitation list|send|revoke`,
 `system overview|health|cli-versions|events|backfill-queue-tokens`, and hosted-only
 `worker list|show|rollback|rollback-all|events`.
 
@@ -46,11 +46,11 @@ diagnostics go to stderr. IDs/path segments and query values are encoded.
 
 ## Implementation and commits
 
-- [ ] Authentication, JSON errors/validation, mutation audit, API registration.
-- [ ] Shared user/project/access operations and tenant API with regression tests.
-- [ ] Shared deployment/build/system/hosted-worker operations and regression tests.
-- [ ] CLI parsing, transport, origin-scoped auth, output, previews and log following.
-- [ ] Help, interactive hints, public documentation, package READMEs and agent guidance.
+- [x] Authentication, JSON errors/validation, mutation audit, API registration.
+- [x] Shared user/project/access operations and tenant API with regression tests.
+- [x] Shared deployment/build/system/hosted-worker operations and regression tests.
+- [x] CLI parsing, transport, origin-scoped auth, output, previews and log following.
+- [x] Help, interactive hints, public documentation, package READMEs and agent guidance.
 - [ ] Package builds, typechecking, final full test suite and CLI smoke verification.
 - [ ] Four GPT-6 Astra high reviews, GPT-5.6 Sol high fixes committed individually,
       and repeated review until no P1 findings remain.
