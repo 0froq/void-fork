@@ -68,7 +68,26 @@ async function runSubcommandGroup<T>(
       await run(root, parsed);
     }
   } catch (err) {
-    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+    if (command === 'platform' && args.includes('--json')) {
+      const { OperatorClientError } = await import('./operator-client.ts');
+      console.error(
+        JSON.stringify(
+          err instanceof OperatorClientError
+            ? err.toJSON()
+            : {
+                error: 'invalid_command',
+                message: err instanceof Error ? err.message : String(err),
+              },
+        ),
+      );
+      process.exit(1);
+    }
+    const message = formatCloudflareUserMessage(err instanceof Error ? err.message : String(err));
+    if (command === 'platform') {
+      console.error(message);
+    } else {
+      log.error(message);
+    }
     process.exit(1);
   }
 }
@@ -218,8 +237,8 @@ if (helpPath) {
     },
     {
       name: 'platform',
-      hint: 'list | use | status | discover | install | upgrade | repair | disable | enable | uninstall',
-      description: 'Install and manage Void platforms',
+      hint: 'auth | user | project | deployment | signup | system | install',
+      description: 'Install platforms and administer users, projects, access, and operations',
     },
     {
       name: 'cloudflare',

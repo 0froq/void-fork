@@ -1,6 +1,12 @@
+import { operatorGroups, parseOperatorArgs, type OperatorArgs } from './operator-args.ts';
 import type { SubcommandDef } from './subcommand-prompt.ts';
 
 export const platformSubcommands: Array<SubcommandDef> = [
+  ...operatorGroups.map((name) => ({
+    name,
+    hint: 'Operator commands',
+    description: `Administer platform ${name}`,
+  })),
   { name: 'list', description: 'List installed and connected platforms' },
   { name: 'use', arg: '[id]', description: 'Select the default Void platform' },
   { name: 'status', arg: '[id]', description: 'Inspect a platform and its health' },
@@ -14,6 +20,7 @@ export const platformSubcommands: Array<SubcommandDef> = [
 ];
 
 export type PlatformArgs =
+  | OperatorArgs
   | { subcommand: 'list' }
   | { subcommand: 'use'; selector: string }
   | { subcommand: 'status'; selector: string }
@@ -107,6 +114,12 @@ function parseLifecycleSelector(
 }
 
 export function parsePlatformArgs(args: Array<string>): PlatformArgs {
+  if (
+    operatorGroups.includes(args[0] ?? '') ||
+    ['--connection', '--json', '--plan', '--yes'].includes(args[0] ?? '')
+  ) {
+    return parseOperatorArgs(args);
+  }
   const [subcommand, ...rest] = args;
 
   if (subcommand === 'list') {
@@ -228,6 +241,6 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   }
 
   throw new Error(
-    'platform: Usage: void platform <connect|list|use|status|discover|install|upgrade|repair|disable|enable|uninstall>.',
+    'platform: Usage: void platform <auth|user|project|deployment|build|signup|invitation|system|worker|list|use|status|discover|install|upgrade|repair|disable|enable|uninstall>.',
   );
 }

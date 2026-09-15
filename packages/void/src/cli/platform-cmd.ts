@@ -124,6 +124,11 @@ export function saveDiscoveredPlatform(discovery: PlatformDiscoveryDocument): Pl
 }
 
 export async function runPlatformCommand(_root: string, args: PlatformArgs): Promise<void> {
+  if (args.subcommand === 'operator') {
+    const { runOperatorCommand } = await import('./operator-cmd.ts');
+    await runOperatorCommand(args);
+    return;
+  }
   if (args.subcommand === 'list') {
     const connections = listPlatformConnections();
     if (connections.length === 0) {
