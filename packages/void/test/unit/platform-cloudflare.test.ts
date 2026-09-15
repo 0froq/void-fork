@@ -8,6 +8,85 @@ import {
 } from '../../src/cli/platform-cloudflare.ts';
 
 describe('platform Cloudflare client', () => {
+  it('requires an active deployed certificate for the exact application wildcard', async () => {
+    const requested: Array<string> = [];
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    const cert = (hosts: Array<string>, status = 'active', expires_on = future) => ({
+      hosts,
+      status,
+      expires_on,
+    });
+    const client = new PlatformCloudflareClient('token', {
+      apiBase: 'https://cloudflare.example.test/client/v4',
+      fetcher: async (input, init) => {
+        const url = new URL(String(input));
+        requested.push(url.pathname);
+        expect(init?.method ?? 'GET').toBe('GET');
+        if (url.pathname.endsWith('/certificate_packs')) {
+          expect(url.searchParams.get('deploy')).toBe('production');
+          return Response.json({
+            success: true,
+            result: [
+              {
+                status: 'active',
+                hosts: ['*.apps.example.com'],
+                certificates: [cert(['*.example.com'])],
+              },
+              { certificates: [cert(['*.apps.example.com'], 'pending_validation')] },
+              { certificates: [cert(['*.apps.example.com'], 'active', '2020-01-01T00:00:00Z')] },
+            ],
+          });
+        }
+        return Response.json({ success: true, result: [cert(['*.APPS.EXAMPLE.COM.'])] });
+      },
+    });
+    await expect(
+      client.hasActiveCertificateForHostname('zone', '*.apps.example.com'),
+    ).resolves.toBe(true);
+    expect(requested).toEqual([
+      '/client/v4/zones/zone/ssl/certificate_packs',
+      '/client/v4/zones/zone/custom_certificates',
+    ]);
+  });
+
+  it('finds covering certificates on later pages and rejects pending-only coverage', async () => {
+    const requested: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        const url = new URL(String(input));
+        requested.push(url.searchParams.get('page')!);
+        return Response.json({
+          success: true,
+          result:
+            url.searchParams.get('page') === '1'
+              ? [{ certificates: [{ status: 'active', hosts: ['*.example.com'] }] }]
+              : [{ certificates: [{ status: 'active', hosts: ['*.apps.example.com'] }] }],
+          result_info: { total_pages: 2 },
+        });
+      },
+    });
+    await expect(
+      client.hasActiveCertificateForHostname('zone', '*.apps.example.com'),
+    ).resolves.toBe(true);
+    expect(requested).toEqual(['1', '2']);
+    const pending = new PlatformCloudflareClient('token', {
+      fetcher: async () =>
+        Response.json({
+          success: true,
+          result: [
+            {
+              status: 'pending_validation',
+              hosts: ['*.apps.example.com'],
+              certificates: [],
+            },
+          ],
+        }),
+    });
+    await expect(
+      pending.hasActiveCertificateForHostname('zone', '*.apps.example.com'),
+    ).resolves.toBe(false);
+  });
+
   it('pins every Wrangler Cloudflare transport selector exactly once', () => {
     const keys = [
       'CLOUDFLARE_API_BASE_URL',

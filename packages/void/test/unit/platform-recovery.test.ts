@@ -161,6 +161,7 @@ function client(manifest = remoteManifest()) {
     emptyR2Bucket: async () => {},
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'example-workers',
+    hasActiveCertificateForHostname: async () => true,
     listAiGateways: async () => [
       {
         id: manifest.deployment.resources.aiGateway,

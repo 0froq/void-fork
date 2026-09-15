@@ -28,6 +28,7 @@ type RecoveryClient = Pick<
   | 'getR2Object'
   | 'getWorkerPlainTextBindings'
   | 'getWorkersSubdomain'
+  | 'hasActiveCertificateForHostname'
   | 'listAccounts'
   | 'listAiGateways'
   | 'listDispatchNamespaces'

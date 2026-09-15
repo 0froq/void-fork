@@ -129,7 +129,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   const applicationDomain =
     recorded?.application.baseDomain ??
     normalizeApplicationDomain(
-      args.applicationDomain || (await promptText('Application base domain:', 'apps.example.com')),
+      args.applicationDomain || (await promptText('Application base domain:', 'example.app')),
     );
   const zoneName =
     recorded?.application.zoneName ??

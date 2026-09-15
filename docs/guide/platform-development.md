@@ -123,8 +123,8 @@ The runtime is written to `packages/platform/dist/runtime`. Use the built CLI to
 ```sh
 node packages/void/dist/cli/cli.mjs platform install \
   --name my-team \
-  --application-domain apps.example.com \
-  --zone example.com \
+  --application-domain example.app \
+  --zone example.app \
   --runtime packages/platform/dist/runtime \
   --plan
 ```

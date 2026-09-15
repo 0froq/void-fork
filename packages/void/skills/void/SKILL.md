@@ -13,6 +13,12 @@ Docs in this skill are bundled from `docs/` during `void` package build and live
 
 ## Command Naming
 
+For a new platform installation, prefer an app domain at the zone apex. Nested
+app domains need an active wildcard edge certificate and SSL-and-Certificates
+read permission; `void platform install --plan` verifies coverage. Use the
+self-hosted platform guide for certificate setup rather than enabling a paid
+product without an explicit request.
+
 For an existing Cloudflare site, run `void deploy` with its root `wrangler.jsonc` or `wrangler.json`. An unlinked project gets a prompt to link and deploy using the existing Worker and resources. Accepting verifies and saves the destination, then continues deployment. Keep new resources, migrations, auth setup, and secret changes separate from this first handoff. The active Worker Version must be the latest upload so inherited secrets have an unambiguous source. Failed builds retain the link for retry. Read `docs/integrations/cloudflare.md` for the supported configuration and rollback behavior.
 
 Platform administration uses `void platform auth login` and the nested

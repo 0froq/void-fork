@@ -32,7 +32,7 @@ Commit subjects start with a capital letter and end with a period.
 - [ ] 16. Support Durable State methods through real Cloudflare RPC.
 - [ ] 17. Wire production Node/Bun/Deno Pages manifests and static assets.
 - [x] 18. Support valid account/OAuth credentials in platform lifecycle reads.
-- [ ] 19. Verify certificate coverage for nested application domains before provisioning.
+- [x] 19. Verify certificate coverage for nested application domains before provisioning.
 - [ ] 20. Prevent canceled builds from launching untracked containers.
 - [ ] 21. Give sandbox concurrency leases globally unique instance identities.
 

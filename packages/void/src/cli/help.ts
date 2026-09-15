@@ -253,7 +253,10 @@ const HELP_TREE: HelpTree = {
           { command: '--name <slug>', description: 'Installation name' },
           { command: '--display-name <name>', description: 'Human-readable platform name' },
           { command: '--account <id>', description: 'Cloudflare account id' },
-          { command: '--application-domain <domain>', description: 'Base domain for applications' },
+          {
+            command: '--application-domain <domain>',
+            description: 'Base domain for applications (zone apex is simplest)',
+          },
           { command: '--zone <domain>', description: 'Cloudflare zone containing the app domain' },
           {
             command: '--dedicated-zone',

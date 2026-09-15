@@ -27,5 +27,10 @@ Platform migrations are forward-only. `platform/packages/api/drizzle/compatibili
 
 See the [self-hosted platform guide](../../docs/guide/self-hosted-platform.md) for the supported core feature set, Cloudflare footprint, and lifecycle commands.
 
+Use the application zone's apex for the simplest certificate setup. Nested app
+domains require an active edge wildcard certificate; planning checks coverage
+before provisioning and explains the required certificate product and read
+permission when coverage is missing.
+
 For local changes, fork CI, and a complete source-runtime example, see
 [Platform Development](../../docs/guide/platform-development.md).

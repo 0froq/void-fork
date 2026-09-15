@@ -59,6 +59,7 @@ type PlanningClient = Pick<
   | 'getR2Object'
   | 'getWorkerPlainTextBindings'
   | 'getWorkersSubdomain'
+  | 'hasActiveCertificateForHostname'
   | 'listAiGateways'
   | 'listAccounts'
   | 'listDispatchNamespaces'
@@ -131,9 +132,35 @@ export async function createPlatformInstallPlan(
 
   const names = deployment.resources;
   const wildcardHostname = `*.${deployment.application.baseDomain}`;
+  const zone = await client.findZone(account.id, deployment.application.zoneName);
+  if (deployment.application.baseDomain !== deployment.application.zoneName) {
+    const certificateHelp =
+      `Use the zone apex ${deployment.application.zoneName} as --application-domain, or provision an active ${wildcardHostname} edge certificate in the existing zone before installing. ` +
+      'Cloudflare Advanced Certificate Manager is a paid add-on; an existing custom wildcard certificate also works. ' +
+      `Manage certificates at https://dash.cloudflare.com/${account.id}/${deployment.application.zoneName}/ssl-tls/edge-certificates. ` +
+      'Certificate inspection requires Zone > SSL and Certificates > Read (or Edit) on this zone.';
+    if (!zone || zone.status !== 'active') {
+      throw new Error(
+        `platform: Nested application domain ${deployment.application.baseDomain} needs an active zone and wildcard certificate. ${certificateHelp}`,
+      );
+    }
+    let covered: boolean;
+    try {
+      covered = await client.hasActiveCertificateForHostname(zone.id, wildcardHostname);
+    } catch (error) {
+      throw new Error(
+        `platform: Could not verify edge certificate coverage for ${wildcardHostname}. ${certificateHelp}`,
+        { cause: error },
+      );
+    }
+    if (!covered) {
+      throw new Error(
+        `platform: No active edge certificate covers ${wildcardHostname}. Universal SSL for ${deployment.application.zoneName} does not cover these deeper application hostnames. ${certificateHelp}`,
+      );
+    }
+  }
   const [
     workersSubdomain,
-    zone,
     aiGateways,
     routingKv,
     isrKv,
@@ -146,7 +173,6 @@ export async function createPlatformInstallPlan(
     workers,
   ] = await Promise.all([
     client.getWorkersSubdomain(account.id),
-    client.findZone(account.id, deployment.application.zoneName),
     client.listAiGateways(account.id),
     client.listKvNamespaces(account.id, names.routingKv),
     client.listKvNamespaces(account.id, names.isrCacheKv),

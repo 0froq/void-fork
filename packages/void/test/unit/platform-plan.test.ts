@@ -19,6 +19,7 @@ function client(overrides: Record<string, unknown> = {}) {
   return {
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'example',
+    hasActiveCertificateForHostname: async () => true,
     getKvValue: async () => null,
     listAiGateways: async () => [],
     findZone: async () => null,
@@ -40,12 +41,12 @@ function client(overrides: Record<string, unknown> = {}) {
 
 const input = {
   accountId: 'account',
-  applicationDomain: 'apps.example.com',
+  applicationDomain: 'example.app',
   controlPlaneDomain: '',
   dedicatedZone: false,
   displayName: 'Example',
   installationSlug: 'example',
-  zoneName: 'example.com',
+  zoneName: 'example.app',
 };
 
 function r2ConfigHash(name: string, fingerprint: string): string {
@@ -55,6 +56,66 @@ function r2ConfigHash(name: string, fingerprint: string): string {
 }
 
 describe('platform installation planning', () => {
+  it('rejects an uncovered nested application domain before resource inventory', async () => {
+    let inventoried = false;
+    const zone = { id: 'zone', name: 'example.com', nameServers: [], status: 'active' };
+    const fake = client({
+      findZone: async () => zone,
+      hasActiveCertificateForHostname: async (_zone: string, hostname: string) => {
+        expect(hostname).toBe('*.apps.example.com');
+        return false;
+      },
+      listWorkerNames: async () => {
+        inventoried = true;
+        return [];
+      },
+    });
+    const nested = { ...input, applicationDomain: 'apps.example.com', zoneName: 'example.com' };
+    await expect(createPlatformInstallPlan(fake, nested, null)).rejects.toThrow(
+      'No active edge certificate',
+    );
+    expect(inventoried).toBe(false);
+    await expect(createPlatformInstallPlan(client(), nested, null)).rejects.toThrow(
+      'needs an active zone',
+    );
+  });
+
+  it('keeps valid nested-domain platforms and explains missing certificate permissions', async () => {
+    const nested = { ...input, applicationDomain: 'apps.example.com', zoneName: 'example.com' };
+    const zone = { id: 'zone', name: 'example.com', nameServers: [], status: 'active' };
+    const plan = await createPlatformInstallPlan(
+      client({ findZone: async () => zone }),
+      nested,
+      null,
+    );
+    expect(plan.deployment.application.baseDomain).toBe('apps.example.com');
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          findZone: async () => zone,
+          hasActiveCertificateForHostname: async () => {
+            throw new Error('permission denied');
+          },
+        }),
+        nested,
+        null,
+      ),
+    ).rejects.toThrow('SSL and Certificates > Read');
+  });
+
+  it('does not probe certificate products for zone-apex application domains', async () => {
+    const plan = await createPlatformInstallPlan(
+      client({
+        hasActiveCertificateForHostname: async () => {
+          throw new Error('must not probe');
+        },
+      }),
+      input,
+      null,
+    );
+    expect(plan.deployment.application.baseDomain).toBe(plan.deployment.application.zoneName);
+  });
+
   it.each(['oauth-access-token', 'account-api-token'])(
     'plans and discovers using authorized accounts for %s',
     async (token) => {
@@ -202,12 +263,12 @@ describe('platform installation planning', () => {
         client({
           findZone: async () => ({
             id: 'zone',
-            name: 'example.com',
+            name: 'example.app',
             nameServers: [],
             status: 'active',
           }),
           listWorkerRoutes: async () => [
-            { id: 'route', pattern: '*.apps.example.com/*', script: 'other-worker' },
+            { id: 'route', pattern: '*.example.app/*', script: 'other-worker' },
           ],
         }),
         input,
@@ -221,7 +282,7 @@ describe('platform installation planning', () => {
       account: { id: 'account', name: 'Account' },
       createdAt: '2026-09-14T00:00:00.000Z',
       deployment: createPlatformDeploymentManifest({
-        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        application: { baseDomain: 'example.app', zoneName: 'example.app' },
         displayName: 'Example',
         installationSlug: 'example',
       }),
@@ -562,14 +623,14 @@ describe('platform installation planning', () => {
       client({
         findZone: async () => ({
           id: 'zone',
-          name: 'example.com',
+          name: 'example.app',
           nameServers: [],
           status: 'active',
         }),
         getWorkerPlainTextBindings: async () => ({ PLATFORM_OWNERSHIP_MARKER: marker }),
         listWorkerNames: async () => [workerName],
         listWorkerRoutes: async () => [
-          { id: 'route', pattern: '*.apps.example.com/*', script: workerName },
+          { id: 'route', pattern: '*.example.app/*', script: workerName },
         ],
       }),
       input,
@@ -619,7 +680,7 @@ describe('platform installation planning', () => {
       client({
         findZoneForHostname: async () => ({
           id: 'control-zone',
-          name: 'example.com',
+          name: 'example.app',
           nameServers: [],
           status: 'active',
         }),
@@ -706,7 +767,7 @@ describe('platform installation planning', () => {
       account: { id: 'account', name: 'Account' },
       createdAt: '2026-09-14T00:00:00.000Z',
       deployment: createPlatformDeploymentManifest({
-        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        application: { baseDomain: 'example.app', zoneName: 'example.app' },
         displayName: 'Example',
         installationSlug: 'example',
       }),
@@ -747,7 +808,7 @@ describe('platform installation planning', () => {
     const fake = client({
       findZone: async () => ({
         id: 'zone',
-        name: 'example.com',
+        name: 'example.app',
         nameServers: [],
         status: 'active',
       }),
@@ -759,7 +820,7 @@ describe('platform installation planning', () => {
   it('adopts only a compatible wildcard application DNS record', async () => {
     const zone = {
       id: 'zone',
-      name: 'example.com',
+      name: 'example.app',
       nameServers: [],
       status: 'active',
     };
@@ -770,7 +831,7 @@ describe('platform installation planning', () => {
           {
             content: '100::',
             id: 'dns',
-            name: '*.apps.example.com',
+            name: '*.example.app',
             proxied: true,
             type: 'AAAA',
           },
@@ -792,7 +853,7 @@ describe('platform installation planning', () => {
             {
               content: '192.0.2.1',
               id: 'dns',
-              name: '*.apps.example.com',
+              name: '*.example.app',
               proxied: false,
               type: 'A',
             },
@@ -809,7 +870,7 @@ describe('platform installation planning', () => {
       account: { id: 'account', name: 'Account' },
       createdAt: '2026-09-14T00:00:00.000Z',
       deployment: createPlatformDeploymentManifest({
-        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        application: { baseDomain: 'example.app', zoneName: 'example.app' },
         displayName: 'Example',
         installationSlug: 'example',
       }),
@@ -844,7 +905,7 @@ describe('platform installation planning', () => {
       account: { id: 'account', name: 'Account' },
       createdAt: '2026-09-14T00:00:00.000Z',
       deployment: createPlatformDeploymentManifest({
-        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        application: { baseDomain: 'example.app', zoneName: 'example.app' },
         displayName: 'Example',
         installationSlug: 'example',
       }),
@@ -883,7 +944,7 @@ describe('platform installation planning', () => {
       account: { id: 'account', name: 'Account' },
       createdAt: '2026-09-14T00:00:00.000Z',
       deployment: createPlatformDeploymentManifest({
-        application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        application: { baseDomain: 'example.app', zoneName: 'example.app' },
         displayName: 'Example',
         installationSlug: 'example',
       }),

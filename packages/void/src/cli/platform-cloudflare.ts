@@ -419,6 +419,68 @@ export class PlatformCloudflareClient {
     return result.map(parseDnsRecord);
   }
 
+  /** Read deployed edge certificates; requesting a pack is not proof of issuance. */
+  async hasActiveCertificateForHostname(zoneId: string, hostname: string): Promise<boolean> {
+    const expected = hostname.toLowerCase().replace(/\.$/, '');
+    const covers = (value: unknown): boolean => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+      }
+      const cert = value as Record<string, unknown>;
+      if (cert.status !== 'active' || !Array.isArray(cert.hosts)) {
+        return false;
+      }
+      if (
+        cert.expires_on !== undefined &&
+        (typeof cert.expires_on !== 'string' ||
+          !Number.isFinite(Date.parse(cert.expires_on)) ||
+          Date.parse(cert.expires_on) <= Date.now())
+      ) {
+        return false;
+      }
+      return cert.hosts.some(
+        (host) => typeof host === 'string' && host.toLowerCase().replace(/\.$/, '') === expected,
+      );
+    };
+    for (const kind of ['ssl/certificate_packs', 'custom_certificates']) {
+      for (let page = 1; page <= 200; page++) {
+        const query = new URLSearchParams({ page: String(page), per_page: '50' });
+        if (kind === 'ssl/certificate_packs') {
+          query.set('deploy', 'production');
+        }
+        const { result, resultInfo } = await this.#requestEnvelope<
+          ReadonlyArray<Record<string, unknown>>
+        >(`/zones/${encodeURIComponent(zoneId)}/${kind}?${query}`);
+        if (!Array.isArray(result)) {
+          throw new Error('platform: Cloudflare returned an invalid certificate inventory.');
+        }
+        for (const entry of result) {
+          const certificates =
+            kind === 'ssl/certificate_packs'
+              ? Array.isArray(entry.certificates)
+                ? entry.certificates
+                : []
+              : [entry];
+          if (certificates.some(covers)) {
+            return true;
+          }
+        }
+        if (
+          result.length === 0 ||
+          (resultInfo?.total_pages !== undefined
+            ? page >= resultInfo.total_pages
+            : result.length < 50)
+        ) {
+          break;
+        }
+        if (page === 200) {
+          throw new Error('platform: Certificate inventory is too large to verify safely.');
+        }
+      }
+    }
+    return false;
+  }
+
   async createDnsRecord(zoneId: string, name: string): Promise<CloudflareDnsRecord> {
     return parseDnsRecord(
       await this.request<Record<string, unknown>>(

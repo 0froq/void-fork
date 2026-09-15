@@ -89,6 +89,7 @@ function planningClient() {
   return {
     listAccounts: async () => [{ id: 'account', name: 'Account' }],
     getWorkersSubdomain: async () => 'workers-subdomain',
+    hasActiveCertificateForHostname: async () => true,
     getKvValue: async () => null,
     getR2Object: async () => null,
     getWorkerPlainTextBindings: async () => ({}),

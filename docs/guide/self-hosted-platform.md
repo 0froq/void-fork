@@ -23,7 +23,7 @@ You need:
 - CI can use a user-scoped or account-scoped API token. Void checks the accounts and resources the credential can access; a browser OAuth session works through the same account checks.
 - A Cloudflare API token for the running platform. This is separate from your administrator login: the platform uses it to manage resources when developers deploy apps. See the permissions below.
 - An empty PostgreSQL database reachable through Cloudflare Hyperdrive, dedicated to this installation. Void records the installation in that database and won't let another platform share it. You manage the database itself.
-- An application base domain such as `apps.example.com`. Its containing Cloudflare zone may already exist or the installer can create it.
+- An application base domain such as `example.app`. Using the zone apex lets Universal SSL cover app hostnames such as `my-app.example.app`. Its Cloudflare zone may already exist or the installer can create it.
 - A GitHub OAuth App for login. The installer prints the exact callback URL before asking for its client credentials.
 - An R2 API token with Object Read & Write access. This is separate from the Cloudflare management API token and is used to sign direct asset uploads.
 
@@ -54,8 +54,8 @@ void platform install --plan \
   --name company \
   --display-name "Company Void" \
   --account 0123456789abcdef0123456789abcdef \
-  --application-domain apps.example.com \
-  --zone example.com
+  --application-domain example.app \
+  --zone example.app
 ```
 
 Commands that change the platform require `--yes` in a non-interactive shell. A preview with `--plan` doesn't need it.
@@ -63,6 +63,23 @@ Commands that change the platform require `--yes` in a non-interactive shell. A 
 Use `--control-plane-domain platform.example.net` when you want a custom API hostname. The hostname must be in a zone the selected account and token can manage. Omitting it keeps the control plane on `workers.dev` and avoids requiring another domain.
 
 Use `--dedicated-zone` if the entire application zone belongs to Void. This adds catch-all routes for unmatched hostnames. For example, you could use a spare domain such as `example.app` as the whole zone, or `apps.example.com` within an existing company zone without the catch-all.
+
+### Using a Nested Application Domain
+
+You can use `apps.example.com` inside the `example.com` zone when an active edge
+certificate already covers `*.apps.example.com`. Universal SSL for `example.com`
+covers first-level hostnames, so it does not cover an app at `my-app.apps.example.com`.
+
+Configure a wildcard certificate with [Advanced Certificate Manager](https://developers.cloudflare.com/ssl/edge-certificates/advanced-certificate-manager/), a paid add-on, or use an existing custom wildcard certificate. Wait until it is active, then run:
+
+```sh
+void platform install --application-domain apps.example.com --zone example.com --plan
+```
+
+Void verifies the deployed certificate before provisioning. The management
+credential needs **Zone → SSL and Certificates → Read** (or Edit) on the zone.
+A pending certificate or a certificate for only `*.example.com` is insufficient.
+Void does not order a certificate or enable a paid product automatically.
 
 ## Configure GitHub OAuth
 
@@ -99,8 +116,8 @@ void platform install \
   --name company \
   --display-name "Company Void" \
   --account 0123456789abcdef0123456789abcdef \
-  --application-domain apps.example.com \
-  --zone example.com \
+  --application-domain example.app \
+  --zone example.app \
   --yes
 ```
 

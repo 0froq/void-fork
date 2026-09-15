@@ -1,5 +1,11 @@
 ## Void
 
+For new platform installations, prefer an application domain at the zone apex
+(for example `example.app` in zone `example.app`). A nested domain such as
+`apps.example.com` requires an active edge certificate for `*.apps.example.com`
+and SSL-and-Certificates read permission; `void platform install --plan` checks
+coverage before provisioning. Do not enable paid certificate products implicitly.
+
 Existing Cloudflare site: run `void deploy` with the existing root `wrangler.jsonc` or `wrangler.json`. If no destination is selected, Void asks to link and deploy using the existing Worker and resources. Acceptance verifies and saves the target, then deploys in the same command. The first handoff preserves bindings, variables, secrets, event handlers, routes, and schedules; keep resource/schema/secret changes separate. The active Worker Version must be the latest upload so secret inheritance is unambiguous. Failed builds retain the handoff guard for retry. Explicit targets and saved links take precedence. Versions without complete trigger snapshots can be rolled back while retaining current routes and schedules.
 
 Platform operations: `void platform auth login` establishes a separate one-hour
