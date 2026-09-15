@@ -64,6 +64,8 @@ The same name always resolves to the same Durable Object. Use `getById(id)` when
 
 ## Execution and persistence
 
+Typed methods run through Cloudflare RPC on the generated Durable Object class. Only your declared methods are exposed; Void’s state-loading and persistence helpers stay private.
+
 Void loads state before the first operation and runs RPC methods one at a time. After a method, `fetch`, or `alarm` handler succeeds, it saves the updated state.
 
 If the handler or save fails, Void restores `context.state` to its previous value. Direct writes to `context.storage` aren't included in that rollback.
