@@ -2,6 +2,7 @@
 
 ## Operating Rules
 
+- Branch choice: keep work on the current branch, including `main`, unless the user asks for a separate branch or worktree. Individually reviewable commits do not require a feature branch.
 - Worktrees: create real git worktrees with `git worktree add` under `.worktrees/`. Do not apply worktree changes back to the main tree without explicit user confirmation.
 - Design/doc work: stay in design mode until the user asks for implementation. If a feature is not live yet, prefer a clean cutover over legacy migration work.
 - Docs/progress: code is the source of truth, but public docs may intentionally omit paused features. Describe root scripts exactly as implemented; root `dev` and `build` are dashboard-only. Track "implemented", "shipped", and "done" separately unless the user says they are equivalent.

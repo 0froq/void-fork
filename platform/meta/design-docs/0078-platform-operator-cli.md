@@ -73,7 +73,7 @@ Cloudflare Free compatibility. Update `README.md`, affected package READMEs,
 
 ## Final verification
 
-Implementation and fixes are committed on `codex/platform-operator-cli`.
+Implementation and fixes are committed on `main` with the individual commit history preserved.
 The terminal surface adds 37 operator commands alongside the existing platform
 lifecycle commands. All reported review findings were addressed in separate
 commits, with regression coverage.
