@@ -51,6 +51,7 @@ import {
 import { scanJobsSync } from './crons/scan.ts';
 import { scanDurableObjectModules } from './durable/scan.ts';
 import { inferBindingsFromSource } from './inference/walk.ts';
+import { resolveLocalD1Target, writeLocalD1PersistState } from './local-d1.ts';
 import { voidLog, voidWarn, voidError } from './log.ts';
 import { pagesDevCssAssetsPlugin } from './pages/dev-css-assets.ts';
 import { bindingRuntimePlugin } from './plugin-binding-runtime.ts';
@@ -765,6 +766,21 @@ export function voidPlugin(options?: {
     ? { bindings: config.inference.bindings }
     : undefined;
   const bindingNames = resolveBindingNames(config.inference?.bindings);
+  const frameworkOwnsCloudflareRuntime =
+    detected !== undefined && (detected.class === 'b' || detected.class === 'c');
+  const localD1PersistRoot = frameworkOwnsCloudflareRuntime
+    ? join(root, '.wrangler', 'state')
+    : (options?.persistTo ?? join(root, '.void'));
+  const localD1 = resolveLocalD1Target(root, {
+    bindingName: bindingNames?.d1 ?? 'DB',
+    persistRoot: localD1PersistRoot,
+  });
+  writeLocalD1PersistState(
+    root,
+    !isNodeTarget(config.target) && !frameworkOwnsCloudflareRuntime
+      ? options?.persistTo
+      : undefined,
+  );
   const inferredBindings = inferProjectBindings(root, { ...inferenceOptions, paths }, scanDirs);
   const sandboxEnabled = isSandboxEnabled(config);
   const bindings = sandboxEnabled ? { ...inferredBindings, needsSandbox: true } : inferredBindings;
@@ -960,7 +976,7 @@ export function voidPlugin(options?: {
   // voidPlugin() only provides DB type codegen, migration management, and
   // wrangler.jsonc binding sync for local dev.
   if (detected && (detected.class === 'b' || detected.class === 'c')) {
-    const frameworkPersistRoot = join(root, '.wrangler', 'state');
+    const frameworkPersistRoot = localD1.persistRoot;
     const syncFrameworkCompat = (compat: ReturnType<typeof readWranglerCompat>) => {
       const syncedDate = ensureWranglerCompatibilityDate(root, compat.compatibilityDate);
       if (syncedDate) {
@@ -1106,9 +1122,10 @@ export function voidPlugin(options?: {
       drizzlePlugin(root, false, dialect, {
         d1BindingName: bindingNames?.d1,
         forceVirtualDb: authEnabled || bindingNames?.d1 !== undefined,
+        localD1DatabaseId: localD1.databaseId,
         localD1PersistRoot: frameworkPersistRoot,
       }),
-      migrationPlugin(root, dialect, 'local', frameworkPersistRoot, {
+      migrationPlugin(root, dialect, localD1.databaseId, frameworkPersistRoot, {
         enabled: false,
       }),
       devTriggersHintPlugin(root, { framework: true, devTriggerToken }),
@@ -2075,17 +2092,18 @@ export function voidPlugin(options?: {
       drizzlePlugin(root, false, getDatabaseDialect(config), {
         d1BindingName: bindingNames?.d1,
         forceVirtualDb: authEnabled || bindingNames?.d1 !== undefined,
-        localD1PersistRoot: options?.persistTo ?? outDir,
+        localD1DatabaseId: localD1.databaseId,
+        localD1PersistRoot: localD1.persistRoot,
         redirectDbTypePaths,
       }),
-      migrationPlugin(root, getDatabaseDialect(config)),
+      migrationPlugin(root, getDatabaseDialect(config), localD1.databaseId, localD1.persistRoot),
       ...(vinextCompat ? [vinextCompat] : []),
       frameworkBuildWrapperPlugin,
       frameworkTriggersPlugin(root, { devTriggerToken }),
       devTriggersHintPlugin(root, { framework: true, devTriggerToken }),
       ...cloudflare({
         ...inspectorPortOption,
-        persistState: { path: options?.persistTo ?? outDir },
+        persistState: { path: localD1.persistRoot },
         auxiliaryWorkers: options?.auxiliaryWorkers,
         viteEnvironment,
         config: mergeBindings,
@@ -2280,9 +2298,10 @@ export function voidPlugin(options?: {
     drizzlePlugin(root, true, dialect, {
       d1BindingName: bindingNames?.d1,
       forceVirtualDb: authEnabled || bindingNames?.d1 !== undefined,
-      localD1PersistRoot: options?.persistTo ?? outDir,
+      localD1DatabaseId: localD1.databaseId,
+      localD1PersistRoot: localD1.persistRoot,
     }),
-    migrationPlugin(root, dialect, 'local', join(root, '.void'), {
+    migrationPlugin(root, dialect, localD1.databaseId, localD1.persistRoot, {
       enabled: authEnabled,
       configPath: authConfigPath,
     }),
@@ -2290,7 +2309,7 @@ export function voidPlugin(options?: {
     devTriggersHintPlugin(root, { framework: false, devTriggerToken }),
     ...cloudflare({
       ...inspectorPortOption,
-      persistState: { path: options?.persistTo ?? outDir },
+      persistState: { path: localD1.persistRoot },
       auxiliaryWorkers: options?.auxiliaryWorkers,
       viteEnvironment: { name: DEFAULT_WORKER_ENVIRONMENT_NAME },
       config: mergeBindings,

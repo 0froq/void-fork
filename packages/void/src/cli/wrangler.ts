@@ -54,6 +54,27 @@ export type WranglerPublishedTrafficSnapshot = {
   routes: Array<unknown>;
 };
 
+export type RootWranglerConfig = {
+  configPath: string;
+  config: Record<string, unknown>;
+};
+
+/** Read the root Wrangler config with the same JSONC parser used by binding sync. */
+export function readRootWranglerConfig(root: string): RootWranglerConfig | undefined {
+  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
+    const configPath = join(root, name);
+    if (!existsSync(configPath)) {
+      continue;
+    }
+    const parsed = parseJsonc(readFileSync(configPath, 'utf-8'));
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new SyntaxError(`Failed to parse ${configPath}: expected a JSON object.`);
+    }
+    return { configPath, config: parsed };
+  }
+  return undefined;
+}
+
 /** Read the last traffic attachment state Void successfully published remotely. */
 export function readWranglerPublishedTrafficSnapshot(
   configPath: string,

@@ -451,4 +451,30 @@ describe('drizzlePlugin db typing generation', () => {
 
     expect(warnMock).not.toHaveBeenCalled();
   });
+
+  it('checks schema state using the configured local D1 database ID', async () => {
+    const root = createProjectRoot();
+    const persistRoot = join(root, 'local-state');
+    const databaseId = 'configured-preview-id';
+    const dbPath = getMiniflareDatabasePath(persistRoot, databaseId);
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const db = await openSqliteDatabase(dbPath);
+    try {
+      db.exec('CREATE TABLE users (id TEXT PRIMARY KEY)');
+    } finally {
+      db.close();
+    }
+
+    const plugin = drizzlePlugin(root, false, 'sqlite', {
+      localD1DatabaseId: databaseId,
+      localD1PersistRoot: persistRoot,
+    });
+    const configureServer = getHookHandler(plugin.configureServer) as (
+      server: unknown,
+    ) => Promise<void>;
+
+    await configureServer({ watcher: { on: vi.fn() } });
+
+    expect(warnMock).not.toHaveBeenCalled();
+  });
 });

@@ -11,6 +11,7 @@ import {
   type DatabaseDialect,
 } from '../config.ts';
 import type { DatabaseProviderAdapter, DatabaseProviderDialect } from '../database-provider.ts';
+import { resolveLocalD1Target, type LocalD1Target } from '../local-d1.ts';
 import {
   collectMigrations,
   readJournal,
@@ -44,10 +45,21 @@ const DEFAULT_SEED_FILES = [
 const MODULE_SEED_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs']);
 
 export function getLocalD1PersistRoot(root: string): string {
+  return getLocalD1Target(root).persistRoot;
+}
+
+export function getLocalD1Target(root: string): LocalD1Target {
   const detected = detectFramework(root);
-  return detected && (detected.class === 'b' || detected.class === 'c')
-    ? join(root, '.wrangler', 'state')
-    : join(root, '.void');
+  const defaultPersistRoot =
+    detected && (detected.class === 'b' || detected.class === 'c')
+      ? join(root, '.wrangler', 'state')
+      : join(root, '.void');
+  const bindingName = resolveBindingNames(readConfig(root).inference?.bindings)?.d1 ?? 'DB';
+  return resolveLocalD1Target(root, {
+    bindingName,
+    defaultPersistRoot,
+    readPersistState: true,
+  });
 }
 
 function runDrizzleKit(root: string, args: Array<string>): void {
@@ -378,9 +390,7 @@ async function runPush(root: string, dialect: DatabaseDialect): Promise<void> {
   } else {
     const { mkdirSync } = await import('node:fs');
     const { dirname } = await import('pathslash');
-    const { getMiniflareDatabasePath } = await import('../migrations/runner.ts');
-    const persistRoot = getLocalD1PersistRoot(root);
-    const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+    const { databasePath: dbPath } = getLocalD1Target(root);
     mkdirSync(dirname(dbPath), { recursive: true });
     configPath = writeDrizzleConfig(root, dbPath);
   }
@@ -473,10 +483,8 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
       localApplied = [];
     }
   } else {
-    const { getMiniflareDatabasePath, getAppliedMigrations } =
-      await import('../migrations/runner.ts');
-    const persistRoot = getLocalD1PersistRoot(root);
-    const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+    const { getAppliedMigrations } = await import('../migrations/runner.ts');
+    const { databasePath: dbPath } = getLocalD1Target(root);
     localApplied = await getAppliedMigrations(dbPath);
   }
   const localSet = new Set(localApplied.map((m) => m.name));
@@ -629,9 +637,8 @@ async function resetDatabase(root: string, dialect: DatabaseDialect): Promise<nu
     return migrations.length;
   }
 
-  const { getMiniflareDatabasePath, runMigrations } = await import('../migrations/runner.ts');
-  const persistRoot = getLocalD1PersistRoot(root);
-  const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+  const { runMigrations } = await import('../migrations/runner.ts');
+  const { databasePath: dbPath } = getLocalD1Target(root);
 
   rmSync(dbPath, { force: true });
   rmSync(dbPath + '-wal', { force: true });
@@ -682,10 +689,8 @@ async function runSeed(
       return;
     }
 
-    const { getMiniflareDatabasePath, openSqliteDatabase } =
-      await import('../migrations/runner.ts');
-    const persistRoot = getLocalD1PersistRoot(root);
-    const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+    const { openSqliteDatabase } = await import('../migrations/runner.ts');
+    const { databasePath: dbPath } = getLocalD1Target(root);
     const db = await openSqliteDatabase(dbPath);
     try {
       db.exec(sql);
@@ -996,9 +1001,8 @@ async function runExecute(
     return;
   }
 
-  const { getMiniflareDatabasePath, openSqliteDatabase } = await import('../migrations/runner.ts');
-  const persistRoot = getLocalD1PersistRoot(root);
-  const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+  const { openSqliteDatabase } = await import('../migrations/runner.ts');
+  const { databasePath: dbPath } = getLocalD1Target(root);
 
   if (!existsSync(dbPath)) {
     log.error('No local database found. Run `void dev` first.');
@@ -1321,10 +1325,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
     return;
   }
 
-  const { getMiniflareDatabasePath, getAppliedMigrations, runMigrations } =
-    await import('../migrations/runner.ts');
-  const persistRoot = getLocalD1PersistRoot(root);
-  const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+  const { getAppliedMigrations, runMigrations } = await import('../migrations/runner.ts');
+  const { databasePath: dbPath } = getLocalD1Target(root);
 
   try {
     const existingRows = await getAppliedMigrations(dbPath);
@@ -1406,10 +1408,7 @@ async function runStudio(root: string, dialect: DatabaseDialect, remote?: boolea
   }
 
   const { writeDrizzleConfig } = await import('../drizzle/config.ts');
-  const { getMiniflareDatabasePath } = await import('../migrations/runner.ts');
-
-  const persistRoot = getLocalD1PersistRoot(root);
-  const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+  const { databasePath: dbPath } = getLocalD1Target(root);
 
   if (!existsSync(dbPath)) {
     log.error('No local database found. Run `void dev` first.');
@@ -1856,10 +1855,8 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
       process.exit(1);
     }
   } else {
-    const { getMiniflareDatabasePath, openSqliteDatabase } =
-      await import('../migrations/runner.ts');
-    const persistRoot = getLocalD1PersistRoot(root);
-    const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+    const { openSqliteDatabase } = await import('../migrations/runner.ts');
+    const { databasePath: dbPath } = getLocalD1Target(root);
     if (existsSync(dbPath)) {
       try {
         const db = await openSqliteDatabase(dbPath);
@@ -2066,9 +2063,8 @@ async function runExport(
     return;
   }
 
-  const { getMiniflareDatabasePath, openSqliteDatabase } = await import('../migrations/runner.ts');
-  const persistRoot = getLocalD1PersistRoot(root);
-  const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+  const { openSqliteDatabase } = await import('../migrations/runner.ts');
+  const { databasePath: dbPath } = getLocalD1Target(root);
 
   if (!existsSync(dbPath)) {
     log.error('No local database found. Run `void dev` first.', errOut);
@@ -2279,9 +2275,8 @@ async function runSeedModule(
   }
 
   const { drizzle } = await import('drizzle-orm/better-sqlite3');
-  const { getMiniflareDatabasePath, openSqliteDatabase } = await import('../migrations/runner.ts');
-  const persistRoot = getLocalD1PersistRoot(root);
-  const dbPath = getMiniflareDatabasePath(persistRoot, 'local');
+  const { openSqliteDatabase } = await import('../migrations/runner.ts');
+  const { databasePath: dbPath } = getLocalD1Target(root);
   const sqlite = await openSqliteDatabase(dbPath);
   try {
     const options = getDrizzleSchemaOptions(schema);

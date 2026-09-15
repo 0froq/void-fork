@@ -30,6 +30,8 @@ This project uses [Void](https://void.cloud) — a fullstack Vite plugin + deplo
 
 Database: define Drizzle tables in `db/schema.ts`, import `db` from `void/db` and tables from `@schema`. Use `void db push` for prototyping, `void db generate` for production migrations. When Void-managed auth is enabled, generation automatically includes its production Better Auth tables (including config renames/plugins); do not duplicate them in `db/schema.ts`. `drizzle-orm` and `drizzle-kit` ship with void (no extra install). Migrations live in `db/migrations/`.
 
+Local D1 commands share development’s configured binding ID (preview ID first) and persistence directory. After changing `voidPlugin({ persistTo })`, start `void dev` to refresh the recorded path before running `void db`.
+
 Database dialects: omit `database` for D1, use `"database": "pg"` for PostgreSQL, or `"database": "mysql"` for MySQL. External databases use `DATABASE_URL` locally and Hyperdrive in production. Import builders from `void/schema-d1`, `void/schema-pg`, or `void/schema-mysql` to match. Direct Cloudflare deploy applies checked-in PostgreSQL/MySQL migrations using the shell-provided production URL; PostgreSQL is transactional, MySQL DDL is not.
 
 Durable state: create `durable-objects/name.ts`, named- and default-export the same `defineDurableState()` value from `void/durable`, and call typed RPC methods through `State.get(id)`. Void derives the binding, worker class, and SQLite-backed Cloudflare migration from the filename. This supports native Void apps on Cloudflare, including direct Cloudflare deploys, and is separate from legacy `*.ws.ts` routes.

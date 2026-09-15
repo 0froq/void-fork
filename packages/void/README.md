@@ -93,7 +93,7 @@ Self-hosted platform upgrades verify every packaged PostgreSQL migration and req
 
 `void/db` is Drizzle-first.
 
-- D1 is the default managed database target
+- D1 is the default managed database target; development and local database commands share the configured binding ID and persistence directory
 - apps can opt into PostgreSQL or MySQL mode
 - route types, DB types, and queue types are generated into `.void/*.d.ts`
 
