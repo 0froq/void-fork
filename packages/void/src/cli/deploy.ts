@@ -5165,15 +5165,17 @@ export async function runCloudflareDeploy(
   acknowledgeWranglerManagedQueueRemovals(configPath, queueConsumerCleanup);
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
   const publishedTraffic = readCloudflareTriggerConfig(generatedConfigPath, configPath);
-  writeWranglerPublishedTrafficSnapshot(
-    configPath,
-    {
-      workers_dev: publishedTraffic.workers_dev,
-      preview_urls: publishedTraffic.preview_urls,
-      routes: [...publishedTraffic.routes],
-    },
-    { create: false },
-  );
+  if (!existingWorker && !execution.preservedTriggers) {
+    writeWranglerPublishedTrafficSnapshot(
+      configPath,
+      {
+        workers_dev: publishedTraffic.workers_dev,
+        preview_urls: publishedTraffic.preview_urls,
+        routes: [...publishedTraffic.routes],
+      },
+      { create: false },
+    );
+  }
   cliLog.info('cloudflare_deploy_end', {
     ok: true,
     worker: workerName,
@@ -5236,6 +5238,18 @@ export function formatCloudflareActivationError(
       return result.triggerRepair === 'succeeded'
         ? `deploy: another Cloudflare operation superseded this deployment. Void restored triggers for the active version ${result.activeVersionId ?? '(unknown)'}; retry from fresh deployment status.`
         : `deploy: another Cloudflare operation superseded this deployment, but its trigger state could not be verified. Inspect the active Worker version ${result.activeVersionId ?? '(unknown)'} immediately.`;
+    case 'inheritance-source-unavailable':
+      return 'deploy: could not verify which Worker Version would supply inherited secrets; production traffic is unchanged.';
+    case 'inheritance-source-changed':
+      return [
+        'deploy: the active Worker Version is not the latest upload, so inherited secrets cannot be pinned safely.',
+        'Remove the unpublished version or activate the intended version in Cloudflare, then retry; production traffic is unchanged.',
+      ].join('\n');
+    case 'traffic-preservation-unavailable':
+      return [
+        'deploy: the existing Worker has dashboard-managed routes or visibility that Void cannot safely republish.',
+        'Add its current routes, workers_dev, and preview_urls values to the root Wrangler config, then retry; no version was uploaded.',
+      ].join('\n');
     case 'traffic-split-unsupported':
       return [
         'deploy: the current Cloudflare deployment splits traffic across multiple Worker Versions.',
@@ -5720,15 +5734,17 @@ async function runCloudflareStaticDeploy(
   acknowledgeWranglerManagedQueueRemovals(configPath, queueConsumerCleanup);
   rememberCloudflareWorkersDevSubdomain(root, accountId, execution.previewUrl);
   const publishedTraffic = readCloudflareTriggerConfig(staticConfigPath, configPath);
-  writeWranglerPublishedTrafficSnapshot(
-    configPath,
-    {
-      workers_dev: publishedTraffic.workers_dev,
-      preview_urls: publishedTraffic.preview_urls,
-      routes: [...publishedTraffic.routes],
-    },
-    { create: false },
-  );
+  if (!existingWorker && !execution.preservedTriggers) {
+    writeWranglerPublishedTrafficSnapshot(
+      configPath,
+      {
+        workers_dev: publishedTraffic.workers_dev,
+        preview_urls: publishedTraffic.preview_urls,
+        routes: [...publishedTraffic.routes],
+      },
+      { create: false },
+    );
+  }
   cliLog.info('cloudflare_deploy_end', {
     ok: true,
     worker: workerName,

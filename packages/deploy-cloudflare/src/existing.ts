@@ -86,6 +86,18 @@ export function assertCloudflareBindingsPreserved(
       'The uploaded version did not preserve the existing Worker bindings and variables. It has not been activated.',
     );
   }
+  const handlers = (worker: ExistingCloudflareWorker): Array<string> | null => {
+    const value = worker.script.handlers;
+    return Array.isArray(value) &&
+      value.every((handler): handler is string => typeof handler === 'string')
+      ? [...new Set(value)].sort()
+      : null;
+  };
+  if (!isDeepStrictEqual(handlers(before), handlers(after))) {
+    throw new Error(
+      'The uploaded version did not preserve the existing Worker event handlers. It has not been activated.',
+    );
+  }
 }
 
 /** Validate the supported handoff without creating or replacing resources. */
@@ -100,7 +112,7 @@ export function assertExistingCloudflareConfig(
     handlers.some((handler) => handler !== 'fetch' && handler !== 'scheduled')
   ) {
     throw new Error(
-      'Linking an existing Worker currently supports fetch handlers only. Scheduled, queue, and Durable Object handlers need a separate migration.',
+      'Linking an existing Worker currently supports fetch and scheduled handlers only. Queue and Durable Object handlers need a separate migration.',
     );
   }
   for (const field of [
@@ -132,7 +144,11 @@ export function assertExistingCloudflareConfig(
   for (const field of ['compatibility_date', 'compatibility_flags', 'limits']) {
     const expected = existing.runtime[field] ?? (field === 'compatibility_flags' ? [] : undefined);
     const actual = config[field] ?? (field === 'compatibility_flags' ? [] : undefined);
-    if ((built || config[field] !== undefined) && !isDeepStrictEqual(actual, expected)) {
+    const equal =
+      field === 'compatibility_flags'
+        ? stringSetEqual(actual, expected)
+        : isDeepStrictEqual(actual, expected);
+    if ((built || config[field] !== undefined) && !equal) {
       throw new Error(
         `Keep the existing Worker's ${field} when linking. Update it in a later deployment.`,
       );
@@ -219,6 +235,18 @@ export function assertExistingCloudflareConfig(
       );
     }
   }
+}
+
+function stringSetEqual(left: unknown, right: unknown): boolean {
+  if (
+    !Array.isArray(left) ||
+    !left.every((value): value is string => typeof value === 'string') ||
+    !Array.isArray(right) ||
+    !right.every((value): value is string => typeof value === 'string')
+  ) {
+    return false;
+  }
+  return isDeepStrictEqual([...new Set(left)].sort(), [...new Set(right)].sort());
 }
 
 function record(value: unknown): value is Record<string, unknown> {

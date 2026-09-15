@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 import {
   readExistingCloudflareWorker,
   assertExistingCloudflareConfig,
+  assertCloudflareBindingsPreserved,
   type ExistingCloudflareWorker,
 } from '../../src/existing.ts';
 
@@ -44,6 +45,22 @@ describe('existing Worker preservation', () => {
       }
     }
   });
+  it('rejects an upload that drops an existing event handler', () => {
+    expect(() =>
+      assertCloudflareBindingsPreserved(worker, {
+        ...worker,
+        versionId: 'candidate',
+        script: { handlers: ['fetch'] },
+      }),
+    ).toThrow('event handlers');
+    expect(() =>
+      assertCloudflareBindingsPreserved(worker, {
+        ...worker,
+        versionId: 'candidate',
+        script: { handlers: ['scheduled', 'fetch'] },
+      }),
+    ).not.toThrow();
+  });
   it('blocks new resources, runtime changes, and unsupported bindings', () => {
     expect(() =>
       assertExistingCloudflareConfig(worker, {
@@ -66,6 +83,21 @@ describe('existing Worker preservation', () => {
       assertExistingCloudflareConfig(
         worker,
         { ...config, triggers: { crons: [] }, queues: { consumers: [], producers: [] } },
+        true,
+      ),
+    ).not.toThrow();
+  });
+  it('compares compatibility flags as a semantic set', () => {
+    expect(() =>
+      assertExistingCloudflareConfig(
+        {
+          ...worker,
+          runtime: {
+            compatibility_date: '2026-02-24',
+            compatibility_flags: ['nodejs_compat'],
+          },
+        },
+        { ...config, compatibility_flags: ['nodejs_compat', 'nodejs_compat'] },
         true,
       ),
     ).not.toThrow();
