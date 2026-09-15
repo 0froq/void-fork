@@ -296,13 +296,13 @@ describe('compileRouteTable', () => {
     );
 
     expect(code).toContain('app.post("/__void/queue"');
-    expect(code).toContain('const queue0Name = "emails"');
+    expect(code).toContain('const __queueNames = ["emails"]');
     expect(code).toContain('import("/queues/emails.ts")');
     expect(code).toContain('mod.default(batch, env)');
     expect(code).toContain('export async function __processQueue');
   });
 
-  it('matches queue name with endsWith for prefixed names', () => {
+  it('resolves exact queue names before the longest prefixed-name suffix', () => {
     const scan: ScanResult = {
       routes: [],
       middleware: [],
@@ -327,7 +327,13 @@ describe('compileRouteTable', () => {
       testOptions,
     );
 
-    expect(code).toContain('queueSuffix.endsWith("-" + queue0Name)');
+    expect(code).toContain('if (exact !== -1) return exact');
+    expect(code).toContain('if (!queueName.endsWith("-" + name)) continue');
+    expect(code).toContain('if (name.length > matchLength)');
+    expect(code).toContain('else if (name.length === matchLength)');
+    expect(code).toContain('match = -1');
+    expect(code).toContain('if (__queueIndex === -1)');
+    expect(code).toContain('return { ok: false, error:');
   });
 
   it('omits /__void/queue route when no queues defined', () => {

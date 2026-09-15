@@ -14,6 +14,7 @@ import { dirname, join, extname } from 'pathslash';
 import { build } from 'vite';
 import type { MigrationPlanBundle } from '../migrations/plan.ts';
 import { readProjectPaths } from '../project-paths.ts';
+import { generateQueueResolverSource } from '../queues/dispatch.ts';
 
 export type WrapperFeatures = {
   /** Auth providers (kept for type compatibility, no longer used by wrapper). */
@@ -544,8 +545,17 @@ function generateHandlersSource(root: string, features: WrapperFeatures): string
     }
 
     lines.push('');
+    lines.push(generateQueueResolverSource(features.queues.map((queue) => queue.name)));
+    lines.push('');
     lines.push('export async function handleQueue(batch, env, ctx) {');
     lines.push('  const queueSuffix = batch.queue;');
+    lines.push('  const __queueIndex = __resolveQueueIndex(queueSuffix);');
+    lines.push('  if (__queueIndex === -1) {');
+    lines.push('    batch.retryAll();');
+    lines.push(
+      '    throw new Error(`No unambiguous queue handler matches "${String(queueSuffix)}"`);',
+    );
+    lines.push('  }');
     lines.push('  const messages = [...batch.messages].map(m => ({');
     lines.push('    id: m.id,');
     lines.push('    timestamp: m.timestamp.toISOString(),');
@@ -554,23 +564,19 @@ function generateHandlersSource(root: string, features: WrapperFeatures): string
     lines.push('  }));');
     lines.push('  const payload = { queue: queueSuffix, messages };');
 
+    lines.push('  switch (__queueIndex) {');
     for (let i = 0; i < features.queues.length; i++) {
-      const name = features.queues[i].name;
-      lines.push('');
+      lines.push(`    case ${i}:`);
+      lines.push(`      if (typeof queueHandler${i} === "function") {`);
+      lines.push(`        await queueHandler${i}(payload, env);`);
       lines.push(
-        `  if (queueSuffix === ${JSON.stringify(name)} || queueSuffix.endsWith("-" + ${JSON.stringify(name)})) {`,
+        `      } else if (queueHandler${i} && typeof queueHandler${i}.default === "function") {`,
       );
-      lines.push(`    if (typeof queueHandler${i} === "function") {`);
-      lines.push(`      await queueHandler${i}(payload, env);`);
-      lines.push(
-        `    } else if (queueHandler${i} && typeof queueHandler${i}.default === "function") {`,
-      );
-      lines.push(`      await queueHandler${i}.default(payload, env);`);
-      lines.push(`    }`);
-      lines.push(`    return;`);
-      lines.push(`  }`);
+      lines.push(`        await queueHandler${i}.default(payload, env);`);
+      lines.push(`      }`);
+      lines.push(`      return;`);
     }
-
+    lines.push('  }');
     lines.push('}');
   }
 

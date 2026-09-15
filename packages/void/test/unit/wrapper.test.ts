@@ -8,8 +8,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { join } from 'pathslash';
-import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   cleanupWrapper,
   needsWrapper,
@@ -102,6 +103,86 @@ describe('cleanupWrapper', () => {
     for (const directory of temporaryDirectories) {
       expect(existsSync(join(voidDir, directory))).toBe(false);
     }
+  });
+});
+
+describe('generated wrapper queue dispatch', () => {
+  const roots: Array<string> = [];
+
+  afterEach(() => {
+    for (const root of roots.splice(0, roots.length)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('uses exact or unique longest suffix matches and rejects unknown queues', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-wrapper-queues-'));
+    const workerDir = join(root, 'server');
+    roots.push(root);
+    mkdirSync(workerDir, { recursive: true });
+    mkdirSync(join(root, 'queues'), { recursive: true });
+    writeFileSync(
+      join(workerDir, 'index.mjs'),
+      'export default { fetch() { return new Response("ok"); } };',
+    );
+    writeFileSync(
+      join(root, 'queues/emails.ts'),
+      'export default async function(_batch, env) { env.calls.push("emails"); }',
+    );
+    writeFileSync(
+      join(root, 'queues/order-emails.ts'),
+      'export default async function(_batch, env) { env.calls.push("order-emails"); }',
+    );
+
+    await generateWrapper(workerDir, 'index.mjs', root, {
+      ...base,
+      queues: [
+        { name: 'emails', filePath: 'emails.ts', bindingName: 'QUEUE_EMAILS' },
+        {
+          name: 'order-emails',
+          filePath: 'order-emails.ts',
+          bindingName: 'CUSTOM_ORDER_EMAILS',
+        },
+      ],
+    });
+
+    const wrapper = (await import(
+      `${pathToFileURL(join(workerDir, 'index.mjs')).href}?test=${crypto.randomUUID()}`
+    )) as {
+      default: {
+        queue(
+          batch: MessageBatch,
+          env: { calls: Array<string> },
+          ctx: ExecutionContext,
+        ): Promise<void>;
+      };
+    };
+    const makeBatch = (queue: string, retryAll = vi.fn()) =>
+      ({
+        queue,
+        messages: [],
+        ackAll: vi.fn(),
+        retryAll,
+      }) as unknown as MessageBatch;
+
+    for (const [queue, expected] of [
+      ['emails', 'emails'],
+      ['project-emails', 'emails'],
+      ['order-emails', 'order-emails'],
+      ['project-order-emails', 'order-emails'],
+    ]) {
+      const env = { calls: [] as Array<string> };
+      await wrapper.default.queue(makeBatch(queue), env, {} as ExecutionContext);
+      expect(env.calls).toEqual([expected]);
+    }
+
+    const retryAll = vi.fn();
+    const env = { calls: [] as Array<string> };
+    await expect(
+      wrapper.default.queue(makeBatch('project-unknown', retryAll), env, {} as ExecutionContext),
+    ).rejects.toThrow('No unambiguous queue handler matches "project-unknown"');
+    expect(retryAll).toHaveBeenCalledOnce();
+    expect(env.calls).toEqual([]);
   });
 });
 

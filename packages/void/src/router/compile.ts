@@ -3,6 +3,7 @@ import type { DevRedirectRule, HeaderRule } from '../cli/types.ts';
 import type { NotFoundHandling } from '../config.ts';
 import type { MigrationPlanBundle } from '../migrations/plan.ts';
 import { resolveLayoutIds } from '../pages/layout-resolution.ts';
+import { generateQueueResolverSource } from '../queues/dispatch.ts';
 import { INTERNAL_BINDING_EXACT_NAMES, INTERNAL_BINDING_PREFIXES } from '../runtime/env-raw.ts';
 import type { ScanResult } from './scan.ts';
 
@@ -1495,14 +1496,18 @@ window.__vite_plugin_react_preamble_installed__ = true;
   }
 
   if (scan.queues.length > 0) {
-    for (let i = 0; i < scan.queues.length; i++) {
-      lines.push(`const queue${i}Name = ${JSON.stringify(scan.queues[i].name)};`);
-    }
+    lines.push(generateQueueResolverSource(scan.queues.map((queue) => queue.name)));
     lines.push('');
     // Queue dispatch as a standalone function — called directly by native queue handler
     // and via the authenticated HTTP route. No global mutable state needed.
     lines.push('export async function __processQueue(payload, env) {');
     lines.push('  const queueSuffix = payload.queue;');
+    lines.push('  const __queueIndex = __resolveQueueIndex(queueSuffix);');
+    lines.push('  if (__queueIndex === -1) {');
+    lines.push(
+      '    return { ok: false, error: `No unambiguous queue handler matches "${String(queueSuffix)}"` };',
+    );
+    lines.push('  }');
     lines.push('  const __decisions = new Map();');
     lines.push('  function __wrapMsg(m) {');
     lines.push('    let decided = false;');
@@ -1527,16 +1532,16 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push('  };');
     lines.push('  let __ok = true;');
     lines.push('  try {');
+    lines.push('    switch (__queueIndex) {');
     for (let i = 0; i < scan.queues.length; i++) {
       const q = scan.queues[i];
-      const cond = i === 0 ? 'if' : '} else if';
+      lines.push(`      case ${i}: {`);
       lines.push(
-        `    ${cond} (queueSuffix === queue${i}Name || queueSuffix.endsWith("-" + queue${i}Name)) {`,
+        `        const mod = await import(${JSON.stringify(`${queuesDir}/${q.filePath}`)});`,
       );
-      lines.push(
-        `      const mod = await import(${JSON.stringify(`${queuesDir}/${q.filePath}`)});`,
-      );
-      lines.push("      if (typeof mod.default === 'function') await mod.default(batch, env);");
+      lines.push("        if (typeof mod.default === 'function') await mod.default(batch, env);");
+      lines.push('        break;');
+      lines.push('      }');
     }
     lines.push('    }');
     lines.push('  } catch { __ok = false; }');
