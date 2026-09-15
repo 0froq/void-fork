@@ -71,6 +71,7 @@ function delayedStubBodyResponse(delayMs: number): Response {
 function cachedStubResponse(cacheControl: string): Response {
   const response = stubResponse();
   response.headers.set('Cache-Control', cacheControl);
+  markSharedCachePolicy(response.headers);
   return response;
 }
 

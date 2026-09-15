@@ -783,7 +783,7 @@ export default {
     }
 
     // Edge-cache hashed static assets (immutable, content-addressed URLs)
-    if (request.method === 'GET' && routing.hashedAssetsPrefix) {
+    if (routing.hashedAssetsPrefix && isSharedStaticCacheRequestEligible(request)) {
       const prefix = '/' + routing.hashedAssetsPrefix + '/';
       if (pathname.startsWith(prefix)) {
         // Cache key tracks the post-rewrite (hash-bearing) URL, not the
@@ -849,6 +849,7 @@ export default {
               }
             }
           }
+          ruled.headers.delete(SHARED_CACHE_POLICY_HEADER);
           return meter(ruled, failureKind ? { failureKind } : undefined);
         };
 
@@ -856,7 +857,7 @@ export default {
         const cached = await cache.match(cacheKey);
         if (
           cached?.headers.get('Cache-Control')?.includes('immutable') &&
-          isStaticCacheResponseEligible(cached)
+          isCurrentStaticCacheResponse(cached)
         ) {
           if (!routing.staticDeploymentId) {
             const repairResult = await maybeServeWfpAssetFallback({
@@ -871,6 +872,7 @@ export default {
               if (isStaticCacheResponseEligible(repairResult.response)) {
                 const repaired = new Response(repairResult.response.body, repairResult.response);
                 repaired.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+                markSharedCachePolicy(repaired.headers);
                 const repairedForCache = repaired.clone();
                 ctx.waitUntil(
                   cache.delete(cacheKey).then(() => cache.put(cacheKey, repairedForCache)),
@@ -966,6 +968,7 @@ export default {
           if (isStaticCacheResponseEligible(response)) {
             const res = new Response(response.body, response);
             res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+            markSharedCachePolicy(res.headers);
             ctx.waitUntil(cache.put(cacheKey, res.clone()));
             return finalizeAsset(res);
           }
@@ -995,6 +998,7 @@ export default {
           if (isStaticCacheResponseEligible(response)) {
             const res = new Response(response.body, response);
             res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+            markSharedCachePolicy(res.headers);
             ctx.waitUntil(cache.put(cacheKey, res.clone()));
             return finalizeAsset(res, failureKind);
           }
@@ -1383,7 +1387,7 @@ export default {
       staticCacheKey = candidateCacheKey;
       const staticCache = caches.default;
       const cached = await staticCache.match(candidateCacheKey);
-      if (cached && isStaticCacheResponseEligible(cached)) {
+      if (cached && isCurrentStaticCacheResponse(cached)) {
         requestType = 'static';
         if (!routing.staticDeploymentId) {
           const repairResult = await maybeServeWfpAssetFallback({
@@ -1407,6 +1411,7 @@ export default {
                 'Cache-Control',
                 'public, s-maxage=31536000, max-age=0, must-revalidate',
               );
+              markSharedCachePolicy(repaired.headers);
               const repairedForCache = repaired.clone();
               ctx.waitUntil(
                 staticCache
@@ -1549,7 +1554,7 @@ export default {
       // rewrite target — otherwise future requests to the original path miss.
       const edgeCacheKey =
         staticCacheKey ??
-        (request.method === 'GET'
+        (isSharedStaticCacheRequestEligible(request)
           ? new Request(`${url.origin}${fallbackOriginPathname}?_v=${routing.staticDeploymentId}`)
           : undefined);
       if (edgeCacheKey && isStaticCacheResponseEligible(finalRes)) {
@@ -1558,6 +1563,7 @@ export default {
           'Cache-Control',
           'public, s-maxage=31536000, max-age=0, must-revalidate',
         );
+        markSharedCachePolicy(cached.headers);
         ctx.waitUntil(caches.default.put(edgeCacheKey, cached.clone()));
       }
 
@@ -1685,6 +1691,7 @@ export default {
           'Cache-Control',
           'public, s-maxage=31536000, max-age=0, must-revalidate',
         );
+        markSharedCachePolicy(cacheRes.headers);
         ctx.waitUntil(caches.default.put(staticCacheKey, cacheRes.clone()));
         return meter(
           clientRevalidateResponse(finalRes),
@@ -2383,23 +2390,28 @@ function isFallbackTargetCacheable(
 }
 
 /**
- * Shared request-side eligibility for the deploy-versioned static cache.
- * Hashed assets take the earlier content-addressed path and do not use this
- * heuristic. Every request that reaches this cache must be safe to satisfy
- * from one shared representation.
+ * Every static cache shares one representation across callers, so credentials,
+ * EventSource semantics, partial requests, and Pages-protocol requests bypass it.
  */
+function isSharedStaticCacheRequestEligible(request: Request): boolean {
+  return Boolean(
+    request.method === 'GET' &&
+    !request.headers.has('Range') &&
+    !request.headers.has('X-VoidPages') &&
+    !shouldBypassIsr(request),
+  );
+}
+
+/** Shared request-side eligibility for the deploy-versioned static cache. */
 function isStaticCacheRequestEligible(
   request: Request,
   pathname: string,
   routing: RoutingEntry,
 ): boolean {
   return Boolean(
-    request.method === 'GET' &&
+    isSharedStaticCacheRequestEligible(request) &&
     routing.version &&
     !isApiPath(pathname) &&
-    !request.headers.has('Range') &&
-    !request.headers.has('X-VoidPages') &&
-    !shouldBypassIsr(request) &&
     (hasExtension(pathname) || !routing.ssr),
   );
 }
@@ -2446,4 +2458,9 @@ function isStaticCacheResponseEligible(response: Response): boolean {
   return (
     response.status === 200 && !isEventStreamResponse(response) && !hasSharedCacheOptOut(response)
   );
+}
+
+/** Only entries written under the current shared-cache policy are safe to serve. */
+function isCurrentStaticCacheResponse(response: Response): boolean {
+  return hasCurrentSharedCachePolicy(response) && isStaticCacheResponseEligible(response);
 }

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Env } from '../../src/env.ts';
 import app, { rebuildRequest } from '../../src/index.ts';
 import {
+  SHARED_CACHE_POLICY_HEADER,
   SHARED_CACHE_POLICY_VERSION,
   isrCacheKey,
   markSharedCachePolicy,
@@ -3347,12 +3348,11 @@ describe('hashed asset caching', () => {
     expect(workerFetch).toHaveBeenCalledTimes(1); // still 1
   });
 
-  it('bypasses stale cache entry without immutable header', async () => {
-    // Simulate pre-existing Workers Assets cache entry (no immutable header)
+  it('replaces an unmarked legacy hashed body instead of serving it', async () => {
     edgeCacheStore.set(
       'https://test.void.app/assets/stale.js',
-      new Response('stale', {
-        headers: { 'Cache-Control': 'public, max-age=0, must-revalidate' },
+      new Response('user-alice', {
+        headers: { 'Cache-Control': 'public, max-age=31536000, immutable' },
       }),
     );
 
@@ -3366,8 +3366,16 @@ describe('hashed asset caching', () => {
 
     const res = await app.fetch(new Request('https://test.void.app/assets/stale.js'), env, ctx);
     expect(res.status).toBe(200);
-    expect(workerFetch).toHaveBeenCalledTimes(1); // bypassed stale entry, hit worker
+    expect(await res.text()).toBe('fresh');
+    expect(workerFetch).toHaveBeenCalledTimes(1);
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+    await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const replacement = edgeCacheStore.get('https://test.void.app/assets/stale.js');
+    expect(replacement?.headers.get(SHARED_CACHE_POLICY_HEADER)).toBe(
+      String(SHARED_CACHE_POLICY_VERSION),
+    );
+    expect(await replacement?.clone().text()).toBe('fresh');
   });
 
   it('does not cache non-hashed asset paths without version', async () => {
@@ -3547,6 +3555,71 @@ describe('hashed asset caching', () => {
     expect(second.headers.get('Set-Cookie')).toContain('sid=user-2');
     expect(workerFetch).toHaveBeenCalledTimes(2);
     expect(edgeCacheStore.has(url)).toBe(false);
+  });
+
+  it('keeps credentialed hashed-path responses private without response opt-out headers', async () => {
+    let render = 0;
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        hashedAssetsPrefix: 'assets',
+      },
+      workerFetchImpl: async () => new Response(`user-${++render}`),
+    });
+    const url = 'https://test.void.app/assets/session-abc.json';
+
+    const firstCtx = createCtx();
+    const first = await app.fetch(
+      new Request(url, { headers: { Cookie: 'session=alice' } }),
+      env,
+      firstCtx,
+    );
+    expect(await first.text()).toBe('user-1');
+    await Promise.all((firstCtx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
+
+    const secondCtx = createCtx();
+    const second = await app.fetch(
+      new Request(url, { headers: { Cookie: 'session=bob' } }),
+      env,
+      secondCtx,
+    );
+    expect(await second.text()).toBe('user-2');
+    expect(workerFetch.mock.calls[0]?.[0].headers.get('Cookie')).toBe('session=alice');
+    expect(workerFetch.mock.calls[1]?.[0].headers.get('Cookie')).toBe('session=bob');
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    expect(edgeCacheStore.has(url)).toBe(false);
+  });
+
+  it.each([
+    ['Authorization', 'Bearer alice'],
+    ['Accept', 'text/event-stream'],
+  ])('bypasses hashed cache for %s requests', async (header, value) => {
+    const url = 'https://test.void.app/assets/session-abc.json';
+    const currentEntry = currentSharedCacheResponse(
+      new Response('cached-user', {
+        headers: { 'Cache-Control': 'public, max-age=31536000, immutable' },
+      }),
+    );
+    edgeCacheStore.set(url, currentEntry);
+    const { env, workerFetch } = createEnv({
+      routing: {
+        workerName: 'test-worker',
+        projectId: 'proj-1',
+        hashedAssetsPrefix: 'assets',
+      },
+      workerResponse: new Response('live-user'),
+    });
+
+    const response = await app.fetch(
+      new Request(url, { headers: { [header]: value } }),
+      env,
+      createCtx(),
+    );
+
+    expect(await response.text()).toBe('live-user');
+    expect(workerFetch).toHaveBeenCalledOnce();
+    expect(await edgeCacheStore.get(url)?.clone().text()).toBe('cached-user');
   });
 
   it('returns 429 when worker exceeds CPU limit', async () => {
@@ -4975,31 +5048,42 @@ describe('static asset caching', () => {
     expect(edgeCacheStore.has('https://test.void.app/profile.json?_v=deploy-1')).toBe(false);
   });
 
-  it('evicts a legacy static entry that contains Set-Cookie instead of serving it', async () => {
+  it('replaces an unmarked legacy static body instead of serving it', async () => {
     const cacheKey = 'https://test.void.app/profile.json?_v=deploy-1';
     edgeCacheStore.set(
       cacheKey,
       new Response('user-alice', {
         headers: {
           'Cache-Control': 'public, s-maxage=31536000',
-          'Set-Cookie': 'sid=alice; Path=/; HttpOnly',
         },
       }),
     );
     const { env, workerFetch } = createEnv({
       routing: { workerName: 'test-worker', projectId: 'proj-1', version: 'deploy-1' },
-      workerResponse: new Response('user-bob', {
-        headers: { 'Set-Cookie': 'sid=bob; Path=/; HttpOnly' },
-      }),
+      workerResponse: new Response('user-bob'),
     });
     const ctx = createCtx();
 
     const response = await app.fetch(new Request('https://test.void.app/profile.json'), env, ctx);
     expect(await response.text()).toBe('user-bob');
-    expect(response.headers.get('Set-Cookie')).toContain('sid=bob');
     expect(workerFetch).toHaveBeenCalledOnce();
     await Promise.all((ctx.waitUntil as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]));
-    expect(edgeCacheStore.has(cacheKey)).toBe(false);
+
+    const replacement = edgeCacheStore.get(cacheKey);
+    expect(replacement).toBeDefined();
+    expect(replacement!.headers.get(SHARED_CACHE_POLICY_HEADER)).toBe(
+      String(SHARED_CACHE_POLICY_VERSION),
+    );
+    expect(await replacement!.clone().text()).toBe('user-bob');
+
+    const cachedResponse = await app.fetch(
+      new Request('https://test.void.app/profile.json'),
+      env,
+      createCtx(),
+    );
+    expect(await cachedResponse.text()).toBe('user-bob');
+    expect(cachedResponse.headers.get(SHARED_CACHE_POLICY_HEADER)).toBeNull();
+    expect(workerFetch).toHaveBeenCalledOnce();
   });
 
   it('client response omits s-maxage on static cache miss', async () => {
