@@ -247,7 +247,7 @@ Use `discover` to restore the administrator's local installation records:
 void platform discover --account <account-id> --installation <id-or-name>
 ```
 
-Discovery checks the recorded resources and their ownership before saving local state. For an enabled installation, it also checks the live platform's identity. Interrupted or disabled installations can still be recovered when their endpoints are unavailable.
+Discovery checks the recorded resources and their ownership before saving local state. For a healthy enabled installation, it also checks the live platform's identity. If an installer-owned resource is missing, discovery restores the verified installation record without requiring its endpoint to respond; run `void platform repair [id]` next to recreate the resource. Discovery refuses a same-name replacement or any surviving resource whose ownership marker belongs to another installation. Interrupted or disabled installations can also be recovered when their endpoints are unavailable.
 
 After discovery, provide `VOID_PLATFORM_DATABASE_URL` for migrations and to coordinate administrator commands. You don't need to re-enter the other secrets for a normal upgrade. If repair must recreate a missing API or proxy Worker, supply its original runtime token, GitHub, R2, JWT, and project-encryption secrets through the `VOID_PLATFORM_*` variables. Cloudflare can't return those values, so keep them in your organization's secret manager.
 

@@ -17,7 +17,7 @@ guard; add no administrator recovery or promotion bypass.
 - [ ] Share authoritative page cache policy across deployment targets.
 - [ ] Preserve production ownership during readiness fallback and compensation.
 - [x] Use supported Durable Object storage for fresh platform installations.
-- [ ] Recover verified installation records when owned resources are missing.
+- [x] Recover verified installation records when owned resources are missing.
 - [ ] Establish durable custody of installation signing and encryption keys.
 - [x] Protect the last active administrator (`ff4f1a15`).
 - [ ] Correct and verify minimum platform runtime permissions.
