@@ -34,7 +34,7 @@ export type PlatformRuntimeManifest = Readonly<{
   artifacts: Readonly<Record<'api' | 'dispatch' | 'proxy' | 'tail', PlatformRuntimeArtifact>>;
   database: PlatformRuntimeDatabaseManifest;
   platformVersion: string;
-  safetyProtocols: Readonly<{ sandboxDrain: 0 | 1 }>;
+  safetyProtocols: Readonly<{ sandboxDrain: 0 | 1 | 2 }>;
   schemaVersion: 2;
   sourceRevision: string | null;
   /** Queue payload contract shared by the API consumer and trusted producers. */
@@ -179,8 +179,12 @@ function parseSafetyProtocols(value: unknown): PlatformRuntimeManifest['safetyPr
     return { sandboxDrain: 0 };
   }
   const protocols = record(value, 'runtime manifest safetyProtocols');
-  if (protocols.sandboxDrain !== 0 && protocols.sandboxDrain !== 1) {
-    throw new Error('runtime manifest safetyProtocols.sandboxDrain must be 0 or 1');
+  if (
+    protocols.sandboxDrain !== 0 &&
+    protocols.sandboxDrain !== 1 &&
+    protocols.sandboxDrain !== 2
+  ) {
+    throw new Error('runtime manifest safetyProtocols.sandboxDrain must be 0, 1, or 2');
   }
   return { sandboxDrain: protocols.sandboxDrain };
 }

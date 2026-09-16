@@ -140,8 +140,10 @@ export type PlatformDatabaseLifecycleLock = (() => Promise<void>) & {
     sourcePlatformVersion: string | null,
     hasPriorWorkers: boolean,
   ) => Promise<PlatformDatabaseMigrationResult>;
-  prepareSandboxDrain?: () => Promise<PlatformSandboxDrainPreparation>;
-  requiredSafetyProtocols?: Readonly<{ sandboxDrain: 0 | 1 }>;
+  prepareSandboxDrain?: (
+    requiredAdmissionProtocol?: 0 | 2,
+  ) => Promise<PlatformSandboxDrainPreparation>;
+  requiredSafetyProtocols?: Readonly<{ sandboxDrain: 0 | 1 | 2 }>;
   verifyDatabase?: (
     runtimeDirectory: string,
     database: PlatformRuntimeDatabaseManifest,
@@ -154,6 +156,8 @@ export type PlatformDatabaseState = Readonly<{
 }>;
 
 export type PlatformSandboxDrainPreparation = Readonly<{
+  admissionProtocol: 0 | 2;
+  generation: string;
   mirrorValue: string;
   state: 'complete' | 'pending';
 }>;
@@ -231,7 +235,9 @@ export type PlatformInstallerDependencies = Readonly<{
     sourcePlatformVersion: string | null,
     hasPriorWorkers: boolean,
   ) => Promise<PlatformDatabaseMigrationResult>;
-  prepareSandboxDrain?: () => Promise<PlatformSandboxDrainPreparation>;
+  prepareSandboxDrain?: (
+    requiredAdmissionProtocol?: 0 | 2,
+  ) => Promise<PlatformSandboxDrainPreparation>;
   recoverWorkerCutover?: (input: {
     key: PlatformWorkerKey;
     preserveCustomDomains: boolean;
@@ -992,13 +998,15 @@ export async function installPlatform(
     const targetSandboxDrainProtocol = runtime.safetyProtocols?.sandboxDrain ?? 0;
     const prepareSandboxDrain =
       dependencies.prepareSandboxDrain ?? releaseDatabaseLock.prepareSandboxDrain;
-    if (targetSandboxDrainProtocol === 1 && !prepareSandboxDrain) {
+    if (targetSandboxDrainProtocol >= 1 && !prepareSandboxDrain) {
       throw new Error(
         'platform: The PostgreSQL lifecycle lock cannot establish the sandbox-drain safety checkpoint.',
       );
     }
     const sandboxDrainPreparation =
-      targetSandboxDrainProtocol === 1 ? await prepareSandboxDrain!() : null;
+      targetSandboxDrainProtocol >= 1
+        ? await prepareSandboxDrain!(targetSandboxDrainProtocol >= 2 ? 2 : 0)
+        : null;
     const sandboxDrainRoutingKvId = requireId(
       Object.fromEntries(manifest.resources.map((resource) => [resource.key, resource.id])),
       'routing-kv',
@@ -1016,12 +1024,12 @@ export async function installPlatform(
     }
     const sandboxDrainState = sandboxDrainPreparation?.state ?? 'complete';
     if (
-      targetSandboxDrainProtocol === 1 &&
+      targetSandboxDrainProtocol >= 1 &&
       (manifest.safetyProtocols?.sandboxDrain ?? 0) < targetSandboxDrainProtocol
     ) {
       manifest = {
         ...manifest,
-        safetyProtocols: { sandboxDrain: 1 },
+        safetyProtocols: { sandboxDrain: targetSandboxDrainProtocol },
         updatedAt: now(),
       };
       writeInstallationManifest(manifest);
@@ -1071,7 +1079,7 @@ export async function installPlatform(
         (snapshot) => snapshot.previousVersionId === null,
       );
     const requiresSandboxDrain =
-      !preserveDisabled && targetSandboxDrainProtocol === 1 && sandboxDrainState === 'pending';
+      !preserveDisabled && targetSandboxDrainProtocol >= 1 && sandboxDrainState === 'pending';
     const requiresTrafficGuard =
       !previousPublicEndpoints ||
       recoveringUnsafeTraffic ||
@@ -2790,7 +2798,8 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
       sourcePlatformVersion,
       hasPriorWorkers,
     );
-  release.prepareSandboxDrain = () => preparePlatformSandboxDrainConnection(client);
+  release.prepareSandboxDrain = (requiredAdmissionProtocol) =>
+    preparePlatformSandboxDrainConnection(client, requiredAdmissionProtocol);
   release.verifyDatabase = (runtimeDirectory, database) =>
     verifyPlatformDatabaseConnection(client, runtimeDirectory, database);
   return release;
@@ -2798,17 +2807,34 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
 
 export async function preparePlatformSandboxDrainConnection(
   client: DatabaseClaimConnection,
+  requiredAdmissionProtocol: 0 | 2 = 0,
 ): Promise<PlatformSandboxDrainPreparation> {
   const relation = await client.query<{ relation: string | null }>(
     `SELECT to_regclass('"sandbox_drain_checkpoints"')::text AS "relation"`,
   );
   if (!relation.rows[0]?.relation) {
     throw new Error(
-      'platform: Runtime declares sandbox-drain safety protocol v1 but its database checkpoint table is missing.',
+      'platform: Runtime declares sandbox-drain safety but its database checkpoint table is missing.',
+    );
+  }
+  const admissionColumn = await client.query<{ present: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'sandbox_drain_checkpoints'
+         AND column_name = 'admission_protocol'
+     ) AS "present"`,
+  );
+  const hasAdmissionColumn = admissionColumn.rows[0]?.present === true;
+  if (requiredAdmissionProtocol === 2 && !hasAdmissionColumn) {
+    throw new Error(
+      'platform: The runtime database does not include the sandbox deployment admission barrier.',
     );
   }
   const readCheckpoint = () =>
     client.query<{
+      admission_protocol: number;
       completed_at: string | null;
       cursor: unknown;
       generation: string;
@@ -2817,13 +2843,14 @@ export async function preparePlatformSandboxDrainConnection(
       state: string;
       updated_at: string;
     }>(
-      `SELECT "generation", "state", "phase", "cursor", "started_at", "updated_at", "completed_at"
+      `SELECT ${hasAdmissionColumn ? '"admission_protocol"' : '0 AS "admission_protocol"'}, "generation", "state", "phase", "cursor", "started_at", "updated_at", "completed_at"
        FROM "sandbox_drain_checkpoints"
        WHERE "singleton" = true`,
     );
   const classify = (
     row:
       | {
+          admission_protocol: number;
           completed_at: string | null;
           cursor: unknown;
           generation: string;
@@ -2840,6 +2867,7 @@ export async function preparePlatformSandboxDrainConnection(
     const cursor = row.cursor as Record<string, unknown> | null;
     if (
       !row.generation ||
+      (row.admission_protocol !== 0 && row.admission_protocol !== 2) ||
       !row.started_at ||
       !row.updated_at ||
       (row.state !== 'draining' && row.state !== 'complete') ||
@@ -2855,6 +2883,8 @@ export async function preparePlatformSandboxDrainConnection(
       );
     }
     return {
+      admissionProtocol: row.admission_protocol,
+      generation: row.generation,
       mirrorValue: JSON.stringify({
         version: 1,
         generation: row.generation,
@@ -2868,8 +2898,67 @@ export async function preparePlatformSandboxDrainConnection(
   };
   const existing = await readCheckpoint();
   const existingState = classify(existing.rows[0]);
-  if (existingState) {
+  if (
+    existingState &&
+    (requiredAdmissionProtocol === 0 ||
+      existingState.admissionProtocol >= requiredAdmissionProtocol)
+  ) {
     return existingState;
+  }
+  if (requiredAdmissionProtocol === 2) {
+    const generation = randomUUID();
+    await client.query('BEGIN');
+    try {
+      await client.query('LOCK TABLE "deployments" IN SHARE MODE');
+      await client.query(
+        `INSERT INTO "sandbox_drain_checkpoints" (
+           "singleton", "admission_protocol", "generation", "state", "phase", "cursor"
+         ) VALUES (true, 2, $1, 'draining', 'deployments', '{"pass":"1"}'::jsonb)
+         ON CONFLICT ("singleton") DO UPDATE
+         SET "admission_protocol" = 2,
+             "generation" = EXCLUDED."generation",
+             "state" = 'draining',
+             "phase" = 'deployments',
+             "cursor" = '{"pass":"1"}'::jsonb,
+             "lease_owner" = NULL,
+             "lease_expires_at" = NULL,
+             "started_at" = now(),
+             "updated_at" = now(),
+             "completed_at" = NULL`,
+        [generation],
+      );
+      const inventory = await client.query<{ empty: boolean }>(
+        `SELECT
+           NOT EXISTS(SELECT 1 FROM "deployments" LIMIT 1)
+           AND NOT EXISTS(SELECT 1 FROM "resources" WHERE "type" = 'container' LIMIT 1)
+           AS "empty"`,
+      );
+      if (inventory.rows[0]?.empty === true) {
+        await client.query(
+          `UPDATE "sandbox_drain_checkpoints"
+           SET "state" = 'complete',
+               "phase" = 'resources',
+               "cursor" = '{"pass":"2"}'::jsonb,
+               "lease_owner" = NULL,
+               "lease_expires_at" = NULL,
+               "updated_at" = now(),
+               "completed_at" = now()
+           WHERE "singleton" = true
+             AND "admission_protocol" = 2
+             AND "generation" = $1`,
+          [generation],
+        );
+      }
+      const armed = classify((await readCheckpoint()).rows[0]);
+      if (!armed || armed.admissionProtocol !== 2) {
+        throw new Error('platform: The sandbox deployment admission barrier could not be armed.');
+      }
+      await client.query('COMMIT');
+      return armed;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    }
   }
   const inventory = await client.query<{ empty: boolean }>(
     `SELECT
@@ -2913,12 +3002,34 @@ export async function verifyPlatformDatabaseConnection(
 
 async function readRequiredPlatformSafetyProtocols(
   client: DatabaseClaimConnection,
-): Promise<Readonly<{ sandboxDrain: 0 | 1 }>> {
+): Promise<Readonly<{ sandboxDrain: 0 | 1 | 2 }>> {
   const relation = await client.query<{ relation: string | null }>(
     `SELECT to_regclass('"sandbox_drain_checkpoints"')::text AS "relation"`,
   );
   if (!relation.rows[0]?.relation) {
     return { sandboxDrain: 0 };
+  }
+  const admissionColumn = await client.query<{ present: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'sandbox_drain_checkpoints'
+         AND column_name = 'admission_protocol'
+     ) AS "present"`,
+  );
+  if (admissionColumn.rows[0]?.present === true) {
+    const admission = await client.query<{ required: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1
+         FROM "sandbox_drain_checkpoints"
+         WHERE "singleton" = true
+           AND "admission_protocol" >= 2
+       ) AS "required"`,
+    );
+    if (admission.rows[0]?.required === true) {
+      return { sandboxDrain: 2 };
+    }
   }
   const checkpoint = await client.query<{ required: boolean }>(
     `SELECT EXISTS(
@@ -2932,13 +3043,13 @@ async function readRequiredPlatformSafetyProtocols(
 
 export function assertPlatformRuntimeSafety(
   runtime: Pick<PlatformRuntimeManifest, 'platformVersion' | 'safetyProtocols'>,
-  installed: Readonly<{ sandboxDrain: 0 | 1 }>,
-  database: Readonly<{ sandboxDrain: 0 | 1 }> = { sandboxDrain: 0 },
+  installed: Readonly<{ sandboxDrain: 0 | 1 | 2 }>,
+  database: Readonly<{ sandboxDrain: 0 | 1 | 2 }> = { sandboxDrain: 0 },
 ): void {
   const requiredSandboxDrain = Math.max(
     installed?.sandboxDrain ?? 0,
     database?.sandboxDrain ?? 0,
-  ) as 0 | 1;
+  ) as 0 | 1 | 2;
   if ((runtime.safetyProtocols?.sandboxDrain ?? 0) < requiredSandboxDrain) {
     throw new Error(
       `platform: Void Platform ${runtime.platformVersion} predates the required sandbox-drain safety protocol. Refusing to upload or activate a runtime that could reopen sandbox creation after drain.`,

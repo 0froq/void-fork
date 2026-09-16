@@ -36,6 +36,7 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Define and enforce the supported Node/CLI/platform compatibility contract.
 - [x] Support native Cloudflare AI development without a Void login.
 - [x] Safely exclude managed Sandboxes, including retained legacy deployments.
+- [x] Serialize legacy deployment admission before accepting an empty Sandbox drain inventory.
 - [x] Correct browser OAuth/DNS and first Workers-subdomain onboarding.
 - [x] Document and verify compatible rollback after a successful platform upgrade.
 - [x] Align feature guides, framework support, product wording, quotas, and operations.

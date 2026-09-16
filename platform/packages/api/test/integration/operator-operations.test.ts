@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   afterAll,
   afterEach,
@@ -93,6 +93,144 @@ function namespace(payload: unknown, status = 200) {
     } as unknown as DurableObjectNamespace,
   };
 }
+
+test('database admission rejects a pre-upgrade deployment after the v2 barrier is armed', async () => {
+  const project = await createTestProject(env.db, ownerId, 'admission-barrier');
+  await env.db.insert(sandboxDrainCheckpoints).values({
+    admission_protocol: 2,
+    singleton: true,
+    generation: 'admission-v2',
+    state: 'complete',
+    phase: 'resources',
+    cursor: { pass: '2' },
+    completed_at: new Date().toISOString(),
+  });
+
+  await expect(
+    env.db.execute(sql`
+      INSERT INTO deployments (id, project_id)
+      VALUES ('dpl_legacy_admission', ${project.id})
+    `),
+  ).rejects.toMatchObject({
+    cause: {
+      message: expect.stringContaining(
+        'deployment admission protocol 0 is below required protocol 2',
+      ),
+    },
+  });
+
+  await env.db.insert(deployments).values({ id: 'dpl_v2_admission', project_id: project.id });
+  const [admitted] = await env.db
+    .select({ admissionProtocol: deployments.admission_protocol })
+    .from(deployments)
+    .where(eq(deployments.id, 'dpl_v2_admission'));
+  expect(admitted?.admissionProtocol).toBe(2);
+});
+
+test.runIf(Boolean(process.env.VOID_TEST_DATABASE_URL))(
+  'updating an existing v2 barrier waits for a legacy admission transaction',
+  async () => {
+    const project = await createTestProject(env.db, ownerId, 'admission-lock');
+    await env.db.insert(sandboxDrainCheckpoints).values({
+      admission_protocol: 0,
+      singleton: true,
+      generation: 'admission-v0',
+      state: 'draining',
+      phase: 'deployments',
+      cursor: { pass: '1' },
+    });
+    let releaseLegacy!: () => void;
+    const legacyMayCommit = new Promise<void>((resolve) => {
+      releaseLegacy = resolve;
+    });
+    let legacyAdmitted!: () => void;
+    const legacyInserted = new Promise<void>((resolve) => {
+      legacyAdmitted = resolve;
+    });
+    const legacyTransaction = env.db.transaction(async (tx) => {
+      await tx.insert(deployments).values({
+        admission_protocol: 0,
+        id: 'dpl_legacy_inflight',
+        project_id: project.id,
+      });
+      legacyAdmitted();
+      await legacyMayCommit;
+    });
+    await legacyInserted;
+
+    let barrierArmed = false;
+    const armBarrier = env.db
+      .update(sandboxDrainCheckpoints)
+      .set({ admission_protocol: 2 })
+      .where(eq(sandboxDrainCheckpoints.singleton, true))
+      .then(() => {
+        barrierArmed = true;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(barrierArmed).toBe(false);
+
+    releaseLegacy();
+    await legacyTransaction;
+    await armBarrier;
+    expect(barrierArmed).toBe(true);
+    const admitted = await env.db
+      .select({ id: deployments.id })
+      .from(deployments)
+      .where(eq(deployments.id, 'dpl_legacy_inflight'));
+    expect(admitted).toEqual([{ id: 'dpl_legacy_inflight' }]);
+  },
+);
+
+test.runIf(Boolean(process.env.VOID_TEST_DATABASE_URL))(
+  'arming v2 with no checkpoint waits for legacy admission before inventory',
+  async () => {
+    const project = await createTestProject(env.db, ownerId, 'admission-table-lock');
+    let releaseLegacy!: () => void;
+    const legacyMayCommit = new Promise<void>((resolve) => {
+      releaseLegacy = resolve;
+    });
+    let legacyAdmitted!: () => void;
+    const legacyInserted = new Promise<void>((resolve) => {
+      legacyAdmitted = resolve;
+    });
+    const legacyTransaction = env.db.transaction(async (tx) => {
+      await tx.insert(deployments).values({
+        admission_protocol: 0,
+        id: 'dpl_legacy_before_checkpoint',
+        project_id: project.id,
+      });
+      legacyAdmitted();
+      await legacyMayCommit;
+    });
+    await legacyInserted;
+
+    let inventoryRead = false;
+    const armBarrier = env.db.transaction(async (tx) => {
+      await tx.execute(sql`LOCK TABLE deployments IN SHARE MODE`);
+      await tx.insert(sandboxDrainCheckpoints).values({
+        admission_protocol: 2,
+        singleton: true,
+        generation: 'admission-v2-after-lock',
+        state: 'draining',
+        phase: 'deployments',
+        cursor: { pass: '1' },
+      });
+      const [inventory] = await tx
+        .select({ id: deployments.id })
+        .from(deployments)
+        .where(eq(deployments.id, 'dpl_legacy_before_checkpoint'));
+      inventoryRead = true;
+      return inventory;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(inventoryRead).toBe(false);
+
+    releaseLegacy();
+    await legacyTransaction;
+    await expect(armBarrier).resolves.toEqual({ id: 'dpl_legacy_before_checkpoint' });
+    expect(inventoryRead).toBe(true);
+  },
+);
 function cloudflareWorkerStub(failScript?: string) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input);

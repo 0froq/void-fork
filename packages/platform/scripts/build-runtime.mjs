@@ -75,7 +75,7 @@ try {
     artifacts,
     database,
     platformVersion: packageJson.version,
-    safetyProtocols: { sandboxDrain: 1 },
+    safetyProtocols: { sandboxDrain: 2 },
     schemaVersion: 2,
     sourceRevision: process.env.VOID_PLATFORM_SOURCE_REVISION || null,
     usageProtocolVersion: PLATFORM_USAGE_PROTOCOL_VERSION,

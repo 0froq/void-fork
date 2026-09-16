@@ -117,6 +117,10 @@ export const deployments = pgTable(
     commit_url: text('commit_url'),
     git_ref: text('git_ref'),
     cli_version: text('cli_version'),
+    admission_protocol: integer('admission_protocol')
+      .notNull()
+      .default(0)
+      .$default(() => 2),
     error_message: text('error_message'),
     asset_hashes: text('asset_hashes'),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
@@ -339,6 +343,7 @@ export const operatorEvents = pgTable(
 /** Authoritative, serialized checkpoint for the managed Sandbox shutdown. */
 export const sandboxDrainCheckpoints = pgTable('sandbox_drain_checkpoints', {
   singleton: boolean('singleton').primaryKey(),
+  admission_protocol: integer('admission_protocol').notNull().default(0),
   generation: text('generation').notNull(),
   state: text('state').notNull().$type<'draining' | 'complete'>(),
   phase: text('phase').notNull().$type<'deployments' | 'resources'>(),

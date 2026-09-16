@@ -77,6 +77,7 @@ export async function readSandboxDrainCheckpoint(db: Db): Promise<SandboxDrainCh
 
 function assertValidCheckpoint(row: SandboxDrainCheckpoint): void {
   if (
+    (row.admission_protocol !== 0 && row.admission_protocol !== 2) ||
     !row.generation ||
     (row.state !== 'draining' && row.state !== 'complete') ||
     (row.phase !== 'deployments' && row.phase !== 'resources') ||

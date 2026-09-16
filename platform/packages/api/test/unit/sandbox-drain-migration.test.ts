@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { getTableConfig } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vite-plus/test';
+import { deployments, sandboxDrainCheckpoints } from '../../src/schema.ts';
 
 const drizzleRoot = new URL('../../drizzle/', import.meta.url);
 
@@ -48,5 +50,34 @@ describe('Sandbox drain database compatibility', () => {
     expect(statements[0]).toMatch(/^CREATE TABLE "sandbox_drain_checkpoints"/);
     expect(statements[1]).toMatch(/^CREATE INDEX "idx_deployments_created_id"/);
     expect(drainMigration).not.toMatch(/\b(?:ALTER|DROP|TRUNCATE|DELETE|UPDATE)\b/i);
+  });
+
+  it('adds a database-enforced v2 deployment admission barrier', () => {
+    const admissionMigration = readFileSync(
+      new URL('0037_deployment_admission_protocol.sql', drizzleRoot),
+      'utf8',
+    );
+    expect(admissionMigration).toContain(
+      'ALTER TABLE "deployments" ADD COLUMN "admission_protocol" integer DEFAULT 0 NOT NULL',
+    );
+    expect(admissionMigration).toContain(
+      'ALTER TABLE "sandbox_drain_checkpoints" ADD COLUMN "admission_protocol" integer DEFAULT 0 NOT NULL',
+    );
+    expect(admissionMigration).toContain("'deployment-admission-bootstrap'");
+    expect(admissionMigration).toContain(
+      'COALESCE("required_protocol", 0) > NEW."admission_protocol"',
+    );
+    expect(admissionMigration).toMatch(/WHERE "singleton" = true\s+FOR SHARE/);
+    expect(admissionMigration).toContain('BEFORE INSERT ON "deployments"');
+
+    const deploymentAdmission = getTableConfig(deployments).columns.find(
+      (column) => column.name === 'admission_protocol',
+    );
+    const checkpointAdmission = getTableConfig(sandboxDrainCheckpoints).columns.find(
+      (column) => column.name === 'admission_protocol',
+    );
+    expect(deploymentAdmission?.default).toBe(0);
+    expect(deploymentAdmission?.defaultFn?.()).toBe(2);
+    expect(checkpointAdmission?.default).toBe(0);
   });
 });

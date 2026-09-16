@@ -163,5 +163,20 @@ describe('platform post-success rollback', () => {
     expect(() =>
       assertPlatformRuntimeSafety(legacy.manifest, { sandboxDrain: 1 }, { sandboxDrain: 0 }),
     ).toThrow('sandbox-drain safety protocol');
+
+    const drainWithoutAdmissionBarrier = runtime({
+      digest: 'b'.repeat(64),
+      migrations: [firstMigration],
+      platformVersion: '1.1.0',
+      safety: 1,
+      schemaDigest: 'd'.repeat(64),
+    });
+    expect(() =>
+      assertPlatformRuntimeSafety(
+        drainWithoutAdmissionBarrier.manifest,
+        { sandboxDrain: 1 },
+        { sandboxDrain: 2 },
+      ),
+    ).toThrow('Refusing to upload or activate');
   });
 });

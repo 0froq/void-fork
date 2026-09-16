@@ -84,6 +84,8 @@ const TEST_PLATFORM_PROJECT_SECRET_KEY = Buffer.alloc(32, 5).toString('base64');
 function sandboxDrainPreparation(state: 'complete' | 'pending') {
   const checkpointState = state === 'complete' ? 'complete' : 'draining';
   return {
+    admissionProtocol: 2 as const,
+    generation: 'generation-1',
     mirrorValue: JSON.stringify({
       completedAt: state === 'complete' ? '2026-09-16T00:00:00.000Z' : undefined,
       generation: 'generation-1',
@@ -1279,6 +1281,7 @@ describe('platform installer', () => {
     async ({ empty, expected, phase, state }) => {
       let checkpoint: Record<string, unknown> | undefined;
       const inserts: Array<ReadonlyArray<unknown> | undefined> = [];
+      const checkpointReads: Array<string> = [];
       const connection = {
         query: async <Row extends Record<string, unknown>>(
           sql: string,
@@ -1290,6 +1293,7 @@ describe('platform installer', () => {
             };
           }
           if (sql.includes('FROM "sandbox_drain_checkpoints"')) {
+            checkpointReads.push(sql);
             return {
               rows: (checkpoint ? [checkpoint] : []) as unknown as ReadonlyArray<Row>,
             };
@@ -1300,6 +1304,7 @@ describe('platform installer', () => {
           if (sql.includes('INSERT INTO "sandbox_drain_checkpoints"')) {
             inserts.push(values);
             checkpoint = {
+              admission_protocol: 0,
               completed_at: empty ? '2026-09-16T00:00:00.000Z' : null,
               cursor: { pass: empty ? '2' : '1' },
               generation: values?.[0],
@@ -1315,6 +1320,7 @@ describe('platform installer', () => {
 
       const prepared = await preparePlatformSandboxDrainConnection(connection);
       expect(prepared.state).toBe(expected);
+      expect(prepared.admissionProtocol).toBe(0);
       expect(JSON.parse(prepared.mirrorValue)).toEqual({
         ...(empty ? { completedAt: '2026-09-16T00:00:00.000Z' } : {}),
         generation: expect.stringMatching(/^[0-9a-f-]{36}$/),
@@ -1329,8 +1335,167 @@ describe('platform installer', () => {
         phase,
         JSON.stringify({ pass: empty ? '2' : '1' }),
       ]);
+      expect(checkpointReads).toEqual([
+        expect.stringContaining('0 AS "admission_protocol"'),
+        expect.stringContaining('0 AS "admission_protocol"'),
+      ]);
     },
   );
+
+  it('requires the database admission column before arming protocol v2', async () => {
+    const queries: Array<string> = [];
+    const connection = {
+      query: async <Row extends Record<string, unknown>>(sql: string) => {
+        queries.push(sql);
+        if (sql.includes('to_regclass')) {
+          return {
+            rows: [{ relation: 'sandbox_drain_checkpoints' }] as unknown as ReadonlyArray<Row>,
+          };
+        }
+        if (sql.includes('information_schema.columns')) {
+          return { rows: [{ present: false }] as unknown as ReadonlyArray<Row> };
+        }
+        return { rows: [] as ReadonlyArray<Row> };
+      },
+    };
+
+    await expect(preparePlatformSandboxDrainConnection(connection, 2)).rejects.toThrow(
+      'database does not include the sandbox deployment admission barrier',
+    );
+    expect(queries).not.toContain('BEGIN');
+  });
+
+  it('arms deployment admission before accepting an empty legacy drain inventory', async () => {
+    let checkpoint: Record<string, unknown> = {
+      admission_protocol: 0,
+      completed_at: '2026-09-16T00:00:00.000Z',
+      cursor: { pass: '2' },
+      generation: 'pre-fence-generation',
+      phase: 'resources',
+      started_at: '2026-09-16T00:00:00.000Z',
+      state: 'complete',
+      updated_at: '2026-09-16T00:00:00.000Z',
+    };
+    const events: Array<string> = [];
+    const connection = {
+      query: async <Row extends Record<string, unknown>>(
+        sql: string,
+        values?: ReadonlyArray<unknown>,
+      ) => {
+        if (sql.includes('to_regclass')) {
+          return {
+            rows: [{ relation: 'sandbox_drain_checkpoints' }] as unknown as ReadonlyArray<Row>,
+          };
+        }
+        if (sql.includes('information_schema.columns')) {
+          return { rows: [{ present: true }] as unknown as ReadonlyArray<Row> };
+        }
+        if (sql === 'BEGIN') {
+          events.push('transaction:begin');
+        } else if (sql.includes('LOCK TABLE "deployments" IN SHARE MODE')) {
+          events.push('deployments:locked');
+        } else if (sql === 'COMMIT') {
+          events.push('transaction:commit');
+        }
+        if (sql.includes('FROM "sandbox_drain_checkpoints"') && sql.includes('SELECT')) {
+          return { rows: [checkpoint] as unknown as ReadonlyArray<Row> };
+        }
+        if (sql.includes('INSERT INTO "sandbox_drain_checkpoints"')) {
+          events.push('admission:armed');
+          checkpoint = {
+            ...checkpoint,
+            admission_protocol: 2,
+            completed_at: null,
+            cursor: { pass: '1' },
+            generation: values?.[0],
+            phase: 'deployments',
+            state: 'draining',
+          };
+        } else if (sql.includes('NOT EXISTS(SELECT 1 FROM "deployments"')) {
+          events.push('inventory:empty');
+          return { rows: [{ empty: true }] as unknown as ReadonlyArray<Row> };
+        } else if (sql.includes('SET "state" = \'complete\'')) {
+          events.push('checkpoint:complete');
+          checkpoint = {
+            ...checkpoint,
+            completed_at: '2026-09-16T00:01:00.000Z',
+            cursor: { pass: '2' },
+            phase: 'resources',
+            state: 'complete',
+          };
+        }
+        return { rows: [] as ReadonlyArray<Row> };
+      },
+    };
+
+    const prepared = await preparePlatformSandboxDrainConnection(connection, 2);
+    expect(events).toEqual([
+      'transaction:begin',
+      'deployments:locked',
+      'admission:armed',
+      'inventory:empty',
+      'checkpoint:complete',
+      'transaction:commit',
+    ]);
+    expect(prepared).toMatchObject({
+      admissionProtocol: 2,
+      generation: expect.not.stringMatching(/^pre-fence/),
+      state: 'complete',
+    });
+  });
+
+  it('rolls back deployment admission arming when inventory cannot be read', async () => {
+    const events: Array<string> = [];
+    const checkpoint = {
+      admission_protocol: 0,
+      completed_at: null,
+      cursor: { pass: '1' },
+      generation: 'pre-fence-generation',
+      phase: 'deployments',
+      started_at: '2026-09-16T00:00:00.000Z',
+      state: 'draining',
+      updated_at: '2026-09-16T00:00:00.000Z',
+    };
+    const connection = {
+      query: async <Row extends Record<string, unknown>>(sql: string) => {
+        if (sql.includes('to_regclass')) {
+          return {
+            rows: [{ relation: 'sandbox_drain_checkpoints' }] as unknown as ReadonlyArray<Row>,
+          };
+        }
+        if (sql.includes('information_schema.columns')) {
+          return { rows: [{ present: true }] as unknown as ReadonlyArray<Row> };
+        }
+        if (sql.includes('FROM "sandbox_drain_checkpoints"') && sql.includes('SELECT')) {
+          return { rows: [checkpoint] as unknown as ReadonlyArray<Row> };
+        }
+        if (sql === 'BEGIN') {
+          events.push('transaction:begin');
+        } else if (sql.includes('LOCK TABLE "deployments" IN SHARE MODE')) {
+          events.push('deployments:locked');
+        } else if (sql.includes('INSERT INTO "sandbox_drain_checkpoints"')) {
+          events.push('admission:armed');
+        } else if (sql.includes('NOT EXISTS(SELECT 1 FROM "deployments"')) {
+          events.push('inventory:error');
+          throw new Error('inventory unavailable');
+        } else if (sql === 'ROLLBACK') {
+          events.push('transaction:rollback');
+        }
+        return { rows: [] as ReadonlyArray<Row> };
+      },
+    };
+
+    await expect(preparePlatformSandboxDrainConnection(connection, 2)).rejects.toThrow(
+      'inventory unavailable',
+    );
+    expect(events).toEqual([
+      'transaction:begin',
+      'deployments:locked',
+      'admission:armed',
+      'inventory:error',
+      'transaction:rollback',
+    ]);
+  });
 
   it('serializes lifecycle changes with the claimed PostgreSQL database', async () => {
     const queries: Array<{ sql: string; values?: ReadonlyArray<unknown> }> = [];
@@ -2922,7 +3087,7 @@ describe('platform installer', () => {
       },
     );
     expect(emptyCoreUpgrade.waitingForSandboxDrain).toBe(false);
-    expect(emptyCoreUpgrade.manifest.safetyProtocols).toEqual({ sandboxDrain: 1 });
+    expect(emptyCoreUpgrade.manifest.safetyProtocols).toEqual({ sandboxDrain: 2 });
     expect(emptyCoreUpgradeConfigs).toHaveLength(4);
     expect(resumedSecretPayloads.slice(0, 2)).toEqual([
       resumedUpdates,
@@ -3023,7 +3188,7 @@ describe('platform installer', () => {
     expect(waitingForSandboxDrain.waitingForSandboxDrain).toBe(true);
     expect(waitingForSandboxDrain.manifest).toMatchObject({
       platformVersion: '0.10.13',
-      safetyProtocols: { sandboxDrain: 1 },
+      safetyProtocols: { sandboxDrain: 2 },
       status: 'verifying',
     });
     expect(sandboxDrainDeployments).toEqual([
@@ -3085,7 +3250,7 @@ describe('platform installer', () => {
     );
     expect(resumedAfterSandboxDrain.waitingForSandboxDrain).toBe(false);
     expect(resumedAfterSandboxDrain.manifest).toMatchObject({
-      safetyProtocols: { sandboxDrain: 1 },
+      safetyProtocols: { sandboxDrain: 2 },
       status: 'installed',
     });
     expect(resumedDrainDeployments).toHaveLength(8);
@@ -3389,7 +3554,7 @@ describe('platform installer', () => {
     });
     expect(disabledLegacyUpgrade.manifest).toMatchObject({
       desiredState: 'disabled',
-      safetyProtocols: { sandboxDrain: 1 },
+      safetyProtocols: { sandboxDrain: 2 },
       status: 'disabled',
     });
 
