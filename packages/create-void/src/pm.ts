@@ -1,6 +1,21 @@
 import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'pathslash';
 
 export type PM = 'npm' | 'pnpm' | 'yarn' | 'bun';
+
+export const VOID_PNPM_ALLOWED_BUILDS = ['better-sqlite3', 'esbuild', 'sharp', 'workerd'] as const;
+
+/** Write the explicit build-script policy required by a new pnpm project. */
+export function writePnpmBuildPolicy(root: string, pm: PM): void {
+  if (pm !== 'pnpm') {
+    return;
+  }
+  writeFileSync(
+    join(root, 'pnpm-workspace.yaml'),
+    `allowBuilds:\n${VOID_PNPM_ALLOWED_BUILDS.map((name) => `  ${name}: true`).join('\n')}\n`,
+  );
+}
 
 export function detectPM(): PM {
   const agent = process.env.npm_config_user_agent;

@@ -36,6 +36,11 @@ bun add -D void
 
 Then run the setup command:
 
+With pnpm, you can also start with `pnpm create void my-app`; the scaffolder sets
+up the required native build permissions before installing Void. If a manual
+installation reports blocked build scripts, use `pnpm approve-builds` to approve
+`better-sqlite3`, `esbuild`, `sharp`, and `workerd` before running setup.
+
 ::: code-group
 
 ```sh [npm]
