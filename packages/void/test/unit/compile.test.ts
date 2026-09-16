@@ -2718,6 +2718,9 @@ describe('compileWorkerEntry', () => {
     // Spliced into fetch, scheduled, AND queue handlers
     const callCount = (code.match(/_validateEnvOnce\(env\)/g) ?? []).length;
     expect(callCount).toBe(3);
+    expect(code).toContain(
+      'if (request.method !== "POST" || new URL(request.url).pathname !== "/__void/prerender-paths") await _validateEnvOnce(env)',
+    );
   });
 
   it('wraps remote-mode fetch and scheduled handlers with resolved runtime env', () => {
@@ -2797,11 +2800,13 @@ describe('compileNodeApp', () => {
     expect(code).toContain('import "/abs/path/to/env.ts"');
     // Helper import
     expect(code).toContain('import { _validateEnvOnce } from "/resolved/env-public.mjs"');
-    // Middleware runs validation on every request before route handlers,
-    // including the /__void/prerender-paths endpoint used by the prerender
-    // child process. Node/Bun read env from process.env.
+    // Only path discovery can run without remote production secrets.
+    // Node/Bun read the application request environment from process.env.
     expect(code).toContain('app.use("*", async (c, next)');
     expect(code).toContain('await _validateEnvOnce(process.env)');
+    expect(code).toContain(
+      'if (c.req.method !== "POST" || c.req.path !== "/__void/prerender-paths")',
+    );
   });
 
   it('uses Deno.env.toObject() as the env source on the deno target', () => {

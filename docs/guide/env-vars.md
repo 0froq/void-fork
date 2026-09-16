@@ -108,6 +108,8 @@ Builds ignore client values from `.env`; this prevents a developer's local value
 
 The server bundle embeds those same public build values. Worker boot validation and server-side `env.VITE_*` reads use them without requiring remote secrets, keeping server rendering consistent with the browser. Server-only keys still come from runtime bindings and are validated at boot.
 
+Prerender path discovery can read route metadata without the deployed server secrets. Application requests, readiness checks, and actual page rendering still validate the runtime environment; a path generator that reads a required secret must have that value available.
+
 ## Validation and redaction
 
 ```sh

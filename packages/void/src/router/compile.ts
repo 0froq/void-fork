@@ -2747,6 +2747,11 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
     ? `import ${JSON.stringify(envSchemaModule.importPath)};\nimport { _validateEnvOnce } from ${JSON.stringify(envSchemaModule.helperPath)};\n`
     : '';
   const envValidateCall = envSchemaModule ? '  await _validateEnvOnce(env);\n' : '';
+  // Discovery reads route metadata in a build-time worker without remote
+  // secrets. Readiness and application requests must still validate at boot.
+  const fetchEnvValidateCall = envSchemaModule
+    ? '  if (request.method !== "POST" || new URL(request.url).pathname !== "/__void/prerender-paths") await _validateEnvOnce(env);\n'
+    : '';
 
   // Filter internal platform bindings so user code cannot access them via c.env.
   // The original env is preserved for framework internals (withRuntimeEnv, etc.).
@@ -2827,7 +2832,7 @@ function __filterInternalBindings(env) {
 
   const fetchHandler = remotePath
     ? `async (request, env, ctx) => {
-${envValidateCall}  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};
+${fetchEnvValidateCall}  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};
 ${isrEnvCapture}  return __withRawEnv(env, () => {
     const userEnv = __filterInternalBindings(env);
     return withRuntimeEnv(env, async () => {
@@ -2838,7 +2843,7 @@ ${renderBlock}
   });
 }`
     : `async (request, env, ctx) => {
-${envValidateCall}${isrEnvCapture}  return __withRawEnv(env, () => {
+${fetchEnvValidateCall}${isrEnvCapture}  return __withRawEnv(env, () => {
     const userEnv = __filterInternalBindings(env);
     return withRuntimeEnv(env, async () => {
       const internal = await __handleInternal(request, env, ctx);
@@ -3021,7 +3026,7 @@ export function compileNodeApp(
     : '';
   const envSource = target === 'deno' ? 'Deno.env.toObject()' : 'process.env';
   const envMiddleware = envSchemaModule
-    ? `app.use("*", async (c, next) => { await _validateEnvOnce(${envSource}); return next(); });\n`
+    ? `app.use("*", async (c, next) => { if (c.req.method !== "POST" || c.req.path !== "/__void/prerender-paths") await _validateEnvOnce(${envSource}); return next(); });\n`
     : '';
 
   return `${staticImport}
