@@ -9,6 +9,26 @@ import {
 } from '../../src/cli/platform-cloudflare.ts';
 
 describe('platform Cloudflare client', () => {
+  it('explains workers.dev onboarding for a fresh account', async () => {
+    const missing = new PlatformCloudflareClient('token', {
+      fetcher: async () => Response.json({ success: true, result: { subdomain: null } }),
+    });
+    await expect(missing.getWorkersSubdomain('account')).rejects.toThrow(
+      'https://dash.cloudflare.com/account/workers-and-pages',
+    );
+
+    const notOnboarded = new PlatformCloudflareClient('token', {
+      fetcher: async () =>
+        Response.json(
+          { errors: [{ message: 'workers.dev subdomain is not registered' }], success: false },
+          { status: 404 },
+        ),
+    });
+    await expect(notOnboarded.getWorkersSubdomain('account')).rejects.toThrow(
+      'finish Workers onboarding',
+    );
+  });
+
   it('requires an active deployed certificate for the exact application wildcard', async () => {
     const requested: Array<string> = [];
     const future = new Date(Date.now() + 86_400_000).toISOString();

@@ -7,7 +7,10 @@ import {
 } from '@void/platform';
 import { cliTitle } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
-import { resolvePlatformCloudflareCredential } from './platform-auth.ts';
+import {
+  assertPlatformOperatorCredentialCanApplyPlan,
+  resolvePlatformCloudflareCredential,
+} from './platform-auth.ts';
 import {
   PlatformCloudflareClient,
   verifyPlatformRuntimeTokenPermissions,
@@ -218,6 +221,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       outro('No Cloudflare or local installation state was changed.');
       return;
     }
+    assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan);
     if (process.stdin.isTTY && !args.yes) {
       const proceed = await confirm({ message: 'Apply this plan?', initialValue: false });
       if (isCancel(proceed) || !proceed) {

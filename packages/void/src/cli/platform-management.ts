@@ -15,7 +15,10 @@ import {
   type PlatformInstallationManifest,
 } from '@void/platform';
 import type { PlatformArgs } from './platform-args.ts';
-import { resolvePlatformCloudflareCredential } from './platform-auth.ts';
+import {
+  assertPlatformOperatorCredentialCanApplyPlan,
+  resolvePlatformCloudflareCredential,
+} from './platform-auth.ts';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
@@ -244,6 +247,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       outro('No Cloudflare or local installation state was changed.');
       return;
     }
+    assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan);
     const repairingMissingRoutingCheckpoint =
       args.subcommand === 'repair' &&
       plan.actions.some(

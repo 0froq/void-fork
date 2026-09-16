@@ -219,10 +219,24 @@ export class PlatformCloudflareClient {
   }
 
   async getWorkersSubdomain(accountId: string): Promise<string> {
-    const result = await this.request<{ subdomain?: unknown }>(
-      `/accounts/${encodeURIComponent(accountId)}/workers/subdomain`,
-    );
-    return requiredString(result.subdomain, 'Cloudflare workers.dev subdomain');
+    const setupUrl = `https://dash.cloudflare.com/${encodeURIComponent(accountId)}/workers-and-pages`;
+    let result: { subdomain?: unknown };
+    try {
+      result = await this.request<{ subdomain?: unknown }>(
+        `/accounts/${encodeURIComponent(accountId)}/workers/subdomain`,
+      );
+    } catch (error) {
+      throw new Error(
+        `platform: Could not read the account's workers.dev subdomain. For a new Cloudflare account, open ${setupUrl}, finish Workers onboarding, choose a workers.dev subdomain, and rerun the command.`,
+        { cause: error },
+      );
+    }
+    if (typeof result.subdomain !== 'string' || result.subdomain.trim() === '') {
+      throw new Error(
+        `platform: This Cloudflare account does not have a workers.dev subdomain. Open ${setupUrl}, finish Workers onboarding, choose a subdomain, and rerun the command.`,
+      );
+    }
+    return result.subdomain;
   }
 
   async listAiGateways(accountId: string): Promise<ReadonlyArray<CloudflareNamedResource>> {

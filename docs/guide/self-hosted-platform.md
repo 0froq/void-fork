@@ -19,11 +19,12 @@ The user dashboard, GitHub builds and webhooks, build Containers, email, Google 
 You need:
 
 - A Cloudflare account with Workers for Platforms and the products represented in the footprint below.
-- Access to create the platform's resources in that account. Void opens your browser to sign in and stores the session in your system keychain. CI uses `CLOUDFLARE_API_TOKEN`.
-- CI can use a user-scoped or account-scoped API token. Void checks the accounts and resources the credential can access; a browser OAuth session works through the same account checks.
+- Access to create the platform's resources in that account. Void can use browser OAuth for read-only plans and lifecycle operations that do not write zones or DNS. Wrangler's browser OAuth grants Zone Read, so a fresh installation needs `CLOUDFLARE_API_TOKEN` with Account → Zone → Edit when creating a zone and Zone → DNS → Edit when creating the application wildcard record.
+- CI can use a user-scoped or account-scoped API token. Scope it to the selected account and application zone. Void checks the accounts and resources the credential can access before provisioning.
 - A Cloudflare API token for the running platform. This is separate from your administrator login: the platform uses it to manage resources when developers deploy apps. See the permissions below.
 - An empty PostgreSQL database reachable through Cloudflare Hyperdrive, dedicated to this installation. Void records the installation in that database and won't let another platform share it. You manage the database itself.
 - An application base domain such as `example.app`. Using the zone apex lets Universal SSL cover app hostnames such as `my-app.example.app`. Its Cloudflare zone may already exist or the installer can create it.
+- A workers.dev subdomain configured for the account. On a new Cloudflare account, open Workers & Pages in the dashboard, finish Workers onboarding, and choose the subdomain before planning the installation.
 - A GitHub OAuth App for login. The installer prints the exact callback URL before asking for its client credentials.
 - An R2 API token with Object Read & Write access. This is separate from the Cloudflare management API token and is used to sign direct asset uploads.
 
@@ -101,6 +102,7 @@ void platform install
 For CI or another non-interactive shell, supply the configuration through environment variables. The example below uses placeholders; load the real values from your secret manager.
 
 `CLOUDFLARE_API_TOKEN` authorizes the installation. `VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN` is the separate token the running platform will use.
+The installation token needs Zone → DNS → Edit for the application wildcard record. If the zone does not exist yet, it also needs Account → Zone → Edit. Keep this management token separate from the runtime token.
 
 ```sh
 export CLOUDFLARE_API_TOKEN=your-scoped-management-token
