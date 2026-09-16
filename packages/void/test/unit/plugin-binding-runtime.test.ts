@@ -12,16 +12,6 @@ function getHookHandler<T>(hook: T | { handler: T } | undefined): T {
 }
 
 describe('bindingRuntimePlugin', () => {
-  it('keeps server runtime subpaths out of separate dependency bundles', () => {
-    const configure = getHookHandler(bindingRuntimePlugin(undefined).configEnvironment) as (
-      name: string,
-    ) => unknown;
-    for (const name of ['void_worker', 'ssr']) {
-      expect(configure(name)).toEqual({ optimizeDeps: { exclude: ['void'] } });
-    }
-    expect(configure('client')).toBeUndefined();
-  });
-
   it('uses custom binding names in KV and R2 runtime helpers', () => {
     const plugin = bindingRuntimePlugin({ kv: 'myapp_kv', r2: 'myapp_storage' });
     const resolveId = getHookHandler(plugin.resolveId) as (

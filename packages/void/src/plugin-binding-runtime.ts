@@ -13,15 +13,6 @@ export function bindingRuntimePlugin(bindingNames: BindingNames | undefined): Pl
   return {
     name: 'void:binding-runtime',
     enforce: 'pre',
-    configEnvironment(name) {
-      if (name !== 'client') {
-        // Generated entries import the env module by its resolved file path.
-        // Prebundling a bare void/kv (or another runtime subpath) embeds a second
-        // envContext, so installed packages lose their request's bindings.
-        // Keep server runtime imports in one module graph; client deps stay fast.
-        return { optimizeDeps: { exclude: ['void'] } };
-      }
-    },
     resolveId: {
       filter: { id: /^(void\/kv|void\/storage)$/ },
       handler(id) {

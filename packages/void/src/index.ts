@@ -926,6 +926,20 @@ export function voidPlugin(options?: {
     },
   };
 
+  // Generated server entries import the env module by its resolved file path.
+  // Prebundling a bare `void` runtime subpath creates another package module
+  // graph and therefore another envContext, so request bindings disappear for
+  // the prebundled copy. Every return path includes this plugin, including
+  // framework and Node targets that do not all use bindingRuntimePlugin.
+  const serverRuntimeOptimizerPlugin: Plugin = {
+    name: 'void:server-runtime-optimizer',
+    configEnvironment(name) {
+      if (name !== 'client') {
+        return { optimizeDeps: { exclude: ['void'] } };
+      }
+    },
+  };
+
   // Scan queues/websocket routes early so both framework-mode and default-mode
   // branches can safely close over these bindings.
   const queues = framework ? [] : scanQueuesSync(root, paths.queuesDir);
@@ -1125,6 +1139,7 @@ export function voidPlugin(options?: {
       ...(nuxtVite8WebSocketCompatPlugin ? [nuxtVite8WebSocketCompatPlugin] : []),
       svelteKitHooksInjectPlugin,
       clientStubsPlugin,
+      serverRuntimeOptimizerPlugin,
       bindingRuntimePlugin(bindingNames),
       // Framework-agnostic env DX: typegen, client leak guard, and build-time
       // folding all operate on env.ts + the Vite client module graph, so they
@@ -2134,6 +2149,7 @@ export function voidPlugin(options?: {
       envClientGuardPlugin(root),
       envClientFoldPlugin(),
       clientStubsPlugin,
+      serverRuntimeOptimizerPlugin,
       bindingRuntimePlugin(bindingNames),
       drizzlePlugin(root, false, getDatabaseDialect(config), {
         d1BindingName: bindingNames?.d1,
@@ -2209,6 +2225,7 @@ export function voidPlugin(options?: {
     return [
       restartPlugin(),
       envPlugin,
+      serverRuntimeOptimizerPlugin,
       envSchemaPlugin(root),
       ...pagesDevCssAssetsPlugin(root, devTriggerToken),
       routingPlugin(root, {
@@ -2343,6 +2360,7 @@ export function voidPlugin(options?: {
     envClientGuardPlugin(root),
     envClientFoldPlugin(),
     clientStubsPlugin,
+    serverRuntimeOptimizerPlugin,
     bindingRuntimePlugin(bindingNames),
     ...(bindings.needsSandbox ? [createSandboxSdkResolvePlugin()] : []),
     ...pagesDevCssAssetsPlugin(root, devTriggerToken),

@@ -217,10 +217,43 @@ describe('voidPlugin dev asset routing', () => {
     config({}, { command: 'build', mode: 'production' });
   }
 
+  async function resolveRuntimeOptimizerConfig(
+    root: string,
+    environmentName: string,
+  ): Promise<unknown> {
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    const { voidPlugin } = await import('../../src/index.ts');
+    const plugin = voidPlugin().find((entry) => entry.name === 'void:server-runtime-optimizer');
+    const configEnvironment = getHookHandler(plugin?.configEnvironment) as (
+      name: string,
+    ) => unknown;
+    return configEnvironment(environmentName);
+  }
+
   it('runs the env config hook for framework and Node early-return plugin paths', async () => {
     await expect(runEnvConfig(createFrameworkProjectRoot())).resolves.toBeUndefined();
     vi.restoreAllMocks();
     await expect(runEnvConfig(createNodeProjectRoot())).resolves.toBeUndefined();
+  });
+
+  it('keeps one Void runtime module graph in core, framework, and Node servers', async () => {
+    await expect(
+      resolveRuntimeOptimizerConfig(createApiOnlyProjectRoot(), 'void_worker'),
+    ).resolves.toEqual({ optimizeDeps: { exclude: ['void'] } });
+    vi.restoreAllMocks();
+    await expect(
+      resolveRuntimeOptimizerConfig(createFrameworkProjectRoot(), 'ssr'),
+    ).resolves.toEqual({ optimizeDeps: { exclude: ['void'] } });
+    vi.restoreAllMocks();
+    await expect(resolveRuntimeOptimizerConfig(createNodeProjectRoot(), 'ssr')).resolves.toEqual({
+      optimizeDeps: { exclude: ['void'] },
+    });
+  });
+
+  it('leaves client dependency optimization unchanged', async () => {
+    await expect(
+      resolveRuntimeOptimizerConfig(createPagesProjectRoot(), 'client'),
+    ).resolves.toBeUndefined();
   });
 
   async function resolveCloudflareConfig(
