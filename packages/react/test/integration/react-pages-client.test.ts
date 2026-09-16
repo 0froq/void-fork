@@ -5,7 +5,12 @@ import { join } from 'pathslash';
 import { chromium, type Browser, type Page } from 'playwright';
 import { describe, expect, it, beforeAll, afterAll } from 'vite-plus/test';
 import { waitForIslandsHydrated } from '../../../../test/browser-helpers.ts';
-import { getPort, waitForServer, killChild } from '../../../../test/integration-helpers.ts';
+import {
+  collectServerOutput,
+  getPort,
+  waitForServer,
+  killChild,
+} from '../../../../test/integration-helpers.ts';
 
 declare global {
   interface Window {
@@ -1517,7 +1522,8 @@ describe('react-pages client (preview)', { retry: 2 }, () => {
     });
 
     await waitForServer(PREVIEW_BASE, 30_000, {
-      isAlive: () => child.exitCode === null,
+      isAlive: () => child.exitCode === null && child.signalCode === null,
+      diagnostics: collectServerOutput(child),
     });
   });
 

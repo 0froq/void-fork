@@ -129,6 +129,7 @@ export async function waitForServer(
     expectStatus?: number;
     isAlive?: () => boolean;
     requestTimeoutMs?: number;
+    diagnostics?: () => string;
   },
 ): Promise<void> {
   // Release the held port so the child process can bind to it.
@@ -145,7 +146,9 @@ export async function waitForServer(
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
     if (options?.isAlive && !options.isAlive()) {
-      throw new Error(`Server process exited while waiting for ${url}`);
+      throw new Error(
+        `Server process exited while waiting for ${url}\n${options.diagnostics?.() ?? ''}`,
+      );
     }
     try {
       const remainingMs = effectiveTimeout - (Date.now() - start);
@@ -174,8 +177,21 @@ export async function waitForServer(
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error(
-    `Timed out waiting for server at ${url} (waited ${effectiveTimeout}ms, scale=${CI_TIMEOUT_SCALE})`,
+    `Timed out waiting for server at ${url} (waited ${effectiveTimeout}ms, scale=${CI_TIMEOUT_SCALE})\n${options?.diagnostics?.() ?? ''}`,
   );
+}
+
+/** Drain both pipes during startup and retain bounded diagnostics for failures. */
+export function collectServerOutput(child: ReturnType<typeof spawn>): () => string {
+  let stdout = '';
+  let stderr = '';
+  child.stdout?.on('data', (chunk) => {
+    stdout = (stdout + String(chunk)).slice(-16000);
+  });
+  child.stderr?.on('data', (chunk) => {
+    stderr = (stderr + String(chunk)).slice(-16000);
+  });
+  return () => `Server stdout:\n${stdout}\nServer stderr:\n${stderr}`;
 }
 
 export async function killChild(child: ReturnType<typeof spawn>): Promise<void> {
