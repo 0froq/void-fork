@@ -119,7 +119,12 @@ When upgrading an installation that previously enabled managed Sandbox, run
 `void platform system sandbox-drain --plan`, then apply it and rerun until it
 reports `complete: true`. Preview later bounded pages by passing the returned
 `nextCursor` to `--cursor`. The lifecycle installer keeps application traffic
-closed while this database-backed drain is required.
+closed while this database-backed drain is required. An active deployment is
+first asked to cancel; rerun the drain after 10 minutes if its request was
+abandoned. A protected cutover remains fenced for 90 minutes before the drain
+can compensate it, while an interrupted rollback is adopted through its
+database lease. These retries restore the committed deployment before deleting
+the managed Sandbox container.
 
 ## Local Development
 

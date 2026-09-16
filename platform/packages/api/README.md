@@ -138,6 +138,10 @@ managed dispatch binding. A leased PostgreSQL checkpoint advances each page and
 requires two passes, so incomplete and concurrent runs resume without accepting
 stale completion. A probe-authenticated installer preflight trusts that database
 checkpoint; platform activation must remain closed until it reports complete.
+Operator retries terminalize an abandoned ordinary cancellation after its
+10-minute grace period. Protected cutovers wait 90 minutes before ownership is
+fenced and external state is compensated; retryable rollback leases are adopted
+through their database owner token and reconciled to the committed deployment.
 
 Integration tests cover operator authentication, tenant operations, operational
 parity, dry runs, and capability guards in `test/integration/operator-*.test.ts`.

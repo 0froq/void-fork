@@ -12,6 +12,7 @@ import {
 import { createBuild, getDeployment } from '../../src/db.ts';
 import { app } from '../../src/index.ts';
 import { loadSandboxDeploymentPageProjection } from '../../src/operator/sandbox-operations.ts';
+import { databaseTimestampMs } from '../../src/routes/deploy.ts';
 import { SANDBOX_DRAIN_STATE_KEY } from '../../src/sandbox-drain.ts';
 import {
   deployments,
@@ -130,6 +131,11 @@ function cloudflareWorkerStub(failScript?: string) {
 }
 
 describe('operator deployment operations', () => {
+  test('parses PostgreSQL timestamps with a short UTC offset', () => {
+    expect(databaseTimestampMs('2026-09-16 10:00:00+00')).toBe(
+      Date.parse('2026-09-16T10:00:00+00:00'),
+    );
+  });
   test('filters and paginates deployment rows with matching totals', async () => {
     const project = await createTestProject(env.db, ownerId, 'alpha');
     await createTestDeployment(env.db, project.id, 'pending');
@@ -602,9 +608,12 @@ describe('operator installation-aware system and worker operations', () => {
     expect((await getDeployment(env.db, deployment.id))?.status).toBe('canceling');
     expect(cf.state.containerApps.has(application.id)).toBe(true);
 
+    // Simulate an abandoned request after the operator requested cancellation.
+    // The operator flow itself must own the terminal transition; the test does
+    // not update the deployment to `canceled` directly.
     await env.db
       .update(deployments)
-      .set({ status: 'canceled' })
+      .set({ updated_at: '2020-01-01T00:00:00.000Z' })
       .where(eq(deployments.id, deployment.id));
     const resumedPages = await applyDrainUntilComplete({
       PLATFORM_TRAFFIC_STATE: 'sandbox-drain',
@@ -627,6 +636,7 @@ describe('operator installation-aware system and worker operations', () => {
       application.id,
     );
     expect(cf.state.containerApps.has(application.id)).toBe(false);
+    expect((await getDeployment(env.db, deployment.id))?.status).toBe('canceled');
     expect(JSON.parse((await env.ROUTING.get(SANDBOX_DRAIN_STATE_KEY))!)).toMatchObject({
       state: 'complete',
     });
@@ -641,6 +651,142 @@ describe('operator installation-aware system and worker operations', () => {
       }),
     );
     expect(events.slice(0, -1).every((event) => event.status === 'failed')).toBe(true);
+  });
+  test('settles an abandoned manifest-less deployment through the operator drain', async () => {
+    const project = await createTestProject(env.db, ownerId, 'sandbox-manifestless');
+    const deployment = await createTestDeployment(env.db, project.id, 'pending');
+    await env.db
+      .update(deployments)
+      .set({ manifest: null })
+      .where(eq(deployments.id, deployment.id));
+    const cf = mockCfApi();
+
+    const firstApply = await req(
+      '/system/sandbox-drain',
+      {},
+      { PLATFORM_TRAFFIC_STATE: 'sandbox-drain' },
+    );
+    expect(firstApply.status).toBe(207);
+    expect(await firstApply.json()).toMatchObject({
+      cancelRequested: [deployment.id],
+      blockers: [expect.objectContaining({ kind: 'active_deployment' })],
+    });
+    await env.db
+      .update(deployments)
+      .set({ updated_at: '2020-01-01T00:00:00.000+00:00' })
+      .where(eq(deployments.id, deployment.id));
+
+    const responses = await applyDrainUntilComplete({
+      PLATFORM_TRAFFIC_STATE: 'sandbox-drain',
+    });
+    expect(responses.at(-1)?.status).toBe(200);
+    expect((await getDeployment(env.db, deployment.id))?.status).toBe('canceled');
+    expect(cf).not.toHaveBeenCalled();
+  });
+  test('adopts and compensates an abandoned rollback lease through the operator drain', async () => {
+    const project = await createTestProject(env.db, ownerId, 'sandbox-rollback-lease');
+    const current = await createTestDeployment(env.db, project.id, 'live');
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ version: 4, type: 'static' }) })
+      .where(eq(deployments.id, current.id));
+    const lease = await createTestDeployment(env.db, project.id, 'pending', 'rollback-lease');
+    await env.db
+      .update(deployments)
+      .set({
+        manifest: JSON.stringify({
+          version: 1,
+          targetDeploymentId: current.id,
+          state: 'retryable',
+          ownerId: 'abandoned-rollback-owner',
+        }),
+      })
+      .where(eq(deployments.id, lease.id));
+    await env.ROUTING.put(project.slug, JSON.stringify({ version: 'possibly-divergent' }));
+
+    const responses = await applyDrainUntilComplete({
+      PLATFORM_TRAFFIC_STATE: 'sandbox-drain',
+    });
+    expect(responses.at(-1)?.status).toBe(200);
+    expect(await getDeployment(env.db, lease.id)).toBeNull();
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!)).toMatchObject({
+      staticDeploymentId: current.id,
+    });
+  });
+  test('waits for a fresh cutover, then fences and compensates it before deletion', async () => {
+    const project = await createTestProject(env.db, ownerId, 'sandbox-cutover-recovery');
+    const current = await createTestDeployment(env.db, project.id, 'live');
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ version: 4, type: 'static' }) })
+      .where(eq(deployments.id, current.id));
+    const deployment = await createTestDeployment(env.db, project.id, 'pending');
+    const applicationName = `${project.id}-${deployment.id}-void-sandbox`
+      .toLowerCase()
+      .replaceAll('_', '-');
+    const namespaceId = 'ns-sandbox-cutover';
+    await env.db
+      .update(deployments)
+      .set({
+        status: 'cutover',
+        manifest: JSON.stringify({
+          version: 4,
+          type: 'void',
+          bindings: {},
+          sandbox: {
+            bindingName: 'SANDBOX',
+            className: 'Sandbox',
+            containerName: 'void-sandbox',
+            image: 'registry.cloudflare.com/sandbox:1.0.0',
+          },
+        }),
+      })
+      .where(eq(deployments.id, deployment.id));
+    const oldIntent = JSON.stringify({
+      projectId: project.id,
+      ownerId: 'still-running-owner',
+      buildId: null,
+    });
+    await env.ROUTING.put(`cutover-intent:${deployment.id}`, oldIntent);
+    await env.ROUTING.put(project.slug, JSON.stringify({ version: deployment.id }));
+    const cf = mockCfApi();
+    cf.seedHostScript({
+      scriptName: `user-${project.slug}-${deployment.id}`,
+      classes: { Sandbox: namespaceId },
+      bindings: [
+        {
+          type: 'durable_object_namespace',
+          name: 'SANDBOX',
+          class_name: 'Sandbox',
+          namespace_id: namespaceId,
+        },
+      ],
+    });
+    const application = cf.seedContainerApp({ name: applicationName, namespaceId });
+
+    const fresh = await req(
+      '/system/sandbox-drain',
+      {},
+      { PLATFORM_TRAFFIC_STATE: 'sandbox-drain' },
+    );
+    expect(fresh.status).toBe(207);
+    expect((await getDeployment(env.db, deployment.id))?.status).toBe('cutover');
+    expect(await env.ROUTING.get(`cutover-intent:${deployment.id}`)).toBe(oldIntent);
+    expect(cf.state.containerApps.has(application.id)).toBe(true);
+
+    await env.db
+      .update(deployments)
+      .set({ updated_at: '2020-01-01 00:00:00+00' })
+      .where(eq(deployments.id, deployment.id));
+    const responses = await applyDrainUntilComplete({
+      PLATFORM_TRAFFIC_STATE: 'sandbox-drain',
+    });
+    expect(responses.at(-1)?.status).toBe(200);
+    expect((await getDeployment(env.db, deployment.id))?.status).toBe('failed');
+    expect(JSON.parse((await env.ROUTING.get(project.slug))!)).toMatchObject({
+      staticDeploymentId: current.id,
+    });
+    expect(cf.state.containerApps.has(application.id)).toBe(false);
   });
   test('completes an empty drain without probing the Container API', async () => {
     const cf = mockCfApi();

@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
-import { TERMINAL_DEPLOYMENT_STATUSES, cancelDeployment, type Db } from '../db.ts';
+import { TERMINAL_DEPLOYMENT_STATUSES, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { getProjectDeploymentWorkerName } from '../naming.ts';
 import { CloudflareApiError } from '../provisioning/cloudflare-api.ts';
@@ -12,6 +12,7 @@ import {
   perDeployContainerApplicationName,
   type ContainerApplicationInfo,
 } from '../provisioning/containers.ts';
+import { settleDeploymentForSandboxDrain } from '../routes/deploy.ts';
 import {
   acquireSandboxDrainLease,
   checkpointSandboxDrain,
@@ -258,6 +259,15 @@ async function deploymentPage(
   for (const row of pageRows) {
     if (row.rollbackLease || !row.manifestPresent) {
       if (row.active) {
+        if (!dryRun) {
+          const settlement = await settleDeploymentForSandboxDrain(env, db, row.deploymentId);
+          if (settlement.state === 'cancel_requested') {
+            result.cancelRequested.push(row.deploymentId);
+          }
+          if (settlement.state === 'terminal') {
+            continue;
+          }
+        }
         result.blockers.push({
           kind: 'active_deployment',
           deploymentId: row.deploymentId,
@@ -291,16 +301,29 @@ async function deploymentPage(
       continue;
     }
     if (row.active) {
-      if (!dryRun && (await cancelDeployment(db, row.deploymentId, 'managed Sandbox disabled'))) {
-        result.cancelRequested.push(row.deploymentId);
+      if (!dryRun) {
+        const settlement = await settleDeploymentForSandboxDrain(env, db, row.deploymentId);
+        if (settlement.state === 'cancel_requested') {
+          result.cancelRequested.push(row.deploymentId);
+        }
+        if (settlement.state !== 'terminal') {
+          result.blockers.push({
+            kind: 'active_deployment',
+            deploymentId: row.deploymentId,
+            projectId: row.projectId,
+            message: `Sandbox deployment ${row.deploymentId} must settle before the drain can advance.`,
+          });
+          continue;
+        }
+      } else {
+        result.blockers.push({
+          kind: 'active_deployment',
+          deploymentId: row.deploymentId,
+          projectId: row.projectId,
+          message: `Sandbox deployment ${row.deploymentId} must settle before the drain can advance.`,
+        });
+        continue;
       }
-      result.blockers.push({
-        kind: 'active_deployment',
-        deploymentId: row.deploymentId,
-        projectId: row.projectId,
-        message: `Sandbox deployment ${row.deploymentId} must settle before the drain can advance.`,
-      });
-      continue;
     }
     let application: ContainerApplicationInfo | undefined;
     try {

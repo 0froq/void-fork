@@ -45,10 +45,14 @@ import {
 } from '../cron-scheduler-client.ts';
 import {
   getProject,
+  getUser,
   getDeployment,
+  cancelDeployment,
   createDeployment,
   updateDeploymentManifest,
   updateDeploymentStatus,
+  deleteRollbackLease,
+  updateRollbackLeaseState,
   beginDeploymentCompensation,
   beginDeploymentCutover,
   updateProjectType,
@@ -132,10 +136,22 @@ export { MAX_REVALIDATE_QUERY_ALLOWLIST_ENTRIES, MAX_ROUTING_RULES, validateMani
 const DEFAULT_DISPATCH_NAMESPACE = 'void-users';
 const DEFAULT_TAIL_SERVICE_NAME = 'void-tail';
 const CUTOVER_RECOVERY_STALE_MS = 90 * 60 * 1000;
+const DEPLOYMENT_CANCEL_STALE_MS = 10 * 60 * 1000;
 const cutoverIntentKey = (deploymentId: string): string => `cutover-intent:${deploymentId}`;
 const cutoverReadyKey = (deploymentId: string): string => `cutover-ready:${deploymentId}`;
 const cutoverCompensatedKey = (deploymentId: string): string =>
   `cutover-compensated:${deploymentId}`;
+
+export function databaseTimestampMs(value: string): number | null {
+  const withSeparator = value.includes('T') ? value : value.replace(' ', 'T');
+  const withZone = /[+-]\d{2}$/.test(withSeparator)
+    ? `${withSeparator}:00`
+    : /(?:Z|[+-]\d{2}:?\d{2})$/i.test(withSeparator)
+      ? withSeparator
+      : `${withSeparator}Z`;
+  const parsed = new Date(withZone).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 type CutoverMarker = {
   projectId: string;
@@ -451,6 +467,253 @@ async function clearProjectExternalState(
     }
     await env.ROUTING.delete(`queue:${getProjectQueueName(project.id, queueName)}`);
   }
+}
+
+export type SandboxDrainDeploymentSettlement = Readonly<{
+  state: 'terminal' | 'cancel_requested' | 'waiting' | 'recovery_incomplete';
+}>;
+
+/**
+ * Settle one abandoned deployment before the managed Sandbox drain deletes its
+ * container. Ordinary requests receive the same two-phase cancellation grace
+ * used by deploy admission. Protected cutovers are fenced by replacing their
+ * owner marker under the project lock, then compensating every external
+ * surface back to PostgreSQL's committed active deployment.
+ */
+export async function settleDeploymentForSandboxDrain(
+  env: ApiEnv['Bindings'],
+  db: Db,
+  deploymentId: string,
+): Promise<SandboxDrainDeploymentSettlement> {
+  const initial = await getDeployment(db, deploymentId);
+  if (!initial || TERMINAL_DEPLOYMENT_STATUSES.includes(initial.status)) {
+    return { state: 'terminal' };
+  }
+
+  const markerKeys: Array<string> = [];
+  const settlement = await db.transaction(async (tx) => {
+    await tx.execute(
+      drizzleSql`SELECT id FROM projects WHERE id = ${initial.project_id} FOR UPDATE`,
+    );
+    const txDb = tx as unknown as Db;
+    const deployment = await getDeployment(txDb, deploymentId);
+    if (!deployment || TERMINAL_DEPLOYMENT_STATUSES.includes(deployment.status)) {
+      return { state: 'terminal' } as const;
+    }
+    const updatedAtMs = databaseTimestampMs(deployment.updated_at);
+    if (updatedAtMs === null) {
+      return { state: 'waiting' } as const;
+    }
+    const ageMs = Date.now() - updatedAtMs;
+    if (deployment.source === 'rollback-lease') {
+      const project = await getProject(txDb, deployment.project_id);
+      if (!project || project.status === 'deleting' || !deployment.manifest) {
+        return { state: 'recovery_incomplete' } as const;
+      }
+      let lease: {
+        targetDeploymentId: string;
+        state: 'running' | 'retryable' | 'applied';
+        ownerId: string;
+      };
+      try {
+        const parsed = JSON.parse(deployment.manifest) as Partial<typeof lease>;
+        if (
+          typeof parsed.targetDeploymentId !== 'string' ||
+          typeof parsed.ownerId !== 'string' ||
+          (parsed.state !== 'running' && parsed.state !== 'retryable' && parsed.state !== 'applied')
+        ) {
+          return { state: 'recovery_incomplete' } as const;
+        }
+        lease = parsed as typeof lease;
+      } catch {
+        return { state: 'recovery_incomplete' } as const;
+      }
+      if (lease.state === 'applied') {
+        if (project.active_deployment_id !== lease.targetDeploymentId) {
+          return { state: 'recovery_incomplete' } as const;
+        }
+        return {
+          state: (await deleteRollbackLease(txDb, deployment.id, lease.ownerId))
+            ? 'terminal'
+            : 'waiting',
+        } as const;
+      }
+      if (lease.state === 'running' && ageMs < 30 * 60 * 1000) {
+        return { state: 'waiting' } as const;
+      }
+
+      const owner = await getUser(txDb, project.user_id);
+      if (!owner) {
+        return { state: 'recovery_incomplete' } as const;
+      }
+      const recoveryOwnerId = crypto.randomUUID();
+      const adopted = await updateRollbackLeaseState(
+        txDb,
+        deployment.id,
+        lease.targetDeploymentId,
+        'running',
+        recoveryOwnerId,
+        lease.ownerId,
+      );
+      if (!adopted) {
+        return { state: 'waiting' } as const;
+      }
+      const committedActive = project.active_deployment_id
+        ? await getDeployment(txDb, project.active_deployment_id)
+        : await resolveLegacyActiveDeployment(env, txDb, project);
+      try {
+        if (committedActive) {
+          if (!project.active_deployment_id) {
+            await setActiveDeployment(txDb, project.id, committedActive.id);
+          }
+          await replayDeploymentCutover(
+            env,
+            txDb,
+            project,
+            committedActive,
+            owner.plan,
+            project.type,
+          );
+        } else {
+          await clearProjectExternalState(env, txDb, project);
+        }
+      } catch {
+        await updateRollbackLeaseState(
+          txDb,
+          deployment.id,
+          lease.targetDeploymentId,
+          'retryable',
+          recoveryOwnerId,
+          recoveryOwnerId,
+        );
+        return { state: 'recovery_incomplete' } as const;
+      }
+      return {
+        state: (await deleteRollbackLease(txDb, deployment.id, recoveryOwnerId))
+          ? 'terminal'
+          : 'recovery_incomplete',
+      } as const;
+    }
+
+    if (deployment.status !== 'cutover' && deployment.status !== 'compensating') {
+      if (deployment.status !== 'canceling') {
+        const requested = await cancelDeployment(txDb, deployment.id, 'managed Sandbox disabled');
+        return { state: requested ? 'cancel_requested' : 'waiting' } as const;
+      }
+      if (ageMs < DEPLOYMENT_CANCEL_STALE_MS) {
+        return { state: 'waiting' } as const;
+      }
+      await updateDeploymentStatus(txDb, deployment.id, 'canceled', 'managed Sandbox disabled', {
+        force: true,
+      });
+      return { state: 'terminal' } as const;
+    }
+
+    const project = await getProject(txDb, deployment.project_id);
+    if (!project || project.status === 'deleting') {
+      return { state: 'waiting' } as const;
+    }
+    const compensatedKey = cutoverCompensatedKey(deployment.id);
+    const [intentRaw, compensated] = await Promise.all([
+      env.ROUTING.get(cutoverIntentKey(deployment.id)),
+      env.ROUTING.get(compensatedKey),
+    ]);
+    if (compensated === project.id) {
+      await updateDeploymentStatus(
+        txDb,
+        deployment.id,
+        'failed',
+        'cutover compensation completed',
+        { force: true },
+      );
+      markerKeys.push(
+        cutoverIntentKey(deployment.id),
+        cutoverReadyKey(deployment.id),
+        compensatedKey,
+      );
+      return { state: 'terminal' } as const;
+    }
+    if (deployment.status === 'cutover' && ageMs < CUTOVER_RECOVERY_STALE_MS) {
+      return { state: 'waiting' } as const;
+    }
+
+    let committedActiveDeploymentId = project.active_deployment_id;
+    if (!committedActiveDeploymentId) {
+      const legacyActive = await resolveLegacyActiveDeployment(env, txDb, project);
+      if (legacyActive) {
+        committedActiveDeploymentId = legacyActive.id;
+        await setActiveDeployment(txDb, project.id, legacyActive.id);
+      }
+    }
+    if (committedActiveDeploymentId === deployment.id) {
+      return { state: 'waiting' } as const;
+    }
+    const owner = await getUser(txDb, project.user_id);
+    if (!owner) {
+      return { state: 'recovery_incomplete' } as const;
+    }
+
+    const intent = parseCutoverMarker(intentRaw);
+    const recoveryMarker: CutoverMarker = {
+      projectId: project.id,
+      ownerId: crypto.randomUUID(),
+      buildId: intent?.buildId ?? null,
+    };
+    // This durable owner change is the fence checked by the original cutover
+    // and by its compensation path before either may mutate another surface.
+    await env.ROUTING.put(cutoverIntentKey(deployment.id), JSON.stringify(recoveryMarker));
+
+    const committedActive = committedActiveDeploymentId
+      ? await getDeployment(txDb, committedActiveDeploymentId)
+      : null;
+    try {
+      if (committedActive) {
+        await replayDeploymentCutover(
+          env,
+          txDb,
+          project,
+          committedActive,
+          owner.plan,
+          project.type,
+        );
+      } else {
+        await clearProjectExternalState(env, txDb, project);
+      }
+      // Persist this before the database transition so a lost COMMIT
+      // acknowledgement can be completed safely by the next drain request.
+      await env.ROUTING.put(compensatedKey, project.id);
+    } catch {
+      await updateDeploymentStatus(
+        txDb,
+        deployment.id,
+        'compensating',
+        'Sandbox drain cutover compensation incomplete',
+        { force: true },
+      );
+      return { state: 'recovery_incomplete' } as const;
+    }
+    await updateDeploymentStatus(
+      txDb,
+      deployment.id,
+      'failed',
+      'abandoned cutover recovered for managed Sandbox disable',
+      { force: true },
+    );
+    markerKeys.push(
+      cutoverIntentKey(deployment.id),
+      cutoverReadyKey(deployment.id),
+      compensatedKey,
+    );
+    return { state: 'terminal' } as const;
+  });
+
+  for (const markerKey of markerKeys) {
+    await env.ROUTING.delete(markerKey).catch(() => {
+      // The acknowledged database transition is authoritative. A later
+      // recovery can safely remove any stale marker left by a failed cleanup.
+    });
+  }
+  return settlement;
 }
 
 // CF's worker script size limit (free plan 1 MiB, paid plan 10 MiB compressed).
@@ -2328,14 +2591,13 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               }
             }
           }
-          const updatedAt = protectedDeployment.updated_at.includes('T')
-            ? protectedDeployment.updated_at
-            : `${protectedDeployment.updated_at.replace(' ', 'T')}Z`;
+          const protectedUpdatedAtMs = databaseTimestampMs(protectedDeployment.updated_at);
           if (
             protectedDeployment.status !== 'compensating' &&
             !protectedBuildInactive &&
             !protectedAssetsMissing &&
-            Date.now() - new Date(updatedAt).getTime() < CUTOVER_RECOVERY_STALE_MS
+            (protectedUpdatedAtMs === null ||
+              Date.now() - protectedUpdatedAtMs < CUTOVER_RECOVERY_STALE_MS)
           ) {
             throw new ConcurrentDeployError(protectedDeployment.id);
           }
@@ -2475,10 +2737,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         if (activeDeploy.source === 'rollback-lease') {
           throw new ConcurrentDeployError(activeDeploy.id);
         }
-        const updatedAt = activeDeploy.updated_at.includes('T')
-          ? activeDeploy.updated_at
-          : activeDeploy.updated_at.replace(' ', 'T') + 'Z';
-        const ageMs = Date.now() - new Date(updatedAt).getTime();
+        const activeUpdatedAtMs = databaseTimestampMs(activeDeploy.updated_at);
+        if (activeUpdatedAtMs === null) {
+          throw new ConcurrentDeployError(activeDeploy.id);
+        }
+        const ageMs = Date.now() - activeUpdatedAtMs;
         if (ageMs < 10 * 60 * 1000) {
           throw new ConcurrentDeployError(activeDeploy.id);
         }
@@ -2648,6 +2911,22 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         }
         if (lockedProject.active_deployment_id !== originalActiveDeploymentId) {
           return;
+        }
+        if (cutoverProtected) {
+          const ownedDeployment = await getDeployment(txDb, currentDeploymentId);
+          if (
+            !ownedDeployment ||
+            ownedDeployment.status !== 'compensating' ||
+            TERMINAL_DEPLOYMENT_STATUSES.includes(ownedDeployment.status)
+          ) {
+            return;
+          }
+          const intent = parseCutoverMarker(
+            await context.env.ROUTING.get(cutoverIntentKey(currentDeploymentId)),
+          );
+          if (intent?.projectId !== projectId || intent.ownerId !== cutoverOwnerId) {
+            return;
+          }
         }
         const competingOperation = await getActiveDeployment(txDb, projectId);
         if (competingOperation && competingOperation.id !== currentDeploymentId) {
