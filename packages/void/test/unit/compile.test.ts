@@ -1976,6 +1976,13 @@ describe('default-target dev parity', () => {
       status: 301,
       origin: 'void.json#routing.redirects',
     },
+    {
+      source: '/rewrite',
+      destination: '/new',
+      status: 200,
+      force: true,
+      origin: 'void.json#routing.rewrites',
+    },
   ];
   const headerRules = [{ pattern: '/*', headers: [['x-test', '1']] as Array<[string, string]> }];
   const fallbackRules = [
@@ -1988,7 +1995,13 @@ describe('default-target dev parity', () => {
     },
   ];
 
-  function compile(opts: Partial<typeof testOptions> & { dev?: boolean; nodeTarget?: boolean }) {
+  function compile(
+    opts: Partial<typeof testOptions> & {
+      dev?: boolean;
+      nodeTarget?: boolean;
+      managedDispatch?: boolean;
+    },
+  ) {
     return compileRouteTable(emptyScan, '/routes', '/middleware', '/crons', '/queues', null, {
       ...testOptions,
       redirectRules,
@@ -1999,7 +2012,7 @@ describe('default-target dev parity', () => {
   }
 
   it('emits redirect + header middleware on the default target in dev', () => {
-    const code = compile({ nodeTarget: false, dev: true });
+    const code = compile({ nodeTarget: false, dev: true, managedDispatch: true });
     expect(code).toContain('const __routingRules =');
     expect(code).toContain('const __headerRules =');
     // Fallback rules are emitted inside the assets-then-fallback notFound body
@@ -2028,9 +2041,66 @@ describe('default-target dev parity', () => {
     expect(res.headers.get('x-test')).toBe('1');
   });
 
-  it('omits redirect + header + fallback middleware on the default target in prod', () => {
-    const code = compile({ nodeTarget: false, dev: false });
-    // Production bundles let the platform dispatch worker own the pipeline
+  it('emits redirect + header + fallback middleware on native Cloudflare in prod', () => {
+    const code = compile({ nodeTarget: false, dev: false, managedDispatch: false });
+    expect(code).toContain('const __routingRules =');
+    expect(code).toContain('const __headerRules =');
+    expect(code).toContain('const __fallbackRules =');
+  });
+
+  it('runs native Cloudflare prod rewrites, headers, and post-asset fallbacks', async () => {
+    const code = compile({ nodeTarget: false, dev: false, managedDispatch: false });
+    const app = evalCompiledApp(code);
+    app.get('/new', (c: any) =>
+      c.text(c.originalUrl()?.pathname === '/rewrite' ? 'rewritten' : 'new'),
+    );
+    app.get('/docs.html', (c) => c.text('fallback'));
+
+    const env = {
+      ASSETS: { fetch: async () => new Response('missing', { status: 404 }) },
+    };
+    const ctx = {
+      waitUntil: () => undefined,
+      passThroughOnException: () => undefined,
+      props: {},
+    } as unknown as ExecutionContext;
+
+    const rewrite = await app.fetch(new Request('http://localhost/rewrite'), env, ctx);
+    expect(await rewrite.text()).toBe('rewritten');
+    expect(rewrite.headers.get('x-test')).toBe('1');
+
+    const fallback = await app.fetch(new Request('http://localhost/docs/guide'), env, ctx);
+    expect(await fallback.text()).toBe('fallback');
+    expect(fallback.headers.get('x-test')).toBe('1');
+  });
+
+  it('applies native Cloudflare prod headers to assets without fallback rules', async () => {
+    const code = compileRouteTable(emptyScan, '/routes', '/middleware', '/crons', '/queues', null, {
+      ...testOptions,
+      nodeTarget: false,
+      dev: false,
+      managedDispatch: false,
+      headerRules,
+    });
+    const app = evalCompiledApp(code);
+    const ctx = {
+      waitUntil: () => undefined,
+      passThroughOnException: () => undefined,
+      props: {},
+    } as unknown as ExecutionContext;
+    const res = await app.fetch(
+      new Request('http://localhost/logo.svg'),
+      { ASSETS: { fetch: async () => new Response('asset') } },
+      ctx,
+    );
+
+    expect(await res.text()).toBe('asset');
+    expect(res.headers.get('x-test')).toBe('1');
+    expect(code).not.toContain('const __fallbackRules =');
+  });
+
+  it('omits redirect + header + fallback middleware from managed bundles', () => {
+    const code = compile({ nodeTarget: false, dev: false, managedDispatch: true });
     expect(code).not.toContain('const __routingRules =');
     expect(code).not.toContain('const __headerRules =');
     expect(code).not.toContain('const __fallbackRules =');
@@ -2072,12 +2142,10 @@ describe('default-target dev parity', () => {
     expect(prodCode).toContain('"source":"/docs/*"');
   });
 
-  // Only the CF-prod build trusts an inbound `X-Void-Original-URL` header:
-  // dispatch strips client-supplied values on ingress, so any header the
-  // worker sees there is dispatch-authored. CF-dev (no dispatch in front)
-  // and node/bun/deno self-hosted (user owns ingress) must NOT trust the
-  // header — clients could spoof `c.originalUrl()` / `c.isRewritten()` for
-  // user code that branches on them.
+  // Only a managed build trusts an inbound `X-Void-Original-URL` header:
+  // dispatch strips client-supplied values on ingress. Native CF, CF dev,
+  // and node/bun/deno targets have no trusted dispatch in front, so clients
+  // must not be able to spoof rewrite metadata.
   //
   // This is a behavioral test that evaluates the actual compiled artifact
   // (not the `installVoidWrappers` mirror) and drives a real Request through
@@ -2088,16 +2156,29 @@ describe('default-target dev parity', () => {
   // - false positives a string check would silently miss (e.g. emitting the
   //   header read in BOTH dev and prod but only honoring it in prod — the
   //   substring is present in cfDev's output but the runtime ignores it).
-  it('reads inbound X-Void-Original-URL only on CF-prod (CF with dev=false)', async () => {
+  it('reads inbound X-Void-Original-URL only behind managed dispatch', async () => {
     type Permutation = {
       readonly label: string;
-      readonly opts: { nodeTarget: boolean; dev: boolean };
+      readonly opts: { nodeTarget: boolean; dev: boolean; managedDispatch?: boolean };
       readonly trustsHeader: boolean;
     };
     const permutations: Array<Permutation> = [
-      { label: 'cfProd', opts: { nodeTarget: false, dev: false }, trustsHeader: true },
-      { label: 'cfDev', opts: { nodeTarget: false, dev: true }, trustsHeader: false },
-      { label: 'nodeProd', opts: { nodeTarget: true, dev: false }, trustsHeader: false },
+      {
+        label: 'managedCfProd',
+        opts: { nodeTarget: false, dev: false, managedDispatch: true },
+        trustsHeader: true,
+      },
+      { label: 'nativeCfProd', opts: { nodeTarget: false, dev: false }, trustsHeader: false },
+      {
+        label: 'cfDev',
+        opts: { nodeTarget: false, dev: true, managedDispatch: true },
+        trustsHeader: false,
+      },
+      {
+        label: 'nodeProd',
+        opts: { nodeTarget: true, dev: false, managedDispatch: true },
+        trustsHeader: false,
+      },
       { label: 'nodeDev', opts: { nodeTarget: true, dev: true }, trustsHeader: false },
     ];
 
@@ -2249,8 +2330,8 @@ describe('default-target dev parity', () => {
   });
 
   it('keeps node target emissions identical in dev and prod', () => {
-    const devCode = compile({ nodeTarget: true, dev: true });
-    const prodCode = compile({ nodeTarget: true, dev: false });
+    const devCode = compile({ nodeTarget: true, dev: true, managedDispatch: true });
+    const prodCode = compile({ nodeTarget: true, dev: false, managedDispatch: true });
     expect(devCode).toContain('const __routingRules =');
     expect(prodCode).toContain('const __routingRules =');
     expect(devCode).toContain('const __headerRules =');

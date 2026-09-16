@@ -623,6 +623,16 @@ export { buildEnv } from '../shared/untrusted-env.ts';
  */
 const MANAGED_DEPLOY_BUILD_ENV = { VOID_DEPLOY_BUILD: '1' } as const;
 
+/** Remove managed-only build markers from an explicit native Cloudflare child. */
+function scrubManagedDeployBuildMarkers(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { deleteEnvVarCaseAware } = requireProvisionModule();
+  deleteEnvVarCaseAware(env, 'VOID_DEPLOY_PROJECT_ID');
+  for (const name of Object.keys(MANAGED_DEPLOY_BUILD_ENV)) {
+    deleteEnvVarCaseAware(env, name);
+  }
+  return env;
+}
+
 /**
  * Deploy-time env selectors that pin the WRONG worker/config out from under the
  * top-level config this flow provisions + preflights. Scrubbed from every child env
@@ -1468,7 +1478,9 @@ function scrubWranglerAuthCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv
  * `validate-emitted` probe.
  */
 function buildSchemaProbeEnv(accountId: string, apiBaseUrl: string): NodeJS.ProcessEnv {
-  const env = scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl));
+  const env = scrubManagedDeployBuildMarkers(
+    scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl)),
+  );
   // Match the Cloudflare deploy build's dotenv boundary. Besides keeping a
   // schema conditioned on this internal marker consistent with the build,
   // this prevents an ambient case variant from shadowing the pinned value on
@@ -4999,8 +5011,9 @@ export async function runCloudflareDeploy(
   // `CLOUDFLARE_*` dotenv keys back into the child's `process.env`. Those values are already
   // on disk and readable by the build code either way — the scrub is about the credentials
   // the PARENT holds, which the project never had.
-  const buildChildEnv = scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl));
-  delete buildChildEnv.VOID_DEPLOY_PROJECT_ID;
+  const buildChildEnv = scrubManagedDeployBuildMarkers(
+    scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl)),
+  );
   // Tell void:env to build Worker vars from portable production dotenv files
   // only. Outside this deploy path Vite keeps its standard dotenv behavior,
   // but local files cannot be serialized into the artifact this command uploads.
@@ -6184,7 +6197,9 @@ async function runCloudflareStaticDeploy(
   const rootConfigBeforeBuild = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
   if (preset.buildCommand && !options.skipBuild) {
     log.step('Building...');
-    const buildChildEnv = scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl));
+    const buildChildEnv = scrubManagedDeployBuildMarkers(
+      scrubWranglerAuthCredentials(deployChildEnv(accountId, apiBaseUrl)),
+    );
     requireProvisionModule().deleteEnvVarCaseAware(buildChildEnv, 'NODE_ENV');
     buildChildEnv.NODE_ENV = 'production';
     const runStaticBuild =

@@ -1738,6 +1738,45 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(wranglerArgs.at(-1)).toContain(generatedStaticConfig(root));
   });
 
+  it('scrubs stale managed markers from a native static build', async () => {
+    const savedProjectId = process.env.VOID_DEPLOY_PROJECT_ID;
+    const savedManagedBuild = process.env.VOID_DEPLOY_BUILD;
+    process.env.VOID_DEPLOY_PROJECT_ID = 'stale-managed-project';
+    process.env.VOID_DEPLOY_BUILD = '1';
+    let buildEnvSeen: NodeJS.ProcessEnv = {};
+    try {
+      const root = makeProject({
+        'package.json': JSON.stringify({ name: 'viteapp', dependencies: { vite: '6.0.0' } }),
+        'void.json': JSON.stringify({}),
+        'wrangler.jsonc': JSON.stringify({ account_id: 'acc123' }),
+        'index.html': '<!doctype html><div id="app"></div>',
+      });
+      const { deps } = harness({
+        runStaticBuild: (_command, env) => {
+          buildEnvSeen = { ...env };
+          mkdirSync(join(root, 'dist'), { recursive: true });
+          writeFileSync(join(root, 'dist/index.html'), '<h1>Built</h1>');
+        },
+      });
+
+      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+      expect(buildEnvSeen.VOID_DEPLOY_PROJECT_ID).toBeUndefined();
+      expect(buildEnvSeen.VOID_DEPLOY_BUILD).toBeUndefined();
+    } finally {
+      if (savedProjectId === undefined) {
+        delete process.env.VOID_DEPLOY_PROJECT_ID;
+      } else {
+        process.env.VOID_DEPLOY_PROJECT_ID = savedProjectId;
+      }
+      if (savedManagedBuild === undefined) {
+        delete process.env.VOID_DEPLOY_BUILD;
+      } else {
+        process.env.VOID_DEPLOY_BUILD = savedManagedBuild;
+      }
+    }
+  });
+
   it('rejects a forged candidate receipt written by a static build hook', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'site', dependencies: { vite: '6.0.0' } }),
@@ -7893,6 +7932,45 @@ describe('runCloudflareDeploy — schema probe runs under the build NODE_ENV', (
 
     expect(probeMarker).toBe('1');
     expect(buildMarker).toBe('1');
+  });
+
+  it('scrubs stale managed markers from native probes and the build', async () => {
+    const savedProjectId = process.env.VOID_DEPLOY_PROJECT_ID;
+    const savedManagedBuild = process.env.VOID_DEPLOY_BUILD;
+    process.env.VOID_DEPLOY_PROJECT_ID = 'stale-managed-project';
+    process.env.VOID_DEPLOY_BUILD = '1';
+    let probeEnvSeen: NodeJS.ProcessEnv = {};
+    let buildEnvSeen: NodeJS.ProcessEnv = {};
+    try {
+      const root = d1Project(PROVISIONED_D1);
+      const { deps } = harness({
+        resolveSchemaFacts: ((_input, env) => {
+          probeEnvSeen = { ...env };
+          return okSchemaFacts();
+        }) as CloudflareDeployDeps['resolveSchemaFacts'],
+        runBuild: (env) => {
+          buildEnvSeen = { ...env };
+        },
+      });
+
+      await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+
+      for (const env of [probeEnvSeen, buildEnvSeen]) {
+        expect(env.VOID_DEPLOY_PROJECT_ID).toBeUndefined();
+        expect(env.VOID_DEPLOY_BUILD).toBeUndefined();
+      }
+    } finally {
+      if (savedProjectId === undefined) {
+        delete process.env.VOID_DEPLOY_PROJECT_ID;
+      } else {
+        process.env.VOID_DEPLOY_PROJECT_ID = savedProjectId;
+      }
+      if (savedManagedBuild === undefined) {
+        delete process.env.VOID_DEPLOY_BUILD;
+      } else {
+        process.env.VOID_DEPLOY_BUILD = savedManagedBuild;
+      }
+    }
   });
 });
 

@@ -83,10 +83,9 @@ type RoutingPluginOptions = {
    * The watcher also watches those two files during `vite dev` and
    * re-runs the merge + invalidates the route module when either changes.
    *
-   * On `node`/`bun`/`deno` targets the merged rules are emitted into the
-   * Hono app in both dev and prod. On the default target they are emitted
-   * only in dev so `vite dev` matches the deployed runtime — in production
-   * the platform dispatch worker owns the pipeline instead.
+   * The merged rules are emitted into every runtime that owns its routing.
+   * Managed Cloudflare builds omit them because platform dispatch owns the
+   * same pipeline.
    */
   routing?: import('./config.ts').RoutingConfig;
   hasSandbox?: boolean;
@@ -222,17 +221,15 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     devTriggerToken: options.devTriggerToken,
     auth: null,
     nodeTarget: !!options.target,
+    managedDispatch: false,
     explicitPrerenderPaths: options.prerenderPaths,
     bindingHandlerPath: options.target ? undefined : resolveFile('#self/remote/binding-handler'),
     bindingNames: options.bindingNames,
   };
 
-  // Static `_redirects` / `_headers` are always merged on every target so
-  // `vite dev` mirrors the deployed routing pipeline. On `node`/`bun`/`deno`
-  // targets the compiled Hono app emits the middleware in both dev and
-  // prod. On the default target the middleware is only emitted in dev —
-  // in production the platform dispatch worker owns the pipeline and the
-  // rules are stripped out of the worker bundle (see `compile.ts`).
+  // Static `_redirects` / `_headers` are always merged. The compiled Hono app
+  // emits them for native Cloudflare, local dev, and non-CF targets. Managed
+  // builds strip the duplicate pipeline because dispatch owns it.
   //
   // `publicDir` starts at `<root>/public` (Vite's default) and is
   // re-resolved from the resolved config in `configResolved`. For
@@ -488,6 +485,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
     },
     config(_, env) {
       routeEnvironment = env.command === 'serve' && !env.isPreview ? 'dev' : 'prod';
+      compileOptions.managedDispatch =
+        !options.target && env.command === 'build' && Boolean(process.env.VOID_DEPLOY_PROJECT_ID);
 
       if (env.command === 'serve' && options.isAuthEnabled()) {
         // Alias better-auth client subpaths to absolute file paths so

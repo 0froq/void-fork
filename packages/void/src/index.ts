@@ -11,7 +11,7 @@ import {
 import { fileURLToPath } from 'node:url';
 import { cloudflare, type PluginConfig, type WorkerConfig } from '@cloudflare/vite-plugin';
 import { appendSqliteClassMigration } from '@void/deploy-core';
-import { join } from 'pathslash';
+import { join, resolve } from 'pathslash';
 import pc from 'picocolors';
 import { loadEnv, type Plugin } from 'vite';
 import {
@@ -23,6 +23,7 @@ import {
 import { findVoidAuthConfig } from './auth/config.ts';
 import { getApiUrl, getProxyUrl, getToken, isStagingMode } from './cli/auth.ts';
 import { SEND_EMAIL_BINDING } from './cli/email-cloudflare.ts';
+import { mergeRoutingRules } from './cli/headers.ts';
 import { readProjectConfig } from './cli/project.ts';
 import {
   ensureWranglerCompat,
@@ -1739,6 +1740,13 @@ export function voidPlugin(options?: {
       // `workerConfig.assets` at all — `mergeBindings` keys off it staying
       // unset.
       if (!framework && !isNodeTarget(config.target)) {
+        managedCloudflareBuild = command === 'build' && Boolean(process.env.VOID_DEPLOY_PROJECT_ID);
+        assetRoutingPublicDir =
+          userConfig.publicDir === false
+            ? null
+            : typeof userConfig.publicDir === 'string'
+              ? resolve(root, userConfig.publicDir)
+              : join(root, 'public');
         assetRouting = resolveConfiguredAssetRoutingPolicy();
         applyAssetRoutingPolicy(assetRouting);
       }
@@ -2199,13 +2207,15 @@ export function voidPlugin(options?: {
   const ssrEntry = validateSsrEntry(root, paths);
   const hasPages = existsSync(paths.pagesDir);
   const hasMiddleware = scanMiddlewareSync(root, paths).length > 0;
+  let assetRoutingPublicDir: string | null = join(root, 'public');
+  let managedCloudflareBuild = false;
 
   function resolveConfiguredAssetRoutingPolicy(): AssetRoutingPolicy {
     const routePatterns = scanRoutePatternsSync(root, paths, routeEnvironment);
     const environmentWebsocketRoutes = websocketRoutes.filter((route) =>
       isRouteEnabledForEnvironment(route, routeEnvironment),
     );
-    return resolveAssetRoutingPolicy({
+    const policy = resolveAssetRoutingPolicy({
       isSsr: Boolean(ssrEntry),
       hasPages,
       hasApiRoutes:
@@ -2219,6 +2229,31 @@ export function voidPlugin(options?: {
       liveEnabled: liveConfig !== undefined,
       notFound: config.routing?.notFound,
     });
+    const rules = mergeRoutingRules({ dir: assetRoutingPublicDir, routing: config.routing });
+    const nativeOwnsEdgeRouting =
+      !managedCloudflareBuild &&
+      (rules.headerRules.length > 0 ||
+        rules.redirectRules.length > 0 ||
+        (rules.fallbackRules?.length ?? 0) > 0);
+    if (nativeOwnsEdgeRouting) {
+      // Cloudflare otherwise serves an existing asset before the generated
+      // Worker can apply redirects or response headers. Native builds own the
+      // rule pipeline, so send every path through the Worker first. Managed
+      // builds keep their inferred policy because dispatch owns these rules.
+      policy.assetConfig.run_worker_first = ['/**'];
+      // A SPA asset binding resolves its shell before the Worker can observe
+      // an asset miss. Disable that platform fallback when native fallback
+      // rules exist, then restore the SPA shell in serveWithAssets after the
+      // ordered user fallbacks have had their chance.
+      if (
+        rules.fallbackRules?.length &&
+        policy.assetConfig.not_found_handling === 'single-page-application'
+      ) {
+        policy.assetConfig.not_found_handling = 'none';
+        policy.workerSpaFallback = true;
+      }
+    }
+    return policy;
   }
 
   // Provisional: `routeEnvironment` is still its `prod` default here, because no
@@ -2282,9 +2317,8 @@ export function voidPlugin(options?: {
       remoteMode,
       // Pass the full routing section so the plugin can merge
       // `public/_redirects` / `public/_headers` with `void.json` rules for
-      // dev-time parity with the deployment runtime. In production the
-      // platform dispatch worker owns the pipeline and the plugin compiles
-      // these rules out of the worker bundle.
+      // parity with the deployment runtime. Managed production builds omit
+      // the rules because dispatch owns them; native builds keep them.
       routing: config.routing,
       bindingNames,
       hasSandbox: bindings.needsSandbox,

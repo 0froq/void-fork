@@ -55,6 +55,39 @@ function createApiOnlyProjectRoot(): string {
   return root;
 }
 
+function createConfiguredEdgeRulesProjectRoot(): string {
+  const root = createApiOnlyProjectRoot();
+  writeFileSync(
+    join(root, 'void.json'),
+    JSON.stringify({
+      worker: { compatibility_date: '2026-02-24' },
+      routing: {
+        headers: { '/asset.txt': ['X-Edge: yes'] },
+        redirects: { '/old.txt': '/new.txt' },
+      },
+    }),
+  );
+  return root;
+}
+
+function createFrameworkProjectRoot(): string {
+  const root = createProjectRoot();
+  writeFileSync(
+    join(root, 'package.json'),
+    JSON.stringify({ type: 'module', dependencies: { vinext: '^0.0.5', react: '^19.0.0' } }),
+  );
+  return root;
+}
+
+function createNodeProjectRoot(): string {
+  const root = createProjectRoot();
+  writeFileSync(
+    join(root, 'void.json'),
+    JSON.stringify({ target: 'node', worker: { compatibility_date: '2026-02-24' } }),
+  );
+  return root;
+}
+
 function createDevOnlyApiProjectRoot(): string {
   const root = createProjectRoot();
   mkdirSync(join(root, 'routes/api'), { recursive: true });
@@ -144,6 +177,24 @@ afterEach(() => {
 });
 
 describe('voidPlugin dev asset routing', () => {
+  async function runEnvConfig(root: string): Promise<void> {
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    const { voidPlugin } = await import('../../src/index.ts');
+    const plugins = voidPlugin();
+    const envPlugin = plugins.find((plugin) => plugin.name === 'void:env');
+    const config = getHookHandler(envPlugin?.config) as (
+      config: import('vite').UserConfig,
+      env: import('vite').ConfigEnv,
+    ) => void;
+    config({}, { command: 'build', mode: 'production' });
+  }
+
+  it('runs the env config hook for framework and Node early-return plugin paths', async () => {
+    await expect(runEnvConfig(createFrameworkProjectRoot())).resolves.toBeUndefined();
+    vi.restoreAllMocks();
+    await expect(runEnvConfig(createNodeProjectRoot())).resolves.toBeUndefined();
+  });
+
   async function resolveCloudflareConfig(
     root: string,
     resolved: Record<string, unknown> = {},
@@ -232,6 +283,94 @@ describe('voidPlugin dev asset routing', () => {
 
     expect(assets?.not_found_handling).toBe('single-page-application');
     expect(assets?.run_worker_first).toEqual(['/__void', '/__void/*']);
+  });
+
+  it('runs configured edge rules before existing assets in native production builds', async () => {
+    const root = createConfiguredEdgeRulesProjectRoot();
+    const assets = await resolveVoidPluginAssets(
+      root,
+      {},
+      { command: 'build', mode: 'production' },
+    );
+
+    expect(assets?.run_worker_first).toEqual(['/**']);
+  });
+
+  it('runs merged public routing files before existing assets in native production builds', async () => {
+    const root = createApiOnlyProjectRoot();
+    mkdirSync(join(root, 'public'), { recursive: true });
+    writeFileSync(join(root, 'public/_headers'), '/asset.txt\n  X-Edge: yes\n');
+    writeFileSync(join(root, 'public/_redirects'), '/old.txt /new.txt 302\n');
+
+    const assets = await resolveVoidPluginAssets(
+      root,
+      {},
+      { command: 'build', mode: 'production' },
+    );
+
+    expect(assets?.run_worker_first).toEqual(['/**']);
+  });
+
+  it('preserves native fallback ordering ahead of the SPA shell', async () => {
+    const root = createApiOnlyProjectRoot();
+    writeFileSync(
+      join(root, 'void.json'),
+      JSON.stringify({
+        worker: { compatibility_date: '2026-02-24' },
+        routing: { fallbacks: { '/legacy/*': '/legacy.html' } },
+      }),
+    );
+
+    const assets = await resolveVoidPluginAssets(
+      root,
+      {},
+      { command: 'build', mode: 'production' },
+    );
+
+    expect(assets?.run_worker_first).toEqual(['/**']);
+    expect(assets?.not_found_handling).toBe('none');
+  });
+
+  it('lets managed production dispatch keep the inferred asset-first policy', async () => {
+    const savedProjectId = process.env.VOID_DEPLOY_PROJECT_ID;
+    process.env.VOID_DEPLOY_PROJECT_ID = 'managed-project';
+    try {
+      const root = createConfiguredEdgeRulesProjectRoot();
+      const assets = await resolveVoidPluginAssets(
+        root,
+        {},
+        { command: 'build', mode: 'production' },
+      );
+
+      expect(assets?.run_worker_first).toEqual(['/api', '/api/*', '/__void', '/__void/*']);
+    } finally {
+      if (savedProjectId === undefined) {
+        delete process.env.VOID_DEPLOY_PROJECT_ID;
+      } else {
+        process.env.VOID_DEPLOY_PROJECT_ID = savedProjectId;
+      }
+    }
+  });
+
+  it('ignores an ambient managed project marker during native development', async () => {
+    const savedProjectId = process.env.VOID_DEPLOY_PROJECT_ID;
+    process.env.VOID_DEPLOY_PROJECT_ID = 'managed-project';
+    try {
+      const root = createConfiguredEdgeRulesProjectRoot();
+      const assets = await resolveVoidPluginAssets(
+        root,
+        {},
+        { command: 'serve', mode: 'development' },
+      );
+
+      expect(assets?.run_worker_first).toContain('/**');
+    } finally {
+      if (savedProjectId === undefined) {
+        delete process.env.VOID_DEPLOY_PROJECT_ID;
+      } else {
+        process.env.VOID_DEPLOY_PROJECT_ID = savedProjectId;
+      }
+    }
   });
 
   it('keeps the API worker-first rules in a preview run of a prod-only route', async () => {

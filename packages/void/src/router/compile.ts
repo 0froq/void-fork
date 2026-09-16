@@ -677,6 +677,8 @@ export type CompileOptions = {
   auth: AuthCompileOptions | null;
   /** `node`/`bun`/`deno` target — omits executionCtx from ALS context */
   nodeTarget?: boolean;
+  /** Managed Cloudflare build whose dispatch worker owns edge routing. */
+  managedDispatch?: boolean;
   /** Absolute path to the binding handler module (for /__void/* native binding access) */
   bindingHandlerPath?: string;
   /** Absolute path to the migration handler module */
@@ -689,15 +691,15 @@ export type CompileOptions = {
   migrationDialect?: 'sqlite' | 'postgresql' | 'mysql';
   /** Custom binding names configured through inference.bindings. */
   bindingNames?: { d1?: string; kv?: string; r2?: string };
-  /** Header rules from routing.headers config (node/bun/deno targets only) */
+  /** Header rules from routing.headers config. */
   headerRules?: Array<HeaderRule>;
-  /** Redirect rules from routing.redirects config (node/bun/deno targets only) */
+  /** Pre-route redirects and rewrites. */
   redirectRules?: Array<DevRedirectRule>;
   /**
    * Post-asset fallback rules (plain `_redirects` 200 + `routing.fallbacks`).
    * Only fire when no route/SSR handler matched — emitted inside Hono's
-   * `notFound` hook on `node`/`bun`/`deno` targets. Empty/undefined skips
-   * the fallback middleware entirely.
+   * `notFound` hook on runtimes without managed dispatch. Empty/undefined
+   * skips the fallback middleware entirely.
    */
   fallbackRules?: Array<DevRedirectRule>;
   /** Explicit prerender paths from void.json routing.prerender */
@@ -764,6 +766,8 @@ export function compileRouteTable(
   const lines: Array<string> = [];
   const auth = options.auth;
   const webSockets = scan.websockets ?? [];
+  const managedDispatch =
+    options.nodeTarget !== true && options.dev !== true && options.managedDispatch === true;
 
   lines.push(`import { AsyncLocalStorage } from "node:async_hooks";`);
   lines.push(`import { Hono } from ${JSON.stringify(options.honoPath)};`);
@@ -932,7 +936,7 @@ export function compileRouteTable(
   );
   lines.push('}');
   lines.push('');
-  // Internal signal consumed by platform dispatch: a 404 came from generated
+  // Internal signal consumed by managed platform dispatch: a 404 came from generated
   // no-route handling, not from a user route intentionally returning 404.
   // Dispatch strips the header before responding to the client.
   lines.push('function __voidShouldMarkNoMatch(request) {');
@@ -963,16 +967,12 @@ export function compileRouteTable(
   // Also wrap `c.redirect` so dynamic redirects preserve the incoming query
   // string the same way static `_redirects` entries do.
   lines.push('app.use(async (c, next) => {');
-  // Migrate `X-Void-Original-URL` set by an outer edge dispatcher into the
-  // WeakMap exactly once per request. Only emitted for the CF-prod target,
-  // where dispatch runs in front of the worker and strips any client-supplied
-  // value on ingress — making the header a trusted, dispatch-authored
-  // handoff. On CF-dev (no dispatch) and on node/bun/deno self-hosted
-  // targets (user owns ingress) the header is client-controlled and not
-  // trustworthy, so the read is skipped. In-worker `c.rewrite` / static-
-  // rewrite re-dispatches populate the WeakMap directly on the `rewriteReq`
-  // and never depend on this header-read path.
-  if (!options.nodeTarget && options.dev !== true) {
+  // Migrate `X-Void-Original-URL` set by managed dispatch into the WeakMap
+  // exactly once per request. Managed dispatch strips any client-supplied
+  // value on ingress, making the header a trusted handoff. Native Cloudflare,
+  // dev, and node/bun/deno targets have no trusted dispatcher in front, so the
+  // read is skipped. In-worker rewrites populate the WeakMap directly.
+  if (managedDispatch) {
     lines.push('  if (!__voidOriginalUrls.has(c.req.raw)) {');
     lines.push('    const __h = c.req.raw.headers.get("X-Void-Original-URL");');
     lines.push('    if (__h != null) {');
@@ -1075,12 +1075,10 @@ export function compileRouteTable(
   lines.push('});');
   lines.push('');
 
-  // Edge routing middleware. On `node`/`bun`/`deno` targets the emitted Hono
-  // app owns routing end-to-end, so the middleware runs in both dev and prod.
-  // On the default target the platform dispatch worker applies these rules in
-  // front of the user worker at deploy time — we only emit them in dev there
-  // so `vite dev` mirrors deployed behavior locally.
-  const emitEdgeRules = options.nodeTarget || options.dev === true;
+  // Edge routing middleware. Every target without managed platform dispatch
+  // owns routing end-to-end, including native Cloudflare production builds.
+  // Managed bundles omit it because dispatch applies the same rules first.
+  const emitEdgeRules = !managedDispatch;
   if (emitEdgeRules && options.redirectRules?.length) {
     compileRoutingRulesMiddleware(
       lines,
@@ -1382,12 +1380,10 @@ window.__vite_plugin_react_preamble_installed__ = true;
       );
     }
     lines.push(`  if (!shouldHandleSsrRequest(c)) {`);
-    if (!options.nodeTarget && options.dev === true && options.fallbackRules?.length) {
-      // Default target in dev: static assets are served by the platform
-      // runtime in front of this worker in production, so to reproduce that
-      // behavior locally we look up assets first, then apply fallback rules
-      // on a 404. Production builds on the default target skip this and let
-      // the platform dispatch worker own the fallback phase.
+    if (!options.nodeTarget && emitEdgeRules && options.fallbackRules?.length) {
+      // Cloudflare without managed dispatch (dev or native production) looks
+      // up assets first, then applies fallback rules on a 404. Managed builds
+      // let dispatch own this phase.
       lines.push(`    const __assetRes = await fetchFromAssets(c);`);
       lines.push(`    if (__assetRes.status !== 404) return __assetRes;`);
       // This branch is gated on `!options.nodeTarget`, so pass `false`.
@@ -1402,12 +1398,13 @@ window.__vite_plugin_react_preamble_installed__ = true;
     lines.push(`});`);
     lines.push('');
   } else if (
-    (options.nodeTarget || options.dev === true) &&
-    options.fallbackRules?.length &&
+    emitEdgeRules &&
+    (options.fallbackRules?.length || (!options.nodeTarget && options.headerRules?.length)) &&
     !(pages && scan.pages.pages.length > 0)
   ) {
     // No SSR entry and no pages mode — emit a standalone notFound hook so
-    // `_redirects` / `routing.fallbacks` rules still fire on asset-miss.
+    // Cloudflare asset responses pass through header middleware, then run
+    // `_redirects` / `routing.fallbacks` rules on asset-miss when configured.
     // Pages mode owns its own notFound (with its own assets-first + SPA
     // fallback logic) and injects the fallback check inline at the correct
     // point; see `compilePageRoutes`.
@@ -1415,25 +1412,25 @@ window.__vite_plugin_react_preamble_installed__ = true;
     // On `node`/`bun`/`deno` the Hono app owns asset serving, so "no route"
     // already means "no asset" — fallbacks run straight away.
     //
-    // On the default target in dev we first ask the platform asset binding
-    // (`env.ASSETS`) so the in-worker flow matches production, where the
-    // platform serves static files before the worker even sees the request.
+    // On Cloudflare without managed dispatch we first ask the asset binding.
     // Fallbacks only fire when the asset lookup also 404s.
     lines.push(`app.notFound(async (c) => {`);
-    if (!options.nodeTarget && options.dev === true) {
+    if (!options.nodeTarget) {
       lines.push(`  const assets = c.env?.ASSETS;`);
       lines.push(`  if (assets && typeof assets.fetch === "function") {`);
       lines.push(`    const __assetRes = await assets.fetch(c.req.raw);`);
       lines.push(`    if (__assetRes.status !== 404) return __assetRes;`);
       lines.push(`  }`);
     }
-    emitFallbackRulesCheck(
-      lines,
-      options.fallbackRules,
-      options.dev === true,
-      '  ',
-      options.nodeTarget === true,
-    );
+    if (options.fallbackRules?.length) {
+      emitFallbackRulesCheck(
+        lines,
+        options.fallbackRules,
+        options.dev === true,
+        '  ',
+        options.nodeTarget === true,
+      );
+    }
     lines.push(
       `  return __voidMarkNoMatch(c.req.raw, new Response("Not Found", { status: 404 }));`,
     );
@@ -2461,11 +2458,11 @@ function compilePageRoutes(
   lines.push(`  if (assetRes.status !== 404) return assetRes;`);
   // Post-asset fallback phase — `routing.fallbacks` / plain `_redirects 200`
   // rules re-dispatch through the app when assets miss but before the SPA
-  // fallback renders. Node/bun/deno targets emit this in both dev and prod
-  // (the Hono app owns the full pipeline there); the default target only
-  // emits it in dev, since production relies on the platform dispatch
-  // worker to apply fallbacks before assets are even served.
-  if ((options.nodeTarget || options.dev === true) && options.fallbackRules?.length) {
+  // fallback renders. Targets without managed dispatch emit this themselves;
+  // managed bundles rely on the platform dispatch worker.
+  const managedDispatch =
+    options.nodeTarget !== true && options.dev !== true && options.managedDispatch === true;
+  if (!managedDispatch && options.fallbackRules?.length) {
     emitFallbackRulesCheck(
       lines,
       options.fallbackRules,

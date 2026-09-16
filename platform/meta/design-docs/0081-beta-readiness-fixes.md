@@ -13,7 +13,7 @@ guard; add no administrator recovery or promotion bypass.
 
 ## Work and commit boundaries
 
-- [ ] Apply routing rules in native Cloudflare production Workers.
+- [x] Apply routing rules in native Cloudflare production Workers.
 - [ ] Share authoritative page cache policy across deployment targets.
 - [ ] Preserve production ownership during readiness fallback and compensation.
 - [x] Use supported Durable Object storage for fresh platform installations.
