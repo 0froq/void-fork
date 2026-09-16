@@ -33,7 +33,7 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Pin new projects to the SDK's tested compatibility date instead of today's date.
 - [x] Preserve request-binding module identity in installed-package development.
 - [ ] Define and enforce the supported Node/CLI/platform compatibility contract.
-- [ ] Support native Cloudflare AI development without a Void login.
+- [x] Support native Cloudflare AI development without a Void login.
 - [x] Safely exclude managed Sandboxes, including retained legacy deployments.
 - [x] Correct browser OAuth/DNS and first Workers-subdomain onboarding.
 - [x] Document and verify compatible rollback after a successful platform upgrade.

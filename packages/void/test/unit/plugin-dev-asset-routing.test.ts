@@ -117,6 +117,33 @@ export async function GET() {
   return root;
 }
 
+function createAiProjectRoot(platform: 'cloudflare' | 'void'): string {
+  const root = createProjectRoot();
+  mkdirSync(join(root, 'routes/api'), { recursive: true });
+  writeFileSync(
+    join(root, 'routes/api/ai.ts'),
+    'import { ai } from "void/ai"; export const GET = () => ai.run("model", {});',
+  );
+  mkdirSync(join(root, '.void'), { recursive: true });
+  writeFileSync(
+    join(root, '.void/project.json'),
+    JSON.stringify({
+      platform,
+      ...(platform === 'void' && {
+        projectId: 'managed-project',
+        proxyUrl: 'https://proxy.void.cloud',
+        slug: 'managed-project',
+      }),
+    }),
+  );
+  return root;
+}
+
+function saveDeploymentPlatform(root: string, platform: 'cloudflare' | 'void'): void {
+  mkdirSync(join(root, '.void'), { recursive: true });
+  writeFileSync(join(root, '.void/project.json'), JSON.stringify({ platform }));
+}
+
 function createCustomBindingProjectRoot(): string {
   const root = createBindingProjectRoot();
   writeFileSync(
@@ -174,6 +201,7 @@ afterEach(() => {
   }
   vi.restoreAllMocks();
   vi.resetModules();
+  vi.unstubAllEnvs();
 });
 
 describe('voidPlugin dev asset routing', () => {
@@ -417,6 +445,53 @@ describe('voidPlugin dev asset routing', () => {
     ]);
     expect(config.kv_namespaces).toEqual([{ binding: 'myapp_kv', id: 'local' }]);
     expect(config.r2_buckets).toEqual([{ binding: 'myapp_storage', bucket_name: 'default' }]);
+  });
+
+  it('uses the owner Cloudflare account for Workers AI during direct local development', async () => {
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', 'cloudflare-token');
+    vi.stubEnv('CLOUDFLARE_AUTH_USE_KEYRING', 'false');
+    vi.stubEnv('VOID_TOKEN', 'void-token-that-must-not-be-used');
+    const config = await resolveCloudflareConfig(createAiProjectRoot('cloudflare'));
+
+    expect(config.ai).toEqual({ binding: 'AI', remote: true });
+    expect(config.vars).not.toMatchObject({
+      __VOID_TOKEN: expect.anything(),
+      __VOID_PROJECT_ID: expect.anything(),
+      __VOID_PROXY_URL: expect.anything(),
+    });
+    expect(process.env.CLOUDFLARE_API_TOKEN).toBe('cloudflare-token');
+    expect(process.env.CLOUDFLARE_AUTH_USE_KEYRING).toBe('true');
+  });
+
+  it('enables remote mode on an explicit Workers AI binding during direct development', async () => {
+    vi.stubEnv('CLOUDFLARE_AUTH_USE_KEYRING', 'false');
+    const config = await resolveCloudflareConfig(createAiProjectRoot('cloudflare'), {
+      ai: { binding: 'AI', staging: true },
+    });
+
+    expect(config.ai).toEqual({ binding: 'AI', remote: true, staging: true });
+  });
+
+  it('keeps managed Workers AI development on the Void proxy', async () => {
+    vi.stubEnv('VOID_TOKEN', 'managed-token');
+    const config = await resolveCloudflareConfig(createAiProjectRoot('void'));
+
+    expect(config.ai).toBeUndefined();
+    expect(config.vars).toMatchObject({
+      __VOID_TOKEN: 'managed-token',
+      __VOID_PROJECT_ID: 'managed-project',
+      __VOID_PROXY_URL: 'https://proxy.void.cloud',
+    });
+  });
+
+  it('does not enable remote AI or Cloudflare auth for a direct non-AI app', async () => {
+    vi.stubEnv('CLOUDFLARE_AUTH_USE_KEYRING', 'false');
+    const root = createApiOnlyProjectRoot();
+    saveDeploymentPlatform(root, 'cloudflare');
+    const config = await resolveCloudflareConfig(root);
+
+    expect(config.ai).toBeUndefined();
+    expect(process.env.CLOUDFLARE_AUTH_USE_KEYRING).toBe('false');
   });
 
   it('keeps projects with only API websocket routes static-first for document requests', async () => {

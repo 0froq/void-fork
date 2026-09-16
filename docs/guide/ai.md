@@ -71,9 +71,21 @@ const result = await ai.toMarkdown([{ name: 'document.pdf', blob: pdfBytes }]);
 
 ## Local Development
 
-AI requires Void credentials for local development. Run `void auth login` and `void project link` (or follow the interactive setup during `vite dev`) to connect your project.
+For a direct Cloudflare project, connect your account and start development:
 
-Once linked, credentials are injected automatically as worker bindings. You do not need to configure them by hand. All inference traffic goes through the Void AI proxy over HTTPS, so usage is tracked and metered the same way it is in production.
+```sh
+void connect --platform cloudflare
+npm run dev
+```
+
+When the app imports `void/ai`, Void enables a remote Workers AI binding during
+development and preview. Requests use your Cloudflare account and its allowance;
+Workers AI has no local simulator. The session uses the same keychain-backed
+Cloudflare login as the CLI, or `CLOUDFLARE_API_TOKEN` in an automated environment.
+
+For a team platform, use `void connect <platform-url>` and link your project.
+Development requests use that platform's HTTPS proxy and usage controls.
+Credentials are injected into server bindings automatically.
 
 ## Usage Limits
 

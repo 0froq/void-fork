@@ -420,7 +420,7 @@ Notes:
 
 - **Account-owned usage.** Direct deployments use your own [Cloudflare AI Gateway analytics](https://developers.cloudflare.com/ai-gateway/). A team platform meters requests through its shared proxy; those usage records do not automatically bill application developers.
 - **The runtime reads the `env.AI` binding by name** -- a custom-named root AI binding is not supported.
-- **`void dev` has no local Workers AI emulation.** In development, AI still routes through Void, so `void dev` AI requires `void auth login` even when you deploy self-hosted.
+- **Workers AI runs remotely during development.** After `void connect --platform cloudflare`, an app importing `void/ai` uses your account's remote AI binding with your Cloudflare login or API token. Development and preview calls consume that account's allowance. Apps without AI imports add no AI binding or authentication probe.
 
 ### ISR on your Cloudflare account {#isr-self-host}
 

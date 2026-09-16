@@ -24,7 +24,7 @@ import { findVoidAuthConfig } from './auth/config.ts';
 import { getApiUrl, getProxyUrl, getToken, isStagingMode } from './cli/auth.ts';
 import { SEND_EMAIL_BINDING } from './cli/email-cloudflare.ts';
 import { mergeRoutingRules } from './cli/headers.ts';
-import { readProjectConfig } from './cli/project.ts';
+import { readDeploymentPlatform, readProjectConfig } from './cli/project.ts';
 import {
   ensureWranglerCompat,
   ensureWranglerCompatibilityDate,
@@ -416,8 +416,9 @@ function hasBinding(list: Array<{ binding: string }> | undefined, name: string):
 /**
  * Decide whether to inject a Workers AI binding into the built wrangler config.
  *
- * Build-only: dev/miniflare has no local Workers AI, so serve must never bind
- * `env.AI` (dev uses the P2 `__VOID_TOKEN` proxy path instead).
+ * Builds use the production binding. During dev, a project explicitly saved
+ * with the direct Cloudflare destination uses Cloudflare's remote binding;
+ * managed and unsaved projects keep using the Void HTTPS proxy.
  *
  * `!resolvedAi` is load-bearing: mergeBindings' return is defu-merged over the
  * resolved root-wrangler config and wins, so skipping when the user already
@@ -429,8 +430,14 @@ export function shouldBindWorkersAi(
   needsAI: boolean,
   resolvedAi: unknown,
   resultAi: unknown,
+  directCloudflareDev: boolean = false,
 ): boolean {
-  return needsAI && command === 'build' && !resultAi && !resolvedAi;
+  return (
+    needsAI &&
+    (command === 'build' || (command === 'serve' && directCloudflareDev)) &&
+    !resultAi &&
+    !resolvedAi
+  );
 }
 
 /**
@@ -745,6 +752,7 @@ export function voidPlugin(options?: {
 }): Array<Plugin> {
   // Resolve root relative to CWD — this runs at config time
   const root = process.cwd();
+  const directCloudflareDestination = readDeploymentPlatform(root) === 'cloudflare';
   warnIfPackageJsonIsNotEsm(root);
   // Token only matters in serve — the dispatch module that uses it is
   // DCE'd from production worker bundles. In build/preview we still need
@@ -1262,24 +1270,41 @@ export function voidPlugin(options?: {
       result.r2_buckets = [{ binding: r2Name, bucket_name: 'default' }];
     }
 
-    // Workers AI — self-host only. The managed deploy ignores dist/wrangler.json,
-    // so this binding only takes effect on a real `wrangler deploy`. Build-gated
-    // because dev/miniflare has no local Workers AI (dev uses the P2
-    // __VOID_TOKEN proxy path). The `ai` config is a single object (not an array)
-    // and needs no external id, so it is safe to inject unconditionally here.
-    // Guard rationale: mergeBindings' return is defu-merged over `resolved` and
-    // wins, so `!resolvedAi` is load-bearing (prevents clobbering a user's own
-    // root-wrangler `ai` binding); `!resultAi` is harmless defense-in-depth
-    // (nothing else in mergeBindings ever sets `result.ai`).
+    // Workers AI — direct builds use the production binding. A saved direct
+    // Cloudflare destination uses the owner's remote Workers AI binding during
+    // dev because Workers AI has no local simulator. Managed and unsaved dev
+    // projects continue through the Void HTTPS proxy below.
+    // An explicit root binding keeps its name and staging choice. Direct dev
+    // only adds `remote: true`, which is required because there is no local AI
+    // simulator. Builds never override the user's root binding.
+    const resolvedAi = (resolved as { ai?: unknown }).ai;
+    const resultAi = (result as { ai?: unknown }).ai;
     if (
+      viteCommand === 'serve' &&
+      bindings.needsAI &&
+      directCloudflareDestination &&
+      !resultAi &&
+      typeof resolvedAi === 'object' &&
+      resolvedAi !== null &&
+      'binding' in resolvedAi &&
+      typeof resolvedAi.binding === 'string'
+    ) {
+      // Preserve an explicit binding name and staging choice while selecting
+      // its only supported local mode.
+      (result as Record<string, unknown>).ai = { ...resolvedAi, remote: true };
+    } else if (
       shouldBindWorkersAi(
         viteCommand,
         bindings.needsAI,
-        (resolved as { ai?: unknown }).ai,
-        (result as { ai?: unknown }).ai,
+        resolvedAi,
+        resultAi,
+        directCloudflareDestination,
       )
     ) {
-      (result as Record<string, unknown>).ai = { binding: 'AI' };
+      (result as Record<string, unknown>).ai = {
+        binding: 'AI',
+        ...(viteCommand === 'serve' && { remote: true }),
+      };
     }
 
     // AI Gateway id → runtime var (harmless in serve; only read by the P3 direct
@@ -1623,7 +1648,7 @@ export function voidPlugin(options?: {
 
     // AI — in local dev, inject VC credentials for HTTPS proxy path.
     // In production, the platform adds a __VOID_PROXY service binding instead.
-    if (viteCommand === 'serve' && bindings.needsAI) {
+    if (viteCommand === 'serve' && bindings.needsAI && !directCloudflareDestination) {
       const credentials = readVoidDevCredentials(root);
       if (credentials.status === 'ok') {
         // Prefer HTTPS proxy — inject credentials, skip direct AI binding
@@ -1735,6 +1760,13 @@ export function voidPlugin(options?: {
       // `dev` is the Vite dev server only. Every build, `void deploy`, and
       // `vite preview` (which reports `command: 'serve'`) is `prod`.
       routeEnvironment = command === 'serve' && !isPreview ? 'dev' : 'prod';
+      // `void cloudflare login` stores OAuth in Wrangler's OS-keychain-backed
+      // credential store. The Cloudflare Vite plugin runs in this process, so
+      // select that same store before it opens the remote Workers AI session.
+      // Explicit API tokens remain Wrangler's highest-priority credential.
+      if (command === 'serve' && directCloudflareDestination && bindings.needsAI) {
+        process.env.CLOUDFLARE_AUTH_USE_KEYRING = 'true';
+      }
       // Re-resolve now that the environment is known — the construction-time
       // value below always assumes `prod`.
       //
@@ -1876,7 +1908,7 @@ export function voidPlugin(options?: {
       }
 
       // AI onboarding: detect missing credentials early and guide users
-      if (bindings.needsAI) {
+      if (bindings.needsAI && !directCloudflareDestination) {
         const credentials = readVoidDevCredentials(root);
         if (credentials.status === 'no-token') {
           afterReady(() => {
