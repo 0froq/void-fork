@@ -1,6 +1,6 @@
 ---
 title: Direct Deployment and Platform Beta Readiness
-status: in-progress
+status: implemented
 created: 2026-09-16
 ---
 
@@ -41,15 +41,31 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Document and verify compatible rollback after a successful platform upgrade.
 - [x] Align feature guides, framework support, product wording, quotas, and operations.
 - [x] Add local release acceptance coverage and a separate live signoff procedure.
-- [ ] Run final verification and four GPT-5.6 Sol/high reviews; fix review P1s separately.
+- [x] Run final verification and four GPT-5.6 Sol/high reviews; fix review P1s separately.
 
 The npm and pnpm packed consumer matrices both passed all four frameworks,
 including real scaffolding, frozen installs, public Vite builds and TypeScript,
 development/preview, Markdown, KV, assets, hydration, and SPA navigation. This
 uncovered separately committed compatibility-date, runtime-module identity,
 Solid declaration, and pnpm bootstrap fixes. Full source verification passed
-441 files / 8,309 tests with 9 skipped tests (unconfigured live Cloudflare and
-unavailable Deno cases); all 29 workspace typechecks passed.
+442 files / 8,328 tests with 11 skipped tests: six unconfigured live Cloudflare
+cases, three unavailable Deno cases, and two PostgreSQL concurrency cases that
+passed separately against real PostgreSQL. All 29 workspace typechecks, the
+package build, lint, formatting, and docs build passed.
+
+Four independent GPT-5.6 Sol/high reviewers completed the native deployment,
+installer, control-plane, and release/package reviews. Their P1 findings were
+fixed in separate commits, with an additional independent credential review:
+
+- `0f1a8c6f`: read authoritative Worker script migration metadata for repeat Durable Object deploys.
+- `2d190549`: recover abandoned deployment and rollback work during Sandbox drain maintenance.
+- `9a67a577`, `f2541df2`, and `8011c1a2`: resume credential updates, reject stale cross-host intent, and preserve encrypted custody of staged values.
+- `858aaa49`: serialize legacy deployment admission before accepting an empty drain inventory, and enforce runtime safety protocol 2 after arming.
+- `26aa9fe4`: require populated backward-schema verification on tag publishing.
+
+No remaining P1 was reported in the reviewed scopes. Final verification also
+caught and corrected a test mock signature and health fixtures that assumed an
+empty checkpoint table. No live Cloudflare signoff is claimed.
 
 Root owns integration, commit boundaries, release tooling, installer and operator
 follow-ups. The native deployment implementation agent owns compiler/deployment
@@ -94,9 +110,12 @@ bounded console diagnostics and complete command logs in the printed temporary
 directory. `VOID_PACKED_PM` and `VOID_PACKED_FRAMEWORK` select focused reruns.
 
 The prior `ff4f1a15` API source and its own built SDK packages were independently
-tested against PostgreSQL with the current migrations through `0036`: 46 API
-test files and 1,324 tests passed. That verifies the additive schema edge; it is
-not a live Cloudflare deployment test.
+tested against PostgreSQL with the current migrations through `0037`: 46 API
+test files and 1,324 tests passed before the admission barrier was armed. The
+operator suite separately passed 32 PostgreSQL tests, including both admission
+serialization cases. Once the barrier is armed, the runtime safety floor rejects
+older code that cannot supply the new admission protocol. These are local
+database checks, not live Cloudflare deployment tests.
 
 ## Live beta signoff
 
