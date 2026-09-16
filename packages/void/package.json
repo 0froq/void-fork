@@ -427,5 +427,8 @@
     "zod": {
       "optional": true
     }
+  },
+  "engines": {
+    "node": ">=24.21.0"
   }
 }

@@ -24,6 +24,8 @@ export default defineConfig({
 
 ## Starting a New Project
 
+Use Node.js 24.21.0 or later for the CLI and build tools.
+
 1. Install the Void CLI:
 
 ```sh
