@@ -856,6 +856,22 @@ const KITCHEN_SINK_NON_ID_BINDINGS = {
 // ---------------------------------------------------------------------------
 
 describe('computeDesiredCloudflareResources — desired set from source', () => {
+  it('expects one native trigger for jobs sharing an expression', async () => {
+    const source = 'export const cron = "* * * * *"; export default () => {};';
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'shared-crons' }),
+      'void.json': '{}',
+      'crons/first.ts': source,
+      'crons/second.ts': source,
+    });
+    const result = await computeDesiredCloudflareResources(
+      root,
+      readConfig(root),
+      join(root, 'wrangler.jsonc'),
+    );
+    expect(result.expectedCrons).toEqual(['* * * * *']);
+  });
+
   it('maps D1/KV/R2 from the import walk and queues from the scanner', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'myapp' }),

@@ -1187,7 +1187,7 @@ export function voidPlugin(options?: {
   const jobs = scanJobsSync(root, paths.cronsDir);
   if (jobs.length > 0) {
     workerConfig.triggers = {
-      crons: jobs.flatMap((job) => job.crons),
+      crons: [...new Set(jobs.flatMap((job) => job.crons))],
     };
   }
   let envSchemaFacts: EnvSchemaFacts | undefined;

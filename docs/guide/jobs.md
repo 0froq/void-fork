@@ -57,6 +57,7 @@ Handler signature:
 Notes:
 
 - Jobs are matched by exact cron string.
+- When jobs share an expression, each matching job runs once per invocation. Void waits for all matching jobs, even if one fails, then reports any failures. Native triggers and managed deliveries are deduplicated by expression.
 - Job modules are lazy-loaded at runtime.
 - Files or directories starting with `_` are ignored.
 - Missing `cron` export causes an error during scan/build.

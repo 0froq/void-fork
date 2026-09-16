@@ -570,23 +570,25 @@ function generateHandlersSource(root: string, features: WrapperFeatures): string
 
     lines.push('');
     lines.push('export async function handleScheduled(controller, env, ctx) {');
-    lines.push('  switch (controller.cron) {');
-
+    lines.push('  const tasks = [];');
     for (let i = 0; i < features.crons.length; i++) {
-      for (const expr of features.crons[i].crons) {
-        lines.push(`    case ${JSON.stringify(expr)}:`);
-      }
+      lines.push(`  if (${JSON.stringify(features.crons[i].crons)}.includes(controller.cron)) {`);
+      lines.push('    tasks.push((async () => {');
       lines.push(`      if (typeof cronHandler${i} === "function") {`);
       lines.push(`        await cronHandler${i}(controller, env, ctx);`);
       lines.push(
         `      } else if (cronHandler${i} && typeof cronHandler${i}.default === "function") {`,
       );
       lines.push(`        await cronHandler${i}.default(controller, env, ctx);`);
-      lines.push(`      }`);
-      lines.push(`      return;`);
+      lines.push('      }');
+      lines.push('    })());');
+      lines.push('  }');
     }
-
-    lines.push('  }');
+    lines.push('  const results = await Promise.allSettled(tasks);');
+    lines.push(
+      '  const errors = results.filter(result => result.status === "rejected").map(result => result.reason);',
+    );
+    lines.push('  if (errors.length) throw new AggregateError(errors, "Scheduled jobs failed");');
     lines.push('}');
   }
 

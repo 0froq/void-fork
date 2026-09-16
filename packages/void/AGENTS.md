@@ -102,6 +102,8 @@ src/
 
 - **Framework queue delivery**: Native queue handlers receive the original `MessageBatch`; only managed HTTP delivery serializes it. The generated `/__void/queue` endpoint requires `__VOID_PROXY_TOKEN`, reconstructs `Date` timestamps and first-decision-wins ack/retry methods, and returns per-message decisions even if the consumer throws. Queue-only wrappers must also serve readiness.
 
+- **Shared cron expressions**: Each scheduled invocation runs every matching job once and awaits all results before surfacing failures. Native trigger configuration and managed scheduler delivery deduplicate expressions; keep this coordinated with worker dispatch to avoid multiplying jobs on managed delivery.
+
 - **Remote R2 preconditions**: Conditional uploads use `/r2/put-conditional` through both the proxy and deployed binding handler. Keep this distinct from legacy `/r2/put` so older deployments cannot silently ignore conditions. Restore date/Headers options before calling the native binding, preserve a `null` precondition result, and never fall back to an unconditional REST upload.
 
 - **Deployment connection**: `void connect [url] [--platform cloudflare|void]` is the developer entry point. A URL chooses Void; without arguments the CLI offers both targets. Interactive connection reuses or obtains credentials for the selected origin/account. `--no-login` saves only verified Void connection metadata; headless authenticated connection requires an origin-scoped keychain session or `VOID_TOKEN` with matching `VOID_API_URL`. Existing project links are preserved when connecting elsewhere. Platform installation and administration remain under `void platform`; it has no `connect` subcommand.

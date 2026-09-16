@@ -118,7 +118,7 @@ describe('compileRouteTable', () => {
     expect(code).not.toContain('if (!_mod_api_hello_ts)');
   });
 
-  it('generates multiple case labels for multi-cron jobs', () => {
+  it('matches every expression of a multi-cron job', () => {
     const scan: ScanResult = {
       routes: [],
       middleware: [],
@@ -138,9 +138,7 @@ describe('compileRouteTable', () => {
     );
 
     expect(code).toContain('const job0Crons = ["0 * * * *","30 * * * *"]');
-    // Two case labels falling through to the same handler
-    expect(code).toContain('case job0Crons[0]:');
-    expect(code).toContain('case job0Crons[1]: {');
+    expect(code).toContain('job0Crons.includes(controller.cron)');
     expect(code).toContain('import("/crons/multi.ts")');
   });
 

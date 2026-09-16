@@ -2694,7 +2694,9 @@ export async function computeDesiredCloudflareResources(
   // (`scanJobsSync(root, paths.cronsDir).flatMap((job) => job.crons)`), from the SAME scan and the
   // SAME `paths` the build's emission sees, so a legitimate build's emitted schedules multiset-equal
   // this reconstruction.
-  const expectedCrons = scanJobsSync(root, paths.cronsDir).flatMap((job) => job.crons);
+  const expectedCrons = [
+    ...new Set(scanJobsSync(root, paths.cronsDir).flatMap((job) => job.crons)),
+  ];
 
   // Email — the handler directory is scanned from the SAME sourceRoot index.ts compiles it from
   // (`scanEmailHandlersSync(paths.sourceRoot)`); outbound-only use shows up as the import walk's
@@ -5722,7 +5724,7 @@ export async function prepareCloudflareFrameworkArtifact(
       readWranglerTopLevelString(rootConfig, 'compatibility_date') ??
       '2026-09-11',
     compatibilityFlags: preset.cloudflareCompatibilityFlags,
-    crons: crons.flatMap((job) => job.crons),
+    crons: [...new Set(crons.flatMap((job) => job.crons))],
     requiredSecrets: requiredSecretNames,
     ...(preset.workerDir === preset.assetsDir
       ? {

@@ -1449,27 +1449,24 @@ window.__vite_plugin_react_preamble_installed__ = true;
     }
     lines.push('');
     lines.push('export async function scheduled(controller, env, ctx) {');
-    lines.push('  switch (controller.cron) {');
+    lines.push('  const tasks = [];');
     for (let i = 0; i < scan.jobs.length; i++) {
       const job = scan.jobs[i];
       const filePath = JSON.stringify(`${jobsDir}/${job.filePath}`);
-      for (let j = 0; j < job.crons.length; j++) {
-        if (j < job.crons.length - 1) {
-          lines.push(`    case job${i}Crons[${j}]:`);
-        } else {
-          lines.push(`    case job${i}Crons[${j}]: {`);
-        }
-      }
+      lines.push(`  if (job${i}Crons.includes(controller.cron)) {`);
+      lines.push('    tasks.push((async () => {');
       lines.push(`      const mod = await import(${filePath});`);
-      lines.push("      if (typeof mod.default === 'function') {");
-      lines.push('        await mod.default(controller, env, ctx);');
-      lines.push('      }');
-      lines.push('      return;');
-      lines.push('    }');
+      lines.push(
+        "      if (typeof mod.default === 'function') await mod.default(controller, env, ctx);",
+      );
+      lines.push('    })());');
+      lines.push('  }');
     }
-    lines.push('    default:');
-    lines.push('      return;');
-    lines.push('  }');
+    lines.push('  const results = await Promise.allSettled(tasks);');
+    lines.push(
+      '  const errors = results.filter(result => result.status === "rejected").map(result => result.reason);',
+    );
+    lines.push('  if (errors.length) throw new AggregateError(errors, "Scheduled jobs failed");');
     lines.push('}');
     lines.push('');
   } else {
