@@ -3,6 +3,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { initializeStagingEnv } from '../../../scripts/kitchen-sink-staging-env-setup.ts';
 
+function apiError(status: number, body: unknown) {
+  return Object.assign(new Error('Failed to set secret'), {
+    name: 'PlatformApiError',
+    status,
+    body: JSON.stringify(body),
+  });
+}
+
 function fixture(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));
   const project = {
@@ -117,19 +125,89 @@ describe('staging kitchen-sink fixture env', () => {
     expect(client.setSecret).toHaveBeenCalledTimes(1);
   });
 
-  it.each([200, 500])(
+  it('verifies persisted secrets after live propagation fails, without retrying writes', async () => {
+    const { client, values } = fixture();
+    client.setSecret.mockImplementation(async (_id, name, value) => {
+      values.set(name, value);
+      throw apiError(502, {
+        error: 'secret stored but live propagation failed',
+        name,
+        liveUpdated: false,
+      });
+    });
+    const steps: Array<string> = [];
+    expect(
+      await initializeStagingEnv(
+        client,
+        async () => {},
+        (step) => steps.push(step),
+      ),
+    ).toEqual(['APP_NAME', 'SECRET_KEY', 'API_URL']);
+    expect(client.setSecret).toHaveBeenCalledTimes(3);
+    expect(client.listSecrets).toHaveBeenCalledTimes(4);
+    expect(steps).toContain('verifying stored API_URL');
+  });
+
+  it.each([
+    {
+      status: 500,
+      body: {
+        error: 'secret stored but live propagation failed',
+        name: 'APP_NAME',
+        liveUpdated: false,
+      },
+    },
+    { status: 502, body: { error: 'upstream unavailable', name: 'APP_NAME', liveUpdated: false } },
+    {
+      status: 502,
+      body: {
+        error: 'secret stored but live propagation failed',
+        name: 'OTHER',
+        liveUpdated: false,
+      },
+    },
+    {
+      status: 502,
+      body: {
+        error: 'secret stored but live propagation failed',
+        name: 'APP_NAME',
+        liveUpdated: true,
+      },
+    },
+    {
+      status: 502,
+      body: {
+        error: 'secret stored but live propagation failed',
+        name: 'APP_NAME',
+        liveUpdated: false,
+      },
+    },
+  ])('rejects unconfirmed or unrelated failures: %j', async ({ status, body }) => {
+    const { client } = fixture();
+    const error = apiError(status, body);
+    client.setSecret.mockRejectedValue(error);
+    await expect(initializeStagingEnv(client, async () => {})).rejects.toBe(error);
+    expect(client.setSecret).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([200, 500, 502])(
     'validates the real schema and keeps API response %i values private',
     (status) => {
       const script = fileURLToPath(
         new URL('../../../scripts/kitchen-sink-staging-env.ts', import.meta.url),
       );
       // Exercise the real entrypoint and API client while preventing all live I/O.
-      const preload = `globalThis.fetch = async (url, options) => {
+      const preload = `const stored = new Set(); globalThis.fetch = async (url, options) => {
       if (url === 'https://api.staging.void.cloud/projects') {
         return Response.json([{ id: 'fake', slug: 'kitchen-sink' }]);
       }
       if (url === 'https://api.staging.void.cloud/projects/fake/secrets') {
-        return Response.json([]);
+        return Response.json([...stored].map(name => ({name})));
+      }
+      const name = url.split('/').at(-1);
+      if (${status} === 502) {
+        stored.add(name);
+        return Response.json({ error: 'secret stored but live propagation failed', name, liveUpdated: false, details: 'MUST_NOT_LOG_' + options.body }, {status: 502});
       }
       return Response.json(
         { ok: ${status === 200}, error: 'MUST_NOT_LOG_' + options.body },
@@ -150,7 +228,7 @@ describe('staging kitchen-sink fixture env', () => {
           },
         },
       );
-      if (status === 200) {
+      if (status !== 500) {
         expect(result.status).toBe(0);
         expect(result.stdout).toContain(
           'Initialized staging kitchen-sink secrets: APP_NAME, SECRET_KEY, API_URL',

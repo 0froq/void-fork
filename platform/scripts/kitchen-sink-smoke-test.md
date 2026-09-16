@@ -14,6 +14,7 @@ Use an app whose data can be deleted. The script has no default destination. If 
 The hosted staging CI workflow initializes missing server values before deploying its existing `kitchen-sink` project at `https://api.staging.void.cloud`. This is CI fixture setup: it sets `APP_NAME` to `Kitchen Sink`, `API_URL` to `https://api.example.com`, and generates a random `SECRET_KEY` only when absent. It validates new values against `env.ts`, preserves configured secrets, and uses the workflow's existing staging credentials. It never reads a local `.env` or prints values. Smoke jobs are serialized; avoid editing these fixture secrets manually during setup because the secret API uses an upsert after listing names.
 
 Setup failures report the operation and HTTP status when available, without printing API response bodies or secret values.
+If the API confirms a value was stored but updating the old worker failed, setup verifies the stored name and continues without retrying the write. The following deployment applies all stored values and must pass the smoke tests. Other errors, or a missing stored name, still fail setup.
 
 The checklist below can also be run manually or with browser automation. Use unique values for created records, wait for each mutation to appear, and remove test records afterward. KV listings are eventually consistent; poll them instead of relying on a fixed delay. Record each result and report failures after completing the remaining cases.
 
