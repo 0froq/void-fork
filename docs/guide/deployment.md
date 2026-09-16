@@ -33,6 +33,10 @@ quotas. Installing a team platform requires Workers for Platforms and the
 [documented infrastructure](./self-hosted-platform.md#cloudflare-footprint).
 Application rollback never reverses database migrations.
 
+Routing-rule parity applies to native Void applications and static deployments.
+Framework-owned Worker output uses its framework's routing and asset policy;
+unsupported Void routing rules are rejected before direct deployment.
+
 For beta installations, use matching CLI, adapter, and platform release versions.
 Discovery and deployment contracts reject unsupported protocol versions and
 disabled capabilities; matching version numbers do not enable an omitted service.

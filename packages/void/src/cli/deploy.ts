@@ -1752,6 +1752,15 @@ export async function syncCloudflareSchemaSecrets(options: {
   };
 }
 
+function hasConfiguredVoidWorkerRoutingRules(routing: RoutingConfig | undefined): boolean {
+  return (
+    routing !== undefined &&
+    [routing.redirects, routing.rewrites, routing.fallbacks, routing.headers].some(
+      (rules) => rules !== undefined && Object.keys(rules).length > 0,
+    )
+  );
+}
+
 /**
  * Remove the CF plugin's deploy pointer before building so the post-build
  * verification can only pass on a pointer THIS build re-created. The CF plugin
@@ -4291,6 +4300,17 @@ export async function runCloudflareDeploy(
         `deploy: --platform cloudflare is not supported for the "${voidConfig.target}" target.`,
         'This backend deploys Cloudflare Workers only. Deploy a node/bun/deno build with its',
         'own host/runtime, or use the default Cloudflare target for --platform cloudflare.',
+      ].join('\n'),
+    );
+    return exit(1);
+  }
+
+  if (detectedFramework?.class === 'a' && hasConfiguredVoidWorkerRoutingRules(voidConfig.routing)) {
+    log.error(
+      [
+        `deploy: native Cloudflare deployment cannot apply Void routing redirects, rewrites, fallbacks, or headers to ${detectedFramework.name}.`,
+        'This framework owns its Worker request handler, so these rules would otherwise be ignored.',
+        'Move the rules into the framework or its Cloudflare Worker, then retry.',
       ].join('\n'),
     );
     return exit(1);

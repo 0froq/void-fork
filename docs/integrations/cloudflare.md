@@ -332,6 +332,13 @@ Void supports Worker apps, static sites, SPAs, known SSGs, `--dir` deploys, and 
 
 Static sites use a small Worker in front of Workers Assets to handle redirects, rewrites, fallbacks, and headers. Hybrid and SSR apps keep their application Worker. A page that opts out of prerendering, a dynamic page without `getPrerenderPaths()`, or another runtime feature keeps the app on a Worker even with `output: "static"`.
 
+Native Void applications apply `void.json` routing rules in their Worker.
+Framework-owned Workers do not yet support those Void redirects, rewrites,
+fallbacks, or headers on the direct target. The CLI rejects such configuration
+before provisioning or building; configure the rules in the framework or its
+Worker instead. This restriction does not change an explicit asset policy for
+`routing.notFound`.
+
 Worker apps support D1, KV, R2, Queues, typed state, PostgreSQL and MySQL through Hyperdrive, auth, WebSockets, AI, cron jobs, and ISR. The main limits are:
 
 - **Sandbox needs Workers Paid and Docker.** Importing `void/sandbox` or enabling `sandbox` in `void.json` adds a Container application. Void checks access before provisioning or building. [Enable Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans) and sign in again if needed. API tokens need Account / Containers: Edit and Account / Cloudchamber: Edit. See [Containers pricing](https://developers.cloudflare.com/containers/pricing/). Apps without Sandbox skip this check and remain compatible with Workers Free within its quotas.
