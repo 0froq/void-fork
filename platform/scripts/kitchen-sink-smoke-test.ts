@@ -174,6 +174,9 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
           cacheControl: res.headers.get('cache-control') || '',
           contentType: res.headers.get('content-type'),
           cfCacheStatus: res.headers.get('cf-cache-status'),
+          dispatchCacheControl: res.headers.get('x-void-debug-cache-control'),
+          dispatchCachePrefix: res.headers.get('x-void-debug-cache-prefix'),
+          dispatchCacheRequest: res.headers.get('x-void-debug-cache-request'),
         };
       }, assetUrl);
 

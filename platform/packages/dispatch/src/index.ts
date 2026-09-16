@@ -725,6 +725,14 @@ export default {
       const res = new Response(response.body, response);
       res.headers.delete('X-Void-No-Match');
       res.headers.set('X-Hosted-By', 'void.cloud');
+      if (env.BASE_HOSTNAME === 'staging.void.app' && pathname.startsWith('/assets/')) {
+        res.headers.set('X-Void-Debug-Cache-Control', res.headers.get('Cache-Control') ?? 'unset');
+        res.headers.set('X-Void-Debug-Cache-Prefix', routing.hashedAssetsPrefix ?? 'unset');
+        res.headers.set(
+          'X-Void-Debug-Cache-Request',
+          isSharedStaticCacheRequestEligible(request) ? 'eligible' : 'bypass',
+        );
+      }
       return res;
     };
 
