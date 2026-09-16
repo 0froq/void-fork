@@ -1,13 +1,16 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { log, isCancel, select } from '@clack/prompts';
-import { parse, type ParseError } from 'jsonc-parser';
 import { basename, join } from 'pathslash';
 import {
   createBundledCloudflareAuthRunner,
   ensureCloudflareAuthentication,
   type CloudflareAccount,
 } from './cloudflare-auth.ts';
-import { LATEST_KNOWN_COMPAT_DATE, writeProvisionedWranglerConfig } from './wrangler.ts';
+import {
+  LATEST_KNOWN_COMPAT_DATE,
+  readRootWranglerConfig,
+  writeProvisionedWranglerConfig,
+} from './wrangler.ts';
 
 export async function connectCloudflare(
   root: string,
@@ -18,20 +21,18 @@ export async function connectCloudflare(
       'connect: Named Cloudflare environments and config overrides are not supported.',
     );
   }
-  let config: Record<string, unknown> = {};
-  for (const name of ['wrangler.jsonc', 'wrangler.json']) {
-    const path = join(root, name);
-    if (!existsSync(path)) {
-      continue;
-    }
-    const errors: Array<ParseError> = [];
-    const parsed = parse(readFileSync(path, 'utf8'), errors);
-    if (errors.length || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error(`connect: Invalid ${name}. Fix it before connecting to Cloudflare.`);
-    }
-    config = parsed;
-    break;
+  const existingConfigPath = ['wrangler.jsonc', 'wrangler.json']
+    .map((name) => join(root, name))
+    .find(existsSync);
+  let existingConfig: ReturnType<typeof readRootWranglerConfig>;
+  try {
+    existingConfig = readRootWranglerConfig(root);
+  } catch {
+    throw new Error(
+      `connect: Invalid ${basename(existingConfigPath!)}. Fix it before connecting to Cloudflare.`,
+    );
   }
+  const config = existingConfig?.config ?? {};
   const envAccount = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
   const configuredAccount = typeof config.account_id === 'string' ? config.account_id : undefined;
   if (envAccount && configuredAccount && envAccount !== configuredAccount) {
@@ -44,9 +45,6 @@ export async function connectCloudflare(
     typeof config.compatibility_date === 'string'
       ? config.compatibility_date
       : LATEST_KNOWN_COMPAT_DATE;
-  const existingConfigPath = ['wrangler.jsonc', 'wrangler.json']
-    .map((name) => join(root, name))
-    .find(existsSync);
   if (existsSync(join(root, 'wrangler.toml'))) {
     throw new Error(
       'connect: Found wrangler.toml. Convert it to wrangler.jsonc with the same settings before connecting to Cloudflare.',
