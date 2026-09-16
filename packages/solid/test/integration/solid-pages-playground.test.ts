@@ -201,7 +201,7 @@ function registerClientTests(getBase: () => string) {
 
       // Submit form without filling fields
       await page.click('button[type="submit"]');
-      await page.waitForFunction(() => document.body.textContent?.includes('Name is required'));
+      await page.waitForFunction(() => document.body?.textContent?.includes('Name is required'));
 
       const text = await page.textContent('body');
       expect(text).toContain('Name is required');
@@ -226,7 +226,7 @@ function registerClientTests(getBase: () => string) {
       await page.fill('input:near(:text("Email:"))', 'charlie@example.com');
 
       await page.click('button[type="submit"]');
-      await page.waitForFunction(() => document.body.textContent?.includes('Charlie'));
+      await page.waitForFunction(() => document.body?.textContent?.includes('Charlie'));
 
       const text = await page.textContent('body');
       expect(text).toContain('Charlie');
@@ -249,7 +249,7 @@ function registerClientTests(getBase: () => string) {
       await page.fill('input:near(:text("Name:"))', 'Dana');
       await page.fill('input:near(:text("Email:"))', 'dana@example.com');
       await page.click('button[type="submit"]');
-      await page.waitForFunction(() => document.body.textContent?.includes('Dana'));
+      await page.waitForFunction(() => document.body?.textContent?.includes('Dana'));
 
       // Click the link to the newly added user's detail page
       await page.click('a:has-text("Dana")');
@@ -554,7 +554,7 @@ function registerIslandTests(getBase: () => string) {
       await page.fill('textarea:near(:text("Body:"))', 'Some content');
 
       await page.click('button:has-text("Add Post")');
-      await page.waitForFunction(() => document.body.textContent?.includes('New Post'));
+      await page.waitForFunction(() => document.body?.textContent?.includes('New Post'));
 
       const text = await page.textContent('body');
       expect(text).toContain('New Post');
