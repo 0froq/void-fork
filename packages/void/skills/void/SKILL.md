@@ -52,6 +52,8 @@ For self-hosted platform installation, require a dedicated empty PostgreSQL data
 
 For self-hosted recovery, `VOID_PLATFORM_PROJECT_SECRET_KEY` restores an original `v1` project-secret keyring. After rotation, restore every retained version with `VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON` and its active entry with `VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION`. These inputs restore a missing API Worker and never replace the live keyring of an existing Worker. Inject them from a secret manager without logging them or writing plaintext files.
 
+For Cloudflare user switching, `void cloudflare login` always opens a fresh browser sign-in. `void cloudflare status` distinguishes the authenticated user and credential method from the project's pinned deployment account. Login never retargets a project. Remove API-credential environment overrides from the current shell before browser sign-in, without printing their values; automatic deployment checks continue to reuse valid sessions.
+
 ## No-Args Behavior
 
 Published self-hosted platform routes and custom domains are observed and recorded as retained attachments. Lifecycle commands gate traffic through installation-owned routing storage but never delete those attachments unattended.

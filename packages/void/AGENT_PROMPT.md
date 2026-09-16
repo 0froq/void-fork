@@ -1,5 +1,7 @@
 ## Void
 
+Cloudflare account switching: `void cloudflare login` opens a fresh browser sign-in; `void cloudflare status` shows the authenticated identity, authentication method, accessible accounts, and pinned deployment account. Login leaves the project target unchanged. Remove environment API-credential overrides from the current shell before switching browser users; never print their values. Automatic deploy authentication reuses valid sessions.
+
 For new platform installations, prefer an application domain at the zone apex
 (for example `example.app` in zone `example.app`). A nested domain such as
 `apps.example.com` requires an active edge certificate for `*.apps.example.com`

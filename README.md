@@ -46,6 +46,8 @@ pnpm void deploy     # deploy to the saved Cloudflare or Void target
 
 ## Adding Void to an Existing Project
 
+To switch Cloudflare users, run `void cloudflare login`. Use `void cloudflare status` to check the signed-in identity and the project's pinned deployment account; signing in leaves the project target unchanged.
+
 Already deploy the same Void app directly to Cloudflare? Run `void deploy`. If your project has a `wrangler.jsonc` or `wrangler.json` and no deployment destination, Void offers to link and deploy using the existing Worker and resources. Accept once, then use `void deploy` for future deployments. See [Deploy an existing Worker](./docs/integrations/cloudflare.md#deploy-an-existing-worker).
 
 1. Install Void:

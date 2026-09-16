@@ -98,6 +98,8 @@ src/
 
 ### Key Design Decisions
 
+- **Cloudflare session switching**: Explicit `void cloudflare login` forces a fresh browser sign-in, while automatic authentication reuses valid sessions. Adopted OAuth sessions persist the keyring preference so later compatible CLI logins update the same encrypted store. Environment API credentials block explicit browser login rather than masking it. Status reports identity/auth method and the pinned account separately; login never rewrites the project target. Keep credentials out of all diagnostics.
+
 - **Repeatable framework wrappers**: `generateWrapper` recognizes current and legacy wrapper entries and preserves the original application across `--skip-build` runs. Compile handlers before replacing the entry, stage the wrapper for an atomic rename, and copy a new original only after an actual new build. A missing or recursively wrapped original requires a rebuild; readiness alone cannot validate the application entry.
 
 - **Framework queue delivery**: Native queue handlers receive the original `MessageBatch`; only managed HTTP delivery serializes it. The generated `/__void/queue` endpoint requires `__VOID_PROXY_TOKEN`, reconstructs `Date` timestamps and first-decision-wins ack/retry methods, and returns per-message decisions even if the consumer throws. Queue-only wrappers must also serve readiness.

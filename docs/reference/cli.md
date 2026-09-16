@@ -182,14 +182,18 @@ Copies your auth token to the system clipboard. Useful for setting up CI secrets
 
 ## Cloudflare authentication
 
-Void ships and invokes compatible Cloudflare tooling itself. Users do not need to install or run a separate Cloudflare CLI. Browser credentials are stored in the operating-system keychain.
+Void ships and invokes compatible Cloudflare tooling itself. Users do not need to install or run a separate Cloudflare CLI. Browser credentials are stored in an encrypted file protected by the operating-system keychain. When Void adopts an existing browser session, it persists the secure-storage preference so subsequent logins through compatible tooling use the same credential store.
 
-- `void cloudflare login` — securely sign in with browser OAuth.
-- `void cloudflare status` — show the accessible Cloudflare accounts without exposing credentials.
+- `void cloudflare login` — open a fresh browser OAuth sign-in, including when already signed in. Use this to switch Cloudflare users without first logging out; Void does not remove the prior session before opening sign-in.
+- `void cloudflare status` — show the authenticated email, authentication method, accessible account names and IDs, and the pinned deployment account and its source. Credential values are never printed.
 - `void cloudflare logout` — remove the local browser session.
 
 Interactive `void connect --platform cloudflare`, `void init`, and `void deploy --platform cloudflare` invoke the same login flow automatically when necessary. Non-interactive CI must set `CLOUDFLARE_API_TOKEN`.
 When a browser session is required, Void opens Cloudflare login immediately and prints `Press Ctrl+C to cancel`; there is no redundant terminal confirmation.
+
+Signing in changes the browser session, not `account_id` in the project configuration. Check `void cloudflare status` after switching users; if the new user cannot access the pinned account, resolve the project target separately before deploying.
+
+An API token or global API key pair in the environment takes precedence over browser credentials. Explicit browser login stops with the names of these overrides; remove them from that shell before signing in. `status` reports the active credential source, and `logout` warns if environment credentials remain active. Explicit browser login requires an interactive terminal; automatic deployment checks continue to reuse valid sessions.
 
 ## Project commands
 

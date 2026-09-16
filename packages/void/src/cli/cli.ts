@@ -256,7 +256,7 @@ if (helpPath) {
     {
       name: 'cloudflare',
       hint: 'login | status | logout',
-      description: 'Manage Cloudflare authentication',
+      description: 'Manage Cloudflare sign-in and inspect the deployment account',
     },
     {
       name: 'project',

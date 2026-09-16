@@ -197,14 +197,20 @@ const HELP_TREE: HelpTree = {
     summary: 'Manage Cloudflare authentication used by Void.',
     usage: ['void cloudflare <command>'],
     commands: [
-      { command: 'login', description: 'Sign in securely with browser OAuth' },
-      { command: 'status', description: 'Show authentication and accessible accounts' },
+      { command: 'login', description: 'Sign in or switch users with browser OAuth' },
+      {
+        command: 'status',
+        description: 'Show identity, authentication, and the deployment account',
+      },
       { command: 'logout', description: 'Remove the local browser session' },
     ],
     children: {
-      login: basicSubcommand('Sign in securely with browser OAuth.', 'void cloudflare login'),
+      login: basicSubcommand(
+        'Sign in again or switch Cloudflare users with browser OAuth.',
+        'void cloudflare login',
+      ),
       status: basicSubcommand(
-        'Show Cloudflare authentication and accessible accounts.',
+        'Show Cloudflare identity, authentication, accessible accounts, and the pinned deployment account.',
         'void cloudflare status',
       ),
       logout: basicSubcommand('Remove the local browser session.', 'void cloudflare logout'),
