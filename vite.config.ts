@@ -1,4 +1,5 @@
-import { availableParallelism } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { availableParallelism, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite-plus';
 
@@ -13,6 +14,7 @@ const e2eWorkerEnv = {
   VOID_E2E_CF_TOKEN: process.env.VOID_E2E_CF_TOKEN ?? '',
   VOID_E2E_CF_ACCOUNT_ID: process.env.VOID_E2E_CF_ACCOUNT_ID ?? '',
   VOID_E2E_RUN_ID: process.env.VOID_E2E_RUN_ID ?? '',
+  VOID_TEST_SOURCE_SNAPSHOTS: `${tmpdir().replaceAll('\\', '/')}/void-playground-sources-${randomUUID()}`,
 };
 
 // Windows CI runners are 2-3x slower for builds and server startup.
@@ -382,6 +384,7 @@ export default defineConfig({
           // Every integration file here owns its fixture directory, so one worker pool can
           // schedule the longest files first and fill idle slots across package boundaries.
           name: 'parallel-integration',
+          globalSetup: ['test/playground-snapshots.ts'],
           sequence: { groupOrder: 2 },
           // maxWorkers limits files, not describe.concurrent tests. On Windows CI, two files
           // at Vitest's default concurrency open up to ten isolated browser contexts at once.

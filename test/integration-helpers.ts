@@ -66,17 +66,21 @@ export function createIsolatedPlayground(
   sourceWorkspacePath: string,
 ): IsolatedPlayground {
   const sourceRoot = join(workspaceRoot, sourceWorkspacePath);
+  const snapshot = process.env.VOID_TEST_SOURCE_SNAPSHOTS
+    ? join(process.env.VOID_TEST_SOURCE_SNAPSHOTS, sourceWorkspacePath)
+    : undefined;
+  const copySource = snapshot && existsSync(snapshot) ? snapshot : sourceRoot;
   const playgroundLocal = join(workspaceRoot, 'playground-local');
   mkdirSync(playgroundLocal, { recursive: true });
   const root = mkdtempSync(join(playgroundLocal, `test-${basename(sourceWorkspacePath)}-`));
 
-  cpSync(sourceRoot, root, {
+  cpSync(copySource, root, {
     recursive: true,
     filter(path) {
       // `cpSync` reports native backslash paths on Windows, while these workspace paths are
       // normalized to forward slashes. Normalize before using the POSIX path helpers or the
       // top-level `node_modules` junction is copied and the replacement junction already exists.
-      return shouldCopyPlaygroundPath(sourceRoot, path);
+      return shouldCopyPlaygroundPath(copySource, path);
     },
   });
 
