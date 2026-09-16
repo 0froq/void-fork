@@ -584,23 +584,15 @@ function generateHandlersSource(root: string, features: WrapperFeatures): string
       '    throw new Error(`No unambiguous queue handler matches "${String(queueSuffix)}"`);',
     );
     lines.push('  }');
-    lines.push('  const messages = [...batch.messages].map(m => ({');
-    lines.push('    id: m.id,');
-    lines.push('    timestamp: m.timestamp.toISOString(),');
-    lines.push('    body: m.body,');
-    lines.push('    attempts: m.attempts,');
-    lines.push('  }));');
-    lines.push('  const payload = { queue: queueSuffix, messages };');
-
     lines.push('  switch (__queueIndex) {');
     for (let i = 0; i < features.queues.length; i++) {
       lines.push(`    case ${i}:`);
       lines.push(`      if (typeof queueHandler${i} === "function") {`);
-      lines.push(`        await queueHandler${i}(payload, env);`);
+      lines.push(`        await queueHandler${i}(batch, env);`);
       lines.push(
         `      } else if (queueHandler${i} && typeof queueHandler${i}.default === "function") {`,
       );
-      lines.push(`        await queueHandler${i}.default(payload, env);`);
+      lines.push(`        await queueHandler${i}.default(batch, env);`);
       lines.push(`      }`);
       lines.push(`      return;`);
     }

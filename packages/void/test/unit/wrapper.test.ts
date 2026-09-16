@@ -255,6 +255,52 @@ describe('generated wrapper queue dispatch', () => {
     expect(retryAll).toHaveBeenCalledOnce();
     expect(env.calls).toEqual([]);
   });
+
+  it('passes native queue messages, dates, and acknowledgment methods through unchanged', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-native-queue-'));
+    roots.push(root);
+    const workerDir = join(root, 'server');
+    mkdirSync(workerDir, { recursive: true });
+    mkdirSync(join(root, 'queues'));
+    writeFileSync(
+      join(workerDir, 'index.mjs'),
+      'export default { fetch() { return new Response("app"); } };',
+    );
+    writeFileSync(
+      join(root, 'queues/emails.ts'),
+      `export default async function(batch, env) {
+      env.received = batch;
+      env.timestamp = batch.messages[0].timestamp.getTime();
+      batch.messages[0].ack();
+      batch.messages[1].retry({ delaySeconds: 12 });
+      batch.ackAll();
+      batch.retryAll({ delaySeconds: 30 });
+    }`,
+    );
+    await generateWrapper(workerDir, 'index.mjs', root, {
+      ...base,
+      queues: [{ name: 'emails', filePath: 'emails.ts', bindingName: 'QUEUE_EMAILS' }],
+    });
+    const wrapper = (await import(pathToFileURL(join(workerDir, 'index.mjs')).href)).default;
+    const timestamp = new Date('2026-01-01T00:00:00Z');
+    const batch = {
+      queue: 'emails',
+      ackAll: vi.fn(),
+      retryAll: vi.fn(),
+      messages: [
+        { id: '1', body: {}, attempts: 1, timestamp, ack: vi.fn(), retry: vi.fn() },
+        { id: '2', body: {}, attempts: 1, timestamp, ack: vi.fn(), retry: vi.fn() },
+      ],
+    };
+    const env: { received?: unknown; timestamp?: number } = {};
+    await wrapper.queue(batch, env, {});
+    expect(env.received).toBe(batch);
+    expect(env.timestamp).toBe(timestamp.getTime());
+    expect(batch.messages[0].ack).toHaveBeenCalledOnce();
+    expect(batch.messages[1].retry).toHaveBeenCalledWith({ delaySeconds: 12 });
+    expect(batch.ackAll).toHaveBeenCalledOnce();
+    expect(batch.retryAll).toHaveBeenCalledWith({ delaySeconds: 30 });
+  });
 });
 
 describe('generateWrapper with migrations', () => {
