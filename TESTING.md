@@ -18,7 +18,7 @@ vpr test:all
 `vpr test:all` formats, lints, builds, typechecks, and tests the merged monorepo. Investigate slow
 or hanging tests when they occur instead of routinely increasing timeouts.
 
-## Packed-package acceptance
+## Prepublish Test
 
 Packed tests install the current tarballs into fresh applications through a temporary local
 registry. They catch dependency, export, type-declaration, and installed-runtime problems that

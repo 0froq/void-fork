@@ -134,7 +134,7 @@ node .github/scripts/packed-consumer.mjs
 The default smoke test uses a React app with npm and pnpm, public Vite, and HTTP
 checks for assets and KV. Set `VOID_PACKED_SUITE=full` for all four native Pages
 adapters, Markdown, production preview, and browser hydration/navigation tests.
-PRs and main pushes select smoke coverage for routine code changes, full coverage
+The Prepublish Test workflow selects smoke coverage for routine code changes, full coverage
 for packaging/dependency/adapter changes, and skip expensive jobs for docs-only changes.
 Release CI always runs the full matrix on Linux and macOS.
 The [beta acceptance record](./platform/meta/design-docs/0081-beta-readiness-fixes.md)

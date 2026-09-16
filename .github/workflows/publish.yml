@@ -21,8 +21,9 @@ jobs:
       contents: read
       deployments: read
 
-  packed-consumers:
-    uses: ./.github/workflows/packed-consumers.yml
+  prepublish-test:
+    name: Prepublish Test
+    uses: ./.github/workflows/prepublish-test.yml
     with:
       suite: full
       include_macos: true
@@ -31,7 +32,7 @@ jobs:
       pull-requests: read
 
   publish:
-    needs: [ci, platform-ci, packed-consumers]
+    needs: [ci, platform-ci, prepublish-test]
     runs-on: ubuntu-latest
     environment: Release
     permissions:

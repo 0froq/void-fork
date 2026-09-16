@@ -8,7 +8,7 @@ const fullSuitePaths = [
   /^packages\/(?:create-void|react|vue|svelte|solid|md)\/(?:src|bin)\//,
   /^packages\/void\/src\/cli\/(?:init|template|package|agents)(?:[-./])/,
   /^\.github\/scripts\/(?:packed-|release-policy)/,
-  /^\.github\/workflows\/(?:packed-consumers|publish)\.yml$/,
+  /^\.github\/workflows\/(?:packed-consumers|prepublish-test|publish)\.yml$/,
 ];
 
 /** Cheap default coverage, with the full acceptance matrix at packaging boundaries. */

@@ -33,6 +33,7 @@ test('runs the full matrix for dependencies, adapters, scaffolding, and packagin
     'packages/void/src/cli/init.ts',
     '.github/scripts/packed-init.mjs',
     '.github/workflows/packed-consumers.yml',
+    '.github/workflows/prepublish-test.yml',
     '.github/workflows/publish.yml',
   ]) {
     assert.equal(selectPackedSuite([path]), 'full', path);
