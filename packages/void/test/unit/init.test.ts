@@ -1648,7 +1648,7 @@ describe('isScaffoldableEmptyProject', () => {
       );
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'pnpm',
-        ['install'],
+        ['install', '--no-frozen-lockfile'],
         expect.objectContaining({
           cwd: appRoot,
           stdio: 'inherit',
@@ -2578,7 +2578,7 @@ export default config;
       );
       expect(mockSpawnSync).toHaveBeenCalledWith(
         'pnpm',
-        ['install'],
+        ['install', '--no-frozen-lockfile'],
         expect.objectContaining({
           cwd: root,
           stdio: 'inherit',

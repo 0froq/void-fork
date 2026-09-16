@@ -36,7 +36,9 @@ export function detectPM(): PM {
 }
 
 export function pmInstall(pm: PM): ReadonlyArray<string> {
-  return [pm, 'install'];
+  // Scaffolding changes package.json, so CI's default frozen install cannot
+  // be used until the initializer has generated the final lockfile.
+  return pm === 'pnpm' ? [pm, 'install', '--no-frozen-lockfile'] : [pm, 'install'];
 }
 
 export function pmExec(pm: PM): ReadonlyArray<string> {

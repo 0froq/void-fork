@@ -2288,7 +2288,10 @@ function installProjectDependencies(
 ): void {
   log.step(`Installing dependencies with ${packageManager}`);
 
-  const result = spawnSync(packageManager, ['install'], {
+  // Init has just changed the manifest. Refresh the lockfile even when pnpm
+  // detects a CI host; subsequent CI builds can use frozen installs normally.
+  const args = packageManager === 'pnpm' ? ['install', '--no-frozen-lockfile'] : ['install'];
+  const result = spawnSync(packageManager, args, {
     cwd: root,
     stdio: 'inherit',
     shell: process.platform === 'win32',

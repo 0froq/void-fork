@@ -43,6 +43,9 @@ installation reports blocked build scripts, approve `esbuild`, `sharp`, and
 `pnpm-workspace.yaml`'s `allowBuilds`: Void uses version 13's bundled binaries,
 so it does not need a native rebuild.
 
+The setup install updates the pnpm lockfile to match the generated dependencies,
+including when setup runs in CI. Later builds can use `pnpm install --frozen-lockfile`.
+
 ::: code-group
 
 ```sh [npm]
