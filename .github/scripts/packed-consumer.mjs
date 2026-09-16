@@ -14,6 +14,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path/posix';
 import { fileURLToPath } from 'node:url';
+import { collectBrowserDiagnostics } from '../../test/browser-helpers.ts';
 import { inspectPackage, startPackedRegistry } from './packed-registry.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -306,8 +307,12 @@ if (runtime.manifest.platformVersion !== ${JSON.stringify(version)}) throw new E
               continue;
             }
             const page = await browser.newPage();
+            const diagnostics = collectBrowserDiagnostics(page);
             try {
               await page.goto(base);
+              // SSR makes the button visible before the client has attached
+              // its event handlers. Verify hydration before testing clicks.
+              await page.locator('#app[data-hydrated="true"]').waitFor();
               await page.getByRole('button', { name: 'Count 0', exact: true }).click();
               await page.getByRole('button', { name: 'Count 1', exact: true }).waitFor();
               await page.evaluate(() => {
@@ -319,6 +324,11 @@ if (runtime.manifest.platformVersion !== ${JSON.stringify(version)}) throw new E
                 await page.evaluate(() => window.__packedNavigation),
                 'preserved',
                 'Link navigation must preserve the document',
+              );
+            } catch (error) {
+              throw new Error(
+                `Packed ${label} ${mode} browser verification failed:\n${String(error.stack ?? error)}\n${diagnostics()}`,
+                { cause: error },
               );
             } finally {
               await page.close();
