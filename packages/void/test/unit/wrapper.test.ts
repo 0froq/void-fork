@@ -186,6 +186,83 @@ describe('generated wrapper queue dispatch', () => {
     }
   });
 
+  async function createRelayWorker() {
+    const root = mkdtempSync(join(tmpdir(), 'void-queue-relay-'));
+    roots.push(root);
+    mkdirSync(join(root, 'queues'));
+    writeFileSync(
+      join(root, 'index.mjs'),
+      'export default { fetch() { return Response.json({ app: true }); } };',
+    );
+    writeFileSync(
+      join(root, 'queues/emails.ts'),
+      `export default function(batch, env) {
+      env.calls.push(batch.messages[0].timestamp.getTime());
+      batch.messages[0].ack();
+      if (env.fail) throw new Error('after first message');
+      batch.messages[0].retry();
+      batch.messages[1].retry({ delaySeconds: 9 });
+      batch.ackAll();
+    }`,
+    );
+    await generateWrapper(root, 'index.mjs', root, {
+      ...base,
+      queues: [{ name: 'emails', filePath: 'emails.ts', bindingName: 'QUEUE_EMAILS' }],
+    });
+    return (await import(pathToFileURL(join(root, 'index.mjs')).href)).default;
+  }
+
+  const relayRequest = (token?: string) =>
+    new Request('https://worker/__void/queue', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { 'x-void-internal': token } : {}),
+      },
+      body: JSON.stringify({
+        queue: 'emails',
+        messages: ['one', 'two'].map((id) => ({
+          id,
+          timestamp: '2026-01-01T00:00:00Z',
+          body: {},
+          attempts: 1,
+        })),
+      }),
+    });
+
+  it('delivers managed HTTP batches and returns first-wins acknowledgment decisions', async () => {
+    const worker = await createRelayWorker();
+    const env = { __VOID_PROXY_TOKEN: 'token', calls: [] as Array<number> };
+    const response = await worker.fetch(relayRequest('token'), env, {});
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      decisions: {
+        one: { action: 'ack' },
+        two: { action: 'retry', delaySeconds: 9 },
+      },
+    });
+    expect(env.calls).toEqual([Date.parse('2026-01-01T00:00:00Z')]);
+    const failed = await worker.fetch(relayRequest('token'), { ...env, fail: true }, {});
+    expect(await failed.json()).toEqual({ ok: false, decisions: { one: { action: 'ack' } } });
+    expect((await worker.fetch(new Request('https://worker/__void/ready'), env, {})).status).toBe(
+      200,
+    );
+  });
+
+  it('requires a configured token before invoking a managed queue consumer', async () => {
+    const worker = await createRelayWorker();
+    const calls: Array<number> = [];
+    for (const [request, env] of [
+      [relayRequest(), { __VOID_PROXY_TOKEN: 'token', calls }],
+      [relayRequest('wrong'), { __VOID_PROXY_TOKEN: 'token', calls }],
+      [relayRequest('token'), { calls }],
+    ] as const) {
+      expect((await worker.fetch(request, env, {})).status).toBe(401);
+    }
+    expect(calls).toEqual([]);
+  });
+
   it('uses exact or unique longest suffix matches and rejects unknown queues', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-wrapper-queues-'));
     const workerDir = join(root, 'server');

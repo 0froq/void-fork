@@ -414,7 +414,7 @@ function generateWrapperSource(
     lines.push(`import { handleScheduled } from "./${handlersModule}";`);
   }
   if (features.queues.length > 0) {
-    lines.push(`import { handleQueue } from "./${handlersModule}";`);
+    lines.push(`import { handleQueue, handleQueueRelay } from "./${handlersModule}";`);
   }
   if (migrations && migrations.length > 0) {
     lines.push(`import { createMigrationHandler } from "./__void_migration_handler.mjs";`);
@@ -429,7 +429,10 @@ function generateWrapperSource(
 
   // Wrap fetch if any intercepted routes are needed
   const needsFetchWrap =
-    features.readiness || features.crons.length > 0 || (migrations && migrations.length > 0);
+    features.readiness ||
+    features.crons.length > 0 ||
+    features.queues.length > 0 ||
+    (migrations && migrations.length > 0);
 
   if (needsFetchWrap) {
     lines.push('async function wrappedFetch(request, env, ctx) {');
@@ -440,9 +443,32 @@ function generateWrapperSource(
     // framework handler doesn't route it to env.ASSETS, which returns CF's
     // "Assets have not yet been deployed" stub during asset propagation
     // and would trip the platform's probe.
-    if (features.readiness || features.crons.length > 0 || features.hasMigrations) {
+    if (
+      features.readiness ||
+      features.crons.length > 0 ||
+      features.queues.length > 0 ||
+      features.hasMigrations
+    ) {
       lines.push('  if (request.method === "GET" && url.pathname === "/__void/ready") {');
       lines.push('    return Response.json({ ready: true });');
+      lines.push('  }');
+    }
+
+    if (features.queues.length > 0) {
+      lines.push('  if (request.method === "POST" && url.pathname === "/__void/queue") {');
+      lines.push('    const expected = env?.__VOID_PROXY_TOKEN;');
+      lines.push('    if (!expected || request.headers.get("x-void-internal") !== expected) {');
+      lines.push('      return Response.json({ error: "unauthorized" }, { status: 401 });');
+      lines.push('    }');
+      lines.push('    try {');
+      lines.push(
+        '      return Response.json(await handleQueueRelay(await request.json(), env, ctx));',
+      );
+      lines.push('    } catch {');
+      lines.push(
+        '      return Response.json({ error: "Invalid queue payload" }, { status: 400 });',
+      );
+      lines.push('    }');
       lines.push('  }');
     }
 
@@ -598,6 +624,30 @@ function generateHandlersSource(root: string, features: WrapperFeatures): string
     }
     lines.push('  }');
     lines.push('}');
+    lines.push(`
+export async function handleQueueRelay(payload, env, ctx) {
+  if (!payload || typeof payload.queue !== "string" || !Array.isArray(payload.messages) ||
+    payload.messages.some(m => !m || typeof m.id !== "string" || typeof m.timestamp !== "string" || !Number.isFinite(Date.parse(m.timestamp)))) {
+    throw new Error("Invalid queue payload");
+  }
+  const decisions = new Map();
+  const messages = payload.messages.map(m => {
+    const decide = (decision) => { if (!decisions.has(m.id)) decisions.set(m.id, decision); };
+    return {
+      id: m.id, timestamp: new Date(m.timestamp), body: m.body, attempts: m.attempts,
+      ack() { decide({ action: "ack" }); },
+      retry(options) { decide({ action: "retry", ...(options?.delaySeconds != null ? { delaySeconds: options.delaySeconds } : {}) }); },
+    };
+  });
+  const batch = {
+    queue: payload.queue, messages,
+    ackAll() { for (const message of messages) message.ack(); },
+    retryAll(options) { for (const message of messages) message.retry(options); },
+  };
+  let ok = true;
+  try { await handleQueue(batch, env, ctx); } catch { ok = false; }
+  return { ok, ...(decisions.size ? { decisions: Object.fromEntries(decisions) } : {}) };
+}`);
   }
 
   return lines.join('\n');
