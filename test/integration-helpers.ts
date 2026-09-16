@@ -198,7 +198,17 @@ export async function killChild(child: ReturnType<typeof spawn>): Promise<void> 
     } else {
       child.kill('SIGTERM');
     }
-    await Promise.race([once(child, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        once(child, 'exit'),
+        new Promise((resolve) => {
+          deadline = setTimeout(resolve, 5_000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(deadline);
+    }
     if (child.exitCode === null && child.signalCode === null) {
       if (process.platform !== 'win32' && child.pid) {
         killTree(child.pid, 'SIGKILL');
