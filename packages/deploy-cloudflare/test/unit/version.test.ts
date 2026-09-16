@@ -1963,12 +1963,12 @@ describe('Cloudflare version activation', () => {
       rollback: 'unsafe',
     });
 
-    expect(runWrangler.mock.calls.map(([args]) => args[0])).toEqual([
-      'deployments',
-      'versions',
-      'deployments',
-      'versions',
-      'versions',
+    expect(runWrangler.mock.calls.map(([args]) => args.slice(0, 2))).toEqual([
+      ['deployments', 'status'],
+      ['versions', 'upload'],
+      ['versions', 'list'],
+      ['deployments', 'status'],
+      ['versions', 'deploy'],
     ]);
   });
 

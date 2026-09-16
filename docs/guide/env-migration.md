@@ -58,6 +58,8 @@ VITE_API_ORIGIN=https://api.example.com void deploy
 
 Client values are compiled into browser assets and are public.
 
+The same public values are embedded in the server bundle for boot validation and `env.VITE_*` reads during server rendering. Do not upload them as remote secrets.
+
 ## 4. Remove masking modifiers
 
 Change:

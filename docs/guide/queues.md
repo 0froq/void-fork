@@ -12,6 +12,8 @@ Create files in `queues/**/*.ts`; `.mts`, `.js`, and `.mjs` also work. The queue
 
 The resulting name must follow Cloudflare's queue naming rules: 1–63 characters, only letters, digits, and `-`, beginning and ending with a letter or digit.
 
+If you previously used a nested queue locally, update producer calls from `queues['order/notifications']` to `queues['order-notifications']`. The derived binding remains `QUEUE_ORDER_NOTIFICATIONS`.
+
 Each queue file should export a default handler wrapped with [`defineQueue`](../reference/api.md#definequeue-t-handler). The generic `<T>` parameter defines the message body type. That is the type of each `msg.body` in the batch, and it is also used by the typed `queues` proxy for `send()` calls.
 
 ```ts

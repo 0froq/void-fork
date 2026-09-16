@@ -65,13 +65,15 @@ void secret put DATABASE_URL
 void secret put STRIPE_KEY
 ```
 
-You can bulk upload an existing dotenv file during migration:
+For bulk upload, prepare a dotenv-formatted file containing only production server values:
 
 ```sh
-void secret sync .env
+void secret sync production-secrets.txt
 ```
 
 `void secret put` and `void secret sync` validate the plaintext against `env.ts` before upload. The remote store encrypts the accepted value and only returns its name later, so subsequent deploy checks can prove presence but cannot re-read the plaintext. The worker validates the real value again at runtime.
+
+Client-prefixed keys are rejected by secret commands. Keep local development credentials and `VITE_*` values out of the production secrets file.
 
 `void deploy` never adds `.env` values to its manifest. It requires every required server key to exist remotely before upload.
 
@@ -104,6 +106,8 @@ export default defineEnv({
 
 Builds ignore client values from `.env`; this prevents a developer's local value from silently becoming production configuration.
 
+The server bundle embeds those same public build values. Worker boot validation and server-side `env.VITE_*` reads use them without requiring remote secrets, keeping server rendering consistent with the browser. Server-only keys still come from runtime bindings and are validated at boot.
+
 ## Validation and redaction
 
 ```sh
@@ -114,7 +118,11 @@ void env types           # regenerate .void/env.d.ts
 
 Invalid-value diagnostics redact the supplied value by default. Set `VOID_ENV_UNMASK=1` only for deliberate local debugging; Void prints a notice when redaction is disabled.
 
-There are no `.secret()` or `.public()` schema modifiers. Those modifiers controlled diagnostic masking, not storage, and made a server value look encrypted when it could still be deployed as plaintext. Storage now follows the server/client boundary, and diagnostics follow one redaction rule.
+There are no `.secret()` or `.public()` schema modifiers. Storage now follows the server/client boundary, and diagnostics follow one redaction rule.
+
+## Imports inside `env.ts`
+
+Void loads `env.ts` through Node's native `import()` before Vite transforms application code. Use relative imports or package names for schema helpers and shared constants. TypeScript path aliases and imports requiring custom Vite transforms are not supported in this file.
 
 ## Migrating from the multi-file model
 

@@ -36,7 +36,7 @@ Database dialects: omit `database` for D1, use `"database": "pg"` for PostgreSQL
 
 Durable state: create `durable-objects/name.ts`, named- and default-export the same `defineDurableState()` value from `void/durable`, and call typed RPC methods through `State.get(id)`. Void derives the binding, worker class, and SQLite-backed Cloudflare migration from the filename. This supports native Void apps on Cloudflare, including direct Cloudflare deploys, and is separate from legacy `*.ws.ts` routes.
 
-External database setup: use `void db connect <connection-string>` to update `.env.local` and a linked Void project, or `NEON_API_KEY=... void db connect --provider neon` to provision Neon. Pass `--local-only` to avoid remote sync. Custom provider modules export a `DatabaseProviderAdapter` from `void/database-provider`.
+External database setup: use `void db connect <connection-string>` to update `.env` and a linked Void project, or `NEON_API_KEY=... void db connect --provider neon` to provision Neon. Pass `--local-only` to avoid remote sync. Custom provider modules export a `DatabaseProviderAdapter` from `void/database-provider`.
 
 Env: declare every env key in `env.ts` at the project root via `defineEnv({ KEY: string(), ... })` from `void/env`. Read values via `import { env } from "void/env"`. Schema validation runs at dev start (warns) and on `void deploy` (hard error on missing prod secrets). Use `VITE_*` prefix for keys that should be exposed to client code.
 

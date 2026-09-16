@@ -2489,6 +2489,7 @@ describe('runCloudflareDeploy — secrets gate', () => {
           stdout: JSON.stringify([
             {
               id: current,
+              number: 1,
               annotations: { 'workers/triggered_by': 'secret' },
               resources: {
                 bindings: [{ name: 'API_TOKEN', type: 'secret_text' }],

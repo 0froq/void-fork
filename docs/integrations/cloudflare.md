@@ -104,7 +104,7 @@ Bindings are [inferred automatically](../reference/resource-inference.md) by sca
 }
 ```
 
-Every binding accepts a string to customize its name (for example, `"db": "MY_DB"` or `"ai": "MY_AI"`).
+`db`, `kv`, `storage`, and `ai` accept a string to customize the binding name (for example, `"db": "MY_DB"` or `"ai": "MY_AI"`). `email` is a boolean feature switch.
 
 See [Configuration](../reference/config.md) for details.
 
