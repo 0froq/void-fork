@@ -57,6 +57,14 @@ const registry = (registryGlobal[ENV_REGISTRY_SYMBOL] ??= {
 });
 const validatedCache = new WeakMap<object, Map<string, unknown>>();
 
+/** Vite embeds the same public build inputs into server and browser bundles. */
+function getClientEnvValues(): Record<string, unknown> {
+  const values = (import.meta as unknown as { env?: Record<string, unknown> }).env;
+  return Object.fromEntries(
+    Object.entries(values ?? {}).filter(([key]) => key.startsWith('VITE_')),
+  );
+}
+
 /**
  * Type-only stub for the validated env shape. Augmented by the generated
  * `.void/env.d.ts` so `env.X` is typed per the user's schema. Includes an
@@ -124,7 +132,12 @@ export async function _validateEnvOnce(envValues: unknown): Promise<void> {
     registry.bootValidation = { ok: true };
     return;
   }
-  const values = (envValues ?? {}) as Record<string, unknown>;
+  // Public values belong to this build, not to the remote secret store. Keep
+  // server rendering and boot validation consistent with the browser bundle.
+  const values = {
+    ...((envValues ?? {}) as Record<string, unknown>),
+    ...getClientEnvValues(),
+  };
   const report = await validateAllEnvWithValues(registry.schema, values);
   if (report.valid) {
     // Seed the sync cache with already-validated values so subsequent
@@ -266,7 +279,8 @@ function readKey(key: string): unknown {
   }
   // Filtered env hides internal __VOID_*/__PROJECT_* bindings from user code.
   const filtered = getRuntimeEnv() as Record<string, unknown>;
-  const rawValue = filtered[key];
+  const clientValues = getClientEnvValues();
+  const rawValue = Object.hasOwn(clientValues, key) ? clientValues[key] : filtered[key];
   if (!registry.schema) {
     return rawValue;
   }
@@ -331,10 +345,12 @@ export const env = new Proxy({} as Record<string, unknown>, {
     if (typeof key === 'symbol') {
       return false;
     }
-    return Reflect.has(getRuntimeEnv() as object, key);
+    return Object.hasOwn(getClientEnvValues(), key) || Reflect.has(getRuntimeEnv() as object, key);
   },
   ownKeys() {
-    return Reflect.ownKeys(getRuntimeEnv() as object);
+    return [
+      ...new Set([...Reflect.ownKeys(getRuntimeEnv()), ...Object.keys(getClientEnvValues())]),
+    ];
   },
   getOwnPropertyDescriptor(_target, key) {
     if (typeof key === 'symbol') {
