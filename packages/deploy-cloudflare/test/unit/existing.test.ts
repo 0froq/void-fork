@@ -142,7 +142,7 @@ describe('existing Worker preservation', () => {
   });
 
   it('does not infer an active migration tag from an explicitly requested candidate', async () => {
-    const runWrangler = vi.fn(() => ({
+    const runWrangler = vi.fn((_args: Array<string>, _options: { capture: boolean }) => ({
       status: 0,
       stderr: '',
       stdout: JSON.stringify({
