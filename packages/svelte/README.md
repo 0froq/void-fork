@@ -114,3 +114,5 @@ request.
 - `test/integration/svelte-pages-client.test.ts`
 
 Cross-package SSR/protocol coverage for Svelte pages mode also lives in `packages/void/test/integration/*`.
+
+The [shared client](../../test/pages-client-contract.ts) and [island](../../test/pages-island-contract.ts) contracts run against this adapter in both dev and preview. Shared form equality is tested directly in [Void](../void/test/unit/form-value-equality.test.ts); tests do not copy the hook implementation.

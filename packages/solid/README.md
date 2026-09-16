@@ -118,3 +118,5 @@ request.
 - `test/integration/solid-pages-playground.test.ts`
 
 The Solid integration test covers both SSR output and browser-side navigation/forms.
+
+The [shared client](../../test/pages-client-contract.ts) and [island](../../test/pages-island-contract.ts) contracts run against this adapter in both dev and preview. Shared form equality is tested directly in [Void](../void/test/unit/form-value-equality.test.ts); tests do not copy the hook implementation.
