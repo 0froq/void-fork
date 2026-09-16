@@ -40,7 +40,7 @@ src/
   build-types.ts              # BuildConfig, BuildLogLine
   github/                     # GitHub App crypto: app-jwt, installation-token, webhook-verify, oidc-verify
   provisioning/               # Worker/resource provisioning + cleanup
-  migrations/                 # Validation + legacy remote D1 runner
+  migrations/                 # Validation + remote D1 migration runner
   auth/
     deploy-token.ts           # Mint short-lived project-scoped deploy JWT (aud: "deploy")
   routes/
@@ -85,6 +85,7 @@ drizzle/
   - CRUD
   - deploys and rollbacks
   - migrations and logs
+    - Managed D1 apply submits each migration's SQL and `_void_migrations` insert in one transactional query batch. Retries require a tracking row to establish success; an existing table or column alone is insufficient. Failures retain the confirmed committed prefix in project metadata. Reconcile older untracked schema changes explicitly before retrying.
   - secrets
   - domains
   - usage
