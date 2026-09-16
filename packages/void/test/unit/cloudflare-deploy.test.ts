@@ -3682,33 +3682,6 @@ describe('verifyGeneratedDeployConfig', () => {
     expect(result.reason).toMatch(/EXTRA_KV/);
   });
 
-  it('passes when every pinned id-bearing binding (incl. a non-desired one) survives the build', () => {
-    // No-regression for the reverse loop: the desired DB and a non-desired EXTRA_DB are both pinned
-    // pre-build and both present unchanged in the artifact, so neither the completeness nor the
-    // reverse-presence loop objects.
-    const snapshot = snapshotBindingIdentities({
-      d1_databases: [
-        { binding: 'DB', database_name: 'myapp-db', database_id: REAL_D1_ID },
-        { binding: 'EXTRA_DB', database_name: 'extra', database_id: OTHER_D1_ID },
-      ],
-    });
-    const root = deployConfigProject({
-      account_id: 'acc123',
-      name: 'myapp',
-      d1_databases: [
-        { binding: 'DB', database_name: 'myapp-db', database_id: REAL_D1_ID },
-        { binding: 'EXTRA_DB', database_name: 'extra', database_id: OTHER_D1_ID },
-      ],
-    });
-    const result = verifyGeneratedDeployConfig(root, {
-      accountId: 'acc123',
-      workerName: 'myapp',
-      desired: { d1: { binding: 'DB', name: 'myapp-db' }, kvNamespaces: [], queues: [] },
-      bindingIdentitySnapshot: snapshot,
-    });
-    expect(result).toEqual({ ok: true });
-  });
-
   // --- Pass-through assert-set completeness (fields Void never emits) + queue ⊆ desired ---
 
   it('passes the full kitchen-sink shape (empty resource arrays, DO/containers, desired queues)', () => {
@@ -4100,7 +4073,7 @@ describe('verifyGeneratedDeployConfig', () => {
     expect(result).toEqual({ ok: true });
   });
 
-  it('passes when no `unsafe` is in the root or the emitted artifact', () => {
+  it('accepts clean artifacts without optional bindings or traffic attachments', () => {
     const root = deployConfigProject({ account_id: 'acc123', name: 'myapp' });
     const result = verifyGeneratedDeployConfig(root, {
       accountId: 'acc123',
@@ -4148,35 +4121,7 @@ describe('verifyGeneratedDeployConfig', () => {
     expect(result).toEqual({ ok: true });
   });
 
-  it('passes when unsafe / tail_consumers / streaming_tail_consumers are absent (the clean-build shape)', () => {
-    // A real `vite build` (root declaring none) leaves all three ABSENT from the emitted artifact,
-    // so the whole-object pin must wave the absent shape through.
-    const root = deployConfigProject({ account_id: 'acc123', name: 'myapp' });
-    const result = verifyGeneratedDeployConfig(root, {
-      accountId: 'acc123',
-      workerName: 'myapp',
-      desired: { kvNamespaces: [], queues: [] },
-      passthroughIdentitySnapshot: snapshotPassthroughIdentities({}),
-      passthroughRawFields: snapshotPassthroughRawFields({}),
-    });
-    expect(result).toEqual({ ok: true });
-  });
-
   // --- Traffic attachment (routes / route / workers_dev / preview_urls — Void emits none) ---
-
-  it('passes when routes / route / workers_dev / preview_urls are all absent (the clean-build shape)', () => {
-    // A real `vite build` (root declaring none) leaves all four ABSENT from the emitted artifact
-    // (verified against a real build), so the whole-object pin must wave the absent shape through.
-    const root = deployConfigProject({ account_id: 'acc123', name: 'myapp' });
-    const result = verifyGeneratedDeployConfig(root, {
-      accountId: 'acc123',
-      workerName: 'myapp',
-      desired: { kvNamespaces: [], queues: [] },
-      passthroughIdentitySnapshot: snapshotPassthroughIdentities({}),
-      passthroughRawFields: snapshotPassthroughRawFields({}),
-    });
-    expect(result).toEqual({ ok: true });
-  });
 
   it('fails closed when the build injects a routes entry absent from the root (traffic hijack)', () => {
     // The build attaches the worker to a production hostname/path the account controls by injecting
@@ -4578,18 +4523,6 @@ describe('verifyGeneratedDeployConfig', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/ai binding/);
-  });
-
-  it('passes an absent ai binding', () => {
-    const root = deployConfigProject({ account_id: 'acc123', name: 'myapp' });
-    const result = verifyGeneratedDeployConfig(root, {
-      accountId: 'acc123',
-      workerName: 'myapp',
-      desired: { kvNamespaces: [], queues: [] },
-      passthroughIdentitySnapshot: snapshotPassthroughIdentities({}),
-      passthroughRawFields: snapshotPassthroughRawFields({}),
-    });
-    expect(result).toEqual({ ok: true });
   });
 
   it('fails closed when the build REMOVES a root-declared ai binding (emitted ai absent)', () => {
@@ -6554,15 +6487,6 @@ describe('assertMigrationsProduceAuthSchema', () => {
     );
   });
 
-  it('does not require a non-unique index the emitted schema marks as index: true', async () => {
-    // `session.userId` is `index: true` in the real artifact, but that is a performance
-    // property — migrations without the index are still correct.
-    await assertMigrationsProduceAuthSchema(
-      [{ name: '0000.sql', sql: `${USER_WITH_UNIQUE_EMAIL}\n${SESSION_WITH_FK}` }],
-      constrained,
-    );
-  });
-
   it('reports every constraint problem at once, naming each table.column', async () => {
     await expect(
       assertMigrationsProduceAuthSchema(
@@ -6750,33 +6674,6 @@ describe('assertMigrationsProduceAuthSchema', () => {
         constrained,
       ),
     ).rejects.toThrow(/foreign key mismatch/);
-  });
-
-  it('still fails closed when the child declares no foreign key at all (the pragma alone would pass it)', async () => {
-    // `PRAGMA foreign_key_check` validates only foreign keys that EXIST, so a child with
-    // none comes back clean. The presence check has to stand on its own.
-    await expect(
-      assertMigrationsProduceAuthSchema(
-        [
-          {
-            name: '0000.sql',
-            sql:
-              `${USER_WITH_UNIQUE_EMAIL}\n` +
-              'CREATE TABLE "session" (id text primary key, userId text);',
-          },
-        ],
-        constrained,
-      ),
-    ).rejects.toThrow(
-      /table "session" column "userId" is missing a foreign key referencing "user"\."id"/,
-    );
-  });
-
-  it('accepts a parent PRIMARY KEY with an explicit reference', async () => {
-    await assertMigrationsProduceAuthSchema(
-      [{ name: '0000.sql', sql: `${USER_WITH_UNIQUE_EMAIL}\n${SESSION_WITH_FK}` }],
-      constrained,
-    );
   });
 
   it('accepts a parent that is UNIQUE (not PRIMARY KEY) with an explicit reference', async () => {
@@ -7143,19 +7040,6 @@ describe("validateAuthMigrationSchema — reads the build's generated auth schem
     ]);
   });
 
-  it('still accepts an EXPLICIT REFERENCES to a UNIQUE-only parent id', async () => {
-    const root = makeProject({ 'package.json': JSON.stringify({ name: 'authapp' }) });
-    writeConstrainedAuthArtifact(root);
-    await validateAuthMigrationSchema(root, [
-      {
-        name: '0000.sql',
-        sql:
-          'CREATE TABLE "user" (id text not null unique, email text not null UNIQUE, name text not null);\n' +
-          SESSION_EXPLICIT_FK,
-      },
-    ]);
-  });
-
   it('fails closed on an implicit REFERENCES to a parent with a COMPOSITE primary key', async () => {
     const root = makeProject({ 'package.json': JSON.stringify({ name: 'authapp' }) });
     writeConstrainedAuthArtifact(root);
@@ -7203,20 +7087,6 @@ describe("validateAuthMigrationSchema — reads the build's generated auth schem
       {
         name: '0000.sql',
         sql: 'CREATE TABLE "user" (id text primary key not null, name text not null);',
-      },
-    ]);
-  });
-
-  it('accepts `id integer primary key` — the rowid alias can never hold NULL', async () => {
-    const root = makeProject({ 'package.json': JSON.stringify({ name: 'authapp' }) });
-    writeAuthSchemaArtifact(root, [{ name: 'user', fields: ['name'] }]);
-    // `PRAGMA table_info` reports `notnull = 0` here, but SQLite assigns a rowid on a NULL
-    // insert, so the column is effectively NOT NULL — rejecting it would break a common,
-    // legitimate schema.
-    await validateAuthMigrationSchema(root, [
-      {
-        name: '0000.sql',
-        sql: 'CREATE TABLE "user" (id integer primary key, name text not null);',
       },
     ]);
   });

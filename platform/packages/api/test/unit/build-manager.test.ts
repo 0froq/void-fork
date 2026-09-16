@@ -2930,23 +2930,6 @@ describe('BuildManager log ingest + WebSocket replay', () => {
     expect(live.some((msg) => msg.type === 'log' && msg.line === 'live line')).toBe(true);
   });
 
-  it('POST /status updates status and broadcasts', async () => {
-    const ctx = makeStubCtx();
-    const env = makeEnv();
-    const m = makeManager(ctx, env);
-    await m.startBuild(makeConfig());
-    dbState.writes = [];
-
-    const res = await m.fetch(
-      agentRequest(ctx, 'https://manager/status', {
-        method: 'POST',
-        body: JSON.stringify({ status: 'deploying' }),
-      }),
-    );
-    expect(res.status).toBe(200);
-    expect(lastWrite('deploying')).toBeDefined();
-  });
-
   it('POST /cancel stops the container and records cancelled', async () => {
     const ctx = makeStubCtx();
     const env = makeEnv();

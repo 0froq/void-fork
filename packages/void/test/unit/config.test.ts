@@ -874,7 +874,7 @@ describe('readConfig redirects', () => {
 });
 
 describe('routing.rewrites validation', () => {
-  it('accepts valid rewrites', () => {
+  it('accepts static rewrites without wildcards', () => {
     setup(JSON.stringify({ routing: { rewrites: { '/docs': '/en/docs' } } }));
     const config = readConfig(tmpDir);
     expect(config.routing?.rewrites).toEqual({ '/docs': '/en/docs' });
@@ -1170,13 +1170,6 @@ describe('duplicate "*" wildcards in rule sources', () => {
     setup(JSON.stringify({ routing: { rewrites: { '/docs/*': '/en/docs/:splat' } } }));
     const config = readConfig(tmpDir);
     expect(config.routing?.rewrites).toEqual({ '/docs/*': '/en/docs/:splat' });
-    cleanup();
-  });
-
-  it('accepts a source with zero "*"', () => {
-    setup(JSON.stringify({ routing: { rewrites: { '/docs': '/en/docs' } } }));
-    const config = readConfig(tmpDir);
-    expect(config.routing?.rewrites).toEqual({ '/docs': '/en/docs' });
     cleanup();
   });
 
