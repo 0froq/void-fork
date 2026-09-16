@@ -9,6 +9,18 @@ import { setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
+async function establishBootstrapSandboxDrainCheckpoint(): Promise<void> {
+  await env.db.delete(sandboxDrainCheckpoints);
+  await env.db.insert(sandboxDrainCheckpoints).values({
+    singleton: true,
+    admission_protocol: 0,
+    generation: 'deployment-admission-bootstrap',
+    state: 'draining',
+    phase: 'deployments',
+    cursor: { pass: '1' },
+  });
+}
+
 async function createInstallationClaim(): Promise<void> {
   await env.db.execute(sql`
     CREATE TABLE "__void_platform_installation" (
@@ -75,6 +87,7 @@ describe('GET /health', () => {
   });
 
   it('admits the authenticated installer Sandbox drain preflight during maintenance', async () => {
+    await establishBootstrapSandboxDrainCheckpoint();
     const res = await app.fetch(
       new Request('http://localhost/internal/platform/sandbox-drain', {
         headers: { 'X-Void-Platform-Probe': 'probe-token' },
@@ -88,15 +101,16 @@ describe('GET /health', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       version: 1,
-      state: 'required',
-      generation: null,
+      state: 'draining',
+      generation: 'deployment-admission-bootstrap',
       complete: false,
-      updatedAt: null,
-      phase: null,
+      updatedAt: expect.any(String),
+      phase: 'deployments',
     });
   });
 
   it('does not trust a stale complete KV mirror without a DB checkpoint', async () => {
+    await env.db.delete(sandboxDrainCheckpoints);
     await env.ROUTING.put(
       SANDBOX_DRAIN_STATE_KEY,
       JSON.stringify({
@@ -119,15 +133,26 @@ describe('GET /health', () => {
           PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
         },
       );
-      expect(await res.json()).toMatchObject({ state: 'required', complete: false });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        version: 1,
+        state: 'required',
+        generation: null,
+        complete: false,
+        updatedAt: null,
+        phase: null,
+      });
     } finally {
       await env.ROUTING.delete(SANDBOX_DRAIN_STATE_KEY);
+      await establishBootstrapSandboxDrainCheckpoint();
     }
   });
 
   it('fails the installer preflight closed when the database checkpoint is invalid', async () => {
+    await env.db.delete(sandboxDrainCheckpoints);
     await env.db.insert(sandboxDrainCheckpoints).values({
       singleton: true,
+      admission_protocol: 0,
       generation: 'invalid-generation',
       state: 'complete',
       phase: 'deployments',
@@ -154,7 +179,7 @@ describe('GET /health', () => {
       });
     } finally {
       error.mockRestore();
-      await env.db.delete(sandboxDrainCheckpoints);
+      await establishBootstrapSandboxDrainCheckpoint();
     }
   });
 
