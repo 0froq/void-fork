@@ -9,6 +9,8 @@ import { envSchemaPlugin } from '../../src/plugin-env-schema.ts';
 
 const roots: Array<string> = [];
 const runtime = join(import.meta.dirname, '../../src/runtime');
+const publicEnvUrl = pathToFileURL(join(runtime, 'env-public.ts')).href;
+const runtimeEnvUrl = pathToFileURL(join(runtime, 'env.ts')).href;
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -29,7 +31,7 @@ describe('production server environment', () => {
       writeFileSync(join(root, '.env'), 'VITE_ORIGIN=http://localhost:5173\n');
       writeFileSync(
         join(root, 'env.ts'),
-        `import { defineEnv, string } from ${JSON.stringify(join(runtime, 'env-public.ts'))};
+        `import { defineEnv, string } from ${JSON.stringify(publicEnvUrl)};
 export default defineEnv({
   VITE_ORIGIN: string()${shellValue ? '' : ".default('https://default.example.com')"},
   SERVER_TOKEN: string(),
@@ -38,8 +40,8 @@ export default defineEnv({
       writeFileSync(
         join(root, 'entry.ts'),
         `import './env.ts';
-import { env, _validateEnvOnce } from ${JSON.stringify(join(runtime, 'env-public.ts'))};
-import { withRuntimeEnv } from ${JSON.stringify(join(runtime, 'env.ts'))};
+import { env, _validateEnvOnce } from ${JSON.stringify(publicEnvUrl)};
+import { withRuntimeEnv } from ${JSON.stringify(runtimeEnvUrl)};
 export async function render(values) {
   return withRuntimeEnv(values, async () => {
     const beforeBoot = env.VITE_ORIGIN;

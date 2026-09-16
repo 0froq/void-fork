@@ -186,8 +186,15 @@ export default {
     expect(authorized.webSocket).not.toBeNull();
     const afterAuthorized = await stub.fetch('http://localhost/chat');
     expect(await afterAuthorized.json()).toEqual({ dispatches: 1 });
-    authorized.webSocket?.accept();
-    authorized.webSocket?.close(1000, 'test complete');
+    const socket = authorized.webSocket!;
+    const closed = new Promise<void>((resolve) => {
+      socket.addEventListener('close', () => resolve(), { once: true });
+    });
+    socket.accept();
+    socket.close(1000, 'test complete');
+    // Finish the close handshake before disposing workerd. Killing it while
+    // the upgrade transport is open can emit an unhandled Windows ECONNRESET.
+    await closed;
   });
 
   it('continues non-upgrade requests to an HTTP route at the same path', async () => {

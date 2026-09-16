@@ -1,22 +1,18 @@
 import { execFileSync } from 'node:child_process';
-import {
-  cpSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import spawn from 'cross-spawn';
 import { join } from 'pathslash';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
-import { getPort, killChild, waitForServer } from '../../../../test/integration-helpers.ts';
+import {
+  createIsolatedPlayground,
+  getPort,
+  killChild,
+  waitForServer,
+  type IsolatedPlayground,
+} from '../../../../test/integration-helpers.ts';
 
 const repository = join(import.meta.dirname, '..', '..', '..', '..');
-const source = join(repository, 'playground/node-app');
 const targets = [
   { target: 'node', command: process.execPath, args: [] },
   { target: 'bun', command: process.env.VOID_TEST_BUN_BIN ?? 'bun', args: [] },
@@ -27,17 +23,17 @@ for (const { target, command, args } of targets) {
   const available = spawn.sync(command, ['--version']).status === 0;
   describe.skipIf(!available)(`${target} production Pages assets`, () => {
     let root: string;
+    let playground: IsolatedPlayground;
     let base: string;
     let child: ReturnType<typeof spawn>;
     let errors = '';
 
     beforeAll(async () => {
-      root = mkdtempSync(join(tmpdir(), `void-pages-${target}-`));
-      for (const path of ['pages', 'routes', 'package.json', 'vite.config.ts']) {
-        cpSync(join(source, path), join(root, path), { recursive: true });
-      }
-      symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'junction');
-      const config = JSON.parse(readFileSync(join(source, 'void.json'), 'utf-8'));
+      // Keep relative workspace dependency links at the same depth and on the
+      // same drive. A junction into the Windows system temp directory breaks them.
+      playground = createIsolatedPlayground(repository, 'playground/node-app');
+      root = playground.root;
+      const config = JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'));
       writeFileSync(join(root, 'void.json'), JSON.stringify({ ...config, target }));
       writeFileSync(
         join(root, 'pages/index.tsx'),
@@ -75,9 +71,7 @@ export default function Home() {
       if (child) {
         await killChild(child);
       }
-      if (root) {
-        rmSync(root, { recursive: true, force: true });
-      }
+      playground?.cleanup();
     });
 
     it('loads the real manifest and serves every referenced script and stylesheet from app-root startup', async () => {
