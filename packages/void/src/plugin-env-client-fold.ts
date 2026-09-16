@@ -199,9 +199,10 @@ export function envClientFoldPlugin(): Plugin {
     // about for folding correctness.
     enforce: 'post',
     async configResolved(config: ResolvedConfig) {
-      // The env-schema plugin has already removed local `.env` values on
-      // builds. Reuse the remaining build-shell client values from config.env.
-      loadedEnv = { ...(config.env ?? {}) } as Record<string, string>;
+      // Vite runs configResolved hooks concurrently. Keep the shared env object
+      // so transforms observe the schema plugin's completed removal of local
+      // values and insertion of defaults, rather than an early snapshot.
+      loadedEnv = (config.env ?? {}) as Record<string, string>;
 
       // Schema `.default(...)` values back-fill missing client keys.
       // We only surface client-exposed ones so server-only defaults never

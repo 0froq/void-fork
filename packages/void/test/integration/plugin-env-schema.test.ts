@@ -1,7 +1,9 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
+import { resolveConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { envClientFoldPlugin } from '../../src/plugin-env-client-fold.ts';
 import { envSchemaPlugin } from '../../src/plugin-env-schema.ts';
 
 /**
@@ -51,12 +53,47 @@ async function runConfigResolved(
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0, roots.length)) {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 describe('envSchemaPlugin auto-discovery', () => {
+  it.each([undefined, 'Build shell'])(
+    'folds settled production values after concurrent config hooks (shell: %s)',
+    async (shellValue) => {
+      const { defineEnv } = await import('../../src/runtime/env-public.ts');
+      const { string } = await import('../../src/runtime/env-helpers.ts');
+      const root = createTempRoot();
+      writeFileSync(join(root, 'env.ts'), 'export default {};\n');
+      writeFileSync(join(root, '.env'), 'VITE_TITLE=Local only\n');
+      vi.stubEnv('VITE_TITLE', shellValue);
+      defineEnv({ VITE_TITLE: string().default('Production default') });
+
+      const fold = envClientFoldPlugin();
+      const resolved = await resolveConfig(
+        { root, configFile: false, plugins: [envSchemaPlugin(root), fold] },
+        'build',
+      );
+      const transform = fold.transform as unknown as (
+        this: { environment: { name: string } },
+        code: string,
+        id: string,
+      ) => Promise<{ code: string }>;
+      const result = await transform.call(
+        { environment: { name: 'client' } },
+        'import { env } from "void/env"; export const title = env.VITE_TITLE;',
+        join(root, 'client.ts'),
+      );
+
+      const expected = shellValue ?? 'Production default';
+      expect(resolved.env.VITE_TITLE).toBe(expected);
+      expect(result.code).toContain(JSON.stringify(expected));
+      expect(result.code).not.toContain('Local only');
+    },
+  );
+
   it('writes .void/env.d.ts when env.ts exists at the project root', async () => {
     const root = createTempRoot();
     writeFileSync(
