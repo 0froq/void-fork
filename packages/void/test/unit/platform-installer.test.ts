@@ -1774,7 +1774,13 @@ describe('platform installer', () => {
       githubClientSecret: updates.GITHUB_CLIENT_SECRET,
       r2AccessKeyId: updates.R2_ACCESS_KEY_ID,
       r2SecretAccessKey: updates.R2_SECRET_ACCESS_KEY,
-      workerSecretUpdatesJson: JSON.stringify(updates),
+      workerSecretUpdatesJson: JSON.stringify({
+        baselineGeneration: 0,
+        generation: null,
+        id: 'rotation-intent-a',
+        schema: 1,
+        updates,
+      }),
     });
     const checkpoint = readInstallationRecoverySecrets(manifest)!;
     expect(checkpoint.cloudflareApiToken).toBe('new-runtime-token');
@@ -1791,9 +1797,12 @@ describe('platform installer', () => {
       r2SecretAccessKey: '',
       updateExistingWorkers: true,
     });
-    expect(platformWorkerSecretPayload('api', resumed, 'account', 'zone', true)).toEqual(updates);
-    expect(platformWorkerSecretPayload('proxy', resumed, 'account', 'zone', true)).toEqual({
-      CF_API_TOKEN: updates.CF_API_TOKEN,
+    expect(resumed.workerSecretUpdates).toEqual({});
+    expect(resumed.pendingWorkerSecretUpdateIntent).toMatchObject({
+      baselineGeneration: 0,
+      generation: null,
+      id: 'rotation-intent-a',
+      updates,
     });
 
     writePendingInstallationSecrets(manifest, {
@@ -1816,6 +1825,81 @@ describe('platform installer', () => {
     });
     expect(platformWorkerSecretPayload('api', later, 'account', 'zone', true)).toBeNull();
     expect(platformWorkerSecretPayload('proxy', later, 'account', 'zone', true)).toBeNull();
+
+    writePendingInstallationSecrets(manifest, {
+      ...baseline,
+      cloudflareApiToken: updates.CF_API_TOKEN,
+      workerSecretUpdatesJson: JSON.stringify({
+        baselineGeneration: 0,
+        generation: 1,
+        id: 'rotation-intent-a',
+        schema: 1,
+        updates,
+      }),
+    });
+    const completedElsewhere = {
+      ...manifest,
+      steps: [
+        ...manifest.steps,
+        {
+          completedAt: '2026-09-16T00:01:00.000Z',
+          key: 'worker-secret-updates:1:pending',
+          resultHash: 'rotation-intent-a',
+        },
+        {
+          completedAt: '2026-09-16T00:01:01.000Z',
+          key: 'worker-cutover:1:committed',
+          resultHash: 'committed',
+        },
+        {
+          completedAt: '2026-09-16T00:01:02.000Z',
+          key: 'worker-secret-updates:1:committed',
+          resultHash: 'rotation-intent-a',
+        },
+      ],
+    };
+    expect(readInstallationRecoverySecrets(completedElsewhere)).toMatchObject({
+      cloudflareApiToken: updates.CF_API_TOKEN,
+    });
+    expect(readInstallationRecoverySecrets(completedElsewhere)?.workerSecretUpdatesJson).toBe(
+      undefined,
+    );
+
+    writePendingInstallationSecrets(manifest, {
+      ...baseline,
+      cloudflareApiToken: 'stale-runtime-token',
+      workerSecretUpdatesJson: JSON.stringify({
+        baselineGeneration: 0,
+        generation: 1,
+        id: 'rotation-intent-a',
+        schema: 1,
+        updates,
+      }),
+    });
+    const supersededElsewhere = {
+      ...completedElsewhere,
+      steps: [
+        ...completedElsewhere.steps,
+        {
+          completedAt: '2026-09-16T00:02:00.000Z',
+          key: 'worker-secret-updates:2:pending',
+          resultHash: 'rotation-intent-b',
+        },
+        {
+          completedAt: '2026-09-16T00:02:01.000Z',
+          key: 'worker-cutover:2:committed',
+          resultHash: 'committed',
+        },
+        {
+          completedAt: '2026-09-16T00:02:02.000Z',
+          key: 'worker-secret-updates:2:committed',
+          resultHash: 'rotation-intent-b',
+        },
+      ],
+    };
+    expect(readInstallationRecoverySecrets(supersededElsewhere)).toMatchObject({
+      cloudflareApiToken: updates.CF_API_TOKEN,
+    });
   });
 
   it('omits unavailable composite secrets so Cloudflare preserves deployed values', () => {
@@ -2780,15 +2864,16 @@ describe('platform installer', () => {
       'gate:closed',
       `rollback:${deployment.resources.apiWorker}`,
     ]);
-    expect(listInstallationManifests(directory)[0]).toMatchObject({
+    const interruptedManifest = listInstallationManifests(directory)[0]!;
+    expect(interruptedManifest).toMatchObject({
       status: 'failed',
       usageProtocolVersion: 0,
     });
-    const interruptedSecretCheckpoint = readInstallationRecoverySecrets(installed.manifest)!;
+    const interruptedSecretCheckpoint = readInstallationRecoverySecrets(interruptedManifest)!;
     const resumedWorkerSecrets = createPlatformInstallationSecrets({
       bootstrapGitHubId: '',
       bootstrapGitHubLogin: '',
-      cloudflareApiToken: '',
+      cloudflareApiToken: 'retry-cf-token',
       checkpoint: interruptedSecretCheckpoint,
       databaseUrl: secrets.databaseUrl,
       existingInstallation: true,
@@ -2798,19 +2883,27 @@ describe('platform installer', () => {
       r2SecretAccessKey: '',
       updateExistingWorkers: true,
     });
-    expect(
-      platformWorkerSecretPayload('api', resumedWorkerSecrets, 'account', 'zone', true),
-    ).toEqual(platformWorkerSecretPayload('api', rotatedWorkerSecrets, 'account', 'zone', true));
-    expect(
-      platformWorkerSecretPayload('proxy', resumedWorkerSecrets, 'account', 'zone', true),
-    ).toEqual(platformWorkerSecretPayload('proxy', rotatedWorkerSecrets, 'account', 'zone', true));
+    expect(resumedWorkerSecrets.workerSecretUpdates).toEqual({
+      CF_API_TOKEN: 'retry-cf-token',
+    });
+    expect(resumedWorkerSecrets.pendingWorkerSecretUpdateIntent?.updates).toEqual(
+      rotatedWorkerSecrets.workerSecretUpdates,
+    );
+    const resumedUpdates = {
+      ...rotatedWorkerSecrets.workerSecretUpdates,
+      CF_API_TOKEN: 'retry-cf-token',
+    };
 
     const emptyCoreUpgradeConfigs: Array<Record<string, unknown>> = [];
     const resumedSecretPayloads: Array<Record<string, string> | null> = [];
     const emptyCoreUpgrade = await installPlatform(
       upgradedPlan,
       resumedWorkerSecrets,
-      { ...sourceManifest, safetyProtocols: { sandboxDrain: 0 } },
+      {
+        ...sourceManifest,
+        safetyProtocols: { sandboxDrain: 0 },
+        steps: interruptedManifest.steps,
+      },
       {
         acquireDatabaseLifecycleLock,
         claimDatabase,
@@ -2832,8 +2925,8 @@ describe('platform installer', () => {
     expect(emptyCoreUpgrade.manifest.safetyProtocols).toEqual({ sandboxDrain: 1 });
     expect(emptyCoreUpgradeConfigs).toHaveLength(4);
     expect(resumedSecretPayloads.slice(0, 2)).toEqual([
-      platformWorkerSecretPayload('api', rotatedWorkerSecrets, 'account', 'zone', true),
-      platformWorkerSecretPayload('proxy', rotatedWorkerSecrets, 'account', 'zone', true),
+      resumedUpdates,
+      { CF_API_TOKEN: 'retry-cf-token' },
     ]);
     expect(
       readInstallationRecoverySecrets(emptyCoreUpgrade.manifest)?.workerSecretUpdatesJson,
@@ -2843,6 +2936,48 @@ describe('platform installer', () => {
         (emptyCoreUpgradeConfigs[index]!.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
       ).toBe('enabled');
     }
+    const nextRotationSecrets = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      cloudflareApiToken: 'next-cf-token',
+      checkpoint: readInstallationRecoverySecrets(emptyCoreUpgrade.manifest),
+      databaseUrl: secrets.databaseUrl,
+      existingInstallation: true,
+      githubClientId: '',
+      githubClientSecret: '',
+      r2AccessKeyId: '',
+      r2SecretAccessKey: '',
+      updateExistingWorkers: true,
+    });
+    const nextRotationPayloads: Array<Record<string, string> | null> = [];
+    const nextRotation = await installPlatform(
+      upgradedPlan,
+      nextRotationSecrets,
+      emptyCoreUpgrade.manifest,
+      {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: upgradeClient,
+        deployWorker: async (_config, secretPayload) => {
+          nextRotationPayloads.push(secretPayload);
+        },
+        migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async () => {},
+      },
+    );
+    expect(nextRotationPayloads.slice(0, 2)).toEqual([
+      { CF_API_TOKEN: 'next-cf-token' },
+      { CF_API_TOKEN: 'next-cf-token' },
+    ]);
+    expect(
+      nextRotation.manifest.steps.filter((step) => step.key.startsWith('worker-secret-updates:')),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: expect.stringMatching(/:pending$/) }),
+        expect.objectContaining({ key: expect.stringMatching(/:committed$/) }),
+      ]),
+    );
     upgradeKvWrites.splice(0);
     deletedKvValues.splice(0);
 

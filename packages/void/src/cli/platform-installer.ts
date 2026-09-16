@@ -63,6 +63,8 @@ import {
   type PlatformInstallPlanAction,
 } from './platform-plan.ts';
 import {
+  latestPlatformWorkerCutoverGeneration,
+  platformWorkerSecretUpdateIntentState,
   promoteInstallationSecrets,
   savePlatformConnection,
   writeInstallationManifest,
@@ -104,6 +106,8 @@ export type PlatformInstallationSecrets = Readonly<{
       >
     >
   >;
+  /** Encrypted recovery intent; applied only while its Worker cutover is authoritative. */
+  pendingWorkerSecretUpdateIntent?: PlatformWorkerSecretUpdateIntent;
 }>;
 
 const PLATFORM_WORKER_SECRET_UPDATE_NAMES = [
@@ -115,6 +119,16 @@ const PLATFORM_WORKER_SECRET_UPDATE_NAMES = [
 ] as const;
 
 type PlatformWorkerSecretUpdateName = (typeof PLATFORM_WORKER_SECRET_UPDATE_NAMES)[number];
+
+type PlatformWorkerSecretUpdates = Partial<Record<PlatformWorkerSecretUpdateName, string>>;
+
+type PlatformWorkerSecretUpdateIntent = Readonly<{
+  baselineGeneration: number;
+  generation: number | null;
+  id: string;
+  schema: 1;
+  updates: Readonly<PlatformWorkerSecretUpdates>;
+}>;
 
 export type PlatformDatabaseLifecycleLock = (() => Promise<void>) & {
   authoritativeManifest?: PlatformInstallationManifest | null;
@@ -315,7 +329,9 @@ export function createPlatformInstallationSecrets(input: {
     projectSecretKeysJson: input.projectSecretKeysJson || '',
     required,
   });
-  const resumedWorkerSecretUpdates = parseWorkerSecretUpdates(checkpoint.workerSecretUpdatesJson);
+  const pendingWorkerSecretUpdateIntent = parseWorkerSecretUpdateIntent(
+    checkpoint.workerSecretUpdatesJson,
+  );
   const explicitWorkerSecretUpdates = withoutEmptySecrets({
     CF_API_TOKEN: input.cloudflareApiToken,
     GITHUB_CLIENT_ID: input.githubClientId,
@@ -324,9 +340,10 @@ export function createPlatformInstallationSecrets(input: {
     R2_SECRET_ACCESS_KEY: input.r2SecretAccessKey,
   });
   return {
-    workerSecretUpdates: input.updateExistingWorkers
-      ? { ...resumedWorkerSecretUpdates, ...explicitWorkerSecretUpdates }
-      : {},
+    workerSecretUpdates: input.updateExistingWorkers ? explicitWorkerSecretUpdates : {},
+    pendingWorkerSecretUpdateIntent: input.updateExistingWorkers
+      ? pendingWorkerSecretUpdateIntent
+      : undefined,
     bootstrapGitHubId: existingInstallation
       ? configured(input.bootstrapGitHubId, 'bootstrapGitHubId')
       : required(
@@ -500,16 +517,8 @@ function assertCanonicalProjectSecretKey(
 
 function secretCheckpoint(
   secrets: PlatformInstallationSecrets,
-  includeWorkerSecretUpdates = true,
+  workerSecretUpdateIntent?: PlatformWorkerSecretUpdateIntent | null,
 ): Record<string, string> {
-  const workerSecretUpdates = Object.fromEntries(
-    Object.entries(secrets.workerSecretUpdates ?? {}).filter(
-      ([name, value]) =>
-        PLATFORM_WORKER_SECRET_UPDATE_NAMES.includes(name as PlatformWorkerSecretUpdateName) &&
-        typeof value === 'string' &&
-        value !== '',
-    ),
-  );
   return {
     bootstrapGitHubId: secrets.bootstrapGitHubId,
     bootstrapGitHubLogin: secrets.bootstrapGitHubLogin,
@@ -523,17 +532,17 @@ function secretCheckpoint(
     projectSecretKeysJson: secrets.projectSecretKeysJson,
     r2AccessKeyId: secrets.r2AccessKeyId,
     r2SecretAccessKey: secrets.r2SecretAccessKey,
-    ...(includeWorkerSecretUpdates && Object.keys(workerSecretUpdates).length > 0
-      ? { workerSecretUpdatesJson: JSON.stringify(workerSecretUpdates) }
+    ...(workerSecretUpdateIntent
+      ? { workerSecretUpdatesJson: JSON.stringify(workerSecretUpdateIntent) }
       : {}),
   };
 }
 
-function parseWorkerSecretUpdates(
+function parseWorkerSecretUpdateIntent(
   value: string | undefined,
-): Partial<Record<PlatformWorkerSecretUpdateName, string>> {
+): PlatformWorkerSecretUpdateIntent | undefined {
   if (!value) {
-    return {};
+    return undefined;
   }
   let parsed: unknown;
   try {
@@ -541,11 +550,30 @@ function parseWorkerSecretUpdates(
   } catch {
     throw new Error('platform: Encrypted pending Worker secret updates must be valid JSON.');
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('platform: Encrypted pending Worker secret updates must be an object.');
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    !('schema' in parsed) ||
+    parsed.schema !== 1 ||
+    !('id' in parsed) ||
+    typeof parsed.id !== 'string' ||
+    parsed.id === '' ||
+    !('baselineGeneration' in parsed) ||
+    !Number.isSafeInteger(parsed.baselineGeneration) ||
+    Number(parsed.baselineGeneration) < 0 ||
+    !('generation' in parsed) ||
+    (parsed.generation !== null &&
+      (!Number.isSafeInteger(parsed.generation) || Number(parsed.generation) <= 0)) ||
+    !('updates' in parsed) ||
+    !parsed.updates ||
+    typeof parsed.updates !== 'object' ||
+    Array.isArray(parsed.updates)
+  ) {
+    throw new Error('platform: Encrypted pending Worker secret update intent is invalid.');
   }
   const updates: Partial<Record<PlatformWorkerSecretUpdateName, string>> = {};
-  for (const [name, entry] of Object.entries(parsed)) {
+  for (const [name, entry] of Object.entries(parsed.updates)) {
     if (
       !PLATFORM_WORKER_SECRET_UPDATE_NAMES.includes(name as PlatformWorkerSecretUpdateName) ||
       typeof entry !== 'string' ||
@@ -555,7 +583,29 @@ function parseWorkerSecretUpdates(
     }
     updates[name as PlatformWorkerSecretUpdateName] = entry;
   }
-  return updates;
+  if (Object.keys(updates).length === 0) {
+    throw new Error('platform: Encrypted pending Worker secret update intent is empty.');
+  }
+  return {
+    baselineGeneration: Number(parsed.baselineGeneration),
+    generation: parsed.generation === null ? null : Number(parsed.generation),
+    id: parsed.id,
+    schema: 1,
+    updates,
+  };
+}
+
+function sanitizeWorkerSecretUpdates(
+  updates: PlatformInstallationSecrets['workerSecretUpdates'],
+): PlatformWorkerSecretUpdates {
+  return Object.fromEntries(
+    Object.entries(updates ?? {}).filter(
+      ([name, value]) =>
+        PLATFORM_WORKER_SECRET_UPDATE_NAMES.includes(name as PlatformWorkerSecretUpdateName) &&
+        typeof value === 'string' &&
+        value !== '',
+    ),
+  );
 }
 
 export async function installPlatform(
@@ -609,12 +659,33 @@ export async function installPlatform(
   } else if (manifest.status === 'uninstalled') {
     throw new Error(`platform: Installation ${manifest.id} has already been uninstalled.`);
   }
+  const explicitWorkerSecretUpdates = sanitizeWorkerSecretUpdates(secrets.workerSecretUpdates);
+  const hasExplicitWorkerSecretUpdates = Object.keys(explicitWorkerSecretUpdates).length > 0;
+  const resumedWorkerSecretUpdateIntent =
+    secrets.pendingWorkerSecretUpdateIntent &&
+    platformWorkerSecretUpdateIntentState(manifest, secrets.pendingWorkerSecretUpdateIntent) ===
+      'active'
+      ? secrets.pendingWorkerSecretUpdateIntent
+      : null;
+  let workerSecretUpdateIntent: PlatformWorkerSecretUpdateIntent | null =
+    hasExplicitWorkerSecretUpdates
+      ? {
+          baselineGeneration: latestPlatformWorkerCutoverGeneration(manifest),
+          generation: null,
+          id: randomUUID(),
+          schema: 1,
+          updates: {
+            ...resumedWorkerSecretUpdateIntent?.updates,
+            ...explicitWorkerSecretUpdates,
+          },
+        }
+      : resumedWorkerSecretUpdateIntent;
   if (preserveDisabled && manifest.desiredState !== 'disabled') {
     manifest = setInstallationDesiredState(manifest, 'disabled', now());
     writeInstallationManifest(manifest);
   }
   assertRequiredPlatformSecrets(plan, manifest, secrets);
-  const pendingSecrets = secretCheckpoint(secrets);
+  const pendingSecrets = secretCheckpoint(secrets, workerSecretUpdateIntent);
   writePendingInstallationSecrets(manifest, {
     ...pendingSecrets,
     databaseClaimState: 'claiming',
@@ -661,6 +732,17 @@ export async function installPlatform(
       'platform: This installation changed on another host. Local state was refreshed; rerun the command to review a current plan.',
     );
   }
+  if (
+    workerSecretUpdateIntent &&
+    !hasExplicitWorkerSecretUpdates &&
+    platformWorkerSecretUpdateIntentState(manifest, workerSecretUpdateIntent) !== 'active'
+  ) {
+    workerSecretUpdateIntent = null;
+  }
+  const workerDeploymentSecrets: PlatformInstallationSecrets = {
+    ...secrets,
+    workerSecretUpdates: workerSecretUpdateIntent?.updates ?? {},
+  };
   try {
     assertPlatformRuntimeSafety(
       runtime,
@@ -1168,11 +1250,30 @@ export async function installPlatform(
       }
     }
     workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
+    if (workerSecretUpdateIntent) {
+      manifest = recordWorkerSecretUpdateState(
+        manifest,
+        workerCutoverGeneration,
+        'pending',
+        workerSecretUpdateIntent.id,
+        now(),
+      );
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      workerSecretUpdateIntent = {
+        ...workerSecretUpdateIntent,
+        generation: workerCutoverGeneration,
+      };
+      writePendingInstallationSecrets(
+        manifest,
+        secretCheckpoint(secrets, workerSecretUpdateIntent),
+      );
+    }
     for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
       const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
       const workerSecrets = platformWorkerSecretPayload(
         key,
-        secrets,
+        workerDeploymentSecrets,
         plan.account.id,
         zone.id,
         action.action !== 'create',
@@ -1311,6 +1412,15 @@ export async function installPlatform(
         now(),
       );
       manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, false, now());
+      if (workerSecretUpdateIntent) {
+        manifest = recordWorkerSecretUpdateState(
+          manifest,
+          workerCutoverGeneration,
+          'committed',
+          workerSecretUpdateIntent.id,
+          now(),
+        );
+      }
       manifest = {
         ...manifest,
         platformVersion: version,
@@ -1321,7 +1431,7 @@ export async function installPlatform(
       manifest = transitionInstallation(manifest, 'disabled', now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      writePendingInstallationSecrets(manifest, secretCheckpoint(secrets, false));
+      writePendingInstallationSecrets(manifest, secretCheckpoint(secrets));
       promoteInstallationSecrets(manifest);
       saveInstalledPlatformConnection(plan, manifest);
       return {
@@ -1397,11 +1507,30 @@ export async function installPlatform(
       workerRollbacks = [];
 
       workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
+      if (workerSecretUpdateIntent) {
+        manifest = recordWorkerSecretUpdateState(
+          manifest,
+          workerCutoverGeneration,
+          'pending',
+          workerSecretUpdateIntent.id,
+          now(),
+        );
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+        workerSecretUpdateIntent = {
+          ...workerSecretUpdateIntent,
+          generation: workerCutoverGeneration,
+        };
+        writePendingInstallationSecrets(
+          manifest,
+          secretCheckpoint(secrets, workerSecretUpdateIntent),
+        );
+      }
       for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
         const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
         const workerSecrets = platformWorkerSecretPayload(
           key,
-          secrets,
+          workerDeploymentSecrets,
           plan.account.id,
           zone.id,
           action.action !== 'create',
@@ -1559,6 +1688,15 @@ export async function installPlatform(
     workerDeploymentCommitted = true;
     manifest = recordWorkerCutoverResolution(manifest, workerCutoverGeneration, 'committed', now());
     manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, true, now());
+    if (workerSecretUpdateIntent) {
+      manifest = recordWorkerSecretUpdateState(
+        manifest,
+        workerCutoverGeneration,
+        'committed',
+        workerSecretUpdateIntent.id,
+        now(),
+      );
+    }
     manifest = {
       ...manifest,
       platformVersion: version,
@@ -1571,7 +1709,7 @@ export async function installPlatform(
     writeInstallationManifest(manifest);
     await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     workerTrafficGuarded = false;
-    writePendingInstallationSecrets(manifest, secretCheckpoint(secrets, false));
+    writePendingInstallationSecrets(manifest, secretCheckpoint(secrets));
     promoteInstallationSecrets(manifest);
     saveInstalledPlatformConnection(plan, manifest);
     return {
@@ -4134,14 +4272,24 @@ type InterruptedWorkerCutover = Readonly<{
 }>;
 
 function nextWorkerCutoverGeneration(manifest: PlatformInstallationManifest): number {
-  return (
-    Math.max(
-      0,
-      ...manifest.steps.flatMap((step) => {
-        const match = /^worker-(?:cutover|traffic-state):(\d+)/.exec(step.key);
-        return match ? [Number(match[1])] : [];
-      }),
-    ) + 1
+  return latestPlatformWorkerCutoverGeneration(manifest) + 1;
+}
+
+function recordWorkerSecretUpdateState(
+  manifest: PlatformInstallationManifest,
+  generation: number,
+  state: 'pending' | 'committed',
+  intentId: string,
+  completedAt: string,
+): PlatformInstallationManifest {
+  return recordInstallationStep(
+    manifest,
+    {
+      completedAt,
+      key: `worker-secret-updates:${generation}:${state}`,
+      resultHash: intentId,
+    },
+    completedAt,
   );
 }
 
