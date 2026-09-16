@@ -102,6 +102,13 @@ void platform project show <project-id>
 
 Project details include resources, domains, and recent builds and deployments. The [command reference](../reference/cli.md#operator-commands) also covers suspending and restoring users, deleting projects, and removing accounts.
 
+New users on a self-hosted installation start with the `custom` profile, which
+does not cap application requests, AI usage, deployment frequency, or retained
+Worker deployments. Named profiles such as `pro` apply the platform's quota and
+retention policies; they do not purchase Cloudflare services or bill your users.
+Storage figures are not a hard storage-quota boundary. Set an operating budget
+and retention policy before opening signup beyond your invited team.
+
 The last active administrator cannot be deleted or suspended, including through
 the browser admin UI. Another administrator must still have access. Automatic
 usage limits do not remove administrator access and do not count as a manual

@@ -328,7 +328,7 @@ Rollback does not reverse database migrations. Void asks for confirmation when t
 
 #### Scope and limitations
 
-Void supports Worker apps, static sites, SPAs, known SSGs, `--dir` deploys, and fully prerenderable Pages apps with `output: "static"`. It also deploys Cloudflare output from TanStack Start, React Router, vinext App Router and Pages Router, SvelteKit, Nuxt, Analog, and Astro.
+Void supports Worker apps, static sites, SPAs, known SSGs, `--dir` deploys, and fully prerenderable Pages apps with `output: "static"`. It also deploys Cloudflare output from TanStack Start, React Router, SvelteKit, Nuxt, Analog, and Astro. The vinext adapters remain experimental and are outside the beta support commitment.
 
 Static sites use a small Worker in front of Workers Assets to handle redirects, rewrites, fallbacks, and headers. Hybrid and SSR apps keep their application Worker. A page that opts out of prerendering, a dynamic page without `getPrerenderPaths()`, or another runtime feature keeps the app on a Worker even with `output: "static"`.
 
@@ -364,7 +364,7 @@ These checks detect changes to the deployment target or uploader, but they don't
 
 `pnpm dev` continues to work as before -- Miniflare creates local instances of all bindings regardless of the IDs in your `wrangler.jsonc`. Your real resource IDs are only used during direct Cloudflare deployment.
 
-### AI (self-host)
+### AI on your Cloudflare account {#ai-self-host}
 
 `void/ai` works on your own Cloudflare account, along two paths:
 
@@ -411,11 +411,11 @@ Set `ai.gateway` before calling `ai.provider().fetch()`; otherwise it returns `5
 
 Notes:
 
-- **No cross-tenant usage metering.** On the Void platform, AI calls are metered and billed through a shared proxy. Self-hosted, there is no metering -- you get your own [Cloudflare AI Gateway analytics](https://developers.cloudflare.com/ai-gateway/) instead.
+- **Account-owned usage.** Direct deployments use your own [Cloudflare AI Gateway analytics](https://developers.cloudflare.com/ai-gateway/). A team platform meters requests through its shared proxy; those usage records do not automatically bill application developers.
 - **The runtime reads the `env.AI` binding by name** -- a custom-named root AI binding is not supported.
 - **`void dev` has no local Workers AI emulation.** In development, AI still routes through Void, so `void dev` AI requires `void auth login` even when you deploy self-hosted.
 
-### ISR (self-host)
+### ISR on your Cloudflare account {#isr-self-host}
 
 [Revalidation (ISR)](../guide/edge/revalidation.md) works self-hosted. `void deploy --platform cloudflare` automatically creates or reuses the cache KV namespace and persists its `ISR_CACHE` binding in `wrangler.jsonc`, just like the other inferred resources.
 
