@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vite-plus/test';
+import { createBindingHandler } from '../../../src/runtime/remote/binding-handler.ts';
 import { ProxyClient } from '../../../src/runtime/remote/client.ts';
 import { ProxyR2Bucket } from '../../../src/runtime/remote/r2.ts';
 
@@ -89,6 +90,78 @@ describe('ProxyR2Bucket', () => {
   });
 
   describe('put()', () => {
+    it('rejects malformed conditions before calling R2', async () => {
+      const put = vi.fn();
+      const handler = createBindingHandler({ __VOID_PROXY_TOKEN: 'internal', STORAGE: { put } });
+      const response = await handler.request('/r2/put-conditional', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-void-internal': 'internal' },
+        body: JSON.stringify({
+          binding: 'STORAGE',
+          key: 'key',
+          value: 'new',
+          onlyIf: { uploadedAfter: 'invalid' },
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect(put).not.toHaveBeenCalled();
+    });
+
+    it.each(['object', 'headers'] as const)(
+      'preserves %s conditions and a rejected write through the binding handler',
+      async (kind) => {
+        const put = vi.fn(async () => null);
+        const handler = createBindingHandler({ __VOID_PROXY_TOKEN: 'internal', STORAGE: { put } });
+        const requests: Array<string> = [];
+        globalThis.fetch = vi.fn(async (input, init) => {
+          const path = new URL(String(input)).pathname;
+          requests.push(path);
+          return handler.request(path, {
+            ...init,
+            headers: { 'content-type': 'application/json', 'x-void-internal': 'internal' },
+          });
+        }) as typeof fetch;
+        const before = new Date('2026-01-01T00:00:00Z');
+        const onlyIf =
+          kind === 'headers'
+            ? new Headers({ 'if-match': 'old' })
+            : { etagMatches: 'old', uploadedBefore: before, secondsGranularity: true };
+        const result = await new ProxyR2Bucket(createClient(), 'STORAGE').put('key', 'new', {
+          onlyIf,
+        });
+        expect(requests).toEqual(['/r2/put-conditional']);
+        expect(result).toBeNull();
+        const options = (put.mock.calls[0] as unknown as [string, unknown, R2PutOptions])[2];
+        if (kind === 'headers') {
+          expect((options.onlyIf as Headers).get('if-match')).toBe('old');
+        } else {
+          expect(options.onlyIf).toEqual(onlyIf);
+          expect((options.onlyIf as R2Conditional).uploadedBefore).toBeInstanceOf(Date);
+        }
+      },
+    );
+
+    it('returns actual metadata from a successful conditional put', async () => {
+      mockFetch({
+        key: 'file.txt',
+        size: 5,
+        etag: 'new-etag',
+        version: 'v1',
+        lastModified: '2026-01-01T00:00:00Z',
+        contentType: 'text/plain',
+        customMetadata: { owner: 'me' },
+      });
+      const result = await new ProxyR2Bucket(createClient(), 'STORAGE').put('file.txt', 'hello', {
+        onlyIf: { etagDoesNotMatch: '*' },
+      });
+      expect(result).toMatchObject({
+        size: 5,
+        etag: 'new-etag',
+        version: 'v1',
+        customMetadata: { owner: 'me' },
+      });
+    });
+
     it.each([
       ['typed array slice', () => new Uint8Array([9, 1, 2, 8]).subarray(1, 3), [1, 2]],
       ['DataView', () => new DataView(new Uint8Array([9, 1, 2, 8]).buffer, 1, 2), [1, 2]],

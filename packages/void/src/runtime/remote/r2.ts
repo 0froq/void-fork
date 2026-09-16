@@ -1,4 +1,5 @@
 import type { ProxyClient } from './client.ts';
+import { serializeR2Conditional } from './r2-conditions.ts';
 
 /**
  * R2Bucket implementation backed by the remote proxy.
@@ -110,7 +111,27 @@ export class ProxyR2Bucket {
       body.customMetadata = options.customMetadata;
     }
 
-    await this.client.fetch('/r2/put', body);
+    const conditional = options?.onlyIf !== undefined;
+    if (conditional) {
+      body.onlyIf = serializeR2Conditional(options.onlyIf!);
+    }
+    // A separate endpoint prevents older proxies/workers from silently ignoring onlyIf.
+    const res = await this.client.fetch(conditional ? '/r2/put-conditional' : '/r2/put', body);
+    const result = (await res.json()) as
+      | Parameters<typeof makeR2Object>[0]
+      | null
+      | { success: true };
+    if (result === null) {
+      return null;
+    }
+    if ('key' in result) {
+      return makeR2Object(result);
+    }
+    if (conditional) {
+      throw new Error(
+        'remote: R2 conditional put requires a compatible Void platform and deployment.',
+      );
+    }
 
     // Return a minimal R2Object
     return makeR2Object({
@@ -190,17 +211,20 @@ function makeR2Object(data: {
   etag: string;
   lastModified: string;
   contentType: string;
+  version?: string;
+  httpMetadata?: R2HTTPMetadata;
+  customMetadata?: Record<string, string>;
 }): R2Object {
   return {
     key: data.key,
-    version: '',
+    version: data.version ?? '',
     size: data.size,
     etag: data.etag,
     httpEtag: data.etag ? `"${data.etag}"` : '',
     checksums: { toJSON: () => ({}) } as R2Checksums,
     uploaded: new Date(data.lastModified || Date.now()),
-    httpMetadata: { contentType: data.contentType },
-    customMetadata: {},
+    httpMetadata: data.httpMetadata ?? { contentType: data.contentType },
+    customMetadata: data.customMetadata ?? {},
     storageClass: 'Standard',
     range: undefined,
     writeHttpMetadata(_headers: Headers) {

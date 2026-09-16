@@ -98,6 +98,8 @@ src/
 
 ### Key Design Decisions
 
+- **Remote R2 preconditions**: Conditional uploads use `/r2/put-conditional` through both the proxy and deployed binding handler. Keep this distinct from legacy `/r2/put` so older deployments cannot silently ignore conditions. Restore date/Headers options before calling the native binding, preserve a `null` precondition result, and never fall back to an unconditional REST upload.
+
 - **Deployment connection**: `void connect [url] [--platform cloudflare|void]` is the developer entry point. A URL chooses Void; without arguments the CLI offers both targets. Interactive connection reuses or obtains credentials for the selected origin/account. `--no-login` saves only verified Void connection metadata; headless authenticated connection requires an origin-scoped keychain session or `VOID_TOKEN` with matching `VOID_API_URL`. Existing project links are preserved when connecting elsewhere. Platform installation and administration remain under `void platform`; it has no `connect` subcommand.
 
 - **Import redirection**: The routing plugin's `resolveId` hook redirects bare `"void"` imports to `void/handler` (the lightweight subpath). Without this, route files pull the entire plugin (vite, @cloudflare/vite-plugin, lightningcss) into the Worker bundle. Uses `import.meta.resolve()` to compute absolute paths at plugin init.
