@@ -71,8 +71,10 @@ import {
 } from '../../src/cli/platform-plan.ts';
 import {
   listInstallationManifests,
+  promoteInstallationSecrets,
   readInstallationRecoverySecrets,
   writeInstallationManifest,
+  writePendingInstallationSecrets,
 } from '../../src/cli/platform-registry.ts';
 
 const directories: Array<string> = [];
@@ -1727,6 +1729,95 @@ describe('platform installer', () => {
     expect(platformWorkerSecretPayload('api', resumed, 'account', 'zone', true)).toBeNull();
   });
 
+  it('resumes encrypted per-Worker credential updates without replaying the baseline', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-secret-update-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const deployment = createPlatformDeploymentManifest({
+      application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+      displayName: 'Example',
+      installationSlug: 'example',
+    });
+    const manifest = createPlatformInstallationManifest({
+      account: { id: 'account', name: 'Account' },
+      createdAt: '2026-09-16T00:00:00.000Z',
+      deployment,
+      id: 'example-a1b2c3d4',
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    writeInstallationManifest(manifest);
+    const baseline = {
+      cloudflareApiToken: 'old-runtime-token',
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      githubClientId: 'old-github-id',
+      githubClientSecret: 'old-github-secret',
+      jwtSecret: TEST_PLATFORM_JWT_SECRET,
+      projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+      r2AccessKeyId: 'old-r2-id',
+      r2SecretAccessKey: 'old-r2-secret',
+    };
+    writePendingInstallationSecrets(manifest, baseline);
+    promoteInstallationSecrets(manifest);
+
+    const updates = {
+      CF_API_TOKEN: 'new-runtime-token',
+      GITHUB_CLIENT_ID: 'new-github-id',
+      GITHUB_CLIENT_SECRET: 'new-github-secret',
+      R2_ACCESS_KEY_ID: 'new-r2-id',
+      R2_SECRET_ACCESS_KEY: 'new-r2-secret',
+    };
+    writePendingInstallationSecrets(manifest, {
+      ...baseline,
+      cloudflareApiToken: updates.CF_API_TOKEN,
+      githubClientId: updates.GITHUB_CLIENT_ID,
+      githubClientSecret: updates.GITHUB_CLIENT_SECRET,
+      r2AccessKeyId: updates.R2_ACCESS_KEY_ID,
+      r2SecretAccessKey: updates.R2_SECRET_ACCESS_KEY,
+      workerSecretUpdatesJson: JSON.stringify(updates),
+    });
+    const checkpoint = readInstallationRecoverySecrets(manifest)!;
+    expect(checkpoint.cloudflareApiToken).toBe('new-runtime-token');
+    const resumed = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      cloudflareApiToken: '',
+      checkpoint,
+      databaseUrl: baseline.databaseUrl,
+      existingInstallation: true,
+      githubClientId: '',
+      githubClientSecret: '',
+      r2AccessKeyId: '',
+      r2SecretAccessKey: '',
+      updateExistingWorkers: true,
+    });
+    expect(platformWorkerSecretPayload('api', resumed, 'account', 'zone', true)).toEqual(updates);
+    expect(platformWorkerSecretPayload('proxy', resumed, 'account', 'zone', true)).toEqual({
+      CF_API_TOKEN: updates.CF_API_TOKEN,
+    });
+
+    writePendingInstallationSecrets(manifest, {
+      ...checkpoint,
+      workerSecretUpdatesJson: '',
+    });
+    promoteInstallationSecrets(manifest);
+    const later = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      cloudflareApiToken: '',
+      checkpoint: readInstallationRecoverySecrets(manifest),
+      databaseUrl: baseline.databaseUrl,
+      existingInstallation: true,
+      githubClientId: '',
+      githubClientSecret: '',
+      r2AccessKeyId: '',
+      r2SecretAccessKey: '',
+      updateExistingWorkers: true,
+    });
+    expect(platformWorkerSecretPayload('api', later, 'account', 'zone', true)).toBeNull();
+    expect(platformWorkerSecretPayload('proxy', later, 'account', 'zone', true)).toBeNull();
+  });
+
   it('omits unavailable composite secrets so Cloudflare preserves deployed values', () => {
     const secrets = createPlatformInstallationSecrets({
       bootstrapGitHubId: '',
@@ -2628,8 +2719,21 @@ describe('platform installer', () => {
       ...sourceManifest,
       usageProtocolVersion: 0 as const,
     };
+    const rotatedWorkerSecrets = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      cloudflareApiToken: 'rotated-cf-token',
+      checkpoint: readInstallationRecoverySecrets(installed.manifest),
+      databaseUrl: secrets.databaseUrl,
+      existingInstallation: true,
+      githubClientId: 'rotated-github-id',
+      githubClientSecret: 'rotated-github-secret',
+      r2AccessKeyId: 'rotated-r2-id',
+      r2SecretAccessKey: 'rotated-r2-secret',
+      updateExistingWorkers: true,
+    });
     await expect(
-      installPlatform(upgradedPlan, secrets, legacySourceManifest, {
+      installPlatform(upgradedPlan, rotatedWorkerSecrets, legacySourceManifest, {
         acquireDatabaseLifecycleLock,
         claimDatabase,
         client: {
@@ -2640,9 +2744,21 @@ describe('platform installer', () => {
             }
           },
         },
-        deployWorker: async (config) => {
+        deployWorker: async (config, secretPayload) => {
           const name = String(config.name);
           interruptedProtocolEvents.push(`deploy:${name}`);
+          if (name === deployment.resources.apiWorker) {
+            expect(secretPayload).toEqual({
+              CF_API_TOKEN: 'rotated-cf-token',
+              GITHUB_CLIENT_ID: 'rotated-github-id',
+              GITHUB_CLIENT_SECRET: 'rotated-github-secret',
+              R2_ACCESS_KEY_ID: 'rotated-r2-id',
+              R2_SECRET_ACCESS_KEY: 'rotated-r2-secret',
+            });
+          }
+          if (name === deployment.resources.proxyWorker) {
+            expect(secretPayload).toEqual({ CF_API_TOKEN: 'rotated-cf-token' });
+          }
           if (name === deployment.resources.proxyWorker) {
             throw new Error('interrupted after API activation');
           }
@@ -2668,18 +2784,40 @@ describe('platform installer', () => {
       status: 'failed',
       usageProtocolVersion: 0,
     });
+    const interruptedSecretCheckpoint = readInstallationRecoverySecrets(installed.manifest)!;
+    const resumedWorkerSecrets = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      cloudflareApiToken: '',
+      checkpoint: interruptedSecretCheckpoint,
+      databaseUrl: secrets.databaseUrl,
+      existingInstallation: true,
+      githubClientId: '',
+      githubClientSecret: '',
+      r2AccessKeyId: '',
+      r2SecretAccessKey: '',
+      updateExistingWorkers: true,
+    });
+    expect(
+      platformWorkerSecretPayload('api', resumedWorkerSecrets, 'account', 'zone', true),
+    ).toEqual(platformWorkerSecretPayload('api', rotatedWorkerSecrets, 'account', 'zone', true));
+    expect(
+      platformWorkerSecretPayload('proxy', resumedWorkerSecrets, 'account', 'zone', true),
+    ).toEqual(platformWorkerSecretPayload('proxy', rotatedWorkerSecrets, 'account', 'zone', true));
 
     const emptyCoreUpgradeConfigs: Array<Record<string, unknown>> = [];
+    const resumedSecretPayloads: Array<Record<string, string> | null> = [];
     const emptyCoreUpgrade = await installPlatform(
       upgradedPlan,
-      secrets,
+      resumedWorkerSecrets,
       { ...sourceManifest, safetyProtocols: { sandboxDrain: 0 } },
       {
         acquireDatabaseLifecycleLock,
         claimDatabase,
         client: upgradeClient,
-        deployWorker: async (config) => {
+        deployWorker: async (config, secretPayload) => {
           emptyCoreUpgradeConfigs.push(config);
+          resumedSecretPayloads.push(secretPayload);
         },
         migrateDatabase: async () => {},
         prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
@@ -2693,6 +2831,13 @@ describe('platform installer', () => {
     expect(emptyCoreUpgrade.waitingForSandboxDrain).toBe(false);
     expect(emptyCoreUpgrade.manifest.safetyProtocols).toEqual({ sandboxDrain: 1 });
     expect(emptyCoreUpgradeConfigs).toHaveLength(4);
+    expect(resumedSecretPayloads.slice(0, 2)).toEqual([
+      platformWorkerSecretPayload('api', rotatedWorkerSecrets, 'account', 'zone', true),
+      platformWorkerSecretPayload('proxy', rotatedWorkerSecrets, 'account', 'zone', true),
+    ]);
+    expect(
+      readInstallationRecoverySecrets(emptyCoreUpgrade.manifest)?.workerSecretUpdatesJson,
+    ).toBe(undefined);
     for (const index of [0, 1, 3]) {
       expect(
         (emptyCoreUpgradeConfigs[index]!.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,

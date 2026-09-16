@@ -106,6 +106,16 @@ export type PlatformInstallationSecrets = Readonly<{
   >;
 }>;
 
+const PLATFORM_WORKER_SECRET_UPDATE_NAMES = [
+  'CF_API_TOKEN',
+  'GITHUB_CLIENT_ID',
+  'GITHUB_CLIENT_SECRET',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+] as const;
+
+type PlatformWorkerSecretUpdateName = (typeof PLATFORM_WORKER_SECRET_UPDATE_NAMES)[number];
+
 export type PlatformDatabaseLifecycleLock = (() => Promise<void>) & {
   authoritativeManifest?: PlatformInstallationManifest | null;
   checkpoint?: (manifest: PlatformInstallationManifest) => Promise<void>;
@@ -305,15 +315,17 @@ export function createPlatformInstallationSecrets(input: {
     projectSecretKeysJson: input.projectSecretKeysJson || '',
     required,
   });
+  const resumedWorkerSecretUpdates = parseWorkerSecretUpdates(checkpoint.workerSecretUpdatesJson);
+  const explicitWorkerSecretUpdates = withoutEmptySecrets({
+    CF_API_TOKEN: input.cloudflareApiToken,
+    GITHUB_CLIENT_ID: input.githubClientId,
+    GITHUB_CLIENT_SECRET: input.githubClientSecret,
+    R2_ACCESS_KEY_ID: input.r2AccessKeyId,
+    R2_SECRET_ACCESS_KEY: input.r2SecretAccessKey,
+  });
   return {
     workerSecretUpdates: input.updateExistingWorkers
-      ? withoutEmptySecrets({
-          CF_API_TOKEN: input.cloudflareApiToken,
-          GITHUB_CLIENT_ID: input.githubClientId,
-          GITHUB_CLIENT_SECRET: input.githubClientSecret,
-          R2_ACCESS_KEY_ID: input.r2AccessKeyId,
-          R2_SECRET_ACCESS_KEY: input.r2SecretAccessKey,
-        })
+      ? { ...resumedWorkerSecretUpdates, ...explicitWorkerSecretUpdates }
       : {},
     bootstrapGitHubId: existingInstallation
       ? configured(input.bootstrapGitHubId, 'bootstrapGitHubId')
@@ -486,7 +498,18 @@ function assertCanonicalProjectSecretKey(
   }
 }
 
-function secretCheckpoint(secrets: PlatformInstallationSecrets): Record<string, string> {
+function secretCheckpoint(
+  secrets: PlatformInstallationSecrets,
+  includeWorkerSecretUpdates = true,
+): Record<string, string> {
+  const workerSecretUpdates = Object.fromEntries(
+    Object.entries(secrets.workerSecretUpdates ?? {}).filter(
+      ([name, value]) =>
+        PLATFORM_WORKER_SECRET_UPDATE_NAMES.includes(name as PlatformWorkerSecretUpdateName) &&
+        typeof value === 'string' &&
+        value !== '',
+    ),
+  );
   return {
     bootstrapGitHubId: secrets.bootstrapGitHubId,
     bootstrapGitHubLogin: secrets.bootstrapGitHubLogin,
@@ -500,7 +523,39 @@ function secretCheckpoint(secrets: PlatformInstallationSecrets): Record<string, 
     projectSecretKeysJson: secrets.projectSecretKeysJson,
     r2AccessKeyId: secrets.r2AccessKeyId,
     r2SecretAccessKey: secrets.r2SecretAccessKey,
+    ...(includeWorkerSecretUpdates && Object.keys(workerSecretUpdates).length > 0
+      ? { workerSecretUpdatesJson: JSON.stringify(workerSecretUpdates) }
+      : {}),
   };
+}
+
+function parseWorkerSecretUpdates(
+  value: string | undefined,
+): Partial<Record<PlatformWorkerSecretUpdateName, string>> {
+  if (!value) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('platform: Encrypted pending Worker secret updates must be valid JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('platform: Encrypted pending Worker secret updates must be an object.');
+  }
+  const updates: Partial<Record<PlatformWorkerSecretUpdateName, string>> = {};
+  for (const [name, entry] of Object.entries(parsed)) {
+    if (
+      !PLATFORM_WORKER_SECRET_UPDATE_NAMES.includes(name as PlatformWorkerSecretUpdateName) ||
+      typeof entry !== 'string' ||
+      entry === ''
+    ) {
+      throw new Error('platform: Encrypted pending Worker secret updates are invalid.');
+    }
+    updates[name as PlatformWorkerSecretUpdateName] = entry;
+  }
+  return updates;
 }
 
 export async function installPlatform(
@@ -1266,6 +1321,7 @@ export async function installPlatform(
       manifest = transitionInstallation(manifest, 'disabled', now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      writePendingInstallationSecrets(manifest, secretCheckpoint(secrets, false));
       promoteInstallationSecrets(manifest);
       saveInstalledPlatformConnection(plan, manifest);
       return {
@@ -1515,6 +1571,7 @@ export async function installPlatform(
     writeInstallationManifest(manifest);
     await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     workerTrafficGuarded = false;
+    writePendingInstallationSecrets(manifest, secretCheckpoint(secrets, false));
     promoteInstallationSecrets(manifest);
     saveInstalledPlatformConnection(plan, manifest);
     return {

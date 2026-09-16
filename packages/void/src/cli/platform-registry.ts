@@ -486,8 +486,8 @@ export function readInstallationRecoverySecrets(
   directory: string = platformRegistryDirectory(),
 ): Record<string, string> | null {
   return (
-    readRecoveryMaterial(manifest, 'recovery', directory) ??
-    readPendingInstallationSecrets(manifest, directory)
+    readPendingInstallationSecrets(manifest, directory) ??
+    readRecoveryMaterial(manifest, 'recovery', directory)
   );
 }
 
