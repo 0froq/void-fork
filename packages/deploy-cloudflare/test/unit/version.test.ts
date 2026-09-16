@@ -43,6 +43,9 @@ function runner(overrides?: {
   let triggerCalls = 0;
   let statusCalls = 0;
   let activeVersionId: string | null = CURRENT;
+  let deploymentVersions: Array<{ version_id: string; percentage: number }> = [
+    { version_id: CURRENT, percentage: 100 },
+  ];
   let uploaded = false;
   return vi.fn((args: Array<string>) => {
     if (args[0] === 'deployments') {
@@ -50,14 +53,11 @@ function runner(overrides?: {
       if (statusCalls === 1 && overrides?.status) {
         if (overrides.status.status !== 0) {
           activeVersionId = null;
+          deploymentVersions = [];
         }
         return overrides.status;
       }
-      return ok(
-        JSON.stringify({
-          versions: activeVersionId ? [{ version_id: activeVersionId, percentage: 100 }] : [],
-        }),
-      );
+      return ok(JSON.stringify({ versions: deploymentVersions }));
     }
     if (args[0] === 'versions' && args[1] === 'upload') {
       uploaded = true;
@@ -73,10 +73,12 @@ function runner(overrides?: {
       const result =
         deployCalls === 1 ? (overrides?.activate ?? ok()) : (overrides?.rollback ?? ok());
       if (result.status === 0) {
-        const active = args.find((argument) => /@100$/.test(argument));
-        if (active) {
-          activeVersionId = active.slice(0, -4);
-        }
+        deploymentVersions = args.flatMap((argument) => {
+          const matched = argument.match(/^([^@]+)@(\d+(?:\.\d+)?)$/);
+          return matched ? [{ version_id: matched[1]!, percentage: Number(matched[2]) }] : [];
+        });
+        activeVersionId =
+          deploymentVersions.find((version) => version.percentage === 100)?.version_id ?? null;
       }
       return result;
     }
@@ -111,6 +113,9 @@ function runner(overrides?: {
           `${result.stdout}\n${result.stderr}`.match(
             /(?:Worker|Current) Version ID:\s*([0-9a-f-]+)/i,
           )?.[1] ?? activeVersionId;
+        deploymentVersions = activeVersionId
+          ? [{ version_id: activeVersionId, percentage: 100 }]
+          : [];
       }
       return result;
     }
@@ -1422,10 +1427,11 @@ describe('Cloudflare version activation', () => {
         }),
       }),
     );
-    expect(runWrangler.mock.calls[2]![0]).toEqual(
-      expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
+    const deployCalls = runWrangler.mock.calls.filter(
+      ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(runWrangler.mock.calls[4]![0]).toContain(`${NEXT}@100`);
+    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1]![0]).toContain(`${NEXT}@100`);
   });
 
   it('never sends Access headers to an unverified cached workers.dev subdomain', async () => {
@@ -1497,10 +1503,11 @@ describe('Cloudflare version activation', () => {
       rollback: 'succeeded',
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(runWrangler.mock.calls[2]![0]).toEqual(
-      expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
+    const deployCalls = runWrangler.mock.calls.filter(
+      ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(runWrangler.mock.calls[3]![0]).toContain(`${CURRENT}@100`);
+    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1]![0]).toContain(`${CURRENT}@100`);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
   });
 
@@ -1599,6 +1606,7 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.map(([args]) => args.slice(0, 2))).toEqual([
       ['deployments', 'status'],
       ['versions', 'upload'],
+      ['deployments', 'status'],
       ['versions', 'deploy'],
       ['deployments', 'status'],
       ['versions', 'deploy'],
@@ -1606,10 +1614,11 @@ describe('Cloudflare version activation', () => {
       ['triggers', 'deploy'],
       ['deployments', 'status'],
     ]);
-    expect(runWrangler.mock.calls[2]![0]).toEqual(
-      expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
+    const deployCalls = runWrangler.mock.calls.filter(
+      ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(runWrangler.mock.calls[4]![0]).toContain(`${NEXT}@100`);
+    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1]![0]).toContain(`${NEXT}@100`);
     expect(fetcher).toHaveBeenCalledWith(
       'https://my-worker.developer-platform-experience.workers.dev/__void/ready',
       expect.objectContaining({
@@ -1618,6 +1627,81 @@ describe('Cloudflare version activation', () => {
         }),
       }),
     );
+  });
+
+  it('does not stage over a production owner that changed after upload', async () => {
+    let statusCalls = 0;
+    const runWrangler = vi.fn(async (args: Array<string>) => {
+      if (args[0] === 'deployments') {
+        statusCalls++;
+        const versionId = statusCalls === 1 ? CURRENT : CONCURRENT;
+        return ok(JSON.stringify({ versions: [{ version_id: versionId, percentage: 100 }] }));
+      }
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return ok(JSON.stringify([{ id: CURRENT, annotations: {} }]));
+      }
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        return ok(`Worker Version ID: ${NEXT}`);
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        workersDevSubdomain: 'developer-platform-experience',
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'deployment-changed',
+      activeVersionId: CONCURRENT,
+      rollback: 'not-needed',
+    });
+    expect(
+      runWrangler.mock.calls.some(([args]) => args[0] === 'versions' && args[1] === 'deploy'),
+    ).toBe(false);
+  });
+
+  it('does not use Access fallback staging after a concurrent activation', async () => {
+    let statusCalls = 0;
+    const runWrangler = vi.fn(async (args: Array<string>) => {
+      if (args[0] === 'deployments') {
+        statusCalls++;
+        const versionId = statusCalls === 1 ? CURRENT : CONCURRENT;
+        return ok(JSON.stringify({ versions: [{ version_id: versionId, percentage: 100 }] }));
+      }
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return ok(JSON.stringify([{ id: CURRENT, annotations: {} }]));
+      }
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        return ok(
+          `Worker Version ID: ${NEXT}\nVersion Preview Alias URL: https://void-ready-abc-my-worker.developer-platform-experience.workers.dev`,
+        );
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => new Response('error code: 1050', { status: 403 }),
+        readinessAttempts: 1,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'deployment-changed',
+      activeVersionId: CONCURRENT,
+      rollback: 'not-needed',
+    });
+    expect(
+      runWrangler.mock.calls.some(([args]) => args[0] === 'versions' && args[1] === 'deploy'),
+    ).toBe(false);
   });
 
   it('restores the prior deployment when a zero-percent version is not ready', async () => {
@@ -1640,11 +1724,65 @@ describe('Cloudflare version activation', () => {
       rollback: 'succeeded',
     });
 
-    expect(runWrangler.mock.calls[2]![0]).toEqual(
-      expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]),
+    const deployCalls = runWrangler.mock.calls.filter(
+      ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(runWrangler.mock.calls[3]![0]).toContain(`${CURRENT}@100`);
+    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1]![0]).toContain(`${CURRENT}@100`);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
+  });
+
+  it('does not restore failed readiness staging over a concurrent candidate', async () => {
+    let deploymentVersions = [{ version_id: CURRENT, percentage: 100 }];
+    let deployCalls = 0;
+    const runWrangler = vi.fn(async (args: Array<string>) => {
+      if (args[0] === 'deployments') {
+        return ok(JSON.stringify({ versions: deploymentVersions }));
+      }
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return ok(JSON.stringify([{ id: CURRENT, annotations: {} }]));
+      }
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        return ok(`Worker Version ID: ${NEXT}`);
+      }
+      if (args[0] === 'versions' && args[1] === 'deploy') {
+        deployCalls++;
+        deploymentVersions = [
+          { version_id: CURRENT, percentage: 100 },
+          { version_id: NEXT, percentage: 0 },
+        ];
+        return ok();
+      }
+      throw new Error(`Unexpected command: ${args.join(' ')}`);
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        workersDevSubdomain: 'developer-platform-experience',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => {
+          deploymentVersions = [
+            { version_id: CURRENT, percentage: 100 },
+            { version_id: CONCURRENT, percentage: 0 },
+          ];
+          return new Response('not ready', { status: 503 });
+        },
+        sleep: async () => {},
+        readinessAttempts: 1,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'readiness-failed',
+      rollback: 'unsafe',
+    });
+    expect(deployCalls).toBe(1);
+    expect(deploymentVersions).toEqual([
+      { version_id: CURRENT, percentage: 100 },
+      { version_id: CONCURRENT, percentage: 0 },
+    ]);
   });
 
   it('does not invoke a changed uploader to restore zero-percent staging', async () => {
@@ -1671,6 +1809,7 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.map(([args]) => args[0])).toEqual([
       'deployments',
       'versions',
+      'deployments',
       'versions',
     ]);
   });

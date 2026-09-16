@@ -100,6 +100,17 @@ type ProductionDeployment = Readonly<{
   versions?: ReadonlyArray<Readonly<{ version_id?: unknown; percentage?: unknown }>>;
 }>;
 
+type ProductionVersionPercentage = Readonly<{ versionId: string; percentage: number }>;
+
+type CurrentProductionVersion =
+  | {
+      kind: 'ok';
+      versionId: string | null;
+      versions: ReadonlyArray<ProductionVersionPercentage>;
+    }
+  | { kind: 'failed'; status: number }
+  | { kind: 'split' };
+
 type RecentCloudflareVersion = Readonly<{
   id: string;
   number: number;
@@ -975,6 +986,15 @@ export async function activateCloudflareVersion(options: {
         rollback: 'not-needed',
       };
     }
+    const stagingOwnerFailure = await verifyReadinessStagingOwner(
+      options,
+      commonArgs,
+      previous.versionId,
+      versionId,
+    );
+    if (stagingOwnerFailure) {
+      return stagingOwnerFailure;
+    }
     const staged = await deployVersionPercentages(
       options,
       commonArgs,
@@ -1029,6 +1049,15 @@ export async function activateCloudflareVersion(options: {
           rollback: 'not-needed',
         };
       }
+      const stagingOwnerFailure = await verifyReadinessStagingOwner(
+        options,
+        commonArgs,
+        previous.versionId,
+        versionId,
+      );
+      if (stagingOwnerFailure) {
+        return stagingOwnerFailure;
+      }
       const staged = await deployVersionPercentages(
         options,
         commonArgs,
@@ -1068,7 +1097,13 @@ export async function activateCloudflareVersion(options: {
       versionId,
       previousVersionId: previous.versionId,
       rollback: stagedVersionOverride
-        ? await restorePreviousVersion(options, commonArgs, previous.versionId, 'readiness failed')
+        ? await restorePreviousVersion(
+            options,
+            commonArgs,
+            previous.versionId,
+            'readiness failed',
+            [stagedVersionPercentages(previous.versionId, versionId)],
+          )
         : 'not-needed',
     };
   }
@@ -1084,6 +1119,7 @@ export async function activateCloudflareVersion(options: {
             commonArgs,
             previous.versionId,
             'uploader verification failed',
+            [stagedVersionPercentages(previous.versionId, versionId)],
           )
         : 'not-needed',
     };
@@ -1109,7 +1145,18 @@ export async function activateCloudflareVersion(options: {
       previousVersionId: previous.versionId,
     };
   }
-  if (ownerBeforeActivation.versionId !== previous.versionId) {
+  const expectedTrafficBeforeActivation = stagedVersionOverride
+    ? stagedVersionPercentages(previous.versionId, versionId)
+    : previous.versionId
+      ? [{ versionId: previous.versionId, percentage: 100 }]
+      : [];
+  if (
+    ownerBeforeActivation.versionId !== previous.versionId ||
+    !productionVersionPercentagesEqual(
+      ownerBeforeActivation.versions,
+      expectedTrafficBeforeActivation,
+    )
+  ) {
     return {
       ok: false,
       reason: 'deployment-changed',
@@ -1140,6 +1187,10 @@ export async function activateCloudflareVersion(options: {
             commonArgs,
             previous.versionId,
             'version activation failed',
+            [
+              stagedVersionPercentages(previous.versionId, versionId),
+              [{ versionId, percentage: 100 }],
+            ],
           )
         : 'not-needed',
     };
@@ -1260,6 +1311,7 @@ export async function activateCloudflareVersion(options: {
       previous.versionId,
       'trigger activation failed',
       desiredTriggerConfig,
+      versionId,
       versionedPreviousTriggerConfigWithTraffic,
     );
     return {
@@ -1312,9 +1364,12 @@ async function restorePreviousVersionAndTriggers(
   previousVersionId: string | null,
   cause: string,
   failedTriggerConfig: CloudflareTriggerConfig,
+  failedVersionId: string,
   capturedTriggerConfig?: CloudflareTriggerConfig,
 ): Promise<'succeeded' | 'failed' | 'unavailable' | 'unsafe'> {
-  const traffic = await restorePreviousVersion(options, commonArgs, previousVersionId, cause);
+  const traffic = await restorePreviousVersion(options, commonArgs, previousVersionId, cause, [
+    [{ versionId: failedVersionId, percentage: 100 }],
+  ]);
   if (traffic !== 'succeeded' || !previousVersionId) {
     return traffic;
   }
@@ -1550,9 +1605,7 @@ function isContainersUnavailable(output: string): boolean {
 async function readCurrentProductionVersion(
   options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
   commonArgs: Array<string>,
-): Promise<
-  { kind: 'ok'; versionId: string | null } | { kind: 'failed'; status: number } | { kind: 'split' }
-> {
+): Promise<CurrentProductionVersion> {
   const result = await Promise.resolve(
     options.runWrangler(
       ['deployments', 'status', ...commonArgs, '--name', options.workerName, '--json'],
@@ -1565,26 +1618,113 @@ async function readCurrentProductionVersion(
       parseCloudflareErrorCode(output) === 10007 ||
       /no deployments|\bworker\b.*\b(?:does not exist|not found)\b/i.test(output)
     ) {
-      return { kind: 'ok', versionId: null };
+      return { kind: 'ok', versionId: null, versions: [] };
     }
     return { kind: 'failed', status: result.status };
   }
   try {
     const deployment = JSON.parse(result.stdout) as ProductionDeployment;
-    const versions = (deployment.versions ?? []).filter(
-      (version) => Number(version.percentage) > 0,
-    );
-    if (versions.length > 1 || (versions.length === 1 && Number(versions[0]?.percentage) !== 100)) {
+    const versions = (deployment.versions ?? []).map((version) => ({
+      versionId: typeof version.version_id === 'string' ? version.version_id : '',
+      percentage: Number(version.percentage),
+    }));
+    if (
+      versions.some(
+        (version) =>
+          version.versionId.length === 0 ||
+          !Number.isFinite(version.percentage) ||
+          version.percentage < 0 ||
+          version.percentage > 100,
+      )
+    ) {
+      return { kind: 'failed', status: result.status };
+    }
+    const activeVersions = versions.filter((version) => version.percentage > 0);
+    if (
+      activeVersions.length > 1 ||
+      (activeVersions.length === 1 && activeVersions[0]?.percentage !== 100)
+    ) {
       return { kind: 'split' };
     }
-    const active = versions[0];
+    const active = activeVersions[0];
     return {
       kind: 'ok',
-      versionId: typeof active?.version_id === 'string' ? active.version_id : null,
+      versionId: active?.versionId ?? null,
+      versions,
     };
   } catch {
     return { kind: 'failed', status: result.status };
   }
+}
+
+function productionVersionPercentagesEqual(
+  actual: ReadonlyArray<ProductionVersionPercentage>,
+  expected: ReadonlyArray<ProductionVersionPercentage>,
+): boolean {
+  return (
+    actual.length === expected.length &&
+    expected.every((entry) =>
+      actual.some(
+        (candidate) =>
+          candidate.versionId === entry.versionId && candidate.percentage === entry.percentage,
+      ),
+    )
+  );
+}
+
+function stagedVersionPercentages(
+  previousVersionId: string | null,
+  versionId: string,
+): Array<ProductionVersionPercentage> {
+  return previousVersionId
+    ? [
+        { versionId: previousVersionId, percentage: 100 },
+        { versionId, percentage: 0 },
+      ]
+    : [];
+}
+
+async function verifyReadinessStagingOwner(
+  options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
+  commonArgs: Array<string>,
+  previousVersionId: string | null,
+  versionId: string,
+): Promise<Extract<CloudflareVersionActivation, { ok: false }> | null> {
+  const owner = await readCurrentProductionVersion(options, commonArgs);
+  if (owner.kind === 'failed') {
+    return {
+      ok: false,
+      reason: 'status-failed',
+      status: owner.status,
+      versionId,
+      previousVersionId,
+      rollback: 'not-needed',
+    };
+  }
+  if (owner.kind === 'split') {
+    return {
+      ok: false,
+      reason: 'traffic-split-unsupported',
+      versionId,
+      previousVersionId,
+      rollback: 'not-needed',
+    };
+  }
+  const expected = previousVersionId ? [{ versionId: previousVersionId, percentage: 100 }] : [];
+  if (
+    owner.versionId !== previousVersionId ||
+    !productionVersionPercentagesEqual(owner.versions, expected)
+  ) {
+    return {
+      ok: false,
+      reason: 'deployment-changed',
+      versionId,
+      previousVersionId,
+      activeVersionId: owner.versionId,
+      rollback: 'not-needed',
+    };
+  }
+  return null;
 }
 
 async function probeReadiness(
@@ -1769,11 +1909,21 @@ async function restorePreviousVersion(
   commonArgs: Array<string>,
   previousVersionId: string | null,
   cause: string,
+  expectedOwnedTraffic: ReadonlyArray<ReadonlyArray<ProductionVersionPercentage>>,
 ): Promise<'succeeded' | 'failed' | 'unavailable' | 'unsafe'> {
   if (!previousVersionId) {
     return 'unavailable';
   }
   if (!options.verifyUploader()) {
+    return 'unsafe';
+  }
+  const owner = await readCurrentProductionVersion(options, commonArgs);
+  if (
+    owner.kind !== 'ok' ||
+    !expectedOwnedTraffic.some((expected) =>
+      productionVersionPercentagesEqual(owner.versions, expected),
+    )
+  ) {
     return 'unsafe';
   }
   const result = await deployVersionPercentages(
