@@ -986,7 +986,6 @@ export function printGlobalHelp(): void {
       '',
       ...globalCommandGroup('env'),
       ...globalOptionLines(['env', 'check']),
-      ...globalOptionLines(['env', 'example']),
       '',
       categoryTitle('codegen'),
       globalCommandLine(['prepare'], 'void prepare'),
