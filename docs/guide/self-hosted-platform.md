@@ -245,6 +245,17 @@ Database migrations only move forward. Void checks that the live migration histo
 
 Pending migrations run in one PostgreSQL transaction. If the Worker rollout fails, Void restores the previous Workers against that compatible schema. A retry recognizes migrations that already succeeded.
 
+The first upgrade to the Sandbox drain safety protocol is a two-stage cutover when the database contains deployments or container resources. Void deploys and verifies the compatible candidate runtime in `sandbox-drain` maintenance mode, leaves application traffic closed, and trusts only its authenticated, database-backed protocol v1 status. An empty fresh installation records a completed checkpoint without making Container API calls. A disabled legacy installation records the protocol floor and pending drain before its upgrade completes, so later enablement still enters maintenance. The standard operator login, session elevation, CLI token minting, and logout flows remain available through an exact method-and-path allowlist and keep their normal authentication checks. Preview bounded drain pages with `void platform system sandbox-drain --plan`, pass each returned `nextCursor` with `--cursor '<value>'`, then apply with `void platform system sandbox-drain --yes` and rerun until it reports `complete: true`. Rerun the interrupted lifecycle command afterward; Void verifies the completion checkpoint before enabling traffic. Application and deployment routes remain closed throughout. Never delete an unverified container application by name.
+
+After a successful upgrade, you can restore a declared-compatible earlier runtime without reversing migrations:
+
+```sh
+void platform rollback [id] --runtime /path/to/earlier/runtime --plan
+void platform rollback [id] --runtime /path/to/earlier/runtime
+```
+
+The installed packaged runtime provides the compatibility declaration. If the current installation used a custom build, also pass its exact artifact directory with `--from-runtime /path/to/current/runtime`. Void compares the current manifest digest with the installed checkpoint, requires the earlier migration journal to be an exact prefix, and verifies PostgreSQL remains at the current forward-only schema. Discovery on another machine preserves the running-runtime and database-schema provenance independently, so a normal `upgrade` can roll forward later. A target missing a safety protocol already required by the database, such as completed Sandbox drain, is rejected before any Worker upload.
+
 ### Manage an installation from another machine
 
 Use `discover` to restore the administrator's local installation records:
@@ -280,7 +291,7 @@ For local API and dashboard development, fork CI, and the source layout, see
 
 ## Continuously deploy a source build
 
-Build `@void/platform` from your checkout and pass its runtime directory to `install`, `upgrade`, `repair`, or `enable` with `--runtime`. Custom runtimes get the same integrity, migration, health, and rollback checks as packaged releases.
+Build `@void/platform` from your checkout and pass its runtime directory to `install`, `upgrade`, `repair`, `enable`, or `rollback` with `--runtime`. Custom runtimes get the same integrity, migration, health, and rollback checks as packaged releases.
 
 Void records the runtime's manifest digest, whether it was packaged or custom, and the source revision when you set `VOID_PLATFORM_SOURCE_REVISION` during the build.
 

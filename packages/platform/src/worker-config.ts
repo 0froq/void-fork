@@ -25,7 +25,7 @@ export function createPlatformWorkerConfigs(input: {
   proxyUrl: string;
   resources: PlatformProvisionedResourceIds;
   runtimeEntrypoints: Readonly<Record<'api' | 'dispatch' | 'proxy' | 'tail', string>>;
-  trafficState?: 'enabled' | 'staging';
+  trafficState?: 'enabled' | 'sandbox-drain' | 'staging';
 }): PlatformWorkerConfigSet {
   const {
     accountId,

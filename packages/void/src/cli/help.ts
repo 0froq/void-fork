@@ -225,6 +225,10 @@ const HELP_TREE: HelpTree = {
       { command: 'discover', description: 'Recover installations from a Cloudflare account' },
       { command: 'install', description: 'Install a Void platform in Cloudflare' },
       { command: 'upgrade [id]', description: 'Upgrade an installed Void platform' },
+      {
+        command: 'rollback [id]',
+        description: 'Restore a compatible earlier platform runtime',
+      },
       { command: 'repair [id]', description: 'Reconcile an installed Void platform' },
       { command: 'disable [id]', description: 'Disable traffic without deleting data' },
       { command: 'enable [id]', description: 'Restore traffic for a disabled platform' },
@@ -276,6 +280,21 @@ const HELP_TREE: HelpTree = {
         'upgrade',
         'Upgrade an installed platform without deleting resources.',
       ),
+      rollback: {
+        summary: 'Restore a compatible earlier runtime without reversing database migrations.',
+        usage: [
+          'void platform rollback [id] --runtime <earlier-path> [--from-runtime <current-path>] [--plan] [--yes]',
+        ],
+        options: [
+          { command: '--runtime <path>', description: 'Earlier compatible runtime to restore' },
+          {
+            command: '--from-runtime <path>',
+            description: 'Current installed runtime when it differs from the packaged runtime',
+          },
+          { command: '--plan', description: 'Print the exact plan without making changes' },
+          { command: '--yes', description: 'Acknowledge non-interactive Cloudflare changes' },
+        ],
+      },
       repair: lifecycleHelp('repair', 'Reconcile drift using the installation ownership manifest.'),
       disable: lifecycleHelp('disable', 'Disable platform traffic without deleting data.'),
       enable: lifecycleHelp('enable', 'Restore configured traffic for a disabled platform.'),

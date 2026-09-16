@@ -34,9 +34,9 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Preserve request-binding module identity in installed-package development.
 - [ ] Define and enforce the supported Node/CLI/platform compatibility contract.
 - [ ] Support native Cloudflare AI development without a Void login.
-- [ ] Safely exclude managed Sandboxes, including retained legacy deployments.
+- [x] Safely exclude managed Sandboxes, including retained legacy deployments.
 - [x] Correct browser OAuth/DNS and first Workers-subdomain onboarding.
-- [ ] Document and verify compatible rollback after a successful platform upgrade.
+- [x] Document and verify compatible rollback after a successful platform upgrade.
 - [ ] Align feature guides, framework support, product wording, quotas, and operations.
 - [ ] Add release acceptance coverage for cross-target behavior and platform lifecycle.
 - [ ] Run final verification and four GPT-5.6 Sol/high reviews; fix review P1s separately.

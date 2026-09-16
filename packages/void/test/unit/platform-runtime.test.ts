@@ -20,6 +20,7 @@ describe('platform runtime manifest', () => {
     const manifest = readPlatformRuntimeManifest();
 
     expect(manifest.schemaVersion).toBe(2);
+    expect(manifest.safetyProtocols).toEqual({ sandboxDrain: 1 });
     expect(manifest.usageProtocolVersion).toBe(1);
     expect(manifest.database.schemaDigest).toBe(
       platformDatabaseSchemaDigest(manifest.database.lineage, manifest.database.migrations),
@@ -79,8 +80,16 @@ describe('platform runtime manifest', () => {
     expect(() => parsePlatformRuntimeManifest({ ...manifest, usageProtocolVersion: 2 })).toThrow(
       'usageProtocolVersion must be 0 or 1',
     );
+    expect(() =>
+      parsePlatformRuntimeManifest({
+        ...manifest,
+        safetyProtocols: { sandboxDrain: 2 },
+      }),
+    ).toThrow('safetyProtocols.sandboxDrain must be 0 or 1');
     const { usageProtocolVersion: _usageProtocolVersion, ...legacy } = manifest;
     expect(parsePlatformRuntimeManifest(legacy).usageProtocolVersion).toBe(0);
+    const { safetyProtocols: _safetyProtocols, ...legacySafety } = manifest;
+    expect(parsePlatformRuntimeManifest(legacySafety).safetyProtocols).toEqual({ sandboxDrain: 0 });
   });
 
   it('resolves packaged and explicit runtime directories with provenance', () => {

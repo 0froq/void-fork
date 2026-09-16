@@ -4,6 +4,7 @@ export const PLATFORM_INSTALLATION_SCHEMA_VERSION = 1 as const;
 export const PLATFORM_DISABLED_KEY = '__void/platform/disabled/v1';
 export const PLATFORM_DISABLED_VALUE = 'disabled';
 export const PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY = '__void/platform/installation/v1';
+export const PLATFORM_SANDBOX_DRAIN_KEY = '__void/platform/sandbox-drain/v1';
 export const PLATFORM_R2_OWNERSHIP_MARKER_KEY = '__void/platform/ownership/v1';
 export const PLATFORM_RESOURCE_OWNERSHIP_SCHEMA_VERSION = 1 as const;
 export const PLATFORM_USAGE_PROTOCOL_VERSION = 1 as const;
@@ -73,6 +74,8 @@ export type PlatformInstallationManifest = Readonly<{
     name: string;
   }>;
   createdAt: string;
+  /** Actual forward-only PostgreSQL schema, independent of the running runtime. */
+  databaseSchemaDigest: string | null;
   deployment: PlatformDeploymentManifest;
   desiredState: 'enabled' | 'disabled';
   endpoints: PlatformInstallationEndpoints;
@@ -81,6 +84,7 @@ export type PlatformInstallationManifest = Readonly<{
   platformVersion: string;
   resources: ReadonlyArray<InstallationResource>;
   runtime: PlatformRuntimeProvenance | null;
+  safetyProtocols: Readonly<{ sandboxDrain: 0 | 1 }>;
   schemaVersion: typeof PLATFORM_INSTALLATION_SCHEMA_VERSION;
   status: InstallationStatus;
   steps: ReadonlyArray<InstallationStep>;
@@ -230,6 +234,7 @@ export function createPlatformInstallationManifest(input: {
   id: string;
   ownershipNonce: string;
   platformVersion: string;
+  safetyProtocols?: Readonly<{ sandboxDrain: 0 | 1 }>;
   usageProtocolVersion?: 0 | 1;
 }): PlatformInstallationManifest {
   const createdAt = assertTimestamp(input.createdAt, 'createdAt');
@@ -245,6 +250,7 @@ export function createPlatformInstallationManifest(input: {
       name: requiredString(input.account.name, 'account.name'),
     },
     createdAt,
+    databaseSchemaDigest: null,
     deployment: parsePlatformDeploymentManifest(
       JSON.parse(JSON.stringify(input.deployment)) as unknown,
     ),
@@ -255,6 +261,7 @@ export function createPlatformInstallationManifest(input: {
     platformVersion: requiredString(input.platformVersion, 'platformVersion'),
     resources: [],
     runtime: null,
+    safetyProtocols: input.safetyProtocols ?? { sandboxDrain: 0 },
     schemaVersion: PLATFORM_INSTALLATION_SCHEMA_VERSION,
     status: 'draft',
     steps: [],
@@ -383,6 +390,7 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
     id: requiredString(value.id, 'id'),
     ownershipNonce: requiredString(value.ownershipNonce, 'ownershipNonce'),
     platformVersion: requiredString(value.platformVersion, 'platformVersion'),
+    safetyProtocols: parseSafetyProtocols(value.safetyProtocols),
     usageProtocolVersion: parseUsageProtocolVersion(value.usageProtocolVersion),
   });
   const runtime = parsePlatformRuntimeProvenance(value.runtime);
@@ -451,7 +459,12 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
       next.updatedAt,
     );
   }
-  return { ...next, updatedAt };
+  const recordedDatabaseSchemaDigest =
+    value.databaseSchemaDigest === undefined || value.databaseSchemaDigest === null
+      ? ([...next.steps].reverse().find((step) => step.key.startsWith('database-schema:'))
+          ?.resultHash ?? null)
+      : requiredString(value.databaseSchemaDigest, 'databaseSchemaDigest');
+  return { ...next, databaseSchemaDigest: recordedDatabaseSchemaDigest, updatedAt };
 }
 
 function parseUsageProtocolVersion(value: unknown): 0 | 1 {
@@ -462,6 +475,17 @@ function parseUsageProtocolVersion(value: unknown): 0 | 1 {
     return 1;
   }
   throw new Error('usageProtocolVersion must be 0 or 1.');
+}
+
+function parseSafetyProtocols(value: unknown): PlatformInstallationManifest['safetyProtocols'] {
+  if (value === undefined) {
+    return { sandboxDrain: 0 };
+  }
+  assertRecord(value, 'safetyProtocols');
+  if (value.sandboxDrain !== 0 && value.sandboxDrain !== 1) {
+    throw new Error('safetyProtocols.sandboxDrain must be 0 or 1.');
+  }
+  return { sandboxDrain: value.sandboxDrain };
 }
 
 function parsePlatformRuntimeProvenance(value: unknown): PlatformRuntimeProvenance | null {

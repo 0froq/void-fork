@@ -29,6 +29,8 @@ Maintainers and platform forks can build the same runtime from source with `vp r
 
 Platform migrations are forward-only. `platform/packages/api/drizzle/compatibility.json` declares exact source-version/schema-digest edges whose old Workers are safe against the target schema. The runtime build validates that each source digest is a prefix of the same PostgreSQL lineage and hashes the journal and every SQL file. When adding a migration, use an expand-compatible change, add only edges verified against the old runtime, and keep destructive contract cleanup for a later release after rollback to the old Workers is no longer possible.
 
+Post-success rollback uses the installed runtime's integrity-checked compatibility manifest and an explicitly supplied earlier runtime. The installation checkpoint records running-runtime provenance separately from the actual forward-only database schema. Rollback never reverses migrations, and it rejects a target whose declared safety protocols are older than the installation or authoritative database state.
+
 See the [self-hosted platform guide](../../docs/guide/self-hosted-platform.md) for the supported core feature set, Cloudflare footprint, and lifecycle commands.
 
 Use the application zone's apex for the simplest certificate setup. Nested app

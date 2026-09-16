@@ -164,6 +164,7 @@ export function selectAuthoritativePlatformManifest(
 export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<void> {
   if (
     args.subcommand !== 'upgrade' &&
+    args.subcommand !== 'rollback' &&
     args.subcommand !== 'repair' &&
     args.subcommand !== 'disable' &&
     args.subcommand !== 'enable' &&
@@ -179,6 +180,8 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     args.subcommand === 'uninstall' || args.subcommand === 'disable'
       ? null
       : loadPlatformRuntime(args.runtime);
+  const rollbackSourceRuntime =
+    args.subcommand === 'rollback' ? loadPlatformRuntime(args.fromRuntime) : null;
 
   const execute = async (
     currentManifest: PlatformInstallationManifest,
@@ -186,6 +189,9 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     databaseCheckpointExists = false,
   ): Promise<void> => {
     const manifest = currentManifest;
+    if (args.subcommand === 'rollback') {
+      assertPlatformRollbackCompatibility(manifest, runtime!, rollbackSourceRuntime!);
+    }
     const recovery = readInstallationRecoverySecrets(manifest);
     const databaseUrl = resolvePlatformInstallDatabaseUrl(recovery, manifest);
 
@@ -230,9 +236,11 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       formatPlatformInstallPlan(plan),
       args.subcommand === 'upgrade'
         ? 'Upgrade plan'
-        : args.subcommand === 'enable'
-          ? 'Enable plan'
-          : 'Repair plan',
+        : args.subcommand === 'rollback'
+          ? 'Rollback plan'
+          : args.subcommand === 'enable'
+            ? 'Enable plan'
+            : 'Repair plan',
     );
     note(
       [
@@ -324,8 +332,12 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         Object.assign(async () => {}, {
           checkpoint: databaseLock?.checkpoint,
           prepareDatabase: databaseLock?.prepareDatabase,
+          prepareSandboxDrain: databaseLock?.prepareSandboxDrain,
+          requiredSafetyProtocols: databaseLock?.requiredSafetyProtocols,
+          verifyDatabase: databaseLock?.verifyDatabase,
         }),
       client,
+      databaseRollbackSource: rollbackSourceRuntime ?? undefined,
       runtime: runtime!,
       replanWorkers: async (recoveryManifest) =>
         (
@@ -346,7 +358,18 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       );
       return;
     }
-    log.success(`${deployment.displayName} is healthy at ${plan.apiUrl}.`);
+    if (result.waitingForSandboxDrain) {
+      note(
+        "The compatible candidate runtime is live in sandbox-drain maintenance mode and application traffic remains disabled. Preview bounded work with `void platform system sandbox-drain --plan`; follow any returned `nextCursor` with `--cursor '<value>'`. Then apply with `void platform system sandbox-drain --yes` and rerun until it reports DB-backed `complete: true`. Rerun this lifecycle command afterward to enable traffic.",
+        'Waiting for managed Sandbox drain',
+      );
+      return;
+    }
+    log.success(
+      args.subcommand === 'rollback'
+        ? `${deployment.displayName} is running compatible runtime ${runtime!.manifest.platformVersion}; PostgreSQL remains at schema ${rollbackSourceRuntime!.manifest.database.schemaDigest}.`
+        : `${deployment.displayName} is healthy at ${plan.apiUrl}.`,
+    );
   };
 
   if (args.plan) {
@@ -387,6 +410,64 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     }
   } finally {
     release();
+  }
+}
+
+export function assertPlatformRollbackCompatibility(
+  installation: PlatformInstallationManifest,
+  target: ReturnType<typeof loadPlatformRuntime>,
+  source: ReturnType<typeof loadPlatformRuntime>,
+): void {
+  if (!installation.runtime) {
+    throw new Error(
+      'platform: The installed runtime has no artifact provenance, so post-success rollback cannot identify its compatibility manifest.',
+    );
+  }
+  if (
+    source.manifest.platformVersion !== installation.platformVersion ||
+    source.manifestSha256 !== installation.runtime.manifestSha256
+  ) {
+    throw new Error(
+      'platform: --from-runtime does not exactly match the installed runtime artifact digest. Supply the runtime used by the current successful deployment.',
+    );
+  }
+  if (target.manifestSha256 === source.manifestSha256) {
+    throw new Error('platform: The rollback target is already the installed runtime artifact.');
+  }
+  if (target.manifest.database.lineage !== source.manifest.database.lineage) {
+    throw new Error('platform: The rollback target belongs to a different database lineage.');
+  }
+  const prefix = source.manifest.database.migrations.slice(
+    0,
+    target.manifest.database.migrations.length,
+  );
+  if (JSON.stringify(prefix) !== JSON.stringify(target.manifest.database.migrations)) {
+    throw new Error(
+      'platform: The rollback target database migrations are not an exact prefix of the installed runtime.',
+    );
+  }
+  const compatible = source.manifest.database.rollbackSafeFrom.some(
+    (entry) =>
+      entry.platformVersion === target.manifest.platformVersion &&
+      entry.schemaDigest === target.manifest.database.schemaDigest,
+  );
+  if (!compatible) {
+    throw new Error(
+      `platform: Installed runtime ${source.manifest.platformVersion} does not declare post-success rollback compatibility with ${target.manifest.platformVersion} at schema ${target.manifest.database.schemaDigest}.`,
+    );
+  }
+  if (installation.databaseSchemaDigest !== source.manifest.database.schemaDigest) {
+    throw new Error(
+      'platform: The authoritative installation checkpoint does not record the installed runtime database schema. Repair or roll forward before rollback.',
+    );
+  }
+  if (
+    (target.manifest.safetyProtocols?.sandboxDrain ?? 0) <
+    (installation.safetyProtocols?.sandboxDrain ?? 0)
+  ) {
+    throw new Error(
+      'platform: The rollback target predates the installed sandbox-drain safety protocol.',
+    );
   }
 }
 

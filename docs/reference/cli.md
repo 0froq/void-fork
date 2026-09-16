@@ -562,6 +562,7 @@ Use these commands to recover, update, pause, or remove an installation:
 ```sh
 void platform discover [--account <id>] [--installation <id-or-name>]
 void platform upgrade [id] [--runtime <path>] [--plan] [--yes]
+void platform rollback [id] --runtime <earlier-path> [--from-runtime <current-path>] [--plan] [--yes]
 void platform repair [id] [--runtime <path>] [--plan] [--yes]
 void platform disable [id] [--plan] [--yes]
 void platform enable [id] [--runtime <path>] [--plan] [--yes]
@@ -579,6 +580,7 @@ After discovery on another machine, set `VOID_PLATFORM_DATABASE_URL`. Normal upg
 | `discover`  | Verifies remote ownership and restores local installation records without downloading secrets |
 | `repair`    | Recreates missing resources owned by the installer                                            |
 | `upgrade`   | Deploys the selected runtime and supported pending migrations                                 |
+| `rollback`  | Restores a declared-compatible earlier runtime without reversing PostgreSQL migrations        |
 | `disable`   | Blocks platform traffic through routing storage without removing data                         |
 | `enable`    | Restores traffic after checking the platform                                                  |
 | `uninstall` | Blocks traffic and removes eligible resources, retaining data by default                      |
@@ -594,6 +596,8 @@ Without `--runtime`, the CLI uses the runtime bundled in `@void/platform`. The i
 Platform migrations only move forward. Their recorded hashes and order must match the release's migration history. Pending SQL runs in one transaction, and only when the release declares rollback compatibility with the exact previous platform version and schema digest. Without that declaration, Void stops and asks you to upgrade through an intermediate release.
 
 The previous platform version remains authoritative until the target runtime passes discovery and health checks. A failed rollout restores the old Workers against the compatible updated schema; retrying doesn't reapply completed migrations.
+
+`platform rollback` is an explicit post-success rollback. `--runtime` must point to the earlier runtime to restore. The current packaged runtime supplies the compatibility declaration by default; use `--from-runtime` when the installed runtime was built elsewhere. Void requires that current artifact's manifest digest to match the installed checkpoint, checks that the earlier migration journal is its exact prefix, verifies the database is still at the current forward schema, and deploys the earlier Workers without deleting or reversing migrations. A later `upgrade` rolls forward from the recovered checkpoint. A rollback target is rejected before upload if it lacks any safety protocol already required by the installation or its database, including completed Sandbox drain.
 
 Uninstall verifies remote ownership before removing anything. Data resources are retained unless you pass `--purge-data`. Workers, R2, AI Gateway, DNS records, routes, custom domains, adopted resources, external PostgreSQL, and zones are always retained for manual review.
 

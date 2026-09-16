@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import {
   createServer,
@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import {
   encodeCloudflareVersionMessage,
   parseCloudflareVersionMessage,
+  readCloudflareVersionMigrationTag,
   readCloudflareTriggerConfig,
   stabilizeCloudflareVersionTriggers,
   type CloudflareCommandResult,
@@ -28,6 +29,7 @@ import {
   PLATFORM_DISABLED_VALUE,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
+  PLATFORM_SANDBOX_DRAIN_KEY,
   recordInstallationResource,
   recordInstallationStep,
   setInstallationDesiredState,
@@ -111,11 +113,22 @@ export type PlatformDatabaseLifecycleLock = (() => Promise<void>) & {
     sourcePlatformVersion: string | null,
     hasPriorWorkers: boolean,
   ) => Promise<PlatformDatabaseMigrationResult>;
+  prepareSandboxDrain?: () => Promise<PlatformSandboxDrainPreparation>;
+  requiredSafetyProtocols?: Readonly<{ sandboxDrain: 0 | 1 }>;
+  verifyDatabase?: (
+    runtimeDirectory: string,
+    database: PlatformRuntimeDatabaseManifest,
+  ) => Promise<void>;
 };
 
 export type PlatformDatabaseState = Readonly<{
   pendingMigrations: ReadonlyArray<PlatformRuntimeMigration>;
   schemaDigest: string;
+}>;
+
+export type PlatformSandboxDrainPreparation = Readonly<{
+  mirrorValue: string;
+  state: 'complete' | 'pending';
 }>;
 
 export type PlatformDatabaseMigrationResult = Readonly<{
@@ -177,6 +190,7 @@ export type PlatformInstallerDependencies = Readonly<{
     ownershipNonce: string,
   ) => Promise<void>;
   client: InstallerClient;
+  databaseRollbackSource?: PlatformRuntime;
   deployWorker?: (
     config: Record<string, unknown>,
     secrets: Record<string, string> | null,
@@ -190,6 +204,7 @@ export type PlatformInstallerDependencies = Readonly<{
     sourcePlatformVersion: string | null,
     hasPriorWorkers: boolean,
   ) => Promise<PlatformDatabaseMigrationResult>;
+  prepareSandboxDrain?: () => Promise<PlatformSandboxDrainPreparation>;
   recoverWorkerCutover?: (input: {
     key: PlatformWorkerKey;
     preserveCustomDomains: boolean;
@@ -218,6 +233,7 @@ export type PlatformInstallerDependencies = Readonly<{
     usageProtocolVersion: 0 | 1,
     healthProbeToken: string,
   ) => Promise<void>;
+  verifySandboxDrain?: (apiUrl: string, healthProbeToken: string) => Promise<boolean>;
   verifyWorkerCutover?: (
     manifest: PlatformInstallationManifest,
     generation: number,
@@ -227,6 +243,7 @@ export type PlatformInstallerDependencies = Readonly<{
 export type PlatformInstallationResult = Readonly<{
   manifest: PlatformInstallationManifest;
   waitingForDns: boolean;
+  waitingForSandboxDrain: boolean;
   zoneNameServers: ReadonlyArray<string>;
 }>;
 
@@ -466,6 +483,11 @@ export async function installPlatform(
     );
   }
   try {
+    assertPlatformRuntimeSafety(
+      runtime,
+      manifest.safetyProtocols,
+      releaseDatabaseLock.requiredSafetyProtocols,
+    );
     if (existing) {
       await dependencies.verifyExistingOwnership?.(
         manifest,
@@ -546,7 +568,12 @@ export async function installPlatform(
       manifest = transitionInstallation(manifest, 'waiting-for-dns', now());
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      return { manifest, waitingForDns: true, zoneNameServers: zone.nameServers };
+      return {
+        manifest,
+        waitingForDns: true,
+        waitingForSandboxDrain: false,
+        zoneNameServers: zone.nameServers,
+      };
     }
 
     for (const action of plan.actions.filter(
@@ -621,8 +648,24 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
 
+    const rollbackDatabase = dependencies.databaseRollbackSource;
     const migrationStep = `database-schema:${runtime.database.schemaDigest}`;
-    if (!manifest.steps.some((step) => step.key === migrationStep)) {
+    if (rollbackDatabase) {
+      const verifyDatabase = releaseDatabaseLock.verifyDatabase;
+      if (!verifyDatabase) {
+        throw new Error(
+          'platform: The PostgreSQL lifecycle lock cannot verify the forward-only rollback schema.',
+        );
+      }
+      await verifyDatabase(rollbackDatabase.directory, rollbackDatabase.manifest.database);
+      manifest = {
+        ...manifest,
+        databaseSchemaDigest: rollbackDatabase.manifest.database.schemaDigest,
+        updatedAt: now(),
+      };
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    } else if (!manifest.steps.some((step) => step.key === migrationStep)) {
       const legacyMigrationStep = `database-migrations:${runtime.database.journalSha256}`;
       if (dependencies.migrateDatabase) {
         if (!manifest.steps.some((step) => step.key === legacyMigrationStep)) {
@@ -654,6 +697,61 @@ export async function installPlatform(
         },
         now(),
       );
+      manifest = {
+        ...manifest,
+        databaseSchemaDigest: runtime.database.schemaDigest,
+        updatedAt: now(),
+      };
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    } else if (releaseDatabaseLock.verifyDatabase) {
+      await releaseDatabaseLock.verifyDatabase(runtimeDirectory, runtime.database);
+      if (manifest.databaseSchemaDigest !== runtime.database.schemaDigest) {
+        manifest = {
+          ...manifest,
+          databaseSchemaDigest: runtime.database.schemaDigest,
+          updatedAt: now(),
+        };
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      }
+    }
+
+    const targetSandboxDrainProtocol = runtime.safetyProtocols?.sandboxDrain ?? 0;
+    const prepareSandboxDrain =
+      dependencies.prepareSandboxDrain ?? releaseDatabaseLock.prepareSandboxDrain;
+    if (targetSandboxDrainProtocol === 1 && !prepareSandboxDrain) {
+      throw new Error(
+        'platform: The PostgreSQL lifecycle lock cannot establish the sandbox-drain safety checkpoint.',
+      );
+    }
+    const sandboxDrainPreparation =
+      targetSandboxDrainProtocol === 1 ? await prepareSandboxDrain!() : null;
+    const sandboxDrainRoutingKvId = requireId(
+      Object.fromEntries(manifest.resources.map((resource) => [resource.key, resource.id])),
+      'routing-kv',
+    );
+    const writeSandboxDrainMirror = async (preparation: PlatformSandboxDrainPreparation) => {
+      await dependencies.client.putKvValue(
+        plan.account.id,
+        sandboxDrainRoutingKvId,
+        PLATFORM_SANDBOX_DRAIN_KEY,
+        preparation.mirrorValue,
+      );
+    };
+    if (sandboxDrainPreparation) {
+      await writeSandboxDrainMirror(sandboxDrainPreparation);
+    }
+    const sandboxDrainState = sandboxDrainPreparation?.state ?? 'complete';
+    if (
+      targetSandboxDrainProtocol === 1 &&
+      (manifest.safetyProtocols?.sandboxDrain ?? 0) < targetSandboxDrainProtocol
+    ) {
+      manifest = {
+        ...manifest,
+        safetyProtocols: { sandboxDrain: 1 },
+        updatedAt: now(),
+      };
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
@@ -700,12 +798,15 @@ export async function installPlatform(
       [...interruptedCutover.staged.values()].some(
         (snapshot) => snapshot.previousVersionId === null,
       );
+    const requiresSandboxDrain =
+      !preserveDisabled && targetSandboxDrainProtocol === 1 && sandboxDrainState === 'pending';
     const requiresTrafficGuard =
       !previousPublicEndpoints ||
       recoveringUnsafeTraffic ||
       createsWorker ||
       recoveringCreatedWorker ||
-      manifest.usageProtocolVersion !== targetUsageProtocolVersion;
+      manifest.usageProtocolVersion !== targetUsageProtocolVersion ||
+      requiresSandboxDrain;
     if (requiresTrafficGuard) {
       await dependencies.client.putKvValue(
         plan.account.id,
@@ -757,7 +858,7 @@ export async function installPlatform(
       ? createPlatformWorkerConfigs({
           ...configInput,
           publicEndpoints: true,
-          trafficState: 'staging',
+          trafficState: requiresSandboxDrain ? 'sandbox-drain' : 'staging',
         })
       : enabledConfigs;
     const previousConfigs = createPlatformWorkerConfigs({
@@ -1043,7 +1144,12 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
       promoteInstallationSecrets(manifest);
       saveInstalledPlatformConnection(plan, manifest);
-      return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
+      return {
+        manifest,
+        waitingForDns: false,
+        waitingForSandboxDrain: false,
+        zoneNameServers: zone.nameServers,
+      };
     }
     manifest = transitionInstallation(manifest, 'verifying', now());
     writeInstallationManifest(manifest);
@@ -1056,6 +1162,48 @@ export async function installPlatform(
       targetUsageProtocolVersion,
       createPlatformHealthProbeToken(manifest.ownershipNonce),
     );
+    if (requiresSandboxDrain) {
+      const drainComplete = await (dependencies.verifySandboxDrain ?? verifyPlatformSandboxDrain)(
+        plan.apiUrl,
+        createPlatformHealthProbeToken(manifest.ownershipNonce),
+      );
+      if (!drainComplete) {
+        manifest = recordWorkerCutoverResolution(
+          manifest,
+          workerCutoverGeneration,
+          'committed',
+          now(),
+        );
+        manifest = recordWorkerTrafficState(manifest, workerCutoverGeneration, false, now());
+        manifest = recordInstallationStep(
+          manifest,
+          {
+            completedAt: now(),
+            key: 'sandbox-drain:maintenance-runtime:v1',
+            resultHash: resolvedRuntime.manifestSha256,
+          },
+          now(),
+        );
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+        workerRollbacks = [];
+        workerDeploymentCommitted = true;
+        saveInstalledPlatformConnection(plan, manifest);
+        return {
+          manifest,
+          waitingForDns: false,
+          waitingForSandboxDrain: true,
+          zoneNameServers: zone.nameServers,
+        };
+      }
+      const completedDrain = await prepareSandboxDrain!();
+      if (completedDrain.state !== 'complete') {
+        throw new Error(
+          'platform: Sandbox drain completion changed while it was being verified. Traffic remains disabled.',
+        );
+      }
+      await writeSandboxDrainMirror(completedDrain);
+    }
     if (requiresStagedCommit) {
       manifest = recordWorkerCutoverResolution(
         manifest,
@@ -1235,6 +1383,7 @@ export async function installPlatform(
       ...manifest,
       platformVersion: version,
       runtime: runtimeProvenance,
+      safetyProtocols: runtime.safetyProtocols ?? { sandboxDrain: 0 },
       updatedAt: now(),
       usageProtocolVersion: targetUsageProtocolVersion,
     };
@@ -1244,7 +1393,12 @@ export async function installPlatform(
     workerTrafficGuarded = false;
     promoteInstallationSecrets(manifest);
     saveInstalledPlatformConnection(plan, manifest);
-    return { manifest, waitingForDns: false, zoneNameServers: zone.nameServers };
+    return {
+      manifest,
+      waitingForDns: false,
+      waitingForSandboxDrain: false,
+      zoneNameServers: zone.nameServers,
+    };
   } catch (error) {
     let failure: unknown = error;
     const currentWorkerRecoveryIncomplete = error instanceof PlatformWorkerRecoveryIncompleteError;
@@ -2269,6 +2423,7 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
     await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockIdentity]);
   };
   release.authoritativeManifest = authoritativeManifest;
+  release.requiredSafetyProtocols = await readRequiredPlatformSafetyProtocols(client);
   release.checkpoint = async (manifest) => {
     if (released) {
       throw new Error('platform: Cannot checkpoint lifecycle state after releasing its lock.');
@@ -2298,7 +2453,160 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
       sourcePlatformVersion,
       hasPriorWorkers,
     );
+  release.prepareSandboxDrain = () => preparePlatformSandboxDrainConnection(client);
+  release.verifyDatabase = (runtimeDirectory, database) =>
+    verifyPlatformDatabaseConnection(client, runtimeDirectory, database);
   return release;
+}
+
+export async function preparePlatformSandboxDrainConnection(
+  client: DatabaseClaimConnection,
+): Promise<PlatformSandboxDrainPreparation> {
+  const relation = await client.query<{ relation: string | null }>(
+    `SELECT to_regclass('"sandbox_drain_checkpoints"')::text AS "relation"`,
+  );
+  if (!relation.rows[0]?.relation) {
+    throw new Error(
+      'platform: Runtime declares sandbox-drain safety protocol v1 but its database checkpoint table is missing.',
+    );
+  }
+  const readCheckpoint = () =>
+    client.query<{
+      completed_at: string | null;
+      cursor: unknown;
+      generation: string;
+      phase: string;
+      started_at: string;
+      state: string;
+      updated_at: string;
+    }>(
+      `SELECT "generation", "state", "phase", "cursor", "started_at", "updated_at", "completed_at"
+       FROM "sandbox_drain_checkpoints"
+       WHERE "singleton" = true`,
+    );
+  const classify = (
+    row:
+      | {
+          completed_at: string | null;
+          cursor: unknown;
+          generation: string;
+          phase: string;
+          started_at: string;
+          state: string;
+          updated_at: string;
+        }
+      | undefined,
+  ): PlatformSandboxDrainPreparation | null => {
+    if (!row) {
+      return null;
+    }
+    const cursor = row.cursor as Record<string, unknown> | null;
+    if (
+      !row.generation ||
+      !row.started_at ||
+      !row.updated_at ||
+      (row.state !== 'draining' && row.state !== 'complete') ||
+      (row.phase !== 'deployments' && row.phase !== 'resources') ||
+      !cursor ||
+      (cursor.pass !== '1' && cursor.pass !== '2') ||
+      (row.state === 'complete' &&
+        (!row.completed_at || row.phase !== 'resources' || cursor.pass !== '2')) ||
+      (row.state === 'draining' && row.completed_at !== null)
+    ) {
+      throw new Error(
+        'platform: The authoritative sandbox-drain database checkpoint is invalid. Traffic remains disabled.',
+      );
+    }
+    return {
+      mirrorValue: JSON.stringify({
+        version: 1,
+        generation: row.generation,
+        state: row.state,
+        startedAt: row.started_at,
+        updatedAt: row.updated_at,
+        ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+      }),
+      state: row.state === 'complete' ? 'complete' : 'pending',
+    };
+  };
+  const existing = await readCheckpoint();
+  const existingState = classify(existing.rows[0]);
+  if (existingState) {
+    return existingState;
+  }
+  const inventory = await client.query<{ empty: boolean }>(
+    `SELECT
+       NOT EXISTS(SELECT 1 FROM "deployments" LIMIT 1)
+       AND NOT EXISTS(SELECT 1 FROM "resources" WHERE "type" = 'container' LIMIT 1)
+       AS "empty"`,
+  );
+  const empty = inventory.rows[0]?.empty === true;
+  const generation = randomUUID();
+  const state = empty ? 'complete' : 'draining';
+  const phase = empty ? 'resources' : 'deployments';
+  const cursor = JSON.stringify({ pass: empty ? '2' : '1' });
+  await client.query(
+    `INSERT INTO "sandbox_drain_checkpoints" (
+       "singleton", "generation", "state", "phase", "cursor", "completed_at"
+     ) VALUES (true, $1, $2, $3, $4::jsonb, CASE WHEN $2 = 'complete' THEN now() ELSE NULL END)
+     ON CONFLICT ("singleton") DO NOTHING`,
+    [generation, state, phase, cursor],
+  );
+  const checkpoint = await readCheckpoint();
+  const preparedState = classify(checkpoint.rows[0]);
+  if (!preparedState) {
+    throw new Error('platform: The sandbox-drain database checkpoint could not be established.');
+  }
+  return preparedState;
+}
+
+export async function verifyPlatformDatabaseConnection(
+  client: DatabaseClaimConnection,
+  runtimeDirectory: string,
+  database: PlatformRuntimeDatabaseManifest,
+): Promise<void> {
+  verifyPlatformDatabaseArtifacts(runtimeDirectory, database);
+  const state = await inspectPlatformDatabaseStateConnection(client, database);
+  if (state.pendingMigrations.length !== 0 || state.schemaDigest !== database.schemaDigest) {
+    throw new Error(
+      'platform: PostgreSQL is not at the exact forward-only schema recorded by the installed runtime.',
+    );
+  }
+}
+
+async function readRequiredPlatformSafetyProtocols(
+  client: DatabaseClaimConnection,
+): Promise<Readonly<{ sandboxDrain: 0 | 1 }>> {
+  const relation = await client.query<{ relation: string | null }>(
+    `SELECT to_regclass('"sandbox_drain_checkpoints"')::text AS "relation"`,
+  );
+  if (!relation.rows[0]?.relation) {
+    return { sandboxDrain: 0 };
+  }
+  const checkpoint = await client.query<{ required: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1
+       FROM "sandbox_drain_checkpoints"
+       WHERE "singleton" = true
+     ) AS "required"`,
+  );
+  return { sandboxDrain: checkpoint.rows[0]?.required === true ? 1 : 0 };
+}
+
+export function assertPlatformRuntimeSafety(
+  runtime: Pick<PlatformRuntimeManifest, 'platformVersion' | 'safetyProtocols'>,
+  installed: Readonly<{ sandboxDrain: 0 | 1 }>,
+  database: Readonly<{ sandboxDrain: 0 | 1 }> = { sandboxDrain: 0 },
+): void {
+  const requiredSandboxDrain = Math.max(
+    installed?.sandboxDrain ?? 0,
+    database?.sandboxDrain ?? 0,
+  ) as 0 | 1;
+  if ((runtime.safetyProtocols?.sandboxDrain ?? 0) < requiredSandboxDrain) {
+    throw new Error(
+      `platform: Void Platform ${runtime.platformVersion} predates the required sandbox-drain safety protocol. Refusing to upload or activate a runtime that could reopen sandbox creation after drain.`,
+    );
+  }
 }
 
 export async function claimPlatformDatabaseConnection(
@@ -3488,14 +3796,7 @@ export async function readActivePlatformWorkerSnapshot(
       `platform: Active Worker ${workerName} predates safe trigger snapshots. Refusing to upgrade because its routes, cron, and queue consumers could not be restored after a failed cutover.`,
     );
   }
-  const script = (value as { script?: unknown }).script;
-  const migrationTag =
-    script &&
-    typeof script === 'object' &&
-    !Array.isArray(script) &&
-    typeof (script as { migration_tag?: unknown }).migration_tag === 'string'
-      ? (script as { migration_tag: string }).migration_tag
-      : null;
+  const migrationTag = readCloudflareVersionMigrationTag(value);
   return { migrationTag, triggerConfig: metadata.triggerConfig, versionId };
 }
 
@@ -3998,6 +4299,73 @@ export async function verifyPlatformHealth(
       `platform: Dispatch health check failed at https://test.${applicationBaseDomain} (HTTP ${dispatch.status}).`,
     );
   }
+}
+
+export async function verifyPlatformSandboxDrain(
+  apiUrl: string,
+  healthProbeToken: string,
+  fetcher: typeof fetch = fetch,
+): Promise<boolean> {
+  const response = await fetcher(`${apiUrl}/internal/platform/sandbox-drain`, {
+    headers: {
+      'X-Void-Platform-Probe': healthProbeToken,
+      ...cfAccessHeaders(process.env, apiUrl),
+    },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `platform: Sandbox drain probe failed at ${apiUrl} (HTTP ${response.status}). Traffic remains disabled.`,
+    );
+  }
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch {
+    throw new Error(
+      'platform: Sandbox drain probe did not return its DB-backed protocol v1 document. Traffic remains disabled.',
+    );
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(
+      'platform: Sandbox drain probe returned an invalid DB-backed protocol v1 document. Traffic remains disabled.',
+    );
+  }
+  const status = value as Record<string, unknown>;
+  const validState =
+    status.state === 'required' || status.state === 'draining' || status.state === 'complete';
+  const validPhase =
+    status.phase === null || status.phase === 'deployments' || status.phase === 'resources';
+  if (
+    status.version !== 1 ||
+    !validState ||
+    typeof status.complete !== 'boolean' ||
+    !validPhase ||
+    (status.generation !== null &&
+      (typeof status.generation !== 'string' || status.generation.length === 0)) ||
+    (status.updatedAt !== null &&
+      (typeof status.updatedAt !== 'string' || !Number.isFinite(Date.parse(status.updatedAt)))) ||
+    (status.state === 'required' &&
+      (status.complete ||
+        status.generation !== null ||
+        status.updatedAt !== null ||
+        status.phase !== null)) ||
+    (status.state === 'draining' &&
+      (status.complete ||
+        typeof status.generation !== 'string' ||
+        typeof status.updatedAt !== 'string' ||
+        status.phase === null)) ||
+    (status.state === 'complete' &&
+      (!status.complete ||
+        typeof status.generation !== 'string' ||
+        typeof status.updatedAt !== 'string' ||
+        status.phase === null))
+  ) {
+    throw new Error(
+      'platform: Sandbox drain probe returned an invalid DB-backed protocol v1 document. Traffic remains disabled.',
+    );
+  }
+  return status.state === 'complete';
 }
 
 export function createPlatformHealthProbeToken(ownershipNonce: string): string {

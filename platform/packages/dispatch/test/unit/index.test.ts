@@ -4028,25 +4028,28 @@ describe('queue relay', () => {
     }
   });
 
-  it('retries staging batches without reading unavailable routing KV', async () => {
-    const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
-    const { env, dispatchGet, routingGet } = createQueueEnv({
-      installationId: 'installation-id',
-      trafficState: 'staging',
-    });
-    routingGet.mockRejectedValue(new Error('routing unavailable'));
-    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it.each(['staging', 'sandbox-drain'])(
+    'retries %s batches without reading unavailable routing KV',
+    async (trafficState) => {
+      const batch = createMockBatch('test-queue', [{ id: 'm1', body: 'hello' }]);
+      const { env, dispatchGet, routingGet } = createQueueEnv({
+        installationId: 'installation-id',
+        trafficState,
+      });
+      routingGet.mockRejectedValue(new Error('routing unavailable'));
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    try {
-      await app.queue(batch, env);
+      try {
+        await app.queue(batch, env);
 
-      expect(routingGet).not.toHaveBeenCalled();
-      expect(dispatchGet).not.toHaveBeenCalled();
-      expect(batch.retryAll).toHaveBeenCalledWith({ delaySeconds: 300 });
-    } finally {
-      warning.mockRestore();
-    }
-  });
+        expect(routingGet).not.toHaveBeenCalled();
+        expect(dispatchGet).not.toHaveBeenCalled();
+        expect(batch.retryAll).toHaveBeenCalledWith({ delaySeconds: 300 });
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
 
   it('relays batches after the self-hosted traffic gate is enabled', async () => {
     const routing = JSON.stringify({ workerName: 'user-app', queueName: 'emails' });

@@ -630,6 +630,7 @@ export default {
     }
     if (
       env.PLATFORM_TRAFFIC_STATE === 'staging' ||
+      env.PLATFORM_TRAFFIC_STATE === 'sandbox-drain' ||
       (env.PLATFORM_INSTALLATION_ID &&
         (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE)
     ) {
@@ -1817,7 +1818,10 @@ export default {
   },
 
   async queue(batch: MessageBatch, env: Env): Promise<void> {
-    if (env.PLATFORM_TRAFFIC_STATE === 'staging') {
+    if (
+      env.PLATFORM_TRAFFIC_STATE === 'staging' ||
+      env.PLATFORM_TRAFFIC_STATE === 'sandbox-drain'
+    ) {
       console.warn(
         `[queue-relay] platform traffic is staging; retrying queue="${batch.queue}" in ${PLATFORM_QUEUE_RETRY_DELAY_SECONDS}s`,
       );

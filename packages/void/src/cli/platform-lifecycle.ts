@@ -327,6 +327,14 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       outro(`Installation ${result.manifest.id} is safely checkpointed.`);
       return;
     }
+    if (result.waitingForSandboxDrain) {
+      note(
+        "The compatible candidate runtime is live in sandbox-drain maintenance mode and application traffic remains disabled. Preview bounded work with `void platform system sandbox-drain --plan`; follow any returned `nextCursor` with `--cursor '<value>'`. Then apply with `void platform system sandbox-drain --yes` and rerun until it reports DB-backed `complete: true`. Rerun this install command afterward to enable traffic.",
+        'Waiting for managed Sandbox drain',
+      );
+      outro(`Installation ${result.manifest.id} is safely checkpointed.`);
+      return;
+    }
     log.success(`${result.manifest.deployment.displayName} is installed at ${plan.apiUrl}.`);
     outro('Run `void auth login`, then deploy an app with `void deploy --platform void`.');
   } finally {

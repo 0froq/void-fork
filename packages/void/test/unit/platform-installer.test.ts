@@ -8,8 +8,10 @@ import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
+  parsePlatformInstallationManifest,
   PLATFORM_DISABLED_KEY,
   PLATFORM_DISABLED_VALUE,
+  PLATFORM_SANDBOX_DRAIN_KEY,
   recordInstallationResource,
   recordInstallationStep,
   setInstallationDesiredState,
@@ -45,6 +47,7 @@ import {
   mergePlatformWorkerTrafficConfig,
   mergePreservedTriggerRoutes,
   preparePlatformDatabaseConnection,
+  preparePlatformSandboxDrainConnection,
   PlatformWorkerRecoveryIncompleteError,
   r2BucketConfigHash,
   readPlatformWorkerDeployments,
@@ -57,6 +60,7 @@ import {
   restorePlatformWorkerDeployment,
   stablePublicEndpointState,
   verifyPlatformHealth,
+  verifyPlatformSandboxDrain,
   withConditionalPlatformWorkerCreate,
   withoutCompletedPlatformWorkerMigrations,
   withoutPlatformWorkerTrafficAttachments,
@@ -73,6 +77,21 @@ import {
 const directories: Array<string> = [];
 const TEST_PLATFORM_JWT_SECRET = 'test-only-platform-jwt-secret-material';
 const TEST_PLATFORM_PROJECT_SECRET_KEY = Buffer.alloc(32, 5).toString('base64');
+
+function sandboxDrainPreparation(state: 'complete' | 'pending') {
+  const checkpointState = state === 'complete' ? 'complete' : 'draining';
+  return {
+    mirrorValue: JSON.stringify({
+      completedAt: state === 'complete' ? '2026-09-16T00:00:00.000Z' : undefined,
+      generation: 'generation-1',
+      startedAt: '2026-09-16T00:00:00.000Z',
+      state: checkpointState,
+      updatedAt: '2026-09-16T00:00:00.000Z',
+      version: 1,
+    }),
+    state,
+  } as const;
+}
 
 beforeEach(() => {
   process.env.VOID_PLATFORM_RECOVERY_KEY = Buffer.alloc(32, 7).toString('base64');
@@ -137,7 +156,10 @@ async function close(server: Server): Promise<void> {
 
 describe('platform installer', () => {
   const claimDatabase = async () => {};
-  const acquireDatabaseLifecycleLock = async () => async () => {};
+  const acquireDatabaseLifecycleLock = async () =>
+    Object.assign(async () => {}, {
+      prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
+    });
 
   it('requires externally custodied identity keys for a fresh installation', () => {
     const input = {
@@ -1001,6 +1023,58 @@ describe('platform installer', () => {
     ).rejects.toThrow('usage protocol does not match');
   });
 
+  it('trusts only a valid DB-backed sandbox drain protocol v1 response', async () => {
+    const statuses = [
+      {
+        complete: false,
+        generation: null,
+        phase: null,
+        state: 'required',
+        updatedAt: null,
+        version: 1,
+      },
+      {
+        complete: true,
+        generation: 'generation-1',
+        phase: 'resources',
+        state: 'complete',
+        updatedAt: '2026-09-16T00:00:00.000Z',
+        version: 1,
+      },
+    ];
+    const headers: Array<Headers> = [];
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      headers.push(new Headers(init?.headers));
+      return Response.json(statuses.shift());
+    }) as typeof fetch;
+
+    await expect(
+      verifyPlatformSandboxDrain('https://api.example.com', 'probe-token', fetcher),
+    ).resolves.toBe(false);
+    await expect(
+      verifyPlatformSandboxDrain('https://api.example.com', 'probe-token', fetcher),
+    ).resolves.toBe(true);
+    expect(headers.every((value) => value.get('X-Void-Platform-Probe') === 'probe-token')).toBe(
+      true,
+    );
+
+    await expect(
+      verifyPlatformSandboxDrain('https://api.example.com', 'probe-token', (async () =>
+        Response.json({
+          complete: true,
+          generation: null,
+          phase: null,
+          state: 'complete',
+          updatedAt: null,
+          version: 1,
+        })) as typeof fetch),
+    ).rejects.toThrow('invalid DB-backed protocol v1');
+    await expect(
+      verifyPlatformSandboxDrain('https://api.example.com', 'probe-token', (async () =>
+        Response.json({ error: 'invalid' }, { status: 503 })) as typeof fetch),
+    ).rejects.toThrow('Traffic remains disabled');
+  });
+
   it('derives an installation-specific high-entropy health probe token', () => {
     const first = createPlatformHealthProbeToken('a'.repeat(43));
     const second = createPlatformHealthProbeToken('b'.repeat(43));
@@ -1147,6 +1221,67 @@ describe('platform installer', () => {
     expect(connection.queries).not.toContain('COMMIT');
     expect(connection.rows).toEqual([]);
   });
+
+  it.each([
+    { empty: true, expected: 'complete', phase: 'resources', state: 'complete' },
+    { empty: false, expected: 'pending', phase: 'deployments', state: 'draining' },
+  ] as const)(
+    'establishes a $state sandbox drain checkpoint when database inventory empty=$empty',
+    async ({ empty, expected, phase, state }) => {
+      let checkpoint: Record<string, unknown> | undefined;
+      const inserts: Array<ReadonlyArray<unknown> | undefined> = [];
+      const connection = {
+        query: async <Row extends Record<string, unknown>>(
+          sql: string,
+          values?: ReadonlyArray<unknown>,
+        ) => {
+          if (sql.includes('to_regclass')) {
+            return {
+              rows: [{ relation: 'sandbox_drain_checkpoints' }] as unknown as ReadonlyArray<Row>,
+            };
+          }
+          if (sql.includes('FROM "sandbox_drain_checkpoints"')) {
+            return {
+              rows: (checkpoint ? [checkpoint] : []) as unknown as ReadonlyArray<Row>,
+            };
+          }
+          if (sql.includes('NOT EXISTS(SELECT 1 FROM "deployments"')) {
+            return { rows: [{ empty }] as unknown as ReadonlyArray<Row> };
+          }
+          if (sql.includes('INSERT INTO "sandbox_drain_checkpoints"')) {
+            inserts.push(values);
+            checkpoint = {
+              completed_at: empty ? '2026-09-16T00:00:00.000Z' : null,
+              cursor: { pass: empty ? '2' : '1' },
+              generation: values?.[0],
+              phase: values?.[2],
+              started_at: '2026-09-16T00:00:00.000Z',
+              state: values?.[1],
+              updated_at: '2026-09-16T00:00:00.000Z',
+            };
+          }
+          return { rows: [] as ReadonlyArray<Row> };
+        },
+      };
+
+      const prepared = await preparePlatformSandboxDrainConnection(connection);
+      expect(prepared.state).toBe(expected);
+      expect(JSON.parse(prepared.mirrorValue)).toEqual({
+        ...(empty ? { completedAt: '2026-09-16T00:00:00.000Z' } : {}),
+        generation: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        startedAt: '2026-09-16T00:00:00.000Z',
+        state,
+        updatedAt: '2026-09-16T00:00:00.000Z',
+        version: 1,
+      });
+      expect(inserts).toHaveLength(1);
+      expect(inserts[0]?.slice(1)).toEqual([
+        state,
+        phase,
+        JSON.stringify({ pass: empty ? '2' : '1' }),
+      ]);
+    },
+  );
 
   it('serializes lifecycle changes with the claimed PostgreSQL database', async () => {
     const queries: Array<{ sql: string; values?: ReadonlyArray<unknown> }> = [];
@@ -1799,6 +1934,10 @@ describe('platform installer', () => {
         },
         deployWorker: async (config, secrets) => {
           expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+          expect(JSON.parse(routingValues.get(PLATFORM_SANDBOX_DRAIN_KEY)!)).toMatchObject({
+            state: 'complete',
+            version: 1,
+          });
           lifecycleEvents.push(`deploy:${String(config.name)}`);
           deployed.push(String(config.name));
           deployedTrafficStates.push(
@@ -1809,12 +1948,16 @@ describe('platform installer', () => {
           }
         },
         migrateDatabase: async () => {},
+        prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
         revalidateBeforeWorkerDeploy: async () => {},
         verifyHealth: async () => {
           expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(
             lifecycleEvents.includes('verify') ? undefined : PLATFORM_DISABLED_VALUE,
           );
           lifecycleEvents.push('verify');
+        },
+        verifySandboxDrain: async () => {
+          throw new Error('an empty fresh installation must not require a manual drain');
         },
       },
     );
@@ -2383,6 +2526,168 @@ describe('platform installer', () => {
       usageProtocolVersion: 0,
     });
 
+    const emptyCoreUpgradeConfigs: Array<Record<string, unknown>> = [];
+    const emptyCoreUpgrade = await installPlatform(
+      upgradedPlan,
+      secrets,
+      { ...sourceManifest, safetyProtocols: { sandboxDrain: 0 } },
+      {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: upgradeClient,
+        deployWorker: async (config) => {
+          emptyCoreUpgradeConfigs.push(config);
+        },
+        migrateDatabase: async () => {},
+        prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async () => {},
+        verifySandboxDrain: async () => {
+          throw new Error('empty core upgrade must not require a manual drain');
+        },
+      },
+    );
+    expect(emptyCoreUpgrade.waitingForSandboxDrain).toBe(false);
+    expect(emptyCoreUpgrade.manifest.safetyProtocols).toEqual({ sandboxDrain: 1 });
+    expect(emptyCoreUpgradeConfigs).toHaveLength(4);
+    for (const index of [0, 1, 3]) {
+      expect(
+        (emptyCoreUpgradeConfigs[index]!.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
+      ).toBe('enabled');
+    }
+    upgradeKvWrites.splice(0);
+    deletedKvValues.splice(0);
+
+    const sandboxDrainDeployments: Array<string> = [];
+    const sandboxDrainTrafficStates: Array<unknown> = [];
+    const sandboxDrainEvents: Array<string> = [];
+    const waitingForSandboxDrain = await installPlatform(
+      upgradedPlan,
+      secrets,
+      { ...sourceManifest, safetyProtocols: { sandboxDrain: 0 } },
+      {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: {
+          ...upgradeClient,
+          deleteKvValue: async () => {
+            sandboxDrainEvents.push('gate:open');
+          },
+          putKvValue: async (_account, _namespace, key) => {
+            if (key === PLATFORM_DISABLED_KEY) {
+              sandboxDrainEvents.push('gate:closed');
+            }
+          },
+        },
+        deployWorker: async (config) => {
+          sandboxDrainDeployments.push(String(config.name));
+          sandboxDrainTrafficStates.push(
+            (config.vars as Record<string, unknown> | undefined)?.PLATFORM_TRAFFIC_STATE,
+          );
+        },
+        migrateDatabase: async () => {},
+        prepareSandboxDrain: async () => sandboxDrainPreparation('pending'),
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async () => {
+          sandboxDrainEvents.push('health');
+        },
+        verifySandboxDrain: async () => {
+          sandboxDrainEvents.push('drain:required');
+          return false;
+        },
+      },
+    );
+    expect(waitingForSandboxDrain.waitingForSandboxDrain).toBe(true);
+    expect(waitingForSandboxDrain.manifest).toMatchObject({
+      platformVersion: '0.10.13',
+      safetyProtocols: { sandboxDrain: 1 },
+      status: 'verifying',
+    });
+    expect(sandboxDrainDeployments).toEqual([
+      deployment.resources.apiWorker,
+      deployment.resources.proxyWorker,
+      deployment.resources.tailWorker,
+      deployment.resources.dispatchWorker,
+    ]);
+    expect(sandboxDrainTrafficStates).toEqual([
+      'sandbox-drain',
+      'sandbox-drain',
+      undefined,
+      'sandbox-drain',
+    ]);
+    expect(sandboxDrainEvents).toEqual(['gate:closed', 'health', 'drain:required']);
+
+    const resumedDrainDeployments: Array<string> = [];
+    const resumedDrainEvents: Array<string> = [];
+    let resumedDrainPreparations = 0;
+    const resumedAfterSandboxDrain = await installPlatform(
+      upgradedPlan,
+      secrets,
+      waitingForSandboxDrain.manifest,
+      {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: {
+          ...upgradeClient,
+          deleteKvValue: async (_account, _namespace, key) => {
+            if (key === PLATFORM_DISABLED_KEY) {
+              resumedDrainEvents.push('gate:open');
+            }
+          },
+          putKvValue: async (_account, _namespace, key) => {
+            if (key === PLATFORM_DISABLED_KEY) {
+              resumedDrainEvents.push('gate:closed');
+            }
+          },
+        },
+        deployWorker: async (config) => {
+          resumedDrainDeployments.push(
+            `${String(config.name)}:${String(
+              (config.vars as Record<string, unknown> | undefined)?.PLATFORM_TRAFFIC_STATE,
+            )}`,
+          );
+        },
+        migrateDatabase: async () => {},
+        prepareSandboxDrain: async () =>
+          sandboxDrainPreparation(resumedDrainPreparations++ === 0 ? 'pending' : 'complete'),
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async () => {
+          resumedDrainEvents.push('health');
+        },
+        verifySandboxDrain: async () => {
+          resumedDrainEvents.push('drain:complete');
+          return true;
+        },
+      },
+    );
+    expect(resumedAfterSandboxDrain.waitingForSandboxDrain).toBe(false);
+    expect(resumedAfterSandboxDrain.manifest).toMatchObject({
+      safetyProtocols: { sandboxDrain: 1 },
+      status: 'installed',
+    });
+    expect(resumedDrainDeployments).toHaveLength(8);
+    expect(resumedDrainDeployments.slice(0, 4)).toEqual([
+      `${deployment.resources.apiWorker}:sandbox-drain`,
+      `${deployment.resources.proxyWorker}:sandbox-drain`,
+      `${deployment.resources.tailWorker}:undefined`,
+      `${deployment.resources.dispatchWorker}:sandbox-drain`,
+    ]);
+    expect(resumedDrainDeployments.slice(4)).toEqual([
+      `${deployment.resources.apiWorker}:enabled`,
+      `${deployment.resources.proxyWorker}:enabled`,
+      `${deployment.resources.tailWorker}:undefined`,
+      `${deployment.resources.dispatchWorker}:enabled`,
+    ]);
+    expect(resumedDrainEvents).toEqual([
+      'gate:closed',
+      'health',
+      'drain:complete',
+      'gate:open',
+      'health',
+    ]);
+    upgradeKvWrites.splice(0);
+    deletedKvValues.splice(0);
+
     let verifiedTargetVersion = '';
     await expect(
       installPlatform(upgradedPlan, secrets, sourceManifest, {
@@ -2424,7 +2729,9 @@ describe('platform installer', () => {
       deployment.resources.dispatchWorker,
     ]);
     expect(migrations).toBe(0);
-    expect(new Set(upgradeKvWrites)).toEqual(new Set(['__void/platform/installation/v1']));
+    expect(new Set(upgradeKvWrites)).toEqual(
+      new Set(['__void/platform/installation/v1', PLATFORM_SANDBOX_DRAIN_KEY]),
+    );
     expect(upgraded.manifest.status).toBe('installed');
     expect(upgraded.manifest.platformVersion).toBe(readPlatformRuntimeManifest().platformVersion);
     expect(upgraded.manifest.runtime).toMatchObject({
@@ -2433,8 +2740,106 @@ describe('platform installer', () => {
     });
     expect(upgraded.manifest.resources).toHaveLength(15);
 
-    const downgradeEvents: Array<string> = [];
     const currentRuntime = resolvePlatformRuntime(getPlatformRuntimeDirectory());
+    const earlierDatabase = migrationSubset(currentRuntime.manifest.database.migrations.length - 1);
+    const earlierRuntime = {
+      ...currentRuntime,
+      manifest: {
+        ...currentRuntime.manifest,
+        database: earlierDatabase,
+        platformVersion: '0.10.13-compatible',
+      },
+      manifestSha256: 'a'.repeat(64),
+    };
+    const rollbackSource = {
+      ...currentRuntime,
+      manifest: {
+        ...currentRuntime.manifest,
+        database: {
+          ...currentRuntime.manifest.database,
+          rollbackSafeFrom: [
+            ...currentRuntime.manifest.database.rollbackSafeFrom,
+            {
+              platformVersion: earlierRuntime.manifest.platformVersion,
+              schemaDigest: earlierDatabase.schemaDigest,
+            },
+          ],
+        },
+      },
+      manifestSha256: 'b'.repeat(64),
+    };
+    const rollbackStartingPoint = {
+      ...upgraded.manifest,
+      databaseSchemaDigest: rollbackSource.manifest.database.schemaDigest,
+      platformVersion: rollbackSource.manifest.platformVersion,
+      runtime: {
+        manifestSha256: rollbackSource.manifestSha256,
+        source: rollbackSource.source,
+        sourceRevision: rollbackSource.manifest.sourceRevision,
+      },
+    };
+    const verifiedRollbackSchemas: Array<string> = [];
+    const rollbackResult = await installPlatform(upgradedPlan, secrets, rollbackStartingPoint, {
+      acquireDatabaseLifecycleLock: async () =>
+        Object.assign(async () => {}, {
+          prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
+          verifyDatabase: async (
+            _runtimeDirectory: string,
+            database: PlatformRuntimeDatabaseManifest,
+          ) => {
+            verifiedRollbackSchemas.push(database.schemaDigest);
+          },
+        }),
+      claimDatabase,
+      client: upgradeClient,
+      databaseRollbackSource: rollbackSource,
+      deployWorker: async () => {},
+      revalidateBeforeWorkerDeploy: async () => {},
+      runtime: earlierRuntime,
+      verifyHealth: async () => {},
+    });
+    expect(verifiedRollbackSchemas).toEqual([rollbackSource.manifest.database.schemaDigest]);
+    expect(rollbackResult.manifest).toMatchObject({
+      databaseSchemaDigest: rollbackSource.manifest.database.schemaDigest,
+      platformVersion: earlierRuntime.manifest.platformVersion,
+      runtime: { manifestSha256: earlierRuntime.manifestSha256 },
+    });
+
+    const cleanMachineDiscovery = parsePlatformInstallationManifest(
+      JSON.parse(JSON.stringify(rollbackResult.manifest)),
+    );
+    expect(cleanMachineDiscovery.databaseSchemaDigest).toBe(
+      rollbackSource.manifest.database.schemaDigest,
+    );
+    expect(cleanMachineDiscovery.runtime?.manifestSha256).toBe(earlierRuntime.manifestSha256);
+
+    const verifiedRollForwardSchemas: Array<string> = [];
+    const rollForwardResult = await installPlatform(upgradedPlan, secrets, cleanMachineDiscovery, {
+      acquireDatabaseLifecycleLock: async () =>
+        Object.assign(async () => {}, {
+          prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
+          verifyDatabase: async (
+            _runtimeDirectory: string,
+            database: PlatformRuntimeDatabaseManifest,
+          ) => {
+            verifiedRollForwardSchemas.push(database.schemaDigest);
+          },
+        }),
+      claimDatabase,
+      client: upgradeClient,
+      deployWorker: async () => {},
+      revalidateBeforeWorkerDeploy: async () => {},
+      runtime: rollbackSource,
+      verifyHealth: async () => {},
+    });
+    expect(verifiedRollForwardSchemas).toEqual([rollbackSource.manifest.database.schemaDigest]);
+    expect(rollForwardResult.manifest).toMatchObject({
+      databaseSchemaDigest: rollbackSource.manifest.database.schemaDigest,
+      platformVersion: rollbackSource.manifest.platformVersion,
+      runtime: { manifestSha256: rollbackSource.manifestSha256 },
+    });
+
+    const downgradeEvents: Array<string> = [];
     const downgraded = await installPlatform(upgradedPlan, secrets, upgraded.manifest, {
       acquireDatabaseLifecycleLock,
       claimDatabase,
@@ -2540,6 +2945,67 @@ describe('platform installer', () => {
       expect(
         (repairedWorkerConfigs[index + 4]!.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
       ).toBe('enabled');
+    }
+
+    const legacyDisabled = {
+      ...setInstallationDesiredState(upgraded.manifest, 'disabled', '2026-09-14T00:00:03.500Z'),
+      safetyProtocols: { sandboxDrain: 0 as const },
+      status: 'disabled' as const,
+    };
+    const disabledLegacyUpgrade = await installPlatform(upgradedPlan, secrets, legacyDisabled, {
+      acquireDatabaseLifecycleLock,
+      claimDatabase,
+      client: upgradeClient,
+      deployWorker: async () => {},
+      migrateDatabase: async () => {},
+      prepareSandboxDrain: async () => sandboxDrainPreparation('pending'),
+      revalidateBeforeWorkerDeploy: async () => {},
+      verifySandboxDrain: async () => {
+        throw new Error('a disabled upgrade must defer drain verification until enablement');
+      },
+    });
+    expect(disabledLegacyUpgrade.manifest).toMatchObject({
+      desiredState: 'disabled',
+      safetyProtocols: { sandboxDrain: 1 },
+      status: 'disabled',
+    });
+
+    const legacyEnableConfigs: Array<Record<string, unknown>> = [];
+    let legacyEnableGateOpened = false;
+    const legacyEnableResult = await installPlatform(
+      upgradedPlan,
+      secrets,
+      setInstallationDesiredState(
+        disabledLegacyUpgrade.manifest,
+        'enabled',
+        '2026-09-14T00:00:03.750Z',
+      ),
+      {
+        acquireDatabaseLifecycleLock,
+        claimDatabase,
+        client: {
+          ...upgradeClient,
+          deleteKvValue: async () => {
+            legacyEnableGateOpened = true;
+          },
+        },
+        deployWorker: async (config) => {
+          legacyEnableConfigs.push(config);
+        },
+        migrateDatabase: async () => {},
+        prepareSandboxDrain: async () => sandboxDrainPreparation('pending'),
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async () => {},
+        verifySandboxDrain: async () => false,
+      },
+    );
+    expect(legacyEnableResult.waitingForSandboxDrain).toBe(true);
+    expect(legacyEnableGateOpened).toBe(false);
+    expect(legacyEnableConfigs).toHaveLength(4);
+    for (const index of [0, 1, 3]) {
+      expect(
+        (legacyEnableConfigs[index]!.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
+      ).toBe('sandbox-drain');
     }
 
     const disabledConfigs: Array<Record<string, unknown>> = [];

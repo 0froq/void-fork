@@ -61,6 +61,27 @@ describe('platform args', () => {
     expect(() => parsePlatformArgs(['disable', '--runtime', '/tmp/void-runtime'])).toThrow(
       "Unknown flag '--runtime'",
     );
+    expect(
+      parsePlatformArgs([
+        'rollback',
+        'example-a1b2c3d4',
+        '--runtime',
+        '/tmp/earlier-runtime',
+        '--from-runtime',
+        '/tmp/current-runtime',
+        '--plan',
+      ]),
+    ).toEqual({
+      fromRuntime: '/tmp/current-runtime',
+      plan: true,
+      runtime: '/tmp/earlier-runtime',
+      selector: 'example-a1b2c3d4',
+      subcommand: 'rollback',
+      yes: false,
+    });
+    expect(() => parsePlatformArgs(['rollback', 'example-a1b2c3d4'])).toThrow(
+      'rollback requires --runtime',
+    );
   });
 
   it('parses safe uninstall choices explicitly', () => {
@@ -109,20 +130,29 @@ describe('platform args', () => {
   });
 
   it('fails closed for every unacknowledged non-interactive mutation', () => {
-    for (const command of ['install', 'upgrade', 'repair', 'disable', 'enable', 'uninstall']) {
-      const parsed = parsePlatformArgs([command]);
+    for (const command of [
+      'install',
+      'upgrade',
+      'rollback',
+      'repair',
+      'disable',
+      'enable',
+      'uninstall',
+    ]) {
+      const runtime = command === 'rollback' ? ['--runtime', '/tmp/earlier'] : [];
+      const parsed = parsePlatformArgs([command, ...runtime]);
       expect(() => assertNoninteractivePlatformMutationAcknowledged(parsed, false)).toThrow(
         'requires --yes',
       );
       expect(() =>
         assertNoninteractivePlatformMutationAcknowledged(
-          parsePlatformArgs([command, '--yes']),
+          parsePlatformArgs([command, ...runtime, '--yes']),
           false,
         ),
       ).not.toThrow();
       expect(() =>
         assertNoninteractivePlatformMutationAcknowledged(
-          parsePlatformArgs([command, '--plan']),
+          parsePlatformArgs([command, ...runtime, '--plan']),
           false,
         ),
       ).not.toThrow();

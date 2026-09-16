@@ -26,6 +26,7 @@ vi.mock('@clack/prompts', () => ({
 }));
 
 vi.mock('../../src/cli/platform-auth.ts', () => ({
+  assertPlatformOperatorCredentialCanApplyPlan: vi.fn(),
   resolvePlatformCloudflareCredential: async () => ({ token: 'token' }),
 }));
 
@@ -102,7 +103,12 @@ vi.mock('../../src/cli/platform-installer.ts', async (importOriginal) => {
       );
       state.events.push('installer-finish');
       await borrowed();
-      return { manifest: existing!, waitingForDns: false, zoneNameServers: [] };
+      return {
+        manifest: existing!,
+        waitingForDns: false,
+        waitingForSandboxDrain: false,
+        zoneNameServers: [],
+      };
     }),
     loadPlatformRuntime: vi.fn(() => state.runtime),
     resolveBootstrapGitHubId: vi.fn(),
