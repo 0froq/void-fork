@@ -6,7 +6,7 @@
 
 /**
  * Marks the isolated probes and Vite build run by
- * `void deploy --backend cloudflare`.
+ * `void deploy --platform cloudflare`.
  *
  * Kept here so the deploy orchestrator and Vite plugin share one spelling.
  * The marker is passed through child-process env only; it is never a Worker

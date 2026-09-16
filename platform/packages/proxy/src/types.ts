@@ -24,6 +24,17 @@ export type AiBinding = Readonly<{
 export type ProxyBody = Record<string, unknown>;
 
 /**
+ * Account-level Cloudflare `send_email` binding.
+ *
+ * CF returns a result object on success (currently `{ messageId?: string }`);
+ * older workerd builds returned nothing. Both are handled at runtime — the
+ * proxy reads `result?.messageId` optionally and falls back to `""`.
+ */
+export type SendEmailBinding = Readonly<{
+  send(message: unknown): Promise<{ messageId?: string } | void>;
+}>;
+
+/**
  * RPC surface exposed by the api worker's `SandboxConcurrencyCounter`
  * Durable Object. Re-declared here instead of imported because the proxy
  * worker must not pull api-package source into its bundle — keep the
@@ -56,6 +67,17 @@ export type Env = Readonly<{
   PLATFORM_INSTALLATION_ID?: string;
   PLATFORM_TRAFFIC_STATE?: string;
   SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounterRpc>;
+  SEND_EMAIL: SendEmailBinding;
+
+  /**
+   * Platform mail zone for this environment — `mail.void.cloud` in
+   * production, `mail.staging.void.cloud` in staging. Declared as a `vars`
+   * entry in every `wrangler.jsonc` scope (wrangler does not inherit vars
+   * into a named env) and mirrored into deployed user workers as the
+   * `__VOID_EMAIL_DOMAIN` plain-text binding. Never defaulted in code: see
+   * `readSenderDomain` in `email.ts`.
+   */
+  EMAIL_SENDER_DOMAIN: string;
 }>;
 
 export type JwtPayload = Readonly<{

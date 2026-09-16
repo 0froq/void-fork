@@ -37,6 +37,13 @@ export type CloudflareTriggerConfig = Readonly<{
   crons: ReadonlyArray<unknown>;
   queueConsumers: ReadonlyArray<unknown>;
   workflows: ReadonlyArray<unknown>;
+  /**
+   * Email Routing addresses (`addresses` in Wrangler config). Wrangler 4.131 applies its
+   * Email Routing plan inside `triggers deploy` — `undefined` skips the plan entirely, while
+   * `[]` is a destructive plan that deletes every rule this Worker owns — so the two must stay
+   * distinct through the snapshot. Absent from annotations written before this field existed.
+   */
+  addresses?: ReadonlyArray<string>;
 }>;
 
 export type CloudflareTrafficConfig = Pick<
@@ -142,7 +149,10 @@ export function parseCloudflareVersionMessage(
   }
 }
 
-/** Capture every configuration surface mutated by `wrangler triggers deploy`. */
+/**
+ * Capture every configuration surface mutated by `wrangler triggers deploy` — routes,
+ * workers.dev / preview flags, crons, queue consumers, workflows, and Email Routing addresses.
+ */
 export function readCloudflareTriggerConfig(
   configPath: string,
   sourceConfigPath?: string,
@@ -368,6 +378,14 @@ function mergeTriggerCleanupBaselines(
       return true;
     });
   };
+  // The baseline is only ever the `previousTriggerConfig` of `deployCloudflareVersionTriggers`,
+  // which mines it for state the active version no longer wants (queue consumers, workflow
+  // schedules, custom domains); it is never replayed as a version's own config. Email Routing
+  // needs no such subtraction — Wrangler plans deletions from rule ownership, not from a previous
+  // list — so `addresses` here is inert today. Carry it the same way as the other lists (the union
+  // of every published plan) so the baseline stays a faithful record, and keep the key absent when
+  // no version carried a plan: an absent key and `[]` are different plans.
+  const withAddresses = present.filter((config) => config.addresses !== undefined);
   return {
     workers_dev: present.some((config) => config.workers_dev),
     preview_urls: present.some((config) => config.preview_urls),
@@ -375,6 +393,9 @@ function mergeTriggerCleanupBaselines(
     crons: unique(present.flatMap((config) => config.crons)),
     queueConsumers: unique(present.flatMap((config) => config.queueConsumers)),
     workflows: unique(present.flatMap((config) => config.workflows)),
+    ...(withAddresses.length === 0
+      ? {}
+      : { addresses: [...new Set(withAddresses.flatMap((config) => config.addresses ?? []))] }),
   };
 }
 
@@ -409,18 +430,27 @@ function triggerConfigWithQueueConsumerCleanup(
   if (queues.length === 0) {
     return previous;
   }
+  // This copy becomes the previous version's known trigger config, which
+  // `stabilizeCloudflareVersionTriggers` replays verbatim when a concurrent rollback returns
+  // traffic to that version. Spread `previous` so every snapshot field survives — including an
+  // optional one such as `addresses`, where an absent key and `[]` are different Email Routing
+  // plans — rather than re-listing fields and silently dropping a newer one.
+  const base: CloudflareTriggerConfig = previous ?? {
+    workers_dev: false,
+    preview_urls: false,
+    routes: [],
+    crons: [],
+    queueConsumers: [],
+    workflows: [],
+  };
   return {
-    workers_dev: previous?.workers_dev ?? false,
-    preview_urls: previous?.preview_urls ?? false,
-    routes: previous?.routes ?? [],
-    crons: previous?.crons ?? [],
+    ...base,
     queueConsumers: [
-      ...(previous?.queueConsumers ?? []),
+      ...base.queueConsumers,
       ...queues
-        .filter((queue) => !queueConsumerNames(previous?.queueConsumers ?? []).includes(queue))
+        .filter((queue) => !queueConsumerNames(base.queueConsumers).includes(queue))
         .map((queue) => ({ queue })),
     ],
-    workflows: previous?.workflows ?? [],
   };
 }
 
@@ -496,6 +526,7 @@ function triggerConfigFromWrangler(config: Record<string, unknown>): CloudflareT
   // rollback do not accidentally reopen the public workers.dev hostname.
   const workersDev =
     typeof config.workers_dev === 'boolean' ? config.workers_dev : routes.length === 0;
+  const addresses = readEmailAddresses(config.addresses);
   return {
     ...(config.routes === undefined && config.route === undefined ? { preserveRoutes: true } : {}),
     ...(config.workers_dev === undefined ? { preserveWorkersDev: true } : {}),
@@ -507,7 +538,15 @@ function triggerConfigFromWrangler(config: Record<string, unknown>): CloudflareT
     crons: Array.isArray(triggers.crons) ? triggers.crons : [],
     queueConsumers: Array.isArray(queues.consumers) ? queues.consumers : [],
     workflows: Array.isArray(config.workflows) ? config.workflows : [],
+    ...(addresses === undefined ? {} : { addresses }),
   };
+}
+
+/** A well-formed `addresses` array, or `undefined` when the field is absent or malformed. */
+function readEmailAddresses(value: unknown): ReadonlyArray<string> | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+    ? (value as ReadonlyArray<string>)
+    : undefined;
 }
 
 function nonVersionedSettingsHash(config: Record<string, unknown>): string {
@@ -549,7 +588,8 @@ function parseTriggerConfig(value: unknown): CloudflareTriggerConfig | null {
     !Array.isArray(value.routes) ||
     !Array.isArray(value.crons) ||
     !Array.isArray(value.queueConsumers) ||
-    !Array.isArray(value.workflows)
+    !Array.isArray(value.workflows) ||
+    (value.addresses !== undefined && readEmailAddresses(value.addresses) === undefined)
   ) {
     return null;
   }
@@ -565,6 +605,7 @@ function parseTriggerConfig(value: unknown): CloudflareTriggerConfig | null {
     crons: value.crons,
     queueConsumers: value.queueConsumers,
     workflows: value.workflows,
+    ...(value.addresses === undefined ? {} : { addresses: value.addresses as Array<string> }),
   };
 }
 
@@ -587,6 +628,21 @@ function triggerWranglerConfig(
   };
   if (manageRoutes && !triggerConfig.preserveRoutes) {
     config.routes = [...triggerConfig.routes];
+  }
+  // Only a snapshot that carried `addresses` may reach Wrangler's Email Routing plan: an
+  // absent key skips the plan, which is what a version deployed without email must do.
+  // That holds in both directions of a rollback — the snapshot being LEFT lends nothing
+  // here — so rolling back from an email-enabled version to one recorded without the key
+  // (a pre-`addresses` snapshot, or a deploy that had no handlers) leaves the rules where
+  // they are, routed to a Worker that no longer exports `email()`. Do not encode that
+  // transition as `[]`: wrangler plans the deletion of every rule this Worker owns on `[]`,
+  // a destructive plan it confirms (default No) in a TTY and refuses in CI, and a
+  // non-zero `triggers deploy` here is `triggers-failed`, which the rollback compensates
+  // by restoring the version it just left. Whether a rollback should touch Email Routing
+  // at all is a product call (design doc 0078, decision 13); this code replays the
+  // snapshot verbatim.
+  if (triggerConfig.addresses !== undefined) {
+    config.addresses = [...triggerConfig.addresses];
   }
   if (triggerConfig.preserveWorkersDev) {
     delete config.workers_dev;
@@ -621,6 +677,10 @@ function resolvePreservedTraffic(
     crons: desired.crons,
     queueConsumers: desired.queueConsumers,
     workflows: desired.workflows,
+    // Not a traffic surface, but this rebuild is on the path of every versioned
+    // deploy: dropping the key here would skip wrangler's Email Routing plan and
+    // record the version without its addresses.
+    ...(desired.addresses === undefined ? {} : { addresses: desired.addresses }),
   };
 }
 

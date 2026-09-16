@@ -12,7 +12,7 @@ import {
 import { createBuild } from '../../src/db.ts';
 import * as db from '../../src/db.ts';
 import app from '../../src/index.ts';
-import { resources, projects, deployments, builds } from '../../src/schema.ts';
+import { resources, projects, deployments, builds, emailDestinations } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -21,6 +21,7 @@ import {
   createTestProject,
   mockCfApi,
   cfError,
+  cfSuccess,
   type TestEnv,
 } from './helpers.ts';
 
@@ -512,5 +513,369 @@ describe('DELETE /projects/:id', () => {
       expect(await env.STATIC_ASSETS_R2.head(key)).toBeNull();
     }
     expect(await env.STATIC_ASSETS_R2.head(otherKey)).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CF Email Routing destination cleanup.
+//
+// Destinations are ACCOUNT-level on Cloudflare: one address added for project
+// A is a valid `send_email` recipient for every worker in the account. The
+// `email_destinations` rows are the only thing that maps them back to
+// projects, and `deleteProjectCascade` deletes those rows — so the cleanup
+// MUST run before the cascade. If it runs after (or not at all) the
+// destination leaks onto the account forever with nothing left to compute the
+// reference count from. These tests fail if the call is dropped or reordered.
+// ---------------------------------------------------------------------------
+
+/**
+ * Wrap the fetch stub `mockCfApi()` installed so `/email/routing/addresses`
+ * calls are recorded and answered here. Kept local rather than pushed into
+ * `mockCfApi` — the only thing under test is which destinations teardown
+ * decides to delete.
+ */
+function captureEmailRoutingCalls(): Array<{ method: string; url: string }> {
+  const calls: Array<{ method: string; url: string }> = [];
+  const inner = globalThis.fetch;
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes('/email/routing/addresses')) {
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url });
+      const tag = url.split('/').pop()?.split('?')[0] ?? 'unknown';
+      return Response.json({ success: true, errors: [], messages: [], result: { tag } });
+    }
+    return inner(input, init);
+  });
+  return calls;
+}
+
+async function addEmailDestination(
+  projectId: string,
+  address: string,
+  cfDestinationId: string,
+): Promise<void> {
+  await env.db.insert(emailDestinations).values({
+    id: `edst_${projectId}_${cfDestinationId}`,
+    project_id: projectId,
+    address,
+    status: 'verified',
+    cf_destination_id: cfDestinationId,
+  });
+}
+
+describe('DELETE /projects/:id — CF email destination cleanup', () => {
+  it('DELETEs a destination this project is the only referent of', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'mail-solo');
+    mockCfApi();
+    const emailCalls = captureEmailRoutingCalls();
+
+    await addEmailDestination(project.id, 'owner@example.com', 'cf-tag-solo');
+    await env.ROUTING.put(`email-allowlist:${project.id}`, JSON.stringify(['owner@example.com']));
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    // The whole point: the account-level address is gone from Cloudflare.
+    // A cleanup that ran AFTER `deleteProjectCascade` would see no rows and
+    // make no call here.
+    expect(emailCalls).toEqual([
+      {
+        method: 'DELETE',
+        url: expect.stringContaining('/email/routing/addresses/cf-tag-solo') as unknown as string,
+      },
+    ]);
+
+    // Proxy read-caches for the dead project are dropped too.
+    expect(await env.ROUTING.get(`email-allowlist:${project.id}`)).toBeNull();
+    expect(await env.ROUTING.get(`email-slug:${project.id}`)).toBeNull();
+  });
+
+  it('leaves a destination another project still references on the account', async () => {
+    const user = await createTestUser(env.db);
+    const doomed = await createTestProject(env.db, user.id, 'mail-shared-a');
+    const survivor = await createTestProject(env.db, user.id, 'mail-shared-b');
+    mockCfApi();
+    const emailCalls = captureEmailRoutingCalls();
+
+    // Same CF tag on both projects — deleting it would silently break the
+    // surviving project's ability to mail that recipient.
+    await addEmailDestination(doomed.id, 'shared@example.com', 'cf-tag-shared');
+    await addEmailDestination(survivor.id, 'shared@example.com', 'cf-tag-shared');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${doomed.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(emailCalls).toEqual([]);
+
+    // The survivor keeps its row.
+    const rows = await env.db
+      .select()
+      .from(emailDestinations)
+      .where(eq(emailDestinations.project_id, survivor.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it('still deletes the project when Cloudflare refuses the destination delete', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'mail-cf-down');
+    mockCfApi();
+    const inner = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/email/routing/addresses')) {
+        return Response.json(
+          { success: false, errors: [{ code: 1000, message: 'boom' }], messages: [], result: null },
+          { status: 500 },
+        );
+      }
+      return inner(input, init);
+    });
+
+    await addEmailDestination(project.id, 'owner@example.com', 'cf-tag-down');
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    // A CF orphan is recoverable by a sweep; a half-torn-down project is not.
+    expect(res.status).toBe(200);
+    const [dbProject] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+    expect(dbProject).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The proxy authorizes `/email/send` with `__VOID_PROXY_TOKEN`, an HMAC of the
+// project id that never expires and that the tenant's own worker code can
+// read. After teardown the ONLY things that stop that token from sending are
+// the `email-slug:<projectId>` and `email-allowlist:<projectId>` KV mirrors
+// (a missing slug mirror is a 502, a missing allowlist denies every
+// recipient) — the proxy reads a missing routing blob as "not suspended".
+// Once the cascade has run there is no row left to retry the deletes from
+// and nothing sweeps them, so a mirror that outlives the project keeps a
+// dead tenant sendable forever. Teardown therefore fails closed on those two
+// deletes, exactly as the destination revoke paths do on their mirror write.
+// ---------------------------------------------------------------------------
+
+describe('DELETE /projects/:id — email send authorization outlives nothing', () => {
+  it('keeps the project when the email mirrors cannot be deleted, and a retry finishes', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'mail-kv-down');
+    mockCfApi();
+    await env.ROUTING.put(`email-slug:${project.id}`, project.slug);
+    await env.ROUTING.put(`email-allowlist:${project.id}`, JSON.stringify(['owner@example.com']));
+    await env.ROUTING.put(
+      project.slug,
+      JSON.stringify({ workerName: 'user-mail-kv-down', projectId: project.id }),
+    );
+
+    // KV refuses ONLY the two email mirror deletes. Every other delete —
+    // the routing entry included — goes through, which is the exact
+    // permutation that used to leave the stale mirrors authorizing sends
+    // for a project whose routing entry (and row) were already gone.
+    const originalDelete = env.ROUTING.delete.bind(env.ROUTING);
+    const failing = vi.spyOn(env.ROUTING, 'delete').mockImplementation((async (k: string) => {
+      if (k === `email-slug:${project.id}` || k === `email-allowlist:${project.id}`) {
+        throw new Error('forced KV failure for test');
+      }
+      return originalDelete(k as never);
+    }) as typeof env.ROUTING.delete);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toMatch(/try again/);
+
+    // The row is the retry handle: it stays, marked deleting, with the
+    // mirrors it will delete on the next attempt still in place.
+    const [kept] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+    expect(kept?.status).toBe('deleting');
+    expect(await env.ROUTING.get(`email-slug:${project.id}`)).toBe(project.slug);
+    expect(await env.ROUTING.get(`email-allowlist:${project.id}`)).not.toBeNull();
+
+    failing.mockRestore();
+    const retry = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(retry.status).toBe(200);
+    const [gone] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+    expect(gone).toBeUndefined();
+    expect(await env.ROUTING.get(`email-slug:${project.id}`)).toBeNull();
+    expect(await env.ROUTING.get(`email-allowlist:${project.id}`)).toBeNull();
+    expect(await env.ROUTING.get(project.slug)).toBeNull();
+  });
+
+  it('revokes the slug mirror before the allowlist mirror', async () => {
+    // The slug mirror is the stronger gate — without it the proxy answers
+    // 502 whatever the allowlist says — so it goes first: if the second
+    // delete is the one that fails, the send path is already closed while
+    // the row waits for the retry.
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'mail-slug-first');
+    mockCfApi();
+    await env.ROUTING.put(`email-slug:${project.id}`, project.slug);
+    await env.ROUTING.put(`email-allowlist:${project.id}`, JSON.stringify(['owner@example.com']));
+
+    const originalDelete = env.ROUTING.delete.bind(env.ROUTING);
+    vi.spyOn(env.ROUTING, 'delete').mockImplementation((async (k: string) => {
+      if (k === `email-allowlist:${project.id}`) {
+        throw new Error('forced KV failure for test');
+      }
+      return originalDelete(k as never);
+    }) as typeof env.ROUTING.delete);
+
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${user.jwt}` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(503);
+    expect(await env.ROUTING.get(`email-slug:${project.id}`)).toBeNull();
+    const [kept] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+    expect(kept?.status).toBe('deleting');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The other side of the same ordering problem: a destination POST that LOSES
+// the race to teardown.
+//
+// The POST route's `status === 'deleting'` guard is an unlocked read, so the
+// cascade can commit while the route is out at Cloudflare registering the
+// address. The CF destination is account-level and already created by then,
+// and `email_destinations` rows are the only thing that maps one back to a
+// project — the cascade removed them all, teardown's cleanup already ran off
+// the rows that existed, and there is no sweep. So the route has to hand the
+// address back itself.
+//
+// NOT fixed here: the unlocked guard itself. That is the pre-existing
+// orphan-on-concurrent-create class from design doc 0067, which three sibling
+// provisioning routes ship with today.
+// ---------------------------------------------------------------------------
+
+describe('POST /projects/:id/email/destinations — losing the teardown race', () => {
+  function addDestinationRequest(projectId: string, jwt: string, address: string): Request {
+    return new Request(`http://localhost/projects/${projectId}/email/destinations`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
+  }
+
+  function cfDeleteCalls(fetchMock: ReturnType<typeof mockCfApi>): Array<string> {
+    return (fetchMock.mock.calls as Array<Array<unknown>>)
+      .filter((call) => {
+        const init = call[1] as RequestInit | undefined;
+        const url = typeof call[0] === 'string' ? call[0] : String(call[0]);
+        return init?.method === 'DELETE' && url.includes('/email/routing/addresses');
+      })
+      .map((call) => (typeof call[0] === 'string' ? call[0] : String(call[0])));
+  }
+
+  it('deletes the CF destination it created and returns the not-inserted status', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'mail-race');
+
+    const fetchMock = mockCfApi({
+      // Teardown commits its cascade while we are out at CF. The project row
+      // — and, by ON DELETE CASCADE, every email_destinations row — is gone
+      // before the INSERT below runs, so the FK has nothing to point at.
+      addEmailDestination: async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
+        await db.deleteProjectCascade(env.db, project.id);
+        return cfSuccess({
+          tag: 'cf-tag-race',
+          email: body.email,
+          verified: null,
+          created: '2026-04-27T00:00:00Z',
+          modified: '2026-04-27T00:00:00Z',
+        });
+      },
+    });
+
+    const res = await app.fetch(
+      addDestinationRequest(project.id, user.jwt, 'racer@example.com'),
+      env,
+    );
+
+    // The INSERT raised `23503`. Uncaught it reaches the app's `onError` as a
+    // generic 500 — this is the same "not inserted" answer the sibling-DELETE
+    // race already gives, not a new code.
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'destination concurrently modified, try again' });
+
+    // And the account-level address is handed back rather than burning a slot
+    // of the shared 200-destination cap forever.
+    expect(cfDeleteCalls(fetchMock)).toEqual([
+      expect.stringContaining('/email/routing/addresses/cf-tag-race') as unknown as string,
+    ]);
+  });
+
+  it('leaves a CF destination a surviving project still references', async () => {
+    // Same race, but the tag came from the already-exists recovery and a live
+    // sibling project points at it. The count must be ZERO to delete — our own
+    // row does not exist, so `<= 1` would revoke the sibling's recipient.
+    const user = await createTestUser(env.db);
+    const doomed = await createTestProject(env.db, user.id, 'mail-race-shared');
+    const survivor = await createTestProject(env.db, user.id, 'mail-race-survivor');
+    await addEmailDestination(survivor.id, 'shared@example.com', 'cf-tag-shared');
+
+    const fetchMock = mockCfApi({
+      addEmailDestination: () => cfError('address already exists'),
+      listEmailDestinations: async () => {
+        await db.deleteProjectCascade(env.db, doomed.id);
+        return cfSuccess([
+          {
+            tag: 'cf-tag-shared',
+            email: 'shared@example.com',
+            verified: '2026-04-26T00:00:00Z',
+            created: '2026-04-25T00:00:00Z',
+            modified: '2026-04-26T00:00:00Z',
+          },
+        ]);
+      },
+    });
+
+    const res = await app.fetch(
+      addDestinationRequest(doomed.id, user.jwt, 'shared@example.com'),
+      env,
+    );
+
+    expect(res.status).toBe(409);
+    expect(cfDeleteCalls(fetchMock)).toEqual([]);
+
+    // The survivor keeps both its row and its recipient.
+    const rows = await env.db
+      .select()
+      .from(emailDestinations)
+      .where(eq(emailDestinations.project_id, survivor.id));
+    expect(rows).toHaveLength(1);
   });
 });

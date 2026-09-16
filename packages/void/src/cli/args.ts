@@ -9,6 +9,7 @@ export type DeployArgs = {
   platform?: 'cloudflare' | 'void';
   backend?: 'cloudflare';
   provision?: boolean;
+  requireEmail?: boolean;
 };
 
 export function parseDeployArgs(args: Array<string>): DeployArgs {
@@ -25,6 +26,7 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
         platform: { type: 'string' },
         backend: { type: 'string' },
         provision: { type: 'boolean' },
+        'require-email': { type: 'boolean' },
       },
       allowPositionals: true,
       strict: true,
@@ -111,6 +113,14 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
     throw new Error('deploy: --provision requires --platform cloudflare.');
   }
 
+  // Mode B email (design doc 0078): fail the deploy — before any upload — instead of
+  // continuing without email when the domain is not set up and nobody can press Enter
+  // (CI / non-TTY). Only the Cloudflare backend runs the email step.
+  const requireEmail = parsed.values['require-email'] === true ? true : undefined;
+  if (requireEmail && backend !== 'cloudflare' && platform !== 'cloudflare') {
+    throw new Error('deploy: --require-email requires --platform cloudflare.');
+  }
+
   // The Cloudflare backend deploys to the user's OWN account and therefore never
   // resolves a Void project. Static flags are target-neutral: both backends honor
   // `--dir` and `--spa` through their respective static deployment adapters.
@@ -123,5 +133,5 @@ export function parseDeployArgs(args: Array<string>): DeployArgs {
     }
   }
 
-  return { projectSlug, dir, spa, skipBuild, debug, platform, backend, provision };
+  return { projectSlug, dir, spa, skipBuild, debug, platform, backend, provision, requireEmail };
 }

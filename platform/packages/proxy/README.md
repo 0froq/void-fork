@@ -1,6 +1,6 @@
 # @voidcloud/proxy
 
-Shared proxy worker for platform-owned capabilities: AI metering, ISR revalidation, and remote D1/KV/R2 access.
+Shared proxy worker for platform-owned capabilities: AI metering, ISR revalidation, remote D1/KV/R2 access, and platform email (outbound sends and the inbound catch-all router).
 
 ## Architecture
 
@@ -8,6 +8,7 @@ Shared proxy worker for platform-owned capabilities: AI metering, ISR revalidati
 - **ISR revalidation** forwards to the API worker over a service binding.
 - **Remote bindings** try the deployed user worker first via `DISPATCH` and its `/__void/*` endpoints, then fall back to Cloudflare REST APIs for older deployments.
 - **Resource resolution** happens through internal API endpoints, not direct DB reads inside the proxy.
+- **Email** is centralized here: the proxy holds the account-level `send_email` binding and is the catch-all inbound router for the platform mail zone. User workers hold no mail binding, so per-project allowlists and quotas cannot be bypassed.
 
 ```text
 Deployed user worker            Proxy                       Downstream
@@ -15,7 +16,11 @@ Deployed user worker            Proxy                       Downstream
 │ ai.run()           │────────▶│ /ai/*              │─────▶│ AI Gateway / AI    │
 │ revalidate()       │────────▶│ /revalidate        │─────▶│ void-api           │
 │ remote D1/KV/R2    │────────▶│ /d1/* /kv/* /r2/*  │─────▶│ user worker / CF   │
+│ sendEmail()        │────────▶│ /email/send        │─────▶│ SEND_EMAIL (CF)    │
 └────────────────────┘         └────────────────────┘      └────────────────────┘
+         ▲                              ▲
+         │  email(envelope) RPC         │  email() handler
+         └──────────────────────────────┴───── CF Email Routing (inbound)
 ```
 
 ## Authentication
@@ -70,9 +75,93 @@ The remote-binding path is:
 
 The proxy forwards the request to `API.fetch("https://api/internal/revalidate/:projectId")` with `x-void-internal`.
 
+### Email
+
+| Endpoint                    | Body                                                                                    | Notes                                                                                                                                          |
+| --------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /email/send`          | `{ projectId, aiToken, from, recipients, mimeBase64, byteSize, requestId, fromDomain }` | Outbound send. Gate chain below; calls `SEND_EMAIL` once per allowed recipient and returns `SendEmailResult`-shaped JSON.                      |
+| `POST /email/internal/send` | `{ platformToken, platformTimestamp, from, to, mimeBase64 }`                            | Platform-internal verification mail from the api worker. `from` is locked to `noreply@$EMAIL_SENDER_DOMAIN`. Not reachable from a user worker. |
+
+Outbound gate chain, in order — the first failure short-circuits, and nothing before the counters burns quota:
+
+```text
+body shape ▸ `from` length ▸ EMAIL_SENDER_DOMAIN set ▸ SEND_EMAIL bound ▸ recipients ▸ MIME size
+  ▸ email-slug:<projectId>        (pins `from` local-part to the project's slug)
+  ▸ strict `from` regex           (<slug>[+tag]@$EMAIL_SENDER_DOMAIN, no CR/LF or display names)
+  ▸ MIME `From:` addr-spec        (exactly one From header, one mailbox, equal to `from`; the
+                                   display name is not inspected — CF's own From-vs-envelope
+                                   check is undocumented, so the proxy does not rely on it.
+                                   The header scan keeps byte offsets, never a view per line,
+                                   so a fold of millions of continuations costs its bytes and
+                                   nothing per line; the value itself has no length bound
+                                   beyond MIME size, matching the framework's unbounded
+                                   display name)
+  ▸ routing.suspended             (platform-wide; the marker dispatch answers with 429)
+  ▸ email-suspended:<projectId>   (email-only kill-switch)
+  ▸ email-allowlist:<projectId>   (per-project verified destinations)
+  ▸ email-burst:<id>:<minute>     ▸ email-sent:<id>:<month>
+  ▸ SEND_EMAIL.send() per recipient
+```
+
+`requestId` is a caller-supplied log correlation id and is never validated: it is truncated to 128
+characters and stripped of control characters once at intake (a missing or non-string id logs as
+`unknown`), so the per-delivery `[email-log]` line can neither be forged with a newline nor carry a
+tenant-sized value.
+
+`POST /email/internal/send` authenticates with an HMAC of
+`<sentinel>.<unixSeconds>.<sha256(from|to|mimeBase64)>` under `JWT_SECRET` (sentinel auth plus
+content binding, 5-minute skew window). Only the proxy and api hold `JWT_SECRET`. The reference
+signer is `packages/api/src/email/send-verification.ts`; changing the format needs a coordinated
+proxy + api deploy. The three hashed fields are size-bounded BEFORE the hash — `mimeBase64` to
+the base64 form of the MIME cap, `from` and `to` to the same 320 characters `/email/send` applies
+— because the hash runs ahead of the token check, so an unauthenticated caller would otherwise
+choose how much is copied and hashed. The token itself is refused unless it is exactly 43
+characters — the only length an HMAC-SHA256 tag has as unpadded base64url — BEFORE it is decoded,
+because the decode copies it several times over (a 4 MB token exhausts the 128 MB isolate). Every
+pre-auth refusal is the same opaque `403 invalid platform token`; `platform token required` is
+reserved for an absent token or timestamp.
+
+The worker also exports `email()` as the catch-all CF Email Routing handler for the mail zone
+(`packages/proxy/src/email-router.ts`). Inbound parses `<slug>+<tag>` from the recipient, reads the
+project's routing blob, and dispatches into the user worker over an `email(envelope)` RPC call —
+`ForwardableEmailMessage` is not RPC-serializable, so the router sends an envelope and enacts the
+returned `EmailAction[]` on the real message. Inbound honors `routing.suspended` and
+`email-suspended:<projectId>` **before** dispatch, and passes the project's `routing.limits` into
+`DISPATCH.get` exactly as the HTTP router does. Forward/reply actions returned by a handler run
+through the same per-project allowlist and burst/monthly quotas as `/email/send` — CF Email Routing
+destinations are account-wide, so per-project gating is the platform's security boundary.
+
+The returned action list is re-validated at the proxy no matter what produced it — a
+Workers-for-Platforms tenant can ship any `WorkerEntrypoint`, so the framework's own guardrails are
+not the boundary. Before any outbound gate: at most 100 actions; every address at most 320 chars; a
+forward's header bag a plain object of at most 32 string headers of at most 1024 chars each (an
+invalid bag drops the whole list); a reply's `raw` a `Uint8Array` of at most 10 MiB, with at most
+20 MiB of replies across one delivery (an overrunning reply is dropped and not charged, so a later
+one that fits still goes); and a reply's MIME `From:` pinned to its envelope sender. Reject reasons
+are truncated to 1,000 chars **before** control chars are stripped, so a control-heavy reason never
+costs a full-length pass. A value that is logged because it failed validation — a non-object
+action, an unknown action `type`, an address that is not a string — is never coerced with
+`String()`: a string is truncated then stripped, and anything else (a typed array or Array, which
+`String()` would join element by element; a BigInt, whose decimal conversion is superlinear) is
+logged by kind only.
+
+Inbound requests are **not** metered today; only the `email-recv:<id>:<month>` delivery counter is
+written.
+
+#### Sender domain
+
+The mail zone is configuration, not a constant: `EMAIL_SENDER_DOMAIN` (`mail.void.cloud` in
+production, `mail.staging.void.cloud` in staging) is declared as a `vars` entry in **every**
+`wrangler.jsonc` scope, since wrangler does not inherit `vars` — or `send_email` — into a named env
+and deploys run `--env production`. Deployed user workers receive the same value as the
+`__VOID_EMAIL_DOMAIN` plain-text binding so the framework builds its default `from` against the same
+zone. There is no baked-in fallback: if the var is missing, both send endpoints fail closed with a
+502 rather than sending on the production zone from a staging worker.
+
 ### Health
 
-`GET /health` returns binding presence for `ai`, `kv`, `jwt`, and `api`.
+`GET /health` returns binding presence for `ai`, `kv`, `jwt`, `api`, `sendEmail`, and
+`emailDomain`.
 
 ## Source Layout
 
@@ -86,6 +175,8 @@ src/
   d1.ts           # D1 remote access
   kv.ts           # KV remote access
   r2.ts           # R2 remote access
+  email.ts        # Outbound /email/send + platform-internal /email/internal/send
+  email-router.ts # Inbound CF Email Routing catch-all -> user worker email() RPC
   types.ts        # Env and JWT types
 test/unit/
   proxy.test.ts
@@ -94,6 +185,7 @@ test/unit/
   d1.test.ts
   kv.test.ts
   r2.test.ts
+  email.test.ts
 ```
 
 ## Bindings
@@ -103,10 +195,15 @@ test/unit/
 | `AI`            | Workers AI         | Real inference binding                                 |
 | `API`           | Service binding    | Internal API calls (`revalidate`, resource resolution) |
 | `DISPATCH`      | Dispatch namespace | Fast path to deployed user workers                     |
-| `ROUTING`       | KV                 | AI limit flags                                         |
+| `ROUTING`       | KV                 | AI limit flags, routing blobs, email allowlists/quotas |
+| `SEND_EMAIL`    | send_email         | Account-level outbound mail                            |
 | `JWT_SECRET`    | Secret             | HMAC/JWT verification                                  |
 | `CF_ACCOUNT_ID` | Secret             | Cloudflare account ID                                  |
 | `CF_API_TOKEN`  | Secret             | Fallback REST API access                               |
+
+| Var                   | Purpose                                                   |
+| --------------------- | --------------------------------------------------------- |
+| `EMAIL_SENDER_DOMAIN` | Platform mail zone for this environment (no code default) |
 
 ## Deploy
 
@@ -125,3 +222,4 @@ Deployed as part of the root `vp run deploy` and `vp run deploy:staging` scripts
 - `test/unit/d1.test.ts` — D1 query and batch behavior
 - `test/unit/kv.test.ts` — KV operations
 - `test/unit/r2.test.ts` — R2 operations
+- `test/unit/email.test.ts` — wrangler binding/var coverage per env, sender-domain threading, suspension gates, inbound dispatch limits

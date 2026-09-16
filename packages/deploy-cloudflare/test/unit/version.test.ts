@@ -798,6 +798,101 @@ describe('Cloudflare version activation', () => {
     expect(parseCloudflareVersionMessage('void:{bad')).toBeNull();
   });
 
+  // Wrangler 4.131 applies its Email Routing plan inside `triggers deploy`, reading the
+  // config's `addresses`. The trigger-only config Void hands it must therefore carry the
+  // snapshot's addresses verbatim — and carry NOTHING when the snapshot has none, because an
+  // absent key skips the plan while `[]` deletes every rule the Worker owns.
+  it('carries Email Routing addresses through the trigger snapshot and the trigger config', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-version-addresses-'));
+    const configPath = join(directory, 'wrangler.json');
+    const applied = async (
+      triggerConfig: Parameters<typeof deployCloudflareVersionTriggers>[0]['triggerConfig'],
+    ): Promise<Record<string, unknown>> => {
+      let config: Record<string, unknown> | undefined;
+      await deployCloudflareVersionTriggers({
+        runWrangler: async (args) => {
+          const configIndex = args.indexOf('-c');
+          config = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf-8')) as Record<
+            string,
+            unknown
+          >;
+          return ok();
+        },
+        workerName: 'app',
+        configPath,
+        triggerConfig,
+      });
+      return config!;
+    };
+    try {
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          name: 'app',
+          account_id: 'account',
+          send_email: [{ name: 'SEND_EMAIL' }],
+          addresses: ['support@mail.acme.com', 'billing@mail.acme.com'],
+        }),
+      );
+      const withAddresses = readCloudflareTriggerConfig(configPath);
+      expect(withAddresses.addresses).toEqual(['support@mail.acme.com', 'billing@mail.acme.com']);
+      expect(await applied(withAddresses)).toMatchObject({
+        addresses: ['support@mail.acme.com', 'billing@mail.acme.com'],
+      });
+      // The annotation round-trips the addresses, so a rollback restores that version's rules.
+      expect(
+        parseCloudflareVersionMessage(encodeCloudflareVersionMessage([], withAddresses)),
+      ).toEqual({ schema: 2, migrations: [], triggerConfig: withAddresses });
+
+      // An explicit empty array is a destructive plan and must survive as `[]`, not vanish.
+      writeFileSync(configPath, JSON.stringify({ name: 'app', addresses: [] }));
+      const emptied = readCloudflareTriggerConfig(configPath);
+      expect(emptied.addresses).toEqual([]);
+      expect(await applied(emptied)).toMatchObject({ addresses: [] });
+
+      // No `addresses` at all — the key must not reach Wrangler, or it would plan on it.
+      writeFileSync(configPath, JSON.stringify({ name: 'app', account_id: 'account' }));
+      const without = readCloudflareTriggerConfig(configPath);
+      expect(without).not.toHaveProperty('addresses');
+      expect(await applied(without)).not.toHaveProperty('addresses');
+      // A rollback replays the TARGET snapshot only: the version being left never lends its
+      // addresses to the trigger config, so a rollback from an email-enabled version to one
+      // recorded without `addresses` skips the plan and leaves the rules where they are —
+      // routed to a Worker that no longer exports `email()`. That is the one shape both an
+      // absent key and a pre-`addresses` (legacy) snapshot share, and it is not `[]`: a
+      // snapshot carrying `[]` would make every rollback to it a destructive plan (wrangler's
+      // default-No y/n in a TTY, a UserError in CI), which `stabilizeCloudflareVersionTriggers`
+      // reports as `triggers-failed` and the caller compensates by restoring the version it
+      // just left. Encoding "handlers removed" as `[]` is therefore a product call, not a fix.
+      let rollbackConfig: Record<string, unknown> | undefined;
+      await deployCloudflareVersionTriggers({
+        runWrangler: async (args) => {
+          const configIndex = args.indexOf('-c');
+          rollbackConfig = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf-8')) as Record<
+            string,
+            unknown
+          >;
+          return ok();
+        },
+        workerName: 'app',
+        configPath,
+        triggerConfig: without,
+        previousTriggerConfig: withAddresses,
+      });
+      expect(rollbackConfig).not.toHaveProperty('addresses');
+      // A malformed array is not an address list; treat it as absent rather than planning on it.
+      writeFileSync(configPath, JSON.stringify({ name: 'app', addresses: [{ bad: true }] }));
+      expect(readCloudflareTriggerConfig(configPath)).not.toHaveProperty('addresses');
+      expect(
+        parseCloudflareVersionMessage(
+          `void:${JSON.stringify({ schema: 2, migrations: [], triggerConfig: { ...without, addresses: 'support@mail.acme.com' } })}`,
+        ),
+      ).toBeNull();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('uploads, probes, activates, and applies triggers in order', async () => {
     const runWrangler = runner();
     const fetcher = vi.fn(async () => Response.json({ ready: true }));
@@ -975,6 +1070,110 @@ describe('Cloudflare version activation', () => {
       expect.any(String),
       '--env=',
     ]);
+  });
+
+  it('replays the previous snapshot addresses when managed-queue cleanup rebuilds it', async () => {
+    // `queueConsumerCleanup` is non-empty on EVERY deploy of a project with Void-managed
+    // consumers (`readWranglerManagedQueueCleanupCandidates` includes the current consumers
+    // for schema-1 upgrades), so the rebuilt previous config is what `stabilize…` replays when
+    // a concurrent rollback returns traffic to the previous version. Wrangler's Email Routing
+    // plan takes no "previous" list — it reconciles to exactly the replayed `addresses`, and
+    // skips the plan when the key is absent — so the copy must keep that version's own value:
+    // absent, `[]`, and a list are three different plans.
+    const replayed = async (
+      previousAddresses: ReadonlyArray<string> | undefined,
+    ): Promise<Record<string, unknown>> => {
+      const activation = deferred<CloudflareCommandResult>();
+      const activationStarted = deferred<void>();
+      let activeVersionId = CURRENT;
+      let appliedTriggerConfig: Record<string, unknown> | undefined;
+      const previousTriggerConfig = {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: [],
+        queueConsumers: [],
+        workflows: [],
+        ...(previousAddresses === undefined ? {} : { addresses: previousAddresses }),
+      };
+      const runWrangler = async (args: Array<string>) => {
+        if (args[0] === 'deployments') {
+          return ok(
+            JSON.stringify({ versions: [{ version_id: activeVersionId, percentage: 100 }] }),
+          );
+        }
+        if (args[0] === 'versions' && args[1] === 'upload') {
+          return ok(
+            `Worker Version ID: ${NEXT}\nVersion Preview URL: https://ready.example.workers.dev`,
+          );
+        }
+        if (args[0] === 'versions' && args[1] === 'deploy') {
+          activeVersionId = NEXT;
+          activationStarted.resolve(undefined);
+          return activation.promise;
+        }
+        if (args[0] === 'versions' && args[1] === 'list') {
+          return ok(
+            JSON.stringify([
+              {
+                id: CURRENT,
+                annotations: {
+                  'workers/message': encodeCloudflareVersionMessage([], previousTriggerConfig),
+                },
+              },
+            ]),
+          );
+        }
+        if (args[0] === 'triggers') {
+          const configIndex = args.indexOf('-c');
+          appliedTriggerConfig = JSON.parse(readFileSync(args[configIndex + 1]!, 'utf8')) as Record<
+            string,
+            unknown
+          >;
+          return ok();
+        }
+        if (args[0] === 'queues') {
+          return ok();
+        }
+        throw new Error(`Unexpected command: ${args.join(' ')}`);
+      };
+
+      const pending = activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'my-worker',
+        message: encodeCloudflareVersionMessage([], {
+          workers_dev: true,
+          preview_urls: true,
+          routes: [],
+          crons: [],
+          queueConsumers: [],
+          workflows: [],
+          addresses: ['billing@mail.acme.com'],
+        }),
+        queueConsumerCleanup: ['jobs'],
+        fetch: async () => Response.json({ ready: true }),
+      });
+      await activationStarted.promise;
+      // A concurrent rollback to the previous version wins before triggers are published.
+      activeVersionId = CURRENT;
+      activation.resolve(ok());
+
+      await expect(pending).resolves.toMatchObject({
+        ok: false,
+        reason: 'deployment-changed',
+        activeVersionId: CURRENT,
+        triggerRepair: 'succeeded',
+      });
+      return appliedTriggerConfig!;
+    };
+
+    expect(await replayed(['support@mail.acme.com'])).toMatchObject({
+      addresses: ['support@mail.acme.com'],
+      queues: { consumers: [{ queue: 'jobs' }] },
+    });
+    expect(await replayed([])).toMatchObject({ addresses: [] });
+    expect(await replayed(undefined)).not.toHaveProperty('addresses');
   });
 
   it('does not compensate over a concurrent owner after trigger failure', async () => {

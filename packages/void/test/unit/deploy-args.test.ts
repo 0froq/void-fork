@@ -131,6 +131,29 @@ describe('parseDeployArgs', () => {
     );
   });
 
+  it('parses --backend cloudflare --require-email', () => {
+    const result = parseDeployArgs(['--backend', 'cloudflare', '--require-email']);
+    expect(result.backend).toBe('cloudflare');
+    expect(result.requireEmail).toBe(true);
+  });
+
+  it('leaves requireEmail undefined when --require-email is not given', () => {
+    const result = parseDeployArgs(['--backend', 'cloudflare']);
+    expect(result.requireEmail).toBeUndefined();
+  });
+
+  it('parses --platform cloudflare --require-email', () => {
+    const result = parseDeployArgs(['--platform', 'cloudflare', '--require-email']);
+    expect(result.platform).toBe('cloudflare');
+    expect(result.requireEmail).toBe(true);
+  });
+
+  it('throws when --require-email is used without --platform cloudflare', () => {
+    expect(() => parseDeployArgs(['--require-email'])).toThrow(
+      'deploy: --require-email requires --platform cloudflare.',
+    );
+  });
+
   it('throws for an invalid --backend value', () => {
     expect(() => parseDeployArgs(['--backend', 'node'])).toThrow(
       "deploy: --backend must be 'cloudflare'.",

@@ -1,9 +1,10 @@
 import { sql as drizzleSql } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { deployTokenTtlSecondsForBuildMinutes, signPrerenderToken } from '../auth/deploy-token.ts';
 import { hmacSignState } from '../auth/hmac.ts';
 import { buildManagerNamespace } from '../build-namespace.ts';
 import { isTerminalBuildStatus } from '../build-status.ts';
+import { getPlatformCapabilities } from '../capabilities.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
 import {
   clearCronScheduler,
@@ -47,6 +48,7 @@ import {
   invalidateMigrationRenamesForOldName,
   upsertProjectDatabaseUrl,
   getProjectDatabaseUrl,
+  tryCreateEmailDestination,
   ACTIVE_BUILD_STATUSES,
 } from '../db.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
@@ -63,6 +65,16 @@ import {
   restoreQueueConsumer,
   snapshotQueueConsumer,
 } from '../provisioning/cloudflare-api.ts';
+import { syncProjectAllowlistKvBestEffort } from '../provisioning/email-allowlist.ts';
+import {
+  addDestination,
+  listDestinations,
+  // This module has its own `isAlreadyExistsError` for CF resource
+  // provisioning (see the bottom of this file); alias the Email Routing one
+  // rather than shadowing it — they match different CF error wordings.
+  isAlreadyExistsError as isDestinationAlreadyExistsError,
+} from '../provisioning/email-routing.ts';
+import { EMAIL_RESERVED_SLUGS } from '../reserved-slugs.ts';
 import {
   buildRoutingJson,
   buildStaticRoutingJson,
@@ -72,9 +84,23 @@ import {
 import { tokenizeSql } from '../sql/tokenize.ts';
 import { getPlanLimits } from '../tiers.ts';
 import type { Build, DeployManifest } from '../types.ts';
+import { rollbackCfDestination } from './email.ts';
 import { getRequestsDataset, queryProjectRequestOverview } from './usage.ts';
 
+/**
+ * Slugs no project may claim. Two overlapping reasons:
+ *
+ *  - hostname collisions on `*.void.app` (`www`, `api`, `dash`, `cname`, …);
+ *  - EMAIL sender identity: `EMAIL_RESERVED_SLUGS` (`../reserved-slugs.ts`).
+ *    A project's outbound `from` is `<slug>[+tag]@<EMAIL_SENDER_DOMAIN>`,
+ *    so owning a slug owns that mailbox, and a user registering `noreply`
+ *    could send mail indistinguishable from the platform's own. That set
+ *    is folded in here rather than listed twice: this check only reaches
+ *    NEW projects, so the email path enforces the same set on its own
+ *    against a project that registered the slug before it was reserved.
+ */
 export const RESERVED_SLUGS = new Set([
+  ...EMAIL_RESERVED_SLUGS,
   'admin',
   'api',
   'app',
@@ -110,6 +136,17 @@ export const RESERVED_SLUGS = new Set([
   'support',
   'www',
 ]);
+
+/**
+ * Longest slug a project may claim. The slug is an EMAIL local-part prefix:
+ * the runtime's default sender is `<slug>+noreply@<EMAIL_SENDER_DOMAIN>` and
+ * inbound mail arrives at `<slug>+<tag>@`. RFC 5321 § 4.5.3.1.1 caps a
+ * local-part at 64 octets and `+noreply` takes 8 of them, so a slug over 56
+ * has no working default sender (the runtime's `VALID_SLUG` refuses it and
+ * `sendEmail` returns `INVALID_FROM`). 56 also sits inside the 63-octet DNS
+ * label `<slug>.void.app` needs, which nothing else enforced either.
+ */
+export const MAX_SLUG_LENGTH = 56;
 
 const DESTRUCTIVE_PATTERNS = [
   /\bDROP\s+TABLE\b/i,
@@ -574,6 +611,12 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'slug must be lowercase alphanumeric with dashes' }, 400);
     }
 
+    // See MAX_SLUG_LENGTH: the slug has to fit in front of `+noreply@` in a
+    // 64-octet SMTP local-part. The CLI treats this 400 as re-promptable.
+    if (body.slug.length > MAX_SLUG_LENGTH) {
+      return context.json({ error: `slug must be at most ${MAX_SLUG_LENGTH} characters` }, 400);
+    }
+
     if (RESERVED_SLUGS.has(body.slug)) {
       return context.json({ error: 'this name is reserved' }, 400);
     }
@@ -596,7 +639,56 @@ const app = new Hono<ApiEnv>()
 
     const userId = context.get('user').id;
     try {
-      const project = await createProject(context.get('db'), userId, body.slug);
+      // ROUTING carries the `email-slug:<projectId>` mirror the email proxy
+      // reads to pin a project's outbound `from` to its own slug.
+      const project = await createProject(
+        context.get('db'),
+        userId,
+        body.slug,
+        context.env.ROUTING,
+      );
+      // Pre-seed the owner's own address as a destination so mail to
+      // themselves works from the first deploy. CF sends them a verification
+      // link; the row stays `pending` until they click it.
+      //
+      // Gated on the `email` platform capability AND EMAIL_SENDER_DOMAIN:
+      // the row's only purpose is to allow-list a recipient for sends from
+      // `<slug>[+tag]@<domain>`, so on a platform that does not enable email
+      // (its `/email/*` routes answer 501) or in an environment with no
+      // platform mail domain there is nothing it could ever authorize — and
+      // registering it would still cost CF a verification email to the owner.
+      const ownerEmail = context.get('user').email;
+      if (
+        getPlatformCapabilities(context.env).email &&
+        context.env.EMAIL_SENDER_DOMAIN &&
+        ownerEmail &&
+        !isSyntheticProviderEmail(ownerEmail)
+      ) {
+        const address = ownerEmail.toLowerCase();
+        // Off the response path: CF Email Routing has no timeout in
+        // `cfFetch`, and project creation must not wait on it. Nothing
+        // downstream depends on the row existing yet — a pending row emits
+        // no allowlist entry either way.
+        await scheduleAfterResponse(
+          context,
+          autoAddOwnerDestination(
+            context.env.CF_ACCOUNT_ID,
+            context.env.CF_API_TOKEN,
+            context.get('db'),
+            context.env.ROUTING,
+            project.id,
+            address,
+            userId,
+          ),
+        );
+        // Tell the caller WHICH address is being registered, and nothing
+        // more: whether CF mails a verification link (fresh address) or
+        // adopts one the owner already verified is decided by the add above,
+        // which has not run yet. The CLI prints this so the verification
+        // email that may follow is explained; `void email destinations`
+        // shows the outcome.
+        return context.json({ ...project, owner_email_destination: { address } }, 201);
+      }
       return context.json(project, 201);
     } catch (err) {
       // Unique constraint violation — slug was taken between check and insert
@@ -3010,6 +3102,151 @@ function tryParse(json: string): ReadonlyArray<unknown> {
   } catch {
     return [];
   }
+}
+
+/**
+ * Run `work` after the response is sent. Falls back to inline `await` when
+ * there is no ExecutionContext — a test harness calling `app.fetch(req, env)`
+ * with two arguments — so the side effect still happens and stays observable.
+ *
+ * Only the missing-context error is recovered; anything else propagates so a
+ * real bug inside `waitUntil` is not swallowed. `work` must handle its own
+ * failures: on the fallback path a rejection would surface as a 5xx.
+ */
+async function scheduleAfterResponse(
+  context: Context<ApiEnv>,
+  work: Promise<unknown>,
+): Promise<void> {
+  try {
+    context.executionCtx.waitUntil(work);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '';
+    if (/has no ExecutionContext|ExecutionContext is not available/i.test(message)) {
+      await work;
+      return;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Register the project owner's own email as a destination for a new project.
+ *
+ * Entirely best-effort — the outer catch is the point, not an oversight. A
+ * degraded CF Email Routing must not fail project creation, and the owner can
+ * re-add the address from the dashboard.
+ *
+ * On a second-or-later project the address is already on the CF account, so
+ * `addDestination` reports "already exists"; we recover by listing and reusing
+ * the existing tag along with any `verified` status the owner earned earlier.
+ * Without that recovery every additional project would start with an empty
+ * allowlist.
+ *
+ * Trusting CF's `verified` flag is sound here only because the address IS the
+ * project owner's own — the same human already consented on a prior project
+ * (owner-relaxed reuse, Option C in design doc 0078). `verification_source`
+ * stays `'cf'` and the audit columns record whose consent was inherited, so a
+ * later email change can revoke exactly these rows. A `pending` row inherits
+ * nothing and therefore carries no audit.
+ */
+async function autoAddOwnerDestination(
+  accountId: string,
+  apiToken: string,
+  db: Db,
+  kv: KVNamespace,
+  projectId: string,
+  address: string,
+  ownerUserId: string,
+): Promise<void> {
+  // Set the moment Cloudflare holds an account-level address for us — on the
+  // fresh-create path AND on the already-exists recovery path, which adopts an
+  // address the account already carries. Everything after that point can fail
+  // with the address still allocated and no row pointing at it.
+  let allocatedTag: string | null = null;
+  try {
+    let cfRow;
+    try {
+      cfRow = await addDestination(accountId, apiToken, address);
+    } catch (err) {
+      if (!isDestinationAlreadyExistsError(err)) {
+        throw err;
+      }
+      const all = await listDestinations(accountId, apiToken);
+      const found = all.find((row) => row.email.toLowerCase() === address);
+      if (!found) {
+        throw err;
+      }
+      cfRow = found;
+    }
+    allocatedTag = cfRow.tag;
+    const status = cfRow.verified ? 'verified' : 'pending';
+    // `address` was the owner's email when the request came in, before the
+    // Cloudflare calls above. Inheriting CF's `verified` flag is only sound
+    // while that is STILL true, and the helper checks it under a lock that
+    // serializes with the login-side email change — a plain re-read here
+    // would not see that change until it commits. A `pending` row inherits
+    // nothing, so it needs no such check.
+    const { row, ownerEmailChanged } = await tryCreateEmailDestination(
+      db,
+      projectId,
+      address,
+      cfRow.tag,
+      status,
+      cfRow.verified ?? null,
+      'cf',
+      status === 'verified' ? { userId: ownerUserId, emailSnapshot: address } : undefined,
+    );
+    if (ownerEmailChanged) {
+      // The owner's address moved while CF was answering. The consent this
+      // row would inherit belongs to a mailbox they no longer hold, and no
+      // later login would revisit it (they compare the stored address with
+      // the provider's, and those now agree). Best-effort means they can
+      // add a recipient by hand; the rollback below releases the tag if
+      // nothing else references it.
+      throw new Error('owner email changed while the address was being registered');
+    }
+    if (!row) {
+      // The helper's hard-error outcome: a manual add for the same address
+      // won the ON CONFLICT race, and its row was deleted before the
+      // read-back. That deleter released the tag only if it counted itself
+      // as the last reference — teardown's cascade window, or an upstream
+      // delete that failed, leaves the tag live with no row pointing at it,
+      // which is exactly what the rollback below exists for. No retry, unlike
+      // the POST route: the owner just removed this address on purpose, and
+      // re-inserting it here would resurrect a row they revoked. Best-effort
+      // means they can re-add it.
+      throw new Error('owner destination row vanished between insert and read-back');
+    }
+    // Already verified on a prior project — push it into the allowlist mirror
+    // now so the proxy accepts the first send without a manual refresh.
+    if (status === 'verified') {
+      await syncProjectAllowlistKvBestEffort(db, kv, projectId);
+    }
+  } catch (err) {
+    console.error('[projects] auto-add owner email destination failed:', err);
+    if (allocatedTag) {
+      // Roll back on ANY error, not just the foreign-key violation that
+      // project teardown's cascade raises. This path is best-effort and runs
+      // after the 201, so nothing retries it and nothing reports it: once CF
+      // has allocated the address, any failure past that point means no row
+      // persisted to reference it, and an unreferenced address is invisible
+      // to teardown's cleanup while still costing the shared 200-per-account
+      // cap. Rolling back unconditionally is simpler and safer than an
+      // FK-only check. The `refs === 0` guard inside `rollbackCfDestination`
+      // is what stops it revoking a recipient a sibling project still uses —
+      // including the already-exists path, where the address predates us.
+      await rollbackCfDestination(db, accountId, apiToken, projectId, address, allocatedTag);
+    }
+  }
+}
+
+/**
+ * OAuth-provider synthetic addresses that are not real mailboxes — registering
+ * one would only generate an undeliverable CF verification email. Today just
+ * GitHub's; add patterns as providers ship.
+ */
+function isSyntheticProviderEmail(email: string): boolean {
+  return /@users\.noreply\.github\.com$/i.test(email);
 }
 
 export default app;

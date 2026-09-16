@@ -115,6 +115,17 @@ export type ProjectResponse = {
 export type CreateProjectResponse = {
   id: string;
   slug: string;
+  /**
+   * Present exactly when the platform scheduled the project owner's own
+   * address to be registered as an outbound email destination. The
+   * registration runs after the response is sent, so this says nothing about
+   * its outcome — Cloudflare may mail a verification link, or adopt an
+   * address the owner already verified. `void email destinations` shows the
+   * resulting state.
+   */
+  owner_email_destination?: {
+    address: string;
+  };
 };
 
 export type DeleteProjectResponse = {
@@ -193,6 +204,52 @@ export type BuildLogsResponse = {
   status: string;
   terminal: boolean;
   external: string | null;
+};
+
+export type EmailUsageResponse = {
+  month: string;
+  sent: number;
+  received: number;
+  limit: number;
+  remaining: number;
+  suspended: boolean;
+};
+
+export type EmailLogEntry = {
+  timestamp: number;
+  direction: 'sent' | 'received';
+  from: string;
+  to: string;
+  subject?: string;
+  status: string;
+};
+
+export type EmailLogsResponse = {
+  logs: Array<EmailLogEntry>;
+  pending?: boolean;
+  note?: string;
+};
+
+export type EmailDestinationResponse = {
+  id: string;
+  address: string;
+  status: 'pending' | 'verified' | 'failed';
+  verified_at: string | null;
+  created_at: string;
+  /**
+   * Set when the platform (not Cloudflare) mailed the confirmation link —
+   * on the first add AND on every repeat add while the row is pending, since
+   * a repeat POST is how that link gets re-sent.
+   */
+  platformVerificationPending?: boolean;
+  /**
+   * `false` when the call mailed nothing and the row waits on a Cloudflare
+   * link sent EARLIER: a repeat add of a CF-pending address, or a first add
+   * (201) of an address Cloudflare already held pending — the owner's own,
+   * from another project or a hand add. CF refused the create and mails its
+   * link on create only, so a bare 201 must not read as "a link went out".
+   */
+  verificationSent?: boolean;
 };
 
 export type DomainResponse = {
@@ -1195,6 +1252,96 @@ export class PlatformClient {
 
     if (!res.ok) {
       await throwPlatformApiError('Failed to complete GitHub join', res);
+    }
+
+    return res.json();
+  }
+
+  async getEmailUsage(projectId: string): Promise<EmailUsageResponse> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/email/usage`, {
+      headers: {
+        ...this.authHeaders,
+      },
+    });
+
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to fetch email usage', res);
+    }
+
+    return res.json();
+  }
+
+  async getEmailLogs(projectId: string, limit?: number): Promise<EmailLogsResponse> {
+    const url = new URL(`${this.baseUrl}/projects/${projectId}/email/logs`);
+    if (limit !== undefined) {
+      url.searchParams.set('limit', String(limit));
+    }
+
+    const res = await fetch(url, {
+      headers: {
+        ...this.authHeaders,
+      },
+    });
+
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to fetch email logs', res);
+    }
+
+    return res.json();
+  }
+
+  async listEmailDestinations(projectId: string): Promise<Array<EmailDestinationResponse>> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/email/destinations`, {
+      headers: {
+        ...this.authHeaders,
+      },
+    });
+
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to list email destinations', res);
+    }
+
+    return res.json();
+  }
+
+  async addEmailDestination(
+    projectId: string,
+    address: string,
+  ): Promise<EmailDestinationResponse & { created: boolean }> {
+    const res = await fetch(`${this.baseUrl}/projects/${projectId}/email/destinations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.authHeaders,
+      },
+      body: JSON.stringify({ address }),
+    });
+
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to add email destination', res);
+    }
+
+    // 201 registered the address just now; 200 found it already on the
+    // project's list. The body is the same shape either way, so the status
+    // is the "created" signal — whether a link went out is the body's
+    // `verificationSent` / `platformVerificationPending`, not the status.
+    const body = (await res.json()) as EmailDestinationResponse;
+    return { ...body, created: res.status === 201 };
+  }
+
+  async removeEmailDestination(projectId: string, destinationId: string): Promise<{ ok: boolean }> {
+    const res = await fetch(
+      `${this.baseUrl}/projects/${projectId}/email/destinations/${destinationId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          ...this.authHeaders,
+        },
+      },
+    );
+
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to remove email destination', res);
     }
 
     return res.json();

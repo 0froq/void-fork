@@ -1,4 +1,13 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  writeSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { cloudflare, type PluginConfig, type WorkerConfig } from '@cloudflare/vite-plugin';
 import { appendSqliteClassMigration } from '@void/deploy-core';
@@ -13,6 +22,7 @@ import {
 } from './asset-routing.ts';
 import { findVoidAuthConfig } from './auth/config.ts';
 import { getApiUrl, getProxyUrl, getToken, isStagingMode } from './cli/auth.ts';
+import { SEND_EMAIL_BINDING } from './cli/email-cloudflare.ts';
 import { readProjectConfig } from './cli/project.ts';
 import {
   ensureWranglerCompat,
@@ -46,6 +56,7 @@ import { pagesDevCssAssetsPlugin } from './pages/dev-css-assets.ts';
 import { bindingRuntimePlugin } from './plugin-binding-runtime.ts';
 import { devTriggersHintPlugin } from './plugin-dev-triggers-hint.ts';
 import { drizzlePlugin } from './plugin-drizzle.ts';
+import { emailDevInboxPlugin } from './plugin-email-dev-inbox.ts';
 import { envClientFoldPlugin } from './plugin-env-client-fold.ts';
 import { envClientGuardPlugin } from './plugin-env-client-guard.ts';
 import { envSchemaPlugin } from './plugin-env-schema.ts';
@@ -72,9 +83,11 @@ import { routingPlugin } from './plugin-routing.ts';
 import { assertNoRootSourceConventionConflicts, resolveProjectPaths } from './project-paths.ts';
 import { scanQueuesSync } from './queues/scan.ts';
 import { compileAssetFallbackHelper } from './router/compile.ts';
+import { hasEmailHandlers, scanEmailHandlersSync } from './router/email.ts';
 import { isRouteEnabledForEnvironment, type RouteEnvironment } from './router/parse-filename.ts';
 import { scanMiddlewareSync, scanRoutePatternsSync } from './router/scan.ts';
 import { scanWebSocketRoutesSync } from './router/websocket.ts';
+import { DEV_INBOX_ENV_VAR, DEV_INBOX_TOKEN_ENV_VAR } from './runtime/email/dev-inbox.ts';
 import { SANDBOX_MIGRATION_TAG, isSandboxEnabled, resolveSandboxConfig } from './sandbox/config.ts';
 import { mergeAndExpand, parseDotenvFile } from './shared/dotenv.ts';
 import {
@@ -101,6 +114,13 @@ import { validateSsrEntry } from './ssr/entry.ts';
  * The token is local to the project and only honored by a worker bound to
  * localhost; treat it like the rest of `.void/` — disposable scratch state,
  * safe to remove manually if desired.
+ *
+ * The file is owner-only (0600). It is the one credential the dev-inbox
+ * routes accept, and loopback is reachable by every account on the host,
+ * so a default-umask 0644 file would hand any other local user the raw MIME,
+ * the DELETE, and the capture endpoint. A file persisted by an earlier
+ * release is tightened in place, never rotated. Windows has no group/other
+ * bits — `mode` and `chmod` only toggle write there — so it is left alone.
  */
 /**
  * Best-effort detection of `vite build` (and `vite preview`) so we can skip
@@ -116,6 +136,8 @@ function isViteBuildOrPreview(): boolean {
   return subcommand === 'build' || subcommand === 'preview';
 }
 
+const DEV_TRIGGER_TOKEN_FILE_MODE = 0o600;
+
 function getOrCreateDevTriggerToken(root: string): string {
   const tokenPath = join(root, '.void', 'dev-trigger-token');
   const readExisting = (): string | undefined => {
@@ -126,9 +148,24 @@ function getOrCreateDevTriggerToken(root: string): string {
       return undefined;
     }
   };
+  // Best-effort: a token we can read but not chmod (foreign owner, read-only
+  // mount) must still start the dev server.
+  const tightenExisting = (): void => {
+    if (process.platform === 'win32') {
+      return;
+    }
+    try {
+      if ((statSync(tokenPath).mode & 0o077) !== 0) {
+        chmodSync(tokenPath, DEV_TRIGGER_TOKEN_FILE_MODE);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const existing = readExisting();
   if (existing) {
+    tightenExisting();
     return existing;
   }
 
@@ -139,7 +176,7 @@ function getOrCreateDevTriggerToken(root: string): string {
   mkdirSync(join(root, '.void'), { recursive: true });
   const fresh = crypto.randomUUID();
   try {
-    const fd = openSync(tokenPath, 'wx');
+    const fd = openSync(tokenPath, 'wx', DEV_TRIGGER_TOKEN_FILE_MODE);
     try {
       writeSync(fd, fresh);
     } finally {
@@ -392,6 +429,40 @@ export function shouldBindWorkersAi(
   resultAi: unknown,
 ): boolean {
   return needsAI && command === 'build' && !resultAi && !resolvedAi;
+}
+
+/**
+ * Decide whether to inject the `void dev` email-inbox loopback var.
+ *
+ * The dev inbox buffer lives in the Vite dev server's Node process;
+ * `sendEmail` runs in workerd and reaches it by fetching the inbox capture
+ * endpoint through the worker's assets binding, which
+ * `@cloudflare/vite-plugin` wires straight into the dev server's middleware
+ * stack. The var carries that binding's NAME (`ASSETS` for a Void app, or
+ * whatever a Class A framework's own wrangler config declares) and its
+ * presence is what arms the dev path at runtime — so it must never reach a
+ * production build's `wrangler.json`, exactly like the `__VOID_TOKEN`
+ * credential gate.
+ *
+ * Gated on `routeEnvironment`, not on `command`: `vite preview` also reports
+ * `command: 'serve'`, but it runs the BUILT worker whose assets binding is a
+ * real asset directory rather than a dev-server loopback. `routeEnvironment`
+ * is the existing `command === 'serve' && !isPreview` distinction.
+ *
+ * Without an assets binding there is no loopback, so injecting the var would
+ * only arm a path that must then fail; gate on it instead.
+ */
+export function shouldInjectEmailDevInboxVar(
+  routeEnvironment: RouteEnvironment,
+  needsEmail: boolean | undefined,
+  assetsBinding: string | undefined,
+): boolean {
+  return (
+    routeEnvironment === 'dev' &&
+    !!needsEmail &&
+    typeof assetsBinding === 'string' &&
+    !!assetsBinding
+  );
 }
 
 const CLOUDFLARE_BUILTIN_IMPORT = /^cloudflare:/;
@@ -712,6 +783,21 @@ export function voidPlugin(options?: {
   if (detected && bindings.needsLive) {
     throw new Error('live: void/live is currently supported in Void apps only.');
   }
+  // Inbound handlers are compiled into the worker's `email()` export by
+  // `routingPlugin`, which no framework branch installs — the framework
+  // wrapper wires crons and queues only. Without this guard the build
+  // succeeds, every file in `email/` is dead code, and inbound mail bounces
+  // at the platform with a message telling the user to redeploy.
+  //
+  // Gated on the handler DIRECTORY, not on `bindings.needsEmail`. Outbound
+  // `sendEmail` is a binding rather than a compiled export, so it keeps
+  // working in every framework and must not be caught here.
+  const hasInboundEmail = hasEmailHandlers(scanEmailHandlersSync(paths.sourceRoot));
+  if (detected && hasInboundEmail) {
+    throw new Error(
+      'email: inbound email handlers are only supported in Void apps. Remove the email/ directory — `sendEmail` from void/email keeps working.',
+    );
+  }
 
   // Server-only void/* imports (db, kv, ai, etc.) must not pull in
   // cloudflare:workers or node: builtins when bundled for the browser.
@@ -741,6 +827,38 @@ export function voidPlugin(options?: {
         throw new Error('void/sandbox is server-only and cannot be imported by browser code.');
       }
       export const sandbox = { get: getSandbox };
+    `,
+    // Server-only for the same reason as the rest: `void/email` reaches
+    // `runtime/env-raw.ts`, whose top-level `node:async_hooks` import and
+    // module-scope `new AsyncLocalStorage()` have no browser equivalent.
+    // Without a stub the client build SUCCEEDS with only an externalization
+    // warning and ships `new (emptyStub).AsyncLocalStorage` — the page then
+    // white-screens on load, which is worse than a build failure.
+    // `void/email/testing` needs its own entry (the filter is anchored) for
+    // a different reason: it pulls `router/email.ts`, dragging node:path,
+    // node:fs and node:module plus ~24 KB of build-time router machinery
+    // into the browser bundle.
+    //
+    // Throwing rather than returning `{}`, following `void/sandbox`: an
+    // accidental client import should fail legibly instead of silently
+    // no-oping a send the caller believes happened.
+    'void/email': `
+      const serverOnly = (name) => () => {
+        throw new Error(name + ' is server-only and cannot be imported by browser code.');
+      };
+      export const sendEmail = serverOnly('sendEmail');
+      export const createEmail = serverOnly('createEmail');
+      export const defineEmail = serverOnly('defineEmail');
+      export const parseEmail = serverOnly('parseEmail');
+      export const replyEmail = serverOnly('replyEmail');
+      export const createMessageProxy = serverOnly('createMessageProxy');
+    `,
+    'void/email/testing': `
+      const serverOnly = (name) => () => {
+        throw new Error(name + ' is server-only and cannot be imported by browser code.');
+      };
+      export const createEmailTestHarness = serverOnly('createEmailTestHarness');
+      export const createInboundTestHarness = serverOnly('createInboundTestHarness');
     `,
     'void/live': '',
     'void/durable': '',
@@ -1148,6 +1266,74 @@ export function voidPlugin(options?: {
       result.vars = vars;
     }
 
+    // Email — no send binding is emitted on purpose. Outbound mail routes
+    // through __VOID_PROXY/email/send (the proxy worker holds the
+    // platform-level send_email binding), so `bindings.needsEmail` only gates
+    // the dev-inbox plugin and the deploy manifest flag.
+    //
+    // Dev only: name the assets binding so `sendEmail` can loop back into the
+    // Vite dev server and reach the `/__void/inbox` buffer, which lives in the
+    // Node process rather than in this worker's isolate — and hand it the
+    // dev-trigger token the inbox middleware requires on every route.
+    const emailDevInboxBinding =
+      (workerConfig.assets as { binding?: string } | undefined)?.binding ??
+      (resolved.assets as { binding?: string } | undefined)?.binding;
+    if (shouldInjectEmailDevInboxVar(routeEnvironment, bindings.needsEmail, emailDevInboxBinding)) {
+      const vars = (result.vars as Record<string, string>) ?? {};
+      vars[DEV_INBOX_ENV_VAR] = emailDevInboxBinding as string;
+      vars[DEV_INBOX_TOKEN_ENV_VAR] = devTriggerToken;
+      result.vars = vars;
+    }
+
+    // Serve never carries Void's own `send_email` binding, so the dev inbox
+    // stays the only sink. `void deploy --platform cloudflare` writes
+    // `send_email: [{ name: "SEND_EMAIL" }]` into the root wrangler.jsonc, and
+    // `sendEmail` falls through to `env.SEND_EMAIL` whenever the inbox is not
+    // armed (`sendInDev: true`, or no assets binding to reach the dev server
+    // through) — under miniflare that binding writes .eml files to disk, or
+    // with `remote: true` sends real mail. Only the entry under the reserved
+    // `SEND_EMAIL` name is removed: a user's own `send_email` binding under
+    // another name is theirs — nothing in Void reads it, and the root config
+    // takes precedence — so it reaches miniflare exactly as declared. Gated on
+    // `needsEmail`, the same signal that arms the inbox: without `void/email`
+    // in the app there is no `sendEmail` to guard, and a `SEND_EMAIL` entry is
+    // then either a stale leftover nothing reads or the user's own choice of
+    // name; `void deploy` warns about the former and deploys as-is, and dev
+    // must not be stricter about the root config than deploy is. Mutate
+    // `resolved`, as the assets policy above does: the return value is
+    // defu-merged over it (arrays concatenate, `undefined` is skipped), so
+    // this is the only way to remove an entry. An emptied array drops the key
+    // — the Cloudflare plugin treats `[]` and absent alike. Build passes the
+    // root entries through untouched.
+    if (viteCommand === 'serve' && bindings.needsEmail) {
+      const sendEmail = (resolved as { send_email?: unknown }).send_email;
+      if (Array.isArray(sendEmail)) {
+        const kept = sendEmail.filter(
+          (entry) => (entry as { name?: unknown } | null)?.name !== SEND_EMAIL_BINDING,
+        );
+        if (kept.length > 0) {
+          (resolved as Record<string, unknown>).send_email = kept;
+        } else {
+          delete (resolved as Record<string, unknown>).send_email;
+        }
+      }
+    }
+
+    // Default sender for `sendEmail()` from void.json `email.from`. Serve-only,
+    // the same gate as `__VOID_TOKEN` — not because it is a credential, but
+    // because on a build the root wrangler.jsonc already owns the var:
+    // `void deploy --platform cloudflare` writes the same `__VOID_EMAIL_FROM`
+    // there once the domain's routing or sending is ready, and that entry
+    // reaches `dist/ssr/wrangler.json` through `resolved.vars`. Injecting it on
+    // build too would advertise a sender on an account nothing was set up on.
+    // The managed deploy ignores the generated wrangler config and injects its
+    // own sender.
+    if (viteCommand === 'serve' && config.email?.from) {
+      const vars = (result.vars as Record<string, string>) ?? {};
+      vars.__VOID_EMAIL_FROM = config.email.from;
+      result.vars = vars;
+    }
+
     // Queues — add producer + consumer bindings for local dev
     if (queues.length > 0) {
       (result as Record<string, unknown>).queues = {
@@ -1507,7 +1693,7 @@ export function voidPlugin(options?: {
   // Runs before the Cloudflare plugin so vars are available as worker bindings.
   //
   // The `{ mode, envDir }` this hook OBSERVES (raw, root-relative) is exposed via `api` so the
-  // self-host `void deploy --backend cloudflare` secret preflight can validate the SAME `.env*`
+  // self-host `void deploy --platform cloudflare` secret preflight can validate the SAME `.env*`
   // set the build ships. It must be captured HERE, at this hook's position, not read off the
   // final `resolved.envDir`: config hooks run in sequence, and a LATER plugin's `config` hook
   // that returns a different `envDir` would change `resolved.envDir` while this hook already
@@ -1727,6 +1913,9 @@ export function voidPlugin(options?: {
             if (fileBindings.needsSandbox && !bindings.needsSandbox) {
               newBindings.push('Sandbox (void/sandbox)');
             }
+            if (fileBindings.needsEmail && !bindings.needsEmail) {
+              newBindings.push('Email (void/email)');
+            }
           }
           if (autoDetectAuth && fileBindings.needsAuth) {
             newBindings.push('Auth (void/auth)');
@@ -1873,6 +2062,7 @@ export function voidPlugin(options?: {
       createWranglerCompatPersistPlugin(root, config),
       restartPlugin(),
       bindingWatchPlugin,
+      ...(bindings.needsEmail ? [emailDevInboxPlugin({ devTriggerToken })] : []),
       envPlugin,
       envSchemaPlugin(root, {
         onDefaults: applySchemaDefaultsToWorkerVars,
@@ -1934,6 +2124,14 @@ export function voidPlugin(options?: {
     if (durableObjects.length > 0) {
       throw new Error(
         `durable: durable-objects/ requires target: "cloudflare". It is not available with target: '${config.target}'.`,
+      );
+    }
+    // `compileNodeApp` imports only the Hono app from the route table; the
+    // `__emailHandler` the table exports for `email/` is never invoked, so
+    // without this the build succeeds and every inbound handler is dead code.
+    if (hasInboundEmail) {
+      throw new Error(
+        `email: inbound email handlers (email/) require target: "cloudflare". They are not available with target: '${config.target}'.`,
       );
     }
     if (config.routing?.revalidate) {
@@ -2045,6 +2243,7 @@ export function voidPlugin(options?: {
     createWranglerCompatPersistPlugin(root, config),
     restartPlugin(),
     bindingWatchPlugin,
+    ...(bindings.needsEmail ? [emailDevInboxPlugin({ devTriggerToken })] : []),
     envPlugin,
     envSchemaPlugin(root, {
       onDefaults: applySchemaDefaultsToWorkerVars,

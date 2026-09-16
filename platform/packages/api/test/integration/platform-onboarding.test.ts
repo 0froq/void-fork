@@ -31,7 +31,8 @@ describe('platform onboarding pages', () => {
     const html = await response.text();
     expect(html).toContain('&lt;Example Platform&gt;');
     expect(html).not.toContain('<Example Platform>');
-    expect(html).toContain("void connect 'https://api.example.com'");
+    // `escapeHtml` escapes the quotes too; the browser renders them back.
+    expect(html).toContain('void connect &#39;https://api.example.com&#39;');
     expect(html).not.toContain('attacker.example');
     expect(html).not.toContain('alias.example.com');
     expect(html).not.toContain('void auth login');
@@ -49,7 +50,8 @@ describe('platform onboarding pages', () => {
     );
     const html = await response.text();
     expect(html).toContain('Get Started with Void Platform');
-    expect(html).toContain("void connect 'https://api.example.com'");
+    // `escapeHtml` escapes the quotes too; the browser renders them back.
+    expect(html).toContain('void connect &#39;https://api.example.com&#39;');
     expect(html).not.toContain('attacker.example');
   });
 

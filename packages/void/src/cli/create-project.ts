@@ -59,6 +59,16 @@ export async function promptAndCreateProject(
   }
   const config: ProjectConfig = { projectId: project.id, slug: project.slug };
   writeProjectConfig(root, attachSelectedPlatform(root, config, client.apiUrl));
+  if (project.owner_email_destination) {
+    // The platform registers the owner's address after it has answered, so
+    // the response cannot say whether Cloudflare mailed a verification link
+    // or adopted an address already verified on an earlier project. Say the
+    // one thing that is true either way, and where the outcome shows up.
+    const { address } = project.owner_email_destination;
+    log.info(
+      `Registering ${address} as a recipient for this project. Cloudflare emails it a verification link unless it is already verified — \`void email destinations\` shows the state.`,
+    );
+  }
   return config;
 }
 

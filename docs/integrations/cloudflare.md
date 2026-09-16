@@ -258,11 +258,12 @@ Direct deployment uses the top-level JSON/JSONC configuration; convert a `wrangl
 Void reads your app's configuration and source, then:
 
 1. Checks the app type, selected account, and Cloudflare credentials.
-2. Creates missing resources or reuses resources already in your account.
-3. Builds the app and checks the generated Worker config, secrets, and migration history.
-4. Preserves or creates the auth secret, applies pending migrations, and uploads keys marked `.secret()` as encrypted Worker secrets.
-5. Uploads a Worker Version and checks that it is ready.
-6. Sends traffic to the new version and applies routes, custom domains, cron schedules, and queue consumers.
+2. If the app uses email (`sendEmail()` or `email/` handlers), reads your zone's email state and, before any project code runs, asks once to set it up. See [Your own Cloudflare account](../guide/email.md#your-own-cloudflare-account) in the email guide.
+3. Creates missing resources or reuses resources already in your account.
+4. Builds the app and checks the generated Worker config, secrets, and migration history.
+5. Preserves or creates the auth secret, applies pending migrations, and uploads keys marked `.secret()` as encrypted Worker secrets.
+6. Uploads a Worker Version and checks that it is ready.
+7. Sends traffic to the new version and applies routes, custom domains, cron schedules, queue consumers, and Email Routing rules.
 
 The secret and migration checks need the built Worker, so they happen after provisioning and building. If a check fails, resources may already exist, but Void has not applied remote D1 migrations or uploaded the application Worker.
 
@@ -273,6 +274,8 @@ Run the first deploy from one machine at a time. The provisioning lock protects 
 ### Deploying from CI
 
 Set `CLOUDFLARE_API_TOKEN` in your CI secrets. The token needs Workers Scripts: Edit and read access to bound resources, plus edit permission for each product Void needs to provision. Set `CLOUDFLARE_ACCOUNT_ID` if the token can access more than one account.
+
+Email setup needs a browser session from `void cloudflare login`, which carries the Email Routing and Email Sending scopes, or a `CLOUDFLARE_API_TOKEN` that also has Email Routing Edit and Email Sending Edit. A Global API Key pair is refused. In CI the email step never prompts: run `void email setup --platform cloudflare` once locally, commit `wrangler.jsonc`, then deploy with `--require-email`.
 
 When a Worker has no version preview URL, such as a Worker with Durable Objects, also set `CLOUDFLARE_WORKERS_SUBDOMAIN`. Use the account subdomain, for example `my-team` or `my-team.workers.dev`. Local deploys cache this value in ignored `.void/cloudflare.json` after Cloudflare reports a deployment URL; a fresh CI checkout has no such cache.
 
@@ -335,6 +338,7 @@ Worker apps support D1, KV, R2, Queues, typed state, PostgreSQL and MySQL throug
 - **Worker apps need a fresh build.** `--skip-build` works for existing static, SPA, and SSG output. Worker validation needs the current build's vars and auth schema.
 - **Named Cloudflare environments aren't supported.** Direct commands use the top-level root config and reject `CLOUDFLARE_ENV`, `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH`, and project-local name overrides. Use a separate root config per deployment target.
 - **Node.js, Bun, and Deno use a different deployment path.** See their [integration guide](./nodejs-bun-deno.md).
+- **Email is set up on the first deploy, on a zone you own.** Put `email.from` in `void.json`; the deploy reads your account, prints a checklist of what it would change, and asks once. See [Your own Cloudflare account](../guide/email.md#your-own-cloudflare-account). Outside Void's reach: `email/_default.ts` and dynamic local parts (`email/[user].ts`) need a catch-all, which exists only on a zone apex, so on a mail subdomain they get no rule; a mail domain that already has non-Cloudflare MX records is refused, never routed over; `sendEmail()` to arbitrary recipients needs Workers Paid (Email Sending onboarding), otherwise verified destinations only; Void owns the top-level `addresses` array in `wrangler.jsonc`, so hand-written entries there skip the email step; and `void email usage`, `logs`, `allow`, and `destinations` are platform-only.
 
 WebSocket routes and typed state use SQLite-backed Durable Objects. Commit the bindings and `new_sqlite_classes` migration history in `wrangler.jsonc`; don't delete or reorder deployed migration steps. Older hosted classes using `new_classes` keep their existing storage.
 

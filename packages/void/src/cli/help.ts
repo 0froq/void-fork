@@ -158,6 +158,11 @@ const HELP_TREE: HelpTree = {
         description: 'Override the platform saved by void init',
       },
       {
+        command: '--require-email',
+        description:
+          'Fail instead of deploying without email when the mail domain is not set up (with --platform cloudflare)',
+      },
+      {
         command: '--debug',
         description: 'Mirror the deploy log to stderr (always written to ~/.void/logs)',
       },
@@ -423,6 +428,80 @@ const HELP_TREE: HelpTree = {
           {
             command: '--verbose',
             description: 'Also print the raw multi-line status breakdown',
+          },
+        ],
+      },
+    },
+  },
+  email: {
+    summary: 'Inspect email activity and manage verified recipients.',
+    usage: ['void email <command>'],
+    commands: [
+      { command: 'usage', description: 'Show monthly outbound/inbound counts and quota' },
+      { command: 'logs', description: 'Show recent email delivery activity' },
+      { command: 'destinations', description: 'List verified recipient addresses' },
+      { command: 'allow <address>', description: 'Add a recipient and trigger CF verification' },
+      { command: 'disallow <address>', description: 'Remove a recipient from the allowlist' },
+      {
+        command: 'status --platform cloudflare',
+        description: 'Show the email setup state and address map on your own account',
+      },
+      {
+        command: 'setup --platform cloudflare',
+        description: 'Set email up on your own Cloudflare account (one confirmation)',
+      },
+    ],
+    children: {
+      usage: withProjectOption(
+        'Show monthly outbound/inbound counts and quota.',
+        'void email usage [options]',
+      ),
+      // Not `withProjectOption`: `logs` is the one email subcommand with a
+      // flag of its own that actually does something, so the shared helper
+      // would hide it. Same shape as `domain status` above.
+      logs: {
+        summary: 'Show recent email delivery activity.',
+        usage: ['void email logs [options]'],
+        options: [
+          { command: '--project <name>', description: 'Project name override' },
+          {
+            command: '--limit <n>',
+            description: 'How many entries to show (positive integer)',
+          },
+        ],
+      },
+      destinations: withProjectOption(
+        'List verified recipient addresses.',
+        'void email destinations [options]',
+      ),
+      allow: withProjectOption(
+        'Add a recipient and trigger a Cloudflare verification email.',
+        'void email allow <address> [options]',
+      ),
+      disallow: withProjectOption(
+        'Remove a recipient from the verified allowlist.',
+        'void email disallow <address> [options]',
+      ),
+      // Mode B (design doc 0078): both read the local project + your wrangler session,
+      // never a Void project, so neither takes `--project`.
+      status: {
+        summary: 'Show the email setup state and address map. Exit 1 when not ready.',
+        usage: ['void email status --platform cloudflare'],
+        options: [
+          {
+            command: '--platform cloudflare',
+            description: 'Your own Cloudflare account (the only platform with a status today)',
+          },
+        ],
+      },
+      setup: {
+        summary:
+          'Set email up on your own Cloudflare account: enable Email Routing, onboard Email Sending, write send_email + addresses into wrangler.jsonc. Asks once before changing the account.',
+        usage: ['void email setup --platform cloudflare'],
+        options: [
+          {
+            command: '--platform cloudflare',
+            description: 'Your own Cloudflare account (required; the Void platform needs no setup)',
           },
         ],
       },
@@ -873,6 +952,8 @@ export function printGlobalHelp(): void {
       ...globalCommandLines('secret'),
       '',
       ...globalCommandGroup('domain'),
+      '',
+      ...globalCommandGroup('email'),
       '',
       ...globalCommandGroup('github'),
       '',

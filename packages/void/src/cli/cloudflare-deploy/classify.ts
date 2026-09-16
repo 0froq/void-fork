@@ -65,7 +65,7 @@ export function classifyCloudflareDeployApp(
       [
         'deploy: --platform cloudflare found no Void backend to deploy.',
         'A full Void app has at least one of: routes/, pages/, middleware, crons/, queues/,',
-        'or an SSR entry. Add your server code, or use `void deploy` for a static site.',
+        'email/, or an SSR entry. Add your server code, or use `void deploy` for a static site.',
       ].join('\n'),
     );
   }

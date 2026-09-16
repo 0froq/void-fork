@@ -303,7 +303,7 @@ describe('detectPreset — strictBackend', () => {
 describe('findBackendSources', () => {
   it('lists every backend source relative to the root', () => {
     const root = setupProject({
-      dirs: ['routes', 'pages', 'middleware', 'crons', 'queues'],
+      dirs: ['routes', 'pages', 'middleware', 'crons', 'queues', 'email'],
       files: { 'src/main.ssr.tsx': 'export default {};' },
     });
     expect(findBackendSources(root)).toEqual([
@@ -312,8 +312,17 @@ describe('findBackendSources', () => {
       'middleware/',
       'crons/',
       'queues/',
+      'email/',
       'src/main.ssr.tsx',
     ]);
+  });
+
+  // `email/` compiles to the worker's `email()` export. A static deploy uploads
+  // no worker, so leaving it out here drops every inbound handler silently.
+  it('counts email/ as a backend, and agrees with hasBackendFiles', () => {
+    const root = setupProject({ dirs: ['email'] });
+    expect(findBackendSources(root)).toEqual(['email/']);
+    expect(hasBackendFiles(root)).toBe(true);
   });
 
   it('is empty for a project with no backend, and agrees with hasBackendFiles', () => {
@@ -410,7 +419,7 @@ describe('resolveWranglerArgv (module-resolution launcher)', () => {
   it("prefers void's own wrangler over an incompatible app-root wrangler, resolving its REAL cli.js", () => {
     // The app root pins its OWN (potentially older/incompatible) wrangler, and a
     // separate "void-nested" wrangler is resolvable via module resolution. The
-    // provisioner targets wrangler 4.107's exact flags/JSON/errors, so void's own
+    // provisioner targets wrangler 4.131's exact flags/JSON/errors, so void's own
     // wrangler MUST win — the app-root one must not shadow it. The resolved entry
     // is the `main` CLI (`wrangler-dist/cli.js`), NOT the `bin.wrangler` wrapper.
     const root = setupProject({

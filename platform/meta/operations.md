@@ -78,6 +78,28 @@ openssl pkcs8 -topk8 -nocrypt -in github-app-pkcs1.pem -out github-app-pkcs8.pem
 
 Container builds use the configured `BuildManager` or `BuildManagerLarge` class for the project's plan. GitHub Actions builds run in the repository's Actions environment and authenticate through `/auth/github-oidc`. Follow build logs with `void platform build logs <build-id> --follow`.
 
+## Email
+
+Every project sends as `<slug>[+tag]@<mail domain>` and receives at `<slug>+anything@<mail domain>` through one shared mail facility; there is no per-project DNS work. The mail domain is the `EMAIL_SENDER_DOMAIN` var on the API and proxy Workers, handed to deployed user Workers as `__VOID_EMAIL_DOMAIN`. The two Worker values must match: the proxy validates every sender against its own copy, so a mismatch fails the API's own verification mail with `INVALID_FROM`. Every reader fails closed when the var is absent. Void Cloud uses `mail.void.cloud` and `mail.staging.void.cloud`, both subdomains of the `void.cloud` zone.
+
+### One-time zone setup, per environment
+
+Do these in order; step 4 before step 5, or the catch-all points at a Worker with no `email()` export. As of 2026-09-11 no step has been done in either environment.
+
+1. Extend `CF_API_TOKEN` with Email Routing: Edit. Without it every destination add returns 403, which the CLI reports as a 502 and the owner auto-add on project creation swallows.
+2. Add the subdomain to Email Routing (dashboard: Email → Email Routing → the zone → Settings → Subdomains). Cloudflare adds and locks the MX, SPF, and DKIM records. The two-label staging name is unverified against this form.
+3. Onboard the same name to Email Sending (dashboard, or `wrangler email sending enable <domain>`). Without it the binding sends only to verified destination addresses, capped at 200 per account across every project. Requires Workers Paid.
+4. Deploy the proxy with `send_email` bound and the `email()` export live. Check the top level, `env.production`, and `env.staging` of `platform/packages/proxy/wrangler.jsonc`; Wrangler does not inherit `send_email` into a named env.
+5. Create the catch-all rule on the subdomain: action _Send to a Worker_, destination the proxy Worker (`PUT /zones/{zone}/email/routing/rules/catch_all` with `{ "type": "worker", "value": ["void-proxy"] }`). Wrangler has no catch-all command and its `addresses` array cannot write it. This rule is the inbound kill switch. Leave the zone's subaddressing setting alone; the catch-all takes every address on the subdomain.
+6. The slug mirror (`email-slug:<projectId>` in `ROUTING` KV) is written on project creation and rewritten hourly by the rollover, so projects that predate the feature are covered within an hour of the API deploy.
+7. Verify with the proxy tail and a message to `<test-slug>+test@<mail domain>`. Outbound sent through the binding shows as dropped in the Email Routing summary even when delivered; read Email Sending metrics instead.
+
+### Deploy order and rollback
+
+Deploy the proxy before the API: the API's verification mail posts to the proxy's `/email/internal/send`. `vp run deploy` runs the API first, so run the two as explicit steps for the release that turns email on. To stop inbound, delete the catch-all rule; to stop outbound, redeploy the proxy without `send_email`.
+
+Two server-side changes are retroactive. Before the first API deploy that carries them, query `project_secrets.name IN ('SEND_EMAIL', '__VOID_EMAIL_DOMAIN', '__VOID_PROJECT_SLUG')` — those are now reserved binding names and a project holding one fails deploys — and check for projects already holding the reserved slugs `noreply`, `postmaster`, `abuse`, `bounce`, and `security`.
+
 ## Staging Access Control
 
 Void Cloud staging protects the API, dashboard, proxy, and app hostnames with Cloudflare Access. Configure user access in the identity provider and use a service-token pair for automation. Access credentials are separate from a Void user or administrator session.
