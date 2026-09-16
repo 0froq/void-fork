@@ -9,6 +9,17 @@ vp test run packages/void
 vp run check
 ```
 
+The named shortcuts select the current test projects:
+
+```sh
+vp run test:unit
+vp run test:integration
+vp run test:metaframeworks
+vp run test:pages:react-vue
+vp run test:pages:svelte-solid
+vp run test:platform
+```
+
 Run the complete SDK and platform verification before handing off a finished change:
 
 ```sh
