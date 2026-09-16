@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -71,6 +71,7 @@ import {
 } from '../../src/cli/platform-plan.ts';
 import {
   listInstallationManifests,
+  readInstallationRecoverySecrets,
   writeInstallationManifest,
 } from '../../src/cli/platform-registry.ts';
 
@@ -193,6 +194,14 @@ describe('platform installer', () => {
         projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY.replace(/=+$/, ''),
       }),
     ).toThrow('canonical base64');
+    expect(() =>
+      createPlatformInstallationSecrets({
+        ...input,
+        jwtSecret: TEST_PLATFORM_JWT_SECRET,
+        projectSecretActiveKeyVersion: 'v1',
+        projectSecretKeysJson: JSON.stringify({ v1: TEST_PLATFORM_PROJECT_SECRET_KEY }),
+      }),
+    ).toThrow('Fresh installations use VOID_PLATFORM_PROJECT_SECRET_KEY');
     expect(
       createPlatformInstallationSecrets({
         ...input,
@@ -201,8 +210,46 @@ describe('platform installer', () => {
       }),
     ).toMatchObject({
       jwtSecret: TEST_PLATFORM_JWT_SECRET,
+      projectSecretActiveKeyVersion: 'v1',
       projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+      projectSecretKeysJson: JSON.stringify({ v1: TEST_PLATFORM_PROJECT_SECRET_KEY }),
     });
+  });
+
+  it('validates complete project-secret keyring restoration inputs', () => {
+    const input = {
+      bootstrapGitHubId: '583231',
+      bootstrapGitHubLogin: 'octocat',
+      cloudflareApiToken: 'cf-token',
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      existingInstallation: true,
+      githubClientId: 'github-id',
+      githubClientSecret: 'github-secret',
+      r2AccessKeyId: 'r2-id',
+      r2SecretAccessKey: 'r2-secret',
+    };
+    expect(() =>
+      createPlatformInstallationSecrets({
+        ...input,
+        projectSecretKeysJson: JSON.stringify({ v1: TEST_PLATFORM_PROJECT_SECRET_KEY }),
+      }),
+    ).toThrow('must be supplied together');
+    expect(() =>
+      createPlatformInstallationSecrets({
+        ...input,
+        projectSecretActiveKeyVersion: 'v2',
+        projectSecretKeysJson: JSON.stringify({ v1: TEST_PLATFORM_PROJECT_SECRET_KEY }),
+      }),
+    ).toThrow('must identify a key');
+    expect(() =>
+      createPlatformInstallationSecrets({
+        ...input,
+        projectSecretActiveKeyVersion: 'v1',
+        projectSecretKeysJson: JSON.stringify({
+          v1: TEST_PLATFORM_PROJECT_SECRET_KEY.replace(/=+$/, ''),
+        }),
+      }),
+    ).toThrow('canonical base64');
   });
 
   it('attempts Worker rollback even when closing an unsafe routing gate fails', async () => {
@@ -1525,6 +1572,102 @@ describe('platform installer', () => {
       jwtSecret: 'recovered-jwt-secret',
       projectSecretKey: recoveredProjectSecretKey,
     });
+
+    const currentV1 = Buffer.alloc(32, 10).toString('base64');
+    const currentV2 = Buffer.alloc(32, 11).toString('base64');
+    const restoredKeyring = createPlatformInstallationSecrets({
+      ...input,
+      checkpoint: {
+        projectSecretActiveKeyVersion: 'v1',
+        projectSecretKey: recoveredProjectSecretKey,
+        projectSecretKeysJson: JSON.stringify({ v1: recoveredProjectSecretKey }),
+      },
+      projectSecretActiveKeyVersion: 'v2',
+      projectSecretKeysJson: JSON.stringify({ v2: currentV2, v1: currentV1 }),
+    });
+    expect(restoredKeyring).toMatchObject({
+      projectSecretActiveKeyVersion: 'v2',
+      projectSecretKey: currentV1,
+      projectSecretKeysJson: JSON.stringify({ v1: currentV1, v2: currentV2 }),
+    });
+    expect(
+      platformWorkerSecretPayload('api', restoredKeyring, 'account', 'zone', false),
+    ).toMatchObject({
+      PROJECT_SECRET_ACTIVE_KEY_VERSION: 'v2',
+      PROJECT_SECRET_KEYS_JSON: JSON.stringify({ v1: currentV1, v2: currentV2 }),
+    });
+    expect(platformWorkerSecretPayload('api', restoredKeyring, 'account', 'zone', true)).toBeNull();
+  });
+
+  it('stores a restored complete project-secret keyring in encrypted recovery state', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-keyring-recovery-test-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const plan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        applicationDomain: 'apps.example.com',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        displayName: 'Example',
+        installationSlug: 'example',
+        zoneName: 'example.com',
+      },
+      null,
+    );
+    const manifest = createPlatformInstallationManifest({
+      account: plan.account,
+      createdAt: '2026-09-16T00:00:00.000Z',
+      deployment: plan.deployment,
+      id: plan.installationId,
+      ownershipNonce: 'ownership-nonce-0123456789abcdef',
+      platformVersion: '1.0.0',
+    });
+    writeInstallationManifest(manifest);
+    const v1 = Buffer.alloc(32, 12).toString('base64');
+    const v2 = Buffer.alloc(32, 13).toString('base64');
+    const secrets = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '583231',
+      bootstrapGitHubLogin: 'octocat',
+      cloudflareApiToken: 'cf-token',
+      checkpoint: {
+        projectSecretActiveKeyVersion: 'v1',
+        projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+        projectSecretKeysJson: JSON.stringify({ v1: TEST_PLATFORM_PROJECT_SECRET_KEY }),
+      },
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      existingInstallation: true,
+      githubClientId: 'github-id',
+      githubClientSecret: 'github-secret',
+      jwtSecret: TEST_PLATFORM_JWT_SECRET,
+      projectSecretActiveKeyVersion: 'v2',
+      projectSecretKeysJson: JSON.stringify({ v1, v2 }),
+      r2AccessKeyId: 'r2-id',
+      r2SecretAccessKey: 'r2-secret',
+    });
+
+    await expect(
+      installPlatform(plan, secrets, manifest, {
+        acquireDatabaseLifecycleLock: async () => {
+          throw new Error('must stop before acquiring a lock');
+        },
+        claimDatabase: async () => {
+          throw new Error('stop after the encrypted checkpoint');
+        },
+        client: {} as never,
+        revalidateBeforeWorkerDeploy: async () => {},
+      }),
+    ).rejects.toThrow('stop after the encrypted checkpoint');
+
+    expect(readInstallationRecoverySecrets(manifest)).toMatchObject({
+      projectSecretActiveKeyVersion: 'v2',
+      projectSecretKey: v1,
+      projectSecretKeysJson: JSON.stringify({ v1, v2 }),
+    });
+    const envelope = readFileSync(join(directory, 'account', `${manifest.id}.secrets.enc`), 'utf8');
+    expect(envelope).not.toContain(v1);
+    expect(envelope).not.toContain(v2);
   });
 
   it("does not replay another workstation's stale recovery secrets during an upgrade", () => {

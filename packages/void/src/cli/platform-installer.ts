@@ -86,7 +86,9 @@ export type PlatformInstallationSecrets = Readonly<{
   githubClientId: string;
   githubClientSecret: string;
   jwtSecret: string;
+  projectSecretActiveKeyVersion: string;
   projectSecretKey: string;
+  projectSecretKeysJson: string;
   r2AccessKeyId: string;
   r2SecretAccessKey: string;
   /** Explicit configuration changes only; never populated from recovery data. */
@@ -264,7 +266,9 @@ export function createPlatformInstallationSecrets(input: {
   /** The caller supplies current explicit rotation inputs, not resumed inputs. */
   updateExistingWorkers?: boolean;
   jwtSecret?: string;
+  projectSecretActiveKeyVersion?: string;
   projectSecretKey?: string;
+  projectSecretKeysJson?: string;
   r2AccessKeyId: string;
   r2SecretAccessKey: string;
   checkpoint?: Record<string, string> | null;
@@ -276,36 +280,31 @@ export function createPlatformInstallationSecrets(input: {
     }
     return value;
   };
-  // Runtime signing/encryption keys are installation identity, not rotating
-  // configuration. Once recovery material exists, an unrelated exported key
-  // must never replace it during repair, upgrade, enable, or resume.
+  // Runtime signing/encryption keys are installation identity, not ordinary
+  // configuration. A checkpoint wins over the legacy single-key inputs. The
+  // explicit complete-keyring pair is the only supported way to supersede a
+  // stale encryption checkpoint, and existing Workers still inherit live keys.
   const existingInstallation = input.existingInstallation === true;
   const restoredIdentity = (explicit: string, name: string): string =>
     existingInstallation ? checkpoint[name] || explicit || '' : explicit || checkpoint[name] || '';
   const configured = (explicit: string, name: string): string => explicit || checkpoint[name] || '';
   const jwtSecret = restoredIdentity(input.jwtSecret || '', 'jwtSecret');
-  const projectSecretKey = restoredIdentity(input.projectSecretKey || '', 'projectSecretKey');
   const resolvedJwtSecret = input.existingInstallation
     ? jwtSecret
     : required(jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
-  const resolvedProjectSecretKey = input.existingInstallation
-    ? projectSecretKey
-    : required(projectSecretKey, 'VOID_PLATFORM_PROJECT_SECRET_KEY');
   if (!existingInstallation && Buffer.byteLength(resolvedJwtSecret, 'utf8') < 32) {
     throw new Error(
       'platform: VOID_PLATFORM_JWT_SECRET must contain at least 32 bytes of secret material unique to this installation.',
     );
   }
-  const decodedProjectSecretKey = Buffer.from(resolvedProjectSecretKey, 'base64');
-  if (
-    resolvedProjectSecretKey &&
-    (decodedProjectSecretKey.byteLength !== 32 ||
-      decodedProjectSecretKey.toString('base64') !== resolvedProjectSecretKey)
-  ) {
-    throw new Error(
-      'platform: VOID_PLATFORM_PROJECT_SECRET_KEY must be the canonical base64 encoding of a 32-byte key unique to this installation.',
-    );
-  }
+  const projectSecretKeyring = resolveProjectSecretKeyring({
+    checkpoint,
+    existingInstallation,
+    projectSecretActiveKeyVersion: input.projectSecretActiveKeyVersion || '',
+    projectSecretKey: input.projectSecretKey || '',
+    projectSecretKeysJson: input.projectSecretKeysJson || '',
+    required,
+  });
   return {
     workerSecretUpdates: input.updateExistingWorkers
       ? withoutEmptySecrets({
@@ -348,7 +347,9 @@ export function createPlatformInstallationSecrets(input: {
           'VOID_PLATFORM_GITHUB_CLIENT_SECRET',
         ),
     jwtSecret: resolvedJwtSecret,
-    projectSecretKey: resolvedProjectSecretKey,
+    projectSecretActiveKeyVersion: projectSecretKeyring.activeVersion,
+    projectSecretKey: projectSecretKeyring.v1Key,
+    projectSecretKeysJson: projectSecretKeyring.keysJson,
     r2AccessKeyId: existingInstallation
       ? configured(input.r2AccessKeyId, 'r2AccessKeyId')
       : required(
@@ -364,6 +365,127 @@ export function createPlatformInstallationSecrets(input: {
   };
 }
 
+function resolveProjectSecretKeyring(input: {
+  checkpoint: Record<string, string>;
+  existingInstallation: boolean;
+  projectSecretActiveKeyVersion: string;
+  projectSecretKey: string;
+  projectSecretKeysJson: string;
+  required: (value: string, name: string) => string;
+}): Readonly<{ activeVersion: string; keysJson: string; v1Key: string }> {
+  const explicitFullKeyring =
+    input.projectSecretKeysJson !== '' || input.projectSecretActiveKeyVersion !== '';
+  if (
+    explicitFullKeyring &&
+    (!input.projectSecretKeysJson || !input.projectSecretActiveKeyVersion)
+  ) {
+    throw new Error(
+      'platform: VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON and VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION must be supplied together.',
+    );
+  }
+  if (explicitFullKeyring && !input.existingInstallation) {
+    throw new Error(
+      'platform: Fresh installations use VOID_PLATFORM_PROJECT_SECRET_KEY to initialize key version v1. The full project-secret keyring inputs are for restoring an existing installation.',
+    );
+  }
+
+  const checkpointKeysJson = input.checkpoint.projectSecretKeysJson || '';
+  const checkpointActiveVersion = input.checkpoint.projectSecretActiveKeyVersion || '';
+  if (
+    !explicitFullKeyring &&
+    (checkpointKeysJson !== '' || checkpointActiveVersion !== '') &&
+    (!checkpointKeysJson || !checkpointActiveVersion)
+  ) {
+    throw new Error(
+      'platform: Encrypted recovery material must contain both the project-secret keyring and its active version.',
+    );
+  }
+
+  if (explicitFullKeyring) {
+    return normalizeProjectSecretKeyring(
+      input.projectSecretKeysJson,
+      input.projectSecretActiveKeyVersion,
+      'VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON',
+      'VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION',
+    );
+  }
+  if (checkpointKeysJson) {
+    return normalizeProjectSecretKeyring(
+      checkpointKeysJson,
+      checkpointActiveVersion,
+      'encrypted recovery project-secret keyring',
+      'encrypted recovery project-secret active version',
+    );
+  }
+
+  const v1Key = input.existingInstallation
+    ? input.checkpoint.projectSecretKey || input.projectSecretKey || ''
+    : input.required(
+        input.projectSecretKey || input.checkpoint.projectSecretKey || '',
+        'VOID_PLATFORM_PROJECT_SECRET_KEY',
+      );
+  if (!v1Key) {
+    return { activeVersion: '', keysJson: '', v1Key: '' };
+  }
+  assertCanonicalProjectSecretKey(v1Key, 'VOID_PLATFORM_PROJECT_SECRET_KEY', true);
+  return {
+    activeVersion: 'v1',
+    keysJson: JSON.stringify({ v1: v1Key }),
+    v1Key,
+  };
+}
+
+function normalizeProjectSecretKeyring(
+  keysJson: string,
+  activeVersion: string,
+  keysName: string,
+  activeVersionName: string,
+): Readonly<{ activeVersion: string; keysJson: string; v1Key: string }> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(keysJson);
+  } catch {
+    throw new Error(`platform: ${keysName} must be valid JSON.`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`platform: ${keysName} must be a JSON object.`);
+  }
+  const entries = Object.entries(parsed);
+  if (entries.length === 0) {
+    throw new Error(`platform: ${keysName} must define at least one key.`);
+  }
+  for (const [version, key] of entries) {
+    if (!version || typeof key !== 'string' || !key) {
+      throw new Error(`platform: ${keysName} must map non-empty versions to keys.`);
+    }
+    assertCanonicalProjectSecretKey(key, `${keysName} entry ${JSON.stringify(version)}`);
+  }
+  if (!Object.hasOwn(parsed, activeVersion)) {
+    throw new Error(`platform: ${activeVersionName} must identify a key in ${keysName}.`);
+  }
+  const keys = Object.fromEntries(
+    entries.sort(([left], [right]) => left.localeCompare(right)),
+  ) as Record<string, string>;
+  return {
+    activeVersion,
+    keysJson: JSON.stringify(keys),
+    v1Key: keys.v1 || '',
+  };
+}
+
+function assertCanonicalProjectSecretKey(
+  value: string,
+  name: string,
+  uniqueToInstallation = false,
+): void {
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.byteLength !== 32 || decoded.toString('base64') !== value) {
+    throw new Error(
+      `platform: ${name} must be the canonical base64 encoding of a 32-byte key${uniqueToInstallation ? ' unique to this installation' : ''}.`,
+    );
+  }
+}
+
 function secretCheckpoint(secrets: PlatformInstallationSecrets): Record<string, string> {
   return {
     bootstrapGitHubId: secrets.bootstrapGitHubId,
@@ -373,7 +495,9 @@ function secretCheckpoint(secrets: PlatformInstallationSecrets): Record<string, 
     githubClientId: secrets.githubClientId,
     githubClientSecret: secrets.githubClientSecret,
     jwtSecret: secrets.jwtSecret,
+    projectSecretActiveKeyVersion: secrets.projectSecretActiveKeyVersion,
     projectSecretKey: secrets.projectSecretKey,
+    projectSecretKeysJson: secrets.projectSecretKeysJson,
     r2AccessKeyId: secrets.r2AccessKeyId,
     r2SecretAccessKey: secrets.r2SecretAccessKey,
   };
@@ -1946,10 +2070,10 @@ export function apiWorkerSecrets(
     GITHUB_CLIENT_SECRET: secrets.githubClientSecret,
     JWT_SECRET: secrets.jwtSecret,
     PLATFORM_BOOTSTRAP_GITHUB_ID: secrets.bootstrapGitHubId,
-    ...(secrets.projectSecretKey
+    ...(secrets.projectSecretKeysJson && secrets.projectSecretActiveKeyVersion
       ? {
-          PROJECT_SECRET_ACTIVE_KEY_VERSION: 'v1',
-          PROJECT_SECRET_KEYS_JSON: JSON.stringify({ v1: secrets.projectSecretKey }),
+          PROJECT_SECRET_ACTIVE_KEY_VERSION: secrets.projectSecretActiveKeyVersion,
+          PROJECT_SECRET_KEYS_JSON: secrets.projectSecretKeysJson,
         }
       : {}),
     R2_ACCESS_KEY_ID: secrets.r2AccessKeyId,
@@ -2065,7 +2189,14 @@ export function assertRequiredPlatformSecrets(
     requireSecret(secrets.githubClientId, 'VOID_PLATFORM_GITHUB_CLIENT_ID');
     requireSecret(secrets.githubClientSecret, 'VOID_PLATFORM_GITHUB_CLIENT_SECRET');
     requireSecret(secrets.jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
-    requireSecret(secrets.projectSecretKey, 'VOID_PLATFORM_PROJECT_SECRET_KEY');
+    requireSecret(
+      secrets.projectSecretKeysJson,
+      'VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON (or VOID_PLATFORM_PROJECT_SECRET_KEY for v1)',
+    );
+    requireSecret(
+      secrets.projectSecretActiveKeyVersion,
+      'VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION (or VOID_PLATFORM_PROJECT_SECRET_KEY for v1)',
+    );
     requireSecret(secrets.r2AccessKeyId, 'VOID_PLATFORM_R2_ACCESS_KEY_ID');
     requireSecret(secrets.r2SecretAccessKey, 'VOID_PLATFORM_R2_SECRET_ACCESS_KEY');
   }

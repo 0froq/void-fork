@@ -268,6 +268,8 @@ Discovery checks the recorded resources and their ownership before saving local 
 
 After discovery, provide `VOID_PLATFORM_DATABASE_URL` for migrations and to coordinate administrator commands. You don't need to re-enter the other secrets for a normal upgrade. If repair must recreate a missing API or proxy Worker, supply its original runtime token, GitHub, R2, JWT, and project-encryption secrets through the `VOID_PLATFORM_*` variables. Cloudflare can't return those values, so keep them in your organization's secret manager.
 
+For an installation whose project-secret keyring is still the original `v1` key, `VOID_PLATFORM_PROJECT_SECRET_KEY` remains the simple restore input. After rotating that keyring, instead supply both `VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON` and `VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION`. The JSON object must include every key version still needed to decrypt stored project secrets, and the active version must name one of those entries. Repair validates this pair and keeps its local copy only in the encrypted recovery checkpoint. It uses the pair when recreating a missing API Worker; it does not replace the live keyring during a normal upgrade or when the API Worker already exists. Inject these values directly from a secret manager without printing them or writing a plaintext secrets file.
+
 ### Prepare for disaster recovery
 
 `discover` reconstructs verified installation metadata on another machine. It does not download credentials, key material, or backed-up data. `repair` can then recreate missing installer-owned infrastructure, but it does not recover the data that infrastructure previously held.
@@ -287,7 +289,7 @@ During a restore, keep platform and application traffic disabled before changing
 
 Installation records live in `~/.void/platforms/` and contain no credentials. Recovery secrets are encrypted with AES-256-GCM in `.recovery.enc` files. The encryption key lives in your operating system's keychain; on systems with POSIX permissions, recovery files are readable only by their owner. Older plaintext `.recovery` files are encrypted and removed on first read.
 
-If the keychain isn't available, Void stops before writing secrets. Headless environments can supply `VOID_PLATFORM_RECOVERY_KEY`: a canonical base64-encoded 32-byte key from a secret manager. A temporary CI runner can use a new recovery-encryption key for each run only when every original credential, including `VOID_PLATFORM_JWT_SECRET` and `VOID_PLATFORM_PROJECT_SECRET_KEY`, remains available in protected CI secrets.
+If the keychain isn't available, Void stops before writing secrets. Headless environments can supply `VOID_PLATFORM_RECOVERY_KEY`: a canonical base64-encoded 32-byte key from a secret manager. A temporary CI runner can use a new recovery-encryption key for each run only when every original credential remains available in protected CI secrets, including `VOID_PLATFORM_JWT_SECRET` and either the original `VOID_PLATFORM_PROJECT_SECRET_KEY` or the complete rotated keyring and active-version pair.
 
 ::: details How recovery protects existing resources
 
@@ -327,7 +329,7 @@ void platform upgrade "$VOID_PLATFORM_INSTALLATION" \
 
 Omit the installation selector only if the account has one discoverable installation. Run one deployment per installation at a time, and let it finish before starting the next. Cancelling during migrations or Worker rollout can leave an installation waiting for recovery.
 
-Keep the management token, database URL, JWT signing secret, and project-encryption key in a protected CI environment. Upgrades inherit deployed Worker secrets. The original values are needed when recreating a missing Worker; configuration credentials are also needed when explicitly rotating them.
+Keep the management token, database URL, JWT signing secret, and complete project-encryption keyring in a protected CI environment. Upgrades inherit deployed Worker secrets. The original values are needed when recreating a missing Worker; configuration credentials are also needed when explicitly rotating them.
 
 ## Disable and safely uninstall
 

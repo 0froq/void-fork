@@ -20,6 +20,7 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Use supported Durable Object storage for fresh platform installations.
 - [x] Recover verified installation records when owned resources are missing.
 - [x] Establish durable custody of installation signing and encryption keys.
+- [x] Restore a complete rotated project keyring when recreating the API Worker.
 - [x] Protect the last active administrator (`ff4f1a15`).
 - [x] Correct and verify minimum platform runtime permissions.
 - [x] Accept supported JSONC syntax during Cloudflare connection.

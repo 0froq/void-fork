@@ -61,6 +61,8 @@ The upstream Void Cloud deployment scripts are for that existing deployment.
 A fork installs or upgrades its own platform with `void platform` and an explicit
 `--runtime` directory, preserving the installer's ownership and migration checks.
 
+For self-hosted recovery, `VOID_PLATFORM_PROJECT_SECRET_KEY` restores an original `v1` project-secret keyring. After key rotation, restore every retained version with `VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON` and select its active entry with `VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION`. These inputs restore a missing API Worker and never replace the live keyring of an existing Worker. Inject them from a secret manager without logging them or writing plaintext files.
+
 Now ask me what I want to build.
 
 For Node.js, Bun, or Deno targets, build and deploy both `dist/ssr` and `dist/client`. Start `dist/ssr/index.js` with the selected runtime from the app root. Production Pages loads its client manifest and hydration assets automatically.

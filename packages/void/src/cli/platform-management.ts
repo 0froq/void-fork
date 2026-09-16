@@ -310,6 +310,9 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       githubClientSecret: process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET || '',
       jwtSecret: process.env.VOID_PLATFORM_JWT_SECRET || '',
       projectSecretKey: process.env.VOID_PLATFORM_PROJECT_SECRET_KEY || '',
+      projectSecretKeysJson: process.env.VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON || '',
+      projectSecretActiveKeyVersion:
+        process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION || '',
       r2AccessKeyId: process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID || '',
       r2SecretAccessKey: process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY || '',
     });

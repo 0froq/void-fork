@@ -251,6 +251,12 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       checkpoint?.bootstrapGitHubId ||
       process.env.VOID_PLATFORM_ADMIN_GITHUB_ID ||
       (await resolveBootstrapGitHubId(bootstrapGitHubLogin));
+    const hasFullProjectSecretKeyring = Boolean(
+      checkpoint?.projectSecretKeysJson ||
+      checkpoint?.projectSecretActiveKeyVersion ||
+      process.env.VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON ||
+      process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION,
+    );
     const secrets = createPlatformInstallationSecrets({
       bootstrapGitHubId,
       bootstrapGitHubLogin,
@@ -275,9 +281,14 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       projectSecretKey:
         checkpoint?.projectSecretKey ||
         process.env.VOID_PLATFORM_PROJECT_SECRET_KEY ||
-        (await promptSecret(
-          'Unique project encryption key for this installation (canonical base64, 32 bytes):',
-        )),
+        (hasFullProjectSecretKeyring
+          ? ''
+          : await promptSecret(
+              'Unique project encryption key for this installation (canonical base64, 32 bytes):',
+            )),
+      projectSecretKeysJson: process.env.VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON || '',
+      projectSecretActiveKeyVersion:
+        process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION || '',
       r2AccessKeyId:
         checkpoint?.r2AccessKeyId ||
         process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID ||
