@@ -3,7 +3,16 @@ import { tmpdir } from 'node:os';
 import { PGlite } from '@electric-sql/pglite';
 import Database from 'better-sqlite3';
 import { join } from 'pathslash';
-import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vite-plus/test';
 import { getLocalD1Target, runDbCommand } from '../../src/cli/db.ts';
 
 const state = vi.hoisted(() => ({ pg: null as PGlite | null }));
@@ -26,9 +35,20 @@ vi.mock('@clack/prompts', () => ({
   log: { error() {}, info() {}, step() {}, success() {} },
 }));
 const roots: Array<string> = [];
-afterEach(async () => {
+beforeAll(async () => {
+  // Load PostgreSQL once: Windows' cold WASM startup belongs to the hook budget,
+  // while each export assertion retains its normal short test deadline.
+  state.pg = new PGlite();
+  await state.pg.waitReady;
+}, 30_000);
+beforeEach(async () => {
+  await state.pg!.exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
+});
+afterAll(async () => {
   await state.pg?.close();
   state.pg = null;
+});
+afterEach(() => {
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -43,47 +63,47 @@ function project(pg = false) {
 
 describe('SQL export restore', () => {
   it('round-trips generated PostgreSQL timestamp defaults without locale or time-zone conversion', async () => {
-    state.pg = new PGlite();
+    const pg = state.pg!;
     const root = project(true);
-    await state.pg.exec(`CREATE TABLE users (
+    await pg.exec(`CREATE TABLE users (
       id SERIAL PRIMARY KEY, name text NOT NULL,
       created_at timestamp NOT NULL DEFAULT now(), updated_at timestamp NOT NULL DEFAULT now()
     ); INSERT INTO users(name, created_at, updated_at)
       VALUES ('Alice', '2026-01-01 12:34:56.123456', '2026-01-02 23:45:00');`);
     const select = 'SELECT id, name, created_at::text, updated_at::text FROM users';
-    const original = await state.pg.query(select);
+    const original = await pg.query(select);
     await runDbCommand(root, { action: 'export', output: 'dump.sql' });
     const dump = readFileSync(join(root, 'dump.sql'), 'utf8');
-    await state.pg.exec('DROP TABLE users');
-    await state.pg.exec(dump);
-    expect((await state.pg.query(select)).rows).toEqual(original.rows);
+    await pg.exec('DROP TABLE users');
+    await pg.exec(dump);
+    expect((await pg.query(select)).rows).toEqual(original.rows);
   });
 
   it('restores a schema-only PostgreSQL export with a fresh serial counter', async () => {
-    state.pg = new PGlite();
+    const pg = state.pg!;
     const root = project(true);
-    await state.pg.exec(
+    await pg.exec(
       "CREATE TABLE users(id SERIAL PRIMARY KEY); SELECT setval('users_id_seq', 100, true);",
     );
     await runDbCommand(root, { action: 'export', output: 'dump.sql', noData: true });
     const dump = readFileSync(join(root, 'dump.sql'), 'utf8');
-    await state.pg.exec('DROP TABLE users');
-    await state.pg.exec(dump);
-    expect((await state.pg.query('INSERT INTO users DEFAULT VALUES RETURNING id')).rows).toEqual([
+    await pg.exec('DROP TABLE users');
+    await pg.exec(dump);
+    expect((await pg.query('INSERT INTO users DEFAULT VALUES RETURNING id')).rows).toEqual([
       { id: 1 },
     ]);
   });
 
   it('preserves an unused PostgreSQL sequence without skipping its first value', async () => {
-    state.pg = new PGlite();
+    const pg = state.pg!;
     const root = project(true);
-    await state.pg.exec('CREATE TABLE users(id BIGSERIAL PRIMARY KEY);');
+    await pg.exec('CREATE TABLE users(id BIGSERIAL PRIMARY KEY);');
     await runDbCommand(root, { action: 'export', output: 'dump.sql' });
     const dump = readFileSync(join(root, 'dump.sql'), 'utf8');
-    await state.pg.exec('DROP TABLE users');
-    await state.pg.exec(dump);
+    await pg.exec('DROP TABLE users');
+    await pg.exec(dump);
     expect(
-      (await state.pg.query('INSERT INTO users DEFAULT VALUES RETURNING id::text AS id')).rows,
+      (await pg.query('INSERT INTO users DEFAULT VALUES RETURNING id::text AS id')).rows,
     ).toEqual([{ id: '1' }]);
   });
 
@@ -121,29 +141,27 @@ describe('SQL export restore', () => {
   it.each([{}, { table: 'users' }, { noSchema: true }])(
     'restores PostgreSQL serial sequences and their state (%j)',
     async (options) => {
-      state.pg = new PGlite();
+      const pg = state.pg!;
       const root = project(true);
       const schema = 'CREATE TABLE users (id SERIAL PRIMARY KEY, name text NOT NULL);';
-      await state.pg.exec(
+      await pg.exec(
         schema +
           "INSERT INTO users(name) VALUES ('Alice'); SELECT setval('users_id_seq', 100, true);",
       );
       await runDbCommand(root, { action: 'export', output: 'dump.sql', ...options });
       const dump = readFileSync(join(root, 'dump.sql'), 'utf8');
-      await state.pg.exec('DROP TABLE users;');
+      await pg.exec('DROP TABLE users;');
       if ('noSchema' in options) {
-        await state.pg.exec(schema);
+        await pg.exec(schema);
       }
-      await state.pg.exec(dump);
-      expect((await state.pg.query('SELECT * FROM users')).rows).toEqual([
-        { id: 1, name: 'Alice' },
+      await pg.exec(dump);
+      expect((await pg.query('SELECT * FROM users')).rows).toEqual([{ id: 1, name: 'Alice' }]);
+      expect((await pg.query("INSERT INTO users(name) VALUES ('Bob') RETURNING id")).rows).toEqual([
+        { id: 101 },
       ]);
-      expect(
-        (await state.pg.query("INSERT INTO users(name) VALUES ('Bob') RETURNING id")).rows,
-      ).toEqual([{ id: 101 }]);
-      await expect(
-        state.pg.exec("INSERT INTO users(id, name) VALUES (1, 'duplicate')"),
-      ).rejects.toThrow('duplicate key');
+      await expect(pg.exec("INSERT INTO users(id, name) VALUES (1, 'duplicate')")).rejects.toThrow(
+        'duplicate key',
+      );
     },
   );
 });
