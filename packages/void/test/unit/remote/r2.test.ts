@@ -89,6 +89,22 @@ describe('ProxyR2Bucket', () => {
   });
 
   describe('put()', () => {
+    it.each([
+      ['typed array slice', () => new Uint8Array([9, 1, 2, 8]).subarray(1, 3), [1, 2]],
+      ['DataView', () => new DataView(new Uint8Array([9, 1, 2, 8]).buffer, 1, 2), [1, 2]],
+      ['pooled Buffer', () => Buffer.from([9, 1, 2, 8]).subarray(1, 3), [1, 2]],
+      ['empty view', () => new Uint8Array([9, 8]).subarray(1, 1), []],
+    ] as const)('uploads only the bytes in a %s', async (_name, makeValue, expected) => {
+      mockFetch({ success: true });
+      const r2 = new ProxyR2Bucket(createClient(), 'STORAGE');
+      await r2.put('binary.bin', makeValue());
+
+      const call = vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(String(call[1].body));
+      expect(typeof body.base64).toBe('string');
+      expect(Array.from(Buffer.from(body.base64, 'base64'))).toEqual(expected);
+    });
+
     it('sends string value as text', async () => {
       mockFetch({ success: true });
 

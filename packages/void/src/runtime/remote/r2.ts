@@ -65,7 +65,7 @@ export class ProxyR2Bucket {
     } else if (value instanceof ArrayBuffer) {
       base64 = arrayBufferToBase64(value);
     } else if (ArrayBuffer.isView(value)) {
-      base64 = arrayBufferToBase64(value.buffer as ArrayBuffer);
+      base64 = arrayBufferToBase64(value.buffer as ArrayBuffer, value.byteOffset, value.byteLength);
     } else if (value instanceof Blob) {
       base64 = arrayBufferToBase64(await value.arrayBuffer());
     } else {
@@ -93,7 +93,7 @@ export class ProxyR2Bucket {
       binding: this.binding,
       key,
     };
-    if (base64) {
+    if (base64 !== undefined) {
       body.base64 = base64;
     } else {
       body.value = textValue;
@@ -171,8 +171,12 @@ export class ProxyR2Bucket {
   }
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+function arrayBufferToBase64(
+  buffer: ArrayBuffer,
+  byteOffset = 0,
+  byteLength = buffer.byteLength,
+): string {
+  const bytes = new Uint8Array(buffer, byteOffset, byteLength);
   let binary = '';
   for (const byte of bytes) {
     binary += String.fromCharCode(byte);
