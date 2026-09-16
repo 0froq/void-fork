@@ -1998,6 +1998,67 @@ describe('Cloudflare version activation', () => {
     ]);
   });
 
+  it('waits for a new Worker to propagate beyond the normal preview retry window', async () => {
+    const runWrangler = runner({
+      upload: ok(`Worker Version ID: ${NEXT}`),
+      bootstrap: ok(`Current Version ID: ${NEXT}\nhttps://first.example.workers.dev`),
+    });
+    let probes = 0;
+    const cancel = vi.fn();
+    const sleep = vi.fn(async () => {});
+    const result = await activateCloudflareVersion({
+      runWrangler,
+      verifyUploader: () => true,
+      workerName: 'first',
+      message: encodeCloudflareVersionMessage([]),
+      allowFirstDeploymentBootstrap: true,
+      sleep,
+      fetch: async () => {
+        probes++;
+        return probes <= 8
+          ? new Response(new ReadableStream({ cancel }), { status: 404 })
+          : Response.json({ ready: true });
+      },
+    });
+    expect(result).toMatchObject({ ok: true, versionId: NEXT });
+    expect(probes).toBe(9);
+    expect(cancel).toHaveBeenCalledTimes(8);
+    expect(runWrangler.mock.calls.filter(([args]) => args[0] === 'deploy')).toHaveLength(1);
+  });
+
+  it('bounds a first-deploy readiness wait by elapsed time and fails closed', async () => {
+    const runWrangler = runner({
+      upload: ok(`Worker Version ID: ${NEXT}`),
+      bootstrap: ok(`Current Version ID: ${NEXT}\nhttps://first.example.workers.dev`),
+    });
+    let time = 0;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => time);
+    let probes = 0;
+    try {
+      const result = await activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'first',
+        message: encodeCloudflareVersionMessage([]),
+        allowFirstDeploymentBootstrap: true,
+        readinessAttempts: 100,
+        sleep: async (milliseconds) => {
+          time += milliseconds;
+        },
+        fetch: async () => {
+          probes++;
+          time += 10_000;
+          return new Response(null, { status: 503 });
+        },
+      });
+      expect(result).toMatchObject({ ok: false, reason: 'bootstrap-readiness-failed' });
+      expect(probes).toBeLessThanOrEqual(6);
+      expect(time).toBeLessThanOrEqual(70_000);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('rolls traffic back when trigger activation fails', async () => {
     const runWrangler = runner({ triggers: { ...ok(), status: 1 } });
     const result = await activateCloudflareVersion({

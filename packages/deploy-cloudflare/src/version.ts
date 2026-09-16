@@ -1798,7 +1798,11 @@ async function bootstrapFirstDeployment(
     undefined,
     options.fetch ?? globalThis.fetch,
     options.sleep ?? defaultSleep,
-    options.readinessAttempts ?? 6,
+    // A new Worker also needs its public route/DNS to propagate. Subsequent
+    // version previews can use the shorter retry window, but bootstrap needs
+    // more than its roughly six seconds of backoff. Keep an overall deadline.
+    options.readinessAttempts ?? 30,
+    60_000,
   );
   if (ready !== 'ready') {
     return {
@@ -1974,6 +1978,7 @@ async function probeReadiness(
   fetcher: typeof globalThis.fetch,
   sleep: (milliseconds: number) => Promise<void>,
   attempts: number,
+  timeoutMs = Number.POSITIVE_INFINITY,
 ): Promise<'ready' | 'failed' | 'access-denied'> {
   const headers = guardedReadinessHeaders(
     url,
@@ -1984,9 +1989,15 @@ async function probeReadiness(
   if (headers === null) {
     return 'failed';
   }
+  const deadline = Date.now() + timeoutMs;
   for (let attempt = 0; attempt < Math.max(1, attempts); attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      break;
+    }
+    let response: Response | undefined;
     try {
-      const response = await fetcher(url, {
+      response = await fetcher(url, {
         headers: {
           'user-agent': 'void-deploy-readiness/1',
           ...headers,
@@ -1997,7 +2008,7 @@ async function probeReadiness(
             : {}),
         },
         redirect: 'manual',
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(Math.max(1, Math.min(10_000, remaining))),
       });
       if (response.ok) {
         const body = (await response.json()) as { ready?: unknown };
@@ -2009,9 +2020,16 @@ async function probeReadiness(
       }
     } catch {
       // Preview propagation is eventually consistent; retry below.
+    } finally {
+      if (response && !response.bodyUsed) {
+        await response.body?.cancel().catch(() => {});
+      }
     }
     if (attempt + 1 < attempts) {
-      await sleep(Math.min(250 * 2 ** attempt, 2_000));
+      const delay = Math.min(250 * 2 ** attempt, 2_000, deadline - Date.now());
+      if (delay > 0) {
+        await sleep(delay);
+      }
     }
   }
   return 'failed';
