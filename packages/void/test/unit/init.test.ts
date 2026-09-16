@@ -1502,7 +1502,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies.void).toBeDefined();
       expect(pkg.devDependencies['@void/react']).toBeDefined();
       expect(pkg.devDependencies['vite-plus']).toBe('^0.1.21');
-      expect(pkg.packageManager).toBe('pnpm@^12.4.1');
+      expect(pkg.packageManager).toBe('pnpm@12.4.1');
       expect(pkg.scripts.dev).toBe('vp dev');
 
       expect(readFileSync(join(root, 'pages', 'index.tsx'), 'utf-8')).toContain(
@@ -4984,7 +4984,7 @@ export default config;
 
       const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
       expectPnpmAllowBuilds(root);
-      expect(pkg.packageManager).toBe('pnpm@^12.4.1');
+      expect(pkg.packageManager).toBe('pnpm@12.4.1');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
