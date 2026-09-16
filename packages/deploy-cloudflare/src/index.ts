@@ -1,9 +1,11 @@
 export {
   readExistingCloudflareWorker,
+  readCloudflareWorkerMigrationTag,
   readCloudflareVersionMigrationTag,
   assertCloudflareDurableObjectLifecycleSupported,
   assertExistingCloudflareConfig,
   assertCloudflareBindingsPreserved,
+  type CloudflareWorkerMigrationTagOptions,
   type ExistingCloudflareWorker,
 } from './existing.ts';
 export {

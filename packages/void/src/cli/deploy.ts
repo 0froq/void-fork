@@ -5086,11 +5086,16 @@ export async function runCloudflareDeploy(
     ((projectRoot) => readGeneratedDeployConfig(projectRoot).path)
   )(root);
   try {
-    await (deps.assertDurableObjectLifecycle ?? assertCloudflareDurableObjectLifecycleSupported)({
+    const lifecycleOptions = {
       runWrangler,
       configPath: lifecycleConfigPath,
       workerName,
-    });
+      accountId,
+      apiBaseUrl,
+    };
+    await (deps.assertDurableObjectLifecycle ?? assertCloudflareDurableObjectLifecycleSupported)(
+      lifecycleOptions,
+    );
   } catch (error) {
     log.error(getErrorMessage(error));
     return exit(1);
