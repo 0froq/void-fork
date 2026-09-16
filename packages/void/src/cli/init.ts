@@ -3432,9 +3432,18 @@ function getOwnVersion(): string {
   return pkg.version;
 }
 
-const MARKER_OPEN_RE = /<!--injected-by-void-v([\d.]+)-->/;
+const MARKER_VERSION_SOURCE =
+  String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?` +
+  String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`;
+const MARKER_OPEN_RE = new RegExp(
+  String.raw`^<!--injected-by-void-v(${MARKER_VERSION_SOURCE})-->\r?$`,
+  'm',
+);
 const MARKER_CLOSE = '<!--/injected-by-void-->';
-const MARKER_BLOCK_RE = /<!--injected-by-void-v[\d.]+-->\n[\s\S]*?<!--\/injected-by-void-->/;
+const MARKER_BLOCK_RE = new RegExp(
+  String.raw`^<!--injected-by-void-v${MARKER_VERSION_SOURCE}-->\r?\n[\s\S]*?^<!--\/injected-by-void-->\r?$`,
+  'm',
+);
 
 function injectAgentBlock(root: string, filePath: string): void {
   const fullPath = join(root, filePath);

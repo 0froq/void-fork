@@ -2260,6 +2260,34 @@ export default config;
     }
   });
 
+  it('updates prerelease agent instructions without changing surrounding prose', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-'));
+    try {
+      const currentVersion = JSON.parse(
+        readFileSync(join(process.cwd(), 'packages/void/package.json'), 'utf-8'),
+      ).version;
+      const before = '# Project guidance\n\nKeep this user-authored introduction.\n\n';
+      const after = '\n\nKeep this user-authored footer.\n';
+      writeFileSync(
+        join(root, 'AGENTS.md'),
+        `${before}<!--injected-by-void-v1.2.3-beta.2+build.7-->\nStale managed instructions.\n<!--/injected-by-void-->${after}`,
+      );
+
+      await runInitCommand(root, { tsconfig: false, github: false, agents: true });
+
+      const updated = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+      expect(updated.startsWith(before)).toBe(true);
+      expect(updated.endsWith(after)).toBe(true);
+      expect(updated).toContain(`<!--injected-by-void-v${currentVersion}-->`);
+      expect(updated).not.toContain('1.2.3-beta.2+build.7');
+      expect(updated).not.toContain('Stale managed instructions.');
+      expect(updated.match(/<!--injected-by-void-v/g)).toHaveLength(1);
+      expect(updated.match(/<!--\/injected-by-void-->/g)).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('creates .gitignore with Void defaults during targeted setup', async () => {
     const root = mkdtempSync(join(tmpdir(), 'void-init-'));
     try {
