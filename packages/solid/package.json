@@ -13,7 +13,7 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./src/runtime/index.ts",
+      "types": "./dist/runtime/index.d.mts",
       "default": "./src/runtime/index.ts"
     },
     "./plugin": {
@@ -21,13 +21,15 @@
       "import": "./dist/plugin.mjs"
     },
     "./runtime": {
-      "types": "./src/runtime/index.ts",
+      "types": "./dist/runtime/index.d.mts",
       "default": "./src/runtime/index.ts"
     },
     "./context": {
+      "types": "./dist/runtime/context.d.mts",
       "default": "./src/runtime/context.ts"
     },
     "./prefetch": {
+      "types": "./dist/runtime/prefetch.d.mts",
       "default": "./src/runtime/prefetch.ts"
     }
   },
