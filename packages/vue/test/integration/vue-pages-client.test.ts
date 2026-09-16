@@ -88,6 +88,48 @@ function registerClientTests(getBase: () => string) {
     await page.waitForSelector('#app[data-hydrated="true"]');
   }
 
+  it('form follows record identity while retaining edits on refresh and submit', async () => {
+    const page = await newPage();
+    const errors: Array<string> = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    try {
+      await page.goto(BASE + '/form-records/first');
+      await waitForHydration(page).catch((error) => {
+        throw new Error(`${String(error)}\n${errors.join('\n')}`);
+      });
+      await page.evaluate(() => {
+        (document.querySelector('nav') as NavElement).__stamp = 42;
+      });
+      await page.getByRole('link', { name: 'Next record' }).click();
+      await page.waitForFunction(
+        () => document.querySelector('h1')?.textContent === 'Editing second',
+      );
+      expect(await page.getByLabel('Record name').inputValue()).toBe('Record second');
+      await page.getByLabel('Record name').fill('Edited second');
+      const refresh = page.waitForResponse((response) =>
+        response.url().includes('/form-records/second'),
+      );
+      await page.getByRole('button', { name: 'Refresh record' }).click();
+      await refresh;
+      expect(await page.getByLabel('Record name').inputValue()).toBe('Edited second');
+      const saved = page.waitForRequest((request) => request.method() === 'POST');
+      const savedResponse = page.waitForResponse(
+        (response) => response.request().method() === 'POST',
+      );
+      await page.getByRole('button', { name: 'Save record' }).click();
+      const request = await saved;
+      expect(new URL(request.url()).pathname).toBe('/form-records/second');
+      expect(request.postDataJSON()).toEqual({ name: 'Edited second' });
+      await savedResponse;
+      expect(await page.getByLabel('Record name').inputValue()).toBe('Edited second');
+      expect(await page.evaluate(() => (document.querySelector('nav') as NavElement).__stamp)).toBe(
+        42,
+      );
+    } finally {
+      await page.context().close();
+    }
+  });
+
   it('hydrates without Vue warnings', async () => {
     const page = await newPage();
     const warnings: Array<string> = [];

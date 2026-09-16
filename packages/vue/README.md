@@ -63,6 +63,11 @@ state, `errors` for field validation, and `error` for non-validation call-site
 failures. The submit helpers return promises so boundary-class failures can
 propagate through Vue async error handling or explicit `catch` handlers.
 
+GET navigation creates a fresh page instance, so forms receive the destination
+record's URL and defaults. Layouts remain mounted. Mutations and
+`router.refresh()` preserve page state by default; use `preserveState` to override
+this behavior when navigating within the same record.
+
 ```vue
 <script setup lang="ts">
 import { useForm } from '@void/vue';

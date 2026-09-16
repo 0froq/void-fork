@@ -990,6 +990,8 @@ Imported from `"@void/vue"`.
 
 Vue `Link` GET `data` is merged into the rendered `href` query string. Primitive values are serialized with `String(value)`, arrays become repeated keys, `null` and `undefined` are omitted, and nested objects throw. `prefetch` and `reloadDocument` are GET-only and throw for mutation links.
 
+Vue GET navigation remounts the page so `useForm()` picks up the destination record's URL and defaults; layouts persist. Mutations and `router.refresh()` preserve page state by default. Set `preserveState` explicitly to override the default for navigation within the same record.
+
 ### `@void/react`
 
 #### `voidReact(options?)`
