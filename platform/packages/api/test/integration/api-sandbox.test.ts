@@ -826,8 +826,11 @@ describe('per-deploy sandbox integration', () => {
     expect(projectIdBinding!.type).toBe('plain_text');
     expect((projectIdBinding as { text?: string }).text).toBe(project.id);
 
-    const slugBinding = bindings.find((b) => b.name === '__VOID_PROJECT_SLUG');
-    expect(slugBinding).toBeUndefined();
+    // Email uses the slug identity on every application Worker.
+    const slugBindings = bindings.filter((b) => b.name === '__VOID_PROJECT_SLUG');
+    expect(slugBindings).toEqual([
+      { type: 'plain_text', name: '__VOID_PROJECT_SLUG', text: project.slug },
+    ]);
   });
 
   it('sandbox deploy writes `project:{projectId}` routing entry with { userId, plan } shape', async () => {

@@ -111,10 +111,7 @@ export default {
         auth: null,
       }),
     );
-    writeFileSync(
-      workerPath,
-      compileWorkerEntry(false, undefined, 'assets', ['ChatWs'], runtimeEnvPath),
-    );
+    writeFileSync(workerPath, compileWorkerEntry({ webSocketClasses: ['ChatWs'], runtimeEnvPath }));
 
     await build({
       configFile: false,
@@ -142,17 +139,22 @@ export default {
 
     const voidRequire = createRequire(join(root, 'packages/void/package.json'));
     const miniflarePath = createRequire(voidRequire.resolve('wrangler')).resolve('miniflare');
-    const { Miniflare } = (await import(pathToFileURL(miniflarePath).href)) as {
+    const { Miniflare, convertV4MiniflareOptions } = (await import(
+      pathToFileURL(miniflarePath).href
+    )) as {
+      convertV4MiniflareOptions(options: Record<string, unknown>): Record<string, unknown>;
       Miniflare: new (options: Record<string, unknown>) => MiniflareInstance;
     };
-    miniflare = new Miniflare({
-      compatibilityDate: '2026-07-01',
-      compatibilityFlags: ['nodejs_compat'],
-      durableObjects: { CHAT_WS: 'ChatWs' },
-      modules: true,
-      modulesRoot: output,
-      scriptPath: join(output, 'worker.mjs'),
-    });
+    miniflare = new Miniflare(
+      convertV4MiniflareOptions({
+        compatibilityDate: '2026-07-01',
+        compatibilityFlags: ['nodejs_compat'],
+        durableObjects: { CHAT_WS: 'ChatWs' },
+        modules: true,
+        modulesRoot: output,
+        scriptPath: join(output, 'worker.mjs'),
+      }),
+    );
   }, 30_000);
 
   afterAll(async () => {

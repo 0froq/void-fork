@@ -142,3 +142,24 @@ and protected credentials. They are not silently substituted with local mocks:
 Record the candidate commit, artifact digest, nonsecret account/resource IDs,
 results, and times. Keep actual credentials in the secret manager. No live beta
 signoff is claimed by the local test results recorded here.
+
+## Upstream email rebase
+
+The 75 local commits were rebased onto upstream `2bae6708` (email support).
+Upstream's `0034_email_destinations` migration remains unchanged. The local
+invitation-history, repository-authorization, Sandbox-drain, and admission
+migrations now follow it as `0035` through `0038`; their snapshots retain the
+email schema and form one ordered predecessor chain. Compatibility digests and
+migration tests use the combined history.
+
+Integration checks preserve email's shared project-slug binding and the removal
+of tenant Sandbox accounting authority. Generated-Worker tests now use the
+upstream compiler options object and WorkerEntrypoint interface, plus the
+installed Miniflare 5 compatibility adapter and persistence setting.
+
+The package and playground builds, all 29 workspace typechecks, Drizzle snapshot
+checks, and documentation build passed. The final full suite passed 465 files
+and 9,641 tests, with 11 skipped tests. A disposable PostgreSQL database also
+verified the predecessor API against the combined migrations; its outdated
+Sandbox slug expectation was corrected in the temporary test copy and passed
+on rerun. No production deployment was performed.

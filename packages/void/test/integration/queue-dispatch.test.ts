@@ -108,7 +108,7 @@ describe('generated queue dispatch', () => {
     );
     writeFileSync(
       workerPath,
-      `${compileWorkerEntry(true, undefined, 'assets', [], runtimeEnvPath)}
+      `${compileWorkerEntry({ hasQueues: true, runtimeEnvPath })}
 export { __processQueue } from "virtual:void-routes";\n`,
     );
 
@@ -119,7 +119,15 @@ export { __processQueue } from "virtual:void-routes";\n`,
         {
           name: 'void-queue-dispatch-test',
           resolveId(id) {
+            if (id === 'cloudflare:workers') {
+              return '\0test-workers-entrypoint';
+            }
             return id === 'virtual:void-routes' ? routeTablePath : null;
+          },
+          load(id) {
+            if (id === '\0test-workers-entrypoint') {
+              return 'export class WorkerEntrypoint { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }';
+            }
           },
         },
       ],
@@ -130,13 +138,29 @@ export { __processQueue } from "virtual:void-routes";\n`,
         ssr: workerPath,
         target: 'esnext',
         rollupOptions: {
-          external: [/^cloudflare:/],
+          external: (id) => id.startsWith('cloudflare:') && id !== 'cloudflare:workers',
           output: { entryFileNames: 'worker.mjs', codeSplitting: false },
         },
       },
     });
 
-    generated = (await import(pathToFileURL(join(output, 'worker.mjs')).href)) as GeneratedWorker;
+    const module = (await import(pathToFileURL(join(output, 'worker.mjs')).href)) as {
+      default: new (
+        ctx: ExecutionContext,
+        env: Record<string, unknown>,
+      ) => {
+        fetch(request: Request): Promise<Response>;
+        queue(batch: MessageBatch): Promise<void>;
+      };
+      __processQueue: GeneratedWorker['__processQueue'];
+    };
+    generated = {
+      __processQueue: module.__processQueue,
+      default: {
+        fetch: (request, env, ctx) => new module.default(ctx, env).fetch(request),
+        queue: (batch, env, ctx) => new module.default(ctx, env).queue(batch),
+      },
+    };
   }, 30_000);
 
   afterAll(() => {

@@ -12,11 +12,15 @@
     },
     {
       "platformVersion": "0.10.14",
-      "schemaDigest": "b9b78b161edc1daf7e993cedd292c1ffd193fbf7003f484a1fd6b4e260f4d9e8"
+      "schemaDigest": "07b5142d4caea007bb8dc8d0fae2c273e56fd6878282fc2b9a76e414210e2fe3"
     },
     {
       "platformVersion": "0.10.14",
-      "schemaDigest": "6e6ab83f109f3c1ce267968914d50c8c826d7e1a6f2821bfd44918766325b7d6"
+      "schemaDigest": "06c6f91f87d2ad95b1631ae48e2cd671aa6976fe53313947748c07bf2a7d6fda"
+    },
+    {
+      "platformVersion": "0.10.14",
+      "schemaDigest": "3dbf4c31d4bc97a11edca35c59b34ffad1f072df0ad7174d69e2de1057e2610b"
     }
   ]
 }

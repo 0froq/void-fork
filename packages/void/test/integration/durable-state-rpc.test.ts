@@ -63,20 +63,12 @@ export default { async fetch(request) {
     );
     writeFileSync(
       entry,
-      compileWorkerEntry(
-        false,
-        undefined,
-        'assets',
-        [],
-        join(root, 'packages/void/src/runtime/env.ts'),
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        'none',
-        [{ bindingName: 'COUNTERS', className: 'CounterState', filePath: definition }],
-      ),
+      compileWorkerEntry({
+        runtimeEnvPath: join(root, 'packages/void/src/runtime/env.ts'),
+        durableObjects: [
+          { bindingName: 'COUNTERS', className: 'CounterState', filePath: definition },
+        ],
+      }),
     );
     await build({
       configFile: false,
@@ -101,19 +93,24 @@ export default { async fetch(request) {
     });
     const requireVoid = createRequire(join(root, 'packages/void/package.json'));
     const modulePath = createRequire(requireVoid.resolve('wrangler')).resolve('miniflare');
-    const { Miniflare } = (await import(pathToFileURL(modulePath).href)) as {
+    const { Miniflare, convertV4MiniflareOptions } = (await import(
+      pathToFileURL(modulePath).href
+    )) as {
+      convertV4MiniflareOptions(options: Record<string, unknown>): Record<string, unknown>;
       Miniflare: new (options: Record<string, unknown>) => Runtime;
     };
     createRuntime = () =>
-      new Miniflare({
-        compatibilityDate: '2026-07-01',
-        compatibilityFlags: ['nodejs_compat'],
-        modules: true,
-        modulesRoot: output,
-        scriptPath: join(output, 'worker.mjs'),
-        durableObjects: { COUNTERS: { className: 'CounterState', useSQLite: true } },
-        durableObjectsPersist: join(temporary, 'state'),
-      });
+      new Miniflare(
+        convertV4MiniflareOptions({
+          compatibilityDate: '2026-07-01',
+          compatibilityFlags: ['nodejs_compat'],
+          modules: true,
+          modulesRoot: output,
+          scriptPath: join(output, 'worker.mjs'),
+          durableObjects: { COUNTERS: { className: 'CounterState', useSQLite: true } },
+          resourcePersistencePath: join(temporary, 'state'),
+        }),
+      );
     runtime = createRuntime();
   }, 30_000);
 

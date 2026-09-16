@@ -16,7 +16,7 @@ function sha256(value: string | Buffer): string {
 }
 
 describe('Sandbox drain database compatibility', () => {
-  it('pins the verified 0035 baseline digest and keeps 0036 additive', () => {
+  it('pins the verified 0036 baseline digest and keeps 0037 additive', () => {
     const compatibility = readJson(new URL('compatibility.json', drizzleRoot)) as {
       lineage: string;
       rollbackSafeFrom: Array<{ platformVersion: string; schemaDigest: string }>;
@@ -25,7 +25,7 @@ describe('Sandbox drain database compatibility', () => {
       entries: Array<{ idx: number; tag: string; when: number }>;
     };
     const baselineMigrations = journal.entries
-      .filter((entry) => entry.idx <= 35)
+      .filter((entry) => entry.idx <= 36)
       .map((entry) => ({
         index: entry.idx,
         sha256: sha256(readFileSync(new URL(`${entry.tag}.sql`, drizzleRoot))),
@@ -35,13 +35,13 @@ describe('Sandbox drain database compatibility', () => {
     const baselineDigest = sha256(
       JSON.stringify({ lineage: compatibility.lineage, migrations: baselineMigrations }),
     );
-    expect(baselineDigest).toBe('6e6ab83f109f3c1ce267968914d50c8c826d7e1a6f2821bfd44918766325b7d6');
+    expect(baselineDigest).toBe('06c6f91f87d2ad95b1631ae48e2cd671aa6976fe53313947748c07bf2a7d6fda');
     expect(compatibility.rollbackSafeFrom).toContainEqual({
       platformVersion: '0.10.14',
       schemaDigest: baselineDigest,
     });
 
-    const drainMigration = readFileSync(new URL('0036_unusual_bloodaxe.sql', drizzleRoot), 'utf8');
+    const drainMigration = readFileSync(new URL('0037_unusual_bloodaxe.sql', drizzleRoot), 'utf8');
     const statements = drainMigration
       .split('--> statement-breakpoint')
       .map((statement) => statement.trim())
@@ -54,7 +54,7 @@ describe('Sandbox drain database compatibility', () => {
 
   it('adds a database-enforced v2 deployment admission barrier', () => {
     const admissionMigration = readFileSync(
-      new URL('0037_deployment_admission_protocol.sql', drizzleRoot),
+      new URL('0038_deployment_admission_protocol.sql', drizzleRoot),
       'utf8',
     );
     expect(admissionMigration).toContain(
