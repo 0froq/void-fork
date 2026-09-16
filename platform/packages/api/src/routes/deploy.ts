@@ -7,6 +7,8 @@ import {
 import { isrCacheKey, isrCachePrefix, isrLegacyCachePrefix } from '@void/isr';
 import {
   hasSharedCacheOptOut,
+  resolvePageTtl,
+  resolveRevalidateTtl,
   SHARED_CACHE_POLICY_VERSION,
   type IsrCacheMetadata,
 } from '@void/isr/core';
@@ -5532,7 +5534,7 @@ async function deleteIsrKeysByPrefix(kv: KVNamespace, prefix: string): Promise<v
   } while (cursor);
 }
 
-// --- ISR prerender helpers (inlined from dispatch to avoid cross-package dependency) ---
+// --- ISR prerender helpers ---
 
 /**
  * Pack response headers + body into a single ArrayBuffer.
@@ -5546,149 +5548,6 @@ function packIsrValue(headers: Record<string, string>, body: ArrayBuffer): Array
   new Uint8Array(buffer, 4, headerJson.byteLength).set(headerJson);
   new Uint8Array(buffer, 4 + headerJson.byteLength).set(new Uint8Array(body));
   return buffer;
-}
-
-/**
- * Resolve the ISR TTL for a given pathname.
- * For object form, first matching pattern wins.
- */
-function resolvePathTtl(
-  revalidate: number | Record<string, number> | undefined,
-  pathname: string,
-): number {
-  if (revalidate == null) {
-    return 0;
-  }
-  if (typeof revalidate === 'number') {
-    return revalidate;
-  }
-  for (const [pattern, ttl] of Object.entries(revalidate)) {
-    if (matchLiteralPattern(pattern, pathname)) {
-      return ttl;
-    }
-  }
-  return 0;
-}
-
-/**
- * Route-aware ISR TTL resolution for prewarming — a mirror of dispatch's
- * `resolvePageTtl` (`packages/dispatch/src/isr.ts`). First-match over the ordered
- * `pages` table (do NOT re-sort — it is already the framework's authoritative
- * `matchRoute` order), where the winning route's TTL is authoritative (0 when it
- * opts out); only when NO page route matches do we fall back to the flat
- * `revalidate` map. When `pages` is absent, behavior is identical to
- * `resolvePathTtl`. Keep in sync with dispatch so prewarm resolves the SAME TTL
- * dispatch will serve — otherwise a specific non-ISR page beneath a flat
- * catch-all would be warmed with the catch-all's TTL and become a misleading
- * cache entry. (Uses the api's `matchLiteralPattern`, the mirror of dispatch's
- * `matchSegmentPattern`.)
- */
-function resolvePageTtl(
-  pages: ReadonlyArray<{ pattern: string; revalidate?: number }> | undefined,
-  revalidate: number | Record<string, number> | undefined,
-  pathRevalidate: Record<string, number> | undefined,
-  pathname: string,
-): number {
-  if (pages && pages.length > 0) {
-    for (const page of pages) {
-      if (matchLiteralPattern(page.pattern, pathname)) {
-        return matchedPageTtl(page, pathRevalidate, pathname);
-      }
-    }
-    return resolvePathTtl(revalidate, pathname);
-  }
-  return resolvePathTtl(revalidate, pathname);
-}
-
-/**
- * Effective ISR TTL for a `pages` entry that ALREADY matched `pathname`,
- * decoding the framework's 3-state table — a mirror of dispatch's
- * `matchedPageTtl` (`packages/dispatch/src/isr.ts`). A baked number is
- * authoritative (`> 0` on, `0` explicit opt-out); an ABSENT `revalidate` is
- * inherit-eligible and resolves the RAW per-path `pathRevalidate` object config
- * against the actual path (honoring per-path `0` opt-outs). Keep in sync with
- * dispatch and the framework's `collectPages`.
- */
-function matchedPageTtl(
-  page: { pattern: string; revalidate?: number },
-  pathRevalidate: Record<string, number> | undefined,
-  pathname: string,
-): number {
-  if (page.revalidate === undefined) {
-    return resolvePathTtl(pathRevalidate, pathname);
-  }
-  return page.revalidate > 0 ? page.revalidate : 0;
-}
-
-/**
- * Resolve the effective ISR TTL honoring a worker `x-revalidate` header — a
- * mirror of dispatch's `resolveRevalidateTtl` (`packages/dispatch/src/isr.ts`).
- * A valid non-negative `x-revalidate` overrides `defaultTtl` (so `0` opts the
- * render OUT of caching); an absent/invalid header keeps `defaultTtl`. Kept in
- * sync with dispatch so prewarm applies the SAME opt-out the edge write sites do.
- */
-function resolveRevalidateTtl(response: Response, defaultTtl: number): number {
-  const header = response.headers.get('x-revalidate');
-  if (header === null) {
-    return defaultTtl;
-  }
-  const value = parseInt(header, 10);
-  if (isNaN(value) || value < 0) {
-    return defaultTtl;
-  }
-  return value;
-}
-
-const MAX_CACHE = 256;
-const regexCache = new Map<string, RegExp>();
-
-/**
- * Match a `routing.revalidate` pattern against a pathname using SEGMENT-ANCHORED
- * semantics. `*` is special (matches any characters including `/`); a
- * WHOLE-SEGMENT `:name` (a `:` right after `/` or at the start of the pattern,
- * whose name is any non-empty run of non-`/` characters — NOT just JS-identifier
- * chars, so `:post-id`, `:post.id`, etc. all anchor — up to the next `/` or end
- * of string) matches exactly ONE non-empty path segment (`[^/]+`). A
- * whole-segment NAMED CATCH-ALL `:name{.+}` (a named catch-all page `[...path]`
- * → `/docs/:path{.+}`) matches ONE-OR-MORE characters that MAY cross `/` (`.+`,
- * so `/docs/a` and `/docs/a/b` both match, but bare `/docs` / `/docs/` do NOT).
- * Only the exact `{.+}` constraint widens — a regex-constrained param like
- * `:path{[0-9]+}` keeps its single-segment `[^/]+` meaning. A mid-segment `:`
- * (e.g. `/api/v1:health`) stays a LITERAL; every other character is literal.
- *
- * Mirrors `matchSegmentPattern` in `packages/dispatch/src/pattern.ts` (despite
- * the local name). Keep the two implementations in sync — `routing.revalidate`
- * keys are written here (during deploy/prerender) and read by dispatch, so both
- * sides must agree on what each pattern matches.
- */
-function matchLiteralPattern(pattern: string, pathname: string): boolean {
-  let regex = regexCache.get(pattern);
-  if (regex) {
-    regexCache.delete(pattern);
-    regexCache.set(pattern, regex);
-  } else {
-    // Two private-use sentinels stand in for route params so the regex-special
-    // escape step below can't touch the classes we swap in last:
-    //   \uE000 - a whole-segment `:name`       -> one path segment (`[^/]+`)
-    //   \uE001 - a named catch-all `:name{.+}`  -> >=1 char, crosses `/` (`.+`)
-    // The named-catch-all rule runs FIRST so `:name{.+}` is consumed as a unit
-    // before the plain `:name` rule can grab `:name` and strand the `{.+}`. The
-    // `{.+}` name class is `[^/{}]+` (excludes braces) so a REGEX-constrained
-    // param like `:path{[0-9]+}` does NOT match and stays a single segment.
-    const escaped = pattern
-      .replace(/(^|\/):[^/{}]+\{\.\+\}(?=\/|$)/g, '$1\uE001') // named catch-all :name{.+} -> catch-all sentinel
-      .replace(/(^|\/):[^/]+(?=\/|$)/g, '$1\uE000') // whole-segment :name -> segment sentinel
-      .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // escape regex specials
-      .replaceAll('*', '.*') // legacy `*` crosses '/'
-      .replaceAll('\uE000', '[^/]+') // segment sentinel -> one segment
-      .replaceAll('\uE001', '.+'); // catch-all sentinel -> >=1 char, crosses '/'
-    regex = new RegExp(`^${escaped}$`);
-    if (regexCache.size >= MAX_CACHE) {
-      regexCache.delete(regexCache.keys().next().value!);
-    }
-    regexCache.set(pattern, regex);
-  }
-  return regex.test(pathname);
 }
 
 /**
