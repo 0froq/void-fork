@@ -699,8 +699,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Upload, probe, and atomically activate a verified Worker Version. */
-export async function activateCloudflareVersion(options: {
+export type CloudflareVersionActivationOptions = {
   /** Reuse an inspected Worker without republishing its domains or other triggers. */
   preserveTriggers?: boolean;
   expectedPreviousVersionId?: string;
@@ -738,7 +737,47 @@ export async function activateCloudflareVersion(options: {
   fetch?: typeof globalThis.fetch;
   sleep?: (milliseconds: number) => Promise<void>;
   readinessAttempts?: number;
-}): Promise<CloudflareVersionActivation> {
+  /** Verify that omitted remote secrets come from the active Worker Version before uploading. */
+  verifyInheritedSecrets?: boolean;
+  /**
+   * Plaintext secrets to attach only to the uploaded candidate version. Supplying every remote
+   * `secret_text` binding lets a deployment recover safely when an inactive upload is newer than
+   * production; `secret_key` bindings cannot be replaced through this option.
+   */
+  candidateSecrets?: Readonly<Record<string, string>>;
+};
+
+type InternalCloudflareVersionActivationOptions = CloudflareVersionActivationOptions & {
+  candidateSecretsFilePath?: string;
+};
+
+/** Upload, probe, and atomically activate a verified Worker Version. */
+export async function activateCloudflareVersion(
+  options: CloudflareVersionActivationOptions,
+): Promise<CloudflareVersionActivation> {
+  const candidateSecrets = Object.entries(options.candidateSecrets ?? {});
+  if (candidateSecrets.length === 0) {
+    return activateCloudflareVersionWithSecretsFile(options);
+  }
+
+  const directory = mkdtempSync(join(tmpdir(), 'void-version-secrets-'));
+  const path = join(directory, 'secrets.json');
+  try {
+    writeFileSync(path, `${JSON.stringify(Object.fromEntries(candidateSecrets))}\n`, {
+      mode: 0o600,
+    });
+    return await activateCloudflareVersionWithSecretsFile({
+      ...options,
+      candidateSecretsFilePath: path,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+async function activateCloudflareVersionWithSecretsFile(
+  options: InternalCloudflareVersionActivationOptions,
+): Promise<CloudflareVersionActivation> {
   const configArgs = options.configPath ? ['-c', options.configPath] : [];
   const commonArgs = [...configArgs, '--env='];
   if (!options.verifyUploader()) {
@@ -766,27 +805,50 @@ export async function activateCloudflareVersion(options: {
     return { ok: false, reason: 'uploader-changed' };
   }
   let inheritanceBaseline: Array<RecentCloudflareVersion> | undefined;
-  if (options.expectedPreviousVersionId !== undefined) {
+  if (options.expectedPreviousVersionId !== undefined || options.verifyInheritedSecrets === true) {
     const recent = await readRecentCloudflareVersionIds(options, commonArgs);
     if (recent === null) {
       return { ok: false, reason: 'inheritance-source-unavailable' };
     }
-    const activeIndex = recent.findIndex((version) => version.id === previous.versionId);
-    const inheritedChain = activeIndex < 0 ? [] : recent.slice(activeIndex);
-    const inheritedCandidates = inheritedChain.slice(1).map((version) => version.id);
-    const safeInheritanceChain =
-      inheritedChain.length > 0 &&
-      inheritedChain.every(
-        (version, index) => index === 0 || version.number === inheritedChain[index - 1]!.number + 1,
-      ) &&
-      arraysEqual(inheritedCandidates, options.trustedInheritanceVersionIds ?? []);
-    if (!safeInheritanceChain) {
-      return {
-        ok: false,
-        reason: 'inheritance-source-changed',
-        activeVersionId: recent.at(-1)?.id ?? null,
-        rollback: 'not-needed',
-      };
+    const latestVersionId = recent.at(-1)?.id ?? null;
+    if (options.expectedPreviousVersionId !== undefined) {
+      const activeIndex = recent.findIndex((version) => version.id === previous.versionId);
+      const inheritedChain = activeIndex < 0 ? [] : recent.slice(activeIndex);
+      const inheritedCandidates = inheritedChain.slice(1).map((version) => version.id);
+      const safeInheritanceChain =
+        inheritedChain.length > 0 &&
+        inheritedChain.every(
+          (version, index) =>
+            index === 0 || version.number === inheritedChain[index - 1]!.number + 1,
+        ) &&
+        arraysEqual(inheritedCandidates, options.trustedInheritanceVersionIds ?? []);
+      if (!safeInheritanceChain) {
+        return {
+          ok: false,
+          reason: 'inheritance-source-changed',
+          activeVersionId: recent.at(-1)?.id ?? null,
+          rollback: 'not-needed',
+        };
+      }
+    }
+    if (options.verifyInheritedSecrets === true && previous.versionId !== latestVersionId) {
+      const replacesAllRemoteSecrets = await candidateReplacesAllRemoteSecrets(
+        options,
+        commonArgs,
+        previous.versionId,
+        latestVersionId,
+      );
+      if (replacesAllRemoteSecrets === null) {
+        return { ok: false, reason: 'inheritance-source-unavailable' };
+      }
+      if (!replacesAllRemoteSecrets) {
+        return {
+          ok: false,
+          reason: 'inheritance-source-changed',
+          activeVersionId: latestVersionId,
+          rollback: 'not-needed',
+        };
+      }
     }
     inheritanceBaseline = recent;
   }
@@ -872,6 +934,9 @@ export async function activateCloudflareVersion(options: {
         options.workerName,
         '--message',
         message,
+        ...(options.candidateSecretsFilePath
+          ? ['--secrets-file', options.candidateSecretsFilePath]
+          : []),
         ...(options.assetsDirectoryOverride ? ['--assets', options.assetsDirectoryOverride] : []),
         '--preview-alias',
         alias,
@@ -909,7 +974,7 @@ export async function activateCloudflareVersion(options: {
   }
   if (inheritanceBaseline) {
     const recent = await readRecentCloudflareVersionIds(options, commonArgs);
-    const previousLatest = inheritanceBaseline.at(-1)!;
+    const previousLatest = inheritanceBaseline.at(-1);
     const expected = [...inheritanceBaseline.map((version) => version.id), versionId].slice(-10);
     if (recent === null) {
       return {
@@ -924,7 +989,7 @@ export async function activateCloudflareVersion(options: {
     if (
       !uploadedVersion ||
       uploadedVersion.id !== versionId ||
-      uploadedVersion.number !== previousLatest.number + 1 ||
+      uploadedVersion.number !== (previousLatest?.number ?? 0) + 1 ||
       !arraysEqual(
         recent.map((version) => version.id),
         expected,
@@ -1457,6 +1522,10 @@ async function readRecentCloudflareVersionIds(
     ),
   );
   if (!isCleanCommandExit(result)) {
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (isMissingWorkerOutput(output)) {
+      return [];
+    }
     return null;
   }
   try {
@@ -1486,6 +1555,74 @@ function arraysEqual(left: ReadonlyArray<string>, right: ReadonlyArray<string>):
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+async function candidateReplacesAllRemoteSecrets(
+  options: Pick<
+    Parameters<typeof activateCloudflareVersion>[0],
+    'candidateSecrets' | 'runWrangler' | 'workerName'
+  >,
+  commonArgs: Array<string>,
+  activeVersionId: string | null,
+  latestVersionId: string | null,
+): Promise<boolean | null> {
+  const versionIds = [
+    ...new Set([activeVersionId, latestVersionId].filter(Boolean)),
+  ] as Array<string>;
+  const secretBindings: Array<Array<{ name: string; type: 'secret_key' | 'secret_text' }>> = [];
+  for (const versionId of versionIds) {
+    const bindings = await readCloudflareVersionSecretBindings(options, commonArgs, versionId);
+    if (bindings === null) {
+      return null;
+    }
+    secretBindings.push(bindings);
+  }
+  return secretBindings.every((bindings) =>
+    bindings.every(
+      (binding) =>
+        binding.type === 'secret_text' &&
+        Object.hasOwn(options.candidateSecrets ?? {}, binding.name),
+    ),
+  );
+}
+
+async function readCloudflareVersionSecretBindings(
+  options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
+  commonArgs: Array<string>,
+  versionId: string,
+): Promise<Array<{ name: string; type: 'secret_key' | 'secret_text' }> | null> {
+  const result = await Promise.resolve(
+    options.runWrangler(
+      ['versions', 'view', versionId, ...commonArgs, '--name', options.workerName, '--json'],
+      { capture: true },
+    ),
+  );
+  if (!isCleanCommandExit(result)) {
+    return null;
+  }
+  try {
+    const version = JSON.parse(result.stdout) as unknown;
+    if (!isRecord(version) || version.id !== versionId || !isRecord(version.resources)) {
+      return null;
+    }
+    const bindings = version.resources.bindings;
+    if (!Array.isArray(bindings) || !bindings.every(isRecord)) {
+      return null;
+    }
+    const secrets: Array<{ name: string; type: 'secret_key' | 'secret_text' }> = [];
+    for (const binding of bindings) {
+      if (binding.type !== 'secret_text' && binding.type !== 'secret_key') {
+        continue;
+      }
+      if (typeof binding.name !== 'string') {
+        return null;
+      }
+      secrets.push({ name: binding.name, type: binding.type });
+    }
+    return secrets;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The Versions API cannot create a Worker or its initial Durable Object migration history, and
  * some accounts do not expose a version preview until their first ordinary deployment. A
@@ -1493,7 +1630,7 @@ function arraysEqual(left: ReadonlyArray<string>, right: ReadonlyArray<string>):
  * version activation. This fallback requires prior proof that no application had been deployed.
  */
 async function bootstrapFirstDeployment(
-  options: Parameters<typeof activateCloudflareVersion>[0],
+  options: InternalCloudflareVersionActivationOptions,
   commonArgs: Array<string>,
   previousVersionId: string | null,
 ): Promise<CloudflareVersionActivation> {
@@ -1509,6 +1646,9 @@ async function bootstrapFirstDeployment(
         options.workerName,
         '--message',
         options.message,
+        ...(options.candidateSecretsFilePath
+          ? ['--secrets-file', options.candidateSecretsFilePath]
+          : []),
         ...(options.assetsDirectoryOverride ? ['--assets', options.assetsDirectoryOverride] : []),
         '--strict',
         '--experimental-provision=false',
@@ -1592,6 +1732,13 @@ function parseCloudflareErrorCode(output: string): number | undefined {
   return value === undefined ? undefined : Number(value);
 }
 
+function isMissingWorkerOutput(output: string): boolean {
+  return (
+    parseCloudflareErrorCode(output) === 10007 ||
+    /no deployments|\bworker\b.*\b(?:does not exist|not found)\b/i.test(output)
+  );
+}
+
 /** Recognize the Containers account-entitlement failure Wrangler exposes during upload. */
 function isContainersUnavailable(output: string): boolean {
   return (
@@ -1614,10 +1761,7 @@ async function readCurrentProductionVersion(
   );
   if (!isCleanCommandExit(result)) {
     const output = `${result.stdout}\n${result.stderr}`;
-    if (
-      parseCloudflareErrorCode(output) === 10007 ||
-      /no deployments|\bworker\b.*\b(?:does not exist|not found)\b/i.test(output)
-    ) {
+    if (isMissingWorkerOutput(output)) {
       return { kind: 'ok', versionId: null, versions: [] };
     }
     return { kind: 'failed', status: result.status };

@@ -412,9 +412,16 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
       requiredSecretNames: secretKeys.filter(
         (key) => typeof emittedVars[key] === 'string' && emittedVars[key] !== '',
       ),
-      uploaded: secretKeys.filter(
+      prepared: secretKeys.filter(
         (key) => typeof emittedVars[key] === 'string' && emittedVars[key] !== '',
       ).length,
+      candidateSecrets: Object.fromEntries(
+        secretKeys.flatMap((key) =>
+          typeof emittedVars[key] === 'string' && emittedVars[key] !== ''
+            ? [[key, emittedVars[key]]]
+            : [],
+        ),
+      ),
     })) as CloudflareDeployDeps['syncSchemaSecrets'],
     // The stubbed build never writes dist/ssr/wrangler.json, so the real config
     // verification would have nothing to read — pass it by default; dedicated tests
@@ -792,7 +799,7 @@ describe('syncCloudflareSchemaSecrets', () => {
     });
   }
 
-  it('uploads marked values through stdin and removes them from plaintext vars', async () => {
+  it('prepares marked values for the candidate and removes them from plaintext vars', async () => {
     const root = schemaSecretProject();
     const calls: Array<{ args: Array<string>; input?: string }> = [];
     let listCount = 0;
@@ -822,18 +829,18 @@ describe('syncCloudflareSchemaSecrets', () => {
 
     expect(result).toEqual({
       requiredSecretNames: ['API_TOKEN', 'REMOTE_ONLY'],
-      uploaded: 1,
+      prepared: 1,
+      candidateSecrets: { API_TOKEN: 'local-token' },
     });
-    const bulk = calls.find((call) => call.args[1] === 'bulk')!;
-    expect(bulk.args).toEqual(['secret', 'bulk', '-c', join(root, 'wrangler.jsonc'), '--env=']);
-    expect(JSON.parse(bulk.input!)).toEqual({ API_TOKEN: 'local-token' });
-    expect(bulk.args.join(' ')).not.toContain('local-token');
+    expect(listCount).toBe(1);
+    expect(calls.every((call) => call.args[1] !== 'bulk')).toBe(true);
+    expect(calls.flatMap((call) => call.args)).not.toContain('local-token');
     const generated = JSON.parse(readFileSync(join(root, 'dist/ssr/wrangler.json'), 'utf-8'));
     expect(generated.vars).toEqual({ ORDINARY: 'visible' });
     expect(generated.secrets.required).toEqual(['API_TOKEN', 'MANUAL_SECRET', 'REMOTE_ONLY']);
   });
 
-  it('bootstraps a first deploy and skips an absent optional marked secret', async () => {
+  it('prepares a first deploy and skips an absent optional marked secret', async () => {
     const root = schemaSecretProject();
     let call = 0;
     const result = await syncCloudflareSchemaSecrets({
@@ -865,13 +872,13 @@ describe('syncCloudflareSchemaSecrets', () => {
 
     expect(result).toEqual({
       requiredSecretNames: ['API_TOKEN'],
-      uploaded: 1,
-      workerWasMissing: true,
+      prepared: 1,
+      candidateSecrets: { API_TOKEN: 'local-token' },
     });
-    expect(call).toBe(3);
+    expect(call).toBe(1);
   });
 
-  it('fails without echoing a value when bulk upload fails', async () => {
+  it('fails without echoing a value when the remote secret list fails', async () => {
     const root = schemaSecretProject();
     const secret = 'never-print-this';
     const promise = syncCloudflareSchemaSecrets({
@@ -881,13 +888,10 @@ describe('syncCloudflareSchemaSecrets', () => {
       workerName: 'app',
       emittedVars: { API_TOKEN: secret },
       secretKeys: ['API_TOKEN'],
-      runWrangler: (args) =>
-        args[1] === 'list'
-          ? { ...cleanExit, stdout: '[]' }
-          : { ...cleanExit, status: 1, stderr: secret },
+      runWrangler: () => ({ ...cleanExit, status: 1, stderr: secret }),
     });
 
-    await expect(promise).rejects.toMatchObject({ reason: 'bulk-failed' });
+    await expect(promise).rejects.toMatchObject({ reason: 'list-failed' });
     await expect(promise).rejects.not.toThrow(secret);
   });
 });
@@ -7602,8 +7606,9 @@ describe('compareWranglerMigrationPaths (wrangler 4.131 numeric-prefix comparato
 // ---------------------------------------------------------------------------
 
 describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
-  it('promotes marked secrets after migration gates and before Worker upload', async () => {
+  it('prepares marked secrets after migration gates and passes them to the candidate upload', async () => {
     const root = d1Project(PROVISIONED_D1);
+    let candidateSecrets: Readonly<Record<string, string>> | undefined;
     const { deps, trace } = harness({
       resolveSchemaFacts: (() =>
         okSchemaFacts({
@@ -7615,13 +7620,28 @@ describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
         emittedVars({ API_TOKEN: 'secret' })) as CloudflareDeployDeps['readEmittedWorkerVars'],
       syncSchemaSecrets: (async () => {
         trace.push('schema-secrets');
-        return { requiredSecretNames: ['API_TOKEN'], uploaded: 1 };
+        return {
+          requiredSecretNames: ['API_TOKEN'],
+          prepared: 1,
+          candidateSecrets: { API_TOKEN: 'secret' },
+        };
       }) as CloudflareDeployDeps['syncSchemaSecrets'],
+      activateVersion: async (options) => {
+        trace.push('candidate-upload');
+        candidateSecrets = options.candidateSecrets;
+        return {
+          ok: true,
+          versionId: '22222222-2222-4222-8222-222222222222',
+          previewUrl: 'https://preview.example.workers.dev',
+          previousVersionId: null,
+        };
+      },
     });
 
     await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
     expect(trace.indexOf('migrate-gate')).toBeLessThan(trace.indexOf('schema-secrets'));
-    expect(trace.indexOf('schema-secrets')).toBeLessThan(trace.indexOf('wrangler:deploy'));
+    expect(trace.indexOf('schema-secrets')).toBeLessThan(trace.indexOf('candidate-upload'));
+    expect(candidateSecrets).toEqual({ API_TOKEN: 'secret' });
   });
 
   it('rejects a plaintext BETTER_AUTH_SECRET before provisioning or upload', async () => {

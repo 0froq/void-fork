@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
 import { describe, expect, it, vi } from 'vite-plus/test';
@@ -235,6 +235,130 @@ describe('Cloudflare version activation', () => {
       activeVersionId: unpublished,
     });
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
+  });
+
+  it('does not inherit any remote secret from a failed candidate newer than production', async () => {
+    const failed = '44444444-4444-4444-8444-444444444444';
+    const directory = mkdtempSync(join(tmpdir(), 'void-active-secret-inheritance-'));
+    const configPath = join(directory, 'wrangler.json');
+    writeFileSync(configPath, JSON.stringify({ name: 'my-worker' }));
+    try {
+      const base = runner({
+        versions: ok(
+          JSON.stringify([
+            { id: CURRENT, number: 1 },
+            { id: failed, number: 2 },
+          ]),
+        ),
+      });
+      const runWrangler = vi.fn((args: Array<string>) => {
+        if (args[0] === 'versions' && args[1] === 'view') {
+          const versionId = args[2]!;
+          return ok(
+            JSON.stringify({
+              id: versionId,
+              resources: {
+                bindings: versionId === failed ? [{ name: 'RAW_SECRET', type: 'secret_text' }] : [],
+              },
+            }),
+          );
+        }
+        return base(args);
+      });
+      await expect(
+        activateCloudflareVersion({
+          runWrangler,
+          configPath,
+          workerName: 'my-worker',
+          verifyUploader: () => true,
+          verifyInheritedSecrets: true,
+          message: encodeCloudflareVersionMessage([]),
+        }),
+      ).resolves.toMatchObject({
+        ok: false,
+        reason: 'inheritance-source-changed',
+        activeVersionId: failed,
+      });
+      expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not treat a newer foreign draft as a first-secret placeholder', async () => {
+    const foreign = '44444444-4444-4444-8444-444444444444';
+    const base = runner({
+      status: { stdout: '', stderr: 'The Worker first has no deployments.', status: 1 },
+      versions: ok(JSON.stringify([{ id: foreign, number: 1 }])),
+    });
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'view') {
+        return ok(
+          JSON.stringify({
+            id: foreign,
+            resources: { bindings: [{ name: 'FOREIGN_SECRET', type: 'secret_text' }] },
+          }),
+        );
+      }
+      return base(args);
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'first-with-secret',
+        verifyUploader: () => true,
+        verifyInheritedSecrets: true,
+        allowFirstDeploymentBootstrap: true,
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'inheritance-source-changed',
+      activeVersionId: foreign,
+    });
+    expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
+  });
+
+  it('can replace every text secret explicitly when a failed candidate is latest', async () => {
+    const failed = '44444444-4444-4444-8444-444444444444';
+    const base = runner();
+    let uploaded = false;
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return ok(
+          JSON.stringify([
+            { id: CURRENT, number: 1 },
+            { id: failed, number: 2 },
+            ...(uploaded ? [{ id: NEXT, number: 3 }] : []),
+          ]),
+        );
+      }
+      if (args[0] === 'versions' && args[1] === 'view') {
+        return ok(
+          JSON.stringify({
+            id: args[2],
+            resources: { bindings: [{ name: 'API_TOKEN', type: 'secret_text' }] },
+          }),
+        );
+      }
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        uploaded = true;
+      }
+      return base(args);
+    });
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        verifyInheritedSecrets: true,
+        candidateSecrets: { API_TOKEN: 'explicit-value' },
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, versionId: NEXT });
+    expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(true);
   });
 
   it('does not trust an unpublished version with a copied Void annotation', async () => {
@@ -1315,12 +1439,25 @@ describe('Cloudflare version activation', () => {
   });
 
   it('does not activate a version whose preview never becomes ready', async () => {
-    const runWrangler = runner();
+    const base = runner();
+    let secretsPath: string | undefined;
+    let uploadedSecrets: unknown;
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        secretsPath = args[args.indexOf('--secrets-file') + 1];
+        uploadedSecrets = JSON.parse(readFileSync(secretsPath!, 'utf8'));
+        if (process.platform !== 'win32') {
+          expect(statSync(secretsPath!).mode & 0o777).toBe(0o600);
+        }
+      }
+      return base(args);
+    });
     const result = await activateCloudflareVersion({
       runWrangler,
       verifyUploader: () => true,
       workerName: 'my-worker',
       message: encodeCloudflareVersionMessage([]),
+      candidateSecrets: { API_TOKEN: 'next-secret' },
       fetch: async () => new Response('not ready', { status: 503 }),
       sleep: async () => {},
       readinessAttempts: 2,
@@ -1332,6 +1469,9 @@ describe('Cloudflare version activation', () => {
       versionId: NEXT,
       rollback: 'not-needed',
     });
+    expect(uploadedSecrets).toEqual({ API_TOKEN: 'next-secret' });
+    expect(runWrangler.mock.calls.flatMap(([args]) => args)).not.toContain('next-secret');
+    expect(secretsPath && existsSync(secretsPath)).toBe(false);
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'deploy')).toBe(false);
   });
 
@@ -2069,6 +2209,39 @@ describe('Cloudflare version activation', () => {
     ).resolves.toMatchObject({ ok: true, previousVersionId: null });
   });
 
+  it('treats a missing Worker version list as an empty inheritance baseline', async () => {
+    const base = runner({
+      status: {
+        stdout: '',
+        stderr: 'This Worker does not exist on your account. [code: 10007]',
+        status: 1,
+      },
+    });
+    let uploaded = false;
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'list') {
+        return uploaded
+          ? ok(JSON.stringify([{ id: NEXT, number: 1 }]))
+          : { stdout: '', stderr: 'Worker not found. [code: 10007]', status: 1 };
+      }
+      if (args[0] === 'versions' && args[1] === 'upload') {
+        uploaded = true;
+      }
+      return base(args);
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        verifyInheritedSecrets: true,
+        workerName: 'first',
+        message: encodeCloudflareVersionMessage([]),
+        fetch: async () => Response.json({ ready: true }),
+      }),
+    ).resolves.toMatchObject({ ok: true, previousVersionId: null });
+  });
+
   it('probes a custom route when workers.dev and preview URLs are disabled', async () => {
     const runWrangler = runner({
       upload: ok(`Worker Version ID: ${NEXT}`),
@@ -2145,7 +2318,7 @@ describe('Cloudflare version activation', () => {
   });
 
   it('bootstraps first-deploy Durable Object migrations through a non-versioned deploy', async () => {
-    const runWrangler = runner({
+    const base = runner({
       status: { stdout: '', stderr: 'The Worker first has no deployments.', status: 1 },
       upload: {
         stdout: '',
@@ -2155,6 +2328,19 @@ describe('Cloudflare version activation', () => {
       bootstrap: ok(
         `Current Version ID: ${NEXT}\nVersion Preview URL: https://2e209d56-first.example.workers.dev`,
       ),
+    });
+    const secretPayloads: Array<unknown> = [];
+    const secretPaths: Array<string> = [];
+    const runWrangler = vi.fn((args: Array<string>) => {
+      if (
+        (args[0] === 'deploy' || (args[0] === 'versions' && args[1] === 'upload')) &&
+        args.includes('--secrets-file')
+      ) {
+        const path = args[args.indexOf('--secrets-file') + 1]!;
+        secretPaths.push(path);
+        secretPayloads.push(JSON.parse(readFileSync(path, 'utf8')));
+      }
+      return base(args);
     });
     const fetcher = vi.fn(async () => Response.json({ ready: true }));
 
@@ -2166,6 +2352,7 @@ describe('Cloudflare version activation', () => {
         configPath: '/app/wrangler.jsonc',
         assetsDirectoryOverride: '/app/.void/deploy/cloudflare/assets',
         message: encodeCloudflareVersionMessage(['0001_init.sql']),
+        candidateSecrets: { API_TOKEN: 'first-secret' },
         fetch: fetcher,
       }),
     ).resolves.toEqual({
@@ -2183,6 +2370,9 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls[2]![0]).toContain('--autoconfig=false');
     expect(runWrangler.mock.calls[2]![0]).toContain('--assets');
     expect(runWrangler.mock.calls[2]![0]).toContain('/app/.void/deploy/cloudflare/assets');
+    expect(secretPayloads).toEqual([{ API_TOKEN: 'first-secret' }, { API_TOKEN: 'first-secret' }]);
+    expect(new Set(secretPaths).size).toBe(1);
+    expect(secretPaths.every((path) => !existsSync(path))).toBe(true);
     expect(fetcher).toHaveBeenCalledWith(
       'https://first.example.workers.dev/__void/ready',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),

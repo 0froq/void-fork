@@ -24,7 +24,7 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Correct and verify minimum platform runtime permissions.
 - [ ] Accept supported JSONC syntax during Cloudflare connection.
 - [x] Audit browser administrator mutations alongside operator API changes.
-- [ ] Attach schema secrets to the candidate deployment before activation.
+- [x] Attach schema secrets to the candidate deployment before activation.
 - [ ] Handle or reject later Durable Object lifecycle changes before mutations.
 - [x] Keep prerelease publishing and scaffolding on the selected release channel.
 - [x] Require platform tests before publishing the packaged runtime.

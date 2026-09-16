@@ -1570,11 +1570,9 @@ type CloudflareSchemaSecretFailureReason =
   | 'invalid-value'
   | 'config-invalid'
   | 'uploader-changed'
-  | 'list-failed'
-  | 'bulk-failed'
-  | 'verification-failed';
+  | 'list-failed';
 
-/** Values-free failure from promotion of schema-marked Cloudflare secrets. */
+/** Values-free failure from preparing schema-marked Cloudflare secrets. */
 export class CloudflareSchemaSecretError extends Error {
   override name = 'CloudflareSchemaSecretError';
 
@@ -1615,16 +1613,16 @@ function readGeneratedDeployConfig(root: string): {
       throw error;
     }
     throw new CloudflareSchemaSecretError(
-      'deploy: the generated Cloudflare config is not valid JSON; no schema secrets were uploaded.',
+      'deploy: the generated Cloudflare config is not valid JSON; no schema secrets were prepared.',
       'config-invalid',
     );
   }
 }
 
 /**
- * Promote explicit `env.ts` `.secret()` values from generated plaintext vars to
- * Cloudflare Worker secrets. Values are streamed as JSON over stdin, remote-only
- * marked secrets are inherited, and no remote secret is ever deleted.
+ * Prepare explicit `env.ts` `.secret()` values for the candidate Worker version.
+ * New values stay in memory until `versions upload --secrets-file`, remote-only
+ * marked secrets are inherited, and no live Worker secret is mutated beforehand.
  */
 export async function syncCloudflareSchemaSecrets(options: {
   root: string;
@@ -1638,13 +1636,13 @@ export async function syncCloudflareSchemaSecrets(options: {
   beforeWranglerRun?: () => boolean;
 }): Promise<{
   requiredSecretNames: Array<string>;
-  uploaded: number;
-  workerWasMissing?: true;
+  prepared: number;
+  candidateSecrets: Record<string, string>;
 }> {
   const excluded = new Set(options.excludeKeys ?? []);
   const secretKeys = [...new Set(options.secretKeys)].filter((key) => !excluded.has(key));
   if (secretKeys.length === 0) {
-    return { requiredSecretNames: [], uploaded: 0 };
+    return { requiredSecretNames: [], prepared: 0, candidateSecrets: {} };
   }
 
   const uploadValues: Record<string, string> = {};
@@ -1658,7 +1656,7 @@ export async function syncCloudflareSchemaSecrets(options: {
     }
     if (typeof value !== 'string') {
       throw new CloudflareSchemaSecretError(
-        `deploy: schema secret ${key} must resolve to a string before it can be uploaded.`,
+        `deploy: schema secret ${key} must resolve to a string before it can be prepared.`,
         'invalid-value',
       );
     }
@@ -1670,8 +1668,7 @@ export async function syncCloudflareSchemaSecrets(options: {
       throw new CloudflareSchemaSecretError('', 'uploader-changed');
     }
   };
-  let workerWasMissing = false;
-  const list = async (allowMissingWorker: boolean): Promise<Array<string>> => {
+  const list = async (): Promise<Array<string>> => {
     beforeRun();
     try {
       return await listSelfHostSecretNames(
@@ -1685,21 +1682,20 @@ export async function syncCloudflareSchemaSecrets(options: {
         secretKeys,
       );
     } catch (error) {
-      if (allowMissingWorker && error instanceof SelfHostFirstDeployError) {
-        workerWasMissing = true;
+      if (error instanceof SelfHostFirstDeployError) {
         return [];
       }
-      if (error instanceof SelfHostFirstDeployError || error instanceof SelfHostSecretListError) {
+      if (error instanceof SelfHostSecretListError) {
         throw new CloudflareSchemaSecretError(
           'deploy: could not confirm the remote schema secrets. No Worker was uploaded; run `void secret list` and retry.',
-          allowMissingWorker ? 'list-failed' : 'verification-failed',
+          'list-failed',
         );
       }
       throw error;
     }
   };
 
-  const existing = await list(true);
+  const existing = await list();
   const marked = new Set(secretKeys);
   const requiredSecretNames = [
     ...new Set([...Object.keys(uploadValues), ...existing.filter((name) => marked.has(name))]),
@@ -1712,7 +1708,7 @@ export async function syncCloudflareSchemaSecrets(options: {
     (rawVars === null || typeof rawVars !== 'object' || Array.isArray(rawVars))
   ) {
     throw new CloudflareSchemaSecretError(
-      'deploy: the generated Cloudflare config has a malformed vars field; no schema secrets were uploaded.',
+      'deploy: the generated Cloudflare config has a malformed vars field; no schema secrets were prepared.',
       'config-invalid',
     );
   }
@@ -1728,7 +1724,7 @@ export async function syncCloudflareSchemaSecrets(options: {
     (rawSecrets === null || typeof rawSecrets !== 'object' || Array.isArray(rawSecrets))
   ) {
     throw new CloudflareSchemaSecretError(
-      'deploy: the generated Cloudflare config has a malformed secrets field; no schema secrets were uploaded.',
+      'deploy: the generated Cloudflare config has a malformed secrets field; no schema secrets were prepared.',
       'config-invalid',
     );
   }
@@ -1739,7 +1735,7 @@ export async function syncCloudflareSchemaSecrets(options: {
     (!Array.isArray(rawRequired) || !rawRequired.every((name) => typeof name === 'string'))
   ) {
     throw new CloudflareSchemaSecretError(
-      'deploy: the generated Cloudflare config has a malformed secrets.required field; no schema secrets were uploaded.',
+      'deploy: the generated Cloudflare config has a malformed secrets.required field; no schema secrets were prepared.',
       'config-invalid',
     );
   }
@@ -1748,47 +1744,10 @@ export async function syncCloudflareSchemaSecrets(options: {
   generated.config.secrets = secrets;
   writeFileSync(generated.path, `${JSON.stringify(generated.config, null, 2)}\n`);
 
-  const entries = Object.entries(uploadValues);
-  for (let offset = 0; offset < entries.length; offset += 100) {
-    const chunk = Object.fromEntries(entries.slice(offset, offset + 100));
-    beforeRun();
-    let result: DeployWranglerRunResult;
-    try {
-      result = await Promise.resolve(
-        options.runWrangler(['secret', 'bulk', '-c', options.configPath, '--env='], {
-          capture: true,
-          input: `${JSON.stringify(chunk)}\n`,
-        }),
-      );
-    } catch {
-      throw new CloudflareSchemaSecretError(
-        'deploy: Cloudflare schema-secret upload failed. No secret value was logged; retry the deploy.',
-        'bulk-failed',
-      );
-    }
-    if (!isCleanWranglerExit(result)) {
-      throw new CloudflareSchemaSecretError(
-        `deploy: Cloudflare schema-secret upload failed (wrangler exit ${String(result.status)}). No secret value was logged; retry the deploy.`,
-        'bulk-failed',
-      );
-    }
-  }
-
-  if (entries.length > 0) {
-    const verified = new Set(await list(false));
-    const missing = Object.keys(uploadValues).filter((key) => !verified.has(key));
-    if (missing.length > 0) {
-      throw new CloudflareSchemaSecretError(
-        `deploy: Cloudflare did not confirm these uploaded schema secrets: ${missing.join(', ')}. No Worker was uploaded; retry once secret storage is available.`,
-        'verification-failed',
-      );
-    }
-  }
-
   return {
     requiredSecretNames,
-    uploaded: entries.length,
-    ...(workerWasMissing ? { workerWasMissing: true as const } : {}),
+    prepared: Object.keys(uploadValues).length,
+    candidateSecrets: uploadValues,
   };
 }
 
@@ -5583,12 +5542,13 @@ export async function runCloudflareDeploy(
     }
   }
 
-  // 10. Promote explicit `.secret()` schema values only after every migration
+  // 10. Prepare explicit `.secret()` schema values only after every migration
   // gate/apply has succeeded, immediately before final verification + upload.
   // The sync rewrites the fresh generated artifact to remove plaintext values,
-  // bulk uploads over stdin, and inherits both uploaded and remote-only marked
-  // secrets without pruning anything from Cloudflare.
+  // and carries new values to the candidate upload while inheriting remote-only
+  // marked secrets without mutating the live Worker first.
   let requiredSchemaSecretNames: Array<string> = [];
+  let candidateSchemaSecrets: Record<string, string> = {};
   if (schemaSecretKeys.length > 0) {
     try {
       const synced = await (deps.syncSchemaSecrets ?? syncCloudflareSchemaSecrets)({
@@ -5601,9 +5561,9 @@ export async function runCloudflareDeploy(
         runWrangler,
         beforeWranglerRun: assertUploaderStillPinned,
       });
-      workerWasMissingBeforeSecretProvisioning ||= synced.workerWasMissing === true;
       requiredSchemaSecretNames = synced.requiredSecretNames;
-      cliLog.info('cloudflare_schema_secrets_ready', { uploaded: synced.uploaded });
+      candidateSchemaSecrets = synced.candidateSecrets;
+      cliLog.info('cloudflare_schema_secrets_ready', { prepared: synced.prepared });
     } catch (error) {
       if (error instanceof CloudflareSchemaSecretError && error.reason === 'uploader-changed') {
         return exit(1);
@@ -5736,6 +5696,8 @@ export async function runCloudflareDeploy(
     }),
     previousTrafficConfig: readWranglerPublishedTrafficSnapshot(configPath),
     queueConsumerCleanup,
+    candidateSecrets: candidateSchemaSecrets,
+    verifyInheritedSecrets: true,
   });
   if (!execution.ok) {
     log.error(
@@ -5833,7 +5795,9 @@ export function formatCloudflareActivationError(
     case 'inheritance-source-changed':
       return [
         'deploy: the active Worker Version is not the latest upload, so inherited secrets cannot be pinned safely.',
-        'Remove the unpublished version or activate the intended version in Cloudflare, then retry; production traffic is unchanged.',
+        'Supply explicit local values for every schema-marked text secret and retry. If the Worker has',
+        'non-text secret bindings, inspect its active and latest versions in Cloudflare before proceeding.',
+        'No version was uploaded; production traffic is unchanged.',
       ].join('\n');
     case 'traffic-preservation-unavailable':
       return [

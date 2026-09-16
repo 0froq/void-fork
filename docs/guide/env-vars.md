@@ -158,6 +158,8 @@ On direct Cloudflare deploys, a built-in schema helper's `.secret()` modifier al
 
 Existing remote-only secrets are preserved, optional missing values stay absent, and deployment doesn't delete remote secrets. Warnings based on a key's name or value don't make it a secret; mark it explicitly.
 
+Direct Cloudflare deploys attach schema-marked values to the uploaded candidate version. The candidate becomes active only after its readiness check passes, so a failed deployment keeps the previous code and secret values together. If a newer inactive version exists on retry, Void proceeds only when the candidate explicitly supplies every text secret; otherwise it stops before upload. Inspect active and latest Worker versions in Cloudflare when non-text secret bindings require recovery.
+
 For auth-enabled apps, both Void Cloud and `void deploy --platform cloudflare` manage `BETTER_AUTH_SECRET` automatically: they preserve an existing encrypted secret and generate one only when missing.
 
 ## Defaults

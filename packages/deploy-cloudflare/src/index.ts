@@ -42,5 +42,6 @@ export {
   type CloudflareTriggerConfig,
   type CloudflareTrafficConfig,
   type CloudflareVersionActivation,
+  type CloudflareVersionActivationOptions,
   type CloudflareVersionMetadata,
 } from './version.ts';
