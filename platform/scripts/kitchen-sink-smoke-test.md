@@ -11,6 +11,8 @@ SMOKE_URL=https://kitchen-sink.apps.example.com node platform/scripts/kitchen-si
 
 Use an app whose data can be deleted. The script has no default destination. If Cloudflare Access protects the app, supply that application's `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` from your secret manager.
 
+The hosted staging CI workflow initializes missing server values before deploying its existing `kitchen-sink` project at `https://api.staging.void.cloud`. This is CI fixture setup: it sets `APP_NAME` to `Kitchen Sink`, `API_URL` to `https://api.example.com`, and generates a random `SECRET_KEY` only when absent. It validates new values against `env.ts`, preserves configured secrets, and uses the workflow's existing staging credentials. It never reads a local `.env` or prints values. Smoke jobs are serialized; avoid editing these fixture secrets manually during setup because the secret API uses an upsert after listing names.
+
 The checklist below can also be run manually or with browser automation. Use unique values for created records, wait for each mutation to appear, and remove test records afterward. KV listings are eventually consistent; poll them instead of relying on a fixed delay. Record each result and report failures after completing the remaining cases.
 
 ## Test Cases
