@@ -166,7 +166,8 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       // A unique URL forces a fresh network GET without sending cache-bypass
       // directives to the origin. Omit application/Access session cookies too.
       // Cookie-bearing requests deliberately bypass the shared asset cache.
-      // The browser context still supplies the Access service-token headers.
+      // The browser context still supplies Access service-token headers when
+      // configured; those protected requests exercise the private cache policy.
       const asset = await page.evaluate(async (url) => {
         const res = await fetch(url, { credentials: 'omit' });
         return {
@@ -174,16 +175,27 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
           cacheControl: res.headers.get('cache-control') || '',
           contentType: res.headers.get('content-type'),
           cfCacheStatus: res.headers.get('cf-cache-status'),
-          dispatchCacheControl: res.headers.get('x-void-debug-cache-control'),
-          dispatchCachePrefix: res.headers.get('x-void-debug-cache-prefix'),
-          dispatchCacheRequest: res.headers.get('x-void-debug-cache-request'),
         };
       }, assetUrl);
 
       assert.equal(asset.status, 200, `asset GET succeeds (got ${asset.status})`);
+      const accessProtected = Object.keys(CF_ACCESS).length > 0;
+      const expectedDirective = accessProtected ? 'no-store' : 'immutable';
+      const directives = asset.cacheControl
+        .toLowerCase()
+        .split(',')
+        .map((part) => part.trim());
       assert.ok(
-        asset.cacheControl.includes('immutable'),
-        `Cache-Control includes immutable for ${assetUrl} (got: ${JSON.stringify(asset)})`,
+        directives.includes(expectedDirective),
+        `Cache-Control includes ${expectedDirective} for ${assetUrl} (got: ${JSON.stringify(asset)})`,
+      );
+      assert.ok(
+        accessProtected
+          ? !directives.includes('immutable') && !directives.includes('public')
+          : !directives.some((directive) =>
+              ['private', 'no-store', 'no-cache'].includes(directive),
+            ),
+        `Cache-Control has no contradictory directives (got: ${asset.cacheControl})`,
       );
     } finally {
       await ctx.close();

@@ -25,7 +25,7 @@ The checklist below can also be run manually or with browser automation. Use uni
 1. Visit `/`.
 2. Assert the page contains "Kitchen Sink" and "Auth" in its text.
 3. Inspect the page's HTML source for hashed asset URLs (e.g. `.js` or `.css` files with hash in the filename).
-4. Use the browser to GET one of those asset URLs with a unique query parameter and `credentials: 'omit'`, and assert its `Cache-Control` header contains `immutable`. A unique URL bypasses the browser's stored response without sending cache-bypass directives to the origin. The shared asset cache deliberately bypasses cookie-bearing requests. Keep the Access service-token headers configured on the browser context when testing an Access-protected app. Inspect a fresh `GET` response rather than a browser-cached response or `HEAD`.
+4. Use the browser to GET one of those asset URLs with a unique query parameter and `credentials: 'omit'`. For a public target, assert `Cache-Control` contains `immutable` without a private/no-cache/no-store directive. For an Access-protected target, keep the service-token headers configured on the browser context and assert `no-store` without public/immutable directives: the authenticated staging request bypasses the shared cache even when browser cookies are omitted. A unique URL bypasses the browser's stored response without sending cache-bypass directives to the origin. Inspect a fresh `GET` response rather than a browser-cached response or `HEAD`.
 
    ```js
    const el =
@@ -36,7 +36,7 @@ The checklist below can also be run manually or with browser automation. Use uni
    response.status + ' ' + response.headers.get('cache-control');
    ```
 
-   Expect `200 public, max-age=31536000, immutable`.
+   Expect `200 public, max-age=31536000, immutable` for a public target or `200 no-store` for the Access-protected staging target. Cloudflare also documents that its [Cache API is unavailable for Workers fronted by Access](https://developers.cloudflare.com/workers/runtime-apis/cache/#background); this authenticated check does not assert an edge-cache hit.
 
 ### 2. SPA navigation (no full reload)
 
