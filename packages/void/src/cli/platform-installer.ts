@@ -70,6 +70,7 @@ import {
   writeInstallationManifest,
   writePendingInstallationSecrets,
 } from './platform-registry.ts';
+import { assertPlatformWorkerSecretUpdateAuthority } from './platform-secret-update-authority.ts';
 import {
   platformManagedWorkerTraffic,
   recordPlatformWorkerTraffic,
@@ -731,6 +732,16 @@ export async function installPlatform(
     throw new Error(
       'platform: This installation changed on another host. Local state was refreshed; rerun the command to review a current plan.',
     );
+  }
+  try {
+    assertPlatformWorkerSecretUpdateAuthority({
+      explicitUpdates: explicitWorkerSecretUpdates,
+      localIntent: secrets.pendingWorkerSecretUpdateIntent,
+      manifest,
+    });
+  } catch (error) {
+    await releaseDatabaseLock();
+    throw error;
   }
   if (
     workerSecretUpdateIntent &&
