@@ -29,6 +29,40 @@ vpr test:all
 `vpr test:all` formats, lints, builds, typechecks, and tests the merged monorepo. Investigate slow
 or hanging tests when they occur instead of routinely increasing timeouts.
 
+Platform projects run first; SDK unit and integration files then share a worker pool. This keeps
+database engines from competing with all framework compilers at startup. Keep module isolation
+enabled: these suites mock globals, keep database state, and exercise real process/lock boundaries.
+The full verification command builds before running the platform's type-aware lint, so it also
+works without a pre-existing dashboard `.void/tsconfig.json`.
+
+## Suite organization and CI scheduling
+
+CI builds and typechecks every playground once per OS in a dedicated required job. Integration
+shards build the public packages and then only the fixtures their tests use; they do not depend
+on generated output from another job. The `done` check requires both the tests and build/type
+checks. Linux and Windows coverage and the credentialed live-deploy gate are unchanged.
+
+Integration sharding uses [measured duration estimates](test/integration-timings.ts), rather than
+filename hashes. [The sequencer](test/sequencer.ts) packs the longest files first and starts costly
+fixtures early. Estimates affect scheduling only: new files receive a fallback estimate, and
+membership tests ensure every discovered file appears exactly once. Refresh the estimates when
+the suite's costs change materially. Seeded file shuffling remains available for isolation checks.
+
+The four adapter suites share their client and island test definitions in `test/`, while retaining
+each framework's own dev, preview, SSR, hydration, and HMR execution. Before integrations start,
+their sources are snapshotted so another test cloning a fixture cannot capture an in-flight HMR
+edit. Dependencies stay linked to the installed workspace, and snapshots are removed afterward.
+
+Use production functions in unit tests. A copy of a hook's implementation inside a test cannot
+catch regressions in the real hook. Shared form-value equality has one direct suite, and actual
+form interactions run in the adapter browser matrix.
+
+The in-memory API deletion tests schedule the fixed container-orphan sweep delay immediately.
+They still execute both sweeps and all provider/database assertions. Production timing and the
+real subprocess/lock deadline tests retain their actual timing semantics.
+
+See [the performance audit](test/PERFORMANCE.md) for baseline measurements, changes, and validation.
+
 ## Prepublish Test
 
 Packed tests install the current tarballs into fresh applications through a temporary local

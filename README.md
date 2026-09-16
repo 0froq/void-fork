@@ -123,6 +123,8 @@ vp run dev:docs        # local docs dev server
 
 See [TESTING.md](./TESTING.md) for targeted verification and the account-neutral, non-destructive
 native Cloudflare live E2E procedure.
+The [test-suite performance audit](./test/PERFORMANCE.md) records duplicate coverage, scheduling,
+and measured end-to-end verification times.
 
 Build the public packages and smoke-test their actual tarballs outside the workspace:
 
