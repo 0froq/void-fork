@@ -34,8 +34,11 @@ describe('playground/kitchen-sink build', () => {
       JSON.stringify({ projectId: 'test-leak-project-id', slug: 'test-leak' }),
     );
 
-    const result = spawn.sync('vp', ['run', '--filter', `./${playground.workspacePath}`, 'build'], {
-      cwd: ROOT,
+    // Build this fixture directly. Other suites create and remove temporary
+    // workspace packages concurrently, so rediscovering the whole task graph
+    // adds an unrelated race to a test of Vite's emitted worker artifacts.
+    const result = spawn.sync('vp', ['build'], {
+      cwd: pg,
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024,
       env: {
@@ -47,7 +50,7 @@ describe('playground/kitchen-sink build', () => {
     });
 
     buildOutput = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-    expect(result.status).toBe(0);
+    expect(result.status, buildOutput).toBe(0);
   });
 
   afterAll(() => {
