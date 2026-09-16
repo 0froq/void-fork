@@ -26,13 +26,13 @@ both baseline measurements. Failed experimental runs are excluded from the compa
 
 ## Local results
 
-| Full verification  |  Run 1 |  Run 2 |   Mean |
-| ------------------ | -----: | -----: | -----: |
-| Baseline           | 104.5s | 100.7s | 102.6s |
-| After core changes | 100.9s | 101.8s | 101.3s |
+| Full verification |  Run 1 |  Run 2 | Final committed tree |   Mean |
+| ----------------- | -----: | -----: | -------------------: | -----: |
+| Baseline          | 104.5s | 100.7s |                    — | 102.6s |
+| After             | 100.9s | 101.8s |               104.9s | 102.5s |
 
-The observed local total is essentially unchanged: about 1.2% lower, within ordinary run-to-run
-variation. The changes should not be presented as a substantial local end-to-end speedup.
+The observed local total is essentially unchanged, within ordinary run-to-run variation.
+The changes should not be presented as a substantial local end-to-end speedup.
 There are measurable component improvements, while compilation/browser work remains dominant:
 
 - The in-memory project-deletion suite no longer spends about 30 seconds in fifteen fixed
@@ -75,6 +75,25 @@ normalization, discovery order, invalid counts and seeded shuffle. Non-integrati
 continues to use Vitest's default behavior. The sequencer loads Vitest's Node API lazily so normal
 build commands do not import that runtime just to read the configuration.
 
+### Observed Actions result
+
+The [implementation run](https://github.com/voidzero-dev/void/actions/runs/35075840560)
+passed all required jobs, as did Security Analysis, staging deployment/smoke tests, and the full
+npm/pnpm acceptance matrix. Comparing the same main CI workflow and runner classes:
+
+| Metric                                             |             Baseline |                After |                                                  Change |
+| -------------------------------------------------- | -------------------: | -------------------: | ------------------------------------------------------: |
+| Workflow creation to final required job completion |        676s (11m16s) |         429s (7m09s) |                        **36.5% shorter; 1.58× speedup** |
+| Slowest Windows integration job                    |                 666s |                 419s |                                           37.1% shorter |
+| Windows integration test steps, shards 1/2 and 2/2 |          304s / 119s |          242s / 253s | More even; new steps also build their selected fixtures |
+| Sum of CI job durations                            | 1,679 runner-seconds | 1,823 runner-seconds |                                         **8.6% higher** |
+
+This is a latency/capacity tradeoff: one additional build/typecheck job per OS shortens the
+critical path, while aggregate runner time increases. Runner-seconds are not a billing estimate.
+These are observed runs, not a statistical guarantee; host load, caches and provisioning vary.
+Conditional Prepublish Test coverage is not folded into this CI comparison: the baseline push
+selected smoke coverage, while the implementation push selected and passed the full matrix.
+
 ## Deduplication and coverage
 
 - Fifteen exact duplicate cases were removed after checking that they used the same fixture,
@@ -94,9 +113,10 @@ build commands do not import that runtime just to read the configuration.
   inserted by an earlier HTTP-level test. The hydration contract avoids re-reading markers that
   the readiness helper has already checked atomically.
 
-Before the final fresh-record guard, full validation collected 467 files and 9,612 cases:
+Final committed-tree validation collected 467 files and 9,612 cases:
 9,601 passed and the same 11 opt-in cases skipped. The lower case count reflects the removal
 of duplicated/model-only cases, with new direct-function and scheduling/lifecycle checks added.
+The net test/harness TypeScript reduction is 1,931 lines (2,918 removed, 987 added).
 
 ## Reliability and developer workflow
 
@@ -117,12 +137,13 @@ tests remain enabled. No retries or longer global timeouts were added.
 
 ## Validation
 
-- Two successful baseline and two successful post-change full local verification runs.
+- Two successful baseline and three successful post-change full local verification runs.
 - All 43 integration files passed in a disposable checkout without generated playground output,
   after building only the public packages: 486 passed, 9 opt-in cases skipped.
 - All 210 adapter browser cases passed after centralization and again with unique mutation data.
 - Direct sequencing/setup typechecks, repository typechecks, formatting and lint checks passed.
 - Real-process regression coverage confirms that shutdown leaves no referenced deadline timer.
+- Green implementation CI, Security Analysis, full npm/pnpm acceptance, and staging smoke tests.
 
 Packed npm/pnpm acceptance, dev versus preview execution, Linux/Windows execution, database
 integration and live deployment exercise different boundaries. Their matching scenarios were
