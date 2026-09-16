@@ -219,7 +219,7 @@ void platform repair [id] --plan
 void platform repair [id]
 ```
 
-Repair recreates missing resources that the installer owns. If an adopted or external resource is missing, restore it yourself before continuing. A disabled platform stays disabled through repair and upgrade.
+Repair recreates missing infrastructure that the installer owns. It does not restore PostgreSQL rows or data stored in provider resources. If an adopted or external resource is missing, restore it yourself before continuing. A disabled platform stays disabled through repair and upgrade.
 
 ### Upgrade the platform
 
@@ -268,6 +268,21 @@ Discovery checks the recorded resources and their ownership before saving local 
 
 After discovery, provide `VOID_PLATFORM_DATABASE_URL` for migrations and to coordinate administrator commands. You don't need to re-enter the other secrets for a normal upgrade. If repair must recreate a missing API or proxy Worker, supply its original runtime token, GitHub, R2, JWT, and project-encryption secrets through the `VOID_PLATFORM_*` variables. Cloudflare can't return those values, so keep them in your organization's secret manager.
 
+### Prepare for disaster recovery
+
+`discover` reconstructs verified installation metadata on another machine. It does not download credentials, key material, or backed-up data. `repair` can then recreate missing installer-owned infrastructure, but it does not recover the data that infrastructure previously held.
+
+Keep a coordinated recovery set for each installation:
+
+- a PostgreSQL backup;
+- the installation identity—the JWT signing secret and complete project-encryption keyring—in a secret manager;
+- provider-supported backups or exports for every data-bearing provider resource;
+- the immutable runtime artifacts and manifest for the installed version or custom source revision.
+
+Capture and label these items as one recovery point so PostgreSQL, provider data, identity, and encryption keys match. Backup and retention capabilities vary by provider and resource; choose and test the supported recovery process for each resource you use.
+
+During a restore, keep platform and application traffic disabled before changing resources. Restore the matching PostgreSQL and provider data with their supported recovery tools, supply the original identity and keyring, and use the preserved runtime artifact. Then run `discover`, preview `repair` with `--plan`, and review every ownership decision and proposed resource change before applying it. Enable traffic only after the restored data and platform health have been verified. Discovery and repair are not substitutes for those backups and do not provide a recovery bypass when required secrets or data are unavailable.
+
 ### Where local state lives
 
 Installation records live in `~/.void/platforms/` and contain no credentials. Recovery secrets are encrypted with AES-256-GCM in `.recovery.enc` files. The encryption key lives in your operating system's keychain; on systems with POSIX permissions, recovery files are readable only by their owner. Older plaintext `.recovery` files are encrypted and removed on first read.
@@ -293,12 +308,11 @@ For local API and dashboard development, fork CI, and the source layout, see
 
 Build `@void/platform` from your checkout and pass its runtime directory to `install`, `upgrade`, `repair`, `enable`, or `rollback` with `--runtime`. Custom runtimes get the same integrity, migration, health, and rollback checks as packaged releases.
 
-Void records the runtime's manifest digest, whether it was packaged or custom, and the source revision when you set `VOID_PLATFORM_SOURCE_REVISION` during the build.
+Void records the runtime's manifest digest, whether it was packaged or custom, and its source revision. A build from a Git checkout automatically records `HEAD`, or `<HEAD>-dirty` when the checkout has uncommitted files. Build systems can set `VOID_PLATFORM_SOURCE_REVISION` to override automatic detection.
 
 A fresh CI runner can discover the installation each time. Set `CLOUDFLARE_API_TOKEN` and `VOID_PLATFORM_DATABASE_URL` through its protected environment, then:
 
 ```sh
-export VOID_PLATFORM_SOURCE_REVISION="$GITHUB_SHA"
 vp run build
 
 export VOID_PLATFORM_REGISTRY_DIR="$RUNNER_TEMP/void-platform-registry"

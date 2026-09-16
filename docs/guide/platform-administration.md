@@ -177,6 +177,8 @@ Health checks use the services configured for the selected platform. An unhealth
 
 Self-hosted installations use `void platform upgrade`, `repair`, `disable`, and `enable` to manage their Workers. See [platform maintenance](./self-hosted-platform.md#resume-repair-recover-and-upgrade). Void Cloud operators can also inspect Worker versions and roll them back with the [`worker` commands](../reference/cli.md#operator-workers).
 
+For disaster recovery, keep a matching PostgreSQL backup, provider data backups, installation identity and complete project-encryption keyring, and immutable runtime artifacts. Keep traffic disabled while restoring data, run `discover` to reconstruct verified local metadata, and review `repair --plan` before recreating missing installer-owned infrastructure. Neither command restores backed-up data. See [Prepare for disaster recovery](./self-hosted-platform.md#prepare-for-disaster-recovery) for the full sequence.
+
 ## Using Scripts
 
 Add `--json` to read a command's result from another program:
@@ -188,18 +190,19 @@ void platform system health --json
 
 Results go to standard output. Command errors go to standard error as JSON and exit with a nonzero status. With `--follow`, each log response is a separate JSON line.
 
-For CI, supply `VOID_OPERATOR_TOKEN` from your secret manager and choose its platform explicitly:
+Operator tokens expire after one hour. For CI, mint a new operator token at the start of each job from a valid full API login session belonging to an active administrator. Choose the platform explicitly, inject the full session as `VOID_TOKEN` from your secret manager, and capture the exchange output directly into the protected job environment:
 
 ```sh
 export VOID_API_URL=https://platform.example.com
-# Supply VOID_OPERATOR_TOKEN from your secret manager.
+VOID_OPERATOR_TOKEN="$(
+  printf '%s' "$VOID_TOKEN" | void platform auth token --token-stdin
+)" || exit 1
+export VOID_OPERATOR_TOKEN
+unset VOID_TOKEN
 void platform system health --json
+unset VOID_OPERATOR_TOKEN
 ```
 
-To obtain a one-hour administrator token from an existing full API login session, pipe that session token to `auth token --token-stdin`:
+Disable shell tracing for the exchange and do not write either token to logs or plaintext files. A full API login session expires after 30 days and can be revoked sooner; renew it through the normal authenticated login flow and update the protected CI secret. A job that runs longer than one hour must repeat the exchange while its full API session is still valid. An expired operator token cannot refresh itself, and Void does not issue permanent service tokens for administrator automation.
 
-```sh
-printf '%s' "$VOID_TOKEN" | void platform auth token --token-stdin
-```
-
-The API login session must belong to an administrator on `VOID_API_URL`. This prints the new operator token to standard output. `auth login --token-stdin` performs the same exchange and saves the result in the system keychain instead. See [operator authentication](../reference/cli.md#operator-authentication) for the full command syntax.
+`auth login --token-stdin` performs the same elevation and saves the one-hour operator token in the system keychain for interactive use. See [operator authentication](../reference/cli.md#operator-authentication) for the full command syntax.
