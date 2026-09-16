@@ -111,12 +111,13 @@ To exercise a deployed application, deploy a disposable copy of `playground/kitc
 
 ## Deploying Your Runtime
 
-Build the runtime with a source revision that identifies the code you are deploying:
+Build the runtime. From a Git checkout, the build automatically records the current commit in the runtime manifest. An uncommitted checkout is recorded with a `-dirty` suffix:
 
 ```sh
-export VOID_PLATFORM_SOURCE_REVISION="$(git rev-parse HEAD)"
 vp run build:core
 ```
+
+Build systems may set `VOID_PLATFORM_SOURCE_REVISION` when they need to override automatic detection with another immutable revision. A source archive without Git metadata builds normally but leaves the revision unrecorded.
 
 The runtime is written to `packages/platform/dist/runtime`. Use the built CLI to preview a new installation from those files:
 

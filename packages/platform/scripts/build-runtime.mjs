@@ -4,6 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'pathslash';
+import { resolvePlatformSourceRevision } from './source-revision.mjs';
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repositoryRoot = join(packageRoot, '..', '..');
@@ -71,13 +72,14 @@ try {
   cpSync(drizzleRoot, join(runtimeRoot, 'drizzle'), { recursive: true });
   const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
   const database = buildDatabaseManifest();
+  const sourceRevision = resolvePlatformSourceRevision({ repositoryRoot });
   const manifest = parsePlatformRuntimeManifest({
     artifacts,
     database,
     platformVersion: packageJson.version,
     safetyProtocols: { sandboxDrain: 2 },
     schemaVersion: 2,
-    sourceRevision: process.env.VOID_PLATFORM_SOURCE_REVISION || null,
+    sourceRevision,
     usageProtocolVersion: PLATFORM_USAGE_PROTOCOL_VERSION,
   });
   writeFileSync(join(runtimeRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
