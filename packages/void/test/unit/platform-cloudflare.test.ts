@@ -5,6 +5,7 @@ import {
   parsePostgresConnectionString,
   PlatformCloudflareClient,
   PlatformWorkerCustomDomainsChangedError,
+  verifyPlatformRuntimeTokenPermissions,
 } from '../../src/cli/platform-cloudflare.ts';
 
 describe('platform Cloudflare client', () => {
@@ -242,6 +243,90 @@ describe('platform Cloudflare client', () => {
     }
     expect(message).not.toContain(token);
     expect(message).toContain('non-JSON');
+  });
+
+  it('preflights core runtime-token access with a nonexistent cache URL', async () => {
+    const requests: Array<{ body: string; method: string; pathname: string }> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: String(init?.body ?? ''),
+          method: init?.method ?? 'GET',
+          pathname: url.pathname,
+        });
+        if (url.pathname.endsWith('/hyperdrive/configs')) {
+          return Response.json({ success: true, result: [] });
+        }
+        return Response.json({ success: true, result: { id: 'zone' } });
+      },
+    });
+
+    await verifyPlatformRuntimeTokenPermissions(client, {
+      accountId: 'account',
+      applicationDomain: 'apps.example.com',
+      customDomains: false,
+      zoneId: 'zone',
+    });
+
+    expect(requests.map(({ method, pathname }) => `${method} ${pathname}`)).toEqual([
+      'GET /client/v4/accounts/account/hyperdrive/configs',
+      'POST /client/v4/zones/zone/purge_cache',
+    ]);
+    const purge = JSON.parse(requests[1]!.body) as { files: ReadonlyArray<string> };
+    expect(purge.files).toHaveLength(1);
+    expect(purge.files[0]).toMatch(
+      /^https:\/\/apps\.example\.com\/\.well-known\/void\/runtime-token-preflight-[a-f0-9-]+$/,
+    );
+  });
+
+  it('checks custom-hostname access only when the runtime enables it', async () => {
+    const paths: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        const url = new URL(String(input));
+        paths.push(url.pathname);
+        if (url.pathname.endsWith('/hyperdrive/configs')) {
+          return Response.json({ success: true, result: [] });
+        }
+        return Response.json({ success: true, result: [] });
+      },
+    });
+
+    await verifyPlatformRuntimeTokenPermissions(client, {
+      accountId: 'account',
+      applicationDomain: 'example.com',
+      customDomains: true,
+      zoneId: 'zone',
+    });
+
+    expect(paths.at(-1)).toBe('/client/v4/zones/zone/custom_hostnames');
+  });
+
+  it('names missing runtime permissions without exposing the token', async () => {
+    const token = 'runtime-token-that-must-stay-secret';
+    const client = new PlatformCloudflareClient(token, {
+      fetcher: async () => {
+        return Response.json(
+          { errors: [{ message: 'permission denied' }], success: false },
+          { status: 403 },
+        );
+      },
+    });
+
+    let message = '';
+    try {
+      await verifyPlatformRuntimeTokenPermissions(client, {
+        accountId: 'account',
+        applicationDomain: 'example.com',
+        customDomains: false,
+        zoneId: 'zone',
+      });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain('Hyperdrive → Write');
+    expect(message).not.toContain(token);
   });
 
   it('refuses unattended custom-domain deletion without a generation precondition', async () => {

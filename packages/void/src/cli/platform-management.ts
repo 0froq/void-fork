@@ -21,6 +21,7 @@ import {
   hyperdriveOriginFromConnectionString,
   hyperdriveOriginMatches,
   PlatformCloudflareClient,
+  verifyPlatformRuntimeTokenPermissions,
 } from './platform-cloudflare.ts';
 import {
   acquirePlatformDatabaseLifecycleLock,
@@ -300,6 +301,18 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       r2AccessKeyId: process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID || '',
       r2SecretAccessKey: process.env.VOID_PLATFORM_R2_SECRET_ACCESS_KEY || '',
     });
+    const runtimeTokenToPreflight = resolvePlatformRuntimeTokenToPreflight(plan, secrets);
+    if (runtimeTokenToPreflight) {
+      await verifyPlatformRuntimeTokenPermissions(
+        new PlatformCloudflareClient(runtimeTokenToPreflight),
+        {
+          accountId: manifest.account.id,
+          applicationDomain: deployment.application.baseDomain,
+          customDomains: plan.deployment.capabilities.customDomains,
+          zoneId: plan.zone?.id ?? null,
+        },
+      );
+    }
     const result = await installPlatform(plan, secrets, installation, {
       // runInstalledPlatformCommand holds the database session lock across the
       // entire replan and mutation sequence.
@@ -371,6 +384,24 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   } finally {
     release();
   }
+}
+
+export function resolvePlatformRuntimeTokenToPreflight(
+  plan: {
+    actions: ReadonlyArray<{ action: string; kind: string }>;
+  },
+  secrets: Pick<
+    ReturnType<typeof createPlatformInstallationSecrets>,
+    'cloudflareApiToken' | 'workerSecretUpdates'
+  >,
+): string {
+  const explicitUpdate = secrets.workerSecretUpdates?.CF_API_TOKEN;
+  if (explicitUpdate) {
+    return explicitUpdate;
+  }
+  return plan.actions.some((action) => action.kind === 'worker' && action.action === 'create')
+    ? secrets.cloudflareApiToken
+    : '';
 }
 
 export async function resolveInstalledPlatformManifest(

@@ -161,14 +161,14 @@ export async function runRevalidate(
               });
             }
           }
-          await uploadPool(listed.keys, R2_CONCURRENCY, (key) =>
-            context.env.ISR_CACHE.delete(key.name),
-          );
           const pageTargets: Array<PurgeEdgeTarget> = [];
           for (const { host, pathname } of pageDirect.values()) {
             pageTargets.push({ host, pathname, deploymentId, variantToken: null });
           }
           pageTargets.push(...pageVariants);
+          await uploadPool(listed.keys, R2_CONCURRENCY, (key) =>
+            context.env.ISR_CACHE.delete(key.name),
+          );
           await purgeEdgeCache(context, pageTargets);
         }
         cursor = listed.list_complete ? undefined : listed.cursor;
@@ -210,14 +210,14 @@ export async function runRevalidate(
               }
             }
           }
-          await uploadPool(listed.keys, R2_CONCURRENCY, (key) =>
-            context.env.ISR_CACHE.delete(key.name),
-          );
           const pageTargets: Array<PurgeEdgeTarget> = [];
           for (const { host, pathname } of pageDirect.values()) {
             pageTargets.push({ host, pathname, deploymentId, variantToken: null });
           }
           pageTargets.push(...pageVariants);
+          await uploadPool(listed.keys, R2_CONCURRENCY, (key) =>
+            context.env.ISR_CACHE.delete(key.name),
+          );
           await purgeEdgeCache(context, pageTargets);
         }
         legacyCursor = listed.list_complete ? undefined : listed.cursor;
@@ -366,12 +366,12 @@ async function purgeEdgeCache(
         urls.push(isrEdgeCacheUrl(host, pathname, deploymentId, 'json'));
       }
     }
-    if (urls.length === 0) {
-      return;
-    }
     // `purgeZoneCache` batches internally at 100 URLs per CF API request.
     await purgeZoneCache(context.env.CF_ZONE_ID, context.env.CF_API_TOKEN, urls);
-  } catch {
-    // Best-effort: KV is already purged, worst case is stale edge for remaining TTL.
+  } catch (error) {
+    console.error(
+      '[api] ISR edge cache purge failed; stale entries may remain until their TTL expires.',
+      error,
+    );
   }
 }

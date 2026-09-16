@@ -8,7 +8,11 @@ import {
 import { cliTitle } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import { resolvePlatformCloudflareCredential } from './platform-auth.ts';
-import { PlatformCloudflareClient, type CloudflareAccount } from './platform-cloudflare.ts';
+import {
+  PlatformCloudflareClient,
+  verifyPlatformRuntimeTokenPermissions,
+  type CloudflareAccount,
+} from './platform-cloudflare.ts';
 import {
   acquirePlatformDatabaseLifecycleLock,
   createPlatformInstallationSecrets,
@@ -226,6 +230,15 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       checkpoint?.cloudflareApiToken ||
       process.env.VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN ||
       (await promptSecret('Void runtime Cloudflare API token:'));
+    await verifyPlatformRuntimeTokenPermissions(
+      new PlatformCloudflareClient(runtimeCloudflareApiToken),
+      {
+        accountId,
+        applicationDomain,
+        customDomains: plan.deployment.capabilities.customDomains,
+        zoneId: plan.zone?.id ?? null,
+      },
+    );
     const bootstrapGitHubLogin =
       checkpoint?.bootstrapGitHubLogin ||
       process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN ||
@@ -322,13 +335,13 @@ function platformRuntimeTokenUrl(accountId: string): string {
   return `https://dash.cloudflare.com/?to=/${encodeURIComponent(accountId)}/api-tokens&${query}`;
 }
 
-function formatPlatformAuthenticationSetup(apiUrl: string, accountId: string): string {
+export function formatPlatformAuthenticationSetup(apiUrl: string, accountId: string): string {
   return (
     `Create a GitHub OAuth App with this callback URL:\n${apiUrl}/auth/callback\n\n` +
     'For direct asset uploads, create an R2 API token with Object Read & Write access to this account.\n\n' +
     `Create a separate, scoped Void runtime API token here:\n${platformRuntimeTokenUrl(accountId)}\n` +
-    'Account permissions: Workers Scripts: Edit, Workers Tail: Read, D1: Edit, Workers KV Storage: Edit, Workers R2 Storage: Edit, Queues: Edit, Account Analytics: Read.\n' +
-    'Zone permission for the application zone: SSL and Certificates: Edit.\n' +
+    'Account permissions: Workers Scripts: Edit, Workers Tail: Read, D1: Edit, Workers KV Storage: Edit, Workers R2 Storage: Edit, Queues: Edit, Hyperdrive: Write, Account Analytics: Read.\n' +
+    'Zone permission for the application zone: Cache Purge: Purge. A custom runtime that enables custom project domains also requires SSL and Certificates: Edit.\n' +
     'The runtime token provisions application resources; your browser OAuth session is used only for platform lifecycle operations.'
   );
 }

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolvePinnedApiBaseUrl } from './provision.ts';
 
 type CloudflareEnvelope<T> = Readonly<{
@@ -94,6 +94,58 @@ export type PlatformTrackedWorkerTraffic = Readonly<{
   customDomains: ReadonlyArray<CloudflareWorkerDomain>;
   routes: ReadonlyArray<Readonly<{ id: string; pattern: string; script: string }>>;
 }>;
+
+export type PlatformRuntimeTokenPreflightClient = Pick<
+  PlatformCloudflareClient,
+  'listHyperdriveConfigs' | 'request'
+>;
+
+export async function verifyPlatformRuntimeTokenPermissions(
+  client: PlatformRuntimeTokenPreflightClient,
+  input: {
+    accountId: string;
+    applicationDomain: string;
+    customDomains: boolean;
+    zoneId: string | null;
+  },
+): Promise<void> {
+  try {
+    await client.listHyperdriveConfigs(input.accountId);
+  } catch (error) {
+    throw runtimeTokenPreflightError('Account → Hyperdrive → Write', error);
+  }
+
+  if (!input.zoneId) {
+    return;
+  }
+
+  const probeUrl = `https://${input.applicationDomain}/.well-known/void/runtime-token-preflight-${randomUUID()}`;
+  try {
+    await client.request(`/zones/${encodeURIComponent(input.zoneId)}/purge_cache`, {
+      body: JSON.stringify({ files: [probeUrl] }),
+      method: 'POST',
+    });
+  } catch (error) {
+    throw runtimeTokenPreflightError('Zone → Cache Purge → Purge', error);
+  }
+
+  if (input.customDomains) {
+    try {
+      await client.request(
+        `/zones/${encodeURIComponent(input.zoneId)}/custom_hostnames?per_page=1`,
+      );
+    } catch (error) {
+      throw runtimeTokenPreflightError('Zone → SSL and Certificates → Edit', error);
+    }
+  }
+}
+
+function runtimeTokenPreflightError(permission: string, cause: unknown): Error {
+  return new Error(
+    `platform: The Void runtime API token failed its permission preflight. Required permission or scope: ${permission}.`,
+    { cause },
+  );
+}
 
 export class PlatformCloudflareClient {
   readonly apiBaseUrl: string;

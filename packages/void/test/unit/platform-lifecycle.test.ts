@@ -4,7 +4,10 @@ import {
   recordInstallationResource,
 } from '@void/platform';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { resolvePlatformInstallDatabaseUrl } from '../../src/cli/platform-lifecycle.ts';
+import {
+  formatPlatformAuthenticationSetup,
+  resolvePlatformInstallDatabaseUrl,
+} from '../../src/cli/platform-lifecycle.ts';
 
 afterEach(() => {
   delete process.env.DATABASE_URL;
@@ -12,6 +15,14 @@ afterEach(() => {
 });
 
 describe('platform lifecycle', () => {
+  it('prints the complete core runtime-token permissions', () => {
+    const setup = formatPlatformAuthenticationSetup('https://api.example.com', 'account');
+
+    expect(setup).toContain('Hyperdrive: Write');
+    expect(setup).toContain('Cache Purge: Purge');
+    expect(setup).toContain('custom project domains also requires SSL and Certificates: Edit');
+  });
+
   it('lets explicit database input replace an unverified install checkpoint', () => {
     const checkpoint = { databaseUrl: 'postgres://unreachable.example/void' };
 

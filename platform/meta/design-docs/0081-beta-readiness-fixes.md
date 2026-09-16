@@ -21,7 +21,7 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Recover verified installation records when owned resources are missing.
 - [x] Establish durable custody of installation signing and encryption keys.
 - [x] Protect the last active administrator (`ff4f1a15`).
-- [ ] Correct and verify minimum platform runtime permissions.
+- [x] Correct and verify minimum platform runtime permissions.
 - [ ] Accept supported JSONC syntax during Cloudflare connection.
 - [x] Audit browser administrator mutations alongside operator API changes.
 - [ ] Attach schema secrets to the candidate deployment before activation.

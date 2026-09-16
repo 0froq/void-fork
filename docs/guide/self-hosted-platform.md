@@ -31,9 +31,9 @@ Workers for Platforms is a platform-level Cloudflare product. This requirement d
 
 ### Runtime token permissions
 
-The running platform needs these account permissions: Workers Scripts: Edit, Workers Tail: Read, D1: Edit, Workers KV Storage: Edit, Workers R2 Storage: Edit, Queues: Edit, and Account Analytics: Read. It also needs SSL and Certificates: Edit on the application zone.
+The running platform needs these account permissions: Workers Scripts: Edit, Workers Tail: Read, D1: Edit, Workers KV Storage: Edit, Workers R2 Storage: Edit, Queues: Edit, Hyperdrive: Write, and Account Analytics: Read. It also needs Cache Purge: Purge on the application zone so ISR revalidation can remove stale edge entries. A custom runtime that enables custom project domains additionally needs SSL and Certificates: Edit on that zone; the core runtime does not enable that capability.
 
-The installer links to the account-token page and asks for the token in a masked prompt. Keep a copy in your secret manager for recovery.
+The installer links to the account-token page and asks for the token in a masked prompt. Before provisioning, it checks account and Hyperdrive access. When the application zone already exists, it also purges one unique nonexistent URL to verify the exact Cache Purge permission. The token and probe URL are not logged. Hyperdrive provisioning still requires Write even though its non-mutating preflight can only verify that Hyperdrive is readable. If the installer creates the zone, the Cache Purge check runs when you resume after DNS activation. Keep a copy of the token in your secret manager for recovery.
 
 ## Preview the installation
 
