@@ -270,16 +270,23 @@ export function createPlatformInstallationSecrets(input: {
   const projectSecretKey = restoredIdentity(input.projectSecretKey || '', 'projectSecretKey');
   const resolvedJwtSecret = input.existingInstallation
     ? jwtSecret
-    : jwtSecret || randomBytes(32).toString('base64url');
+    : required(jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
   const resolvedProjectSecretKey = input.existingInstallation
     ? projectSecretKey
-    : projectSecretKey || randomBytes(32).toString('base64');
+    : required(projectSecretKey, 'VOID_PLATFORM_PROJECT_SECRET_KEY');
+  if (!existingInstallation && Buffer.byteLength(resolvedJwtSecret, 'utf8') < 32) {
+    throw new Error(
+      'platform: VOID_PLATFORM_JWT_SECRET must contain at least 32 bytes of secret material unique to this installation.',
+    );
+  }
+  const decodedProjectSecretKey = Buffer.from(resolvedProjectSecretKey, 'base64');
   if (
     resolvedProjectSecretKey &&
-    Buffer.from(resolvedProjectSecretKey, 'base64').byteLength !== 32
+    (decodedProjectSecretKey.byteLength !== 32 ||
+      decodedProjectSecretKey.toString('base64') !== resolvedProjectSecretKey)
   ) {
     throw new Error(
-      'platform: VOID_PLATFORM_PROJECT_SECRET_KEY must be a base64-encoded 32-byte key.',
+      'platform: VOID_PLATFORM_PROJECT_SECRET_KEY must be the canonical base64 encoding of a 32-byte key unique to this installation.',
     );
   }
   return {

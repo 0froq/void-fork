@@ -111,6 +111,8 @@ export VOID_PLATFORM_GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
 export VOID_PLATFORM_ADMIN_GITHUB_LOGIN=your-github-username
 export VOID_PLATFORM_R2_ACCESS_KEY_ID=your-r2-access-key-id
 export VOID_PLATFORM_R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+export VOID_PLATFORM_JWT_SECRET=your-platform-signing-secret
+export VOID_PLATFORM_PROJECT_SECRET_KEY=your-base64-encoded-32-byte-key
 
 void platform install \
   --name company \
@@ -120,6 +122,8 @@ void platform install \
   --zone example.app \
   --yes
 ```
+
+Use your secret manager's cryptographic generator to create a distinct pair for each platform installation: `VOID_PLATFORM_JWT_SECRET` must contain at least 32 random bytes, and `VOID_PLATFORM_PROJECT_SECRET_KEY` must be the canonical base64 encoding of exactly 32 random bytes. Store both before starting the install, then inject that installation's same values into every resume or repair run that may create a Worker. Do not print them or generate them only inside an ephemeral CI job. Void does not generate these installation identity keys.
 
 The database must be dedicated to this installation. Its ownership claim and platform tables remain after uninstall because external PostgreSQL is never purged automatically. To reuse it for a different installation, explicitly remove the old platform schema and data yourself or provide a fresh database.
 
@@ -255,7 +259,7 @@ After discovery, provide `VOID_PLATFORM_DATABASE_URL` for migrations and to coor
 
 Installation records live in `~/.void/platforms/` and contain no credentials. Recovery secrets are encrypted with AES-256-GCM in `.recovery.enc` files. The encryption key lives in your operating system's keychain; on systems with POSIX permissions, recovery files are readable only by their owner. Older plaintext `.recovery` files are encrypted and removed on first read.
 
-If the keychain isn't available, Void stops before writing secrets. Headless environments can supply `VOID_PLATFORM_RECOVERY_KEY`: a canonical base64-encoded 32-byte key from a secret manager. A temporary CI runner can use a new key for each run if its original credentials remain available in protected CI secrets.
+If the keychain isn't available, Void stops before writing secrets. Headless environments can supply `VOID_PLATFORM_RECOVERY_KEY`: a canonical base64-encoded 32-byte key from a secret manager. A temporary CI runner can use a new recovery-encryption key for each run only when every original credential, including `VOID_PLATFORM_JWT_SECRET` and `VOID_PLATFORM_PROJECT_SECRET_KEY`, remains available in protected CI secrets.
 
 ::: details How recovery protects existing resources
 
@@ -296,7 +300,7 @@ void platform upgrade "$VOID_PLATFORM_INSTALLATION" \
 
 Omit the installation selector only if the account has one discoverable installation. Run one deployment per installation at a time, and let it finish before starting the next. Cancelling during migrations or Worker rollout can leave an installation waiting for recovery.
 
-Keep the management token and database URL in a protected CI environment. Upgrades inherit deployed Worker secrets. Other original secrets are needed when recreating a missing Worker or explicitly rotating credentials.
+Keep the management token, database URL, JWT signing secret, and project-encryption key in a protected CI environment. Upgrades inherit deployed Worker secrets. The original values are needed when recreating a missing Worker; configuration credentials are also needed when explicitly rotating them.
 
 ## Disable and safely uninstall
 

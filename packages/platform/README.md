@@ -21,6 +21,8 @@ The `void` CLI consumes this package for `void platform install`, `repair`, `upg
 
 Interactive lifecycle operations authenticate the human operator through Cloudflare browser sign-in with OS-keychain storage. The installed control plane receives a separate scoped runtime token. Local recovery checkpoints are AES-256-GCM encrypted with a key held in the OS keychain; normal upgrades preserve existing Cloudflare Worker secrets rather than downloading or rewriting them.
 
+Fresh installations require a unique JWT signing secret with at least 32 bytes of random material and a unique, canonical base64-encoded 32-byte project-encryption key from the operator's durable secret manager. The installer never makes an ephemeral workstation or CI registry the only custodian of these installation identity keys. Existing Workers preserve their deployed values during routine lifecycle operations.
+
 Runtime and installation manifests record the last usage protocol proven live across the complete Worker set. A protocol transition gates traffic before the first Worker update and opens it only after target health and immutable versions pass; interrupted transitions remain gated and resumable.
 
 Maintainers and platform forks can build the same runtime from source with `vp run --filter @void/platform build` and deploy it using `void platform upgrade --runtime packages/platform/dist/runtime`. The custom path does not bypass release safety: its manifest, Worker bundles, migration journal, and SQL files receive the same integrity and compatibility verification as packaged artifacts. Set `VOID_PLATFORM_SOURCE_REVISION` while building to carry a commit or build identifier into the installation's runtime provenance.

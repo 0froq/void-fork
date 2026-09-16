@@ -71,6 +71,8 @@ import {
 } from '../../src/cli/platform-registry.ts';
 
 const directories: Array<string> = [];
+const TEST_PLATFORM_JWT_SECRET = 'test-only-platform-jwt-secret-material';
+const TEST_PLATFORM_PROJECT_SECRET_KEY = Buffer.alloc(32, 5).toString('base64');
 
 beforeEach(() => {
   process.env.VOID_PLATFORM_RECOVERY_KEY = Buffer.alloc(32, 7).toString('base64');
@@ -136,6 +138,50 @@ async function close(server: Server): Promise<void> {
 describe('platform installer', () => {
   const claimDatabase = async () => {};
   const acquireDatabaseLifecycleLock = async () => async () => {};
+
+  it('requires externally custodied identity keys for a fresh installation', () => {
+    const input = {
+      bootstrapGitHubId: '583231',
+      bootstrapGitHubLogin: 'octocat',
+      cloudflareApiToken: 'cf-token',
+      databaseUrl: 'postgres://user:password@db.example.com/void',
+      githubClientId: 'github-id',
+      githubClientSecret: 'github-secret',
+      r2AccessKeyId: 'r2-id',
+      r2SecretAccessKey: 'r2-secret',
+    };
+
+    expect(() => createPlatformInstallationSecrets(input)).toThrow(
+      'VOID_PLATFORM_JWT_SECRET is required',
+    );
+    expect(() =>
+      createPlatformInstallationSecrets({ ...input, jwtSecret: TEST_PLATFORM_JWT_SECRET }),
+    ).toThrow('VOID_PLATFORM_PROJECT_SECRET_KEY is required');
+    expect(() =>
+      createPlatformInstallationSecrets({
+        ...input,
+        jwtSecret: 'short',
+        projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+      }),
+    ).toThrow('at least 32 bytes');
+    expect(() =>
+      createPlatformInstallationSecrets({
+        ...input,
+        jwtSecret: TEST_PLATFORM_JWT_SECRET,
+        projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY.replace(/=+$/, ''),
+      }),
+    ).toThrow('canonical base64');
+    expect(
+      createPlatformInstallationSecrets({
+        ...input,
+        jwtSecret: TEST_PLATFORM_JWT_SECRET,
+        projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+      }),
+    ).toMatchObject({
+      jwtSecret: TEST_PLATFORM_JWT_SECRET,
+      projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+    });
+  });
 
   it('attempts Worker rollback even when closing an unsafe routing gate fails', async () => {
     const events: Array<string> = [];
@@ -1516,6 +1562,8 @@ describe('platform installer', () => {
           databaseUrl: 'postgres://user:password@db.example.com/void',
           githubClientId: 'github-id',
           githubClientSecret: 'github-secret',
+          jwtSecret: TEST_PLATFORM_JWT_SECRET,
+          projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
           r2AccessKeyId: 'r2-id',
           r2SecretAccessKey: 'r2-secret',
         }),
@@ -1621,6 +1669,8 @@ describe('platform installer', () => {
           databaseUrl: 'postgres://user:password@db.example.com/void',
           githubClientId: 'github-id',
           githubClientSecret: 'github-secret',
+          jwtSecret: TEST_PLATFORM_JWT_SECRET,
+          projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
           r2AccessKeyId: 'r2-id',
           r2SecretAccessKey: 'r2-secret',
         }),
@@ -1702,6 +1752,8 @@ describe('platform installer', () => {
         databaseUrl: 'postgres://user:password@db.example.com/void',
         githubClientId: 'github-id',
         githubClientSecret: 'github-secret',
+        jwtSecret: TEST_PLATFORM_JWT_SECRET,
+        projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
         r2AccessKeyId: 'r2-id',
         r2SecretAccessKey: 'r2-secret',
       }),
@@ -1850,6 +1902,8 @@ describe('platform installer', () => {
           databaseUrl: 'postgres://user:password@db.example.com/void',
           githubClientId: 'github-id',
           githubClientSecret: 'github-secret',
+          jwtSecret: TEST_PLATFORM_JWT_SECRET,
+          projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
           r2AccessKeyId: 'r2-id',
           r2SecretAccessKey: 'r2-secret',
         }),
@@ -1928,6 +1982,8 @@ describe('platform installer', () => {
           databaseUrl: 'postgres://user:password@db.example.com/void',
           githubClientId: 'github-id',
           githubClientSecret: 'github-secret',
+          jwtSecret: TEST_PLATFORM_JWT_SECRET,
+          projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
           r2AccessKeyId: 'r2-id',
           r2SecretAccessKey: 'r2-secret',
         }),
@@ -2069,6 +2125,8 @@ describe('platform installer', () => {
         databaseUrl: 'postgres://user:password@db.example.com/void',
         githubClientId: 'github-id',
         githubClientSecret: 'github-secret',
+        jwtSecret: TEST_PLATFORM_JWT_SECRET,
+        projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
         r2AccessKeyId: 'r2-id',
         r2SecretAccessKey: 'r2-secret',
       }),
@@ -2148,6 +2206,8 @@ describe('platform installer', () => {
       databaseUrl: 'postgres://user:password@db.example.com/void',
       githubClientId: 'github-id',
       githubClientSecret: 'github-secret',
+      jwtSecret: TEST_PLATFORM_JWT_SECRET,
+      projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
       r2AccessKeyId: 'r2-id',
       r2SecretAccessKey: 'r2-secret',
     });

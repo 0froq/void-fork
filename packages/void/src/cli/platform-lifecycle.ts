@@ -249,8 +249,18 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         process.env.VOID_PLATFORM_GITHUB_CLIENT_SECRET ||
         (await promptSecret('GitHub OAuth client secret:')),
       existingInstallation: existing !== null,
-      jwtSecret: process.env.VOID_PLATFORM_JWT_SECRET || '',
-      projectSecretKey: process.env.VOID_PLATFORM_PROJECT_SECRET_KEY || '',
+      jwtSecret:
+        checkpoint?.jwtSecret ||
+        process.env.VOID_PLATFORM_JWT_SECRET ||
+        (await promptSecret(
+          'Unique JWT signing secret for this installation (at least 32 bytes):',
+        )),
+      projectSecretKey:
+        checkpoint?.projectSecretKey ||
+        process.env.VOID_PLATFORM_PROJECT_SECRET_KEY ||
+        (await promptSecret(
+          'Unique project encryption key for this installation (canonical base64, 32 bytes):',
+        )),
       r2AccessKeyId:
         checkpoint?.r2AccessKeyId ||
         process.env.VOID_PLATFORM_R2_ACCESS_KEY_ID ||
