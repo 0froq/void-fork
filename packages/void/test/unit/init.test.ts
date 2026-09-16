@@ -17,12 +17,12 @@ import {
   extractPnpmWorkspacePackages,
   generateStarterMigration,
   getWorkflowYaml,
-  getTodayCompatDate,
   isScaffoldableEmptyProject,
   isVoidResolvableFrom,
   runInitCommand,
 } from '../../src/cli/init.ts';
 import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
+import { LATEST_KNOWN_COMPAT_DATE } from '../../src/cli/wrangler.ts';
 import { buildDrizzleKitSpawnEnv } from '../../src/cli/yarn-pnp.ts';
 
 const mockSpawnSync = vi.fn();
@@ -1359,7 +1359,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
         $schema: './node_modules/void/schema.json',
         worker: {
-          compatibility_date: getTodayCompatDate(),
+          compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
       });
       expect(() =>
@@ -1396,7 +1396,7 @@ describe('isScaffoldableEmptyProject', () => {
         $schema: './node_modules/void/schema.json',
         database: 'pg',
         worker: {
-          compatibility_date: getTodayCompatDate(),
+          compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
       });
 
@@ -1519,7 +1519,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
         $schema: './node_modules/void/schema.json',
         worker: {
-          compatibility_date: getTodayCompatDate(),
+          compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
       });
     } finally {
@@ -2579,7 +2579,7 @@ export default config;
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
         $schema: './node_modules/void/schema.json',
         worker: {
-          compatibility_date: getTodayCompatDate(),
+          compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
       });
     } finally {
@@ -2617,7 +2617,7 @@ export default config;
           prerender: ['/'],
         },
         worker: {
-          compatibility_date: getTodayCompatDate(),
+          compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
       });
     } finally {
@@ -2636,7 +2636,7 @@ export default config;
       expect(JSON.parse(readFileSync(join(root, 'void.json'), 'utf-8'))).toEqual({
         $schema: './node_modules/void/schema.json',
         worker: {
-          compatibility_date: getTodayCompatDate(),
+          compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         },
       });
     } finally {
@@ -2791,7 +2791,7 @@ export default config;
         platform: 'cloudflare',
       });
       expect(JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'))).toEqual({
-        compatibility_date: getTodayCompatDate(),
+        compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         compatibility_flags: ['nodejs_als'],
       });
       expect(mockSpawnSync).toHaveBeenCalledWith(
@@ -2951,7 +2951,7 @@ export default config;
       await runInitCommand(root);
 
       expect(JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'))).toEqual({
-        compatibility_date: getTodayCompatDate(),
+        compatibility_date: LATEST_KNOWN_COMPAT_DATE,
         compatibility_flags: ['nodejs_als'],
       });
       expect(

@@ -47,7 +47,7 @@ import {
   type ScaffoldStarterMode,
   type ScaffoldToolchain,
 } from './template.ts';
-import { writeProvisionedWranglerConfig } from './wrangler.ts';
+import { LATEST_KNOWN_COMPAT_DATE, writeProvisionedWranglerConfig } from './wrangler.ts';
 import {
   buildDrizzleKitSpawnEnv,
   findInstalledYarnPnpRuntime,
@@ -1549,15 +1549,6 @@ function setupTsconfig(
   }
 }
 
-/** Today's UTC date as YYYY-MM-DD for wrangler compatibility_date. */
-export function getTodayCompatDate(): string {
-  const d = new Date();
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
 function readProjectWranglerCompatDate(root: string): string | undefined {
   for (const name of ['wrangler.jsonc', 'wrangler.json']) {
     const configPath = join(root, name);
@@ -1596,7 +1587,7 @@ function setupWranglerConfig(root: string, framework: DetectedFramework): void {
     existsSync(join(root, name)),
   );
   const result = writeProvisionedWranglerConfig(root, {
-    compatibilityDate: getTodayCompatDate(),
+    compatibilityDate: LATEST_KNOWN_COMPAT_DATE,
     compatibilityFlags: ['nodejs_als'],
   });
 
@@ -1637,7 +1628,7 @@ function ensureVoidWorkerCompatibilityDate(root: string): void {
     return;
   }
 
-  const compatibilityDate = readProjectWranglerCompatDate(root) ?? getTodayCompatDate();
+  const compatibilityDate = readProjectWranglerCompatDate(root) ?? LATEST_KNOWN_COMPAT_DATE;
   config.worker = {
     ...worker,
     compatibility_date: compatibilityDate,

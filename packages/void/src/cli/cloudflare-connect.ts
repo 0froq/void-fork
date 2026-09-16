@@ -7,7 +7,7 @@ import {
   ensureCloudflareAuthentication,
   type CloudflareAccount,
 } from './cloudflare-auth.ts';
-import { writeProvisionedWranglerConfig } from './wrangler.ts';
+import { LATEST_KNOWN_COMPAT_DATE, writeProvisionedWranglerConfig } from './wrangler.ts';
 
 export async function connectCloudflare(
   root: string,
@@ -43,7 +43,7 @@ export async function connectCloudflare(
   const compatibilityDate =
     typeof config.compatibility_date === 'string'
       ? config.compatibility_date
-      : new Date().toISOString().slice(0, 10);
+      : LATEST_KNOWN_COMPAT_DATE;
   const existingConfigPath = ['wrangler.jsonc', 'wrangler.json']
     .map((name) => join(root, name))
     .find(existsSync);

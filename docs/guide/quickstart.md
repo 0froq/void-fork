@@ -6,6 +6,10 @@ outline: deep
 
 Let's create a Void app, run it locally, and deploy it. You can start in an empty directory or [add Void to an existing Vite app](#adding-to-an-existing-vite-app).
 
+Use Node.js 24.21.0 or later. New projects pin the SDK's tested Workers
+compatibility date, so the bundled local runtime can start them. An existing
+compatibility date in your project is preserved.
+
 ## Start in an Empty Directory
 
 Install Void in your project directory:
