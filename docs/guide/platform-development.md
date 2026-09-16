@@ -156,7 +156,19 @@ Review the generated SQL and migration journal before committing them. Released 
 
 The uncredentialed test workflows use GitHub-hosted runners in forks. They build and test the workspace without requiring Void Cloud accounts, tokens, or deployment access.
 
-If your fork has a released platform version, set the repository variable `VOID_PLATFORM_PRODUCTION_REF` to its branch, tag, or commit. Platform pull requests will then test that version against the proposed database schema using a disposable PostgreSQL service. A workflow that explicitly requests this compatibility check must provide a usable baseline.
+If your fork has a released platform version, set the repository variable
+`VOID_PLATFORM_PRODUCTION_REF` to its immutable 40-character commit SHA. Platform
+pull requests then create that version's database, seed representative user,
+project, and encrypted-secret records, and apply the proposed migrations. The
+check verifies existing data and runs the previous runtime against the upgraded
+schema. Mutable branch or tag names are rejected.
+
+Without an explicit SHA, required compatibility checks use the latest successful
+GitHub deployment to `Prod` (or `VOID_PLATFORM_PRODUCTION_ENV`). They require
+read access to deployment history and stop if no completed deployment is found.
+Advancing the production branch does not change the selected baseline. Fork
+workflows that call platform CI must grant `deployments: read` alongside
+`contents: read`.
 
 The upstream repository also contains workflows for deploying Void Cloud and publishing the official npm packages. Forks should configure their own release workflow around the built CLI and `platform upgrade --runtime`; the [source-build CI example](./self-hosted-platform.md#continuously-deploy-a-source-build) shows the required inputs. Keep production credentials in protected environments restricted to the appropriate release refs.
 

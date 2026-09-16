@@ -17,6 +17,7 @@ jobs:
     uses: ./.github/workflows/platform-ci.yml
     permissions:
       contents: read
+      deployments: read
 
   publish:
     needs: [ci, platform-ci]
