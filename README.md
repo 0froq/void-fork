@@ -124,6 +124,18 @@ vp run dev:docs        # local docs dev server
 See [TESTING.md](./TESTING.md) for targeted verification and the account-neutral, non-destructive
 native Cloudflare live E2E procedure.
 
+Before publishing, build the public packages and verify the actual tarballs:
+
+```sh
+vp run build
+node .github/scripts/packed-consumer.mjs
+```
+
+This tests `create-void` and `void init` outside the workspace with npm, pnpm,
+public Vite, and all four native Pages adapters. Release CI also runs it on macOS.
+The [beta acceptance record](./platform/meta/design-docs/0081-beta-readiness-fixes.md)
+separates these local checks from the credentialed Cloudflare signoff.
+
 ### Project Structure
 
 | Path                         | Purpose                                                           |

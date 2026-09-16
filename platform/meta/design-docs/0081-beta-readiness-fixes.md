@@ -30,17 +30,25 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Keep prerelease publishing and scaffolding on the selected release channel.
 - [x] Require platform tests before publishing the packaged runtime.
 - [x] Check schema upgrades against an immutable previous runtime and populated data.
-- [ ] Verify packed public packages outside the workspace using public Vite.
+- [x] Verify packed public packages outside the workspace using public Vite.
 - [x] Pin new projects to the SDK's tested compatibility date instead of today's date.
 - [x] Preserve request-binding module identity in installed-package development.
-- [ ] Define and enforce the supported Node/CLI/platform compatibility contract.
+- [x] Define and enforce the supported Node/CLI/platform compatibility contract.
 - [x] Support native Cloudflare AI development without a Void login.
 - [x] Safely exclude managed Sandboxes, including retained legacy deployments.
 - [x] Correct browser OAuth/DNS and first Workers-subdomain onboarding.
 - [x] Document and verify compatible rollback after a successful platform upgrade.
-- [ ] Align feature guides, framework support, product wording, quotas, and operations.
-- [ ] Add release acceptance coverage for cross-target behavior and platform lifecycle.
+- [x] Align feature guides, framework support, product wording, quotas, and operations.
+- [x] Add local release acceptance coverage and a separate live signoff procedure.
 - [ ] Run final verification and four GPT-5.6 Sol/high reviews; fix review P1s separately.
+
+The npm and pnpm packed consumer matrices both passed all four frameworks,
+including real scaffolding, frozen installs, public Vite builds and TypeScript,
+development/preview, Markdown, KV, assets, hydration, and SPA navigation. This
+uncovered separately committed compatibility-date, runtime-module identity,
+Solid declaration, and pnpm bootstrap fixes. Full source verification passed
+441 files / 8,309 tests with 9 skipped tests (unconfigured live Cloudflare and
+unavailable Deno cases); all 29 workspace typechecks passed.
 
 Root owns integration, commit boundaries, release tooling, installer and operator
 follow-ups. The native deployment implementation agent owns compiler/deployment
@@ -65,3 +73,52 @@ The beta scope is native Cloudflare applications plus an invitation-controlled
 core platform. Optional hosted features must not be advertised as core features.
 Managed Sandboxes require explicit legacy draining and activation guards; a
 capability flag alone cannot stop tenant-owned containers.
+
+## Release acceptance commands
+
+Build public packages, then test their real tarballs outside the workspace:
+
+```sh
+vp run build
+node .github/scripts/packed-consumer.mjs
+```
+
+The harness uses a read-only loopback registry for the release cohort and public
+npm for external dependencies. It drives the actual `create-void`/`void init`
+interaction with npm and pnpm, checks frozen reinstalls and public Vite 8, and
+exercises React, Vue, Svelte, and Solid builds, typechecking, development,
+production preview, KV, assets, hydration, and client navigation. The React
+fixture also verifies the separately installed Markdown plugin. Failures retain
+bounded console diagnostics and complete command logs in the printed temporary
+directory. `VOID_PACKED_PM` and `VOID_PACKED_FRAMEWORK` select focused reruns.
+
+The prior `ff4f1a15` API source and its own built SDK packages were independently
+tested against PostgreSQL with the current migrations through `0036`: 46 API
+test files and 1,324 tests passed. That verifies the additive schema edge; it is
+not a live Cloudflare deployment test.
+
+## Live beta signoff
+
+These checks require a separately selected disposable account, domain, database,
+and protected credentials. They are not silently substituted with local mocks:
+
+1. Run the gated native live suite from `packages/void/test/e2e/README.md` on a
+   Workers Free account. Add a Pages app and inspect data, logs, routing rules,
+   failed-candidate secret rotation, rollback, and an existing-Worker handoff.
+2. Run the packaged `platform install --plan`, review its account/resource names,
+   then install into an eligible disposable platform account. Complete actual
+   GitHub OAuth login and have a second developer connect and deploy an app.
+3. Exercise the documented minimal runtime token, R2 upload, D1/KV, queue/cron,
+   AI and ISR operations. A health response alone is insufficient evidence.
+4. Interrupt and resume installation/upgrade; recover local records on another
+   machine; recreate a missing API Worker using the saved complete keyring; and
+   verify existing project secrets still decrypt.
+5. Verify compatible runtime rollback and roll-forward. For a legacy Sandbox
+   installation, verify maintenance login, bounded drain, provider-side container
+   termination, and rejection of old unsafe runtimes before restoring traffic.
+6. Verify disable/enable and both uninstall retention modes. Review retained
+   resources and preserve unrelated account resources.
+
+Record the candidate commit, artifact digest, nonsecret account/resource IDs,
+results, and times. Keep actual credentials in the secret manager. No live beta
+signoff is claimed by the local test results recorded here.
