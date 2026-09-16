@@ -24,9 +24,11 @@ jobs:
   packed-consumers:
     uses: ./.github/workflows/packed-consumers.yml
     with:
+      suite: full
       include_macos: true
     permissions:
       contents: read
+      pull-requests: read
 
   publish:
     needs: [ci, platform-ci, packed-consumers]

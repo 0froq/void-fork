@@ -124,15 +124,19 @@ vp run dev:docs        # local docs dev server
 See [TESTING.md](./TESTING.md) for targeted verification and the account-neutral, non-destructive
 native Cloudflare live E2E procedure.
 
-Before publishing, build the public packages and verify the actual tarballs:
+Build the public packages and smoke-test their actual tarballs outside the workspace:
 
 ```sh
 vp run build
 node .github/scripts/packed-consumer.mjs
 ```
 
-This tests `create-void` and `void init` outside the workspace with npm, pnpm,
-public Vite, and all four native Pages adapters. Release CI also runs it on macOS.
+The default smoke test uses a React app with npm and pnpm, public Vite, and HTTP
+checks for assets and KV. Set `VOID_PACKED_SUITE=full` for all four native Pages
+adapters, Markdown, production preview, and browser hydration/navigation tests.
+PRs and main pushes select smoke coverage for routine code changes, full coverage
+for packaging/dependency/adapter changes, and skip expensive jobs for docs-only changes.
+Release CI always runs the full matrix on Linux and macOS.
 The [beta acceptance record](./platform/meta/design-docs/0081-beta-readiness-fixes.md)
 separates these local checks from the credentialed Cloudflare signoff.
 

@@ -14,14 +14,17 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path/posix';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
 import { inspectPackage, startPackedRegistry } from './packed-registry.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+const suite = process.env.VOID_PACKED_SUITE ?? 'smoke';
+assert(['smoke', 'full'].includes(suite), 'VOID_PACKED_SUITE must be smoke or full');
+const full = suite === 'full';
 const work = mkdtempSync(join(tmpdir(), 'void-packed-consumer-'));
 const archiveDir = join(work, 'archives');
 mkdirSync(archiveDir);
 console.log(`Packed consumer artifacts: ${work}`);
+console.log(`Packed consumer suite: ${suite}`);
 const environment = { ...process.env, CI: 'true' };
 for (const key of Object.keys(environment)) {
   if (/^(VOID_|CLOUDFLARE_|CF_|WRANGLER_|NPM_TOKEN$|NODE_AUTH_TOKEN$)/i.test(key)) {
@@ -131,7 +134,9 @@ const managers = process.env.VOID_PACKED_PM ? [process.env.VOID_PACKED_PM] : ['n
 assert(managers.every((manager) => ['npm', 'pnpm'].includes(manager)));
 const frameworks = process.env.VOID_PACKED_FRAMEWORK
   ? [process.env.VOID_PACKED_FRAMEWORK]
-  : ['react', 'vue', 'svelte', 'solid'];
+  : full
+    ? ['react', 'vue', 'svelte', 'solid']
+    : ['react'];
 assert(frameworks.every((framework) => ['react', 'vue', 'svelte', 'solid'].includes(framework)));
 const pages = {
   react: `import { useState } from 'react';
@@ -162,7 +167,10 @@ export default function Page(props: { message: string }) {
 let browser;
 const failures = [];
 try {
-  browser = await chromium.launch({ headless: true });
+  if (full) {
+    const { chromium } = await import('playwright');
+    browser = await chromium.launch({ headless: true });
+  }
   for (const manager of managers) {
     for (const framework of frameworks) {
       const label = `${manager}-${framework}`;
@@ -170,8 +178,8 @@ try {
         const fixture = join(work, label);
         console.log(`Checking packed ${label}: create-void and interactive init`);
         await run(
-          'python3',
-          [join(root, '.github/scripts/packed-init.py'), fixture, framework, manager, version],
+          process.execPath,
+          [join(root, '.github/scripts/packed-init.mjs'), fixture, framework, manager, version],
           work,
         );
         writeFileSync(
@@ -180,7 +188,7 @@ try {
         );
         const cli = join(fixture, 'node_modules/void/dist/cli/cli.mjs');
         await run(process.execPath, [cli, '--help'], fixture);
-        if (framework === 'react') {
+        if (full && framework === 'react') {
           await run(
             manager,
             manager === 'npm'
@@ -257,7 +265,7 @@ if (runtime.manifest.platformVersion !== ${JSON.stringify(version)}) throw new E
           ],
           fixture,
         );
-        for (const mode of ['dev', 'preview']) {
+        for (const mode of full ? ['dev', 'preview'] : ['dev']) {
           const httpPort = await port();
           const base = `http://127.0.0.1:${httpPort}`;
           const task = launch(
@@ -289,10 +297,13 @@ if (runtime.manifest.platformVersion !== ${JSON.stringify(version)}) throw new E
             const apiBody = await apiResponse.text();
             assert.equal(apiResponse.status, 200, `${apiBody}\n${task.failure()}`);
             assert.deepEqual(JSON.parse(apiBody), { value: 'ok' });
-            if (framework === 'react') {
+            if (full && framework === 'react') {
               const markdown = await fetch(`${base}/markdown`);
               assert.equal(markdown.status, 200, task.failure());
               assert((await markdown.text()).includes('Packed Markdown'));
+            }
+            if (!browser) {
+              continue;
             }
             const page = await browser.newPage();
             try {
@@ -317,7 +328,7 @@ if (runtime.manifest.platformVersion !== ${JSON.stringify(version)}) throw new E
           }
         }
         console.log(
-          `Passed packed ${label}: init, frozen install, public Vite build/typecheck, dev/preview, assets, KV, hydration/navigation, runtime integrity`,
+          `Passed packed ${label} (${suite}): init, frozen install, public Vite build/typecheck, assets, KV, runtime integrity${full ? ', dev/preview, hydration/navigation' : ', dev HTTP'}`,
         );
       } catch (error) {
         failures.push({ fixture: label, error: String(error.stack ?? error) });
