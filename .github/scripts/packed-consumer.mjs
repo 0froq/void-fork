@@ -321,7 +321,7 @@ if (runtime.manifest.platformVersion !== ${JSON.stringify(version)}) throw new E
         );
       } catch (error) {
         failures.push({ fixture: label, error: String(error.stack ?? error) });
-        console.error(`Failed packed ${label}: ${String(error.message ?? error).split('\n')[0]}`);
+        console.error(`Failed packed ${label}: ${String(error.stack ?? error)}`);
       }
     }
   }
