@@ -355,6 +355,7 @@ async function scheduled(
 ): Promise<void> {
   if (
     env.PLATFORM_TRAFFIC_STATE === 'staging' ||
+    env.PLATFORM_TRAFFIC_STATE === 'sandbox-drain' ||
     (env.PLATFORM_INSTALLATION_ID &&
       (await env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE)
   ) {
