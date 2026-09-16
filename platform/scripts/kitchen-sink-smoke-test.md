@@ -25,14 +25,14 @@ The checklist below can also be run manually or with browser automation. Use uni
 1. Visit `/`.
 2. Assert the page contains "Kitchen Sink" and "Auth" in its text.
 3. Inspect the page's HTML source for hashed asset URLs (e.g. `.js` or `.css` files with hash in the filename).
-4. Use the browser to GET one of those asset URLs with `cache: 'no-store'` and `credentials: 'omit'`, and assert its `Cache-Control` header contains `immutable`. The shared asset cache deliberately bypasses cookie-bearing requests. Keep the Access service-token headers configured on the browser context when testing an Access-protected app. Inspect a fresh `GET` response rather than a browser-cached response or `HEAD`.
+4. Use the browser to GET one of those asset URLs with a unique query parameter and `credentials: 'omit'`, and assert its `Cache-Control` header contains `immutable`. A unique URL bypasses the browser's stored response without sending cache-bypass directives to the origin. The shared asset cache deliberately bypasses cookie-bearing requests. Keep the Access service-token headers configured on the browser context when testing an Access-protected app. Inspect a fresh `GET` response rather than a browser-cached response or `HEAD`.
 
    ```js
    const el =
      document.querySelector('script[src*="/assets/"]') ||
      document.querySelector('link[href*="/assets/"]');
    const url = el.src || el.href;
-   const response = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+   const response = await fetch(url + '?smoke=' + Date.now(), { credentials: 'omit' });
    response.status + ' ' + response.headers.get('cache-control');
    ```
 

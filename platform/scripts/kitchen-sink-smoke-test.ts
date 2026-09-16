@@ -161,20 +161,26 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       const assetMatch = html.match(/\/(assets\/[^"']+[-._][A-Za-z0-9_-]{6,}\.(js|css))/);
       assert.ok(assetMatch, 'found hashed asset URL in HTML');
 
-      const assetUrl = `${BASE}/${assetMatch![1]}`;
+      const assetUrl = `${BASE}/${assetMatch![1]}?smoke=${uid}`;
 
-      // Read a fresh network GET without application/Access session cookies.
+      // A unique URL forces a fresh network GET without sending cache-bypass
+      // directives to the origin. Omit application/Access session cookies too.
       // Cookie-bearing requests deliberately bypass the shared asset cache.
       // The browser context still supplies the Access service-token headers.
       const asset = await page.evaluate(async (url) => {
-        const res = await fetch(url, { cache: 'no-store', credentials: 'omit' });
-        return { status: res.status, cacheControl: res.headers.get('cache-control') || '' };
+        const res = await fetch(url, { credentials: 'omit' });
+        return {
+          status: res.status,
+          cacheControl: res.headers.get('cache-control') || '',
+          contentType: res.headers.get('content-type'),
+          cfCacheStatus: res.headers.get('cf-cache-status'),
+        };
       }, assetUrl);
 
       assert.equal(asset.status, 200, `asset GET succeeds (got ${asset.status})`);
       assert.ok(
         asset.cacheControl.includes('immutable'),
-        `Cache-Control includes immutable (got: ${asset.cacheControl})`,
+        `Cache-Control includes immutable for ${assetUrl} (got: ${JSON.stringify(asset)})`,
       );
     } finally {
       await ctx.close();
