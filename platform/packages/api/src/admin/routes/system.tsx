@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Handler } from 'hono';
 import type { ApiEnv } from '../../env.ts';
+import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import {
   backfillPlatformQueueTokens,
   cliVersionStats,
@@ -23,7 +24,13 @@ adminSystem.get('/health', async (context) =>
   context.json(await systemHealth(context.get('db'), context.env, context.req.url)),
 );
 adminSystem.post('/backfill-queue-tokens', async (context) =>
-  context.json(await backfillPlatformQueueTokens(context.env)),
+  executeAuditedMutation(context, operatorAuditIntent('system/backfill-queue-tokens'), async () => {
+    const result = await backfillPlatformQueueTokens(context.env);
+    return {
+      response: context.json(result),
+      succeeded: result.errored === 0,
+    };
+  }),
 );
 
 export const dashboardHandler: Handler<ApiEnv> = async (context) => {

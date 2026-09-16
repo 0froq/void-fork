@@ -22,7 +22,7 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Protect the last active administrator (`ff4f1a15`).
 - [ ] Correct and verify minimum platform runtime permissions.
 - [ ] Accept supported JSONC syntax during Cloudflare connection.
-- [ ] Audit browser administrator mutations alongside operator API changes.
+- [x] Audit browser administrator mutations alongside operator API changes.
 - [ ] Attach schema secrets to the candidate deployment before activation.
 - [ ] Handle or reject later Durable Object lifecycle changes before mutations.
 - [x] Keep prerelease publishing and scaffolding on the selected release channel.

@@ -105,8 +105,8 @@ Commands use the selected platform connection. Add `--plan` to preview a change,
 the workflows; the [CLI reference](../docs/reference/cli.md#operator-commands)
 lists all commands and options.
 
-The CLI and browser admin UI share the same server operations. The operator API
-is served at `/operator/v1` and records changes in `operator_events`. Apply
+The CLI and browser admin UI share the same server operations and record their
+mutations in `operator_events`. The operator API is served at `/operator/v1`. Apply
 `0033_operator_sessions_and_events` before deploying the API; the migration adds
 tables and indexes that remain compatible with existing Workers.
 

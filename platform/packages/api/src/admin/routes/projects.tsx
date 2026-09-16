@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { SITE_DOMAIN } from '../../constants.ts';
 import { getAllProjectsWithOwner, countProjects, searchProjects } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
+import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import { deleteOperatorProject, getOperatorProject } from '../../operator/tenant-service.ts';
 import { renderOperationError } from '../operation-error.tsx';
 import { BuildTable } from '../views/build-table.tsx';
@@ -191,8 +192,15 @@ app.get('/:id', async (context) => {
 
 // POST /projects/:id/delete
 app.post('/:id/delete', async (context) => {
-  await deleteOperatorProject(context, context.req.param('id'));
-  return context.redirect('/admin/projects');
+  const projectId = context.req.param('id');
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent(`projects/${projectId}/delete`),
+    async () => {
+      await deleteOperatorProject(context, projectId);
+      return { response: context.redirect('/admin/projects'), succeeded: true };
+    },
+  );
 });
 
 export default app;

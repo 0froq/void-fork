@@ -12,6 +12,7 @@ import {
 
 let env: TestEnv;
 let token: string;
+let adminToken: string;
 beforeAll(async () => {
   env = await setupEnv();
 });
@@ -22,6 +23,7 @@ beforeEach(async () => {
   await clearTables(env.db);
   const user = await createTestUser(env.db, 'audit-admin', 'github', undefined, 'free', 'admin');
   token = await createOperatorToken(env.db, user);
+  adminToken = user.adminJwt;
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -35,6 +37,22 @@ function request(path: string, body?: unknown, bindings: TestEnv = env) {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }),
     bindings,
+  );
+}
+
+function adminRequest(path: string, body = new URLSearchParams()) {
+  return app.fetch(
+    new Request(`http://localhost/admin${path}`, {
+      method: 'POST',
+      headers: {
+        Cookie: `admin_token=${adminToken}`,
+        Origin: 'http://localhost',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+      redirect: 'manual',
+    }),
+    env,
   );
 }
 
@@ -170,6 +188,81 @@ test('records a successful 200 mutation outcome as successful', async () => {
     expect.objectContaining({
       action: 'workers/api/rollback',
       status: 'success',
+      http_status: 200,
+    }),
+  ]);
+});
+
+test('browser mutations record canonical targets and explicit redirect outcomes', async () => {
+  const target = await createTestUser(env.db, 'browser-audit-target');
+  const response = await adminRequest(
+    `/users/${target.id}/plan`,
+    new URLSearchParams({ plan: 'pro', credential: 'must-not-be-audited' }),
+  );
+
+  expect(response.status).toBe(302);
+  expect(response.headers.get('Location')).toBe(`/admin/users/${target.id}`);
+  expect(response.headers.get('X-Void-Audit-Id')).toBeTruthy();
+  expect(await env.db.select().from(operatorEvents)).toEqual([
+    expect.objectContaining({
+      login: 'audit-admin',
+      action: `users/${target.id}/plan`,
+      target: JSON.stringify({ userId: target.id, plan: 'pro' }),
+      status: 'success',
+      http_status: 302,
+    }),
+  ]);
+  expect(JSON.stringify(await env.db.select().from(operatorEvents))).not.toContain(
+    'must-not-be-audited',
+  );
+});
+
+test('browser backfill records a failed outcome when its 200 response reports errors', async () => {
+  await env.ROUTING.put(
+    'queue:audit-backfill',
+    JSON.stringify({
+      workerName: 'user-audit-backfill',
+      projectId: 'proj_audit',
+      queueName: 'jobs',
+    }),
+  );
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    Response.json({ success: false, errors: [{ message: 'rate limited' }] }, { status: 429 }),
+  );
+
+  const response = await adminRequest('/backfill-queue-tokens');
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ updated: 0, errored: 1 });
+  expect(await env.db.select().from(operatorEvents)).toEqual([
+    expect.objectContaining({
+      action: 'system/backfill-queue-tokens',
+      target: JSON.stringify({ entries: 'queue:*' }),
+      status: 'failed',
+      http_status: 200,
+    }),
+  ]);
+});
+
+test('browser rollback-all records a failed outcome when its result page is HTML 200', async () => {
+  cloudflareWorkerStub('void-dashboard');
+  const response = await adminRequest(
+    '/platform/rollback-all',
+    new URLSearchParams({
+      version_dispatch: 'previous',
+      version_dashboard: 'previous',
+      version_api: 'previous',
+      version_tail: 'previous',
+      version_proxy: 'previous',
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Content-Type')).toContain('text/html');
+  expect(await env.db.select().from(operatorEvents)).toEqual([
+    expect.objectContaining({
+      action: 'workers/rollback-all',
+      status: 'failed',
       http_status: 200,
     }),
   ]);

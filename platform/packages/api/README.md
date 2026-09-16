@@ -121,13 +121,14 @@ deploy tokens cannot authenticate this API, including in development bypass mode
 
 Routes under `src/operator/` share user/project/access and operational services
 with `src/admin/routes/`. Operational POSTs accept `dryRun: true` for validation
-and a concrete preview without side effects. Actual mutations persist an audit
-intent before execution and its outcome afterward. `/system/events` paginates
-those records. Audit targets contain JSON-encoded, action-specific identifiers
-and bounded change arguments; unrelated request fields and credentials are
-excluded. JSON errors use `{ error, message, details? }`; partial external
-failures report completed work instead of silently retrying. Requests are bounded
-to 32 KiB, list pages to 100 rows, and responses disable caching.
+and a concrete preview without side effects. CLI and browser mutations persist an
+audit intent before execution and its outcome afterward. `/system/events`
+paginates those records. Audit targets contain JSON-encoded, action-specific
+identifiers and bounded change arguments; unrelated request fields and
+credentials are excluded. JSON errors use `{ error, message, details? }`;
+partial external failures report completed work instead of silently retrying.
+Requests are bounded to 32 KiB, list pages to 100 rows, and responses disable
+caching.
 
 Integration tests cover operator authentication, tenant operations, operational
 parity, dry runs, and capability guards in `test/integration/operator-*.test.ts`.
