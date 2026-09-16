@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { availableParallelism, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite-plus';
+import { SuiteSequencer } from './test/sequencer.ts';
 
 const maxWorkers = process.env.CI ? 2 : Math.max(2, Math.floor(availableParallelism() * 0.75));
 
@@ -348,13 +349,12 @@ export default defineConfig({
   resolve: { alias: platformAlias },
   test: {
     silent: 'passed-only',
+    sequence: { sequencer: SuiteSequencer },
     projects: [
       {
         test: {
           name: 'unit',
           include: ['packages/*/test/unit/**/*.test.ts'],
-          // Share one worker pool with independent integrations. This lets long integration
-          // startups begin immediately while short unit files fill otherwise-idle workers.
           sequence: { groupOrder: 2 },
           maxWorkers,
         },
@@ -385,6 +385,8 @@ export default defineConfig({
           // schedule the longest files first and fill idle slots across package boundaries.
           name: 'parallel-integration',
           globalSetup: ['test/playground-snapshots.ts'],
+          // Bound simultaneous database engines and framework compilers locally.
+          // Unit tests still fill unused integration workers in the same phase.
           sequence: { groupOrder: 2 },
           // maxWorkers limits files, not describe.concurrent tests. On Windows CI, two files
           // at Vitest's default concurrency open up to ten isolated browser contexts at once.
