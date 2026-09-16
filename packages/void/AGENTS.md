@@ -98,6 +98,8 @@ src/
 
 ### Key Design Decisions
 
+- **Repeatable framework wrappers**: `generateWrapper` recognizes current and legacy wrapper entries and preserves the original application across `--skip-build` runs. Compile handlers before replacing the entry, stage the wrapper for an atomic rename, and copy a new original only after an actual new build. A missing or recursively wrapped original requires a rebuild; readiness alone cannot validate the application entry.
+
 - **Remote R2 preconditions**: Conditional uploads use `/r2/put-conditional` through both the proxy and deployed binding handler. Keep this distinct from legacy `/r2/put` so older deployments cannot silently ignore conditions. Restore date/Headers options before calling the native binding, preserve a `null` precondition result, and never fall back to an unconditional REST upload.
 
 - **Deployment connection**: `void connect [url] [--platform cloudflare|void]` is the developer entry point. A URL chooses Void; without arguments the CLI offers both targets. Interactive connection reuses or obtains credentials for the selected origin/account. `--no-login` saves only verified Void connection metadata; headless authenticated connection requires an origin-scoped keychain session or `VOID_TOKEN` with matching `VOID_API_URL`. Existing project links are preserved when connecting elsewhere. Platform installation and administration remain under `void platform`; it has no `connect` subcommand.

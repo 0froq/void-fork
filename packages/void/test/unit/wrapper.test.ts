@@ -25,6 +25,77 @@ const base: WrapperFeatures = {
   queues: [],
 };
 
+describe('repeated wrapper generation', () => {
+  const roots: Array<string> = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves the real application across repeated skip-build preparation', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-repeat-wrapper-'));
+    roots.push(root);
+    const original = 'export default { fetch() { return new Response("application"); } };';
+    writeFileSync(join(root, 'index.mjs'), original);
+    await generateWrapper(root, 'index.mjs', root, { ...base, readiness: true });
+    await generateWrapper(root, 'index.mjs', root, { ...base, readiness: true });
+    expect(readFileSync(join(root, '__original.mjs'), 'utf8')).toBe(original);
+    const worker = (await import(pathToFileURL(join(root, 'index.mjs')).href)).default;
+    expect(await (await worker.fetch(new Request('https://app/'), {}, {})).text()).toBe(
+      'application',
+    );
+    expect((await worker.fetch(new Request('https://app/__void/ready'), {}, {})).status).toBe(200);
+  });
+
+  it('keeps the entry intact when compiling handlers fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-failed-wrapper-'));
+    roots.push(root);
+    const original = 'export default { fetch() { return new Response("application"); } };';
+    writeFileSync(join(root, 'index.mjs'), original);
+    await expect(
+      generateWrapper(root, 'index.mjs', root, {
+        ...base,
+        crons: [{ name: 'missing', filePath: 'missing.ts', crons: ['* * * * *'] }],
+      }),
+    ).rejects.toThrow();
+    expect(readFileSync(join(root, 'index.mjs'), 'utf8')).toBe(original);
+    await generateWrapper(root, 'index.mjs', root, { ...base, readiness: true });
+    expect(readFileSync(join(root, '__original.mjs'), 'utf8')).toBe(original);
+  });
+
+  it('recognizes legacy wrappers and refreshes the original after a new build', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-legacy-wrapper-'));
+    roots.push(root);
+    const original = 'export default { fetch() { return new Response("first"); } };';
+    writeFileSync(join(root, 'index.mjs'), original);
+    await generateWrapper(root, 'index.mjs', root, { ...base, readiness: true });
+    const legacy = readFileSync(join(root, 'index.mjs'), 'utf8').replace(
+      /^\/\/ Generated[^\n]*\n/,
+      '',
+    );
+    writeFileSync(join(root, 'index.mjs'), legacy);
+    await generateWrapper(root, 'index.mjs', root, { ...base, readiness: true });
+    expect(readFileSync(join(root, '__original.mjs'), 'utf8')).toBe(original);
+    const rebuilt = original.replace('first', 'second');
+    writeFileSync(join(root, 'index.mjs'), rebuilt);
+    await generateWrapper(root, 'index.mjs', root, { ...base, readiness: true });
+    expect(readFileSync(join(root, '__original.mjs'), 'utf8')).toBe(rebuilt);
+  });
+
+  it('requires a rebuild if an older repeated deploy already destroyed the original', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'void-corrupt-wrapper-'));
+    roots.push(root);
+    const wrapper =
+      'import original from "./__original.mjs";\nexport default { fetch: original.fetch };';
+    writeFileSync(join(root, 'index.mjs'), wrapper);
+    writeFileSync(join(root, '__original.mjs'), wrapper);
+    await expect(
+      generateWrapper(root, 'index.mjs', root, { ...base, readiness: true }),
+    ).rejects.toThrow('Rebuild');
+  });
+});
+
 describe('needsWrapper', () => {
   it('returns false when no features are set', () => {
     expect(needsWrapper(base)).toBe(false);
