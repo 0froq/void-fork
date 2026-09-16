@@ -14,7 +14,8 @@ guard; add no administrator recovery or promotion bypass.
 ## Work and commit boundaries
 
 - [x] Apply routing rules in native Cloudflare production Workers.
-- [ ] Share authoritative page cache policy across deployment targets.
+- [x] Share authoritative page cache policy across deployment targets.
+- [ ] Consolidate the equivalent API prewarm resolver after the Sandbox drain commit.
 - [ ] Preserve production ownership during readiness fallback and compensation.
 - [x] Use supported Durable Object storage for fresh platform installations.
 - [x] Recover verified installation records when owned resources are missing.

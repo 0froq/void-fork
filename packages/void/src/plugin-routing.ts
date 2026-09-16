@@ -17,7 +17,7 @@ import { generateQueueTypes } from './codegen/queue-types.ts';
 import { generateRouteTypes } from './codegen/route-types.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
 import { readConfig, getDatabaseDialect, type NotFoundHandling } from './config.ts';
-import { collectRevalidate, hasRevalidate } from './isr-config.ts';
+import { collectPages, collectRevalidate, hasRevalidate } from './isr-config.ts';
 import { readProjectPaths } from './project-paths.ts';
 import {
   compileRouteTable,
@@ -307,13 +307,12 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
 
   let resolvedConfig: import('vite').ResolvedConfig | null = null;
 
-  // Merged ISR revalidate map for the CURRENT build, gated by `emitIsr` (see
-  // buildStart). The `load` hook threads this into `compileRouteTable` so the
-  // baked `__VOID_ISR_REVALIDATE` const and the worker entry's `handleIsr`
-  // wiring derive from the SAME decision within one build. `undefined` whenever
-  // ISR is not emitted (dev, managed `void deploy`, non-CF target, or no
-  // revalidate config), keeping today's behavior byte-identical.
+  // ISR policy for the CURRENT build, gated by `emitIsr` (see buildStart). The
+  // ordered page table is the same 3-state policy shipped to managed dispatch:
+  // positive TTL, explicit 0 opt-out, or absent to inherit path config.
   let isrRevalidate: number | Record<string, number> | undefined;
+  let isrPages: Array<{ pattern: string; revalidate?: number }> | undefined;
+  let isrPathRevalidate: Record<string, number> | undefined;
 
   function resolveAuthClientPath(config: import('vite').ResolvedConfig): string {
     if (config.plugins.some((plugin) => plugin.name === 'void-react:pages')) {
@@ -568,16 +567,20 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
         // captured value.
         const buildConfig = readConfig(root);
         const merged = collectRevalidate(buildConfig, scan!.pages);
+        const configuredRevalidate = buildConfig.routing?.revalidate;
         const emitIsr =
           !options.target &&
           resolvedConfig?.command === 'build' &&
           !process.env.VOID_DEPLOY_PROJECT_ID &&
           hasRevalidate(merged);
-        // Route table + worker entry must agree within one build: the load hook
-        // bakes `__VOID_ISR_REVALIDATE`/`__VOID_ISR_DEPLOYMENT_ID` from
-        // `isrRevalidate`, and the entry's `handleIsr` wiring imports those same
-        // consts. Both derive from `emitIsr` so they are present or absent together.
+        // Route table + worker entry must agree within one build. All constants
+        // derive from `emitIsr` so they are present or absent together.
         isrRevalidate = emitIsr ? merged : undefined;
+        isrPages = emitIsr ? collectPages(scan!.pages, configuredRevalidate) : undefined;
+        isrPathRevalidate =
+          emitIsr && configuredRevalidate && typeof configuredRevalidate === 'object'
+            ? configuredRevalidate
+            : undefined;
         // Resolve the ISR runtime path LAZILY — only when ISR is actually emitted
         // — so non-ISR/managed/dev builds never depend on it.
         const isr = emitIsr
@@ -673,6 +676,8 @@ export function routingPlugin(root: string, options: RoutingPluginOptions): Plug
           compileOptions,
           getPagesCompileOptions(),
           isrRevalidate,
+          isrPages,
+          isrPathRevalidate,
         );
       },
     },

@@ -11,6 +11,7 @@ import {
   normalizePageDataForJsonCache,
   packIsrValue,
   markSharedCachePolicy,
+  resolvePageTtl,
   resolvePathTtl,
   resolveRevalidateTtl,
   SHARED_CACHE_POLICY_VERSION,
@@ -92,6 +93,8 @@ export type RenderFn = (request: Request) => Promise<Response>;
 
 export type HandleIsrOptions = Readonly<{
   revalidate: number | Record<string, number> | undefined;
+  pages?: ReadonlyArray<{ pattern: string; revalidate?: number }>;
+  pathRevalidate?: Record<string, number>;
   deploymentId: string;
   queryAllowlist?: QueryAllowlist;
 }>;
@@ -578,7 +581,7 @@ export async function handleIsr(
   options: HandleIsrOptions,
   render: RenderFn,
 ): Promise<Response | null> {
-  const { revalidate, deploymentId, queryAllowlist } = options;
+  const { revalidate, pages, pathRevalidate, deploymentId, queryAllowlist } = options;
 
   if (request.method !== 'GET') {
     return null;
@@ -601,7 +604,7 @@ export async function handleIsr(
   if (pathname === '/api' || pathname.startsWith('/api/')) {
     return null;
   }
-  const isrTtl = resolvePathTtl(revalidate, pathname);
+  const isrTtl = resolvePageTtl(pages, revalidate, pathRevalidate, pathname);
   if (isrTtl <= 0) {
     return null;
   }

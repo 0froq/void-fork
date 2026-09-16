@@ -287,6 +287,37 @@ export function resolvePathTtl(
   return 0;
 }
 
+/** One ordered page-route entry in the shared ISR TTL policy. */
+export type IsrPageTtl = Readonly<{ pattern: string; revalidate?: number }>;
+
+/**
+ * Resolve ISR TTL from the framework's ordered page table.
+ *
+ * The first matching page is authoritative. A baked positive TTL enables ISR,
+ * a baked `0` opts out, and an absent TTL inherits from the raw per-path config.
+ * Only requests that match no page fall back to the flattened revalidate config.
+ */
+export function resolvePageTtl(
+  pages: ReadonlyArray<IsrPageTtl> | undefined,
+  revalidate: number | Record<string, number> | undefined,
+  pathRevalidate: Record<string, number> | undefined,
+  pathname: string,
+): number {
+  if (pages) {
+    for (const page of pages) {
+      if (!matchSegmentPattern(page.pattern, pathname)) {
+        continue;
+      }
+      return page.revalidate === undefined
+        ? resolvePathTtl(pathRevalidate, pathname)
+        : page.revalidate > 0
+          ? page.revalidate
+          : 0;
+    }
+  }
+  return resolvePathTtl(revalidate, pathname);
+}
+
 /** Extract response headers while removing ISR-managed and private headers. */
 export function serializeHeaders(response: Response): Record<string, string> {
   const result: Record<string, string> = {};

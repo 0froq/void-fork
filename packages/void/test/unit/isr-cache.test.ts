@@ -596,6 +596,27 @@ describe('handleIsr', () => {
     return new Request(`https://${HOST}${path}`, { method: 'GET', headers });
   }
 
+  it('leaves an explicitly opted-out page to the live renderer despite a conflicting flat TTL', async () => {
+    const { kv } = createKvMock();
+    const render = vi.fn(async () => new Response('<html>private</html>'));
+
+    const response = await handleIsr(
+      htmlRequest('/private'),
+      makeEnv(kv),
+      createCtx().ctx,
+      {
+        revalidate: { '/private': 60 },
+        pages: [{ pattern: '/private', revalidate: 0 }],
+        pathRevalidate: { '/private': 60 },
+        deploymentId: DPL,
+      },
+      render,
+    );
+
+    expect(response).toBeNull();
+    expect(render).not.toHaveBeenCalled();
+  });
+
   it('isolates only allowlisted query variants and ignores unrelated parameters', async () => {
     const { store, kv } = createKvMock();
     const env = makeEnv(kv);

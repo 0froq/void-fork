@@ -762,6 +762,10 @@ export function compileRouteTable(
    * unaffected — the const is only imported/used when the entry wires ISR.
    */
   mergedRevalidate?: number | Record<string, number>,
+  /** Ordered page TTL policy used by native ISR before the flat fallback map. */
+  isrPages?: ReadonlyArray<{ pattern: string; revalidate?: number }>,
+  /** Raw object-form routing.revalidate config for inherit-eligible pages. */
+  isrPathRevalidate?: Record<string, number>,
 ): string {
   const lines: Array<string> = [];
   const auth = options.auth;
@@ -1858,13 +1862,16 @@ window.__vite_plugin_react_preamble_installed__ = true;
   lines.push(
     `export const __VOID_DEV_TRIGGER_TOKEN = ${JSON.stringify(options.devTriggerToken ?? crypto.randomUUID())};`,
   );
-  // Baked ISR config. `__VOID_ISR_REVALIDATE` is the merged revalidate map/number
-  // (or `undefined`). `__VOID_ISR_DEPLOYMENT_ID` MUST be a COMPILE-TIME LITERAL —
+  // Baked ISR policy. The ordered page table preserves explicit opt-outs and
+  // object-config inheritance before the flat fallback map is consulted.
+  // `__VOID_ISR_DEPLOYMENT_ID` MUST be a COMPILE-TIME LITERAL —
   // stringified here at build time exactly like `__VOID_BUILD_KEY` above — so every
   // isolate of a deployment shares one id (edge-cache keys, KV keys, and the
   // `revalidate()` purge path must all agree). A runtime `crypto.randomUUID()` in the
   // emitted source would mint a fresh id per isolate and break cache reads + purge.
   lines.push(`export const __VOID_ISR_REVALIDATE = ${JSON.stringify(mergedRevalidate)};`);
+  lines.push(`export const __VOID_ISR_PAGES = ${JSON.stringify(isrPages)};`);
+  lines.push(`export const __VOID_ISR_PATH_REVALIDATE = ${JSON.stringify(isrPathRevalidate)};`);
   lines.push(`export const __VOID_ISR_DEPLOYMENT_ID = ${JSON.stringify(crypto.randomUUID())};`);
   lines.push('');
   lines.push(`export default app;`);
@@ -2788,7 +2795,7 @@ function __filterInternalBindings(env) {
   // `isr` is absent every fragment below is an empty string, so the generated
   // fetch handler is byte-identical to the pre-ISR output.
   const isrImport = isr
-    ? `import { handleIsr } from ${JSON.stringify(isr.runtimePath)};\nimport { __VOID_ISR_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes';\n`
+    ? `import { handleIsr } from ${JSON.stringify(isr.runtimePath)};\nimport { __VOID_ISR_REVALIDATE, __VOID_ISR_PAGES, __VOID_ISR_PATH_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes';\n`
     : '';
   // Capture deployment id + host on the raw env at the top of fetch(), before
   // dispatch — always, so `revalidate()` (which reads the raw env) can see them
@@ -2812,7 +2819,7 @@ function __filterInternalBindings(env) {
   const renderBlock = isr
     ? `      const __render = async (req) => serveWithAssets(req, env, await app.fetch(req, userEnv, ctx));
       if (env.ISR_CACHE && request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-        const __isr = await handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: ${JSON.stringify(isr?.queryAllowlist)} }, __render);
+        const __isr = await handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, pages: __VOID_ISR_PAGES, pathRevalidate: __VOID_ISR_PATH_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: ${JSON.stringify(isr?.queryAllowlist)} }, __render);
         if (__isr) return __isr;
       }
       return __render(request);`

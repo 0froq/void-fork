@@ -26,6 +26,7 @@ export {
   isStale,
   normalizePageDataForJsonCache,
   packIsrValue,
+  resolvePageTtl,
   resolvePathTtl,
   resolveRevalidateTtl,
   serializeHeaders,
@@ -182,34 +183,6 @@ function matchedPageTtl(
     return resolvePathTtl(pathRevalidate, pathname);
   }
   return page.revalidate > 0 ? page.revalidate : 0;
-}
-
-/**
- * Route-aware ISR TTL resolution. Iterates `pages` in the framework's
- * authoritative order (do NOT re-sort — it is already the order the worker's
- * own matchRoute resolves in) and first-matches via `matchSegmentPattern`, so
- * dispatch picks the SAME winning route the worker renders. The winner's TTL is
- * authoritative via `matchedPageTtl` (0 when it opts out; an inherit-eligible
- * winner resolves the per-path `pathRevalidate` object config). Only when NO
- * page route matches do we fall back to the flat `revalidate` map (user
- * void.json patterns). When `pages` is absent, behavior is identical to
- * `resolvePathTtl`.
- */
-export function resolvePageTtl(
-  pages: ReadonlyArray<{ pattern: string; revalidate?: number }> | undefined,
-  revalidate: number | Record<string, number> | undefined,
-  pathRevalidate: Record<string, number> | undefined,
-  pathname: string,
-): number {
-  if (pages && pages.length > 0) {
-    for (const page of pages) {
-      if (matchSegmentPattern(page.pattern, pathname)) {
-        return matchedPageTtl(page, pathRevalidate, pathname);
-      }
-    }
-    return resolvePathTtl(revalidate, pathname);
-  }
-  return resolvePathTtl(revalidate, pathname);
 }
 
 /**

@@ -487,6 +487,35 @@ describe('ISR (stale-while-revalidate)', () => {
     expect([...kvStore.keys()].some((k) => k.includes('/docs/setup/install'))).toBe(false);
   });
 
+  it('honors a page opt-out over the same path in the flat managed policy', async () => {
+    const { env, workerFetch, kvStore } = createEnv({
+      routing: {
+        workerName: 'user-app',
+        projectId: 'proj_1',
+        ssr: true,
+        version: 'v1',
+        revalidate: { '/private': 60 },
+        pages: [{ pattern: '/private', revalidate: 0 }],
+        pathRevalidate: { '/private': 60 },
+      },
+      workerResponse: new Response('<html>private</html>', {
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    });
+
+    const first = await app.fetch(new Request('https://my-app.void.app/private'), env, createCtx());
+    const second = await app.fetch(
+      new Request('https://my-app.void.app/private'),
+      env,
+      createCtx(),
+    );
+
+    expect(first.headers.get('x-isr-cache')).toBeNull();
+    expect(second.headers.get('x-isr-cache')).toBeNull();
+    expect(workerFetch).toHaveBeenCalledTimes(2);
+    expect([...kvStore.keys()].some((key) => key.includes('/private'))).toBe(false);
+  });
+
   it("DOES cache the catch-all's own nested path", async () => {
     const { env, kvStore } = createEnv({
       routing: {

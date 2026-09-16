@@ -3068,13 +3068,13 @@ describe('compileWorkerEntry — ISR wiring', () => {
     expect(code).toContain('import { handleIsr } from "void/isr"');
     // Baked import #2: the two consts from the compiled route table (single source of truth).
     expect(code).toContain(
-      "import { __VOID_ISR_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes'",
+      "import { __VOID_ISR_REVALIDATE, __VOID_ISR_PAGES, __VOID_ISR_PATH_REVALIDATE, __VOID_ISR_DEPLOYMENT_ID } from 'virtual:void-routes'",
     );
     // Render path threaded through handleIsr, guarded on the ISR_CACHE binding.
     expect(code).toContain('if (env.ISR_CACHE &&');
     expect(code).toContain('request.headers.get("upgrade")?.toLowerCase() !== "websocket"');
     expect(code).toContain(
-      'handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: {"/search":["q"]} }, __render)',
+      'handleIsr(request, env, ctx, { revalidate: __VOID_ISR_REVALIDATE, pages: __VOID_ISR_PAGES, pathRevalidate: __VOID_ISR_PATH_REVALIDATE, deploymentId: __VOID_ISR_DEPLOYMENT_ID, queryAllowlist: {"/search":["q"]} }, __render)',
     );
     // Deployment id + host captured on the raw env so revalidate() can purge even
     // on requests that never enter the render ladder.
@@ -3219,5 +3219,26 @@ describe('compileRouteTable — baked ISR consts', () => {
       { '/blog/*': 30 },
     );
     expect(map).toContain('export const __VOID_ISR_REVALIDATE = {"/blog/*":30};');
+  });
+
+  it('bakes the ordered page policy and raw path config for native ISR', () => {
+    const code = compileRouteTable(
+      scan,
+      '/routes',
+      '/middleware',
+      '/crons',
+      '/queues',
+      null,
+      testOptions,
+      null,
+      { '/private': 60 },
+      [{ pattern: '/private', revalidate: 0 }],
+      { '/private': 60 },
+    );
+
+    expect(code).toContain(
+      'export const __VOID_ISR_PAGES = [{"pattern":"/private","revalidate":0}];',
+    );
+    expect(code).toContain('export const __VOID_ISR_PATH_REVALIDATE = {"/private":60};');
   });
 });
