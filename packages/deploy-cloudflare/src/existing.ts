@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { parseRootWranglerConfig } from './config.ts';
 import type { CloudflareCommandRunner } from './execute.ts';
 
 export type ExistingCloudflareWorker = {
@@ -8,6 +9,13 @@ export type ExistingCloudflareWorker = {
   script: Record<string, unknown>;
 };
 
+type ExistingCloudflareWorkerOptions = {
+  runWrangler: CloudflareCommandRunner;
+  configPath: string;
+  workerName: string;
+  versionId?: string;
+};
+
 /** Read the deployed version, not the most recently uploaded candidate. */
 export async function readExistingCloudflareWorker(options: {
   runWrangler: CloudflareCommandRunner;
@@ -15,10 +23,27 @@ export async function readExistingCloudflareWorker(options: {
   workerName: string;
   versionId?: string;
 }): Promise<ExistingCloudflareWorker> {
+  const worker = await readCloudflareWorker(options, false);
+  if (!worker) {
+    throw new Error(`Cloudflare Worker "${options.workerName}" does not have an active version.`);
+  }
+  return worker;
+}
+
+async function readCloudflareWorker(
+  options: ExistingCloudflareWorkerOptions,
+  allowMissing: boolean,
+): Promise<ExistingCloudflareWorker | null> {
   const target = ['-c', options.configPath, '--env=', '--name', options.workerName];
-  const read = async (args: Array<string>): Promise<Record<string, unknown>> => {
+  const read = async (
+    args: Array<string>,
+    missingIsNull = false,
+  ): Promise<Record<string, unknown> | null> => {
     const result = await options.runWrangler([...args, ...target, '--json'], { capture: true });
     if (result.status !== 0 || result.signal || result.error) {
+      if (missingIsNull && isMissingWorkerOutput(`${result.stdout}\n${result.stderr}`)) {
+        return null;
+      }
       throw new Error(
         `Could not verify existing Cloudflare Worker "${options.workerName}". Check the account, Worker name, and Cloudflare permissions before retrying.`,
       );
@@ -35,8 +60,14 @@ export async function readExistingCloudflareWorker(options: {
   };
   const deployment = options.versionId
     ? { versions: [{ version_id: options.versionId, percentage: 100 }] }
-    : await read(['deployments', 'status']);
+    : await read(['deployments', 'status'], allowMissing);
+  if (deployment === null) {
+    return null;
+  }
   const versions = deployment.versions;
+  if (allowMissing && Array.isArray(versions) && versions.length === 0) {
+    return null;
+  }
   if (
     !Array.isArray(versions) ||
     versions.length !== 1 ||
@@ -50,6 +81,9 @@ export async function readExistingCloudflareWorker(options: {
   }
   const versionId = versions[0].version_id;
   const version = await read(['versions', 'view', versionId]);
+  if (version === null) {
+    throw new Error('Cloudflare did not return the existing Worker configuration.');
+  }
   const resources = version.resources;
   if (
     version.id !== versionId ||
@@ -61,8 +95,13 @@ export async function readExistingCloudflareWorker(options: {
   ) {
     throw new Error('Cloudflare did not return the existing Worker configuration.');
   }
+  const migrationTag = readCloudflareVersionMigrationTag(version);
+  const script = {
+    ...resources.script,
+    ...(migrationTag === null ? {} : { migration_tag: migrationTag }),
+  };
   const after = options.versionId ? deployment : await read(['deployments', 'status']);
-  if (!isDeepStrictEqual(deployment.versions, after.versions)) {
+  if (after === null || !isDeepStrictEqual(deployment.versions, after.versions)) {
     throw new Error(
       'Cloudflare production changed while linking. Retry from the current deployment.',
     );
@@ -71,8 +110,102 @@ export async function readExistingCloudflareWorker(options: {
     versionId,
     bindings: resources.bindings,
     runtime: resources.script_runtime,
-    script: resources.script,
+    script,
   };
+}
+
+/** Read Wrangler's current version detail shape plus the two older shapes seen in fixtures/APIs. */
+export function readCloudflareVersionMigrationTag(version: unknown): string | null {
+  if (!record(version)) {
+    return null;
+  }
+  const resources = record(version.resources) ? version.resources : undefined;
+  const candidates = [
+    resources && record(resources.script_runtime) ? resources.script_runtime.migration_tag : null,
+    resources && record(resources.script) ? resources.script.migration_tag : null,
+    record(version.script) ? version.script.migration_tag : null,
+    version.migration_tag,
+  ];
+  const tag = candidates.find((candidate) => typeof candidate === 'string');
+  return typeof tag === 'string' && tag.length > 0 ? tag : null;
+}
+
+/**
+ * The Versions upload endpoint cannot safely apply a new Durable Object class migration to an
+ * existing Worker in the native beta. Reject that pending lifecycle change before the caller
+ * mutates a database or Worker secret; ordinary uploads whose migration tag is already active
+ * continue normally.
+ */
+export async function assertCloudflareDurableObjectLifecycleSupported(options: {
+  runWrangler: CloudflareCommandRunner;
+  configPath: string;
+  workerName: string;
+}): Promise<void> {
+  const migrations = parseDurableObjectMigrations(
+    parseRootWranglerConfig(options.configPath).migrations,
+  );
+  if (!migrations.some((migration) => migration.changesClasses)) {
+    return;
+  }
+  const existing = await readCloudflareWorker(options, true);
+  if (!existing) {
+    return;
+  }
+  const activeTag = existing.script.migration_tag;
+  const activeIndex =
+    typeof activeTag === 'string'
+      ? migrations.findIndex((migration) => migration.tag === activeTag)
+      : -1;
+  const pending = migrations.slice(activeIndex + 1).filter((migration) => migration.changesClasses);
+  if (pending.length === 0) {
+    return;
+  }
+  throw new Error(
+    [
+      'deploy: native Cloudflare beta cannot apply a Durable Object class migration to an existing Worker.',
+      `Pending migration tag${pending.length === 1 ? '' : 's'}: ${pending.map((migration) => migration.tag).join(', ')}.`,
+      'Apply the class migration through a supported Cloudflare deployment workflow, then retry after that migration tag is active.',
+      'No database migration or Worker secret was changed.',
+    ].join('\n'),
+  );
+}
+
+function parseDurableObjectMigrations(
+  value: unknown,
+): Array<{ tag: string; changesClasses: boolean }> {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error('deploy: generated Cloudflare config has a malformed migrations field.');
+  }
+  return value.map((migration) => {
+    if (!record(migration) || typeof migration.tag !== 'string') {
+      throw new Error('deploy: generated Cloudflare config has a malformed class migration.');
+    }
+    const fields = [
+      migration.new_classes,
+      migration.new_sqlite_classes,
+      migration.renamed_classes,
+      migration.deleted_classes,
+    ];
+    for (const field of fields) {
+      if (field !== undefined && !Array.isArray(field)) {
+        throw new Error('deploy: generated Cloudflare config has a malformed class migration.');
+      }
+    }
+    return {
+      tag: migration.tag,
+      changesClasses: fields.some((field) => Array.isArray(field) && field.length > 0),
+    };
+  });
+}
+
+function isMissingWorkerOutput(output: string): boolean {
+  return (
+    /\[code:\s*10007\]/i.test(output) ||
+    /no deployments|\bworker\b.*\b(?:does not exist|not found)\b/i.test(output)
+  );
 }
 
 export function assertCloudflareBindingsPreserved(

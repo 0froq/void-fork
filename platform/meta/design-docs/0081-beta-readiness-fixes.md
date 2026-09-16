@@ -25,7 +25,7 @@ guard; add no administrator recovery or promotion bypass.
 - [ ] Accept supported JSONC syntax during Cloudflare connection.
 - [x] Audit browser administrator mutations alongside operator API changes.
 - [x] Attach schema secrets to the candidate deployment before activation.
-- [ ] Handle or reject later Durable Object lifecycle changes before mutations.
+- [x] Handle or reject later Durable Object lifecycle changes before mutations.
 - [x] Keep prerelease publishing and scaffolding on the selected release channel.
 - [x] Require platform tests before publishing the packaged runtime.
 - [x] Check schema upgrades against an immutable previous runtime and populated data.

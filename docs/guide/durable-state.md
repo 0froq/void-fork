@@ -129,7 +129,7 @@ export default Counter;
 
 These state migrations are separate from Cloudflare's Durable Object class migration. Void generates the latter with `new_sqlite_classes` when it discovers the file.
 
-Do not delete or reorder generated Durable Object migrations in `wrangler.jsonc` after deployment. Renaming or removing a Durable Object class requires an explicit Cloudflare class migration and is not automated yet.
+Do not delete or reorder generated Durable Object migrations in `wrangler.jsonc` after deployment. Native Cloudflare beta deploys can create these classes with the Worker's first deployment, but do not yet apply a later class migration to an existing Worker. Additions, renames, and removals require an explicit supported Cloudflare deployment workflow; after its migration tag is active, `void deploy --platform cloudflare` can resume ordinary version uploads.
 
 ## Deployment support
 

@@ -42,6 +42,7 @@ import {
   writeCloudflareFrameworkDeployConfig,
   writeCloudflareStaticDeployConfig,
   readExistingCloudflareWorker,
+  assertCloudflareDurableObjectLifecycleSupported,
   assertExistingCloudflareConfig,
   assertCloudflareBindingsPreserved,
   type ExistingCloudflareWorker,
@@ -2377,6 +2378,8 @@ export type DeployWranglerRun = (
  */
 export interface CloudflareDeployDeps {
   readExistingWorker?: typeof readExistingCloudflareWorker;
+  /** Fail closed on a pending existing-Worker Durable Object class migration. */
+  assertDurableObjectLifecycle?: typeof assertCloudflareDurableObjectLifecycleSupported;
   /** wrangler runner for the orchestrator's own whoami/migrate/deploy calls. */
   runWrangler?: DeployWranglerRun;
   /** Run the project's `vite build` (inherited stdio). Throws on a nonzero build. */
@@ -5052,6 +5055,24 @@ export async function runCloudflareDeploy(
       `deploy: the build added ${dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'} migrations, but DATABASE_URL is not set. ` +
         'Refusing to upload a Worker against an unmigrated database.',
     );
+    return exit(1);
+  }
+
+  // Wrangler Versions cannot apply a new Durable Object class migration to an existing Worker.
+  // Inspect the active migration tag after the build has produced the exact config, but before
+  // remote database migration or secret mutation. First deployments remain supported.
+  const lifecycleConfigPath = (
+    deps.resolveGeneratedConfigPath ??
+    ((projectRoot) => readGeneratedDeployConfig(projectRoot).path)
+  )(root);
+  try {
+    await (deps.assertDurableObjectLifecycle ?? assertCloudflareDurableObjectLifecycleSupported)({
+      runWrangler,
+      configPath: lifecycleConfigPath,
+      workerName,
+    });
+  } catch (error) {
+    log.error(getErrorMessage(error));
     return exit(1);
   }
 

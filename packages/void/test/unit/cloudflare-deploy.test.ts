@@ -423,6 +423,7 @@ function harness(overrides: Partial<CloudflareDeployDeps> = {}): {
         ),
       ),
     })) as CloudflareDeployDeps['syncSchemaSecrets'],
+    assertDurableObjectLifecycle: async () => {},
     // The stubbed build never writes dist/ssr/wrangler.json, so the real config
     // verification would have nothing to read — pass it by default; dedicated tests
     // exercise the real verifier and the fail-closed branch.
@@ -7606,6 +7607,26 @@ describe('compareWranglerMigrationPaths (wrangler 4.131 numeric-prefix comparato
 // ---------------------------------------------------------------------------
 
 describe('runCloudflareDeploy — post-build ground-truth secret gate', () => {
+  it('rejects a pending Durable Object class migration before database or secret mutation', async () => {
+    const root = d1Project(PROVISIONED_D1, INIT_MIGRATION);
+    const { deps, trace, wranglerArgs } = harness({
+      assertDurableObjectLifecycle: async () => {
+        trace.push('do-lifecycle');
+        throw new Error('pending class migration');
+      },
+    });
+
+    await expect(
+      runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(trace).toContain('build');
+    expect(trace).toContain('do-lifecycle');
+    expect(wranglerArgs.some((args) => args[0] === 'd1')).toBe(false);
+    expect(trace).not.toContain('auth-secret');
+    expect(trace).not.toContain('schema-secrets');
+    expect(trace).not.toContain('wrangler:deploy');
+  });
+
   it('prepares marked secrets after migration gates and passes them to the candidate upload', async () => {
     const root = d1Project(PROVISIONED_D1);
     let candidateSecrets: Readonly<Record<string, string>> | undefined;
