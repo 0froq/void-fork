@@ -1,5 +1,21 @@
 import { describe, it, expect, vi, beforeAll } from 'vite-plus/test';
 import { SandboxConcurrencyCounter } from '../../../api/src/sandbox-concurrency-counter.ts';
+
+vi.mock('../../src/capabilities.ts', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/capabilities.ts')>();
+  return {
+    ...original,
+    proxyCapabilityEnabled(value: string | undefined, capability: string) {
+      // Exercise the dormant route implementation when no capability document
+      // is supplied. Explicitly disabled configurations still cover the real
+      // gate response below; production defaults are tested separately.
+      return capability === 'sandbox' && value === undefined
+        ? true
+        : original.proxyCapabilityEnabled(value, capability);
+    },
+  };
+});
+
 import worker from '../../src/index.ts';
 
 const JWT_SECRET = 'test-secret-key';
@@ -388,7 +404,7 @@ describe('proxy sandbox routes', () => {
       expect(await res.json()).toEqual({ error: 'sandboxId required' });
     });
 
-    it('returns 500 when the DO RPC throws (framework fail-open kicks in)', async () => {
+    it('returns 500 when the DO RPC throws so the runtime fails closed', async () => {
       const counter = createMockCounter({
         acquire: async () => {
           throw new Error('do unavailable');

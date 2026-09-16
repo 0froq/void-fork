@@ -4012,6 +4012,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               instanceType: manifest.sandbox.instanceType,
               maxInstances: manifest.sandbox.maxInstances,
             },
+            context.env.ROUTING,
           );
           sandboxContainerAppId = containerApplicationId;
           await assertDeploymentNotCanceled(context.get('db'), deployment.id);

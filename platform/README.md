@@ -115,6 +115,12 @@ Allowed administrator removals revoke access before resource cleanup and preserv
 that revocation if cleanup fails, so concurrent removals cannot lock out the
 remaining administrator.
 
+When upgrading an installation that previously enabled managed Sandbox, run
+`void platform system sandbox-drain --plan`, then apply it and rerun until it
+reports `complete: true`. Preview later bounded pages by passing the returned
+`nextCursor` to `--cursor`. The lifecycle installer keeps application traffic
+closed while this database-backed drain is required.
+
 ## Local Development
 
 With a local PostgreSQL server running, build the shared packages and set up the API:

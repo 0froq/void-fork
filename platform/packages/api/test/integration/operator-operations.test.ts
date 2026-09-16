@@ -11,7 +11,15 @@ import {
 } from 'vite-plus/test';
 import { createBuild, getDeployment } from '../../src/db.ts';
 import { app } from '../../src/index.ts';
-import { deployments, platformEvents } from '../../src/schema.ts';
+import { loadSandboxDeploymentPageProjection } from '../../src/operator/sandbox-operations.ts';
+import { SANDBOX_DRAIN_STATE_KEY } from '../../src/sandbox-drain.ts';
+import {
+  deployments,
+  operatorEvents,
+  platformEvents,
+  resources,
+  sandboxDrainCheckpoints,
+} from '../../src/schema.ts';
 import { BUILD_INSTANCE_LARGE } from '../../src/tiers.ts';
 import {
   clearTables,
@@ -19,6 +27,7 @@ import {
   createTestDeployment,
   createTestProject,
   createTestUser,
+  mockCfApi,
   setupEnv,
   teardownEnv,
   type TestEnv,
@@ -36,6 +45,8 @@ afterAll(async () => {
 beforeEach(async () => {
   await env.db.delete(platformEvents);
   await clearTables(env.db);
+  await env.db.delete(sandboxDrainCheckpoints);
+  await env.ROUTING.delete(SANDBOX_DRAIN_STATE_KEY);
   delete env.PLATFORM_INSTALLATION_ID;
   delete env.PLATFORM_CAPABILITIES;
   const user = await createTestUser(env.db, 'operator', 'github', undefined, 'free', 'admin');
@@ -58,6 +69,18 @@ function req(path: string, body?: Record<string, unknown>, extraEnv?: Record<str
     }),
     { ...env, ...extraEnv },
   );
+}
+async function applyDrainUntilComplete(extraEnv?: Record<string, unknown>) {
+  const responses: Array<Response> = [];
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const response = await req('/system/sandbox-drain', {}, extraEnv);
+    responses.push(response);
+    const body = (await response.clone().json()) as { complete?: boolean };
+    if (body.complete) {
+      return responses;
+    }
+  }
+  throw new Error('Sandbox drain did not complete within ten bounded pages.');
 }
 function namespace(payload: unknown, status = 200) {
   const fetch = vi.fn(async (_input: unknown) => Response.json(payload, { status }));
@@ -511,5 +534,330 @@ describe('operator installation-aware system and worker operations', () => {
     expect(JSON.stringify(body)).not.toContain('private-token');
     expect(put).not.toHaveBeenCalled();
     await env.ROUTING.delete('queue:operator-test');
+  });
+  test('previews, cancels, resumes, and audits an orphan Sandbox application drain', async () => {
+    const project = await createTestProject(env.db, ownerId, 'sandbox-drain');
+    const deployment = await createTestDeployment(env.db, project.id, 'pending');
+    const applicationName = `${project.id}-${deployment.id}-void-sandbox`
+      .toLowerCase()
+      .replaceAll('_', '-');
+    const namespaceId = 'ns-sandbox-drain';
+    await env.db
+      .update(deployments)
+      .set({
+        manifest: JSON.stringify({
+          version: 3,
+          bindings: {},
+          sandbox: {
+            bindingName: 'SANDBOX',
+            className: 'Sandbox',
+            containerName: 'void-sandbox',
+            image: 'registry.cloudflare.com/sandbox:1.0.0',
+          },
+        }),
+      })
+      .where(eq(deployments.id, deployment.id));
+    const cf = mockCfApi();
+    cf.seedHostScript({
+      scriptName: `user-${project.slug}-${deployment.id}`,
+      classes: { Sandbox: namespaceId },
+      bindings: [
+        {
+          type: 'durable_object_namespace',
+          name: 'SANDBOX',
+          class_name: 'Sandbox',
+          namespace_id: namespaceId,
+        },
+      ],
+    });
+    const application = cf.seedContainerApp({ name: applicationName, namespaceId });
+
+    const plan = await req(
+      '/system/sandbox-drain',
+      { dryRun: true },
+      { PLATFORM_TRAFFIC_STATE: 'sandbox-drain' },
+    );
+    expect(plan.status).toBe(200);
+    expect(await plan.json()).toMatchObject({
+      dryRun: true,
+      applications: [],
+      blockers: [expect.objectContaining({ kind: 'active_deployment' })],
+    });
+    expect(await env.ROUTING.get(SANDBOX_DRAIN_STATE_KEY)).toBeNull();
+    expect(cf.state.containerApps.has(application.id)).toBe(true);
+
+    const firstApply = await req(
+      '/system/sandbox-drain',
+      {},
+      { PLATFORM_TRAFFIC_STATE: 'sandbox-drain' },
+    );
+    expect(firstApply.status).toBe(207);
+    expect(await firstApply.json()).toMatchObject({
+      ok: false,
+      partial: true,
+      complete: false,
+      cancelRequested: [deployment.id],
+      deletedApplications: [],
+    });
+    expect((await getDeployment(env.db, deployment.id))?.status).toBe('canceling');
+    expect(cf.state.containerApps.has(application.id)).toBe(true);
+
+    await env.db
+      .update(deployments)
+      .set({ status: 'canceled' })
+      .where(eq(deployments.id, deployment.id));
+    const resumedPages = await applyDrainUntilComplete({
+      PLATFORM_TRAFFIC_STATE: 'sandbox-drain',
+    });
+    const resumed = resumedPages.at(-1)!;
+    const resumedPageBodies = await Promise.all(
+      resumedPages.map(
+        async (response) =>
+          (await response.clone().json()) as { deletedApplications?: Array<string> },
+      ),
+    );
+    expect(resumed.status).toBe(200);
+    expect(await resumed.json()).toMatchObject({
+      ok: true,
+      complete: true,
+      applications: [],
+      blockers: [],
+    });
+    expect(resumedPageBodies.flatMap((body) => body.deletedApplications ?? [])).toContain(
+      application.id,
+    );
+    expect(cf.state.containerApps.has(application.id)).toBe(false);
+    expect(JSON.parse((await env.ROUTING.get(SANDBOX_DRAIN_STATE_KEY))!)).toMatchObject({
+      state: 'complete',
+    });
+    const events = await env.db.select().from(operatorEvents);
+    expect(events).toHaveLength(1 + resumedPages.length);
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({
+        action: 'system/sandbox-drain',
+        target: JSON.stringify({ applications: 'managed-sandbox-containers' }),
+        status: 'success',
+        http_status: 200,
+      }),
+    );
+    expect(events.slice(0, -1).every((event) => event.status === 'failed')).toBe(true);
+  });
+  test('completes an empty drain without probing the Container API', async () => {
+    const cf = mockCfApi();
+    const responses = await applyDrainUntilComplete();
+    const response = responses.at(-1)!;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      complete: true,
+      applications: [],
+      blockers: [],
+    });
+    expect(cf).not.toHaveBeenCalled();
+  });
+  test('projects a bounded Sandbox identity from a large deployment manifest', async () => {
+    const project = await createTestProject(env.db, ownerId, 'sandbox-large-manifest');
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    const unrelatedPayload = `manifest-payload-${'x'.repeat(4 * 1024 * 1024)}`;
+    await env.db
+      .update(deployments)
+      .set({
+        manifest: JSON.stringify({
+          version: 3,
+          bindings: {},
+          vars: { LARGE_UNUSED_VALUE: unrelatedPayload },
+          sandbox: {
+            bindingName: 'SANDBOX',
+            className: 'Sandbox',
+            containerName: 'void-sandbox',
+            image: 'registry.cloudflare.com/sandbox:1.0.0',
+          },
+        }),
+      })
+      .where(eq(deployments.id, deployment.id));
+
+    const rows = await loadSandboxDeploymentPageProjection(env.db, null);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      deploymentId: deployment.id,
+      bindingName: 'SANDBOX',
+      className: 'Sandbox',
+      containerName: 'void-sandbox',
+      identityOversized: false,
+    });
+    expect(Object.keys(rows[0]!)).toEqual([
+      'deploymentId',
+      'projectId',
+      'projectSlug',
+      'active',
+      'rollbackLease',
+      'manifestPresent',
+      'sandboxType',
+      'bindingNameType',
+      'bindingName',
+      'classNameType',
+      'className',
+      'containerNameType',
+      'containerName',
+      'identityOversized',
+      'createdAt',
+    ]);
+    const returnedProjection = JSON.stringify(rows);
+    expect(returnedProjection.length).toBeLessThan(2_000);
+    expect(returnedProjection).not.toContain('manifest-payload-');
+  });
+  test('blocks oversized Sandbox identity metadata before any Container API call', async () => {
+    const project = await createTestProject(env.db, ownerId, 'sandbox-oversized-identity');
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    await env.db
+      .update(deployments)
+      .set({
+        manifest: JSON.stringify({
+          version: 3,
+          bindings: {},
+          sandbox: {
+            bindingName: 'S'.repeat(513),
+            className: 'Sandbox',
+            containerName: 'void-sandbox',
+            image: 'registry.cloudflare.com/sandbox:1.0.0',
+          },
+        }),
+      })
+      .where(eq(deployments.id, deployment.id));
+    const cf = mockCfApi();
+
+    const response = await req('/system/sandbox-drain', {});
+    expect(response.status).toBe(207);
+    expect(await response.json()).toMatchObject({
+      complete: false,
+      blockers: [
+        expect.objectContaining({
+          kind: 'invalid_manifest',
+          deploymentId: deployment.id,
+          message: expect.stringContaining('exceeds 512 characters'),
+        }),
+      ],
+    });
+    expect(cf).not.toHaveBeenCalled();
+  });
+  test('refuses to delete an uncorroborated container resource', async () => {
+    const project = await createTestProject(env.db, ownerId, 'sandbox-unverified');
+    const cf = mockCfApi();
+    const application = cf.seedContainerApp({
+      name: 'unrelated-account-application',
+      namespaceId: 'ns-unrelated',
+    });
+    await env.db.insert(resources).values({
+      id: 'res_unverified_sandbox',
+      project_id: project.id,
+      type: 'container',
+      cf_id: application.id,
+      binding_name: 'SANDBOX',
+    });
+
+    await req('/system/sandbox-drain', {});
+    const response = await req('/system/sandbox-drain', {});
+    expect(response.status).toBe(207);
+    expect(await response.json()).toMatchObject({
+      complete: false,
+      deletedApplications: [],
+      blockers: [
+        expect.objectContaining({
+          kind: 'unverified_container',
+          resourceId: 'res_unverified_sandbox',
+          projectId: project.id,
+          bindingName: 'SANDBOX',
+          applicationId: application.id,
+          applicationName: application.name,
+          resolution: expect.stringContaining('only after proving ownership'),
+        }),
+      ],
+    });
+    expect(cf.state.containerApps.has(application.id)).toBe(true);
+    expect(await env.db.select().from(resources)).toHaveLength(1);
+  });
+  test('does not delete a same-name application after its managed script is missing', async () => {
+    const project = await createTestProject(env.db, ownerId, 'sandbox-missing-script');
+    const deployment = await createTestDeployment(env.db, project.id, 'live');
+    await env.db
+      .update(deployments)
+      .set({
+        manifest: JSON.stringify({
+          version: 3,
+          bindings: {},
+          sandbox: {
+            bindingName: 'SANDBOX',
+            className: 'Sandbox',
+            containerName: 'void-sandbox',
+            image: 'registry.cloudflare.com/sandbox:1.0.0',
+          },
+        }),
+      })
+      .where(eq(deployments.id, deployment.id));
+    const applicationName = `${project.id}-${deployment.id}-void-sandbox`
+      .toLowerCase()
+      .replaceAll('_', '-');
+    const cf = mockCfApi({
+      listWorkerBindings: () =>
+        Response.json(
+          { success: false, errors: [{ message: 'script not found' }] },
+          { status: 404 },
+        ),
+    });
+    const replacement = cf.seedContainerApp({
+      name: applicationName,
+      namespaceId: 'native-or-replacement-namespace',
+    });
+
+    const response = await req('/system/sandbox-drain', {});
+    expect(response.status).toBe(207);
+    expect(await response.json()).toMatchObject({
+      complete: false,
+      blockers: [
+        expect.objectContaining({
+          kind: 'unverified_container',
+          applicationId: replacement.id,
+          deploymentId: deployment.id,
+        }),
+      ],
+    });
+    expect(cf.state.containerApps.has(replacement.id)).toBe(true);
+  });
+  test('advances a durable cursor through more than one deployment page', async () => {
+    const project = await createTestProject(env.db, ownerId, 'sandbox-many-deployments');
+    for (let index = 0; index < 17; index++) {
+      await createTestDeployment(env.db, project.id, 'live');
+    }
+    const cf = mockCfApi();
+
+    const plan = await req('/system/sandbox-drain', { dryRun: true });
+    const planBody = (await plan.json()) as { nextCursor: string; processed: number };
+    expect(planBody.processed).toBe(16);
+    expect(typeof planBody.nextCursor).toBe('string');
+    const nextPlan = await req('/system/sandbox-drain', {
+      dryRun: true,
+      cursor: planBody.nextCursor,
+    });
+    expect(await nextPlan.json()).toMatchObject({ processed: 1, phase: 'deployments' });
+    expect(await env.db.select().from(sandboxDrainCheckpoints)).toEqual([]);
+
+    const first = await req('/system/sandbox-drain', {});
+    expect(first.status).toBe(207);
+    const firstBody = (await first.json()) as {
+      truncated: boolean;
+      processed: number;
+      checkpoint: { cursor: { id: string } };
+    };
+    expect(firstBody).toMatchObject({ truncated: true, processed: 16, complete: false });
+
+    const second = await req('/system/sandbox-drain', {});
+    expect(second.status).toBe(207);
+    const secondBody = (await second.json()) as {
+      processed: number;
+      checkpoint: { cursor: { id?: string }; phase: string };
+    };
+    expect(secondBody).toMatchObject({ processed: 1, complete: false });
+    expect(secondBody.checkpoint.phase).toBe('resources');
+    expect(secondBody.checkpoint.cursor.id).toBeUndefined();
+    expect(cf).not.toHaveBeenCalled();
   });
 });

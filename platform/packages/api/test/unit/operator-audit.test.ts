@@ -44,6 +44,10 @@ describe('operator audit intent normalization', () => {
       },
       { action: 'system/backfill-queue-tokens', target: { entries: 'queue:*' } },
       {
+        action: 'system/sandbox-drain',
+        target: { applications: 'managed-sandbox-containers' },
+      },
+      {
         action: 'workers/api/rollback',
         body: { environment: 'staging', versionId: 'ver_1' },
         target: { workerName: 'api', environment: 'staging', versionId: 'ver_1' },

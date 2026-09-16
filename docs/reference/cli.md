@@ -477,11 +477,23 @@ void platform system health
 void platform system cli-versions
 void platform system events [--page <n>] [--limit <n>]
 void platform system backfill-queue-tokens
+void platform system sandbox-drain [--cursor <opaque-cursor>]
 ```
 
 `overview` shows platform totals and recent activity. `health` checks the configured services and database, and exits with a nonzero status if a check fails. `cli-versions` reports the CLI versions used by deployments.
 
 `events` shows the administrator, target, and outcome of changes. A pending event means the outcome has not been recorded. Previews and session login/logout do not create these events. `backfill-queue-tokens` repairs older queue entries that are missing authentication tokens and supports `--plan` before applying the repair.
+
+`sandbox-drain` is the resumable shutdown protocol for the paused managed
+Sandbox beta. Use `--plan` to inspect one bounded page of active deployments,
+deployment manifests, container resources, and verified container applications.
+Pass its `nextCursor` back with `--cursor` to preview later pages. Apply the
+command, wait for any canceled deployments to settle, and rerun until its
+database-backed checkpoint reports `complete: true`. The platform lifecycle
+remains closed while pages, blockers, or unverified applications remain. Normal
+operator login, session elevation, CLI token minting, and logout remain
+available with their existing authentication checks; application and deployment
+routes remain closed.
 
 #### Hosted Workers {#operator-workers}
 

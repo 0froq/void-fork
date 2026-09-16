@@ -129,6 +129,7 @@ export const deployments = pgTable(
   (table) => [
     index('idx_deployments_project_id').on(table.project_id, table.created_at),
     index('idx_deployments_project_status').on(table.project_id, table.status),
+    index('idx_deployments_created_id').on(table.created_at, table.id),
   ],
 );
 
@@ -334,6 +335,20 @@ export const operatorEvents = pgTable(
   },
   (table) => [index('idx_operator_events_created').on(table.created_at, table.id)],
 );
+
+/** Authoritative, serialized checkpoint for the managed Sandbox shutdown. */
+export const sandboxDrainCheckpoints = pgTable('sandbox_drain_checkpoints', {
+  singleton: boolean('singleton').primaryKey(),
+  generation: text('generation').notNull(),
+  state: text('state').notNull().$type<'draining' | 'complete'>(),
+  phase: text('phase').notNull().$type<'deployments' | 'resources'>(),
+  cursor: jsonb('cursor').$type<Record<string, string> | null>(),
+  lease_owner: text('lease_owner'),
+  lease_expires_at: timestamp('lease_expires_at', { mode: 'string' }),
+  started_at: timestamp('started_at', { mode: 'string' }).notNull().defaultNow(),
+  updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
+  completed_at: timestamp('completed_at', { mode: 'string' }),
+});
 
 // ---------------------------------------------------------------------------
 // platform_events (audit log for admin platform rollbacks)

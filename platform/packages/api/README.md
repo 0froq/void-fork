@@ -130,6 +130,15 @@ partial external failures report completed work instead of silently retrying.
 Requests are bounded to 32 KiB, list pages to 100 rows, and responses disable
 caching.
 
+Managed Sandbox disablement uses `void platform system sandbox-drain`. The
+preview inventories bounded pages of deployment manifests and container
+resources without writing. Apply closes the activation gate, cancels active
+Sandbox deployments, and deletes only container applications corroborated by a
+managed dispatch binding. A leased PostgreSQL checkpoint advances each page and
+requires two passes, so incomplete and concurrent runs resume without accepting
+stale completion. A probe-authenticated installer preflight trusts that database
+checkpoint; platform activation must remain closed until it reports complete.
+
 Integration tests cover operator authentication, tenant operations, operational
 parity, dry runs, and capability guards in `test/integration/operator-*.test.ts`.
 

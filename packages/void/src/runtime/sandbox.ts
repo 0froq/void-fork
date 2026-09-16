@@ -49,6 +49,15 @@ export class SandboxLimitError extends Error {
   }
 }
 
+/** Managed platform Sandbox is unavailable or its activation gate cannot be verified. */
+export class SandboxUnavailableError extends Error {
+  override readonly name = 'SandboxUnavailableError';
+
+  constructor(message = 'Managed Sandbox is unavailable on this Void platform.') {
+    super(message);
+  }
+}
+
 let sandboxBindingName = DEFAULT_SANDBOX_BINDING;
 
 export function __setSandboxBindingName(bindingName: string): void {
@@ -112,18 +121,28 @@ async function emitRuntimeSeconds(
 
 /**
  * Resolve the `{ gate, projectId, aiToken }` triple needed to call a gate
- * route. Returns `null` when any piece is missing — local dev (no proxy
- * binding) and partial deploys (binding present but identity vars absent)
- * both fall through to the no-op path so a missing platform setup never
- * blocks sandbox acquisition.
+ * route. Returns `null` when any piece is missing. The caller distinguishes a
+ * native deployment with no reserved bindings from a partial managed identity,
+ * which must fail closed.
  *
  * Wire field is named `aiToken` because the shared proxy auth middleware
  * (packages/proxy/src/index.ts) verifies HMAC against `body.aiToken` for
  * every route. Naming it `proxyToken` here would diverge from the existing
  * AI/ISR convention without changing the on-the-wire contract.
  */
-function resolveGateIdentity(): { gate: Fetcher; projectId: string; aiToken: string } | null {
-  const runtimeEnv = getRawRuntimeEnv();
+type SandboxGateIdentity = { gate: Fetcher; projectId: string; aiToken: string };
+
+function isManagedPlatformSandbox(runtimeEnv: Record<string, unknown>): boolean {
+  return [
+    SANDBOX_GATE_BINDING,
+    '__PROJECT_ID',
+    '__VOID_PROXY_TOKEN',
+    '__VOID_USER_ID',
+    '__VOID_PROJECT_SLUG',
+  ].some((binding) => runtimeEnv[binding] !== undefined);
+}
+
+function resolveGateIdentity(runtimeEnv = getRawRuntimeEnv()): SandboxGateIdentity | null {
   const gate = runtimeEnv[SANDBOX_GATE_BINDING] as Fetcher | undefined;
   if (!gate) {
     return null;
@@ -134,6 +153,53 @@ function resolveGateIdentity(): { gate: Fetcher; projectId: string; aiToken: str
     return null;
   }
   return { gate, projectId, aiToken };
+}
+
+async function acquireManagedSandbox(
+  sandboxId: string,
+  runtimeEnv = getRawRuntimeEnv(),
+): Promise<void> {
+  if (!isManagedPlatformSandbox(runtimeEnv)) {
+    // A native Cloudflare deploy has no Void platform identity. Preserve the
+    // upstream SDK behavior for that path.
+    return;
+  }
+  const identity = resolveGateIdentity(runtimeEnv);
+  if (!identity) {
+    throw new SandboxUnavailableError(
+      'Managed Sandbox activation could not verify the platform identity bindings.',
+    );
+  }
+
+  let response: Response;
+  try {
+    response = await identity.gate.fetch('https://gate/sandbox/acquire', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectId: identity.projectId,
+        aiToken: identity.aiToken,
+        sandboxId,
+      }),
+    });
+  } catch {
+    throw new SandboxUnavailableError(
+      'Managed Sandbox activation could not reach the platform gate.',
+    );
+  }
+  if (response.status === 409) {
+    const body = (await response.json().catch(() => ({}))) as { reason?: string };
+    const reason =
+      body.reason === 'concurrency' || body.reason === 'runtime_budget'
+        ? body.reason
+        : 'concurrency';
+    throw new SandboxLimitError(reason);
+  }
+  if (!response.ok) {
+    throw new SandboxUnavailableError(
+      `Managed Sandbox activation was rejected by the platform gate (HTTP ${response.status}).`,
+    );
+  }
 }
 
 /**
@@ -214,6 +280,14 @@ function notifyGateRefresh(ctx: DurableObjectState): Promise<void> {
  */
 export class VoidPlatformSandbox<Env = unknown> extends Sandbox<Env> {
   override async onStart(): Promise<void> {
+    // This lifecycle check is deliberate duplication of getSandbox(). Legacy
+    // code can address a raw Durable Object stub without calling the SDK
+    // helper; no container may start until the managed gate approves it.
+    await acquireManagedSandbox(
+      getSandboxInstanceId(this.ctx),
+      this.env as Record<string, unknown>,
+    );
+
     const now = Date.now();
     const stored = await this.ctx.storage.get<number>([
       STORAGE_KEY_START_TS,
@@ -338,13 +412,11 @@ export class VoidPlatformSandbox<Env = unknown> extends Sandbox<Env> {
  * body the shared proxy auth middleware expects. A `409` response means the
  * user has exceeded a budget — we throw `SandboxLimitError` so the caller
  * can render a clear message. Any other non-OK status (or a thrown transport
- * error from the service binding) is treated as "gate unavailable" and we
- * fall through to returning the stub so a broken gate doesn't break sandbox
- * access entirely.
+ * error from the service binding) fails closed before returning a usable
+ * managed stub.
  *
- * When the gate binding is absent (local dev) or the identity vars are
- * missing (partial deploy), the gate check is skipped entirely and we
- * return the stub directly.
+ * When all reserved platform identity bindings are absent, this is a native
+ * Cloudflare or local deployment and returns the upstream stub directly.
  *
  * The stub is constructed BEFORE calling the gate so we can pass its opaque,
  * namespace-specific Durable Object id (`stub.id.toString()`) as `sandboxId`.
@@ -370,35 +442,7 @@ export async function getSandbox<T extends Sandbox = Sandbox>(
   // key an account-wide concurrency counter.
   const sandboxId = (stub as unknown as DurableObjectStub).id.toString();
 
-  const identity = resolveGateIdentity();
-  if (identity) {
-    try {
-      const res = await identity.gate.fetch('https://gate/sandbox/acquire', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          projectId: identity.projectId,
-          aiToken: identity.aiToken,
-          sandboxId,
-        }),
-      });
-      if (res.status === 409) {
-        const body = (await res.json().catch(() => ({}))) as { reason?: string };
-        const reason =
-          body.reason === 'concurrency' || body.reason === 'runtime_budget'
-            ? body.reason
-            : 'concurrency';
-        throw new SandboxLimitError(reason);
-      }
-      // Non-OK non-409 falls through: a broken gate must not block sandbox
-      // acquisition; the gate's lease TTL backstops accounting.
-    } catch (error) {
-      if (error instanceof SandboxLimitError) {
-        throw error;
-      }
-      // Transport errors get the same fail-open treatment as a non-OK response.
-    }
-  }
+  await acquireManagedSandbox(sandboxId);
 
   return stub;
 }

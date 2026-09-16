@@ -2,6 +2,8 @@ import { PLATFORM_DISABLED_KEY } from '@void/platform';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vite-plus/test';
 import app from '../../src/index.ts';
+import { SANDBOX_DRAIN_STATE_KEY } from '../../src/sandbox-drain.ts';
+import { sandboxDrainCheckpoints } from '../../src/schema.ts';
 import { USAGE_SIGNING_KEY_KV_KEY } from '../../src/usage-auth.ts';
 import { setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
 
@@ -61,6 +63,99 @@ describe('GET /health', () => {
     });
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'Platform disabled' });
+  });
+
+  it('keeps public API traffic closed during a Sandbox drain', async () => {
+    const res = await app.fetch(new Request('http://localhost/health'), {
+      ...env,
+      PLATFORM_TRAFFIC_STATE: 'sandbox-drain',
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'Platform disabled' });
+  });
+
+  it('admits the authenticated installer Sandbox drain preflight during maintenance', async () => {
+    const res = await app.fetch(
+      new Request('http://localhost/internal/platform/sandbox-drain', {
+        headers: { 'X-Void-Platform-Probe': 'probe-token' },
+      }),
+      {
+        ...env,
+        PLATFORM_TRAFFIC_STATE: 'sandbox-drain',
+        PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      version: 1,
+      state: 'required',
+      generation: null,
+      complete: false,
+      updatedAt: null,
+      phase: null,
+    });
+  });
+
+  it('does not trust a stale complete KV mirror without a DB checkpoint', async () => {
+    await env.ROUTING.put(
+      SANDBOX_DRAIN_STATE_KEY,
+      JSON.stringify({
+        version: 1,
+        generation: 'stale-generation',
+        state: 'complete',
+        startedAt: '2026-09-16T00:00:00.000Z',
+        updatedAt: '2026-09-16T00:01:00.000Z',
+        completedAt: '2026-09-16T00:01:00.000Z',
+      }),
+    );
+    try {
+      const res = await app.fetch(
+        new Request('http://localhost/internal/platform/sandbox-drain', {
+          headers: { 'X-Void-Platform-Probe': 'probe-token' },
+        }),
+        {
+          ...env,
+          PLATFORM_TRAFFIC_STATE: 'sandbox-drain',
+          PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
+        },
+      );
+      expect(await res.json()).toMatchObject({ state: 'required', complete: false });
+    } finally {
+      await env.ROUTING.delete(SANDBOX_DRAIN_STATE_KEY);
+    }
+  });
+
+  it('fails the installer preflight closed when the database checkpoint is invalid', async () => {
+    await env.db.insert(sandboxDrainCheckpoints).values({
+      singleton: true,
+      generation: 'invalid-generation',
+      state: 'complete',
+      phase: 'deployments',
+      cursor: { pass: 'invalid' },
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await app.fetch(
+        new Request('http://localhost/internal/platform/sandbox-drain', {
+          headers: { 'X-Void-Platform-Probe': 'probe-token' },
+        }),
+        {
+          ...env,
+          PLATFORM_TRAFFIC_STATE: 'sandbox-drain',
+          PLATFORM_HEALTH_PROBE_TOKEN: 'probe-token',
+        },
+      );
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({
+        version: 1,
+        state: 'invalid',
+        complete: false,
+        checkpoint: 'sandbox_drain_checkpoints',
+      });
+    } finally {
+      error.mockRestore();
+      await env.db.delete(sandboxDrainCheckpoints);
+    }
   });
 
   it('admits installer health checks while public traffic is disabled', async () => {

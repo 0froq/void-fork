@@ -828,7 +828,7 @@ export function voidPlugin(options?: {
     'void/storage': 'export const storage = {}; export const createStorage = () => ({});',
     'void/isr': 'export const revalidate = async () => {};',
     // Client stub must mirror the real runtime/sandbox.ts surface so any
-    // client-side `instanceof SandboxLimitError` check doesn't crash with a
+    // client-side `instanceof` check for either runtime error doesn't crash with a
     // TypeError, and async `await getSandbox(...)` callers don't silently
     // mis-handle a sync return. Throwing here makes accidental client imports
     // fail loudly rather than returning a misleading bare `{}`.
@@ -838,6 +838,12 @@ export function voidPlugin(options?: {
           super(message ?? 'Sandbox limit reached: ' + reason);
           this.name = 'SandboxLimitError';
           this.reason = reason;
+        }
+      }
+      export class SandboxUnavailableError extends Error {
+        constructor(message = 'Managed Sandbox is unavailable on this Void platform.') {
+          super(message);
+          this.name = 'SandboxUnavailableError';
         }
       }
       export async function getSandbox() {

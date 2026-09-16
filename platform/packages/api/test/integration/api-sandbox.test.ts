@@ -9,6 +9,20 @@ import {
   afterEach,
   vi,
 } from 'vite-plus/test';
+
+vi.mock('../../src/capabilities.ts', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/capabilities.ts')>();
+  return {
+    ...original,
+    getPlatformCapabilities(env: { PLATFORM_CAPABILITIES?: string }) {
+      // Keep exercising the dormant provisioning, rollback, and cleanup
+      // implementation. Production hard-disable behavior has a separate
+      // integration test that imports the unmocked capability resolver.
+      return { ...original.getPlatformCapabilities(env), sandbox: true };
+    },
+  };
+});
+
 import { markDeploymentRetained } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { deployments, projects, resources } from '../../src/schema.ts';

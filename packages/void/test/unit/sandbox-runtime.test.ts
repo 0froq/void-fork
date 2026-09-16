@@ -285,10 +285,10 @@ describe('runtime sandbox: getSandbox()', () => {
     );
   });
 
-  it('falls through and returns the DO stub when the gate responds non-409 non-OK (fail-open)', async () => {
+  it('fails closed when the managed gate responds non-409 non-OK', async () => {
     vi.resetModules();
     const { envContext } = await import('../../src/runtime/env-raw.ts');
-    const { getSandbox } = await import('../../src/runtime/sandbox.ts');
+    const { getSandbox, SandboxUnavailableError } = await import('../../src/runtime/sandbox.ts');
 
     const stub = {
       __fail_open: true,
@@ -309,10 +309,7 @@ describe('runtime sandbox: getSandbox()', () => {
         __VOID_PROXY_TOKEN: 'token-1',
       },
       async () => {
-        // Documents the deliberate fail-open behaviour: a broken gate must not
-        // block sandbox acquisition. The gate's lease TTL backstops accounting.
-        const result = await getSandbox('sb-any');
-        expect(result).toBe(stub);
+        await expect(getSandbox('sb-any')).rejects.toBeInstanceOf(SandboxUnavailableError);
       },
     );
 
@@ -320,10 +317,10 @@ describe('runtime sandbox: getSandbox()', () => {
     expect(stubFn).toHaveBeenCalledOnce();
   });
 
-  it('falls through and returns the DO stub when the gate fetch throws (fail-open on transport error)', async () => {
+  it('fails closed when the managed gate fetch throws', async () => {
     vi.resetModules();
     const { envContext } = await import('../../src/runtime/env-raw.ts');
-    const { getSandbox } = await import('../../src/runtime/sandbox.ts');
+    const { getSandbox, SandboxUnavailableError } = await import('../../src/runtime/sandbox.ts');
 
     const stub = {
       __fail_open_throw: true,
@@ -332,10 +329,6 @@ describe('runtime sandbox: getSandbox()', () => {
     const stubFn = vi.fn((..._args: ReadonlyArray<unknown>) => stub);
     getSandboxImpl = stubFn;
 
-    // Service-binding transport errors (proxy unreachable, internal throw)
-    // must NOT block sandbox acquisition — same fail-open intent as a 500
-    // response. Only the explicit 409 → SandboxLimitError signal should
-    // propagate to the caller.
     const gateFetch = vi.fn(async (..._args: ReadonlyArray<unknown>) => {
       throw new Error('service binding unreachable');
     });
@@ -348,8 +341,7 @@ describe('runtime sandbox: getSandbox()', () => {
         __VOID_PROXY_TOKEN: 'token-1',
       },
       async () => {
-        const result = await getSandbox('sb-throw');
-        expect(result).toBe(stub);
+        await expect(getSandbox('sb-throw')).rejects.toBeInstanceOf(SandboxUnavailableError);
       },
     );
 
@@ -418,10 +410,10 @@ describe('runtime sandbox: getSandbox()', () => {
     expect(acquireBody.sandboxId).toBe(releaseBody.sandboxId);
   });
 
-  it('skips the gate call and returns the DO stub when __VOID_PROXY_TOKEN is missing', async () => {
+  it('fails closed when a managed deployment is missing an identity binding', async () => {
     vi.resetModules();
     const { envContext } = await import('../../src/runtime/env-raw.ts');
-    const { getSandbox } = await import('../../src/runtime/sandbox.ts');
+    const { getSandbox, SandboxUnavailableError } = await import('../../src/runtime/sandbox.ts');
 
     const stub = {
       __no_token: true,
@@ -434,10 +426,6 @@ describe('runtime sandbox: getSandbox()', () => {
       async (..._args: ReadonlyArray<unknown>) => new Response(null, { status: 200 }),
     );
 
-    // Mirrors a partial / legacy deploy: the proxy service binding is wired
-    // up but the HMAC identity vars never landed. Without those we can't
-    // form an authenticated request, so we must skip the gate entirely
-    // (same no-op semantics as local dev with no proxy binding).
     await envContext.run(
       {
         SANDBOX: { __ns: true },
@@ -446,8 +434,7 @@ describe('runtime sandbox: getSandbox()', () => {
         // __VOID_PROXY_TOKEN intentionally absent
       },
       async () => {
-        const result = await getSandbox('sb-skip');
-        expect(result).toBe(stub);
+        await expect(getSandbox('sb-skip')).rejects.toBeInstanceOf(SandboxUnavailableError);
       },
     );
 
@@ -466,6 +453,32 @@ describe('runtime sandbox: VoidPlatformSandbox', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('blocks a raw managed Durable Object start when the gate disables Sandbox', async () => {
+    vi.resetModules();
+    const { envContext } = await import('../../src/runtime/env-raw.ts');
+    const { VoidPlatformSandbox, SandboxUnavailableError } =
+      await import('../../src/runtime/sandbox.ts');
+    const { Sandbox } = await import('@cloudflare/sandbox');
+    const upstreamStart = vi.spyOn(
+      Sandbox.prototype as { onStart: () => Promise<void> },
+      'onStart',
+    );
+    const gateFetch = vi.fn(async () => new Response('managed Sandbox disabled', { status: 501 }));
+    const env = {
+      __VOID_PROXY: { fetch: gateFetch },
+      __PROJECT_ID: 'proj-disabled',
+      __VOID_PROXY_TOKEN: 'token-disabled',
+    };
+
+    await envContext.run(env, async () => {
+      const sandbox = new VoidPlatformSandbox(createMockCtx('raw-disabled') as never, env as never);
+      await expect(sandbox.onStart()).rejects.toBeInstanceOf(SandboxUnavailableError);
+    });
+
+    expect(gateFetch).toHaveBeenCalledOnce();
+    expect(upstreamStart).not.toHaveBeenCalled();
   });
 
   it('onStart() records start timestamp in storage even when no usage queue is bound', async () => {
@@ -551,8 +564,9 @@ describe('runtime sandbox: VoidPlatformSandbox', () => {
     // hook handed us one and lets us assert on the in-flight fetch.
     expect(ctx._waitUntilTasks.length).toBe(1);
     await Promise.all(ctx._waitUntilTasks);
-    expect(gateFetch).toHaveBeenCalledOnce();
-    const releaseCall = gateFetch.mock.calls[0];
+    expect(gateFetch).toHaveBeenCalledTimes(2);
+    expect(gateFetch.mock.calls[0][0]).toBe('https://gate/sandbox/acquire');
+    const releaseCall = gateFetch.mock.calls[1];
     expect(releaseCall[0]).toBe('https://gate/sandbox/release');
     // Same {projectId, aiToken, sandboxId} contract as /acquire — the shared
     // proxy auth middleware protects both routes.
@@ -703,8 +717,9 @@ describe('runtime sandbox: VoidPlatformSandbox', () => {
     expect(ctx._waitUntilTasks.length).toBe(1);
     await Promise.all(ctx._waitUntilTasks);
 
-    expect(gateFetch).toHaveBeenCalledOnce();
-    const refreshCall = gateFetch.mock.calls[0];
+    expect(gateFetch).toHaveBeenCalledTimes(2);
+    expect(gateFetch.mock.calls[0][0]).toBe('https://gate/sandbox/acquire');
+    const refreshCall = gateFetch.mock.calls[1];
     expect(refreshCall[0]).toBe('https://gate/sandbox/refresh');
     const refreshInit = refreshCall[1] as RequestInit;
     expect(refreshInit.method).toBe('POST');
@@ -751,8 +766,9 @@ describe('runtime sandbox: VoidPlatformSandbox', () => {
     expect(ctx._waitUntilTasks.length).toBe(1);
     await Promise.all(ctx._waitUntilTasks);
 
-    expect(gateFetch).toHaveBeenCalledOnce();
-    const releaseCall = gateFetch.mock.calls[0];
+    expect(gateFetch).toHaveBeenCalledTimes(2);
+    expect(gateFetch.mock.calls[0][0]).toBe('https://gate/sandbox/acquire');
+    const releaseCall = gateFetch.mock.calls[1];
     expect(releaseCall[0]).toBe('https://gate/sandbox/release');
     const releaseInit = releaseCall[1] as RequestInit;
     expect(JSON.parse(releaseInit.body as string)).toEqual({

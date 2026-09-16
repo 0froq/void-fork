@@ -104,6 +104,9 @@ function auditTarget(
   if (segments[0] === 'system' && segments[1] === 'backfill-queue-tokens') {
     return JSON.stringify({ entries: 'queue:*' });
   }
+  if (segments[0] === 'system' && segments[1] === 'sandbox-drain') {
+    return JSON.stringify({ applications: 'managed-sandbox-containers' });
+  }
   if (segments[0] === 'workers') {
     const environment = boundedString(body.environment ?? platformEnvironment, 512) ?? 'production';
     if (segments[1] === 'rollback-all') {

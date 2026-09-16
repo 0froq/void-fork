@@ -188,7 +188,7 @@ const DESTRUCTIVE_PRAGMA = '-- void:allow-destructive';
  */
 class RollbackError extends Error {
   constructor(
-    public readonly status: 400 | 404 | 409,
+    public readonly status: 400 | 404 | 409 | 501,
     message: string,
     /**
      * For destructive-rollback rejections, we surface the server-computed
@@ -879,6 +879,16 @@ const app = new Hono<ApiEnv>()
     if (!preCheck.retained) {
       return context.json({ error: 'deployment not retained (worker script evicted)' }, 400);
     }
+    if (
+      preCheck.manifest &&
+      (JSON.parse(preCheck.manifest) as DeployManifest).sandbox &&
+      !getPlatformCapabilities(context.env).sandbox
+    ) {
+      return context.json(
+        { error: 'This Void platform does not enable rollback to Sandbox deployments.' },
+        501,
+      );
+    }
 
     const planLimits = getPlanLimits(context.get('user').plan);
 
@@ -1029,6 +1039,16 @@ const app = new Hono<ApiEnv>()
           }
           if (!target.retained) {
             throw new RollbackError(400, 'deployment not retained (worker script evicted)');
+          }
+          if (
+            target.manifest &&
+            (JSON.parse(target.manifest) as DeployManifest).sandbox &&
+            !getPlatformCapabilities(context.env).sandbox
+          ) {
+            throw new RollbackError(
+              501,
+              'This Void platform does not enable rollback to Sandbox deployments.',
+            );
           }
 
           // Re-read project so `active_deployment_id` and `type` reflect

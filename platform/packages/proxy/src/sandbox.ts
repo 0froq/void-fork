@@ -87,8 +87,8 @@ function sandboxLeaseId(projectId: string, sandboxId: string): string {
  *   3. KV runtime-budget block (cheap, single KV read)
  *   4. DO concurrency claim (expensive, cross-script DO RPC)
  *
- * Any unhandled error falls through to 500 so the framework's fail-open
- * branch lets the sandbox run rather than blocking on a proxy hiccup.
+ * Any unhandled error returns 500. The managed runtime treats that response
+ * as an unavailable gate and refuses to start the Sandbox.
  */
 app.post('/acquire', async (context) => {
   const projectId = context.get('projectId');
@@ -199,7 +199,7 @@ app.post('/release', async (context) => {
       // `packages/api/src/provisioning/cleanup.ts`). This branch fires only on
       // KV-propagation misses immediately after the first deploy of a brand-new
       // project — in which case the corresponding `/sandbox/acquire` also missed
-      // and fail-opened without counting a slot, so there's nothing to release.
+      // before counting a slot, so there's nothing to release.
       return new Response(null, { status: 204 });
     }
 

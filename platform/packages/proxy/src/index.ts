@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { ai } from './ai.ts';
 import { asNumber, asString, isProxyBody } from './body.ts';
+import { proxyCapabilityEnabled } from './capabilities.ts';
 import { d1 } from './d1.ts';
 import { routeInbound } from './email-router.ts';
 import { email, MAX_RECIPIENT_LENGTH, MAX_SENDER_LENGTH } from './email.ts';
@@ -25,6 +26,7 @@ app.use('/*', async (context, next) => {
   if (
     !installerProbe &&
     (context.env.PLATFORM_TRAFFIC_STATE === 'staging' ||
+      context.env.PLATFORM_TRAFFIC_STATE === 'sandbox-drain' ||
       (context.env.PLATFORM_INSTALLATION_ID &&
         (await context.env.ROUTING.get(PLATFORM_DISABLED_KEY)) === PLATFORM_DISABLED_VALUE))
   ) {
@@ -333,23 +335,6 @@ export default {
     await routeInbound(message, env, ctx);
   },
 };
-
-function proxyCapabilityEnabled(value: string | undefined, capability: string): boolean {
-  if (!value) {
-    return true;
-  }
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return (
-      !!parsed &&
-      typeof parsed === 'object' &&
-      !Array.isArray(parsed) &&
-      (parsed as Record<string, unknown>)[capability] === true
-    );
-  } catch {
-    return false;
-  }
-}
 
 // --- HMAC verification ---
 
