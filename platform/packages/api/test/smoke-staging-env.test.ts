@@ -158,6 +158,7 @@ describe('staging kitchen-sink fixture env', () => {
       } else {
         expect(result.status).toBe(1);
         expect(result.stderr).toContain('Staging kitchen-sink fixture setup failed.');
+        expect(result.stderr).toContain('Failed while setting APP_NAME (HTTP 500).');
       }
       expect(result.stdout + result.stderr).not.toContain('MUST_NOT_LOG_');
       expect(result.stdout + result.stderr).not.toContain('fake-token');

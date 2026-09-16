@@ -15,17 +15,22 @@ type Client = {
 export async function initializeStagingEnv(
   client: Client,
   validate: (entries: Array<Secret>) => Promise<void>,
+  onStep: (step: string) => void = () => {},
 ): Promise<Array<string>> {
+  onStep('checking the staging API');
   if (client.apiUrl !== STAGING_API) {
     throw new Error('Kitchen-sink fixture setup requires the staging API.');
   }
+  onStep('listing projects');
   const projects = (await client.listProjects()).filter((project) => project.slug === PROJECT_SLUG);
+  onStep('selecting the kitchen-sink project');
   if (projects.length !== 1) {
     throw new Error(
       'Kitchen-sink fixture setup requires exactly one existing kitchen-sink project.',
     );
   }
   const projectId = projects[0].id;
+  onStep('listing secret names');
   const existing = new Set((await client.listSecrets(projectId)).map((secret) => secret.name));
   const entries: Array<Secret> = [];
   for (const name of ['APP_NAME', 'SECRET_KEY', 'API_URL']) {
@@ -45,8 +50,10 @@ export async function initializeStagingEnv(
     return [];
   }
   // Validate the whole batch before any write, like `void secret sync`.
+  onStep('validating env.ts');
   await validate(entries);
   for (const { name, value } of entries) {
+    onStep(`setting ${name}`);
     await client.setSecret(projectId, name, value);
   }
   return entries.map(({ name }) => name);

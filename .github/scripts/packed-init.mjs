@@ -24,12 +24,14 @@ export function runPty(
       : ['-q', '-e', '-f', '-c', command, '/dev/null'];
 
   return new Promise((resolveRun, reject) => {
-    // Node's piped stdin is a socket pair on macOS; BSD script requires a real
-    // pipe or terminal. Process substitution bridges stdin without delaying
-    // script's exit while an input-copy process is waiting for another prompt.
+    // BSD script needs a real pipe instead of Node's macOS socket pair. Only
+    // bridge stdin there: on Linux the extra cat retains the output descriptors
+    // after script exits, so Node never receives the child's close event.
     const child = spawn(
-      'bash',
-      ['-c', 'exec "$@" < <(cat 2>/dev/null)', 'packed-init', 'script', ...args],
+      process.platform === 'darwin' ? 'bash' : 'script',
+      process.platform === 'darwin'
+        ? ['-c', 'exec "$@" < <(cat 2>/dev/null)', 'packed-init', 'script', ...args]
+        : args,
       {
         cwd,
         env,
