@@ -834,6 +834,8 @@ void db export [--output <path>] [--no-data] [--no-schema] [--table <name>]
 
 Dump the local database as SQL. Outputs to stdout by default (pipeable), or to a file with `--output`.
 
+Data exports preserve SQLite AUTOINCREMENT and PostgreSQL SERIAL counters, including IDs consumed by deleted rows. PostgreSQL schema exports create serial sequences before their tables and restore ownership, constraints, and indexes afterward. `--no-schema` restores counter values into an existing schema; `--no-data` starts counters at their schema-defined starting values.
+
 | Flag              | Purpose                            |
 | ----------------- | ---------------------------------- |
 | `--output <path>` | Write to a file instead of stdout  |

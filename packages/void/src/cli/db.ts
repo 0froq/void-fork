@@ -31,6 +31,12 @@ import { loadLocalEnv } from '../shared/env.ts';
 import { getProxyUrl, getToken } from './auth.ts';
 import { PlatformApiError, PlatformClient } from './client.ts';
 import type { DbArgs } from './db-args.ts';
+import {
+  exportPgConstraints,
+  exportPgSequences,
+  quoteSqlIdentifier,
+  quoteSqlString,
+} from './db-export-sequences.ts';
 import { formatTimestamp } from './gen.ts';
 import { cliTitle, dim, pc } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
@@ -1923,15 +1929,19 @@ async function runExport(
         tables = result.rows.map((row) => String(row.tablename));
       }
 
+      const sequences = await exportPgSequences(client, tables, args);
+      parts.push(...sequences.before);
       for (const table of tables) {
+        const cols = await client.query(
+          `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = $1 AND table_schema = 'public' ORDER BY ordinal_position`,
+          [table],
+        );
+        const names = cols.rows.map((column) => quoteSqlIdentifier(String(column.column_name)));
+        const tableName = `"public".${quoteSqlIdentifier(table)}`;
         if (!args.noSchema) {
           // Get CREATE TABLE statement (simplified — pg_dump would be more complete)
-          const cols = await client.query(
-            `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = $1 AND table_schema = 'public' ORDER BY ordinal_position`,
-            [table],
-          );
           const colDefs = cols.rows.map((column) => {
-            let def = `  "${String(column.column_name)}" ${String(column.data_type)}`;
+            let def = `  ${quoteSqlIdentifier(String(column.column_name))} ${String(column.data_type)}`;
             if (column.is_nullable === 'NO') {
               def += ' NOT NULL';
             }
@@ -1940,11 +1950,16 @@ async function runExport(
             }
             return def;
           });
-          parts.push(`CREATE TABLE "${table}" (\n${colDefs.join(',\n')}\n);`);
+          parts.push(`CREATE TABLE ${tableName} (\n${colDefs.join(',\n')}\n);`);
         }
 
         if (!args.noData) {
-          const rows = await client.query(`SELECT * FROM "${table}"`);
+          // Ask PostgreSQL for its lossless text values. Driver Date conversion
+          // loses timestamp microseconds and introduces the client's time zone;
+          // JSON/large numeric values must not pass through JavaScript coercion.
+          const rows = await client.query(
+            `SELECT ${names.map((name) => `${name}::text AS ${name}`).join(', ')} FROM ${tableName}`,
+          );
           for (const row of rows.rows) {
             const cols = Object.keys(row);
             const vals = cols.map((column) => {
@@ -1957,10 +1972,16 @@ async function runExport(
               }
               return `'${String(value).replace(/'/g, "''")}'`;
             });
-            parts.push(`INSERT INTO "${table}" (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
+            parts.push(
+              `INSERT INTO ${tableName} (${cols.map(quoteSqlIdentifier).join(', ')}) VALUES (${vals.join(', ')});`,
+            );
           }
         }
         parts.push('');
+      }
+      parts.push(...sequences.after);
+      if (!args.noSchema) {
+        parts.push(...(await exportPgConstraints(client, tables)));
       }
     });
 
@@ -2060,7 +2081,8 @@ async function runExport(
           "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '\\_%' ESCAPE '\\' ORDER BY name",
         )
         .all()
-        .map((row) => String(row.name));
+        .map((row) => String(row.name))
+        .filter((name) => !name.startsWith('sqlite_'));
     }
 
     const parts: Array<string> = [];
@@ -2074,7 +2096,9 @@ async function runExport(
       }
 
       if (!args.noData) {
-        const rows = db.prepare(`SELECT * FROM "${table}"`).all() as Array<Record<string, unknown>>;
+        const rows = db.prepare(`SELECT * FROM ${quoteSqlIdentifier(table)}`).all() as Array<
+          Record<string, unknown>
+        >;
         for (const row of rows) {
           const cols = Object.keys(row);
           const vals = cols.map((column) => {
@@ -2087,11 +2111,32 @@ async function runExport(
             }
             return `'${String(value).replace(/'/g, "''")}'`;
           });
-          parts.push(`INSERT INTO "${table}" (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
+          parts.push(
+            `INSERT INTO ${quoteSqlIdentifier(table)} (${cols.map(quoteSqlIdentifier).join(', ')}) VALUES (${vals.join(', ')});`,
+          );
         }
       }
 
       parts.push('');
+    }
+
+    // SQLite creates sqlite_sequence itself when an AUTOINCREMENT table is
+    // restored. Preserve its high-water marks after all table data, including
+    // deleted IDs, without attempting to CREATE this reserved system table.
+    if (
+      !args.noData &&
+      db.prepare("SELECT name FROM sqlite_master WHERE name='sqlite_sequence'").get()
+    ) {
+      const sequences = db
+        .prepare<{ name: string; seq: number }>('SELECT name, seq FROM sqlite_sequence')
+        .all();
+      for (const sequence of sequences) {
+        if (tables.includes(sequence.name)) {
+          const name = quoteSqlString(sequence.name);
+          parts.push(`DELETE FROM sqlite_sequence WHERE name = ${name};`);
+          parts.push(`INSERT INTO sqlite_sequence (name, seq) VALUES (${name}, ${sequence.seq});`);
+        }
+      }
     }
 
     const output = parts.join('\n');
