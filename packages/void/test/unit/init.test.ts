@@ -79,7 +79,7 @@ describe('GitHub Actions deployment workflows', () => {
 function expectPnpmAllowBuilds(root: string): void {
   const yaml = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf-8');
   expect(yaml).toContain('allowBuilds:\n');
-  expect(yaml).toContain('  better-sqlite3: true');
+  expect(yaml).toContain('  better-sqlite3: false');
   expect(yaml).toContain('  esbuild: true');
   expect(yaml).toContain('  sharp: true');
   expect(yaml).toContain('  workerd: true');

@@ -125,7 +125,7 @@ const EMPTY_PROJECT_ALLOWED_ENTRIES = new Set([
   '.zencoder',
 ]);
 
-const PNPM_ALLOWED_BUILDS = ['better-sqlite3', 'esbuild', 'sharp', 'workerd'] as const;
+const PNPM_ALLOWED_BUILDS = ['esbuild', 'sharp', 'workerd'] as const;
 const drizzleKitBin = join(fileURLToPath(import.meta.resolve('drizzle-kit')), '..', 'bin.cjs');
 
 // Dependencies/scripts that can be left behind by a Void Pages starter after
@@ -2208,7 +2208,8 @@ function removeTopLevelYamlBlock(yaml: string, key: string): string {
 }
 
 function pnpmAllowBuildsYaml(): string {
-  const lines = ['allowBuilds:'];
+  // better-sqlite3 13 already ships its Node-API binaries; no native build is needed.
+  const lines = ['allowBuilds:', '  better-sqlite3: false'];
   for (const dependency of PNPM_ALLOWED_BUILDS) {
     lines.push(`  ${dependency}: true`);
   }

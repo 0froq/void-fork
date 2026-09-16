@@ -4,7 +4,7 @@ import { join } from 'pathslash';
 
 export type PM = 'npm' | 'pnpm' | 'yarn' | 'bun';
 
-export const VOID_PNPM_ALLOWED_BUILDS = ['better-sqlite3', 'esbuild', 'sharp', 'workerd'] as const;
+export const VOID_PNPM_ALLOWED_BUILDS = ['esbuild', 'sharp', 'workerd'] as const;
 
 /** Write the explicit build-script policy required by a new pnpm project. */
 export function writePnpmBuildPolicy(root: string, pm: PM): void {
@@ -13,7 +13,9 @@ export function writePnpmBuildPolicy(root: string, pm: PM): void {
   }
   writeFileSync(
     join(root, 'pnpm-workspace.yaml'),
-    `allowBuilds:\n${VOID_PNPM_ALLOWED_BUILDS.map((name) => `  ${name}: true`).join('\n')}\n`,
+    // better-sqlite3 13 ships Node-API binaries and declares gypfile:false.
+    // Match the repository policy instead of invoking pnpm's implicit rebuild.
+    `allowBuilds:\n  better-sqlite3: false\n${VOID_PNPM_ALLOWED_BUILDS.map((name) => `  ${name}: true`).join('\n')}\n`,
   );
 }
 

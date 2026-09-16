@@ -20,7 +20,7 @@ describe('create-void package manager bootstrap', () => {
     writePnpmBuildPolicy(root, 'pnpm');
 
     expect(readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf-8')).toBe(
-      `allowBuilds:\n${VOID_PNPM_ALLOWED_BUILDS.map((name) => `  ${name}: true`).join('\n')}\n`,
+      `allowBuilds:\n  better-sqlite3: false\n${VOID_PNPM_ALLOWED_BUILDS.map((name) => `  ${name}: true`).join('\n')}\n`,
     );
   });
 

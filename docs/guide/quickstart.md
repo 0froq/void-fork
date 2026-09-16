@@ -38,8 +38,10 @@ Then run the setup command:
 
 With pnpm, you can also start with `pnpm create void my-app`; the scaffolder sets
 up the required native build permissions before installing Void. If a manual
-installation reports blocked build scripts, use `pnpm approve-builds` to approve
-`better-sqlite3`, `esbuild`, `sharp`, and `workerd` before running setup.
+installation reports blocked build scripts, approve `esbuild`, `sharp`, and
+`workerd` with `pnpm approve-builds`. Set `better-sqlite3: false` in
+`pnpm-workspace.yaml`'s `allowBuilds`: Void uses version 13's bundled binaries,
+so it does not need a native rebuild.
 
 ::: code-group
 
