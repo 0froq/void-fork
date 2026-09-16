@@ -31,6 +31,7 @@ guard; add no administrator recovery or promotion bypass.
 - [x] Check schema upgrades against an immutable previous runtime and populated data.
 - [ ] Verify packed public packages outside the workspace using public Vite.
 - [x] Pin new projects to the SDK's tested compatibility date instead of today's date.
+- [x] Preserve request-binding module identity in installed-package development.
 - [ ] Define and enforce the supported Node/CLI/platform compatibility contract.
 - [ ] Support native Cloudflare AI development without a Void login.
 - [ ] Safely exclude managed Sandboxes, including retained legacy deployments.
