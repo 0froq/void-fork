@@ -19,6 +19,56 @@ const jobs = [
 ];
 type JobEnv = { calls: Array<string>; fail: boolean };
 
+it('authenticates framework cron HTTP requests while leaving native events usable', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'void-cron-auth-'));
+  roots.push(root);
+  mkdirSync(join(root, 'crons'));
+  writeFileSync(
+    join(root, 'index.mjs'),
+    'export default { fetch() { return new Response("app"); } };',
+  );
+  writeFileSync(
+    join(root, 'crons/job.mjs'),
+    'export default (_controller, env) => { env.calls.push("ran"); };',
+  );
+  await generateWrapper(root, 'index.mjs', root, {
+    auth: null,
+    queues: [],
+    crons: [{ name: 'job', filePath: 'job.mjs', crons: ['* * * * *'] }],
+  });
+  const worker = (await import(pathToFileURL(join(root, 'index.mjs')).href)).default;
+  const request = (token?: string) =>
+    new Request('https://public.example/__void/scheduled', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { 'x-void-internal': token } : {}),
+      },
+      body: JSON.stringify({ cron: '* * * * *', scheduledTime: 1 }),
+    });
+  const calls: Array<string> = [];
+  for (const [bindings, token] of [
+    [{}, undefined],
+    [{}, 'attacker'],
+    [{ CRON_SECRET: '' }, undefined],
+    [{ CRON_SECRET: 'secret' }, undefined],
+    [{ CRON_SECRET: 'secret' }, 'wrong'],
+    [{ __VOID_PROXY_TOKEN: 'proxy', CRON_SECRET: 'secret' }, 'secret'],
+  ] as const) {
+    expect((await worker.fetch(request(token), { ...bindings, calls }, {})).status).toBe(401);
+  }
+  expect(calls).toEqual([]);
+  await worker.scheduled({ cron: '* * * * *', scheduledTime: 1 }, { calls }, {});
+  expect(calls).toEqual(['ran']);
+  for (const [bindings, token] of [
+    [{ CRON_SECRET: 'secret' }, 'secret'],
+    [{ __VOID_PROXY_TOKEN: 'proxy' }, 'proxy'],
+  ] as const) {
+    expect((await worker.fetch(request(token), { ...bindings, calls }, {})).status).toBe(200);
+  }
+  expect(calls).toHaveLength(3);
+});
+
 it.each(['native', 'framework'])(
   '%s executes every matching job once and waits for siblings after failure',
   async (kind) => {

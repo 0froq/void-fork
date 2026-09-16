@@ -509,7 +509,7 @@ function generateWrapperSource(
       lines.push('  if (request.method === "POST" && url.pathname === "/__void/scheduled") {');
       lines.push('    const __token = request.headers.get("x-void-internal");');
       lines.push('    const __expected = env?.__VOID_PROXY_TOKEN || env?.CRON_SECRET;');
-      lines.push('    if (__expected && __token !== __expected) {');
+      lines.push('    if (!__expected || __token !== __expected) {');
       lines.push("      return new Response(JSON.stringify({ error: 'unauthorized' }), {");
       lines.push('        status: 401,');
       lines.push('        headers: { "Content-Type": "application/json" },');

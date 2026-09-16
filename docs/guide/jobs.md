@@ -90,3 +90,5 @@ The endpoint works in native Void apps and supported frameworks. Framework jobs 
 ## Deployment behavior
 
 On deploy, Void includes all discovered job schedules in the deploy manifest and configures worker cron triggers automatically.
+
+Native scheduled events do not require a manual HTTP token. For framework deployments, HTTP requests to `/__void/scheduled` require a matching `x-void-internal` token: the managed platform supplies its proxy token, or you can explicitly configure `CRON_SECRET` for manual calls. An absent or mismatched token returns `401` without running a job.
