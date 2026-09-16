@@ -163,15 +163,11 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
 
       const assetUrl = `${BASE}/${assetMatch![1]}`;
 
-      // `cache: 'no-store'` makes this a NETWORK get, so the assertion reads the
-      // response the platform just produced. Reading the stored entry instead
-      // (plain HEAD after the page load, which is how this test used to run)
-      // reports whatever the browser cached earlier: the dispatch edge cache only
-      // stamps `immutable` on gets to hashed paths, so a conditional HEAD is both
-      // answered from the store and outside the caching contract under test.
-      // Use in-browser fetch (not curl) — CF edge cache rules differ for browser vs non-browser
+      // Read a fresh network GET without application/Access session cookies.
+      // Cookie-bearing requests deliberately bypass the shared asset cache.
+      // The browser context still supplies the Access service-token headers.
       const asset = await page.evaluate(async (url) => {
-        const res = await fetch(url, { cache: 'no-store' });
+        const res = await fetch(url, { cache: 'no-store', credentials: 'omit' });
         return { status: res.status, cacheControl: res.headers.get('cache-control') || '' };
       }, assetUrl);
 
