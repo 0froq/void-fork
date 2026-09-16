@@ -230,7 +230,7 @@ describe('buildPrerenderBindings', () => {
       wranglerVars: {},
       env: {},
       voidToken: null,
-      voidProjectId: undefined,
+      voidProjectId: 'proj',
       voidStaging: false,
       remoteMode: false,
     });
