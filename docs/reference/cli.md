@@ -967,6 +967,8 @@ List production secret names for the saved target. Secret values are never print
 
 ### `void secret put`
 
+On hosted projects, secret writes and deletes return a retryable conflict while a deployment or rollback is in progress. Wait for that operation to finish and retry; the rejected operation leaves the stored secret unchanged.
+
 ```
 void secret put <name> [--project <name>]
 void secret put <name=value> [--project <name>]

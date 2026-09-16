@@ -87,6 +87,7 @@ drizzle/
   - migrations and logs
     - Managed D1 apply submits each migration's SQL and `_void_migrations` insert in one transactional query batch. Retries require a tracking row to establish success; an existing table or column alone is insufficient. Failures retain the confirmed committed prefix in project metadata. Reconcile older untracked schema changes explicitly before retrying.
   - secrets
+    - Secret changes hold the project row lock through active-Worker propagation. A nonterminal deployment or rollback lease returns HTTP 409 before storage changes; retry after that operation completes. Propagation requests time out after 30 seconds so an unavailable upstream cannot hold the project fence indefinitely.
   - domains
   - usage
   - PostgreSQL and MySQL project database provisioning/update
