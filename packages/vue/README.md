@@ -111,7 +111,6 @@ request.
 
 ## Tests
 
-- `test/unit/use-form.test.ts`
 - `test/unit/prefetch.test.ts`
 - `test/integration/vue-pages-client.test.ts`
 

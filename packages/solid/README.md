@@ -115,7 +115,6 @@ request.
 
 ## Tests
 
-- `test/unit/use-form.test.ts`
 - `test/integration/solid-pages-playground.test.ts`
 
 The Solid integration test covers both SSR output and browser-side navigation/forms.

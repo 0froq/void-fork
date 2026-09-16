@@ -219,7 +219,6 @@ export const loader = defineHandler(() => ({ title: 'Home' }));
 
 ## Tests
 
-- `test/unit/use-form.test.ts`
 - `test/unit/link.test.ts`
 - `test/integration/react-pages-client.test.ts`
 

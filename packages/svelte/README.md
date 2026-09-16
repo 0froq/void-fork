@@ -111,7 +111,6 @@ request.
 
 ## Tests
 
-- `test/unit/use-form.test.ts`
 - `test/integration/svelte-pages-client.test.ts`
 
 Cross-package SSR/protocol coverage for Svelte pages mode also lives in `packages/void/test/integration/*`.
