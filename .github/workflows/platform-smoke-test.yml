@@ -66,8 +66,11 @@ jobs:
           VOID_API_URL: https://api.staging.void.cloud
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID_STAGING }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET_STAGING }}
+      - name: Prepare the hosted kitchen-sink fixture
+        id: fixture
+        run: node platform/scripts/kitchen-sink-platform-fixture.ts
       - name: Deploy kitchen-sink
-        working-directory: playground/kitchen-sink
+        working-directory: ${{ steps.fixture.outputs.path }}
         run: node ../../packages/void/dist/cli/cli.mjs deploy --project kitchen-sink
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN_STAGING }}

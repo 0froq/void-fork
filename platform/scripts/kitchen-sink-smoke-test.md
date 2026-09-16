@@ -2,7 +2,7 @@
 
 Use `playground/kitchen-sink` to verify a platform with a disposable app. The automated suite resets the app's database, KV, and storage, then exercises navigation, mutations, authentication, queues, and caching.
 
-Deploy the app to the platform you want to test, then pass its URL explicitly from the repository root:
+Managed Sandboxes are paused. Prepare the hosted fixture with `node platform/scripts/kitchen-sink-platform-fixture.ts`, then deploy the isolated app directory it prints to the platform you want to test. This copy omits the unsupported Sandbox routes and navigation; the original playground and native Cloudflare Sandbox build coverage are preserved. Pass the deployed URL explicitly from the repository root:
 
 ```sh
 vp exec playwright install chromium
