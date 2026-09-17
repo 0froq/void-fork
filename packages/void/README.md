@@ -31,6 +31,8 @@ npm install -D void
 
 If you run `void init` in an empty directory, the scaffold flow adds the matching Pages adapter and Vite+ by default.
 
+Init always writes brief coding-agent instructions to `AGENTS.md`, pointing to `node_modules/void/skills/void/docs/`, and links skills for detected agents. Run `void init --agents` to add or refresh just this setup without choosing an agent.
+
 Then run `npx void init`. In an empty directory, the full interactive flow can scaffold a starter and configure local project files. It then asks where to deploy: Cloudflare (the default) creates or augments `wrangler.jsonc`, handles secure browser sign-in through Void's bundled tooling, and saves the selected account; Void asks for the API URL of an explicitly connected company platform (`void connect <url>` or `void platform install`). Back up `~/.void/platforms/` after installing a company platform because its owner-only recovery material contains runtime keys that Cloudflare cannot return. The next app step is just `npx void deploy`. Auth-enabled deploys preserve an existing `BETTER_AUTH_SECRET` or create a persistent encrypted secret when missing on either platform. Root `.env` is local-only; production server keys declared in `env.ts` use encrypted remote secret storage and are rejected as plaintext Worker vars. In an existing app, init configures Void in place by adding missing Vite scripts and creating or patching `vite.config.*` with `voidPlugin()`.
 
 ```ts

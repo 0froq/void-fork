@@ -29,8 +29,7 @@ The `void` package on npm has these previous versions: '0.0.1', '0.1.0', '0.1.2'
     - affected packages's `README.md` or `AGENTS.md`
     - relevant docs md files in `docs`
     - `packages/void/skills/void` (if change affects skill/CLI guidance)
-    - `packages/void/AGENT_PROMPT.md`
-    - `packages/void/getting-started-prompt.txt`
+    - `packages/void/AGENTS_TEMPLATE.md` (keep at most four brief bullets; detailed guidance belongs in docs)
 - When adding new CLI commands, always remember to update the following:
   - CLI help message
   - The hint message for command groups in the interactive list when running `void` with no args
@@ -99,7 +98,7 @@ The `void` package contains two parts:
 - **`deploy`** — builds, validates migrations, and deploys to the configured Cloudflare or Void target
 - **`platform`** — installs, maintains, and administers a self-hosted Void platform
 - **`gen`** — scaffolds models, routes, middleware, SSR entries, cron jobs, and queue consumers
-- **`init`** — sets up agent instructions, skills, and reference prompts for coding agents
+- **`init`** — sets up `AGENTS.md` instructions and links skills for detected coding agents
 - **`db`** — manages migrations and inspects the local D1 database
 - **`auth`** — login, logout, and token management
 - **`project`** — link, create, and manage Void projects

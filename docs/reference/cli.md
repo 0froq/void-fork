@@ -98,8 +98,8 @@ After that, the full interactive flow walks through:
 
 1. **TypeScript:** creates or updates `tsconfig.json`, including `extends .void/tsconfig.json`, `void/env` types, and root-level `files` / `compilerOptions.paths` merges when an existing config would otherwise replace Void's generated entries.
 2. **Database:** asks whether you want D1, PostgreSQL, MySQL, or no database yet. PostgreSQL writes `"database": "pg"`; MySQL writes `"database": "mysql"`; D1 stays implicit.
-3. **Agent instructions:** detects agents once and injects instructions into `CLAUDE.md` or `AGENTS.md`.
-4. **Skills:** links Void skills using the same detected or selected agent context.
+3. **Agent instructions:** always creates or updates `AGENTS.md` with brief Void instructions and the bundled docs path, preserving content outside the versioned block.
+4. **Skills:** links Void skills for detected coding agents.
 5. **Demo code:** for existing non-Pages projects, optionally scaffolds a `db/migrations/` directory plus an API route and typed fetch example.
 6. **Deployment platform:** asks where `void deploy` should send the app: Cloudflare (the default), Void, or Skip deployment setup. The choice is stored as `platform` in `.void/project.json`. Choosing Cloudflare creates or augments `wrangler.jsonc`, checks the Cloudflare session through Void's bundled tooling, opens secure browser sign-in when needed, and writes the selected account as `account_id` (automatically when only one account is available).
 7. **GitHub Actions:** optionally creates `.github/workflows/void-deploy.yml` for the selected target. Cloudflare workflows run `void deploy --platform cloudflare` with `CLOUDFLARE_API_TOKEN` and pass the optional `DATABASE_URL` secret needed by PostgreSQL/MySQL apps. Void workflows use the selected platform's API URL and are offered only when its discovery document advertises GitHub Actions support.
@@ -108,7 +108,7 @@ After that, the full interactive flow walks through:
 
 If Cloudflare sign-in is declined or does not complete, initialization still finishes with the configuration in place. Rerun `void init`, or use `void cloudflare login`, when you are ready.
 
-If no agent is detected, `void init` asks you to choose one from a short list (Claude, Cursor, Codex, Gemini CLI, Generic). That single choice is reused across all agent steps.
+Agent setup never asks which coding agent you use. If no agent is detected, skill linking is skipped; `AGENTS.md` still points to the complete docs at `node_modules/void/skills/void/docs/`.
 
 Use flags to run individual steps without prompts:
 
@@ -1348,10 +1348,10 @@ The routing rules themselves are created by the next `void deploy --platform clo
 
 Runs all agent setup steps:
 
-1. **Instructions:** detects agents once and injects Void framework instructions with versioned markers.
-2. **Skills:** links skills for the same detected or selected agent context.
+1. **Instructions:** always creates or updates `AGENTS.md` with four brief bullets and versioned markers. Content outside the Void block and other instruction files are preserved.
+2. **Skills:** links skills for detected coding agents.
 
-If no agent is detected, `void init --agents` asks you to choose from Claude Code, Cursor, Codex, Gemini CLI, or Generic.
+There is no agent-selection prompt. If no agent is detected, skill linking is skipped; the instructions point directly to `node_modules/void/skills/void/docs/`.
 
 ## Environment variables
 

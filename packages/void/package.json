@@ -13,8 +13,7 @@
     "dist",
     "schema.json",
     "skills",
-    "AGENT_PROMPT.md",
-    "getting-started-prompt.txt",
+    "AGENTS_TEMPLATE.md",
     "README.md"
   ],
   "type": "module",

@@ -21,7 +21,7 @@ import { getDatabaseDialect, readConfig, type DatabaseDialect } from '../config.
 import { writeDrizzleConfig } from '../drizzle/config.ts';
 import { detectFramework, type DetectedFramework } from '../plugin-inference.ts';
 import { readProjectPaths } from '../project-paths.ts';
-import { detectAgents, getAgentById, getPackageDir, type AgentConfig } from './agents.ts';
+import { detectAgents, getPackageDir } from './agents.ts';
 import { connectCloudflare } from './cloudflare-connect.ts';
 import { maybeSetupDeployProject } from './deploy-setup.ts';
 import { maybeScaffoldEnvTs } from './env-scaffold.ts';
@@ -3358,79 +3358,6 @@ export function ensureVoidDependency(root: string): boolean {
   return changed || pnpmConfigChanged;
 }
 
-type AgentSetupSelection = {
-  instructionFilePath: 'CLAUDE.md' | 'AGENTS.md';
-  agents: Array<AgentConfig>;
-};
-
-function detectInstructionFilePath(
-  root: string,
-  agents: Array<AgentConfig>,
-): 'CLAUDE.md' | 'AGENTS.md' {
-  if (agents.some((a) => a.skillsDir === '.claude/skills')) {
-    return 'CLAUDE.md';
-  }
-  if (existsSync(join(root, 'CLAUDE.md'))) {
-    return 'CLAUDE.md';
-  }
-  if (existsSync(join(root, 'AGENTS.md'))) {
-    return 'AGENTS.md';
-  }
-  return 'AGENTS.md';
-}
-
-async function pickAgentWhenUndetected(): Promise<AgentSetupSelection> {
-  const choice = await select({
-    message: 'Could not detect your coding agent. Which one are you using?',
-    options: [
-      { value: 'claude-code', label: 'Claude Code' },
-      { value: 'cursor', label: 'Cursor' },
-      { value: 'codex', label: 'Codex' },
-      { value: 'gemini-cli', label: 'Gemini CLI' },
-      { value: 'generic', label: 'Generic' },
-    ],
-  });
-  if (isCancel(choice) || typeof choice === 'symbol') {
-    cancel('Setup cancelled.');
-    process.exit(0);
-  }
-
-  if (choice === 'generic') {
-    return {
-      instructionFilePath: 'AGENTS.md',
-      agents: [],
-    };
-  }
-
-  const selected = getAgentById(choice);
-  if (!selected) {
-    return {
-      instructionFilePath: 'AGENTS.md',
-      agents: [],
-    };
-  }
-
-  return {
-    instructionFilePath: choice === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md',
-    agents: [selected],
-  };
-}
-
-async function resolveAgentSetup(root: string): Promise<AgentSetupSelection> {
-  const detected = detectAgents(root);
-  if (detected.length > 0) {
-    return {
-      instructionFilePath: detectInstructionFilePath(root, detected),
-      agents: detected,
-    };
-  }
-  return pickAgentWhenUndetected();
-}
-
-function readAgentPrompt(): string {
-  return readFileSync(join(getPackageDir(), 'AGENT_PROMPT.md'), 'utf-8');
-}
-
 function getOwnVersion(): string {
   const pkg = JSON.parse(readFileSync(join(getPackageDir(), 'package.json'), 'utf-8'));
   return pkg.version;
@@ -3449,12 +3376,13 @@ const MARKER_BLOCK_RE = new RegExp(
   'm',
 );
 
-function injectAgentBlock(root: string, filePath: string): void {
+function injectAgentBlock(root: string): void {
+  const filePath = 'AGENTS.md';
   const fullPath = join(root, filePath);
   const version = getOwnVersion();
-  const promptContent = readAgentPrompt();
+  const template = readFileSync(join(getPackageDir(), 'AGENTS_TEMPLATE.md'), 'utf-8');
   const openMarker = `<!--injected-by-void-v${version}-->`;
-  const block = `${openMarker}\n${promptContent}\n${MARKER_CLOSE}`;
+  const block = `${openMarker}\n${template}\n${MARKER_CLOSE}`;
 
   if (existsSync(fullPath)) {
     const existing = readFileSync(fullPath, 'utf-8');
@@ -3629,17 +3557,16 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
 
   // Steps 4–5: Agent instructions and skills
   if (!targeted || initArgs?.agents) {
-    const agentSetup = await resolveAgentSetup(root);
-
     // Step 4: Agent instructions
-    injectAgentBlock(root, agentSetup.instructionFilePath);
+    injectAgentBlock(root);
 
     // Step 5: Link skills
-    if (agentSetup.agents.length > 0) {
+    const agents = detectAgents(root);
+    if (agents.length > 0) {
       const { linkSkillsForSpecificAgents } = await import('./skills.ts');
-      linkSkillsForSpecificAgents(root, agentSetup.agents);
+      linkSkillsForSpecificAgents(root, agents);
     } else {
-      log.info('Skills linking skipped for generic agent setup');
+      log.info('No coding agent detected; read the bundled docs linked in AGENTS.md');
     }
   }
 

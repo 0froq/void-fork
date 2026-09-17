@@ -219,12 +219,12 @@ Source: `src/cli/gen-args.ts` (arg parsing), `src/cli/gen.ts` (command runner). 
 
 Void ships with first-class support for coding agents (Claude Code, Cursor, Codex, etc.):
 
-- **`AGENT_PROMPT.md`** — compressed reference prompt shipped in the `void` npm package. Covers project structure, routing, DB, auth, typed fetch, KV/storage/queues/cron, CLI, and deployment.
-- **`skills/`** — Claude Code skills shipped in the npm package:
+- **`AGENTS_TEMPLATE.md`** — template shipped in the `void` npm package, limited to four brief bullets: what Void is, Cloudflare or Void platform deployment, the core development workflow, and where to read the bundled docs. Keep detailed feature guidance in docs.
+- **`skills/`** — coding agent skills shipped in the npm package:
   - `void` — unified app + CLI skill covering project architecture, runtime APIs, deployment flows, and CLI operations (deploy, db, gen, secrets, domains, projects) with lazy-loaded reference files.
   - `migrate-cloudflare-to-void` — guides migration from `@cloudflare/vite-plugin` to `void`.
-- **`docs/`** — all 23 docs markdown files are included in the npm package at `node_modules/void/docs/`.
-- **`void init --agents`** — runs all agent setup steps from a single detection/selection pass: injects Void instructions with versioned markers and symlinks skills from the `void` package.
+- **`skills/void/docs/`** — Markdown files copied from the repository's `docs/` during build and included at `node_modules/void/skills/void/docs/`.
+- **`void init --agents`** — always injects the template into `AGENTS.md` with versioned markers, preserving surrounding content. It never asks which coding agent is in use or edits other instruction files. Skills are symlinked from the `void` package for detected agents; without detection, only `AGENTS.md` instructions are added.
 - **`void init` in an empty directory** — scaffolds a Pages-mode starter, then lets you pick D1, PostgreSQL, MySQL, or Static Pages before running the same setup flow.
 - **Cloudflare onboarding in `void init`** — Cloudflare is the default deployment choice. Init stores it in `.void/project.json`, creates or comment-preservingly augments `wrangler.jsonc`, checks the Cloudflare session through bundled tooling, opens secure browser OAuth when needed, and writes the sole or selected account as `account_id`. Void and Skip never run the Wrangler onboarding. A deploy-time `--platform` override is one-off and never changes either saved preference.
 
