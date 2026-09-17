@@ -76,6 +76,10 @@ import {
   writeInstallationManifest,
   writePendingInstallationSecrets,
 } from '../../src/cli/platform-registry.ts';
+import {
+  completePlatformSetupDraft,
+  savePlatformSetupDraft,
+} from '../../src/cli/platform-setup-draft.ts';
 
 const directories: Array<string> = [];
 const TEST_PLATFORM_JWT_SECRET = 'test-only-platform-jwt-secret-material';
@@ -166,97 +170,108 @@ describe('platform installer', () => {
       prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
     });
 
-  it('installs all four Workers without a zone and probes the actual dispatch hostname', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'void-platform-workers-dev-test-'));
-    directories.push(directory);
-    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
-    const forbidden = async (): Promise<never> => {
-      throw new Error('no zone or DNS access allowed');
-    };
-    const plan = await createPlatformInstallPlan(
-      {
-        ...planningClient(),
-        findZone: forbidden,
-        listDnsRecords: forbidden,
-        listWorkerRoutes: forbidden,
-        hasActiveCertificateForHostname: forbidden,
-      },
-      {
-        accountId: 'account',
-        applicationDomain: '',
-        zoneName: '',
-        workersDev: true,
-        controlPlaneDomain: '',
-        dedicatedZone: false,
-        displayName: 'Testing',
-        installationSlug: 'testing',
-      },
-      null,
-    );
-    let index = 0;
-    const create = async (_account: string, name: string) => ({ id: `resource-${index++}`, name });
-    const configs: Array<Record<string, unknown>> = [];
-    const secrets = createPlatformInstallationSecrets({
-      bootstrapGitHubId: '583231',
-      bootstrapGitHubLogin: 'octocat',
-      cloudflareApiToken: 'test-token',
-      databaseUrl: 'postgres://user:password@db.example.com/testing',
-      githubClientId: 'id',
-      githubClientSecret: 'secret',
-      jwtSecret: TEST_PLATFORM_JWT_SECRET,
-      projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
-      r2AccessKeyId: 'id',
-      r2SecretAccessKey: 'secret',
-    });
-    const result = await installPlatform(plan, secrets, null, {
-      claimDatabase,
-      acquireDatabaseLifecycleLock,
-      client: {
-        createAiGateway: create,
-        createDnsRecord: forbidden,
-        createZone: forbidden,
-        createKvNamespace: create,
-        createR2Bucket: create,
-        createQueue: create,
-        createDispatchNamespace: create,
-        createHyperdrive: create,
-        putKvValue: async () => {},
-        deleteKvValue: async () => {},
-        putR2Object: async () => {},
-      },
-      deployWorker: async (config) => {
-        configs.push(config);
-      },
-      migrateDatabase: async () => {},
-      revalidateBeforeWorkerDeploy: async () => {},
-      verifyHealth: async (
-        _api,
-        _id,
-        _proxy,
-        _domain,
-        _version,
-        _protocol,
-        _token,
-        _fetcher,
-        dispatchOrigin,
-      ) => {
-        expect(dispatchOrigin).toBe(
-          `https://${plan.deployment.resources.dispatchWorker}.workers-subdomain.workers.dev`,
-        );
-      },
-    });
-    expect(result.manifest.status).toBe('installed');
-    expect(
-      result.manifest.resources.some(
-        (resource) => resource.kind === 'zone' || resource.kind === 'dns-record',
-      ),
-    ).toBe(false);
-    expect(new Set(configs.map((config) => config.name)).size).toBe(4);
-    expect(
-      configs.every((config) => !config.routes || (config.routes as Array<unknown>).length === 0),
-    ).toBe(true);
-    expect(parsePlatformInstallationManifest(result.manifest)).toEqual(result.manifest);
-  });
+  it.each([false, true])(
+    'installs all four Workers without a zone and probes the actual dispatch hostname (credential draft: %s)',
+    async (fromDraft) => {
+      const directory = mkdtempSync(join(tmpdir(), 'void-platform-workers-dev-test-'));
+      directories.push(directory);
+      process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+      const forbidden = async (): Promise<never> => {
+        throw new Error('no zone or DNS access allowed');
+      };
+      const plan = await createPlatformInstallPlan(
+        {
+          ...planningClient(),
+          findZone: forbidden,
+          listDnsRecords: forbidden,
+          listWorkerRoutes: forbidden,
+          hasActiveCertificateForHostname: forbidden,
+        },
+        {
+          accountId: 'account',
+          applicationDomain: '',
+          zoneName: '',
+          workersDev: true,
+          controlPlaneDomain: '',
+          dedicatedZone: false,
+          displayName: 'Testing',
+          installationSlug: 'testing',
+        },
+        null,
+      );
+      let index = 0;
+      const create = async (_account: string, name: string) => ({
+        id: `resource-${index++}`,
+        name,
+      });
+      const configs: Array<Record<string, unknown>> = [];
+      const secrets = createPlatformInstallationSecrets({
+        bootstrapGitHubId: '583231',
+        bootstrapGitHubLogin: 'octocat',
+        cloudflareApiToken: 'test-token',
+        databaseUrl: 'postgres://user:password@db.example.com/testing',
+        githubClientId: 'id',
+        githubClientSecret: 'secret',
+        jwtSecret: TEST_PLATFORM_JWT_SECRET,
+        projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+        r2AccessKeyId: 'id',
+        r2SecretAccessKey: 'secret',
+      });
+      const draft = fromDraft
+        ? completePlatformSetupDraft(
+            savePlatformSetupDraft(plan, resolvePlatformRuntime().manifest.platformVersion),
+          )
+        : null;
+      const result = await installPlatform(plan, secrets, draft, {
+        claimDatabase,
+        acquireDatabaseLifecycleLock,
+        client: {
+          createAiGateway: create,
+          createDnsRecord: forbidden,
+          createZone: forbidden,
+          createKvNamespace: create,
+          createR2Bucket: create,
+          createQueue: create,
+          createDispatchNamespace: create,
+          createHyperdrive: create,
+          putKvValue: async () => {},
+          deleteKvValue: async () => {},
+          putR2Object: async () => {},
+        },
+        deployWorker: async (config) => {
+          configs.push(config);
+        },
+        migrateDatabase: async () => {},
+        revalidateBeforeWorkerDeploy: async () => {},
+        verifyHealth: async (
+          _api,
+          _id,
+          _proxy,
+          _domain,
+          _version,
+          _protocol,
+          _token,
+          _fetcher,
+          dispatchOrigin,
+        ) => {
+          expect(dispatchOrigin).toBe(
+            `https://${plan.deployment.resources.dispatchWorker}.workers-subdomain.workers.dev`,
+          );
+        },
+      });
+      expect(result.manifest.status).toBe('installed');
+      expect(
+        result.manifest.resources.some(
+          (resource) => resource.kind === 'zone' || resource.kind === 'dns-record',
+        ),
+      ).toBe(false);
+      expect(new Set(configs.map((config) => config.name)).size).toBe(4);
+      expect(
+        configs.every((config) => !config.routes || (config.routes as Array<unknown>).length === 0),
+      ).toBe(true);
+      expect(parsePlatformInstallationManifest(result.manifest)).toEqual(result.manifest);
+    },
+  );
 
   it('requires externally custodied identity keys for a fresh installation', () => {
     const input = {

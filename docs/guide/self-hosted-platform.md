@@ -64,6 +64,8 @@ For a domain installation, use these answers. Testing mode skips the application
 
 The preview uses placeholder resource names. The real install prints its final names and GitHub callback URL.
 
+The preview also links directly to the runtime-token form, the account's R2 token page, and GitHub OAuth registration. It opens no browser tabs and saves no installation draft. For a new installation, configure the GitHub callback when the real installer opens that step; a saved setup draft keeps its existing callback.
+
 You can select either path directly:
 
 ```sh
@@ -102,6 +104,8 @@ For workers.dev testing with the default API hostname, browser login can authori
 Browser login does not grant AI Gateway access. A preview can therefore show **inspect ai-gateway**: Void verifies that resource with the runtime token after you confirm installation, before creating any resources. Include **Account → AI Gateway → Edit** on that token. Other infrastructure continues using your browser login, and a normal API-token installation keeps using its management token when that token already has access.
 
 The management token lets your CLI install and maintain the platform. The runtime token is stored as a Worker secret so the platform can deploy apps after you close your terminal. They are separate credentials.
+
+The runtime-token link prefills Cloudflare's documented permission fields. Check the short summary beside the link: Workers Tail, Hyperdrive, and any required AI Gateway permission are listed explicitly because their template keys are not documented. For a domain installation, also select the indicated zone. See [Cloudflare's token template documentation](https://developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template/).
 
 ::: details Permissions to select for each token
 
@@ -177,18 +181,18 @@ void platform install
 
 :::
 
-Use the same name, account, and domain as the preview. The command shows the final plan, API URL, and callback URL, then waits for confirmation. Leave that terminal open while you configure GitHub.
+Use the same name, account, and domain as the preview, then confirm the installation plan. Void saves a local setup draft and opens the runtime-token page when that token is missing. Paste the token into the masked prompt. As you continue, it opens GitHub and R2 at their respective steps. Each page has a short checklist and a clickable fallback link in the terminal. Values already supplied through the environment or saved setup are reused without opening their pages again.
 
 ### Configure GitHub OAuth {#configure-github-oauth}
 
-1. Open [GitHub's new OAuth App form](https://github.com/settings/applications/new) while signed in as the account that will own the login integration.
+1. The installer opens [GitHub's new OAuth App form](https://github.com/settings/applications/new) when it needs OAuth credentials. Sign in as the account that will own the login integration.
 2. Set **Application name** to your platform's display name and **Homepage URL** to the API URL Void just printed.
-3. Set **Authorization callback URL** to the exact printed URL ending in `/auth/callback`, then register the application. Use the real install's URL, not the earlier preview's placeholder.
+3. Set **Authorization callback URL** to the exact printed URL ending in `/auth/callback`, then register the application. This URL is now pinned in your saved draft and remains the same if credential setup is interrupted.
 4. Save the **Client ID**, generate a **Client Secret**, and save that too. GitHub's [registration guide](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) describes the form.
 
 This OAuth App handles sign-in. A GitHub App with repository access and build webhooks is not required for the core platform.
 
-Back in the terminal, confirm the plan and answer the prompts in order: runtime Cloudflare token, your initial administrator's GitHub username, PostgreSQL URL, GitHub client ID and secret, signing and encryption keys, and R2 credentials. Secret values are masked.
+The prompts collect the runtime token, administrator GitHub username, PostgreSQL URL, GitHub client ID and secret, R2 credentials, and signing/encryption keys. Secret values are masked and setup progress is encrypted locally using the system keychain. Keep a password-manager copy for recovery on another machine.
 
 Void applies database migrations, provisions the resources, deploys the Workers, and verifies the platform. Installation progress is checkpointed for recovery. When it prints the installed API URL, continue to [connect and deploy an app](#connect-and-deploy-an-app).
 
@@ -209,6 +213,8 @@ void platform install --resume --name <installation-id>
 ```
 
 Keep the management token available for any remaining DNS changes. When using a source build, also pass the same `--runtime` directory. Resume uses the saved checkpoint and original secrets; do not start a second installation or generate replacement keys. If setup failed before a checkpoint was saved, rerun the original command.
+
+If you stop while entering credentials, rerun the same install command: it reuses the matching draft. With one unfinished credential draft, a bare `void platform install` continues it automatically. Once provisioning has begun, use the explicit `--resume --name <id>` command above. A cancelled setup preserves its callback URL and already collected credentials; it does not create Cloudflare resources just to save progress.
 
 :::
 

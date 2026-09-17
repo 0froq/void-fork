@@ -26,6 +26,7 @@ vi.mock('../../src/cli/platform-auth.ts', () => ({
 vi.mock('../../src/cli/platform-registry.ts', async (original) => ({
   ...(await original<typeof import('../../src/cli/platform-registry.ts')>()),
   assertPlatformInstallationSlugAvailable: vi.fn(),
+  listInstallationManifests: () => [],
 }));
 vi.mock('../../src/cli/platform-plan.ts', async (original) => ({
   ...(await original<typeof import('../../src/cli/platform-plan.ts')>()),
