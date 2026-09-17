@@ -20,6 +20,7 @@ import {
   getWorkflowYaml,
   isScaffoldableEmptyProject,
   isVoidResolvableFrom,
+  parseInitArgs,
   runInitCommand,
 } from '../../src/cli/init.ts';
 import { savePlatformConnection } from '../../src/cli/platform-registry.ts';
@@ -42,6 +43,57 @@ const mockListProjects = vi.fn();
 const mockCreateProject = vi.fn();
 const mockDiscoverPlatform = vi.fn();
 let platformRegistryDirectory: string;
+
+describe('init Git arguments', () => {
+  it('keeps Git optional and honors the last positive or negative flag', () => {
+    expect(parseInitArgs([]).git).toBeUndefined();
+    expect(parseInitArgs(['--git']).git).toBe(true);
+    expect(parseInitArgs(['--no-git']).git).toBe(false);
+    expect(parseInitArgs(['--git', '--no-git']).git).toBe(false);
+    expect(parseInitArgs(['--no-git', '--git']).git).toBe(true);
+    expect(parseInitArgs(['--agents', '--git'])).toMatchObject({ agents: true, git: true });
+  });
+
+  it.each(['--git', '--no-git'])('keeps the full starter flow with %s', async (flag) => {
+    const root = mkdtempSync(join(tmpdir(), 'void-init-git-flow-'));
+    try {
+      mockSelect
+        .mockResolvedValueOnce('vite')
+        .mockResolvedValueOnce('react')
+        .mockResolvedValueOnce('static')
+        .mockResolvedValueOnce('none');
+      await runInitCommand(root, parseInitArgs([flag]));
+      expect(existsSync(join(root, 'pages', 'index.tsx'))).toBe(true);
+      expect(existsSync(join(root, '.gitignore'))).toBe(true);
+      const gitCalls = mockSpawnSync.mock.calls.filter(([command]) => command === 'git');
+      expect(gitCalls).toHaveLength(flag === '--git' ? 1 : 0);
+      if (flag === '--git') {
+        expect(gitCalls[0][1]).toEqual(['init']);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['--git', '--no-git'])(
+    'rejects %s in a workspace member before modifying it',
+    async (flag) => {
+      const root = mkdtempSync(join(tmpdir(), 'void-init-git-workspace-'));
+      try {
+        writeFileSync(join(root, 'package.json'), JSON.stringify({ workspaces: ['apps/*'] }));
+        const child = join(root, 'apps', 'web');
+        mkdirSync(child, { recursive: true });
+        await expect(runInitCommand(child, parseInitArgs(['--agents', flag]))).rejects.toThrow(
+          'The --git/--no-git options are not available when adding a package to an existing monorepo',
+        );
+        expect(readdirSync(child)).toEqual([]);
+        expect(mockSpawnSync).not.toHaveBeenCalled();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+});
 
 describe('GitHub Actions deployment workflows', () => {
   it('scaffolds the direct Cloudflare deployment path with a scoped API token', () => {
@@ -2337,6 +2389,8 @@ export default config;
       expect(gitignore).toContain('.void');
       expect(gitignore).toContain('.wrangler');
       expect(gitignore).toContain('.env');
+      expect(gitignore.split('\n')).toContain('.env.*');
+      expect(gitignore.split('\n')).toContain('!.env.example');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

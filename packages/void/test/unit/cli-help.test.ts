@@ -104,6 +104,11 @@ describe('CLI help resolver', () => {
 });
 
 describe('rendered help advertises the flags the parser honours', () => {
+  it('shows both Git initialization flags on init', () => {
+    const page = render(['init']);
+    expect(page).toContain('--git');
+    expect(page).toContain('--no-git');
+  });
   /** The page as handed to clack's `note` (mocked above), ANSI stripped, so an assertion reads like the terminal. */
   function render(path: Array<string>): string {
     vi.mocked(note).mockClear();

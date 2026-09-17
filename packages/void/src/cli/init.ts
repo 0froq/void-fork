@@ -25,6 +25,7 @@ import { detectAgents, getPackageDir } from './agents.ts';
 import { connectCloudflare } from './cloudflare-connect.ts';
 import { maybeSetupDeployProject } from './deploy-setup.ts';
 import { maybeScaffoldEnvTs } from './env-scaffold.ts';
+import { initialCommitCommand, setupGit } from './init-git.ts';
 import { cliTitle } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
@@ -58,6 +59,7 @@ export type InitArgs = {
   tsconfig: boolean;
   github: boolean;
   agents: boolean;
+  git?: boolean;
 };
 
 export function parseInitArgs(args: Array<string>): InitArgs {
@@ -69,7 +71,9 @@ export function parseInitArgs(args: Array<string>): InitArgs {
         tsconfig: { type: 'boolean' },
         github: { type: 'boolean' },
         agents: { type: 'boolean' },
+        git: { type: 'boolean' },
       },
+      allowNegative: true,
       strict: true,
     });
   } catch (error) {
@@ -81,6 +85,7 @@ export function parseInitArgs(args: Array<string>): InitArgs {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
     agents: parsed.values.agents === true,
+    git: parsed.values.git as boolean | undefined,
   };
 }
 
@@ -3416,6 +3421,16 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
   if (!targeted) {
     root = await resolveInitRoot(root);
   }
+  const workspaceSubpackage = isInsideWorkspaceSubpackage(root);
+  if (workspaceSubpackage && initArgs?.git !== undefined) {
+    throw new Error(
+      'init: The --git/--no-git options are not available when adding a package to an existing monorepo.',
+    );
+  }
+  const gitInitialized =
+    !workspaceSubpackage && (!targeted || initArgs?.git !== undefined)
+      ? await setupGit(root, initArgs?.git)
+      : false;
   const framework = detectFramework(root);
   const preScaffoldState = detectProjectState(root);
   const detectedPagesFramework = detectPagesFramework(root);
@@ -3762,6 +3777,10 @@ export async function runInitCommand(root: string, initArgs?: InitArgs): Promise
     if (linked?.slug) {
       patchWorkflowProjectSlug(root, linked.slug);
     }
+  }
+
+  if (gitInitialized) {
+    log.info(`Git (optional): ${initialCommitCommand(root)}`);
   }
 
   if (workspaceSubpackageSkip) {

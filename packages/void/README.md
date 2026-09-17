@@ -31,6 +31,8 @@ npm install -D void
 
 If you run `void init` in an empty directory, the scaffold flow adds the matching Pages adapter and Vite+ by default.
 
+Init offers to initialize Git and suggests an optional initial commit command. Use `--git` or `--no-git` to choose without the Git prompt. Existing repositories are preserved; Void does not commit automatically.
+
 To install a team platform, use `void platform install`. A domain is recommended; the visible workers.dev testing option is also available as `--workers-dev`. Add a domain later with `void platform domain set example.com`, preserving projects, deployments, and API connections. See the [platform setup guide](../../docs/guide/self-hosted-platform.md).
 
 Init always writes brief coding-agent instructions to `AGENTS.md`, pointing to `node_modules/void/skills/void/docs/`, and links skills for detected agents. Run `void init --agents` to add or refresh just this setup without choosing an agent.

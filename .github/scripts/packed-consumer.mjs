@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import {
   createWriteStream,
@@ -182,6 +182,41 @@ try {
           process.execPath,
           [join(root, '.github/scripts/packed-init.mjs'), fixture, framework, manager, version],
           work,
+        );
+        assert(
+          existsSync(join(fixture, '.git')),
+          'Init should initialize the accepted Git repository',
+        );
+        assert.notEqual(
+          spawnSync('git', ['rev-parse', '--verify', 'HEAD'], { cwd: fixture }).status,
+          0,
+          'Init must not create an initial commit automatically',
+        );
+        assert.equal(
+          execFileSync('git', ['ls-files'], { cwd: fixture, encoding: 'utf8' }),
+          '',
+          'Init must not stage files automatically',
+        );
+        assert.deepEqual(
+          execFileSync(
+            'git',
+            [
+              'check-ignore',
+              'node_modules/dependency',
+              '.env',
+              '.env.local',
+              '.env.production',
+              '.env.example',
+            ],
+            {
+              cwd: fixture,
+              encoding: 'utf8',
+            },
+          )
+            .trim()
+            .split('\n'),
+          ['node_modules/dependency', '.env', '.env.local', '.env.production'],
+          'Init must ignore local environment files while allowing the example',
         );
         writeFileSync(
           join(fixture, '.npmrc'),

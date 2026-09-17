@@ -77,10 +77,16 @@ Use `void --help` for the command list. For a specific command, try `void deploy
 ### `void init`
 
 ```
-void init [--tsconfig] [--github] [--agents]
+void init [--tsconfig] [--github] [--agents] [--git | --no-git]
 ```
 
 Setup wizard for Void projects (new or existing).
+
+Outside an existing Git repository or workspace package, the interactive wizard first asks **Initialize a git repository?**, with Yes selected. Accepting runs `git init` using your Git default branch. At the end, Void suggests an optional `git add -A && git commit -m "chore: initial commit"` command; it does not stage files or commit automatically. Git initialization failures produce a warning and setup continues.
+
+Use `--git` to initialize without the Git prompt, or `--no-git` to skip it. In CI or without an interactive terminal, Git initialization requires `--git`. Existing repositories, including parent repositories, are preserved. Workspace packages skip Git initialization and do not accept these two flags.
+
+Void's `.gitignore` defaults exclude dependencies, generated files, `.env`, and `.env.*`, while allowing `.env.example` to be committed.
 
 In an empty project, `void init` asks you to choose:
 
@@ -118,7 +124,7 @@ Use flags to run individual steps without prompts:
 | `--agents`   | Set up agent instructions and skills           |
 | `--github`   | Only create the GitHub Actions deploy workflow |
 
-Flags can be combined. When any flag is provided, only the specified steps run and interactive prompts are skipped.
+These step flags can be combined. When any of them is provided, only the specified steps run and interactive prompts are skipped. Git setup is skipped unless `--git` is also supplied. `--git` and `--no-git` alone keep the full setup wizard and control only its Git step.
 
 For Cloudflare, the generated workflow needs a `CLOUDFLARE_API_TOKEN` repository secret with access to your app's account and resources. PostgreSQL and MySQL apps also need `DATABASE_URL`.
 

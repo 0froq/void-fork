@@ -130,6 +130,8 @@ const HELP_TREE: HelpTree = {
     options: [
       { command: '--agents', description: 'Set up agent instructions and skills' },
       { command: '--tsconfig', description: 'Only update tsconfig.json' },
+      { command: '--git', description: 'Initialize a Git repository without prompting' },
+      { command: '--no-git', description: 'Skip Git repository initialization' },
       {
         command: '--github',
         description: 'Only create the GitHub Actions deploy workflow (OIDC, no stored token)',

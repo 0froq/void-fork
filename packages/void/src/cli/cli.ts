@@ -240,7 +240,11 @@ if (helpPath) {
 } else if (!command && process.stdin.isTTY) {
   // Interactive top-level prompt
   const topLevelCommands: Array<SubcommandDef> = [
-    { name: 'init', description: 'Set up void in a new or existing project' },
+    {
+      name: 'init',
+      hint: '--agents | --tsconfig | --github | --git | --no-git',
+      description: 'Set up void in a new or existing project',
+    },
     { name: 'connect', description: 'Connect to Cloudflare or a Void platform' },
     { name: 'deploy', description: 'Build and deploy, or link an existing Cloudflare Worker' },
     {

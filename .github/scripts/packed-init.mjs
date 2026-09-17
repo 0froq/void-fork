@@ -142,6 +142,7 @@ export async function initializePackedProject(directory, framework, manager, ver
     cwd: dirname(root),
     env,
     prompts: [
+      { text: 'Initialize a git repository?', response: '\r' },
       { text: 'Choose a Pages scaffold toolchain:', response: '\x1b[B\r' },
       {
         text: 'Choose a Pages framework to scaffold:',

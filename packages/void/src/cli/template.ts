@@ -4,6 +4,8 @@ export const SCAFFOLD_GITIGNORE_LINES = [
   '.void',
   '.wrangler',
   '.env',
+  '.env.*',
+  '!.env.example',
   '*.tsbuildinfo',
   '.DS_Store',
 ] as const;

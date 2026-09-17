@@ -36,6 +36,8 @@ pnpm add -D void
 
 In an empty project, `void init` asks which framework and starter you want, then installs the dependencies. It uses Vite+ by default. In an existing app, it adds missing scripts and configures the Vite plugin.
 
+Init offers to initialize Git and suggests an optional initial commit command. Use `--git` or `--no-git` to choose without the Git prompt. Existing repositories are preserved; Void does not commit automatically.
+
 Init also adds brief instructions to `AGENTS.md`, pointing coding agents to the bundled docs at `node_modules/void/skills/void/docs/`. Run `void init --agents` to add or refresh just the agent setup.
 
 Then run:

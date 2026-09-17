@@ -13,6 +13,8 @@ Docs in this skill are bundled from `docs/` during `void` package build and live
 
 `void init --agents` always writes brief instructions to `AGENTS.md`, pointing to `node_modules/void/skills/void/docs/`. It preserves content outside its versioned block, leaves other instruction files untouched, and links skills for detected agents without asking which agent is in use.
 
+`void init` offers Git initialization with `--git` / `--no-git` overrides and suggests an optional initial commit command. It preserves existing repositories and never commits automatically; see `docs/reference/cli.md` for CI and workspace behavior.
+
 ## Command Naming
 
 For a new platform installation, prefer an app domain at the zone apex. Nested
