@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   preflight: vi.fn(),
   plan: vi.fn(),
   database: vi.fn(),
+  spinner: vi.fn(),
+  progress: { start: vi.fn(), stop: vi.fn(), message: vi.fn(), error: vi.fn(), clear: vi.fn() },
 }));
 vi.mock('@clack/prompts', async (original) => ({
   ...(await original<typeof import('@clack/prompts')>()),
@@ -47,6 +49,10 @@ vi.mock('../../src/cli/auth.ts', async (original) => ({
   openBrowser: mocks.open,
 }));
 vi.mock('../../src/cli/prompt-password.ts', () => ({ passwordWithPlaceholder: mocks.password }));
+vi.mock('../../src/cli/output.ts', async (original) => ({
+  ...(await original<typeof import('../../src/cli/output.ts')>()),
+  createSpinner: mocks.spinner,
+}));
 vi.mock('../../src/cli/platform-auth.ts', () => ({
   resolvePlatformCloudflareCredential: async () => ({ source: 'oauth', token: 'operator-token' }),
   resolvePlatformCloudflareCredentialWithInput: async (input: () => Promise<unknown>) => ({
@@ -112,6 +118,7 @@ beforeEach(() => {
     { id: 'account', name: 'Account' },
   ]);
   mocks.confirm.mockResolvedValue(true);
+  mocks.spinner.mockReturnValue(mocks.progress);
   mocks.select.mockImplementation(async ({ message, options }) =>
     message === 'Continue a previous platform install?' ? options[0].value : 'workers-dev',
   );
@@ -199,6 +206,55 @@ async function savedSetup(name = 'test-setup') {
 }
 
 describe('platform credential onboarding', () => {
+  it('starts installation progress before the installer runs, updates it, and stops on success', async () => {
+    mocks.install.mockImplementation(async (_plan, _secrets, manifest, dependencies) => {
+      expect(mocks.progress.start).toHaveBeenCalledWith('Installing the platform…');
+      dependencies.onProgress('Preparing the platform database…');
+      return { manifest, waitingForDns: false, waitingForSandboxDrain: false };
+    });
+    await runPlatformLifecycleCommand(parsePlatformArgs(args));
+    expect(mocks.progress.message).toHaveBeenCalledWith('Preparing the platform database…');
+    expect(mocks.progress.stop).toHaveBeenCalledWith('Platform installed.');
+    expect(mocks.progress.error).not.toHaveBeenCalled();
+    // Spinner cancellation must not swallow the CLI's cancellation signal.
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    mocks.spinner.mock.calls[0]![0].onCancel();
+    expect(kill).toHaveBeenCalledWith(process.pid, 'SIGINT');
+  });
+
+  it('clears failed progress before printing recovery instructions', async () => {
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+    mocks.install.mockRejectedValueOnce(new Error('checkpoint failed'));
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(args))).rejects.toThrow(
+      'checkpoint failed',
+    );
+    expect(mocks.progress.error).toHaveBeenCalledWith('Platform installation failed.');
+    expect(mocks.progress.stop).not.toHaveBeenCalled();
+    const recoveryIndex = info.mock.calls.findIndex(([message]) =>
+      message.startsWith('Continue with:'),
+    );
+    expect(recoveryIndex).toBeGreaterThanOrEqual(0);
+    expect(mocks.progress.error.mock.invocationCallOrder[0]).toBeLessThan(
+      info.mock.invocationCallOrder[recoveryIndex]!,
+    );
+  });
+
+  it.each(['waitingForDns', 'waitingForSandboxDrain'] as const)(
+    'stops progress when installation pauses for %s',
+    async (reason) => {
+      mocks.install.mockImplementation(async (_plan, _secrets, manifest) => ({
+        manifest,
+        waitingForDns: false,
+        waitingForSandboxDrain: false,
+        zoneNameServers: [],
+        [reason]: true,
+      }));
+      await runPlatformLifecycleCommand(parsePlatformArgs(args));
+      expect(mocks.progress.stop).toHaveBeenCalledWith('Installation paused; progress is saved.');
+      expect(mocks.progress.error).not.toHaveBeenCalled();
+    },
+  );
+
   it('explains database and key inputs without displaying their values', async () => {
     const info = vi.spyOn(log, 'info').mockImplementation(() => {});
     await runPlatformLifecycleCommand(parsePlatformArgs(args));
@@ -566,12 +622,14 @@ describe('platform credential onboarding', () => {
     expect(mocks.password).not.toHaveBeenCalled();
     expect(listInstallationManifests()).toEqual([]);
     expect(readdirSync(directory)).toEqual([]);
+    expect(mocks.spinner).not.toHaveBeenCalled();
   });
   it('does not save a draft or open pages when the plan is declined', async () => {
     mocks.confirm.mockResolvedValue(false);
     await runPlatformLifecycleCommand(parsePlatformArgs(args));
     expect(listInstallationManifests()).toEqual([]);
     expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.spinner).not.toHaveBeenCalled();
   });
   it('opens each missing credential page and preserves encrypted progress and callback identity across cancellation', async () => {
     const normalPassword = mocks.password.getMockImplementation()!;

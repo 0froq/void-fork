@@ -4,7 +4,7 @@ import {
   normalizeInstallationSlug,
   type PlatformInstallationManifest,
 } from '@void/platform';
-import { cliTitle, pc } from './output.ts';
+import { cliTitle, createSpinner, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
@@ -288,6 +288,18 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     dedicatedZone = catchAll;
   }
   const release = args.plan ? null : acquirePlatformLifecycleLock(accountId, installationSlug);
+  let progress: ReturnType<typeof createSpinner> | undefined;
+  const startProgress = (message: string) => {
+    const active = createSpinner({
+      // Clack stops its animation on cancellation. Forward that cancellation
+      // to the CLI's existing signal coordinator (or normal process termination).
+      onCancel: () => {
+        process.kill(process.pid, 'SIGINT');
+      },
+    });
+    active.start(message);
+    return active;
+  };
   try {
     if (!existing && !args.plan) {
       assertPlatformInstallationSlugAvailable(installationSlug);
@@ -309,11 +321,14 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
           'platform: DATABASE_URL is required to verify an interrupted installation before resuming it.',
         );
       }
+      progress = startProgress('Reading the saved installation…');
       const authoritative = await readPlatformDatabaseLifecycleManifest(
         databaseUrl,
         existing.id,
         existing.ownershipNonce,
       );
+      progress?.stop('Read the saved installation.');
+      progress = undefined;
       if (authoritative) {
         const { selectAuthoritativePlatformManifest } = await import('./platform-management.ts');
         const selected = selectAuthoritativePlatformManifest(existing, authoritative);
@@ -586,6 +601,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       projectSecretActiveKeyVersion:
         process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION || '',
     });
+    progress = startProgress('Installing the platform…');
     if (credentialSetup) {
       // Stop treating this as an untouched local draft before any database claim is attempted.
       saveValues({ projectSecretKey: secrets.projectSecretKey });
@@ -595,6 +611,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       acquireDatabaseLifecycleLock: acquirePlatformDatabaseLifecycleLock,
       client,
       runtime,
+      onProgress: (message) => progress?.message(message),
       replanWorkers: async (manifest) =>
         (
           await createPlatformInstallPlan(client, planInput, manifest, {
@@ -621,6 +638,12 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         });
       },
     });
+    progress?.stop(
+      result.waitingForDns || result.waitingForSandboxDrain
+        ? 'Installation paused; progress is saved.'
+        : 'Platform installed.',
+    );
+    progress = undefined;
     if (result.waitingForDns) {
       note(
         result.zoneNameServers.length > 0
@@ -647,12 +670,18 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     }
     outro('Run `void auth login`, then deploy an app with `void deploy --platform void`.');
   } catch (error) {
+    progress?.error('Platform installation failed.');
+    progress = undefined;
     if (existing && !args.plan) {
       log.info('Continue with: void platform install --resume --name ' + existing.id);
     }
     throw error;
   } finally {
-    release?.();
+    try {
+      progress?.clear();
+    } finally {
+      release?.();
+    }
   }
 }
 

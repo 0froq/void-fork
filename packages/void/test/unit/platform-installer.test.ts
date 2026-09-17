@@ -222,7 +222,9 @@ describe('platform installer', () => {
             savePlatformSetupDraft(plan, resolvePlatformRuntime().manifest.platformVersion),
           )
         : null;
+      const progress: Array<string> = [];
       const result = await installPlatform(plan, secrets, draft, {
+        onProgress: (message) => progress.push(message),
         claimDatabase,
         acquireDatabaseLifecycleLock,
         client: {
@@ -239,9 +241,14 @@ describe('platform installer', () => {
           putR2Object: async () => {},
         },
         deployWorker: async (config) => {
+          expect(progress.at(-1)).toMatch(
+            /^(Deploying|Enabling) the (api|proxy|tail|dispatch) service/,
+          );
           configs.push(config);
         },
-        migrateDatabase: async () => {},
+        migrateDatabase: async () => {
+          expect(progress.at(-1)).toBe('Applying platform database migrations…');
+        },
         revalidateBeforeWorkerDeploy: async () => {},
         verifyHealth: async (
           _api,

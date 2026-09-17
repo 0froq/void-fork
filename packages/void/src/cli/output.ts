@@ -1,4 +1,4 @@
-import { isCI, log, spinner, type SpinnerResult } from '@clack/prompts';
+import { isCI, log, spinner, type SpinnerOptions, type SpinnerResult } from '@clack/prompts';
 import pc from 'picocolors';
 
 export { pc };
@@ -9,9 +9,9 @@ export { pc };
  * (`\x1b[?25l` / `\x1b[?25h`) that render as text artifacts. This wrapper
  * replaces the spinner with plain log output in CI.
  */
-export function createSpinner(): SpinnerResult {
+export function createSpinner(options?: Pick<SpinnerOptions, 'onCancel'>): SpinnerResult {
   if (!isCI()) {
-    return spinner();
+    return spinner(options);
   }
 
   let currentMessage = '';
