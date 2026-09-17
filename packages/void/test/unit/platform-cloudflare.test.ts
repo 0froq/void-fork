@@ -9,6 +9,49 @@ import {
 } from '../../src/cli/platform-cloudflare.ts';
 
 describe('platform Cloudflare client', () => {
+  it.each([401, 403, 429, 500, 503])(
+    'distinguishes HTTP %s from missing workers.dev onboarding',
+    async (status) => {
+      const client = new PlatformCloudflareClient('secret-token', {
+        fetcher: async () =>
+          Response.json({ success: false, errors: [{ message: 'provider failure' }] }, { status }),
+      });
+      const error = await client.getWorkersSubdomain('account').catch((error) => error as Error);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(`HTTP ${status}`);
+      expect((error as Error).message).not.toContain('finish Workers onboarding');
+      expect((error as Error).message).not.toContain('secret-token');
+      expect((error as Error).message).toContain(
+        status === 401 || status === 403 ? 'permissions' : 'Rerun',
+      );
+    },
+  );
+
+  it('does not infer missing onboarding from a failed network request', async () => {
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async () => {
+        throw new TypeError('fetch failed');
+      },
+    });
+    await expect(client.getWorkersSubdomain('account')).rejects.toThrow('the request failed');
+    await expect(client.getWorkersSubdomain('account')).rejects.toThrow(
+      'no Workers onboarding change is needed',
+    );
+  });
+
+  it('accepts an existing subdomain and handles an empty result without a property access error', async () => {
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async () =>
+        Response.json({ success: true, result: { subdomain: 'void-platform-e2e-test' } }),
+    });
+    await expect(client.getWorkersSubdomain('account')).resolves.toBe('void-platform-e2e-test');
+    const empty = new PlatformCloudflareClient('token', {
+      fetcher: async () => Response.json({ success: true, result: null }),
+    });
+    await expect(empty.getWorkersSubdomain('account')).rejects.toThrow(
+      'does not have a workers.dev subdomain',
+    );
+  });
   it('explains workers.dev onboarding for a fresh account', async () => {
     const missing = new PlatformCloudflareClient('token', {
       fetcher: async () => Response.json({ success: true, result: { subdomain: null } }),

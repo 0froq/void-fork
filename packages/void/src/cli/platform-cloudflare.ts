@@ -220,23 +220,31 @@ export class PlatformCloudflareClient {
 
   async getWorkersSubdomain(accountId: string): Promise<string> {
     const setupUrl = `https://dash.cloudflare.com/${encodeURIComponent(accountId)}/workers-and-pages`;
-    let result: { subdomain?: unknown };
+    let result: { subdomain?: unknown } | null;
     try {
       result = await this.request<{ subdomain?: unknown }>(
         `/accounts/${encodeURIComponent(accountId)}/workers/subdomain`,
       );
     } catch (error) {
+      const status = error instanceof PlatformCloudflareApiError ? error.status : null;
+      const reason = status === null ? 'the request failed' : `HTTP ${status}`;
+      const guidance =
+        status === 401 || status === 403
+          ? 'Check your Cloudflare login or API token permissions for this account, then rerun the command.'
+          : status === 404
+            ? `Check ${setupUrl}. If no subdomain is shown, finish Workers onboarding and choose one; otherwise check account access and retry.`
+            : 'Rerun the command. If the dashboard already shows a subdomain, no Workers onboarding change is needed.';
       throw new Error(
-        `platform: Could not read the account's workers.dev subdomain. For a new Cloudflare account, open ${setupUrl}, finish Workers onboarding, choose a workers.dev subdomain, and rerun the command.`,
+        `platform: Could not read the workers.dev subdomain for account ${accountId} (${reason}). ${guidance}`,
         { cause: error },
       );
     }
-    if (typeof result.subdomain !== 'string' || result.subdomain.trim() === '') {
+    if (typeof result?.subdomain !== 'string' || result.subdomain.trim() === '') {
       throw new Error(
         `platform: This Cloudflare account does not have a workers.dev subdomain. Open ${setupUrl}, finish Workers onboarding, choose a subdomain, and rerun the command.`,
       );
     }
-    return result.subdomain;
+    return result.subdomain.trim();
   }
 
   async listAiGateways(accountId: string): Promise<ReadonlyArray<CloudflareNamedResource>> {

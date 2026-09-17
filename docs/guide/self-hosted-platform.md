@@ -29,6 +29,8 @@ In the [Cloudflare dashboard](https://dash.cloudflare.com/), select the account 
 3. Open **R2 Object Storage** and complete its activation. Void creates the bucket later.
 4. For a domain installation, choose a domain you own, such as `example.app`. If you need one, register it with your preferred registrar. Use a spare domain's root: apps will be served at `my-app.example.app`. For workers.dev testing, skip this step and the DNS setup below.
 
+If Workers & Pages already shows a **Subdomain** in the account details, that setup is complete even when the account has no Workers. You do not need to create a placeholder Worker. If Void cannot read an existing subdomain, retry and check the reported API status or account permissions.
+
 If that domain is already in this Cloudflare account, use its existing zone. Otherwise, [add the domain to Cloudflare](https://developers.cloudflare.com/dns/zone-setups/full-setup/setup/) and follow the nameserver instructions until the zone is active. A zone is Cloudflare's DNS configuration for a domain; creating one does not buy the domain.
 
 You can also let Void create the zone during installation. Setting it up now lets you scope the API tokens to that zone and finish installation without a DNS pause. The platform API uses `workers.dev` by default, so it needs no additional domain.
