@@ -641,6 +641,9 @@ importers:
       estree-walker:
         specifier: ^3.0.3
         version: 3.0.3
+      fast-wrap-ansi:
+        specifier: ^0.2.2
+        version: 0.2.2
       magic-string:
         specifier: ^1.3.1
         version: 1.3.1
