@@ -1,6 +1,6 @@
-@import '@voidcloud/ui/styles.css';
+@import './ui/styles/index.css';
 
-@source '../ui/src/**/*.{ts,tsx}';
+@source './ui/**/*.{ts,tsx}';
 
 /* Navigation progress bar */
 .nav-progress {

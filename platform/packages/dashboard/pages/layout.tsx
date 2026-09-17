@@ -1,10 +1,10 @@
 import { useNavigation, useShared } from '@void/react';
-import { AppHeader, FooterNav, ThemeContextProvider } from '@voidcloud/ui';
-import logoDark from '@voidcloud/ui/assets/logos/void-dark.svg';
-import logoLight from '@voidcloud/ui/assets/logos/void-light.svg';
 import { useEffect, type ReactNode } from 'react';
 import preventDragging from '../lib/preventDragging.ts';
 import type { DashboardShared } from '../middleware/01.auth.ts';
+import logoDark from '../ui/assets/logos/void-dark.svg';
+import logoLight from '../ui/assets/logos/void-light.svg';
+import { AppHeader, FooterNav, ThemeContextProvider } from '../ui/index.ts';
 import '../app.css';
 
 const footerConfig = {
