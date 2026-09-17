@@ -79,6 +79,7 @@ try {
   const sourceRevision = resolvePlatformSourceRevision({ repositoryRoot });
   const manifest = parsePlatformRuntimeManifest({
     artifacts,
+    applicationRoutingVersion: 1,
     database,
     platformVersion: packageJson.version,
     safetyProtocols: { sandboxDrain: 2 },

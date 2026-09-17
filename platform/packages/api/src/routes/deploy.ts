@@ -12,6 +12,11 @@ import {
   SHARED_CACHE_POLICY_VERSION,
   type IsrCacheMetadata,
 } from '@void/isr/core';
+import {
+  platformProjectHostname,
+  platformProjectHostnames,
+  readPlatformApplication,
+} from '@void/platform';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import {
@@ -32,7 +37,6 @@ import { hmacSignState } from '../auth/hmac.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
 import { deleteDispatchScript, retryWithBackoff } from '../cf-api.ts';
 import { R2_CONCURRENCY, uploadPool } from '../concurrency.ts';
-import { SITE_DOMAIN } from '../constants.ts';
 import {
   clearCronScheduler,
   restoreCronScheduler,
@@ -82,6 +86,7 @@ import { generateId } from '../id.ts';
 import { checkCliVersionOrRespond } from '../middleware/cli-version.ts';
 import { getProjectQueueName } from '../naming.ts';
 import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
+import { ensureProjectIngress } from '../project-ingress.ts';
 import {
   BETTER_AUTH_SECRET_NAME,
   decryptProjectSecret,
@@ -2103,6 +2108,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
   if (versionReject) {
     return versionReject;
   }
+  await ensureProjectIngress(context.env, project);
   const cliVersion = context.req.header('x-void-cli-version') ?? null;
 
   const user = context.get('user');
@@ -3219,9 +3225,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
       const hostScopedRedirects = manifest.redirectRules?.some((r) => r.host) ?? false;
       const hostScopedFallbacks = manifest.fallbackRules?.some((r) => r.host) ?? false;
       if (hostScopedRedirects || hostScopedFallbacks) {
-        const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+        const application = readPlatformApplication(context.env);
         projectDomains ??= await getDomainsByProjectId(context.get('db'), projectId);
-        const boundHosts = new Set<string>([`${project.slug}.${siteDomain}`]);
+        const boundHosts = new Set<string>(platformProjectHostnames(project, application));
         for (const d of projectDomains) {
           boundHosts.add(d.hostname);
         }
@@ -3259,13 +3265,13 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           parseAssetManifest(currentLiveDeployment.asset_hashes),
         );
         if (sameManifest && sameAssets) {
-          const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+          const application = readPlatformApplication(context.env);
           projectDomains ??= await getDomainsByProjectId(context.get('db'), projectId);
           const activeDomains = projectDomains.filter((d) => d.status === 'active');
           const fullUrl =
             activeDomains.length > 0
               ? `https://${activeDomains[0].hostname}`
-              : `https://${project.slug}.${siteDomain}`;
+              : `https://${platformProjectHostname(project, application)}`;
 
           emit({ event: 'start', deploymentId: currentLiveDeployment.id });
           emit({
@@ -3274,7 +3280,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             url: fullUrl,
             urls: [
               ...activeDomains.map((d) => `https://${d.hostname}`),
-              `https://${project.slug}.${siteDomain}`,
+              `https://${platformProjectHostname(project, application)}`,
             ],
             assets: 0,
             workers: 0,
@@ -3783,12 +3789,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             }
           }
 
-          const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+          const application = readPlatformApplication(context.env);
           const activeDomains = projectDomains.filter((d) => d.status === 'active');
           const url =
             activeDomains.length > 0
               ? `https://${activeDomains[0].hostname}`
-              : `https://${project.slug}.${siteDomain}`;
+              : `https://${platformProjectHostname(project, application)}`;
 
           emit({
             event: 'done',
@@ -3796,7 +3802,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             url,
             urls: [
               ...activeDomains.map((d) => `https://${d.hostname}`),
-              `https://${project.slug}.${siteDomain}`,
+              `https://${platformProjectHostname(project, application)}`,
             ],
             assets: assetCount,
             workers: 0,
@@ -4661,7 +4667,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           }
           await assertDeploymentNotCanceled(context.get('db'), deployment.id);
           await assertProjectNotDeleting(context.get('db'), projectId);
-          const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+          const application = readPlatformApplication(context.env);
 
           await uploadPool(manifest.prerender, 3, async (pathname) => {
             const ttl = resolvePageTtl(
@@ -4675,7 +4681,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             }
             try {
               const userWorker = context.env.DISPATCH.get(workerName);
-              const slugHost = `${project.slug}.${siteDomain}`;
+              const slugHost = platformProjectHostname(project, application);
               const url = `https://${slugHost}${pathname}`;
               const response = await userWorker.fetch(new Request(url));
               // Mirror dispatch's live-miss / background write gate so prewarm
@@ -5047,12 +5053,12 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           }
         }
 
-        const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+        const application = readPlatformApplication(context.env);
         const activeDomains = projectDomains.filter((d) => d.status === 'active');
         const fullUrl =
           activeDomains.length > 0
             ? `https://${activeDomains[0].hostname}`
-            : `https://${project.slug}.${siteDomain}`;
+            : `https://${platformProjectHostname(project, application)}`;
 
         emit({
           event: 'done',
@@ -5060,7 +5066,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           url: fullUrl,
           urls: [
             ...activeDomains.map((d) => `https://${d.hostname}`),
-            `https://${project.slug}.${siteDomain}`,
+            `https://${platformProjectHostname(project, application)}`,
           ],
           assets: assetCount,
           workers: workerFiles.length,
@@ -5378,8 +5384,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             ]).catch(() => {
               // Stale markers are harmless once PostgreSQL is live.
             });
-            const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
-            const slugUrl = `https://${project.slug}.${siteDomain}`;
+            const application = readPlatformApplication(context.env);
+            const slugUrl = `https://${platformProjectHostname(project, application)}`;
             emit({
               event: 'done',
               deployment: failedDeployment.id,
@@ -5417,8 +5423,8 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           await markDeploymentRetained(context.get('db'), failedDeployment.id, true).catch(
             () => {},
           );
-          const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
-          const slugUrl = `https://${project.slug}.${siteDomain}`;
+          const application = readPlatformApplication(context.env);
+          const slugUrl = `https://${platformProjectHostname(project, application)}`;
           emit({
             event: 'done',
             deployment: failedDeployment.id,

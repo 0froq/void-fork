@@ -57,6 +57,10 @@ export {
   platformProjectHostnames,
   platformProjectIngressName,
   platformProjectWorkersDevHostname,
+  platformWorkersDevAliasKey,
+  readPlatformApplication,
+  PLATFORM_APPLICATION_KEY,
+  resolvePlatformApplicationEnvironment,
   type PlatformApplication,
   type PlatformApplicationProject,
 } from './application.ts';

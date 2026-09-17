@@ -1,5 +1,7 @@
 import {
   createPlatformDiscoveryDocument,
+  readPlatformApplication,
+  resolvePlatformApplicationEnvironment,
   PLATFORM_DISABLED_KEY,
   PLATFORM_DISABLED_VALUE,
 } from '@void/platform';
@@ -105,6 +107,10 @@ function isSandboxDrainMaintenanceRequest(request: Request): boolean {
 }
 
 const app = new Hono<ApiEnv>()
+  .use('*', async (context, next) => {
+    context.env = await resolvePlatformApplicationEnvironment(context.env);
+    await next();
+  })
 
   // Catch-all error handler. Without this, Hono returns a plain-text
   // `Internal Server Error` body which is opaque to the CLI and dashboard.
@@ -192,6 +198,9 @@ const app = new Hono<ApiEnv>()
       createPlatformDiscoveryDocument({
         apiUrl: new URL(context.req.url).origin,
         applicationDomain: context.env.SITE_DOMAIN ?? 'void.app',
+        ...(context.env.PLATFORM_APPLICATION
+          ? { applicationRouting: readPlatformApplication(context.env) }
+          : {}),
         authenticationProviders: [
           ...(capabilities.githubOAuth ? (['github'] as const) : []),
           ...(capabilities.googleOAuth ? (['google'] as const) : []),

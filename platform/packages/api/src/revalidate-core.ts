@@ -10,9 +10,9 @@ import {
   isrLegacyCacheVariantPrefix,
   splitIsrCacheKey,
 } from '@void/isr';
+import { platformProjectHostnames, readPlatformApplication } from '@void/platform';
 import type { Context } from 'hono';
 import { R2_CONCURRENCY, uploadPool } from './concurrency.ts';
-import { SITE_DOMAIN } from './constants.ts';
 import { getDomainsByProjectId } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { resolveCurrentIsrDeployments, type IsrRoutingTarget } from './isr-cache.ts';
@@ -73,7 +73,7 @@ export async function runRevalidate(
   body: RevalidateRequestBody,
 ): Promise<Response> {
   const db = context.get('db');
-  const siteDomain = context.env.SITE_DOMAIN ?? SITE_DOMAIN;
+  const application = readPlatformApplication(context.env);
 
   const customDomains = await getDomainsByProjectId(db, projectId);
   // Include `pending` domains, not only `active`. Activation writes the
@@ -88,7 +88,9 @@ export async function runRevalidate(
   // are harmless no-ops. Domains are only ever `pending`|`active` (deletion
   // removes the row), so this is every routable host for the project.
   const targets: Array<IsrRoutingTarget> = [
-    { hostname: `${project.slug}.${siteDomain}`, routingKey: project.slug },
+    ...platformProjectHostnames({ id: projectId, slug: project.slug }, application).map(
+      (hostname) => ({ hostname, routingKey: project.slug }),
+    ),
     ...customDomains.map((d) => ({
       hostname: d.hostname,
       routingKey: `domain:${d.hostname}`,
@@ -351,6 +353,7 @@ async function purgeEdgeCache(
   context: Context<ApiEnv>,
   targets: ReadonlyArray<PurgeEdgeTarget>,
 ): Promise<void> {
+  targets = targets.filter((target) => !target.host.endsWith('.workers.dev'));
   if (targets.length === 0) {
     return;
   }

@@ -31,6 +31,7 @@ export type PlatformRuntimeDatabaseManifest = Readonly<{
 }>;
 
 export type PlatformRuntimeManifest = Readonly<{
+  applicationRoutingVersion?: 1;
   artifacts: Readonly<Record<'api' | 'dispatch' | 'proxy' | 'tail', PlatformRuntimeArtifact>>;
   database: PlatformRuntimeDatabaseManifest;
   platformVersion: string;
@@ -151,6 +152,7 @@ export function parsePlatformRuntimeManifest(value: unknown): PlatformRuntimeMan
   }
   return {
     artifacts,
+    ...(root.applicationRoutingVersion === 1 ? { applicationRoutingVersion: 1 as const } : {}),
     database: {
       journalSha256: sha256(databaseValue.journalSha256, 'database journal digest'),
       lineage,

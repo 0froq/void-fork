@@ -1,3 +1,4 @@
+import { readPlatformApplication, type PlatformApplication } from './application.ts';
 import { normalizeApplicationDomain, type PlatformCapabilities } from './manifest.ts';
 
 export const PLATFORM_DISCOVERY_SCHEMA_VERSION = 1 as const;
@@ -5,13 +6,14 @@ export const PLATFORM_DISCOVERY_SCHEMA_VERSION = 1 as const;
 export type PlatformDiscoveryDocument = Readonly<{
   apiUrl: string;
   applicationDomain: string;
+  applicationRouting?: PlatformApplication;
   authenticationProviders: ReadonlyArray<'github' | 'google'>;
   capabilities: PlatformCapabilities;
   displayName: string;
   installationId: string | null;
   platformVersion: string;
   proxyUrl: string;
-  schemaVersion: typeof PLATFORM_DISCOVERY_SCHEMA_VERSION;
+  schemaVersion: typeof PLATFORM_DISCOVERY_SCHEMA_VERSION | 2;
   usageProtocolVersion: 0 | 1;
 }>;
 
@@ -70,7 +72,7 @@ export function createPlatformDiscoveryDocument(
     installationId: input.installationId?.trim() || null,
     platformVersion: input.platformVersion.trim(),
     proxyUrl: normalizeOrigin(input.proxyUrl, 'proxyUrl'),
-    schemaVersion: PLATFORM_DISCOVERY_SCHEMA_VERSION,
+    schemaVersion: input.applicationRouting?.workersDev ? 2 : PLATFORM_DISCOVERY_SCHEMA_VERSION,
     usageProtocolVersion: input.usageProtocolVersion ?? 0,
   };
 }
@@ -80,7 +82,10 @@ export function parsePlatformDiscoveryDocument(value: unknown): PlatformDiscover
     throw new Error('Platform discovery document must be an object.');
   }
   const document = value as Record<string, unknown>;
-  if (document.schemaVersion !== PLATFORM_DISCOVERY_SCHEMA_VERSION) {
+  if (
+    document.schemaVersion !== PLATFORM_DISCOVERY_SCHEMA_VERSION &&
+    document.schemaVersion !== 2
+  ) {
     throw new Error(
       `Unsupported platform discovery schema version: ${String(document.schemaVersion)}.`,
     );
@@ -133,6 +138,13 @@ export function parsePlatformDiscoveryDocument(value: unknown): PlatformDiscover
   return createPlatformDiscoveryDocument({
     apiUrl,
     applicationDomain: string('applicationDomain'),
+    ...(document.schemaVersion === 2
+      ? {
+          applicationRouting: readPlatformApplication({
+            PLATFORM_APPLICATION: JSON.stringify(document.applicationRouting ?? null),
+          }),
+        }
+      : {}),
     authenticationProviders: providers as Array<'github' | 'google'>,
     capabilities: parsedCapabilities,
     displayName: string('displayName'),

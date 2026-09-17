@@ -1,7 +1,7 @@
+import { resolvePlatformApplicationEnvironment } from '@void/platform';
 import type { Env } from './env.ts';
 import { createErrorResponse } from './error-page.ts';
 import { applyHeaderRules, type HeaderRule } from './headers.ts';
-import { extractSlug } from './hostname.ts';
 import {
   readIsrCache,
   writeIsrCache,
@@ -31,6 +31,7 @@ import {
   type RequestType,
 } from './metering.ts';
 import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from './platform-lifecycle.ts';
+import { applicationEdgeCache, resolveProjectHostname } from './project-hostname.ts';
 import { classifyDynamicRequestType, hasExtension } from './request-type.ts';
 import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules.ts';
 import { resolveStaticPath, resolveAssetContentType, safeDecodePathname } from './static.ts';
@@ -202,8 +203,8 @@ async function deleteSharedIsrEntry(env: Env, entry: SharedIsrEntry): Promise<vo
       entry.pathname,
       entry.originalUrl,
     ),
-    caches.default.delete(entry.htmlKey),
-    caches.default.delete(entry.jsonKey),
+    applicationEdgeCache.delete(entry.htmlKey),
+    applicationEdgeCache.delete(entry.jsonKey),
   ]);
 }
 
@@ -610,6 +611,7 @@ export function rebuildRequest(
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    env = await resolvePlatformApplicationEnvironment(env);
     const url = new URL(request.url);
     if (
       !env.PLATFORM_INSTALLATION_ID &&
@@ -660,7 +662,11 @@ export default {
       return createErrorResponse(request, 404, 'Not Found');
     }
 
-    const slug = extractSlug(url.hostname, env.BASE_HOSTNAME);
+    const selected = await resolveProjectHostname(url.hostname, env);
+    const slug = selected.slug;
+    if (selected.workersDev && !selected.projectId) {
+      return createErrorResponse(request, 404, 'Not Found');
+    }
     const routingKey = slug ?? `domain:${url.hostname}`;
 
     const routingRaw = await env.ROUTING.get(routingKey, { cacheTtl: 60 });
@@ -671,6 +677,9 @@ export default {
     }
 
     const routing: RoutingEntry = JSON.parse(routingRaw);
+    if (selected.projectId && selected.projectId !== routing.projectId) {
+      return createErrorResponse(request, 404, 'Not Found');
+    }
 
     // Check if project is suspended
     if (routing.suspended) {
@@ -854,7 +863,7 @@ export default {
           return meter(ruled, failureKind ? { failureKind } : undefined);
         };
 
-        const cache = caches.default;
+        const cache = applicationEdgeCache;
         const cached = await cache.match(cacheKey);
         if (
           cached?.headers.get('Cache-Control')?.includes('immutable') &&
@@ -1048,7 +1057,7 @@ export default {
       ) {
         const isPagesRequest = request.headers.has('X-VoidPages');
         const isrDeploymentId = routing.version ?? 'legacy';
-        const cache = caches.default;
+        const cache = applicationEdgeCache;
         const isrOriginalUrlVariant = buildFallbackOriginalUrlVariant(
           request.url,
           pathname,
@@ -1386,7 +1395,7 @@ export default {
       cacheUrl.searchParams.set('_v', String(routing.version));
       const candidateCacheKey = new Request(cacheUrl.toString());
       staticCacheKey = candidateCacheKey;
-      const staticCache = caches.default;
+      const staticCache = applicationEdgeCache;
       const cached = await staticCache.match(candidateCacheKey);
       if (cached && isCurrentStaticCacheResponse(cached)) {
         requestType = 'static';
@@ -1565,7 +1574,7 @@ export default {
           'public, s-maxage=31536000, max-age=0, must-revalidate',
         );
         markSharedCachePolicy(cached.headers);
-        ctx.waitUntil(caches.default.put(edgeCacheKey, cached.clone()));
+        ctx.waitUntil(applicationEdgeCache.put(edgeCacheKey, cached.clone()));
       }
 
       return meter(clientRevalidateResponse(finalRes));
@@ -1693,7 +1702,7 @@ export default {
           'public, s-maxage=31536000, max-age=0, must-revalidate',
         );
         markSharedCachePolicy(cacheRes.headers);
-        ctx.waitUntil(caches.default.put(staticCacheKey, cacheRes.clone()));
+        ctx.waitUntil(applicationEdgeCache.put(staticCacheKey, cacheRes.clone()));
         return meter(
           clientRevalidateResponse(finalRes),
           responseFailureKind ? { failureKind: responseFailureKind } : undefined,
@@ -1774,7 +1783,7 @@ export default {
             originalUrlVariant,
           );
           ctx.waitUntil(
-            populateJsonEdgeCache(caches.default, jsonCacheKey, response, isrTtl, 'MISS'),
+            populateJsonEdgeCache(applicationEdgeCache, jsonCacheKey, response, isrTtl, 'MISS'),
           );
         }
       }
@@ -2225,7 +2234,7 @@ async function revalidateInBackground(
       return false;
     }
     const ttl = resolveRevalidateTtl(response, defaultTtl);
-    const cache = caches.default;
+    const cache = applicationEdgeCache;
     // Evict every shared representation of this entry: R2/KV + HTML edge + JSON edge.
     const evictSharedEntry = async () => {
       await deleteIsrCache(

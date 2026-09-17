@@ -89,6 +89,7 @@ export type ApiEnv = Env & {
     /** Trusted producer used by the API-owned sandbox lease counter. */
     USAGE_EVENTS_QUEUE?: Queue<unknown>;
     SITE_DOMAIN?: string;
+    PLATFORM_APPLICATION?: string;
     DASHBOARD_URL?: string;
     USAGE_COUNTER: DurableObjectNamespace;
     CRON_SCHEDULER: DurableObjectNamespace;

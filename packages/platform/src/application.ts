@@ -4,11 +4,64 @@ export type PlatformApplication = Readonly<{
   dedicatedZone: boolean;
   /** Empty only for an explicitly selected workers.dev installation. */
   zoneName: string;
+  zoneId?: string;
   /** Retained after adding a domain so existing test URLs keep working. */
   workersDev?: Readonly<{ subdomain: string; installationId: string }>;
 }>;
 
 export type PlatformApplicationProject = Readonly<{ id: string; slug: string }>;
+
+export function readPlatformApplication(
+  env: Readonly<{ PLATFORM_APPLICATION?: string; SITE_DOMAIN?: string; BASE_HOSTNAME?: string }>,
+): PlatformApplication {
+  const baseDomain = env.SITE_DOMAIN ?? env.BASE_HOSTNAME ?? 'void.app';
+  if (!env.PLATFORM_APPLICATION) {
+    return { baseDomain, zoneName: baseDomain, dedicatedZone: false };
+  }
+  return createPlatformDeploymentManifest({
+    installationSlug: 'runtime',
+    displayName: 'Runtime',
+    application: JSON.parse(env.PLATFORM_APPLICATION) as PlatformApplication,
+  }).application;
+}
+
+export function platformWorkersDevAliasKey(hostname: string): string {
+  return `workers-dev:${hostname}`;
+}
+
+export const PLATFORM_APPLICATION_KEY = '__void/platform/application/v1';
+
+export async function resolvePlatformApplicationEnvironment<
+  T extends {
+    PLATFORM_APPLICATION?: string;
+    ROUTING: { get(key: string): Promise<string | null> };
+  },
+>(env: T): Promise<T> {
+  if (!env.PLATFORM_APPLICATION) {
+    return env;
+  }
+  const raw = await env.ROUTING.get(PLATFORM_APPLICATION_KEY);
+  if (!raw) {
+    return env;
+  }
+  const previous = readPlatformApplication(env);
+  const next = readPlatformApplication({ PLATFORM_APPLICATION: raw });
+  if (
+    !previous.workersDev ||
+    !next.workersDev ||
+    previous.workersDev.installationId !== next.workersDev.installationId ||
+    previous.workersDev.subdomain !== next.workersDev.subdomain
+  ) {
+    throw new Error('Application routing belongs to another platform installation.');
+  }
+  return {
+    ...env,
+    PLATFORM_APPLICATION: raw,
+    SITE_DOMAIN: next.baseDomain,
+    BASE_HOSTNAME: next.baseDomain,
+    ...(next.zoneId ? { CF_ZONE_ID: next.zoneId } : {}),
+  };
+}
 
 export function platformProjectIngressName(
   project: PlatformApplicationProject,
@@ -53,3 +106,4 @@ export function platformProjectHostnames(
     ]),
   ];
 }
+import { createPlatformDeploymentManifest } from './manifest.ts';

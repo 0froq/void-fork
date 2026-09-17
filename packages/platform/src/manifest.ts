@@ -57,6 +57,7 @@ export type PlatformDeploymentManifestInput = Readonly<{
     dedicatedZone?: boolean;
     zoneName: string;
     workersDev?: PlatformApplication['workersDev'];
+    zoneId?: string;
   }>;
   authentication?: Readonly<{
     providers?: ReadonlyArray<'github' | 'google'>;
@@ -226,6 +227,9 @@ export function createPlatformDeploymentManifest(
       dedicatedZone: input.application.dedicatedZone ?? false,
       zoneName,
       ...(workersDev ? { workersDev: { ...workersDev } } : {}),
+      ...(input.application.zoneId
+        ? { zoneId: requiredString(input.application.zoneId, 'application.zoneId') }
+        : {}),
     },
     authentication: { providers: [...providers] },
     capabilities,
@@ -316,6 +320,7 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
           ? ''
           : requiredString(application.zoneName, 'application.zoneName'),
       ...(workersDev ? { workersDev } : {}),
+      ...(typeof application.zoneId === 'string' ? { zoneId: application.zoneId } : {}),
     },
     authentication: { providers: providers as Array<'github' | 'google'> },
     capabilities,
