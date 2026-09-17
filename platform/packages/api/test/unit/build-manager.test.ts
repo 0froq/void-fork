@@ -874,8 +874,7 @@ describe('BuildManager.startBuild', () => {
   it('grants enough grace to cover the agent drain barrier — two processes, one relation, so a test holds it', () => {
     // `container/build-agent.mjs` is plain JS copied into the image and cannot
     // import from `src/`, so the DO's grace and the agent's barrier deadline are two
-    // separate literals. PINNED_VOID_CLI_VERSION already proved a "keep in sync"
-    // comment does not hold. `>=` not `===`: the grace also has to cover the final
+    // separate literals. `>=` not `===`: the grace also has to cover the final
     // closeControlServer that runs after the barrier. (The exit path deliberately
     // does NOT flush — see `finishBuildLogging`; that push has no route to the DO
     // and awaiting it could only spend this grace.)
@@ -6468,22 +6467,13 @@ describe('build-agent parent-process secret scrub', () => {
 // builds set nothing, which is why only they rendered broken.
 describe('PINNED_VOID_CLI_VERSION (fallback CLI ↔ SDK package contract)', () => {
   it('matches the workspace SDK package the platform deploys against', () => {
-    // The pin only applies to repos with no local `void` dependency, so drift is
-    // invisible in every normal build — it sat at 0.9.1 while the SDK moved
-    // to 0.10.x, meaning those repos would have deployed through a CLI a full
-    // minor behind the one the platform was tested against. A comment saying
-    // "keep in sync" did not hold; this assertion does. On an SDK version bump,
-    // update the constant.
+    // The Worker bundle must use the exact SDK version from the release commit.
     expect(PINNED_VOID_CLI_VERSION).toBe(voidPackageJson.version);
   });
 
   it('matches the container agent’s own backstop default', () => {
-    // Two copies of this literal exist: BuildManager injects VOID_CLI_VERSION,
-    // and the agent falls back to DEFAULT_VOID_CLI_VERSION when the env is
-    // absent. build-agent.mjs is plain JS copied into the image, so it cannot
-    // import the constant — only a test can hold the two in step. Both were
-    // sitting at 0.9.1; bumping one alone would leave the fallback path
-    // deploying through a different CLI than the injected path.
+    // Both import the same release manifest, including when the agent receives
+    // no VOID_CLI_VERSION override from the manager.
     expect(DEFAULT_VOID_CLI_VERSION).toBe(PINNED_VOID_CLI_VERSION);
   });
 });

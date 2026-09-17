@@ -213,6 +213,13 @@ use `next`. The scaffolder installs its exact matching CLI version, so
 `create-void@beta` cannot silently select the stable CLI. Packaged platform
 runtimes record the release commit as their source revision.
 
+The managed build fallback CLI also derives its version from
+`packages/void/package.json`; there are no separate version pins to update.
+Build its image from the repository root with
+`docker build --file platform/packages/api/container/Dockerfile .`.
+The root `.dockerignore` limits that build context to the agent, Dockerfile,
+and public SDK manifest.
+
 Publishing requires both SDK CI and platform CI, including the platform unit and
 API integration suites. Release tags also run the Windows SDK checks; a passing
 SDK-only build cannot publish a changed control plane.

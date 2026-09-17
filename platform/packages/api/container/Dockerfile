@@ -85,11 +85,13 @@ RUN COREPACK_HOME=/home/builder/.cache/node/corepack \
     corepack prepare "pnpm@${PNPM_VERSION}" "yarn@${YARN_VERSION}" --activate \
   && chown -R builder:builder /home/builder/.cache/node/corepack
 
-# The agent is the container entrypoint. No node_modules — it uses only Node
-# builtins.
-COPY build-agent.mjs /build-agent.mjs
+# Build from the repository root. The root .dockerignore limits the context to
+# these files. Keep their relative layout so Node can import the release manifest
+# without node_modules or a generated version file. Both remain root-owned.
+COPY packages/void/package.json /opt/void/packages/void/package.json
+COPY platform/packages/api/container/build-agent.mjs /opt/void/platform/packages/api/container/build-agent.mjs
 
 # Health-check / control port the DO talks to (GET / health, POST /cancel).
 EXPOSE 4000
 
-CMD ["node", "/build-agent.mjs"]
+CMD ["node", "/opt/void/platform/packages/api/container/build-agent.mjs"]

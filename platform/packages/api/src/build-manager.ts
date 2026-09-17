@@ -1,5 +1,6 @@
 import { Container } from '@cloudflare/containers';
 import { Terminal } from '@xterm/headless';
+import voidPackageJson from '../../../../packages/void/package.json' with { type: 'json' };
 import {
   DEPLOY_TOKEN_HARD_MAX_MINUTES,
   deployTokenTtlSecondsForBuildMinutes,
@@ -263,14 +264,9 @@ export function withDeadline<T>(work: Promise<T>, ms: number, reason: string): P
   });
 }
 
-// Pin the build container's fallback Void CLI to the platform's shipped version.
-// Used ONLY when the repo has no local `void` dependency to run; a repo that
-// pins its own version is unaffected. Kept equal to
-// packages/void/package.json (the SDK package in this workspace that the platform deploys
-// against) so a moving `void@latest` can't change deploy behavior with no repo
-// diff. The comment alone let this sit a full minor behind for the whole life of
-// the feature, so `build-manager.test.ts` now asserts the equality instead.
-export const PINNED_VOID_CLI_VERSION = '0.10.14';
+// Bundled from the release's SDK manifest. Used only when the application has
+// no local Void dependency; never resolve the moving npm "latest" channel.
+export const PINNED_VOID_CLI_VERSION = voidPackageJson.version;
 
 // Ceiling on how long a queued build may wait for the just-in-time branch-head
 // freshness recheck to succeed. While the GitHub compare API is unreachable

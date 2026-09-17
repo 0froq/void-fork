@@ -51,6 +51,7 @@ import { argv } from 'node:process';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
+import voidPackageJson from '../../../../packages/void/package.json' with { type: 'json' };
 
 // --- constants ---------------------------------------------------------------
 
@@ -67,13 +68,9 @@ const LOG_FLUSH_MS = 500;
 // rest of the build); with it the flush retries on the next tick. Also bounds how
 // long the final drain at exit can block before the container terminates.
 const DO_POST_TIMEOUT_MS = 10000;
-// Default pin kept in sync with the platform's shipped Void CLI. BuildManager
-// injects VOID_CLI_VERSION; this constant is the backstop if the env is absent.
-// Must equal PINNED_VOID_CLI_VERSION in src/build-manager.ts, which the
-// build-manager test asserts against the workspace SDK package — this file is
-// plain JS copied into the container image, so it can't import that constant
-// and the test mirrors the literal instead.
-export const DEFAULT_VOID_CLI_VERSION = '0.10.14';
+// BuildManager injects VOID_CLI_VERSION. If absent, use the release manifest
+// copied into this image, never a mutable npm dist-tag or the untrusted app's manifest.
+export const DEFAULT_VOID_CLI_VERSION = voidPackageJson.version;
 
 // --- source-download bounds --------------------------------------------------
 //

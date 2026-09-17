@@ -34,7 +34,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build API build container
-        run: docker build --pull --tag void-api-build-container:ci platform/packages/api/container
+        run: docker build --pull --tag void-api-build-container:ci --file platform/packages/api/container/Dockerfile .
 
   lint-build-check:
     runs-on: ${{ github.repository == 'voidzero-dev/void' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}

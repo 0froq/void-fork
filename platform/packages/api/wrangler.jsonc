@@ -108,6 +108,7 @@
     {
       "class_name": "BuildManager",
       "image": "./container/Dockerfile",
+      "image_build_context": "../../..",
       "max_instances": 50,
       // Free-plan build container: standard-3 = 2 vCPU / 8 GiB / 16 GB. (CF caps a
       // single container at standard-4 = 4 vCPU / 12 GiB / 20 GB, and custom types
@@ -122,6 +123,7 @@
     {
       "class_name": "BuildManagerLarge",
       "image": "./container/Dockerfile",
+      "image_build_context": "../../..",
       "max_instances": 50,
       // Paid-plan build container: standard-4 = 4 vCPU / 12 GiB / 20 GB (the CF max).
       "instance_type": "standard-4",
@@ -247,6 +249,7 @@
         {
           "class_name": "BuildManager",
           "image": "./container/Dockerfile",
+          "image_build_context": "../../..",
           "max_instances": 50,
           // Free-plan build container: standard-3 = 2 vCPU / 8 GiB / 16 GB. (CF caps a
           // single container at standard-4 = 4 vCPU / 12 GiB / 20 GB, and custom types
@@ -261,6 +264,7 @@
         {
           "class_name": "BuildManagerLarge",
           "image": "./container/Dockerfile",
+          "image_build_context": "../../..",
           "max_instances": 50,
           // Paid-plan build container: standard-4 = 4 vCPU / 12 GiB / 20 GB (the CF max).
           "instance_type": "standard-4",
@@ -372,6 +376,7 @@
         {
           "class_name": "BuildManager",
           "image": "./container/Dockerfile",
+          "image_build_context": "../../..",
           "max_instances": 50,
           // Free-plan build container: standard-3 = 2 vCPU / 8 GiB / 16 GB. (CF caps a
           // single container at standard-4 = 4 vCPU / 12 GiB / 20 GB, and custom types
@@ -386,6 +391,7 @@
         {
           "class_name": "BuildManagerLarge",
           "image": "./container/Dockerfile",
+          "image_build_context": "../../..",
           "max_instances": 50,
           // Paid-plan build container: standard-4 = 4 vCPU / 12 GiB / 20 GB (the CF max).
           "instance_type": "standard-4",

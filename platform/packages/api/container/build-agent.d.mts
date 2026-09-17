@@ -3,7 +3,7 @@
 // `.d.mts` — letting the unit test import the exported helpers without a
 // `@ts-expect-error`. Only the test-exercised surface is declared; the agent's
 // runtime behavior lives in build-agent.mjs. Not copied into the container image
-// (the Dockerfile copies build-agent.mjs only).
+// (the Dockerfile copies build-agent.mjs and the public SDK manifest).
 
 export const SCRUBBED_ENV_VARS: ReadonlyArray<string>;
 

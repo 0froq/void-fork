@@ -320,7 +320,7 @@ Forks build their own runtime and use `void platform install` or
 - GitHub build reruns require `check_run` and `check_suite` webhook subscriptions
   in addition to Checks write permission. Reuse the same ownership, branch-head,
   and deduplication checks as push-triggered builds.
-- Keep the fallback build-container CLI version aligned with the SDK package
+- The fallback build-container CLI version is derived from the SDK package
   version. The version equality test enforces this during updates.
 
 The [lessons](./meta/lessons.md) and affected package tests contain more detailed
