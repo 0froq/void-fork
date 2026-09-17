@@ -52,3 +52,11 @@ export {
   type PlatformProvisionedResourceIds,
   type PlatformWorkerConfigSet,
 } from './worker-config.ts';
+export {
+  platformProjectHostname,
+  platformProjectHostnames,
+  platformProjectIngressName,
+  platformProjectWorkersDevHostname,
+  type PlatformApplication,
+  type PlatformApplicationProject,
+} from './application.ts';

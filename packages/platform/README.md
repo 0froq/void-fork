@@ -27,6 +27,8 @@ Fresh installations require a unique JWT signing secret with at least 32 bytes o
 
 Runtime and installation manifests record the last usage protocol proven live across the complete Worker set. A protocol transition gates traffic before the first Worker update and opens it only after target health and immutable versions pass; interrupted transitions remain gated and resumable.
 
+Application-addressing contracts preserve schema v1 for existing domain installations. Schema v2 records an optional workers.dev installation identity, retained when a domain is added. Project ingress names include the stable project ID so a deleted project's hostname cannot be inherited by a later project with the same slug.
+
 Maintainers and platform forks can build the same runtime from source with `vp run --filter @void/platform build` and deploy it using `void platform upgrade --runtime packages/platform/dist/runtime`. The custom path does not bypass release safety: its manifest, Worker bundles, migration journal, and SQL files receive the same integrity and compatibility verification as packaged artifacts. Builds from a Git checkout automatically record `HEAD` in the runtime provenance, with a `-dirty` suffix when the checkout has uncommitted files. Build systems can set `VOID_PLATFORM_SOURCE_REVISION` to override automatic detection with another commit or build identifier; source archives without Git metadata leave it unrecorded.
 
 Runtime artifacts include migration SQL, the journal, and compatibility metadata. Drizzle authoring snapshots stay in the source tree and are excluded from the published runtime.
