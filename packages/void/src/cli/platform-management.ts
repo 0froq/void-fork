@@ -14,6 +14,7 @@ import {
   type InstallationResource,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import { createSpinner } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
@@ -182,6 +183,8 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       : loadPlatformRuntime(args.runtime);
   const rollbackSourceRuntime =
     args.subcommand === 'rollback' ? loadPlatformRuntime(args.fromRuntime) : null;
+  let progress: ReturnType<typeof createSpinner> | undefined;
+  let reportResult: (() => void) | undefined;
 
   const execute = async (
     currentManifest: PlatformInstallationManifest,
@@ -263,6 +266,23 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       return;
     }
     assertPlatformOperatorCredentialCanApplyPlan(operatorCredential, plan);
+    progress = createSpinner({
+      // Preserve the subprocess signal coordinator used by platform installs.
+      onCancel: () => {
+        if (!process.emit('SIGINT')) {
+          process.exit(130);
+        }
+      },
+    });
+    progress.start(
+      args.subcommand === 'upgrade'
+        ? 'Upgrading the platform'
+        : args.subcommand === 'rollback'
+          ? 'Rolling back the platform'
+          : args.subcommand === 'enable'
+            ? 'Enabling the platform'
+            : 'Repairing the platform',
+    );
     const repairingMissingRoutingCheckpoint =
       args.subcommand === 'repair' &&
       plan.actions.some(
@@ -348,6 +368,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         }),
       client,
       databaseRollbackSource: rollbackSourceRuntime ?? undefined,
+      onProgress: (message) => progress?.message(message),
       runtime: runtime!,
       replanWorkers: async (recoveryManifest) =>
         (
@@ -361,25 +382,35 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
           repairMissing: args.subcommand === 'repair',
         }),
     });
-    if (result.waitingForDns) {
-      note(
-        `Wait for ${deployment.application.zoneName} to become active, then rerun this command.`,
-        'Waiting for nameservers',
+    // Keep progress visible while the outer database session releases its lock.
+    progress.message('Finalizing platform changes');
+    reportResult = () => {
+      progress?.stop(
+        result.waitingForDns || result.waitingForSandboxDrain
+          ? 'Platform operation paused; progress is saved.'
+          : `Platform ${args.subcommand} complete.`,
       );
-      return;
-    }
-    if (result.waitingForSandboxDrain) {
-      note(
-        "The compatible candidate runtime is live in sandbox-drain maintenance mode and application traffic remains disabled. Preview bounded work with `void platform system sandbox-drain --plan`; follow any returned `nextCursor` with `--cursor '<value>'`. Then apply with `void platform system sandbox-drain --yes` and rerun until it reports DB-backed `complete: true`. Rerun this lifecycle command afterward to enable traffic.",
-        'Waiting for managed Sandbox drain',
+      progress = undefined;
+      if (result.waitingForDns) {
+        note(
+          `Wait for ${deployment.application.zoneName} to become active, then rerun this command.`,
+          'Waiting for nameservers',
+        );
+        return;
+      }
+      if (result.waitingForSandboxDrain) {
+        note(
+          "The compatible candidate runtime is live in sandbox-drain maintenance mode and application traffic remains disabled. Preview bounded work with `void platform system sandbox-drain --plan`; follow any returned `nextCursor` with `--cursor '<value>'`. Then apply with `void platform system sandbox-drain --yes` and rerun until it reports DB-backed `complete: true`. Rerun this lifecycle command afterward to enable traffic.",
+          'Waiting for managed Sandbox drain',
+        );
+        return;
+      }
+      log.success(
+        args.subcommand === 'rollback'
+          ? `${deployment.displayName} is running compatible runtime ${runtime!.manifest.platformVersion}; PostgreSQL remains at schema ${rollbackSourceRuntime!.manifest.database.schemaDigest}.`
+          : `${deployment.displayName} is healthy at ${plan.apiUrl}.`,
       );
-      return;
-    }
-    log.success(
-      args.subcommand === 'rollback'
-        ? `${deployment.displayName} is running compatible runtime ${runtime!.manifest.platformVersion}; PostgreSQL remains at schema ${rollbackSourceRuntime!.manifest.database.schemaDigest}.`
-        : `${deployment.displayName} is healthy at ${plan.apiUrl}.`,
-    );
+    };
   };
 
   if (args.plan) {
@@ -418,8 +449,17 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     } finally {
       await releaseDatabase();
     }
+    reportResult?.();
+  } catch (error) {
+    progress?.error(`Platform ${args.subcommand} failed.`);
+    progress = undefined;
+    throw error;
   } finally {
-    release();
+    try {
+      progress?.clear();
+    } finally {
+      release();
+    }
   }
 }
 

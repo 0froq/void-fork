@@ -14,7 +14,15 @@ const state = vi.hoisted(() => ({
   events: [] as Array<string>,
   manifest: undefined as PlatformInstallationManifest | undefined,
   prepareDatabase: vi.fn(),
+  releaseDatabase: vi.fn(),
+  spinner: vi.fn(),
+  progress: { start: vi.fn(), message: vi.fn(), stop: vi.fn(), error: vi.fn(), clear: vi.fn() },
   runtime: undefined as ReturnType<typeof resolvePlatformRuntime> | undefined,
+}));
+
+vi.mock('../../src/cli/output.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/cli/output.ts')>()),
+  createSpinner: state.spinner,
 }));
 
 vi.mock('@clack/prompts', () => ({
@@ -75,6 +83,7 @@ vi.mock('../../src/cli/platform-installer.ts', async (importOriginal) => {
     acquirePlatformDatabaseLifecycleLock: vi.fn(async () => {
       const release = Object.assign(
         async () => {
+          await state.releaseDatabase();
           state.events.push('outer-release');
         },
         {
@@ -87,6 +96,8 @@ vi.mock('../../src/cli/platform-installer.ts', async (importOriginal) => {
     }),
     createPlatformInstallationSecrets: state.createSecrets,
     installPlatform: vi.fn(async (...args: Parameters<typeof actual.installPlatform>) => {
+      expect(state.progress.start).toHaveBeenCalled();
+      expect(state.progress.stop).not.toHaveBeenCalled();
       const existing = args[2];
       const dependencies = args[3];
       const borrowed = await dependencies.acquireDatabaseLifecycleLock(
@@ -96,6 +107,7 @@ vi.mock('../../src/cli/platform-installer.ts', async (importOriginal) => {
       );
       expect(borrowed.prepareDatabase).toBe(state.prepareDatabase);
       state.events.push('installer-start');
+      dependencies.onProgress?.('Deploying the api service');
       await borrowed.prepareDatabase!(
         state.runtime!.directory,
         state.runtime!.manifest.database,
@@ -103,6 +115,7 @@ vi.mock('../../src/cli/platform-installer.ts', async (importOriginal) => {
         false,
       );
       state.events.push('installer-finish');
+      dependencies.onProgress?.('Verifying the enabled platform');
       await borrowed();
       return {
         manifest: existing!,
@@ -161,10 +174,15 @@ vi.mock('../../src/cli/platform-registry.ts', async (importOriginal) => {
   };
 });
 
+import { log, note } from '@clack/prompts';
+import { installPlatform } from '../../src/cli/platform-installer.ts';
 import { runInstalledPlatformCommand } from '../../src/cli/platform-management.ts';
 
 describe('installed platform upgrade', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    state.spinner.mockReturnValue(state.progress);
+    state.releaseDatabase.mockReset().mockResolvedValue(undefined);
     state.createSecrets.mockReset().mockReturnValue({});
     state.events.length = 0;
     state.prepareDatabase.mockReset().mockImplementation(async (_directory, database) => {
@@ -224,6 +242,7 @@ describe('installed platform upgrade', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     delete process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION;
     delete process.env.VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON;
   });
@@ -250,6 +269,14 @@ describe('installed platform upgrade', () => {
       'outer-release',
       'local-release',
     ]);
+    expect(state.progress.start).toHaveBeenCalledWith('Upgrading the platform');
+    expect(state.progress.message).toHaveBeenCalledWith('Deploying the api service');
+    expect(state.progress.message).toHaveBeenCalledWith('Verifying the enabled platform');
+    expect(state.progress.stop).toHaveBeenCalledExactlyOnceWith('Platform upgrade complete.');
+    expect(state.progress.error).not.toHaveBeenCalled();
+    expect(state.progress.stop.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(log.success).mock.invocationCallOrder[0]!,
+    );
   });
 
   it('forwards an explicitly restored complete project-secret keyring during repair', async () => {
@@ -274,6 +301,7 @@ describe('installed platform upgrade', () => {
         projectSecretKeysJson: keysJson,
       }),
     );
+    expect(state.progress.start).toHaveBeenCalledWith('Repairing the platform');
   });
 
   it('releases the held lifecycle lock when database preparation fails', async () => {
@@ -298,5 +326,120 @@ describe('installed platform upgrade', () => {
       'outer-release',
       'local-release',
     ]);
+    expect(state.progress.error).toHaveBeenCalledExactlyOnceWith('Platform upgrade failed.');
+    expect(state.progress.stop).not.toHaveBeenCalled();
+  });
+
+  it('does not start deployment progress for a plan-only run', async () => {
+    await runInstalledPlatformCommand({
+      plan: true,
+      runtime: '',
+      selector: state.manifest!.id,
+      subcommand: 'upgrade',
+      yes: false,
+    });
+    expect(state.spinner).not.toHaveBeenCalled();
+    expect(installPlatform).not.toHaveBeenCalled();
+    expect(state.events).toEqual([]);
+  });
+
+  it('stops progress when preparation fails before deployment starts', async () => {
+    state.createSecrets.mockImplementationOnce(() => {
+      throw new Error('invalid credentials');
+    });
+    await expect(
+      runInstalledPlatformCommand({
+        plan: false,
+        runtime: '',
+        selector: state.manifest!.id,
+        subcommand: 'upgrade',
+        yes: true,
+      }),
+    ).rejects.toThrow('invalid credentials');
+    expect(installPlatform).not.toHaveBeenCalled();
+    expect(state.progress.error).toHaveBeenCalledExactlyOnceWith('Platform upgrade failed.');
+    expect(state.events).toEqual(['outer-release', 'local-release']);
+  });
+
+  it('keeps progress active through final database lock release', async () => {
+    state.releaseDatabase.mockImplementationOnce(async () => {
+      expect(state.progress.message).toHaveBeenLastCalledWith('Finalizing platform changes');
+      expect(state.progress.stop).not.toHaveBeenCalled();
+      expect(log.success).not.toHaveBeenCalled();
+    });
+    await runInstalledPlatformCommand({
+      plan: false,
+      runtime: '',
+      selector: state.manifest!.id,
+      subcommand: 'upgrade',
+      yes: true,
+    });
+    expect(state.progress.stop).toHaveBeenCalledExactlyOnceWith('Platform upgrade complete.');
+  });
+
+  it('reports a finalization failure without claiming success and still releases the local lock', async () => {
+    state.releaseDatabase.mockRejectedValueOnce(new Error('database release failed'));
+    await expect(
+      runInstalledPlatformCommand({
+        plan: false,
+        runtime: '',
+        selector: state.manifest!.id,
+        subcommand: 'upgrade',
+        yes: true,
+      }),
+    ).rejects.toThrow('database release failed');
+    expect(state.progress.error).toHaveBeenCalledExactlyOnceWith('Platform upgrade failed.');
+    expect(state.progress.stop).not.toHaveBeenCalled();
+    expect(log.success).not.toHaveBeenCalled();
+    expect(state.events.at(-1)).toBe('local-release');
+  });
+
+  it.each(['waitingForDns', 'waitingForSandboxDrain'] as const)(
+    'stops progress before explaining a %s pause',
+    async (reason) => {
+      vi.mocked(installPlatform).mockResolvedValueOnce({
+        manifest: state.manifest!,
+        waitingForDns: false,
+        waitingForSandboxDrain: false,
+        zoneNameServers: [],
+        [reason]: true,
+      });
+      await runInstalledPlatformCommand({
+        plan: false,
+        runtime: '',
+        selector: state.manifest!.id,
+        subcommand: 'upgrade',
+        yes: true,
+      });
+      expect(state.progress.stop).toHaveBeenCalledExactlyOnceWith(
+        'Platform operation paused; progress is saved.',
+      );
+      expect(state.progress.error).not.toHaveBeenCalled();
+      expect(log.success).not.toHaveBeenCalled();
+      expect(state.progress.stop.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(note).mock.invocationCallOrder.at(-1)!,
+      );
+      expect(state.events).toEqual(['outer-release', 'local-release']);
+    },
+  );
+
+  it('forwards spinner cancellation to coordinated CLI shutdown', async () => {
+    await runInstalledPlatformCommand({
+      plan: false,
+      runtime: '',
+      selector: state.manifest!.id,
+      subcommand: 'upgrade',
+      yes: true,
+    });
+    const onCancel = state.spinner.mock.calls[0]![0].onCancel;
+    const emit = vi.spyOn(process, 'emit').mockReturnValueOnce(true);
+    onCancel();
+    expect(emit).toHaveBeenCalledWith('SIGINT');
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('test exit');
+    });
+    emit.mockReturnValueOnce(false);
+    expect(onCancel).toThrow('test exit');
+    expect(exit).toHaveBeenCalledWith(130);
   });
 });
