@@ -113,16 +113,6 @@
       "import": "./dist/runtime/client-solid.mjs",
       "require": "./dist/runtime/client-solid.mjs"
     },
-    "./runtime/fetch": {
-      "types": "./dist/runtime/fetch.d.mts",
-      "import": "./dist/runtime/fetch.mjs",
-      "require": "./dist/runtime/fetch.mjs"
-    },
-    "./runtime/fetch-stream": {
-      "types": "./dist/runtime/fetch-stream.d.mts",
-      "import": "./dist/runtime/fetch-stream.mjs",
-      "require": "./dist/runtime/fetch-stream.mjs"
-    },
     "./sse": {
       "types": "./dist/runtime/sse.d.mts",
       "import": "./dist/runtime/sse.mjs",
@@ -243,31 +233,6 @@
       "import": "./dist/runtime/remote/index.mjs",
       "require": "./dist/runtime/remote/index.mjs"
     },
-    "./remote/binding-handler": {
-      "types": "./dist/runtime/remote/binding-handler.d.mts",
-      "import": "./dist/runtime/remote/binding-handler.mjs",
-      "require": "./dist/runtime/remote/binding-handler.mjs"
-    },
-    "./runtime/migration-handler": {
-      "types": "./dist/runtime/migration-handler.d.mts",
-      "import": "./dist/runtime/migration-handler.mjs",
-      "require": "./dist/runtime/migration-handler.mjs"
-    },
-    "./runtime/migration-handler-pg": {
-      "types": "./dist/runtime/migration-handler-pg.d.mts",
-      "import": "./dist/runtime/migration-handler-pg.mjs",
-      "require": "./dist/runtime/migration-handler-pg.mjs"
-    },
-    "./runtime/migration-handler-mysql": {
-      "types": "./dist/runtime/migration-handler-mysql.d.mts",
-      "import": "./dist/runtime/migration-handler-mysql.mjs",
-      "require": "./dist/runtime/migration-handler-mysql.mjs"
-    },
-    "./runtime/ws-server": {
-      "types": "./dist/runtime/ws-server.d.mts",
-      "import": "./dist/runtime/ws-server.mjs",
-      "require": "./dist/runtime/ws-server.mjs"
-    },
     "./pages": {
       "types": "./dist/pages/index.d.mts",
       "import": "./dist/pages/index.mjs",
@@ -282,11 +247,6 @@
       "types": "./dist/pages/head.d.mts",
       "import": "./dist/pages/head.mjs",
       "require": "./dist/pages/head.mjs"
-    },
-    "./pages-head-client": {
-      "types": "./dist/pages/head-client.d.mts",
-      "import": "./dist/pages/head-client.mjs",
-      "require": "./dist/pages/head-client.mjs"
     },
     "./pages-prefetch": {
       "types": "./dist/pages/prefetch.d.mts",
