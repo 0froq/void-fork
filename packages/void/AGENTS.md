@@ -35,66 +35,14 @@ Production non-CF Pages pass a filesystem-backed `ASSETS` provider to the genera
 
 ### Source Layout
 
-```
-src/
-  index.ts                  # Main export: voidPlugin() → Plugin[]
-  config.ts                 # readConfig(), VoidConfig, convertHeadersConfig(), redirect/header helpers
-  plugin-routing.ts         # Virtual module resolution, file watching, HMR, type codegen
-  plugin-node-target.ts     # Non-CF deploy targets (Node.js, Bun, Deno) — binding guard, dev server, build entry
-  plugin-inference.ts       # Binding inference orchestration (calls walk.ts)
-  plugin-migration.ts       # Local migration runner on dev startup
-  standard-schema.ts        # Inlined Standard Schema V1 types (no @standard-schema/spec dep)
-  routes-stub.ts            # Empty RouteMap/WebSocketRouteMap interfaces (augmented by generated routes.d.ts)
-  router/
-    parse-filename.ts       # Route filename → RouteDefinition (pure function)
-    detect-exports.ts       # Detects named HTTP method exports (GET, POST, etc.) via parseSync
-    websocket.ts            # .ws.ts scanner + DO class metadata extraction
-    scan.ts                 # Filesystem scanner using tinyglobby + export detection
-    compile.ts              # Generates Hono app code + worker entry + websocket wiring
-  durable/
-    scan.ts                 # durable-objects/* convention → binding/class/migration metadata
-  codegen/
-    route-types.ts          # Generates .void/routes.d.ts (RouteMap + WebSocketRouteMap)
-    db-types.ts             # (removed — Drizzle schema is now the type source)
-    queue-types.ts          # Generates .void/queues.d.ts (QueueMap with payload types)
-  queues/
-    scan.ts                 # Queue file scanner (name from relative path, nested segments joined by `-`, consumer options)
-  runtime/
-    handler.ts              # defineHandler(), defineHandler.withValidator(), defineMiddleware(), defineHead(), defineQueue()
-    queues.ts               # QueueMap stub interface + typed `queues` proxy using env.QUEUE_*
-    validator.ts            # runValidation() — Standard Schema body/query/params validation
-    response.ts             # convertReturnValue() — return → Response
-    fetch.ts                # Typed fetch client for void/client
-    fetch-stream.ts         # SSE stream consumer (fetchStream) for void/client
-    ws.ts                   # defineRoom(), defineWebSocket(), typed connect() client
-    ws-server.ts            # DO runtime helpers for generated websocket routes
-    ai.ts                   # AI proxy — auto-detects backend (service binding / HTTPS / direct binding)
-    db.ts                   # Drizzle D1 instance (auto-wired with user schema via virtual module)
-    durable.ts              # defineDurableState(), typed RPC stubs, persistence + state migrations
-  inference/
-    walk.ts                 # AST walking with vite's parseSync + estree-walker
-  migrations/
-    runner.ts               # Applies pending migrations via drizzle-orm's programmatic migrate()
-    collect.ts              # Reads .sql files from db/migrations/ dir, sorted by filename
-    validate.ts             # Destructive-op detection + pragma enforcement
-  cli/
-    cli.ts                  # CLI entry: `void deploy|link|login`
-    deploy.ts               # Managed/native target dispatch and deployment orchestration
-    connect.ts              # Developer onboarding: select Cloudflare or Void and authenticate
-    cloudflare-connect.ts   # Shared account setup for connect and init
-    cloudflare-deploy/
-      classify.ts           # Fail-closed native app-shape classifier
-      config.ts             # Shared Wrangler JSON/JSONC config readers
-      execute.ts            # Verified final Wrangler upload executor
-    cloudflare-operations.ts # Direct secrets, domains, versions, logs, rollback, and D1 operations
-    project.ts              # Reads/creates .void/project.json (deploy platform + optional Void link)
-    auth.ts                 # Token read/save + runLogin() (local server + browser OAuth)
-    login.ts                # Login command UI (@clack/prompts)
-    package.ts              # Packages dist/ into FormData (worker + assets + migrations + manifest)
-    agents.ts               # Shared agent configs and detection
-    client.ts               # HTTP client for platform API
-    types.ts                # CLI-only deploy types and @void/deploy-core re-exports
-```
+The Vite entry is `src/index.ts`; `src/plugin-*` wires feature plugins.
+`src/router`, `src/pages` and `src/codegen` scan and compile application
+code. `src/runtime` contains Worker-safe public helpers; `src/cli` owns
+commands, packaging and deployment. Database authoring and migration helpers
+live in `src/drizzle` and `src/migrations`.
+
+Use the current source tree and package exports for file and API inventories;
+generated entries must preserve the module-boundary rules below.
 
 ### Key Design Decisions
 
@@ -139,23 +87,11 @@ Two features need extra wiring on a self-hosted `vite build && wrangler deploy` 
 
 ### Package Exports
 
-| Subpath          | What                                                                                                                                  |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `void`           | `voidPlugin()` named export + `defineHandler` + `defineMiddleware` + `basicAuth` + `defineHead` + `defineQueue` + `CloudContext` type |
-| `void/handler`   | `defineHandler()`, `defineHandler.withValidator()`, `defineMiddleware()`, `basicAuth()`, `defineHead()`, types                        |
-| `void/response`  | `convertReturnValue()`                                                                                                                |
-| `void/validator` | `runValidation()`, `ValidatorSlots`, `HandlerInput` types                                                                             |
-| `void/routes`    | Empty `RouteMap` + `WebSocketRouteMap` stubs (augmented by generated `routes.d.ts`)                                                   |
-| `void/client`    | Typed `fetch()` client + `fetchStream()` SSE consumer + `FetchError`                                                                  |
-| `void/ws`        | `defineRoom()`, `defineWebSocket()`, typed `connect()`, and WebSocket context types                                                   |
-| `void/durable`   | `defineDurableState()`, typed RPC stubs, state context, and state migration types                                                     |
-| `void/db`        | `db` Drizzle D1 instance (auto-wired with user schema) + `createDb()` for custom D1 bindings                                          |
-| `void/queues`    | `queues` typed proxy + `QueueMap` stub interface (augmented by generated `queues.d.ts`)                                               |
-| `void/ai`        | `ai` proxy — `ai.run()`, `ai.stream()`, `ai.models()` with auto-detected backend (service binding / HTTPS / direct)                   |
-| `void/log`       | `logger.error/warn/info(msg, fields?)` — emits stringified JSON to `console.*` so Cloudflare Tail captures level + msg                |
-| `void/env`       | `defineEnv()`, typed `env` proxy, built-in schema helpers (`string`, `number`, `oneOf`, …) + global Cloudflare types                  |
-
-The CLI binary is at `dist/cli/cli.mjs` (declared in `bin` field of package.json).
+[package.json](./package.json) is the authoritative export map and declares
+the CLI binary at `dist/cli/cli.mjs`. The
+[API reference](../../docs/reference/api.md#user-facing-imports) documents
+supported imports. Keep Worker-safe runtime subpaths separate from the
+Vite/CLI dependency graph.
 
 ### Legacy Void Cloud Staging Selection
 
@@ -197,17 +133,9 @@ The recorded `env` is enforced by `isRouteEnabledForEnvironment()`. The scanners
 
 ## Code Generation (`void gen`)
 
-Rails/Laravel-style scaffolding commands for common boilerplate:
-
-| Command                                            | Creates                                                     |
-| -------------------------------------------------- | ----------------------------------------------------------- |
-| `void gen model <name> [cols...]`                  | Drizzle table in `db/schema/` + barrel export + CRUD routes |
-| `void gen migration <name>`                        | Empty migration file with auto-numbered prefix              |
-| `void gen route <path> [--methods get,post,...]`   | Route file with `defineHandler` exports                     |
-| `void gen middleware <name>`                       | Numbered middleware file with `defineMiddleware`            |
-| `void gen ssr [--react\|--vue\|--svelte\|--solid]` | SSR entry + client entry + App component                    |
-| `void gen cron <name>`                             | Cron job file with `defineScheduled` in `crons/`            |
-| `void gen queue <name>`                            | Queue consumer file with `defineQueue`                      |
+The [CLI reference](../../docs/reference/cli.md#code-generation) lists
+scaffolding commands and flags. Keep generation in `src/cli/gen.ts` aligned
+with `src/cli/gen-args.ts`, CLI help and the interactive command-group hint.
 
 Column types for `gen model`: `string`, `text`, `datetime` → `text()`, `integer` → `integer()`, `boolean` → `integer({ mode: "boolean" })`, `real` → `real()`. Append `?` for nullable (omits `.notNull()`).
 
@@ -232,29 +160,10 @@ Agent instructions use versioned markers (`<!--injected-by-void-v0.0.1-->` / `<!
 
 ## Tests
 
-| Test file                                   | Covers                                                         |
-| ------------------------------------------- | -------------------------------------------------------------- |
-| `test/unit/parse-filename.test.ts`          | Route filename parsing (21 tests)                              |
-| `test/unit/scan.test.ts`                    | Filesystem scanning + queue consumers (13 tests)               |
-| `test/unit/detect-exports.test.ts`          | Named HTTP method export detection (8 tests)                   |
-| `test/unit/compile.test.ts`                 | Code generation + queue routes (10 tests)                      |
-| `test/unit/response.test.ts`                | Return value → Response (8 tests)                              |
-| `test/unit/inference.test.ts`               | AST-based binding inference + queues + AI (19 tests)           |
-| `test/unit/fetch-stream.test.ts`            | SSE stream consumer (fetchStream) (5 tests)                    |
-| `test/unit/validate-migrations.test.ts`     | Destructive-op detection + pragma (12 tests)                   |
-| `test/unit/collect-migrations.test.ts`      | Migration file collection (4 tests)                            |
-| `test/unit/validator.test.ts`               | Standard Schema validation runtime (8 tests)                   |
-| `test/unit/validator-real-schemas.test.ts`  | Real schema validation (zod/valibot/arktype) (16 tests)        |
-| `test/unit/define-handler.test.ts`          | defineHandler + middleware composition (18 tests)              |
-| `test/unit/fetch.test.ts`                   | Typed fetch client (9 tests)                                   |
-| `test/unit/ws.test.ts`                      | Typed websocket client (3 tests)                               |
-| `test/unit/route-types.test.ts`             | Route type codegen output (6 tests)                            |
-| `test/unit/route-type-extraction.test.ts`   | Type extraction pipeline (Serialize + ExtractInput) (14 tests) |
-| `test/unit/db.test.ts`                      | Drizzle D1 instance + schema wiring (25 tests)                 |
-| `test/unit/queue-types.test.ts`             | Queue type codegen output (3 tests)                            |
-| `test/unit/plugin-node-target.test.ts`      | Node target plugin — binding guard, plugin creation (5 tests)  |
-| `test/integration/node-target.test.ts`      | Node app playground — dev server + production build (5 tests)  |
-| `test/integration/queue-playground.test.ts` | Queue send → consumer → KV round-trip (1 test)                 |
+Tests live in `test/unit` and `test/integration`. Run the affected files
+during development, then follow [TESTING.md](../../TESTING.md) for final
+workspace and packed-consumer verification. Keep regression cases against
+production functions and real generated entries rather than copied code.
 
 ## Pitfalls / Things That Broke
 

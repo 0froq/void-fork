@@ -165,7 +165,6 @@ Void is one repository with an explicit dependency boundary:
 | [`packages/dispatch`](./packages/dispatch/README.md)   | Edge router for installation app domains and custom domains               |
 | [`packages/proxy`](./packages/proxy/README.md)         | AI proxy, remote D1/KV/R2 proxy, ISR revalidation bridge                  |
 | [`packages/tail`](./packages/tail/README.md)           | Runtime log ingestion into Analytics Engine                               |
-| [`packages/ui`](./packages/ui)                         | Shared platform CSS tokens and UI components                              |
 | [`../packages/void`](../packages/void/AGENTS.md)       | Main `void` package: Vite plugin, CLI, runtime, codegen, deploy packaging |
 | `../packages/{vue,react,svelte,solid}`                 | Pages-mode adapters and runtime helpers                                   |
 | `../packages/create-void`                              | Scaffolding package                                                       |
@@ -194,47 +193,17 @@ Void is one repository with an explicit dependency boundary:
 | AI metering, BYOK AI gateway, remote D1/KV/R2 access, revalidation bridge     | `packages/proxy/src/*`                                                                                                                                                                                                                 |
 | Runtime logs and live tailing                                                 | `packages/tail/src/index.ts`, `packages/api/src/admin/routes/deployments.tsx`                                                                                                                                                          |
 | User-facing dashboard                                                         | `packages/dashboard/pages/*`, `packages/dashboard/middleware/01.auth.ts`, `packages/dashboard/lib/api.ts`                                                                                                                              |
-| Shared internal styling                                                       | `packages/ui/src/base.css`, `packages/ui/src/theme.css`                                                                                                                                                                                |
+| Dashboard styling                                                             | `packages/dashboard/ui/styles/base.css`, `packages/dashboard/ui/styles/tokens.css`                                                                                                                                                     |
 
 The dashboard depends on `void` and `@void/react` through normal `workspace:*` dependencies. Those packages export only their `dist/` output, so run `vp run build` before `vp run --filter @voidcloud/platform deploy` on a fresh checkout. The platform workflows do this; the task graph does not.
 
-## SDK overview
+## SDK guidance
 
-The repository-level packages and docs are the public product surface.
-
-### `../packages/void`
-
-This is the main `void` package.
-
-- `src/index.ts` wires together routing, pages-mode infrastructure, codegen, migrations, prerendering, Cloudflare integration, and non-CF targets.
-- `src/cli/*` contains the CLI.
-- `src/router/*` handles `routes/` scanning and route compilation.
-- `src/pages/*` handles pages-mode scanning, protocol, head management, defer, and manifest generation.
-- `src/runtime/*` contains helpers exposed as `void/db`, `void/kv`, `void/storage`, `void/ai`, `void/isr`, `void/client`, and auth utilities.
-- `src/codegen/*` generates `.void/routes.d.ts`, `.void/db.d.ts`, `.void/queues.d.ts`, and tsconfig glue.
-- `src/drizzle/*` and `src/migrations/*` handle schema discovery and migration execution.
-- `src/plugin-node-target.ts` supports `target: "node" | "bun" | "deno"`.
-
-### Adapter packages
-
-- `../packages/vue`
-- `../packages/react`
-- `../packages/svelte`
-- `../packages/solid`
-
-These packages provide pages-mode adapters, links, forms, router helpers, prefetching, and framework-specific client behavior.
-
-### Framework support
-
-Current public support is:
-
-- TanStack Start
-- React Router
-- SvelteKit
-- Nuxt
-- Astro
-
-There is Vinext-specific source in the framework repo, but it is intentionally on hold and not part of the current public support matrix.
+Public SDK architecture and adapter guidance live in the
+[root instructions](../AGENTS.md) and
+[core package instructions](../packages/void/AGENTS.md).
+Use the [framework integration guide](../docs/integrations/frameworks/overview.md)
+for the supported framework list.
 
 ## Platform Package Overview
 

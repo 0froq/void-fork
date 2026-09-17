@@ -26,16 +26,16 @@ Use the Node.js version recorded in `.node-version`. The workspace uses public n
 
 ## Finding the Implementation
 
-| Directory                                             | Purpose                                                              |
-| ----------------------------------------------------- | -------------------------------------------------------------------- |
-| `packages/void`                                       | Framework, application runtime, and CLI                              |
-| `packages/platform`                                   | Installer contracts, packaged Workers, and platform migrations       |
-| `packages/deploy-core`, `packages/deploy-cloudflare`  | Shared deployment contracts and Cloudflare upload code               |
-| `platform/packages/api`                               | Users, projects, deployments, provisioning, and administrator API/UI |
-| `platform/packages/dispatch`                          | Application routing and static assets                                |
-| `platform/packages/proxy`                             | AI, remote bindings, and revalidation                                |
-| `platform/packages/tail`                              | Runtime log ingestion                                                |
-| `platform/packages/dashboard`, `platform/packages/ui` | Dashboard source and shared UI                                       |
+| Directory                                            | Purpose                                                              |
+| ---------------------------------------------------- | -------------------------------------------------------------------- |
+| `packages/void`                                      | Framework, application runtime, and CLI                              |
+| `packages/platform`                                  | Installer contracts, packaged Workers, and platform migrations       |
+| `packages/deploy-core`, `packages/deploy-cloudflare` | Shared deployment contracts and Cloudflare upload code               |
+| `platform/packages/api`                              | Users, projects, deployments, provisioning, and administrator API/UI |
+| `platform/packages/dispatch`                         | Application routing and static assets                                |
+| `platform/packages/proxy`                            | AI, remote bindings, and revalidation                                |
+| `platform/packages/tail`                             | Runtime log ingestion                                                |
+| `platform/packages/dashboard`                        | Dashboard source and local UI components in `ui/`                    |
 
 The `@voidcloud/*` names identify workspace implementation packages. Their `private: true` flags prevent publishing those packages to npm. Deployable core Workers are bundled into the public `@void/platform` package.
 
