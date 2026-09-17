@@ -1,3 +1,4 @@
+import { readPlatformApplication } from '@void/platform';
 import { sql } from 'drizzle-orm';
 import { backfillQueueTokens } from '../admin/backfill-queue-tokens.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
@@ -40,15 +41,31 @@ async function checkUrl(
   try {
     const res = await fetch(url, {
       headers,
+      // Do not forward probe credentials to a login redirect or treat its HTML
+      // login page as a successful health check.
+      redirect: 'manual',
       signal: AbortSignal.timeout(5000),
     });
-    return { name, ok: res.ok, latencyMs: Date.now() - start };
+    void res.body?.cancel().catch(() => {});
+    return {
+      name,
+      ok: res.ok,
+      latencyMs: Date.now() - start,
+      ...(!res.ok
+        ? {
+            error: `HTTP ${res.status}${res.status >= 300 && res.status < 400 ? ' (redirect)' : ''}`,
+          }
+        : {}),
+    };
   } catch (err) {
     return {
       name,
       ok: false,
       latencyMs: Date.now() - start,
-      error: err instanceof Error ? err.message : 'Unknown error',
+      error:
+        err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+          ? 'Health check timed out after 5 seconds.'
+          : 'Could not reach the service.',
     };
   }
 }
@@ -58,12 +75,12 @@ async function checkDb(db: Db): Promise<HealthCheck> {
   try {
     await db.execute(sql`SELECT 1`);
     return { name: 'db', ok: true, latencyMs: Date.now() - start };
-  } catch (err) {
+  } catch {
     return {
       name: 'db',
       ok: false,
       latencyMs: Date.now() - start,
-      error: err instanceof Error ? err.message : 'Unknown error',
+      error: 'Database query failed.',
     };
   }
 }
@@ -129,6 +146,23 @@ export async function systemHealth(
   const cloudDomain = cloudDomainFromHost(new URL(requestUrl).hostname);
   const siteDomain = env.SITE_DOMAIN ?? SITE_DOMAIN;
   const proxyUrl = env.PROXY_URL ?? `https://proxy.${cloudDomain}`;
+  let dispatchUrl: string | null = `https://test.${siteDomain}/health`;
+  if (installed && env.PLATFORM_APPLICATION) {
+    const application = readPlatformApplication(env);
+    if (application.zoneName) {
+      dispatchUrl = `https://test.${application.baseDomain}/health`;
+    } else {
+      const worker = env.DISPATCH_WORKER_NAME;
+      const workersDev = application.workersDev;
+      dispatchUrl =
+        worker &&
+        /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(worker) &&
+        workersDev &&
+        workersDev.installationId === env.PLATFORM_INSTALLATION_ID
+          ? `https://${worker}.${workersDev.subdomain}.workers.dev/health`
+          : null;
+    }
+  }
   const dispatchHeaders: Record<string, string> | undefined = installed
     ? env.PLATFORM_HEALTH_PROBE_TOKEN
       ? { 'X-Void-Platform-Probe': env.PLATFORM_HEALTH_PROBE_TOKEN }
@@ -137,7 +171,11 @@ export async function systemHealth(
   const checks = [
     { name: 'api', ok: true, latencyMs: 0 },
     ...(await Promise.all([
-      checkUrl('proxy', `${proxyUrl.replace(/\/$/, '')}/health`),
+      checkUrl(
+        'proxy',
+        `${proxyUrl.replace(/\/$/, '')}/health`,
+        installed ? dispatchHeaders : undefined,
+      ),
       ...(!installed
         ? [
             checkUrl(
@@ -146,14 +184,16 @@ export async function systemHealth(
             ),
           ]
         : []),
-      installed && !dispatchHeaders
+      !dispatchUrl || (installed && !dispatchHeaders)
         ? Promise.resolve({
             name: 'dispatch',
             ok: false,
             latencyMs: 0,
-            error: 'Platform health probe token is not configured.',
+            error: !dispatchUrl
+              ? 'Dispatch health endpoint is not configured for this installation.'
+              : 'Platform health probe token is not configured.',
           })
-        : checkUrl('dispatch', `https://test.${siteDomain}/health`, dispatchHeaders),
+        : checkUrl('dispatch', dispatchUrl, dispatchHeaders),
       checkDb(db),
     ])),
   ];

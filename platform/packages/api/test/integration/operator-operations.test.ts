@@ -1,3 +1,4 @@
+import { PLATFORM_APPLICATION_KEY } from '@void/platform';
 import { eq, sql } from 'drizzle-orm';
 import {
   afterAll,
@@ -539,6 +540,192 @@ describe('operator installation-aware system and worker operations', () => {
       'https://test.apps.example/health',
     ]);
     expect(fetch.mock.calls[1][1]?.headers).toEqual({ 'X-Void-Platform-Probe': 'probe' });
+    expect(fetch.mock.calls[0][1]?.headers).toEqual({ 'X-Void-Platform-Probe': 'probe' });
+    expect(fetch.mock.calls.every(([, init]) => init?.redirect === 'manual')).toBe(true);
+  });
+
+  const workersDevApplication = {
+    baseDomain: 'test-account.workers.dev',
+    zoneName: '',
+    dedicatedZone: false,
+    workersDev: { subdomain: 'test-account', installationId: 'example-123456abcdef' },
+  };
+  const workersDevEnv = {
+    PLATFORM_INSTALLATION_ID: 'example-123456abcdef',
+    PLATFORM_APPLICATION: JSON.stringify(workersDevApplication),
+    PROXY_URL: 'https://custom-proxy.example',
+    DISPATCH_WORKER_NAME: 'recorded-dispatch-worker',
+    PLATFORM_HEALTH_PROBE_TOKEN: 'probe',
+  };
+
+  test('workers.dev health probes the recorded dispatch Worker independently of the API hostname', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json({ ok: true }));
+    const response = await req('/system/health', undefined, workersDevEnv);
+    expect(await response.json()).toMatchObject({ allOk: true });
+    expect(fetch.mock.calls.map(([input]) => String(input))).toEqual([
+      'https://custom-proxy.example/health',
+      'https://recorded-dispatch-worker.test-account.workers.dev/health',
+    ]);
+  });
+
+  test('health switches to the active application domain after adding one to workers.dev', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json({ ok: true }));
+    await env.ROUTING.put(
+      PLATFORM_APPLICATION_KEY,
+      JSON.stringify({
+        ...workersDevApplication,
+        baseDomain: 'apps.example.com',
+        zoneName: 'example.com',
+        zoneId: 'zone',
+      }),
+    );
+    try {
+      expect(await (await req('/system/health', undefined, workersDevEnv)).json()).toMatchObject({
+        allOk: true,
+      });
+      expect(fetch.mock.calls.map(([input]) => String(input))).toEqual([
+        'https://custom-proxy.example/health',
+        'https://test.apps.example.com/health',
+      ]);
+    } finally {
+      await env.ROUTING.delete(PLATFORM_APPLICATION_KEY);
+    }
+  });
+
+  test.each([undefined, 'untrusted.example/path'])(
+    'does not guess a workers.dev endpoint without a valid Worker name (%s)',
+    async (name) => {
+      const fetch = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async () => Response.json({ ok: true }));
+      const result = await (
+        await req('/system/health', undefined, { ...workersDevEnv, DISPATCH_WORKER_NAME: name })
+      ).json();
+      expect(result).toMatchObject({
+        allOk: false,
+        checks: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'dispatch',
+            ok: false,
+            error: 'Dispatch health endpoint is not configured for this installation.',
+          }),
+        ]),
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test('preserves legacy platform health endpoints and headers', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json({ ok: true }));
+    const result = await (
+      await req('/system/health', undefined, {
+        SITE_DOMAIN: 'staging.void.app',
+        PROXY_URL: 'https://proxy.staging.void.cloud',
+        DASHBOARD_URL: 'https://dash.staging.void.cloud',
+        PLATFORM_HEALTH_PROBE_TOKEN: 'must-not-send',
+      })
+    ).json();
+    expect(result).toMatchObject({ allOk: true });
+    expect(fetch.mock.calls.map(([input]) => String(input))).toEqual([
+      'https://proxy.staging.void.cloud/health',
+      'https://dash.staging.void.cloud/login',
+      'https://test.staging.void.app/health',
+    ]);
+    expect(fetch.mock.calls.map(([, init]) => init?.headers)).toEqual([
+      undefined,
+      undefined,
+      { 'X-Health-Check': 'void-admin' },
+    ]);
+  });
+
+  test('does not send the dispatch probe to another installation identity', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json({ ok: true }));
+    const result = await (
+      await req('/system/health', undefined, {
+        ...workersDevEnv,
+        PLATFORM_INSTALLATION_ID: 'other-123456abcdef',
+      })
+    ).json();
+    expect(result).toMatchObject({
+      allOk: false,
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          name: 'dispatch',
+          ok: false,
+          error: 'Dispatch health endpoint is not configured for this installation.',
+        }),
+      ]),
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not expose database credentials in health failures', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true }));
+    vi.spyOn(env.db, 'execute').mockRejectedValueOnce(
+      new Error('Connection failed: postgresql://user:private-password@example.com/db'),
+    );
+    const result = await (await req('/system/health', undefined, workersDevEnv)).json();
+    expect(result).toMatchObject({
+      allOk: false,
+      checks: expect.arrayContaining([
+        expect.objectContaining({ name: 'db', ok: false, error: 'Database query failed.' }),
+      ]),
+    });
+    expect(JSON.stringify(result)).not.toContain('private-password');
+  });
+
+  test.each([403, 503, 302])(
+    'reports HTTP %s without exposing the upstream response body',
+    async (status) => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async () => new Response('sensitive upstream response', { status }),
+      );
+      const result = await (await req('/system/health', undefined, workersDevEnv)).json();
+      expect(result).toMatchObject({
+        allOk: false,
+        checks: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'proxy',
+            ok: false,
+            error: status === 302 ? 'HTTP 302 (redirect)' : `HTTP ${status}`,
+          }),
+          expect.objectContaining({
+            name: 'dispatch',
+            ok: false,
+            error: status === 302 ? 'HTTP 302 (redirect)' : `HTTP ${status}`,
+          }),
+        ]),
+      });
+      expect(JSON.stringify(result)).not.toContain('sensitive upstream response');
+    },
+  );
+
+  test.each(['TimeoutError', 'TypeError'])('reports a safe diagnostic for %s', async (name) => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      Object.assign(new Error('private-credential'), { name }),
+    );
+    const result = await (await req('/system/health', undefined, workersDevEnv)).json();
+    expect(result).toMatchObject({
+      allOk: false,
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          name: 'proxy',
+          error:
+            name === 'TimeoutError'
+              ? 'Health check timed out after 5 seconds.'
+              : 'Could not reach the service.',
+        }),
+      ]),
+    });
+    expect(JSON.stringify(result)).not.toContain('private-credential');
   });
   test('every worker route rejects installed platforms before external calls', async () => {
     const fetch = cloudflareWorkerStub();

@@ -69,13 +69,21 @@ export function createPlatformWorkerConfigs(input: {
   ];
   const dispatchNamespace = [{ binding: 'DISPATCH', namespace: names.dispatchNamespace }];
   const r2 = [{ binding: 'STATIC_ASSETS_R2', bucket_name: names.assetsBucket }];
+  // Public workers.dev probes must re-enter Cloudflare's public edge. Service
+  // bindings here would make API/proxy bootstrap depend on each other existing.
+  const fetchWorkersDev =
+    Boolean(deployment.application.workersDev) ||
+    [apiUrl, proxyUrl].some((url) => new URL(url).hostname.endsWith('.workers.dev'));
 
   const api: Record<string, unknown> = {
     ...common,
     name: names.apiWorker,
     main: runtimeEntrypoints.api,
     no_bundle: true,
-    compatibility_flags: ['nodejs_compat'],
+    compatibility_flags: [
+      'nodejs_compat',
+      ...(fetchWorkersDev ? ['global_fetch_strictly_public'] : []),
+    ],
     placement: { mode: 'smart' },
     hyperdrive: [{ binding: 'HYPERDRIVE', id: resources.hyperdrive }],
     kv_namespaces: kv,

@@ -3,6 +3,81 @@ import { createPlatformDeploymentManifest } from '../../src/manifest.ts';
 import { createPlatformWorkerConfigs } from '../../src/worker-config.ts';
 
 describe('platform usage queue bindings', () => {
+  it.each([
+    {
+      apiUrl: 'https://api.example.com',
+      proxyUrl: 'https://proxy.example.com',
+      workersDev: false,
+      publicFetch: false,
+    },
+    {
+      apiUrl: 'https://api.account.workers.dev',
+      proxyUrl: 'https://proxy.example.com',
+      workersDev: false,
+      publicFetch: true,
+    },
+    {
+      apiUrl: 'https://api.example.com',
+      proxyUrl: 'https://proxy.account.workers.dev',
+      workersDev: false,
+      publicFetch: true,
+    },
+    {
+      apiUrl: 'https://api.example.com',
+      proxyUrl: 'https://proxy.example.com',
+      workersDev: true,
+      publicFetch: true,
+    },
+  ])(
+    'supports public health probes without adding bootstrap service dependencies: $apiUrl, $proxyUrl, workersDev=$workersDev',
+    ({ apiUrl, proxyUrl, workersDev, publicFetch }) => {
+      const deployment = createPlatformDeploymentManifest({
+        application: workersDev
+          ? {
+              baseDomain: 'account.workers.dev',
+              zoneName: '',
+              workersDev: { subdomain: 'account', installationId: 'example-123456abcdef' },
+            }
+          : { baseDomain: 'apps.example.com', zoneName: 'example.com' },
+        displayName: 'Example',
+        installationSlug: 'example',
+      });
+      const configs = createPlatformWorkerConfigs({
+        accountId: 'account',
+        apiUrl,
+        proxyUrl,
+        deployment,
+        healthProbeToken: 'probe',
+        installationId: 'example-123456abcdef',
+        ownershipNonce: 'ownership',
+        platformVersion: '1.0.0',
+        resources: {
+          hyperdrive: 'db',
+          isrCacheKv: 'isr',
+          legacyAssetsKv: 'assets',
+          routingKv: 'routing',
+          zone: workersDev ? '' : 'zone',
+        },
+        runtimeEntrypoints: {
+          api: 'api.mjs',
+          proxy: 'proxy.mjs',
+          dispatch: 'dispatch.mjs',
+          tail: 'tail.mjs',
+        },
+      });
+      expect(configs.api.compatibility_flags).toEqual([
+        'nodejs_compat',
+        ...(publicFetch ? ['global_fetch_strictly_public'] : []),
+      ]);
+      expect(configs.api.services).toBeUndefined();
+      expect(configs.proxy.compatibility_flags).toEqual(['nodejs_compat']);
+      expect(configs.proxy.services).toEqual([
+        { binding: 'API', service: deployment.resources.apiWorker },
+      ]);
+      expect(Object.keys(configs).sort()).toEqual(['api', 'dispatch', 'proxy', 'tail']);
+    },
+  );
+
   it('binds the existing queue only to trusted platform producers', () => {
     const deployment = createPlatformDeploymentManifest({
       application: { baseDomain: 'apps.example.com', zoneName: 'example.com' },
