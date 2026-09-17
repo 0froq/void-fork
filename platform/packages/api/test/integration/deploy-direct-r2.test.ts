@@ -475,7 +475,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
   // in-flight uploads for a not-yet-finalized deploy on the same project.
   // Deleting them would race a concurrent `upload-urls`-then-finalize flow
   // and break the second deploy with a missing-asset error. See
-  // `sweepProjectAssetOrphans` in `assets.ts` for the rationale.
+  // `scanProjectAssetOrphanCandidates` in `assets.ts` for the rationale.
   it('static deploy preserves recently-uploaded R2 orphans within the pending-upload protection window', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'jm-orphan-recent');
