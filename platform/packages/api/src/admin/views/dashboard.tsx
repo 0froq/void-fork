@@ -66,25 +66,51 @@ function HealthStatusBanner() {
     var summary=document.getElementById('health-summary');
     var container=document.getElementById('health-status');
     if(!el||!summary||!container)return;
-    el.innerHTML=data.checks.map(function(ch){
-      var dot=ch.ok?'\\u25CF':'\\u25CF';
+    if(!data||!Array.isArray(data.checks))throw new Error('Invalid health response');
+    el.replaceChildren();
+    data.checks.forEach(function(ch){
       var color=ch.ok?'#22c55e':'#ef4444';
       var ms=ch.latencyMs>0?' ('+ch.latencyMs+'ms)':'';
-      return '<span style="font-size:0.8rem"><span style="color:'+color+'">'+dot+'</span> '+ch.name+ms+'</span>';
-    }).join('');
+      var item=document.createElement('span');
+      item.style.fontSize='0.8rem';
+      var dot=document.createElement('span');
+      dot.style.color=color;
+      dot.textContent='\\u25CF';
+      item.append(dot,document.createTextNode(' '+ch.name+ms));
+      if(!ch.ok){
+        var reason=document.createElement('span');
+        reason.style.color=color;
+        reason.textContent=' — '+(ch.error||'Health check failed.');
+        item.append(reason);
+      }
+      el.append(item);
+    });
     if(data.allOk){
-      summary.textContent='All systems operational';
+      summary.textContent='All health checks passed';
       summary.style.color='#22c55e';
       container.style.borderColor='#ccc';
     }else{
       var bad=data.checks.filter(function(ch){return!ch.ok}).length;
-      summary.textContent=bad+' service'+(bad>1?'s':'')+' degraded';
+      summary.textContent=bad+' health check'+(bad>1?'s':'')+' failed';
       summary.style.color='#ef4444';
       container.style.borderColor='#ef4444';
     }
   }
+  function unavailable(){
+    var summary=document.getElementById('health-summary');
+    var checks=document.getElementById('health-checks');
+    var container=document.getElementById('health-status');
+    if(summary){
+      summary.textContent='Unable to check system status';
+      summary.style.color='#ef4444';
+    }
+    if(checks)checks.replaceChildren();
+    if(container)container.style.borderColor='#ef4444';
+  }
   function poll(){
-    fetch('/admin/health',{credentials:'same-origin'}).then(function(r){return r.json()}).then(render).catch(function(){});
+    fetch('/admin/health',{credentials:'same-origin',redirect:'error'})
+      .then(function(r){if(!r.ok)throw new Error('Health request failed');return r.json();})
+      .then(render).catch(unavailable);
   }
   poll();
   setInterval(poll,30000);

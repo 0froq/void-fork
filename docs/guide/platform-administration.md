@@ -177,6 +177,8 @@ void platform system health
 
 Health checks use the services configured for the selected platform. An unhealthy result exits with a nonzero status, so the same command can be used in a script.
 
+The browser dashboard's **System Status** checks refresh every 30 seconds. Failed checks show an HTTP status or connection error beside the service name. If the dashboard cannot refresh the checks, it reports that status is unavailable instead of displaying stale results.
+
 Use `void platform upgrade`, `repair`, `disable`, and `enable` to maintain your platform. See [platform maintenance](./self-hosted-platform.md#resume-repair-recover-and-upgrade).
 
 For disaster recovery, keep a matching PostgreSQL backup, provider data backups, installation identity and complete project-encryption keyring, and immutable runtime artifacts. Keep traffic disabled while restoring data, run `discover` to reconstruct verified local metadata, and review `repair --plan` before recreating missing installer-owned infrastructure. Neither command restores backed-up data. See [Prepare for disaster recovery](./self-hosted-platform.md#prepare-for-disaster-recovery) for the full sequence.
