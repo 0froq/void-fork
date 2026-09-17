@@ -24,6 +24,20 @@ function env() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('project workers.dev ingress', () => {
+  it('does not create forwarding Workers for new apps after a domain is attached', async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const bindings = env();
+    bindings.PLATFORM_APPLICATION = JSON.stringify({
+      ...application,
+      baseDomain: 'example.com',
+      zoneName: 'example.com',
+    });
+    bindings.ROUTING.get = vi.fn(async () => null) as unknown as KVNamespace['get'];
+    await ensureProjectIngress(bindings, project);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(bindings.ROUTING.put).not.toHaveBeenCalled();
+  });
   it('performs no provider or KV calls for domain-only platforms', async () => {
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);

@@ -3,20 +3,14 @@ import {
   platformProjectWorkersDevHostname,
   platformWorkersDevAliasKey,
   readPlatformApplication,
+  PLATFORM_PROJECT_INGRESS_SOURCE,
   type PlatformApplicationProject,
 } from '@void/platform';
 import type { ApiEnv } from './env.ts';
 import { cfFetch, CF_API_BASE, CloudflareApiError } from './provisioning/cloudflare-api.ts';
 
 /** All application policy remains in the shared dispatcher, including suspension and maintenance. */
-export const PROJECT_INGRESS_SOURCE = `export default {
-  fetch(request, env) {
-    if (new URL(request.url).hostname !== env.VOID_APP_HOSTNAME) {
-      return new Response('Not Found', {status: 404});
-    }
-    return env.PLATFORM_DISPATCH.fetch(request);
-  }
-};`;
+export const PROJECT_INGRESS_SOURCE = PLATFORM_PROJECT_INGRESS_SOURCE;
 
 export async function ensureProjectIngress(
   env: ApiEnv['Bindings'],
@@ -32,6 +26,10 @@ export async function ensureProjectIngress(
   }
   const name = platformProjectIngressName(project, application.workersDev);
   const hostname = platformProjectWorkersDevHostname(project, application.workersDev);
+  if (application.zoneName && !(await env.ROUTING.get(platformWorkersDevAliasKey(hostname)))) {
+    // After domain activation, only maintain aliases already issued during testing.
+    return;
+  }
   const url = `${CF_API_BASE}/${env.CF_ACCOUNT_ID}/workers/scripts/${name}`;
   const bindings = [
     { type: 'plain_text', name: 'VOID_APP_HOSTNAME', text: hostname },

@@ -60,6 +60,7 @@ export {
   platformWorkersDevAliasKey,
   readPlatformApplication,
   PLATFORM_APPLICATION_KEY,
+  PLATFORM_PROJECT_INGRESS_SOURCE,
   resolvePlatformApplicationEnvironment,
   type PlatformApplication,
   type PlatformApplicationProject,

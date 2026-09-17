@@ -5,6 +5,10 @@ import {
   platformProjectIngressName,
 } from '../../src/application.ts';
 import {
+  createPlatformDiscoveryDocument,
+  parsePlatformDiscoveryDocument,
+} from '../../src/discovery.ts';
+import {
   createApplicationRoutes,
   createPlatformDeploymentManifest,
   parsePlatformDeploymentManifest,
@@ -20,6 +24,32 @@ const application = {
 };
 
 describe('platform application addressing', () => {
+  it('version-gates discovery and verifies its application identity', () => {
+    const manifest = createPlatformDeploymentManifest({
+      installationSlug: 'team',
+      displayName: 'Team',
+      application,
+    });
+    const document = createPlatformDiscoveryDocument({
+      apiUrl: 'https://api.example.com',
+      proxyUrl: 'https://proxy.example.com',
+      applicationDomain: application.baseDomain,
+      applicationRouting: application,
+      installationId: workersDev.installationId,
+      displayName: 'Team',
+      platformVersion: '1.0.0',
+      authenticationProviders: ['github'],
+      capabilities: manifest.capabilities,
+    });
+    expect(document.schemaVersion).toBe(2);
+    expect(parsePlatformDiscoveryDocument(document)).toEqual(document);
+    expect(() => parsePlatformDiscoveryDocument({ ...document, installationId: 'other' })).toThrow(
+      'installation identity',
+    );
+    expect(() => parsePlatformDiscoveryDocument({ ...document, schemaVersion: 1 })).toThrow(
+      'schema version 2',
+    );
+  });
   it('preserves existing domain manifests and routes', () => {
     const manifest = createPlatformDeploymentManifest({
       installationSlug: 'team',

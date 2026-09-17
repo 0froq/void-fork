@@ -11,6 +11,16 @@ export type PlatformApplication = Readonly<{
 
 export type PlatformApplicationProject = Readonly<{ id: string; slug: string }>;
 
+/** Minimal public-origin adapter; request policy remains in the service-bound dispatcher. */
+export const PLATFORM_PROJECT_INGRESS_SOURCE: string = `export default {
+  fetch(request, env) {
+    if (new URL(request.url).hostname !== env.VOID_APP_HOSTNAME) {
+      return new Response('Not Found', {status: 404});
+    }
+    return env.PLATFORM_DISPATCH.fetch(request);
+  }
+};`;
+
 export function readPlatformApplication(
   env: Readonly<{ PLATFORM_APPLICATION?: string; SITE_DOMAIN?: string; BASE_HOSTNAME?: string }>,
 ): PlatformApplication {
