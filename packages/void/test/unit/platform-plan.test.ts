@@ -7,7 +7,8 @@ import {
   recordInstallationResource,
   recordInstallationStep,
 } from '@void/platform';
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
+import { pc } from '../../src/cli/output.ts';
 import {
   PlatformCloudflareApiError,
   PlatformCloudflareClient,
@@ -16,6 +17,7 @@ import { installPlatform } from '../../src/cli/platform-installer.ts';
 import { verifyPlatformAiGatewayPlan } from '../../src/cli/platform-lifecycle.ts';
 import {
   createPlatformInstallPlan,
+  formatPlatformInstallPlan,
   platformProvisionIntentHash,
   revalidatePlatformInstallAction,
 } from '../../src/cli/platform-plan.ts';
@@ -78,6 +80,34 @@ function legacyInstallation(suffix = '0123456789ab') {
 }
 
 describe('platform installation planning', () => {
+  it.each([false, true])(
+    'bolds names and labels, not account IDs or URLs (workers.dev: %s)',
+    async (workersDev) => {
+      const plan = await createPlatformInstallPlan(
+        client(),
+        {
+          ...input,
+          ...(workersDev ? { workersDev: true, applicationDomain: '', zoneName: '' } : {}),
+        },
+        null,
+      );
+      const bold = vi.spyOn(pc, 'bold').mockImplementation(pc.createColors(true).bold);
+      try {
+        expect(formatPlatformInstallPlan(plan).split('\n').slice(0, 4)).toEqual([
+          '\u001b[1mExample in Account\u001b[22m (account)',
+          '\u001b[1mApplications:\u001b[22m ' +
+            (workersDev
+              ? 'workers.dev (testing); add a domain with void platform domain set <domain>'
+              : '*.example.app'),
+          `\u001b[1mControl plane:\u001b[22m ${plan.apiUrl}`,
+          `\u001b[1mResource proxy:\u001b[22m ${plan.proxyUrl}`,
+        ]);
+      } finally {
+        bold.mockRestore();
+      }
+    },
+  );
+
   it('keeps an explicit pending AI Gateway check in previews, then verifies it without changing resource names', async () => {
     const denied = client({
       listAiGateways: async () => {
@@ -95,6 +125,9 @@ describe('platform installation planning', () => {
       action: 'inspect',
       reason: expect.stringContaining('AI Gateway: Edit'),
     });
+    const output = formatPlatformInstallPlan(preview);
+    expect(output).toMatch(/^inspect\s+ai-gateway\s+void-example$/m);
+    expect(output).not.toContain('AI Gateway access will be verified');
     await expect(installPlatform(preview, {} as never, null, {} as never)).rejects.toThrow(
       'verified before provisioning',
     );

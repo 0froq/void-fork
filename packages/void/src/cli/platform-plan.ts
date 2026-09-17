@@ -13,6 +13,7 @@ import {
   type PlatformDeploymentManifest,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import { pc } from './output.ts';
 import { PlatformCloudflareApiError } from './platform-cloudflare.ts';
 import type {
   CloudflareAccount,
@@ -1005,19 +1006,16 @@ async function readRemoteOwnership(
 
 export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {
   const lines = [
-    `${plan.deployment.displayName} in ${plan.account.name} (${plan.account.id})`,
+    `${pc.bold(`${plan.deployment.displayName} in ${plan.account.name}`)} (${plan.account.id})`,
     plan.deployment.application.zoneName
-      ? `Applications: *.${plan.deployment.application.baseDomain}`
-      : 'Applications: workers.dev (testing); add a domain with void platform domain set <domain>',
-    `Control plane: ${plan.apiUrl}`,
-    `Resource proxy: ${plan.proxyUrl}`,
+      ? `${pc.bold('Applications:')} *.${plan.deployment.application.baseDomain}`
+      : `${pc.bold('Applications:')} workers.dev (testing); add a domain with void platform domain set <domain>`,
+    `${pc.bold('Control plane:')} ${plan.apiUrl}`,
+    `${pc.bold('Resource proxy:')} ${plan.proxyUrl}`,
     '',
   ];
   for (const action of plan.actions) {
     lines.push(`${action.action.padEnd(6)} ${action.kind.padEnd(19)} ${action.name}`);
-    if (action.action === 'inspect') {
-      lines.push(`       ${action.reason}`);
-    }
   }
   return lines.join('\n');
 }

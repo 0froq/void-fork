@@ -1,11 +1,14 @@
 import { createPlatformDeploymentManifest } from '@void/platform';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { pc } from '../../src/cli/output.ts';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import { PlatformCloudflareClient } from '../../src/cli/platform-cloudflare.ts';
+import { loadPlatformRuntime } from '../../src/cli/platform-installer.ts';
 import { runPlatformLifecycleCommand } from '../../src/cli/platform-lifecycle.ts';
 
 const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
+  note: vi.fn(),
   select: vi.fn(),
   text: vi.fn(),
   plan: vi.fn(),
@@ -16,7 +19,7 @@ vi.mock('@clack/prompts', async (original) => ({
   select: mocks.select,
   text: mocks.text,
   intro: vi.fn(),
-  note: vi.fn(),
+  note: mocks.note,
   outro: vi.fn(),
 }));
 vi.mock('../../src/cli/platform-auth.ts', () => ({
@@ -81,6 +84,21 @@ afterEach(() => {
 });
 
 describe('interactive platform installation prompts', () => {
+  it('bolds platform runtime labels without styling their values', async () => {
+    vi.spyOn(pc, 'bold').mockImplementation(pc.createColors(true).bold);
+    const runtime = loadPlatformRuntime('');
+    await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--workers-dev']));
+    expect(mocks.note).toHaveBeenCalledWith(
+      [
+        `\u001b[1mVersion:\u001b[22m ${runtime.manifest.platformVersion}`,
+        `\u001b[1mSource:\u001b[22m ${runtime.source}`,
+        `\u001b[1mRevision:\u001b[22m ${runtime.manifest.sourceRevision ?? 'not recorded'}`,
+        `\u001b[1mManifest SHA-256:\u001b[22m ${runtime.manifestSha256}`,
+      ].join('\n'),
+      'Platform runtime',
+    );
+  });
+
   it('uses a placeholder, not a prefilled installation name', async () => {
     mocks.text.mockResolvedValueOnce('my-team');
     await runPlatformLifecycleCommand(

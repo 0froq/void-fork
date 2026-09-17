@@ -4,7 +4,7 @@ import {
   normalizeInstallationSlug,
   type PlatformInstallationManifest,
 } from '@void/platform';
-import { cliTitle } from './output.ts';
+import { cliTitle, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
@@ -603,10 +603,10 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
 
 function formatPlatformRuntime(runtime: ReturnType<typeof loadPlatformRuntime>): string {
   return [
-    `Version: ${runtime.manifest.platformVersion}`,
-    `Source: ${runtime.source}`,
-    `Revision: ${runtime.manifest.sourceRevision ?? 'not recorded'}`,
-    `Manifest SHA-256: ${runtime.manifestSha256}`,
+    `${pc.bold('Version:')} ${runtime.manifest.platformVersion}`,
+    `${pc.bold('Source:')} ${runtime.source}`,
+    `${pc.bold('Revision:')} ${runtime.manifest.sourceRevision ?? 'not recorded'}`,
+    `${pc.bold('Manifest SHA-256:')} ${runtime.manifestSha256}`,
   ].join('\n');
 }
 
