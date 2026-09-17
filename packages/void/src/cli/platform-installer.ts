@@ -4777,6 +4777,27 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function platformProbeFailure(
+  label: string,
+  url: string,
+  response: Response,
+): Promise<Error> {
+  const message = `platform: ${label} failed at ${url} (HTTP ${response.status}).`;
+  if (
+    response.status === 403 &&
+    response.headers.get('server')?.toLowerCase() === 'cloudflare' &&
+    response.headers.get('content-type')?.toLowerCase().includes('text/html')
+  ) {
+    const body = await response.text().catch(() => '');
+    if (body.includes('Default-Deny') && /errorCode:\s*1050\b/.test(body)) {
+      return new Error(
+        `${message} Cloudflare Access's account Default-Deny policy blocked the request before it reached Void (error 1050). Ask your account administrator to allow CLI access to this installation's service hostnames, then resume the installation. Signing in to Cloudflare in your browser does not authenticate these CLI health checks. See https://void.cloud/guide/self-hosted-platform#cloudflare-access.`,
+      );
+    }
+  }
+  return new Error(message);
+}
+
 export async function verifyPlatformHealth(
   apiUrl: string,
   installationId: string,
@@ -4794,19 +4815,22 @@ export async function verifyPlatformHealth(
         'X-Void-Platform-Probe': healthProbeToken,
         ...cfAccessHeaders(process.env, url),
       },
+      // A login redirect must not forward the installation's probe credential.
+      redirect: 'manual',
       signal: AbortSignal.timeout(30_000),
     });
+  const dispatchUrl = dispatchOrigin ?? `https://test.${applicationBaseDomain}`;
   const [health, discovery, proxy, dispatch] = await Promise.all([
     request(`${apiUrl}/health`),
     request(`${apiUrl}/.well-known/void-platform`),
     request(`${proxyUrl}/health`),
-    request(`${dispatchOrigin ?? `https://test.${applicationBaseDomain}`}/health`),
+    request(`${dispatchUrl}/health`),
   ]);
   if (!health.ok) {
-    throw new Error(`platform: Health check failed at ${apiUrl} (HTTP ${health.status}).`);
+    throw await platformProbeFailure('Health check', apiUrl, health);
   }
   if (!discovery.ok) {
-    throw new Error(`platform: Discovery check failed at ${apiUrl} (HTTP ${discovery.status}).`);
+    throw await platformProbeFailure('Discovery check', apiUrl, discovery);
   }
   const body = (await discovery.json()) as {
     installationId?: unknown;
@@ -4825,12 +4849,10 @@ export async function verifyPlatformHealth(
     );
   }
   if (!proxy.ok) {
-    throw new Error(`platform: Proxy health check failed at ${proxyUrl} (HTTP ${proxy.status}).`);
+    throw await platformProbeFailure('Proxy health check', proxyUrl, proxy);
   }
   if (!dispatch.ok) {
-    throw new Error(
-      `platform: Dispatch health check failed at https://test.${applicationBaseDomain} (HTTP ${dispatch.status}).`,
-    );
+    throw await platformProbeFailure('Dispatch health check', dispatchUrl, dispatch);
   }
 }
 

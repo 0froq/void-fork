@@ -1132,10 +1132,10 @@ describe('platform installer', () => {
   });
 
   it('verifies API, discovery, proxy, and dispatch before committing a cutover', async () => {
-    const requests: Array<{ headers: Headers; url: string }> = [];
+    const requests: Array<{ headers: Headers; url: string; redirect?: RequestRedirect }> = [];
     const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      requests.push({ headers: new Headers(init?.headers), url });
+      requests.push({ headers: new Headers(init?.headers), url, redirect: init?.redirect });
       return Response.json(
         url.endsWith('/.well-known/void-platform')
           ? {
@@ -1168,7 +1168,104 @@ describe('platform installer', () => {
       requests.every((entry) => entry.headers.get('X-Void-Platform-Probe') === 'probe-token'),
     ).toBe(true);
     expect(requests.every((entry) => !entry.headers.has('X-Health-Check'))).toBe(true);
+    expect(requests.every((entry) => entry.redirect === 'manual')).toBe(true);
   });
+
+  it.each([
+    'https://api.example.com/health',
+    'https://api.example.com/.well-known/void-platform',
+    'https://proxy.example.com/health',
+    'https://void-example-dispatch.account.workers.dev/health',
+  ])(
+    'explains Cloudflare account Default-Deny at %s without exposing response content',
+    async (blockedUrl) => {
+      process.env.CF_ACCESS_CLIENT_ID = 'unrelated-service-id';
+      process.env.CF_ACCESS_CLIENT_SECRET = 'unrelated-service-secret';
+      const requests: Array<Headers> = [];
+      const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        requests.push(new Headers(init?.headers));
+        if (url === blockedUrl) {
+          return new Response(
+            '<title>Blocked by this account&#39;s &#60;strong&#62;Default-Deny&#60;/strong&#62; policy.</title><script>var b={errorCode: 1050};</script>untrusted-response-content',
+            {
+              status: 403,
+              headers: { server: 'cloudflare', 'content-type': 'text/html; charset=UTF-8' },
+            },
+          );
+        }
+        return Response.json(
+          url.endsWith('/.well-known/void-platform')
+            ? {
+                installationId: 'example-a1b2c3d4',
+                platformVersion: '1.2.3',
+                usageProtocolVersion: 1,
+              }
+            : { ok: true },
+        );
+      }) as typeof fetch;
+      const failure = await verifyPlatformHealth(
+        'https://api.example.com',
+        'example-a1b2c3d4',
+        'https://proxy.example.com',
+        'account.workers.dev',
+        '1.2.3',
+        1,
+        'probe-token',
+        fetcher,
+        'https://void-example-dispatch.account.workers.dev',
+      ).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      const message = String(failure);
+      expect(message).toContain(new URL(blockedUrl).origin);
+      expect(message).toContain('Default-Deny policy blocked the request before it reached Void');
+      expect(message).toContain('error 1050');
+      expect(message).toContain('resume the installation');
+      expect(message).not.toContain('untrusted-response-content');
+      expect(message).not.toContain('probe-token');
+      expect(message).not.toContain('https://test.account.workers.dev');
+      expect(
+        requests.every(
+          (headers) =>
+            !headers.has('CF-Access-Client-Id') && !headers.has('CF-Access-Client-Secret'),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    {
+      status: 403,
+      headers: new Headers({ server: 'cloudflare', 'content-type': 'application/json' }),
+      body: '{"error":"Forbidden"}',
+    },
+    {
+      status: 403,
+      headers: new Headers({ server: 'cloudflare', 'content-type': 'text/html' }),
+      body: '<title>Other firewall block</title>',
+    },
+    { status: 302, headers: new Headers({ location: 'https://login.example.com' }), body: '' },
+  ])(
+    'does not misdiagnose other failed probes as Default-Deny: $status',
+    async ({ status, headers, body }) => {
+      const fetcher = (async () => new Response(body, { status, headers })) as typeof fetch;
+      await expect(
+        verifyPlatformHealth(
+          'https://api.example.com',
+          'example-a1b2c3d4',
+          'https://proxy.example.com',
+          'apps.example.com',
+          '1.2.3',
+          1,
+          'probe-token',
+          fetcher,
+        ),
+      ).rejects.toEqual(
+        new Error(`platform: Health check failed at https://api.example.com (HTTP ${status}).`),
+      );
+    },
+  );
 
   it('authenticates lifecycle health probes to Access-gated hosted staging', async () => {
     process.env.CF_ACCESS_CLIENT_ID = 'service-id';

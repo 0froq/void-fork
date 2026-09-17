@@ -353,6 +353,14 @@ void platform install --resume --name <id>
 
 You can correct the database URL if the initial connection failed. Once Void has claimed the database or provisioned Hyperdrive, that database is fixed for the installation. A later command with a different URL stops before making changes.
 
+### Cloudflare Access blocks the health check {#cloudflare-access}
+
+If installation reports **Default-Deny (error 1050)**, Cloudflare blocked the HTTP health check before it reached Void. This is separate from the API token used to deploy the Workers.
+
+Ask your account administrator to permit access to this installation's service hostnames. For a testing platform intended to be publicly reachable, use a narrowly scoped Access exception for those hostnames, not an account-wide change. The installer checks the API, proxy, and dispatch endpoints; its runtime probe credential does not authenticate to Cloudflare Access. A browser login does not authenticate the CLI's requests either. Deployed app hostnames will also need appropriate access rules.
+
+Once access is configured, rerun `void platform install --resume --name <id>`. You do not need to delete the installation or recreate its resources.
+
 ### Repair missing resources
 
 Preview what needs repair, then apply it:
