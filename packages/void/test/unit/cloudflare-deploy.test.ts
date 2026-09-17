@@ -128,6 +128,82 @@ const cleanExit: DeployWranglerRunResult = {
 };
 
 describe('Cloudflare activation diagnostics', () => {
+  it.each(['worker', 'static'] as const)(
+    'flushes the %s upload diagnostic before exiting',
+    async (kind) => {
+      const root = makeProject({
+        'package.json': JSON.stringify({ name: 'site', dependencies: { void: '*' } }),
+        'void.json': '{}',
+        'routes/index.ts': 'export const GET = () => "site";',
+        'public/index.html': '<h1>Site</h1>',
+        'wrangler.jsonc': JSON.stringify({
+          name: 'site',
+          account_id: 'personal',
+          compatibility_date: '2026-02-24',
+        }),
+      });
+      const order: Array<string> = [];
+      const diagnostic = 'Compatibility flag specified multiple times: nodejs_als';
+      const error = vi.fn(() => {
+        order.push('error');
+      });
+      const logger: CliLogger = {
+        ...silentCliLog,
+        path: '/tmp/deploy-diagnostic.jsonl',
+        error,
+        close: async () => {
+          order.push('close');
+        },
+      };
+      const output = vi.spyOn(log, 'error').mockImplementation(() => {});
+      const { deps } = harness({
+        activateVersion: async () => ({
+          ok: false,
+          reason: 'upload-failed',
+          status: 1,
+          cloudflareErrorCode: 10021,
+          diagnostic,
+        }),
+        exit: (code) => {
+          order.push('exit');
+          throw new ExitError(code);
+        },
+      });
+      try {
+        await expect(
+          runCloudflareDeploy(root, kind === 'static' ? { dir: 'public' } : {}, logger, deps),
+        ).rejects.toBeInstanceOf(ExitError);
+        expect(order).toEqual(['error', 'close', 'exit']);
+        expect(error).toHaveBeenCalledWith(
+          'cloudflare_deploy_failed',
+          expect.objectContaining({ message: expect.stringContaining(diagnostic) }),
+        );
+        expect(output).toHaveBeenCalledWith(expect.stringContaining(diagnostic));
+        expect(output).toHaveBeenCalledWith(
+          expect.stringContaining('Detailed log: /tmp/deploy-diagnostic.jsonl'),
+        );
+      } finally {
+        output.mockRestore();
+      }
+    },
+  );
+
+  it.each(['upload-failed', 'bootstrap-failed'] as const)(
+    'prints the underlying diagnostic for %s',
+    (reason) => {
+      const message = formatCloudflareActivationError({
+        ok: false,
+        reason,
+        status: 1,
+        cloudflareErrorCode: 10021,
+        diagnostic: 'Uncaught TypeError: Cannot read properties of undefined\n  at index.js:42:1',
+      });
+      expect(message).toContain('Cloudflare error code: 10021');
+      expect(message).toContain('Uncaught TypeError: Cannot read properties of undefined');
+      expect(message).toContain('at index.js:42:1');
+    },
+  );
+
   it('reports readiness restoration outcomes without claiming uncertain traffic is unchanged', () => {
     expect(
       formatCloudflareActivationError({
@@ -457,9 +533,6 @@ describe('existing Cloudflare site handoff', () => {
   }
   function build(root: string) {
     const config = parseRootWranglerConfig(join(root, 'wrangler.jsonc'));
-    // The real Cloudflare Vite build currently materializes the root flag and Void's inferred
-    // flag separately. Cloudflare treats the duplicate array as the same semantic flag set.
-    config.compatibility_flags = ['nodejs_compat', 'nodejs_compat'];
     config.triggers = { crons: [] };
     config.queues = { consumers: [], producers: [] };
     config.durable_objects = { bindings: [] };
@@ -530,6 +603,42 @@ describe('existing Cloudflare site handoff', () => {
       trafficConfig,
     );
     expect(activateVersion).toHaveBeenCalledTimes(2);
+  });
+
+  it('normalizes duplicate flags emitted by an older project plugin before upload', async () => {
+    const root = site();
+    const configPath = join(root, 'wrangler.jsonc');
+    const activateVersion = vi
+      .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
+      .mockImplementation(async (options) => {
+        expect(parseRootWranglerConfig(options.configPath!).compatibility_flags).toEqual([
+          'nodejs_compat',
+        ]);
+        return {
+          ok: true,
+          versionId: 'new',
+          previousVersionId: 'original',
+          previewUrl: 'https://site.example.com',
+        };
+      });
+    const { deps } = harness({
+      readExistingWorker: async () => existing,
+      runBuild: () => {
+        build(root);
+        const generatedPath = join(root, 'dist/ssr/wrangler.json');
+        const generated = parseRootWranglerConfig(generatedPath);
+        generated.compatibility_flags = ['nodejs_compat', 'nodejs_compat'];
+        writeFileSync(generatedPath, JSON.stringify(generated));
+      },
+      verifyDeployConfig: verifyGeneratedDeployConfig,
+      activateVersion,
+    });
+
+    await runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps);
+
+    expect(activateVersion).toHaveBeenCalledOnce();
+    expect(parseRootWranglerConfig(configPath).compatibility_flags).toEqual(['nodejs_compat']);
+    expect(readCloudflareLink(root)).toBeNull();
   });
   it('retains the link guard after a failed build and verifies the Worker again on retry', async () => {
     const root = site();

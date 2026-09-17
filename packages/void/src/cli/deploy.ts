@@ -1559,6 +1559,23 @@ function readGeneratedDeployConfig(root: string): {
   }
 }
 
+/** Older project plugins can repeat root flags; normalize only the generated artifact. */
+function deduplicateGeneratedCompatibilityFlags(configPath: string, rootConfigPath: string): void {
+  if (resolve(configPath) === resolve(rootConfigPath) || !existsSync(configPath)) {
+    return;
+  }
+  const config = parseRootWranglerConfig(configPath);
+  const flags = config.compatibility_flags;
+  if (!Array.isArray(flags) || !flags.every((flag): flag is string => typeof flag === 'string')) {
+    return;
+  }
+  const uniqueFlags = [...new Set(flags)];
+  if (uniqueFlags.length !== flags.length) {
+    config.compatibility_flags = uniqueFlags;
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  }
+}
+
 /**
  * Check whether Void contributes worker-side routing rules.
  */
@@ -4907,6 +4924,7 @@ export async function runCloudflareDeploy(
     ((projectRoot) => readGeneratedDeployConfig(projectRoot).path)
   )(root);
   try {
+    deduplicateGeneratedCompatibilityFlags(lifecycleConfigPath, configPath);
     const lifecycleOptions = {
       runWrangler,
       configPath: lifecycleConfigPath,
@@ -5505,7 +5523,8 @@ export async function runCloudflareDeploy(
     verifyInheritedSecrets: true,
   });
   if (!execution.ok) {
-    log.error(
+    await reportCloudflareActivationFailure(
+      cliLog,
       needsSandbox && execution.containersUnavailable
         ? formatCloudflareSandboxUnavailable()
         : formatCloudflareActivationError(execution),
@@ -5566,6 +5585,16 @@ function existingWranglerConfigArgs(configPath: string): Array<string> {
   return existsSync(configPath) ? ['-c', configPath] : [];
 }
 
+async function reportCloudflareActivationFailure(
+  cliLog: CliLogger,
+  message: string,
+): Promise<void> {
+  cliLog.error('cloudflare_deploy_failed', new Error(message));
+  // The default exit() terminates the process immediately, so flush the diagnostic first.
+  await cliLog.close().catch(() => {});
+  log.error(`${message}${cliLog.path ? `\n\nDetailed log: ${cliLog.path}` : ''}`);
+}
+
 export function formatCloudflareActivationError(
   result: Exclude<Awaited<ReturnType<typeof activateCloudflareVersion>>, { ok: true }>,
 ): string {
@@ -5574,6 +5603,7 @@ export function formatCloudflareActivationError(
     result.cloudflareErrorCode === undefined
       ? ''
       : ` Cloudflare error code: ${String(result.cloudflareErrorCode)}.`;
+  const diagnostic = result.diagnostic ? `\n\n${result.diagnostic}` : '';
   switch (result.reason) {
     case 'uploader-changed':
       if (result.rollback === 'succeeded') {
@@ -5616,7 +5646,7 @@ export function formatCloudflareActivationError(
         'in Cloudflare, then retry; no version was uploaded.',
       ].join('\n');
     case 'upload-failed':
-      return `deploy: Cloudflare Worker Version upload failed${status}; production traffic is unchanged.${cloudflareCode}`;
+      return `deploy: Cloudflare Worker Version upload failed${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}`;
     case 'upload-output-invalid':
       return 'deploy: Wrangler uploaded a version but did not report its version id; production traffic is unchanged.';
     case 'preview-unavailable':
@@ -5640,7 +5670,7 @@ export function formatCloudflareActivationError(
         `Then retry. ${formatCloudflareReadinessRestoration(result)}`,
       ].join('\n');
     case 'bootstrap-failed':
-      return `deploy: Cloudflare could not bootstrap the first Worker deployment${status}.${cloudflareCode}`;
+      return `deploy: Cloudflare could not bootstrap the first Worker deployment${status}.${cloudflareCode}${diagnostic}`;
     case 'bootstrap-output-invalid':
       return [
         'deploy: Cloudflare bootstrapped the first Worker deployment, but Wrangler',
@@ -6049,6 +6079,7 @@ async function runCloudflareStaticDeploy(
       '2026-09-11',
     assetConfig: manifest.assetConfig ?? { not_found_handling: 'none' },
   });
+  deduplicateGeneratedCompatibilityFlags(staticConfigPath, configPath);
 
   if (existingWorker) {
     assertExistingCloudflareConfig(existingWorker, parseRootWranglerConfig(staticConfigPath), true);
@@ -6115,7 +6146,7 @@ async function runCloudflareStaticDeploy(
     queueConsumerCleanup,
   });
   if (!execution.ok) {
-    log.error(formatCloudflareActivationError(execution));
+    await reportCloudflareActivationFailure(cliLog, formatCloudflareActivationError(execution));
     return exit(1);
   }
   if (existingWorker) {

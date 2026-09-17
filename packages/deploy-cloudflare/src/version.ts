@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'pathslash';
 import { parseRootWranglerConfig } from './config.ts';
+import { cloudflareCommandDiagnostic } from './diagnostics.ts';
 import type { CloudflareCommandResult, CloudflareCommandRunner } from './execute.ts';
 
 const VERSION_ID_RE = /(?:Worker|Current) Version ID:\s*([0-9a-f]{8}-[0-9a-f-]{27})/i;
@@ -85,6 +86,8 @@ export type CloudflareVersionActivation =
         | 'triggers-failed';
       status?: number;
       cloudflareErrorCode?: number;
+      /** Bounded uploader error text with terminal escapes removed and common credential formats redacted. */
+      diagnostic?: string;
       /** Wrangler reached Cloudflare's Containers entitlement endpoint and received a 403. */
       containersUnavailable?: boolean;
       versionId?: string;
@@ -979,6 +982,7 @@ async function activateCloudflareVersionWithSecretsFile(
       ok: false,
       reason: 'upload-failed',
       status: upload.status,
+      ...commandDiagnosticFields(upload),
       ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
       ...(isContainersUnavailable(output) ? { containersUnavailable: true } : {}),
     };
@@ -1759,6 +1763,7 @@ async function bootstrapFirstDeployment(
       ok: false,
       reason: 'bootstrap-failed',
       status: bootstrap.status,
+      ...commandDiagnosticFields(bootstrap),
       ...(cloudflareErrorCode === undefined ? {} : { cloudflareErrorCode }),
       ...(isContainersUnavailable(output) ? { containersUnavailable: true } : {}),
     };
@@ -1828,6 +1833,11 @@ async function bootstrapFirstDeployment(
 function parseCloudflareErrorCode(output: string): number | undefined {
   const value = output.match(CLOUDFLARE_ERROR_CODE_RE)?.[1];
   return value === undefined ? undefined : Number(value);
+}
+
+function commandDiagnosticFields(result: CloudflareCommandResult): { diagnostic?: string } {
+  const diagnostic = cloudflareCommandDiagnostic(result);
+  return diagnostic ? { diagnostic } : {};
 }
 
 function isMissingWorkerOutput(output: string): boolean {

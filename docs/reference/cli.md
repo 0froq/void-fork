@@ -633,6 +633,8 @@ The older `--backend cloudflare` spelling remains available as a compatibility a
 
 Every deploy writes a structured JSONL trace to `~/.void/logs/deploy-<timestamp>.jsonl` regardless of `--debug`. On failure the path is printed at the end of the error message so you can attach it when reporting platform issues. `VOID_DEPLOY_DEBUG=1` is accepted as an alternate trigger for stderr mirroring.
 
+Cloudflare upload failures include the underlying validation message and stack locations when available, along with the numeric error code. The CLI writes and flushes that diagnostic to the deploy log before exiting. For example, code `10021` can report a duplicate compatibility flag or a Worker startup exception; use the accompanying message to identify the cause. Diagnostics are length-limited, omit stdout binding tables, and redact common credential formats.
+
 When a deploy fails after it starts, the CLI also prints a summary of that trace under the error, so the cause is visible where the file is not — a CI runner, for example, is discarded with the job. The summary has two blocks: every `error` record with its flattened cause chain, then the last 20 records as a timeline.
 
 Pre-flight failures print no summary. A missing project, a rejected flag combination, or an unsupported `--platform cloudflare` feature stops before any trace exists, and each of those prints its own message explaining what to change. A build failure prints no summary either — the build streams its own output straight to the terminal.

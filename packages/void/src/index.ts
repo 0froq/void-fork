@@ -1246,6 +1246,17 @@ export function voidPlugin(options?: {
     );
     const result: Record<string, unknown> = { ...workerConfig };
 
+    // The Cloudflare plugin defu-merges this patch over resolved, concatenating arrays.
+    // Flags read from the root config therefore occur in both inputs. Emit their union
+    // once and clear only the in-memory fallback so uploads never repeat a flag.
+    result.compatibility_flags = [
+      ...new Set([
+        ...((result.compatibility_flags as Array<string> | undefined) ?? []),
+        ...(resolved.compatibility_flags ?? []),
+      ]),
+    ];
+    resolved.compatibility_flags = [];
+
     if (envSchemaFacts || (authEnabled && process.env[CLOUDFLARE_DEPLOY_BUILD_ENV] === '1')) {
       const plaintextVars = {
         ...((resolved.vars as Record<string, unknown> | undefined) ?? {}),

@@ -2533,8 +2533,67 @@ describe('Cloudflare version activation', () => {
       reason: 'upload-failed',
       status: 1,
       cloudflareErrorCode: 10211,
+      diagnostic: 'Durable Object migrations require deploy. [code: 10211]',
     });
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
+  });
+
+  it('returns the validation diagnostic when uploading an existing Worker fails', async () => {
+    const runWrangler = runner({
+      upload: {
+        stdout: 'Your Worker has access to these bindings:\nenv.PRIVATE_VALUE: "do-not-echo"',
+        stderr:
+          '\u001b[31m✘ [ERROR]\u001b[0m A request to the Cloudflare API failed.\n\n  Uncaught TypeError: Cannot read properties of undefined (reading "fetch")\n    at index.js:42:1\n  [code: 10021]\n',
+        status: 1,
+      },
+    });
+
+    const result = await activateCloudflareVersion({
+      runWrangler,
+      verifyUploader: () => true,
+      workerName: 'existing',
+      message: encodeCloudflareVersionMessage([]),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'upload-failed',
+      cloudflareErrorCode: 10021,
+      diagnostic: expect.stringContaining('Uncaught TypeError:'),
+    });
+    expect(JSON.stringify(result)).not.toContain('do-not-echo');
+    expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
+    expect(runWrangler.mock.calls.some(([args]) => args.includes('--yes'))).toBe(false);
+  });
+
+  it('returns the validation diagnostic when a first-deployment bootstrap fails', async () => {
+    const runWrangler = runner({
+      status: { stdout: '', stderr: 'This Worker does not exist. [code: 10007]', status: 1 },
+      upload: {
+        stdout: '',
+        stderr: 'You cannot upload a new version of a Worker that does not yet exist.',
+        status: 1,
+      },
+      bootstrap: {
+        stdout: '',
+        stderr: '✘ [ERROR] Script startup exceeded CPU time limit. [code: 10021]',
+        status: 1,
+      },
+    });
+
+    await expect(
+      activateCloudflareVersion({
+        runWrangler,
+        verifyUploader: () => true,
+        workerName: 'new-worker',
+        message: encodeCloudflareVersionMessage([]),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'bootstrap-failed',
+      cloudflareErrorCode: 10021,
+      diagnostic: 'Script startup exceeded CPU time limit. [code: 10021]',
+    });
   });
 
   it('classifies a Containers entitlement failure during version upload', async () => {
@@ -2559,6 +2618,8 @@ describe('Cloudflare version activation', () => {
       reason: 'upload-failed',
       status: 1,
       containersUnavailable: true,
+      diagnostic:
+        'Authentication error [GET https://api.cloudflare.com/client/v4/accounts/acc/containers/me] status: 403',
     });
   });
 
@@ -2590,6 +2651,8 @@ describe('Cloudflare version activation', () => {
       reason: 'bootstrap-failed',
       status: 1,
       containersUnavailable: true,
+      diagnostic:
+        'Authentication error [GET https://api.cloudflare.com/client/v4/accounts/acc/containers/me] status: 403',
     });
   });
 
@@ -2677,6 +2740,7 @@ describe('Cloudflare version activation', () => {
       reason: 'upload-failed',
       status: 1,
       cloudflareErrorCode: 10211,
+      diagnostic: 'Durable Object migrations require deploy. [code: 10211]',
     });
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
   });
