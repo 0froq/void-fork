@@ -127,8 +127,6 @@ vp run dev:docs        # local docs dev server
 
 See [TESTING.md](./TESTING.md) for targeted verification and the account-neutral, non-destructive
 native Cloudflare live E2E procedure.
-The [test-suite performance audit](./test/PERFORMANCE.md) records duplicate coverage, scheduling,
-and measured end-to-end verification times.
 
 Build the public packages and smoke-test their actual tarballs outside the workspace:
 
@@ -143,7 +141,7 @@ adapters, Markdown, production preview, and browser hydration/navigation tests.
 The Prepublish Test workflow selects smoke coverage for routine code changes, full coverage
 for packaging/dependency/adapter changes, and skip expensive jobs for docs-only changes.
 Release CI always runs the full matrix on Linux and macOS.
-The [beta acceptance record](./platform/meta/design-docs/0081-beta-readiness-fixes.md)
+The [release acceptance procedure](./platform/meta/release-acceptance.md)
 separates these local checks from the credentialed Cloudflare signoff.
 
 ### Project Structure

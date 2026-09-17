@@ -61,8 +61,6 @@ The in-memory API deletion tests schedule the fixed container-orphan sweep delay
 They still execute both sweeps and all provider/database assertions. Production timing and the
 real subprocess/lock deadline tests retain their actual timing semantics.
 
-See [the performance audit](test/PERFORMANCE.md) for baseline measurements, changes, and validation.
-
 ## Prepublish Test
 
 Packed tests install the current tarballs into fresh applications through a temporary local

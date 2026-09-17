@@ -10,6 +10,7 @@ For work on the implementation:
 - [Platform README](../README.md) describes development and verification.
 - [Architecture](./architecture.md) maps the current packages, runtime and data stores.
 - [Operations](./operations.md) covers maintenance and recovery.
+- [Release acceptance](./release-acceptance.md) separates local verification from live provider signoff.
 - [Packaged runtime](../../packages/platform/README.md) explains how to build and upgrade a fork.
 - [Design archive](./design-docs/README.md) preserves feature rationale and implementation history.
 
