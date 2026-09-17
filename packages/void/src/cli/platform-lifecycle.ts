@@ -740,7 +740,10 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       outro(`Installation ${result.manifest.id} is safely checkpointed.`);
       return;
     }
-    log.success(`${result.manifest.deployment.displayName} is installed at ${plan.apiUrl}.`);
+    log.success(
+      `${result.manifest.deployment.displayName} is installed at ${new URL('/admin', plan.apiUrl).href}.`,
+    );
+    log.info(`API URL: ${plan.apiUrl}`);
     if (!plan.deployment.application.zoneName) {
       log.info(
         'Apps will use workers.dev addresses. When your domain is ready: void platform domain set <domain>',

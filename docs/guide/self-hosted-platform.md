@@ -204,7 +204,7 @@ This OAuth App handles sign-in. A GitHub App with repository access and build we
 
 The prompts collect the runtime token, administrator GitHub username, PostgreSQL URL, GitHub client ID and secret, R2 credentials, and signing/encryption keys. Secret values are masked and setup progress is encrypted locally using the system keychain. Keep a password-manager copy for recovery on another machine.
 
-Void shows installation progress while it prepares the database, provisions Cloudflare resources, deploys the services, and verifies platform health. Progress is checkpointed for recovery. When it prints the installed API URL, continue to [connect and deploy an app](#connect-and-deploy-an-app).
+Void shows installation progress while it prepares the database, provisions Cloudflare resources, deploys the services, and verifies platform health. Progress is checkpointed for recovery. When installation finishes, open the printed admin dashboard link and sign in with the GitHub account you selected as administrator. This creates your first admin user; no app or CLI login is required. Void also prints the API URL to use when you [connect and deploy an app](#connect-and-deploy-an-app).
 
 Remove the management token from the shell when finished:
 

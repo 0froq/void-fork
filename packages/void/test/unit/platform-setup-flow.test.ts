@@ -360,6 +360,8 @@ describe('platform credential onboarding', () => {
   });
 
   it('starts installation progress before the installer runs, updates it, and stops on success', async () => {
+    const success = vi.spyOn(log, 'success').mockImplementation(() => {});
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
     mocks.install.mockImplementation(async (_plan, _secrets, manifest, dependencies) => {
       expect(mocks.progress.start).toHaveBeenCalledWith('Installing the platform');
       dependencies.onProgress('Preparing the platform database');
@@ -369,6 +371,10 @@ describe('platform credential onboarding', () => {
     expect(mocks.progress.message).toHaveBeenCalledWith('Preparing the platform database');
     expect(mocks.progress.stop).toHaveBeenCalledWith('Platform installed.');
     expect(mocks.progress.error).not.toHaveBeenCalled();
+    expect(success).toHaveBeenCalledWith(
+      'Test is installed at https://void-test-setup-api.account.workers.dev/admin.',
+    );
+    expect(info).toHaveBeenCalledWith('API URL: https://void-test-setup-api.account.workers.dev');
     // Spinner cancellation must not swallow the CLI's cancellation signal.
     const emit = vi.spyOn(process, 'emit').mockReturnValueOnce(true);
     mocks.spinner.mock.calls[0]![0].onCancel();
