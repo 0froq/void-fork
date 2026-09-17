@@ -5,6 +5,7 @@ import {
   formatPlatformSetupPlan,
   openPlatformSetupPage,
   platformSetupPages,
+  platformSetupFieldHelp,
 } from '../../src/cli/platform-setup.ts';
 
 function plan(domain = ''): PlatformInstallPlan {
@@ -39,6 +40,30 @@ function plan(domain = ''): PlatformInstallPlan {
   };
 }
 describe('platform credential setup links', () => {
+  it('provides concise database and key guidance with live website links', () => {
+    const database = platformSetupFieldHelp('databaseUrl')!;
+    expect(database.placeholder).toBe('postgresql://user:pw@…/database');
+    expect(database.description).toContain('users, projects, and deployments');
+    expect(database.description).toContain('https://neon.com/');
+    expect(database.description).toContain(
+      'https://void.cloud/guide/self-hosted-platform#platform-database',
+    );
+    for (const key of ['jwtSecret', 'projectSecretKey']) {
+      const help = platformSetupFieldHelp(key)!;
+      expect(help.description).toContain('Run openssl rand -base64 32');
+      expect(help.description).toContain(
+        'https://void.cloud/guide/self-hosted-platform#signing-and-encryption-keys',
+      );
+      expect(help.description).not.toContain('\n');
+    }
+    expect(platformSetupFieldHelp('jwtSecret')!.description).toContain(
+      'Signs platform login tokens',
+    );
+    expect(platformSetupFieldHelp('projectSecretKey')!.description).toContain(
+      'Encrypts app secrets',
+    );
+    expect(platformSetupFieldHelp('cloudflareApiToken')).toBeUndefined();
+  });
   it('scopes the runtime form to the account and preselects every required permission with an accurate fallback', () => {
     const pages = platformSetupPages(plan());
     const url = new URL(pages.runtime.url);

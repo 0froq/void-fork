@@ -46,6 +46,7 @@ vi.mock('../../src/cli/auth.ts', async (original) => ({
   ...(await original<typeof import('../../src/cli/auth.ts')>()),
   openBrowser: mocks.open,
 }));
+vi.mock('../../src/cli/prompt-password.ts', () => ({ passwordWithPlaceholder: mocks.password }));
 vi.mock('../../src/cli/platform-auth.ts', () => ({
   resolvePlatformCloudflareCredential: async () => ({ source: 'oauth', token: 'operator-token' }),
   resolvePlatformCloudflareCredentialWithInput: async (input: () => Promise<unknown>) => ({
@@ -198,6 +199,35 @@ async function savedSetup(name = 'test-setup') {
 }
 
 describe('platform credential onboarding', () => {
+  it('explains database and key inputs without displaying their values', async () => {
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+    await runPlatformLifecycleCommand(parsePlatformArgs(args));
+    expect(mocks.password).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'PostgreSQL DATABASE_URL:',
+        placeholder: 'postgresql://user:pw@…/database',
+      }),
+    );
+    expect(mocks.password).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'JWT signing key:' }),
+    );
+    expect(mocks.password).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Project encryption key:' }),
+    );
+    expect(mocks.text).toHaveBeenCalledWith(expect.objectContaining({ message: 'Access Key ID:' }));
+    expect(mocks.password).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Secret Access Key:' }),
+    );
+    const descriptions = info.mock.calls.map(([message]) => message).join('\n');
+    expect(descriptions).toContain(
+      'https://void.cloud/guide/self-hosted-platform#platform-database',
+    );
+    expect(descriptions).toContain('Signs platform login tokens. Run openssl rand -base64 32');
+    expect(descriptions).toContain('Encrypts app secrets. Run openssl rand -base64 32 separately');
+    expect(descriptions).not.toContain(environment.VOID_PLATFORM_DATABASE_URL);
+    expect(descriptions).not.toContain(environment.VOID_PLATFORM_JWT_SECRET);
+    expect(descriptions).not.toContain(environment.VOID_PLATFORM_PROJECT_SECRET_KEY);
+  });
   it('replaces a revoked saved token during the same continued setup', async () => {
     const draft = await savedSetup();
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
@@ -582,6 +612,7 @@ describe('platform credential onboarding', () => {
     expect(JSON.stringify(mocks.open.mock.calls)).not.toContain('secret-value');
   });
   it('skips browsers and secret prompts for values supplied through the environment', async () => {
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
     for (const [key, value] of Object.entries(environment)) {
       vi.stubEnv(key, value);
     }
@@ -589,6 +620,7 @@ describe('platform credential onboarding', () => {
     expect(mocks.open).not.toHaveBeenCalled();
     expect(mocks.password).not.toHaveBeenCalled();
     expect(mocks.install).toHaveBeenCalledOnce();
+    expect(info.mock.calls.map(([message]) => message).join('\n')).not.toContain('openssl rand');
   });
   it('does not persist an invalid signing key or begin provisioning', async () => {
     const normal = mocks.password.getMockImplementation()!;

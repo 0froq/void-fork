@@ -48,7 +48,9 @@ import {
   formatPlatformSetupPlan,
   openPlatformSetupPage,
   platformSetupPages,
+  platformSetupFieldHelp,
 } from './platform-setup.ts';
+import { passwordWithPlaceholder } from './prompt-password.ts';
 
 export function resolvePlatformInstallDatabaseUrl(
   checkpoint: Record<string, string> | null,
@@ -379,7 +381,14 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       persist = true,
       validate?: (value: string) => string | undefined,
     ) => {
-      const value = configured(key, environment) || (await promptSecret(message, masked, validate));
+      let value = configured(key, environment);
+      if (!value) {
+        const help = platformSetupFieldHelp(key);
+        if (help && process.stdin.isTTY) {
+          log.info(help.description);
+        }
+        value = await promptSecret(message, masked, validate, help?.placeholder);
+      }
       const error = validate?.(value);
       if (error) {
         throw new Error('platform: ' + error);
@@ -544,7 +553,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       jwtSecret: await collect(
         'jwtSecret',
         'VOID_PLATFORM_JWT_SECRET',
-        'JWT signing secret from your password manager (at least 32 random bytes):',
+        'JWT signing key:',
         true,
         true,
         credentialSetup
@@ -561,7 +570,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
           : await collect(
               'projectSecretKey',
               'VOID_PLATFORM_PROJECT_SECRET_KEY',
-              'Project encryption key from your password manager (base64, 32 bytes):',
+              'Project encryption key:',
               true,
               true,
               credentialSetup
@@ -807,18 +816,22 @@ async function promptSecret(
   message: string,
   masked = true,
   validate?: (value: string) => string | undefined,
+  placeholder?: string,
 ): Promise<string> {
   if (!process.stdin.isTTY) {
     throw new Error(
       `platform: ${message.replace(/:$/, '')} is required in non-interactive mode. Set the documented VOID_PLATFORM_* environment variable.`,
     );
   }
+  const options = {
+    message,
+    validate: (input: string | undefined) => (input ? validate?.(input) : 'A value is required.'),
+  };
   const value = masked
-    ? await password({
-        message,
-        validate: (input) => (input ? validate?.(input) : 'A value is required.'),
-      })
-    : await text({ message, validate: (input) => (input ? undefined : 'A value is required.') });
+    ? placeholder
+      ? await passwordWithPlaceholder({ ...options, placeholder })
+      : await password(options)
+    : await text({ ...options, placeholder });
   if (isCancel(value) || typeof value === 'symbol') {
     throw new Error('platform: Cancelled.');
   }

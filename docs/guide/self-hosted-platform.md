@@ -75,7 +75,7 @@ void platform install --workers-dev --plan
 
 `--workers-dev` cannot be combined with `--application-domain`, `--zone`, or `--dedicated-zone`.
 
-## 3. Create the Platform Database
+## 3. Create the Platform Database {#platform-database}
 
 Use an empty PostgreSQL database dedicated to this platform. It stores users, projects, and deployments; individual apps can still use D1. Void creates the tables and the Hyperdrive connection, but does not provision the PostgreSQL server.
 
@@ -138,19 +138,25 @@ Void checks access before provisioning. If it reports a missing permission, upda
 
 In the account's **R2 Object Storage** page, select **Manage API Tokens**, create an account token if your role permits it (otherwise a user token), and choose **Object Read & Write**. The installer needs these credentials before creating its bucket, so the initial token must cover that bucket when it is created; the dashboard's all-buckets option covers it. Save the **Access Key ID** and **Secret Access Key**. These are different from the two management/runtime tokens above. See [R2's token instructions](https://developers.cloudflare.com/r2/api/tokens/).
 
-### Signing and Encryption Keys
+### Signing and Encryption Keys {#signing-and-encryption-keys}
 
-The current installer asks for two keys. Generate and save them before continuing: a JWT signing secret with at least 32 random bytes, and a separate project-encryption key containing exactly 32 random bytes encoded as base64. Generate each once per platform and keep the originals for recovery.
+The **JWT signing key** signs platform login tokens. The **Project encryption key** encrypts app secrets stored by your platform. Generate a separate key for each by running this command twice:
+
+```sh
+openssl rand -base64 32
+```
+
+Save each result in your password manager, then paste it into the corresponding installer prompt. The command generates 32 random bytes encoded as base64, suitable for either field. Keep the two original keys for recovery; do not regenerate them when resuming or upgrading.
 
 ::: details Generate the keys without printing them to your terminal
 
 On macOS, this copies a suitable random value to the clipboard:
 
 ```sh
-node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))' | pbcopy
+openssl rand -base64 32 | pbcopy
 ```
 
-Paste it into your password manager as **JWT signing secret**. Run the command again and save the second value as **Project encryption key**. On PowerShell, use `Set-Clipboard` instead of `pbcopy`; on other systems, use your secret manager's secure generator with the same byte length and encoding.
+Paste it into your password manager as **JWT signing key**. Run the command again and save the second value as **Project encryption key**. On PowerShell, use `Set-Clipboard` instead of `pbcopy`. If OpenSSL is unavailable, use your secret manager's secure generator for 32 random bytes in base64, or `node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))'`.
 
 :::
 
