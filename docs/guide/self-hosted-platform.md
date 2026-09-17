@@ -79,15 +79,19 @@ void platform install --workers-dev --plan
 
 Use an empty PostgreSQL database dedicated to this platform. It stores users, projects, and deployments; individual apps can still use D1. Void creates the tables and the Hyperdrive connection, but does not provision the PostgreSQL server.
 
-If you already have hosted PostgreSQL, create a fresh database and a user that owns it. The connection must work both from your computer, for migrations, and from Cloudflare, for the running platform.
+Void does not require a particular database provider. Use an existing PostgreSQL host or choose a service such as **Neon**, **PlanetScale Postgres**, **Supabase**, or others.
 
-For example, with [Neon](https://neon.com/):
+1. Create a fresh database or project dedicated to the platform, with no existing application tables. Use a database role that can create and manage its tables and schemas.
+2. Open the provider's connection details and select the primary database. Use a direct connection or a session-mode pooler, not transaction pooling. The connection must work from both your computer and Cloudflare.
+3. Copy the PostgreSQL connection URL, including the password and SSL settings, into your password manager. Paste only the URL—not a surrounding `psql` command—into Void's `PostgreSQL DATABASE_URL` prompt.
 
-1. Create a new project for the platform.
-2. Open its connection details and select the new database and its owner role.
-3. Turn **connection pooling off** and copy the PostgreSQL connection URL, including the password and SSL settings, into your password manager. Copy only the URL, not a surrounding `psql` command.
+| Provider                                                                     | Connection setup                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Neon](https://neon.com/docs/get-started-with-neon/connect-neon)             | Open **Connect**, select the database and owner role, and turn **connection pooling off**.                                                                                                                                                            |
+| [PlanetScale Postgres](https://planetscale.com/docs/postgres/connecting)     | Choose **Postgres**, not Vitess/MySQL. Open **Connect**, create role credentials, and use the direct primary connection on port `5432`, not PgBouncer on `6432`.                                                                                      |
+| [Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres) | Open **Connect** and use the direct connection where IPv6 is available, or the **Session pooler** on port `5432` for IPv4 connectivity. Do not select the transaction pooler on `6543`. Replace the password placeholder with your database password. |
 
-The direct connection is needed for installation locks and migrations. Cloudflare also recommends it for [Neon with Hyperdrive](https://developers.cloudflare.com/hyperdrive/examples/connect-to-postgres/postgres-database-providers/neon/). You will paste it into Void's `PostgreSQL DATABASE_URL` prompt.
+For a dedicated Supabase project, [disable the Data API](https://supabase.com/docs/guides/api/securing-your-api#disable-the-data-api) so the platform's tables are not exposed through Supabase's auto-generated endpoints. Void uses the PostgreSQL connection, not Supabase API keys.
 
 Once installation claims the database, continue using that same database for resume and maintenance commands. Uninstall never deletes external PostgreSQL.
 
