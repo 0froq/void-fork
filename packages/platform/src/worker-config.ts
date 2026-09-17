@@ -125,6 +125,9 @@ export function createPlatformWorkerConfigs(input: {
       R2_STATIC_ASSETS_BUCKET: names.assetsBucket,
       REQUESTS_DATASET: names.requestsDataset,
       SITE_DOMAIN: deployment.application.baseDomain,
+      ...(deployment.application.workersDev
+        ? { PLATFORM_APPLICATION: JSON.stringify(deployment.application) }
+        : {}),
       TAIL_SERVICE_NAME: names.tailWorker,
       VOID_PROXY_SERVICE: names.proxyWorker,
     },
@@ -194,6 +197,9 @@ export function createPlatformWorkerConfigs(input: {
       tail_consumers: [{ service: names.tailWorker }],
       vars: {
         BASE_HOSTNAME: deployment.application.baseDomain,
+        ...(deployment.application.workersDev
+          ? { PLATFORM_APPLICATION: JSON.stringify(deployment.application) }
+          : {}),
         PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken,
         PLATFORM_INSTALLATION_ID: installationId,
         PLATFORM_TRAFFIC_STATE: trafficState,

@@ -49,6 +49,7 @@ export type PlatformInstallPlanInput = Readonly<{
   displayName: string;
   installationSlug: string;
   zoneName: string;
+  workersDev?: boolean;
 }>;
 
 type PlanningClient = Pick<
@@ -105,11 +106,25 @@ export async function createPlatformInstallPlan(
       )
       .digest('hex')
       .slice(0, 12)}`;
+  const accountSubdomain = await client.getWorkersSubdomain(account.id);
+  const workersDev =
+    existing?.deployment.application.workersDev ??
+    (input.workersDev ? { subdomain: accountSubdomain, installationId } : undefined);
+  if (workersDev && workersDev.subdomain !== accountSubdomain) {
+    throw new Error(
+      'platform: The account workers.dev subdomain changed. Restore it before continuing.',
+    );
+  }
+  const testing = !!workersDev && !input.zoneName;
   const deployment = createPlatformDeploymentManifest({
     application: {
-      baseDomain: input.applicationDomain,
+      baseDomain: testing ? `${accountSubdomain}.workers.dev` : input.applicationDomain,
       dedicatedZone: input.dedicatedZone,
       zoneName: input.zoneName,
+      ...(workersDev ? { workersDev } : {}),
+      ...(existing?.deployment.application.zoneId
+        ? { zoneId: existing.deployment.application.zoneId }
+        : {}),
     },
     controlPlane: {
       apiHostname: input.controlPlaneDomain || null,
@@ -132,8 +147,8 @@ export async function createPlatformInstallPlan(
 
   const names = deployment.resources;
   const wildcardHostname = `*.${deployment.application.baseDomain}`;
-  const zone = await client.findZone(account.id, deployment.application.zoneName);
-  if (deployment.application.baseDomain !== deployment.application.zoneName) {
+  const zone = testing ? null : await client.findZone(account.id, deployment.application.zoneName);
+  if (!testing && deployment.application.baseDomain !== deployment.application.zoneName) {
     const certificateHelp =
       `Use the zone apex ${deployment.application.zoneName} as --application-domain, or provision an active ${wildcardHostname} edge certificate in the existing zone before installing. ` +
       'Cloudflare Advanced Certificate Manager is a paid add-on; an existing custom wildcard certificate also works. ' +
@@ -172,7 +187,7 @@ export async function createPlatformInstallPlan(
     hyperdrives,
     workers,
   ] = await Promise.all([
-    client.getWorkersSubdomain(account.id),
+    Promise.resolve(accountSubdomain),
     client.listAiGateways(account.id),
     client.listKvNamespaces(account.id, names.routingKv),
     client.listKvNamespaces(account.id, names.isrCacheKv),
@@ -301,42 +316,44 @@ export async function createPlatformInstallPlan(
     }
   }
   const actions: Array<PlatformInstallPlanAction> = [];
-  const recordedZone = existing?.resources.find((resource) => resource.key === 'zone');
-  const remotelyOwnedZone = remoteOwnership?.resources.some(
-    (resource) => resource.key === 'zone' && resource.id === zone?.id,
-  );
-  const repairCreatedZone =
-    options?.repairMissing && recordedZone?.ownership === 'created' && !zone;
-  if (
-    recordedZone &&
-    !repairCreatedZone &&
-    (!zone || recordedZone.id !== zone.id || recordedZone.kind !== 'zone')
-  ) {
-    throw new Error(
-      `platform: Recorded zone ${recordedZone.name} (${recordedZone.id}) no longer matches the Cloudflare account.`,
+  if (!testing) {
+    const recordedZone = existing?.resources.find((resource) => resource.key === 'zone');
+    const remotelyOwnedZone = remoteOwnership?.resources.some(
+      (resource) => resource.key === 'zone' && resource.id === zone?.id,
     );
+    const repairCreatedZone =
+      options?.repairMissing && recordedZone?.ownership === 'created' && !zone;
+    if (
+      recordedZone &&
+      !repairCreatedZone &&
+      (!zone || recordedZone.id !== zone.id || recordedZone.kind !== 'zone')
+    ) {
+      throw new Error(
+        `platform: Recorded zone ${recordedZone.name} (${recordedZone.id}) no longer matches the Cloudflare account.`,
+      );
+    }
+    actions.push({
+      action: repairCreatedZone
+        ? 'create'
+        : recordedZone || (zone && remotelyOwnedZone)
+          ? 'reuse'
+          : zone
+            ? 'adopt'
+            : 'create',
+      id: zone?.id ?? null,
+      key: 'zone',
+      kind: 'zone',
+      name: deployment.application.zoneName,
+      reason: repairCreatedZone
+        ? 'Recreate the missing installer-owned zone.'
+        : recordedZone || remotelyOwnedZone
+          ? 'Reuse the recorded zone.'
+          : zone
+            ? 'Use the existing zone without taking ownership.'
+            : 'Create the requested zone.',
+    });
+    addDnsPlan(actions, existing, wildcardHostname, dnsRecords, options);
   }
-  actions.push({
-    action: repairCreatedZone
-      ? 'create'
-      : recordedZone || (zone && remotelyOwnedZone)
-        ? 'reuse'
-        : zone
-          ? 'adopt'
-          : 'create',
-    id: zone?.id ?? null,
-    key: 'zone',
-    kind: 'zone',
-    name: deployment.application.zoneName,
-    reason: repairCreatedZone
-      ? 'Recreate the missing installer-owned zone.'
-      : recordedZone || remotelyOwnedZone
-        ? 'Reuse the recorded zone.'
-        : zone
-          ? 'Use the existing zone without taking ownership.'
-          : 'Create the requested zone.',
-  });
-  addDnsPlan(actions, existing, wildcardHostname, dnsRecords, options);
   addNamedPlan(
     actions,
     existing,
@@ -980,7 +997,9 @@ async function readRemoteOwnership(
 export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {
   const lines = [
     `${plan.deployment.displayName} in ${plan.account.name} (${plan.account.id})`,
-    `Applications: *.${plan.deployment.application.baseDomain}`,
+    plan.deployment.application.zoneName
+      ? `Applications: *.${plan.deployment.application.baseDomain}`
+      : 'Applications: workers.dev (testing); add a domain with void platform domain set <domain>',
     `Control plane: ${plan.apiUrl}`,
     `Resource proxy: ${plan.proxyUrl}`,
     '',

@@ -133,16 +133,42 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   }
   const accounts = await readAccounts(client);
   const accountId = recorded ? existing!.account.id : await selectAccount(accounts, args.account);
+  let workersDev =
+    (!!recorded?.application.workersDev && !recorded.application.zoneName) ||
+    args.workersDev === true;
+  if (
+    !recorded &&
+    !args.workersDev &&
+    !args.applicationDomain &&
+    !args.zone &&
+    process.stdin.isTTY
+  ) {
+    const mode = await select({
+      message: 'Where should your apps live?',
+      options: [
+        { value: 'domain', label: 'Use a domain', hint: 'recommended' },
+        { value: 'workers-dev', label: 'Use workers.dev for testing', hint: 'add a domain later' },
+      ],
+    });
+    if (isCancel(mode)) {
+      throw new Error('platform: Cancelled.');
+    }
+    workersDev = mode === 'workers-dev';
+  }
   const applicationDomain =
     recorded?.application.baseDomain ??
-    normalizeApplicationDomain(
-      args.applicationDomain || (await promptText('Application base domain:', 'example.app')),
-    );
+    (workersDev
+      ? ''
+      : normalizeApplicationDomain(
+          args.applicationDomain || (await promptText('Application base domain:', 'example.app')),
+        ));
   const zoneName =
     recorded?.application.zoneName ??
-    normalizeApplicationDomain(
-      args.zone || (await promptText('Cloudflare zone:', applicationDomain)),
-    );
+    (workersDev
+      ? ''
+      : normalizeApplicationDomain(
+          args.zone || (await promptText('Cloudflare zone:', applicationDomain)),
+        ));
   const displayName =
     recorded?.displayName ??
     (args.displayName || (await promptText('Platform display name:', `${installationSlug} Void`)));
@@ -203,6 +229,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       displayName,
       installationSlug,
       zoneName,
+      ...(workersDev ? { workersDev: true } : {}),
     };
     const plan = await createInitialPlatformInstallPlan(
       client,
@@ -347,6 +374,11 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       return;
     }
     log.success(`${result.manifest.deployment.displayName} is installed at ${plan.apiUrl}.`);
+    if (!plan.deployment.application.zoneName) {
+      log.info(
+        'Apps will use workers.dev addresses. When your domain is ready: void platform domain set <domain>',
+      );
+    }
     outro('Run `void auth login`, then deploy an app with `void deploy --platform void`.');
   } finally {
     release?.();

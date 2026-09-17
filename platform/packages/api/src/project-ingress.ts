@@ -75,7 +75,7 @@ export async function ensureProjectIngress(
     );
     const response = await fetch(url, {
       method: 'PUT',
-      headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
+      headers: { Authorization: `Bearer ${env.CF_API_TOKEN}`, 'If-None-Match': '*' },
       body: form,
     });
     const body = (await response.json()) as { success?: boolean };

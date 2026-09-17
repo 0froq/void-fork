@@ -11,7 +11,10 @@ export const platformSubcommands: Array<SubcommandDef> = [
   { name: 'use', arg: '[id]', description: 'Select the default Void platform' },
   { name: 'status', arg: '[id]', description: 'Inspect a platform and its health' },
   { name: 'discover', description: 'Recover installations from a Cloudflare account' },
-  { name: 'install', description: 'Install a Void platform in Cloudflare' },
+  {
+    name: 'install',
+    description: 'Install a Void platform with a domain or workers.dev for testing',
+  },
   { name: 'upgrade', arg: '[id]', description: 'Upgrade an installed Void platform' },
   { name: 'rollback', arg: '[id]', description: 'Restore a compatible earlier platform runtime' },
   { name: 'repair', arg: '[id]', description: 'Reconcile an installed Void platform' },
@@ -39,6 +42,7 @@ export type PlatformArgs =
       runtime: string;
       yes: boolean;
       zone: string;
+      workersDev?: boolean;
     }
   | {
       subcommand: 'upgrade' | 'repair' | 'disable' | 'enable';
@@ -226,6 +230,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       '--runtime',
       '--zone',
     ]);
+    let workersDev = false;
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i]!;
       if (valueFlags.has(arg)) {
@@ -240,12 +245,23 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
         dedicatedZone = true;
       } else if (arg === '--yes') {
         yes = true;
+      } else if (arg === '--workers-dev') {
+        workersDev = true;
       } else {
         throw new Error(`platform: Unexpected argument '${arg}'.`);
       }
     }
+    if (
+      workersDev &&
+      (values.has('--application-domain') || values.has('--zone') || dedicatedZone)
+    ) {
+      throw new Error(
+        'platform: --workers-dev cannot be combined with a domain, zone, or --dedicated-zone.',
+      );
+    }
     return {
       subcommand,
+      ...(workersDev ? { workersDev: true } : {}),
       account: values.get('--account') ?? '',
       applicationDomain: values.get('--application-domain') ?? '',
       controlPlaneDomain: values.get('--control-plane-domain') ?? '',

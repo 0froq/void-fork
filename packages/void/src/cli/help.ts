@@ -257,10 +257,14 @@ const HELP_TREE: HelpTree = {
         ],
       },
       install: {
-        summary: 'Install or resume a Void platform in Cloudflare.',
+        summary: 'Install or resume a Void platform with a domain, or workers.dev for testing.',
         usage: ['void platform install [options]'],
         options: [
           { command: '--name <slug>', description: 'Installation name' },
+          {
+            command: '--workers-dev',
+            description: 'Use workers.dev for testing; add a domain later',
+          },
           { command: '--display-name <name>', description: 'Human-readable platform name' },
           { command: '--account <id>', description: 'Cloudflare account id' },
           {

@@ -265,6 +265,8 @@ export type PlatformInstallerDependencies = Readonly<{
     platformVersion: string,
     usageProtocolVersion: 0 | 1,
     healthProbeToken: string,
+    fetcher?: typeof fetch,
+    dispatchOrigin?: string,
   ) => Promise<void>;
   verifySandboxDrain?: (apiUrl: string, healthProbeToken: string) => Promise<boolean>;
   verifyWorkerCutover?: (
@@ -628,6 +630,11 @@ export async function installPlatform(
   const resolvedRuntime = dependencies.runtime ?? resolvePlatformRuntime();
   const runtimeDirectory = resolvedRuntime.directory;
   const runtime = resolvedRuntime.manifest;
+  if (plan.deployment.application.workersDev && runtime.applicationRoutingVersion !== 1) {
+    throw new Error(
+      'platform: This runtime does not support workers.dev application routing. Use a current platform runtime.',
+    );
+  }
   verifyRuntimeArtifacts(runtimeDirectory, runtime);
   const runtimeProvenance = {
     manifestSha256: resolvedRuntime.manifestSha256,
@@ -813,47 +820,49 @@ export async function installPlatform(
     }
     await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
 
-    const zoneAction = plan.actions.find((action) => action.key === 'zone')!;
+    const zoneAction = plan.actions.find((action) => action.key === 'zone');
     let zone = plan.zone;
-    if (zoneAction.action === 'create') {
-      manifest = recordProvisionIntent(manifest, zoneAction, now());
-      writeInstallationManifest(manifest);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      zone = await dependencies.client.createZone(plan.account.id, zoneAction.name);
-    }
-    if (!zone) {
-      throw new Error('platform: Cloudflare did not return the platform zone.');
-    }
-    if (zoneAction.action === 'adopt') {
-      manifest = recordAdoptionIntent(manifest, zoneAction, zone.id, now());
-      writeInstallationManifest(manifest);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-    }
-    manifest = recordResource(
-      manifest,
-      zoneAction,
-      zone.id,
-      zoneAction.action === 'adopt'
-        ? 'adopted'
-        : zoneAction.action === 'create' || hasProvisionIntent(manifest, zoneAction)
-          ? 'created'
-          : undefined,
-      now(),
-    );
-    writeInstallationManifest(manifest);
-    await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-    if (zone.status !== 'active') {
-      manifest = transitionInstallation(manifest, 'waiting-for-dns', now());
-      writeInstallationManifest(manifest);
-      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
-      return {
+    if (zoneAction) {
+      if (zoneAction.action === 'create') {
+        manifest = recordProvisionIntent(manifest, zoneAction, now());
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+        zone = await dependencies.client.createZone(plan.account.id, zoneAction.name);
+      }
+      if (!zone) {
+        throw new Error('platform: Cloudflare did not return the platform zone.');
+      }
+      if (zoneAction.action === 'adopt') {
+        manifest = recordAdoptionIntent(manifest, zoneAction, zone.id, now());
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      }
+      manifest = recordResource(
         manifest,
-        waitingForDns: true,
-        waitingForSandboxDrain: false,
-        zoneNameServers: zone.nameServers,
-      };
+        zoneAction,
+        zone.id,
+        zoneAction.action === 'adopt'
+          ? 'adopted'
+          : zoneAction.action === 'create' || hasProvisionIntent(manifest, zoneAction)
+            ? 'created'
+            : undefined,
+        now(),
+      );
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      if (zone.status !== 'active') {
+        manifest = transitionInstallation(manifest, 'waiting-for-dns', now());
+        writeInstallationManifest(manifest);
+        await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+        return {
+          manifest,
+          waitingForDns: true,
+          waitingForSandboxDrain: false,
+          zoneNameServers: zone.nameServers,
+        };
+      }
     }
-
+    const zoneId = zone?.id ?? '';
     for (const action of plan.actions.filter(
       (entry) => entry.key !== 'routing-kv' && entry.kind !== 'zone' && entry.kind !== 'worker',
     )) {
@@ -910,7 +919,7 @@ export async function installPlatform(
         plan,
         action,
         secrets.databaseUrl,
-        zone.id,
+        zoneId,
       );
       manifest = recordResource(
         manifest,
@@ -1124,7 +1133,7 @@ export async function installPlatform(
         isrCacheKv: requireId(ids, 'isr-cache-kv'),
         legacyAssetsKv: requireId(ids, 'legacy-assets-kv'),
         routingKv: requireId(ids, 'routing-kv'),
-        zone: zone.id,
+        zone: zoneId,
       },
       runtimeEntrypoints: entrypoints,
     };
@@ -1209,7 +1218,7 @@ export async function installPlatform(
               }
               await dependencies.client.removeRoutes(
                 plan.account.id,
-                zone.id,
+                zoneId,
                 trackedPlatformWorkerTraffic(manifest!, new Set([snapshot.workerName])),
               );
             },
@@ -1294,7 +1303,7 @@ export async function installPlatform(
         key,
         workerDeploymentSecrets,
         plan.account.id,
-        zone.id,
+        zoneId,
         action.action !== 'create',
       );
       manifest = recordProvisionIntent(manifest, action, now());
@@ -1335,7 +1344,7 @@ export async function installPlatform(
               }
               const [customDomains, routes] = await Promise.all([
                 dependencies.client.listWorkerDomains(plan.account.id),
-                dependencies.client.listWorkerRoutes(zone.id),
+                zoneId ? dependencies.client.listWorkerRoutes(zoneId) : Promise.resolve([]),
               ]);
               manifest = recordPlatformWorkerTraffic(
                 manifest!,
@@ -1376,7 +1385,11 @@ export async function installPlatform(
                   'platform: Safe Cloudflare Worker route publication is unavailable.',
                 );
               }
-              await dependencies.client.publishWorkerRoutesSafely(zone.id, workerName, patterns);
+              if (zoneId) {
+                await dependencies.client.publishWorkerRoutesSafely(zoneId, workerName, patterns);
+              } else if (patterns.length > 0) {
+                throw new Error('platform: Cannot publish zone routes in workers.dev mode.');
+              }
             },
             previousConfig: previousWorkerConfig,
             previousPublicEndpoints,
@@ -1394,7 +1407,7 @@ export async function installPlatform(
               }
               await dependencies.client.removeRoutes(
                 plan.account.id,
-                zone.id,
+                zoneId,
                 trackedPlatformWorkerTraffic(manifest!, new Set([action.name])),
               );
             },
@@ -1457,7 +1470,7 @@ export async function installPlatform(
         manifest,
         waitingForDns: false,
         waitingForSandboxDrain: false,
-        zoneNameServers: zone.nameServers,
+        zoneNameServers: zone?.nameServers ?? [],
       };
     }
     manifest = transitionInstallation(manifest, 'verifying', now());
@@ -1470,6 +1483,10 @@ export async function installPlatform(
       version,
       targetUsageProtocolVersion,
       createPlatformHealthProbeToken(manifest.ownershipNonce),
+      undefined,
+      !plan.deployment.application.zoneName
+        ? `https://${plan.deployment.resources.dispatchWorker}.${plan.workersSubdomain}.workers.dev`
+        : undefined,
     );
     if (requiresSandboxDrain) {
       const drainComplete = await (dependencies.verifySandboxDrain ?? verifyPlatformSandboxDrain)(
@@ -1502,7 +1519,7 @@ export async function installPlatform(
           manifest,
           waitingForDns: false,
           waitingForSandboxDrain: true,
-          zoneNameServers: zone.nameServers,
+          zoneNameServers: zone?.nameServers ?? [],
         };
       }
       const completedDrain = await prepareSandboxDrain!();
@@ -1551,7 +1568,7 @@ export async function installPlatform(
           key,
           workerDeploymentSecrets,
           plan.account.id,
-          zone.id,
+          zoneId,
           action.action !== 'create',
         );
         const preservedRoutes = dependencies.deployWorker
@@ -1589,7 +1606,7 @@ export async function installPlatform(
                 }
                 const [customDomains, routes] = await Promise.all([
                   dependencies.client.listWorkerDomains(plan.account.id),
-                  dependencies.client.listWorkerRoutes(zone.id),
+                  zoneId ? dependencies.client.listWorkerRoutes(zoneId) : Promise.resolve([]),
                 ]);
                 manifest = recordPlatformWorkerTraffic(
                   manifest!,
@@ -1628,7 +1645,11 @@ export async function installPlatform(
                     'platform: Safe Cloudflare Worker route publication is unavailable.',
                   );
                 }
-                await dependencies.client.publishWorkerRoutesSafely(zone.id, workerName, patterns);
+                if (zoneId) {
+                  await dependencies.client.publishWorkerRoutesSafely(zoneId, workerName, patterns);
+                } else if (patterns.length > 0) {
+                  throw new Error('platform: Cannot publish zone routes in workers.dev mode.');
+                }
               },
               previousConfig: previousWorkerConfig,
               previousPublicEndpoints: true,
@@ -1646,7 +1667,7 @@ export async function installPlatform(
                 }
                 await dependencies.client.removeRoutes(
                   plan.account.id,
-                  zone.id,
+                  zoneId,
                   trackedPlatformWorkerTraffic(manifest!, new Set([action.name])),
                 );
               },
@@ -1701,6 +1722,10 @@ export async function installPlatform(
         version,
         targetUsageProtocolVersion,
         createPlatformHealthProbeToken(manifest.ownershipNonce),
+        undefined,
+        !plan.deployment.application.zoneName
+          ? `https://${plan.deployment.resources.dispatchWorker}.${plan.workersSubdomain}.workers.dev`
+          : undefined,
       );
       await verifyCurrentWorkerCutover();
     }
@@ -1735,7 +1760,7 @@ export async function installPlatform(
       manifest,
       waitingForDns: false,
       waitingForSandboxDrain: false,
-      zoneNameServers: zone.nameServers,
+      zoneNameServers: zone?.nameServers ?? [],
     };
   } catch (error) {
     let failure: unknown = error;
@@ -4712,6 +4737,7 @@ export async function verifyPlatformHealth(
   usageProtocolVersion: 0 | 1,
   healthProbeToken: string,
   fetcher: typeof fetch = fetch,
+  dispatchOrigin?: string,
 ): Promise<void> {
   const request = (url: string) =>
     fetcher(url, {
@@ -4725,7 +4751,7 @@ export async function verifyPlatformHealth(
     request(`${apiUrl}/health`),
     request(`${apiUrl}/.well-known/void-platform`),
     request(`${proxyUrl}/health`),
-    request(`https://test.${applicationBaseDomain}/health`),
+    request(`${dispatchOrigin ?? `https://test.${applicationBaseDomain}`}/health`),
   ]);
   if (!health.ok) {
     throw new Error(`platform: Health check failed at ${apiUrl} (HTTP ${health.status}).`);

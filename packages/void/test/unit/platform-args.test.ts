@@ -3,6 +3,22 @@ import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import { assertNoninteractivePlatformMutationAcknowledged } from '../../src/cli/platform-lifecycle.ts';
 
 describe('platform args', () => {
+  it('makes testing explicit and rejects competing domain choices', () => {
+    expect(parsePlatformArgs(['install', '--workers-dev', '--plan'])).toMatchObject({
+      workersDev: true,
+      plan: true,
+    });
+    expect(parsePlatformArgs(['install'])).not.toHaveProperty('workersDev');
+    for (const flags of [
+      ['--zone', 'example.com'],
+      ['--application-domain', 'example.com'],
+      ['--dedicated-zone'],
+    ]) {
+      expect(() => parsePlatformArgs(['install', '--workers-dev', ...flags])).toThrow(
+        'cannot be combined',
+      );
+    }
+  });
   it('parses connection and lifecycle selectors', () => {
     expect(() => parsePlatformArgs(['connect', 'https://api.example.com'])).toThrow();
     expect(parsePlatformArgs(['repair', 'example-a1b2c3d4', '--plan'])).toEqual({

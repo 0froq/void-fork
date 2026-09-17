@@ -56,6 +56,31 @@ function r2ConfigHash(name: string, fingerprint: string): string {
 }
 
 describe('platform installation planning', () => {
+  it('plans workers.dev without any zone, DNS, or certificate access', async () => {
+    const forbidden = async () => {
+      throw new Error('zone access must not occur');
+    };
+    const plan = await createPlatformInstallPlan(
+      client({
+        findZone: forbidden,
+        listDnsRecords: forbidden,
+        listWorkerRoutes: forbidden,
+        hasActiveCertificateForHostname: forbidden,
+      }),
+      { ...input, applicationDomain: '', zoneName: '', workersDev: true },
+      null,
+    );
+    expect(plan.zone).toBeNull();
+    expect(
+      plan.actions.some((action) => action.kind === 'zone' || action.kind === 'dns-record'),
+    ).toBe(false);
+    expect(plan.deployment.application).toMatchObject({
+      baseDomain: 'example.workers.dev',
+      zoneName: '',
+      workersDev: { subdomain: 'example' },
+    });
+    expect(plan.actions.filter((action) => action.kind === 'worker')).toHaveLength(4);
+  });
   it('rejects an uncovered nested application domain before resource inventory', async () => {
     let inventoried = false;
     const zone = { id: 'zone', name: 'example.com', nameServers: [], status: 'active' };

@@ -587,7 +587,7 @@ export async function disablePlatform(
   }
   try {
     await writeRemoteManifestIfPresent(client, next);
-    const zone = requireResource(next, 'zone');
+    const zone = next.resources.find((resource) => resource.key === 'zone');
     const routing = requireResource(next, 'routing-kv');
     const trafficGeneration = currentTrafficGeneration(next);
     await client.putKvValue(
@@ -599,7 +599,7 @@ export async function disablePlatform(
     const trackedTraffic = trackedPlatformWorkerTraffic(next);
     await client.removeRoutes(
       next.account.id,
-      missing.has(zone.key) ? null : zone.id,
+      !zone || missing.has(zone.key) ? null : zone.id,
       trackedTraffic,
     );
     next = markTrafficAttachmentsRetained(next);
