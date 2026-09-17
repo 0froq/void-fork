@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'pathslash';
+import { basename, dirname, join } from 'pathslash';
 import { resolvePlatformSourceRevision } from './source-revision.mjs';
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -69,7 +69,11 @@ try {
     };
   }
 
-  cpSync(drizzleRoot, join(runtimeRoot, 'drizzle'), { recursive: true });
+  cpSync(drizzleRoot, join(runtimeRoot, 'drizzle'), {
+    recursive: true,
+    // Drizzle snapshots support authoring new migrations, not applying them.
+    filter: (source) => !/^\d{4}_snapshot\.json$/.test(basename(source)),
+  });
   const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
   const database = buildDatabaseManifest();
   const sourceRevision = resolvePlatformSourceRevision({ repositoryRoot });

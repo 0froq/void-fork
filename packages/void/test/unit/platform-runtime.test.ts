@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -15,6 +15,26 @@ import { describe, expect, it } from 'vite-plus/test';
 import { loadPlatformRuntime } from '../../src/cli/platform-installer.ts';
 
 describe('platform runtime manifest', () => {
+  it('packages migration inputs without Drizzle authoring snapshots', () => {
+    const runtimeDirectory = getPlatformRuntimeDirectory();
+    const manifest = readPlatformRuntimeManifest();
+    const migrationsDirectory = join(runtimeDirectory, 'drizzle');
+
+    expect(readdirSync(migrationsDirectory).sort()).toEqual(
+      [
+        'compatibility.json',
+        'meta',
+        ...manifest.database.migrations.map((migration) => `${migration.tag}.sql`),
+      ].sort(),
+    );
+    expect(readdirSync(join(migrationsDirectory, 'meta'))).toEqual(['_journal.json']);
+    const compatibility = JSON.parse(
+      readFileSync(join(migrationsDirectory, 'compatibility.json'), 'utf8'),
+    );
+    expect(compatibility.lineage).toBe(manifest.database.lineage);
+    expect(compatibility.rollbackSafeFrom).toEqual(manifest.database.rollbackSafeFrom);
+  });
+
   it('binds every packaged migration and Worker artifact to the manifest', () => {
     const runtimeDirectory = getPlatformRuntimeDirectory();
     const manifest = readPlatformRuntimeManifest();
