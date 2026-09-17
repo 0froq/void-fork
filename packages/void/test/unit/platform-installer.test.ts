@@ -390,7 +390,13 @@ describe('platform installer', () => {
     expect(failures).toEqual(['closing the routing gate failed: KV unavailable']);
   });
 
-  it('creates a new Worker through a conditional API request', async () => {
+  it.each([
+    '',
+    '?excludeScript=true',
+    '?bindings_inherit=strict',
+    '?excludeScript=true&bindings_inherit=strict',
+    '?bindings_inherit=strict&excludeScript=true',
+  ])('creates a new Worker through a conditional API request with %s', async (query) => {
     const requests: Array<{
       authorization: string | undefined;
       body: string;
@@ -427,14 +433,18 @@ describe('platform installer', () => {
               headers: { Authorization: 'Bearer secret-token' },
             });
             expect(inspection.ok).toBe(true);
-            const created = await fetch(`${apiBaseUrl}/accounts/account/workers/scripts/void-api`, {
-              body: 'worker bundle',
-              headers: {
-                Authorization: 'Bearer secret-token',
-                'Content-Type': 'text/plain',
+            const created = await fetch(
+              `${apiBaseUrl}/accounts/account/workers/scripts/void-api${query}`,
+              {
+                body: 'worker bundle',
+                headers: {
+                  Authorization: 'Bearer secret-token',
+                  'Content-Type': 'text/plain',
+                  'If-None-Match': 'must-be-replaced-by-the-guard',
+                },
+                method: 'PUT',
               },
-              method: 'PUT',
-            });
+            );
             expect(created.ok).toBe(true);
             return 'created';
           },
@@ -454,9 +464,47 @@ describe('platform installer', () => {
           body: 'worker bundle',
           ifNoneMatch: '*',
           method: 'PUT',
-          path: '/client/v4/accounts/account/workers/scripts/void-api',
+          path: '/client/v4/accounts/account/workers/scripts/void-api' + query,
         },
       ]);
+    } finally {
+      await close(upstream);
+    }
+  });
+
+  it.each([
+    '?excludeScript=false',
+    '?bindings_inherit=loose',
+    '?token=secret-value',
+    '?excludeScript=true&force=true',
+    '?excludeScript=true&excludeScript=true',
+    '?bindings_inherit=strict&bindings_inherit=loose',
+  ])('rejects unsupported or ambiguous create parameters: %s', async (query) => {
+    let forwarded = 0;
+    const upstream = createServer((_request, response) => {
+      forwarded++;
+      response.end('{}');
+    });
+    const origin = await listen(upstream);
+    try {
+      const result = withConditionalPlatformWorkerCreate(
+        'account',
+        'void-api',
+        async (base) => {
+          const response = await fetch(
+            `${base}/accounts/account/workers/scripts/void-api${query}`,
+            {
+              method: 'PUT',
+              body: 'worker bundle',
+            },
+          );
+          expect(response.status).toBe(409);
+        },
+        `${origin}/client/v4`,
+      );
+      await expect(result).rejects.toThrow('unexpected mutation PUT');
+      await expect(result).rejects.not.toThrow('secret-value');
+      expect(forwarded).toBe(0);
     } finally {
       await close(upstream);
     }
@@ -473,11 +521,14 @@ describe('platform installer', () => {
         'account',
         'void-api',
         async (apiBaseUrl) => {
-          await fetch(`${apiBaseUrl}/accounts/account/workers/scripts/void-api`, {
-            body: 'worker bundle',
-            headers: { Authorization: 'Bearer secret-token' },
-            method: 'PUT',
-          });
+          await fetch(
+            `${apiBaseUrl}/accounts/account/workers/scripts/void-api?excludeScript=true&bindings_inherit=strict`,
+            {
+              body: 'worker bundle',
+              headers: { Authorization: 'Bearer secret-token' },
+              method: 'PUT',
+            },
+          );
         },
         `${upstreamOrigin}/client/v4`,
       );
@@ -503,7 +554,7 @@ describe('platform installer', () => {
           async (apiBaseUrl) => {
             proxyBaseUrl = apiBaseUrl;
             const response = await fetch(
-              `${apiBaseUrl}/accounts/account/workers/scripts/other-worker`,
+              `${apiBaseUrl}/accounts/account/workers/scripts/other-worker?excludeScript=true&bindings_inherit=strict`,
               { body: 'unconditional bundle', method: 'PUT' },
             );
             expect(response.status).toBe(409);

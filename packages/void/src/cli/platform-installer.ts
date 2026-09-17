@@ -3797,10 +3797,18 @@ async function startConditionalWorkerCreateProxy(
         outgoing.end('{"success":false,"errors":[{"message":"Invalid API proxy path"}]}');
         return;
       }
+      // Wrangler omits script content from the response and requests strict
+      // binding inheritance. These are the only accepted create-query options.
+      const createQuery = [...incomingUrl.searchParams];
+      const supportedCreateQuery =
+        new Set(createQuery.map(([key]) => key)).size === createQuery.length &&
+        createQuery.every(
+          ([key, value]) =>
+            (key === 'excludeScript' && value === 'true') ||
+            (key === 'bindings_inherit' && value === 'strict'),
+        );
       const isConditionalCreate =
-        incoming.method === 'PUT' &&
-        incomingUrl.pathname === expectedPath &&
-        incomingUrl.search === '';
+        incoming.method === 'PUT' && incomingUrl.pathname === expectedPath && supportedCreateQuery;
       const isTopLevelWorkerUpload =
         incoming.method === 'PUT' &&
         new RegExp(
@@ -3812,7 +3820,11 @@ async function startConditionalWorkerCreateProxy(
         (isTopLevelWorkerUpload && !isConditionalCreate) ||
         (!isReadOnly && !isConditionalCreate && !state.created)
       ) {
-        state.rejectedMutation = `${incoming.method ?? 'UNKNOWN'} ${incomingUrl.pathname}`;
+        state.rejectedMutation = `${incoming.method ?? 'UNKNOWN'} ${incomingUrl.pathname}${
+          incomingUrl.pathname === expectedPath && !supportedCreateQuery
+            ? ' (unsupported Worker create query)'
+            : ''
+        }`;
         incoming.resume();
         outgoing.writeHead(409, { 'Content-Type': 'application/json' });
         outgoing.end(
