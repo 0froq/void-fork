@@ -84,16 +84,6 @@ export default function FooterNav({ footer }: FooterNavProps) {
       </section>
       <section className="wrapper wrapper--ticks flex flex-col items-start justify-between gap-3 border-t px-5 py-5 md:flex-row md:items-center md:gap-0 md:px-24">
         <p className="text-sm">{footerCopyright}</p>
-        <div className="hidden gap-10 text-sm md:flex">
-          {/*
-          <a href="https://voidzero.dev/terms" className="text-grey">
-            Terms & Conditions
-          </a>
-          <a href="https://voidzero.dev/privacy" className="text-grey">
-            Privacy Policy
-          </a>
-          */}
-        </div>
       </section>
     </>
   );

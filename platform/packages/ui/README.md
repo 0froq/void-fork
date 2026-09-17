@@ -1,16 +1,16 @@
 # @voidcloud/ui
 
-Void design-system package shared by platform surfaces.
+Styles and React components for the optional platform dashboard.
 
-The package contains the copied VoidZero theme foundation:
+The package contains:
 
-- `src/styles` - Tailwind v4 theme tokens, base reset, and marketing/app component styles.
+- `src/styles` - Tailwind v4 theme tokens, base reset, and dashboard shell/button styles.
 - `src/fonts` - APK Protocol, KH Teka Mono, and Inter font files.
-- `src/assets` - VoidZero theme images, logos, icons, and animation assets.
-- `src/components` - React UI primitives used by the dashboard and future surfaces.
+- `src/assets` - Void logos and dashboard backgrounds.
+- `src/components` - The dashboard header and footer.
 
-Import the full stylesheet from `@voidcloud/ui/styles.css` and React primitives from
-`@voidcloud/ui`.
+Import the stylesheet from `@voidcloud/ui/styles.css` and `AppHeader`, `FooterNav`,
+and `ThemeContextProvider` from `@voidcloud/ui`.
 
 ## Inter license
 

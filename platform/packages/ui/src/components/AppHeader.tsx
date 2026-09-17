@@ -2,7 +2,6 @@ import { Menu } from '@base-ui/react/menu';
 import { Icon } from '@iconify/react';
 import { useEffect, useState } from 'react';
 import { useThemeContext } from '../context/ThemeContext.tsx';
-import cx from '../lib/cx.tsx';
 import type { IconOption } from '../types/theme-config.ts';
 
 const EXTERNAL_URL_RE = /^(?:[a-z]+:|\/\/)/i;
@@ -150,7 +149,7 @@ export default function AppHeader({
 
       {title ? (
         <div className="pointer-events-none absolute top-1/2 left-1/2 hidden -translate-x-1/2 -translate-y-1/2 sm:block">
-          <h2 className={cx('text-center text-xl sm:text-2xl')}>{title}</h2>
+          <h2 className="text-center text-xl sm:text-2xl">{title}</h2>
         </div>
       ) : null}
     </header>
