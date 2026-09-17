@@ -41,6 +41,7 @@ describe('platform usage queue bindings', () => {
       { binding: 'USAGE_QUEUE', queue: deployment.resources.usageQueue },
     ]);
     expect(configs.proxy.queues).toBeUndefined();
+    expect(configs.proxy.durable_objects).toBeUndefined();
     expect(configs.tail.queues).toBeUndefined();
   });
 

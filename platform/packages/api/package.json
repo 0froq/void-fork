@@ -7,8 +7,7 @@
     "./api": "./src/api.ts",
     "./reserved-slugs": "./src/reserved-slugs.ts",
     "./routing": "./src/routing.ts",
-    "./usage-auth": "./src/usage-auth.ts",
-    "./sandbox-concurrency-counter": "./src/sandbox-concurrency-counter.ts"
+    "./usage-auth": "./src/usage-auth.ts"
   },
   "scripts": {
     "db:generate": "drizzle-kit generate",

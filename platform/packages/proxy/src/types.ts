@@ -33,32 +33,6 @@ export type ProxyBody = Record<string, unknown>;
 export type SendEmailBinding = Readonly<{
   send(message: unknown): Promise<{ messageId?: string } | void>;
 }>;
-
-/**
- * RPC surface exposed by the api worker's `SandboxConcurrencyCounter`
- * Durable Object. Re-declared here instead of imported because the proxy
- * worker must not pull api-package source into its bundle — keep the
- * coupling at the wire-shape level only. The brand is required by the
- * `DurableObjectNamespace<T>` constraint and isn't carried over the wire.
- */
-declare const SANDBOX_DO_BRAND: unique symbol;
-export interface SandboxConcurrencyCounterRpc extends Rpc.DurableObjectBranded {
-  [SANDBOX_DO_BRAND]: never;
-  acquire(
-    projectScopedSandboxInstanceId: string,
-    planLimit: number,
-    attribution: { projectId: string; userId: string; slug: string },
-  ): Promise<{ ok: true } | { ok: false; reason: 'concurrency' }>;
-  refresh(
-    projectScopedSandboxInstanceId: string,
-    attribution: { projectId: string; userId: string; slug: string },
-  ): Promise<{ ok: true } | { ok: false; reason: 'not_held' }>;
-  release(
-    projectScopedSandboxInstanceId: string,
-    attribution: { projectId: string; userId: string; slug: string },
-  ): Promise<void>;
-}
-
 export type Env = Readonly<{
   AI: AiBinding;
   AI_GATEWAY_ID?: string;
@@ -73,7 +47,6 @@ export type Env = Readonly<{
   PLATFORM_HEALTH_PROBE_TOKEN?: string;
   PLATFORM_INSTALLATION_ID?: string;
   PLATFORM_TRAFFIC_STATE?: string;
-  SANDBOX_CONCURRENCY_COUNTER: DurableObjectNamespace<SandboxConcurrencyCounterRpc>;
   SEND_EMAIL: SendEmailBinding;
 
   /**

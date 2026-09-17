@@ -160,6 +160,10 @@ and deploys run `--env production`. Deployed user workers receive the same value
 zone. There is no baked-in fallback: if the var is missing, both send endpoints fail closed with a
 502 rather than sending on the production zone from a staging worker.
 
+### Managed Sandbox
+
+Authenticated `POST /sandbox/*` requests return `501` because managed Sandbox is unavailable. The proxy has no Sandbox handlers or concurrency-counter binding. Native `void/sandbox` on direct Cloudflare deployments is independent of this proxy.
+
 ### Health
 
 `GET /health` returns binding presence for `ai`, `kv`, `jwt`, `api`, `sendEmail`, and

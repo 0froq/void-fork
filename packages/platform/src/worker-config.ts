@@ -143,15 +143,6 @@ export function createPlatformWorkerConfigs(input: {
     kv_namespaces: [{ binding: 'ROUTING', id: resources.routingKv }],
     services: [{ binding: 'API', service: names.apiWorker }],
     dispatch_namespaces: dispatchNamespace,
-    durable_objects: {
-      bindings: [
-        {
-          name: 'SANDBOX_CONCURRENCY_COUNTER',
-          class_name: 'SandboxConcurrencyCounter',
-          script_name: names.apiWorker,
-        },
-      ],
-    },
     vars: {
       AI_GATEWAY_ID: names.aiGateway,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),

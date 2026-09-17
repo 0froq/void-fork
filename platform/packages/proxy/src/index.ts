@@ -11,7 +11,6 @@ import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from './platform-lifec
 import { r2 } from './r2.ts';
 import { verifyPrerenderBuild, verifyProjectOwner } from './resolve.ts';
 import { revalidate } from './revalidate.ts';
-import { sandbox } from './sandbox.ts';
 import type { Env, JwtPayload, ProxyBody, ProxyEnv } from './types.ts';
 
 const app = new Hono<ProxyEnv>();
@@ -281,19 +280,17 @@ app.post('/ai/*', async (context, next) => {
   await next();
 });
 
-app.post('/sandbox/*', async (context, next) => {
-  if (!proxyCapabilityEnabled(context.env.PLATFORM_CAPABILITIES, 'sandbox')) {
-    return context.json(
-      {
-        error: 'platform capability unavailable',
-        capability: 'sandbox',
-        message: 'This Void platform does not enable sandbox.',
-      },
-      501,
-    );
-  }
-  await next();
-});
+// Managed Sandbox is unavailable; retain its authenticated error response.
+app.post('/sandbox/*', (context) =>
+  context.json(
+    {
+      error: 'platform capability unavailable',
+      capability: 'sandbox',
+      message: 'This Void platform does not enable sandbox.',
+    },
+    501,
+  ),
+);
 
 // Same gate for the email group. A deployed worker on a platform without
 // the email module still holds `__VOID_PROXY` and a valid project token, so
@@ -322,7 +319,6 @@ app.route('/d1', d1);
 app.route('/kv', kv);
 app.route('/r2', r2);
 app.route('/revalidate', revalidate);
-app.route('/sandbox', sandbox);
 app.route('/email', email);
 
 export default {
