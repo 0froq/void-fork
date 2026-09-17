@@ -40,7 +40,6 @@ export type PlatformInstallPlan = Readonly<{
   proxyUrl: string;
   workersSubdomain: string;
   zone: CloudflareZone | null;
-  provisioningSuffix?: string;
 }>;
 
 export type PlatformInstallPlanInput = Readonly<{
@@ -82,7 +81,6 @@ export async function createPlatformInstallPlan(
   existing: PlatformInstallationManifest | null,
   options?: {
     authoritativeProvisionIntents?: boolean;
-    provisioningSuffix?: string;
     repairMissing?: boolean;
     allowUnverifiedAiGateway?: boolean;
   },
@@ -136,11 +134,7 @@ export async function createPlatformInstallPlan(
     },
     displayName: input.displayName,
     installationSlug,
-    resources:
-      existing?.deployment.resources ??
-      createPlatformResourceNames(
-        resourceSlugForInstallation(installationSlug, installationId, options?.provisioningSuffix),
-      ),
+    resources: existing?.deployment.resources ?? createPlatformResourceNames(installationSlug),
   });
   if (existing && JSON.stringify(existing.deployment) !== JSON.stringify(deployment)) {
     throw new Error(
@@ -530,7 +524,6 @@ export async function createPlatformInstallPlan(
     proxyUrl,
     workersSubdomain,
     zone,
-    ...(options?.provisioningSuffix ? { provisioningSuffix: options.provisioningSuffix } : {}),
   };
 }
 
@@ -580,25 +573,6 @@ export async function revalidatePlatformInstallAction(
       );
     }
   }
-}
-
-function resourceSlugForInstallation(
-  installationSlug: string,
-  installationId: string,
-  provisioningSuffix?: string,
-): string {
-  const suffix = provisioningSuffix ?? installationId.slice(installationSlug.length + 1);
-  if (!/^(?:[a-f0-9]{12}|[a-f0-9]{32})$/.test(suffix)) {
-    // Existing schema-v1 installations used the human-readable slug directly.
-    return installationSlug;
-  }
-  // The resource-name builder validates its entire input as a 40-character slug.
-  // Keep all 128 random bits and shorten only the readable prefix to fit that
-  // budget. Preserve the legacy 12-character-suffix names unchanged.
-  const readablePrefix = installationSlug
-    .slice(0, suffix.length === 32 ? 7 : 26)
-    .replace(/-+$/, '');
-  return `${readablePrefix}-${suffix}`;
 }
 
 function resourceSlugForManifest(manifest: PlatformInstallationManifest): string {
@@ -710,6 +684,11 @@ function addNamedPlan(
   const recorded = existing?.resources.find((resource) => resource.key === key);
   if (remote) {
     if (existing && ambiguousResources.has(key)) {
+      if (!isLegacyUniqueProvisionAttempt(existing, key, kind, name)) {
+        throw new Error(
+          `platform: Ownership of ${kind} ${JSON.stringify(name)} could not be verified. The resource was left untouched. Restore this installation's ownership record before resuming, or choose another installation name for a new platform.`,
+        );
+      }
       actions.push({
         action: 'create',
         id: null,
@@ -731,13 +710,12 @@ function addNamedPlan(
     );
     const markedProvision =
       existing !== null &&
-      isUniqueProvisionAttempt(existing, key, kind, name) &&
       hasUnrecordedProvisionIntent(existing, key, kind, name) &&
       intentProofs.has(key);
     const ambiguousProvision =
       existing !== null &&
       options?.authoritativeProvisionIntents === true &&
-      isUniqueProvisionAttempt(existing, key, kind, name) &&
+      isLegacyUniqueProvisionAttempt(existing, key, kind, name) &&
       hasAmbiguousProvisionIntent(existing, key, kind, remote.id, name);
     if (
       (!recorded || recorded.id !== remote.id || recorded.kind !== kind) &&
@@ -746,7 +724,7 @@ function addNamedPlan(
       !ambiguousProvision
     ) {
       throw new Error(
-        `platform: ${kind} ${JSON.stringify(name)} already exists but is not owned by this installation. Choose another installation name.`,
+        `platform: ${kind} ${JSON.stringify(name)} already exists but is not owned by this installation. Resume the owning installation, or choose another installation name. Nothing was overwritten.`,
       );
     }
     if (ambiguousProvision && !markedProvision && !remotelyOwned) {
@@ -768,7 +746,7 @@ function addNamedPlan(
       kind,
       name,
       reason: markedProvision
-        ? 'Recover the uniquely named resource from an interrupted provisioning attempt.'
+        ? 'Recover the resource with its matching ownership marker from an interrupted provisioning attempt.'
         : existingAction === 'update'
           ? 'Deploy the current platform version.'
           : 'Reuse the recorded resource.',
@@ -910,7 +888,9 @@ function matchesResourceMarker(
   }
 }
 
-function isUniqueProvisionAttempt(
+// Preserve recovery for previously installed, suffixed namespaces. New platforms
+// use readable names and stop on ambiguous ownership instead of renaming resources.
+function isLegacyUniqueProvisionAttempt(
   manifest: PlatformInstallationManifest,
   key: string,
   kind: InstallationResourceKind,

@@ -105,7 +105,7 @@ beforeEach(() => {
   mocks.confirm.mockResolvedValue(true);
   mocks.select.mockResolvedValue('workers-dev');
   mocks.preflight.mockResolvedValue(undefined);
-  mocks.plan.mockImplementation(async (_client, input, existing, options) => {
+  mocks.plan.mockImplementation(async (_client, input, existing) => {
     const id = existing?.id ?? 'test-setup-123456abcdef';
     const deployment = createPlatformDeploymentManifest({
       installationSlug: input.installationSlug,
@@ -115,9 +115,7 @@ beforeEach(() => {
         zoneName: '',
         workersDev: { subdomain: 'account', installationId: id },
       },
-      resources: existing?.deployment.resources ?? {
-        apiWorker: 'api-' + (options.provisioningSuffix ?? 'preview'),
-      },
+      resources: existing?.deployment.resources,
     });
     return {
       account: { id: 'account', name: 'Account' },
@@ -220,7 +218,7 @@ describe('platform credential onboarding', () => {
     );
     const draft = listInstallationManifests()[0]!;
     expect(draft.deployment.installationSlug).toBe('void-e2e');
-    expect(draft.deployment.resources.apiWorker).toMatch(/^void-void-e2-[a-f0-9]{32}-api$/);
+    expect(draft.deployment.resources.apiWorker).toBe('void-void-e2e-api');
     expect(isPlatformSetupDraft(draft)).toBe(true);
     const callback = `https://${draft.deployment.resources.apiWorker}.void-platform-e2e-test.workers.dev/auth/callback`;
     expect(info).toHaveBeenCalledWith(expect.stringContaining('Callback: ' + callback));

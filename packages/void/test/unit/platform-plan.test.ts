@@ -3,6 +3,7 @@ import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
   createPlatformResourceOwnershipMarker,
+  createPlatformResourceNames,
   recordInstallationResource,
   recordInstallationStep,
 } from '@void/platform';
@@ -60,6 +61,22 @@ function r2ConfigHash(name: string, fingerprint: string): string {
     .digest('hex');
 }
 
+function legacyInstallation(suffix = '0123456789ab') {
+  return createPlatformInstallationManifest({
+    account: { id: 'account', name: 'Account' },
+    createdAt: '2026-09-14T00:00:00.000Z',
+    deployment: createPlatformDeploymentManifest({
+      installationSlug: input.installationSlug,
+      displayName: input.displayName,
+      application: { baseDomain: input.applicationDomain, zoneName: input.zoneName },
+      resources: createPlatformResourceNames(`example-${suffix}`),
+    }),
+    id: 'example-0123456789ab',
+    ownershipNonce: '0123456789abcdef0123456789abcdef',
+    platformVersion: '1.0.0',
+  });
+}
+
 describe('platform installation planning', () => {
   it('keeps an explicit pending AI Gateway check in previews, then verifies it without changing resource names', async () => {
     const denied = client({
@@ -73,7 +90,6 @@ describe('platform installation planning', () => {
     });
     const preview = await createPlatformInstallPlan(denied, input, null, {
       allowUnverifiedAiGateway: true,
-      provisioningSuffix: 'a'.repeat(32),
     });
     expect(preview.actions.find((action) => action.key === 'ai-gateway')).toMatchObject({
       action: 'inspect',
@@ -264,7 +280,7 @@ describe('platform installation planning', () => {
     const fake = client();
     const plan = await createPlatformInstallPlan(fake, input, null);
     expect(plan.apiUrl).toBe(`https://${plan.deployment.resources.apiWorker}.example.workers.dev`);
-    expect(plan.deployment.resources.apiWorker).toMatch(/^void-example-[a-f0-9]{12}-api$/);
+    expect(plan.deployment.resources.apiWorker).toBe('void-example-api');
     expect(plan.actions).toHaveLength(15);
     expect(plan.actions.every((action) => action.action === 'create')).toBe(true);
     expect(Object.keys(fake)).not.toContain('createZone');
@@ -278,25 +294,9 @@ describe('platform installation planning', () => {
     expect(applied.deployment.resources).toEqual(planned.deployment.resources);
   });
 
-  it('uses an explicit unpredictable suffix for a provisioning plan', async () => {
-    const plan = await createPlatformInstallPlan(client(), input, null, {
-      provisioningSuffix: '0123456789abcdef0123456789abcdef',
-    });
-    expect(plan.deployment.resources.apiWorker).toBe(
-      'void-example-0123456789abcdef0123456789abcdef-api',
-    );
-    expect(plan.deployment.resources.dispatchWorker).toBe(
-      'void-example-0123456789abcdef0123456789abcdef-dispatch',
-    );
-    expect(
-      Math.max(...Object.values(plan.deployment.resources).map((name) => name.length)),
-    ).toBeLessThanOrEqual(63);
-  });
-
   it.each(['a', 'example', 'void-e2e', 'abcdef-team', 'x'.repeat(40)])(
-    'keeps the full random suffix within the resource-slug budget for %s',
+    'uses the full readable name without a resource suffix for %s',
     async (installationSlug) => {
-      const suffix = '0123456789abcdef0123456789abcdef';
       for (const workersDev of [false, true]) {
         const plan = await createPlatformInstallPlan(
           client(),
@@ -306,18 +306,24 @@ describe('platform installation planning', () => {
             ...(workersDev ? { workersDev: true, applicationDomain: '', zoneName: '' } : {}),
           },
           null,
-          { provisioningSuffix: suffix },
         );
         expect(plan.deployment.installationSlug).toBe(installationSlug);
-        expect(plan.deployment.resources.apiWorker).toBe(
-          `void-${installationSlug.slice(0, 7).replace(/-+$/, '')}-${suffix}-api`,
-        );
+        expect(plan.deployment.resources.apiWorker).toBe(`void-${installationSlug}-api`);
         for (const name of Object.values(plan.deployment.resources)) {
-          expect(name).toContain(suffix);
           expect(name.length).toBeLessThanOrEqual(63);
           expect(name).not.toContain('--');
         }
       }
+    },
+  );
+
+  it.each(['0123456789ab', '0123456789abcdef0123456789abcdef'])(
+    'preserves recorded resource names from installations with the suffix %s',
+    async (suffix) => {
+      const existing = legacyInstallation(suffix);
+      const plan = await createPlatformInstallPlan(client(), input, existing);
+      expect(plan.deployment.resources).toEqual(existing.deployment.resources);
+      expect(plan.apiUrl).toBe(`https://void-example-${suffix}-api.example.workers.dev`);
     },
   );
 
@@ -327,6 +333,50 @@ describe('platform installation planning', () => {
         title.endsWith('-routing') ? [{ id: 'someone-else', name: title }] : [],
     });
     await expect(createPlatformInstallPlan(fake, input, null)).rejects.toThrow('not owned');
+  });
+
+  it.each([
+    { listWorkerNames: async () => ['void-example-api'] },
+    { listR2Buckets: async () => [{ id: 'void-example-assets', name: 'void-example-assets' }] },
+    { listQueues: async (_account: string, name: string) => [{ id: 'other-queue', name }] },
+  ])('refuses existing account resources instead of allocating another name', async (inventory) => {
+    await expect(createPlatformInstallPlan(client(inventory), input, null)).rejects.toThrow(
+      'Resume the owning installation, or choose another installation name. Nothing was overwritten.',
+    );
+  });
+
+  it('stops on unverified ownership for a readable resource rather than renaming it', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null);
+    const name = initial.deployment.resources.assetsBucket;
+    const fingerprint = '2026-09-14T00:00:00.000Z';
+    const manifest = recordInstallationResource(
+      createPlatformInstallationManifest({
+        account: initial.account,
+        deployment: initial.deployment,
+        id: initial.installationId,
+        ownershipNonce: '0123456789abcdef0123456789abcdef',
+        platformVersion: '1.0.0',
+        createdAt: fingerprint,
+      }),
+      {
+        configHash: r2ConfigHash(name, fingerprint),
+        id: name,
+        key: 'assets-bucket',
+        kind: 'r2-bucket',
+        name,
+        ownership: 'created',
+        state: 'ready',
+      },
+      fingerprint,
+    );
+    await expect(
+      createPlatformInstallPlan(
+        client({ listR2Buckets: async () => [{ fingerprint, id: name, name }] }),
+        input,
+        manifest,
+      ),
+    ).rejects.toThrow('The resource was left untouched.');
+    expect(manifest.deployment.resources.assetsBucket).toBe('void-example-assets');
   });
 
   it('refuses to replace an existing Worker custom domain or DNS record', async () => {
@@ -431,9 +481,7 @@ describe('platform installation planning', () => {
   });
 
   it('refuses an intent-only resource after an ambiguous create response', async () => {
-    const initial = await createPlatformInstallPlan(client(), input, null, {
-      provisioningSuffix: '0123456789ab',
-    });
+    const initial = await createPlatformInstallPlan(client(), input, legacyInstallation());
     let manifest = createPlatformInstallationManifest({
       account: initial.account,
       createdAt: '2026-09-14T00:00:00.000Z',
@@ -489,8 +537,8 @@ describe('platform installation planning', () => {
     expect(recovered.deployment.resources.routingKv).toBe(retry?.name);
   });
 
-  it('uses a fresh name after an interrupted repair create', async () => {
-    const initial = await createPlatformInstallPlan(client(), input, null);
+  it('preserves legacy recovery after an interrupted repair create', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, legacyInstallation());
     const resourceName = initial.deployment.resources.routingKv;
     let manifest = createPlatformInstallationManifest({
       account: initial.account,
@@ -545,9 +593,7 @@ describe('platform installation planning', () => {
   });
 
   it('retains a recorded R2 bucket whose ownership marker is missing', async () => {
-    const initial = await createPlatformInstallPlan(client(), input, null, {
-      provisioningSuffix: '0123456789ab',
-    });
+    const initial = await createPlatformInstallPlan(client(), input, legacyInstallation());
     const bucketName = initial.deployment.resources.assetsBucket;
     const fingerprint = '2026-09-14T00:00:00.000Z';
     let manifest = createPlatformInstallationManifest({
@@ -591,9 +637,7 @@ describe('platform installation planning', () => {
   });
 
   it('retains a marked R2 bucket whose creation fingerprint changed', async () => {
-    const initial = await createPlatformInstallPlan(client(), input, null, {
-      provisioningSuffix: '0123456789ab',
-    });
+    const initial = await createPlatformInstallPlan(client(), input, legacyInstallation());
     const bucketName = initial.deployment.resources.assetsBucket;
     const fingerprint = '2026-09-14T00:00:00.000Z';
     let manifest = createPlatformInstallationManifest({

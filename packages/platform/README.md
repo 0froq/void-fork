@@ -6,6 +6,8 @@ For a first installation, follow [Install a Void Platform](../../docs/guide/self
 
 The CLI provides direct credential setup links in plans and opens missing-credential pages during an approved interactive install. Local credential drafts preserve the final Worker names and OAuth callback before provisioning, with partial secrets encrypted by the existing recovery store. A completed credential-setup marker separates these drafts from database-claimed installation recovery.
 
+New platforms use readable resource names such as `void-team-api` and `void-team-routing`, without random suffixes. Choose an installation name that is unused in the selected account. Conflicting resources are never silently adopted, overwritten, or bypassed by choosing random names. Existing installations keep their recorded resource names, including older suffixed names; application/user resource naming is independent.
+
 The packaged API also serves the `void platform` commands for managing users,
 projects, access, and logs. The installer applies the database migration needed
 for administrator sessions and audit records. See

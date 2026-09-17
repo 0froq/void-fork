@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { confirm, intro, isCancel, log, note, outro, password, select, text } from '@clack/prompts';
 import {
   normalizeApplicationDomain,
@@ -313,13 +312,10 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       zoneName,
       ...(workersDev ? { workersDev: true } : {}),
     };
-    let plan = await createInitialPlatformInstallPlan(
-      client,
-      planInput,
-      existing,
+    let plan = await createPlatformInstallPlan(client, planInput, existing, {
       authoritativeProvisionIntents,
-      args.plan,
-    );
+      allowUnverifiedAiGateway: true,
+    });
     note(
       formatPlatformInstallPlan(plan),
       args.plan ? 'Read-only installation plan' : 'Installation plan',
@@ -625,7 +621,6 @@ export async function verifyPlatformAiGatewayPlan(
   try {
     verified = await createPlatformInstallPlan(client, input, existing, {
       authoritativeProvisionIntents,
-      provisioningSuffix: preview.provisioningSuffix,
     });
   } catch (error) {
     if (
@@ -674,44 +669,6 @@ export function assertNoninteractivePlatformMutationAcknowledged(
   throw new Error(
     `platform: Non-interactive \`void platform ${args.subcommand}\` requires --yes to acknowledge Cloudflare changes. Run with --plan first to inspect them.`,
   );
-}
-
-async function createInitialPlatformInstallPlan(
-  client: PlatformCloudflareClient,
-  input: Parameters<typeof createPlatformInstallPlan>[1],
-  existing: PlatformInstallationManifest | null,
-  authoritativeProvisionIntents: boolean,
-  planOnly: boolean,
-): Promise<Awaited<ReturnType<typeof createPlatformInstallPlan>>> {
-  if (existing || planOnly) {
-    return createPlatformInstallPlan(client, input, existing, {
-      authoritativeProvisionIntents,
-      allowUnverifiedAiGateway: true,
-    });
-  }
-  let collision: unknown;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      return await createPlatformInstallPlan(client, input, null, {
-        authoritativeProvisionIntents,
-        allowUnverifiedAiGateway: true,
-        // A fresh apply receives a 128-bit resource namespace. Independent installers
-        // therefore cannot accidentally choose the same Worker name during the API's
-        // non-atomic create precondition window; installers resuming the SAME installation
-        // are serialized by the PostgreSQL lifecycle lock. An account principal deliberately
-        // targeting this exact random name already has authority to replace it after install.
-        provisioningSuffix: randomBytes(16).toString('hex'),
-      });
-    } catch (error) {
-      if (!String(error).includes('already exists but is not owned by this installation')) {
-        throw error;
-      }
-      collision = error;
-    }
-  }
-  throw new Error('platform: Could not allocate collision-free platform resource names.', {
-    cause: collision,
-  });
 }
 
 async function readAccounts(
