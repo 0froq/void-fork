@@ -610,9 +610,6 @@ export class PlatformCloudflareClient {
     const entries: Array<{ id?: unknown; title?: unknown }> = [];
     for (let page = 1; ; page++) {
       const query = new URLSearchParams({ page: String(page), per_page: '100' });
-      if (title) {
-        query.set('title', title);
-      }
       const result = await this.request<ReadonlyArray<{ id?: unknown; title?: unknown }>>(
         `/accounts/${encodeURIComponent(accountId)}/storage/kv/namespaces?${query}`,
       );
@@ -621,10 +618,13 @@ export class PlatformCloudflareClient {
         break;
       }
     }
-    return entries.map((entry) => ({
+    const namespaces = entries.map((entry) => ({
       id: requiredString(entry.id, 'KV namespace id'),
       name: requiredString(entry.title, 'KV namespace title'),
     }));
+    // The KV API lists all namespaces; it does not filter by a `title` parameter.
+    // Filter only after pagination and validation, without hiding real duplicates.
+    return title ? namespaces.filter((namespace) => namespace.name === title) : namespaces;
   }
 
   async createKvNamespace(accountId: string, title: string): Promise<CloudflareNamedResource> {

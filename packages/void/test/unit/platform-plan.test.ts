@@ -80,6 +80,70 @@ function legacyInstallation(suffix = '0123456789ab') {
 }
 
 describe('platform installation planning', () => {
+  it('resumes the recorded namespaces using the real unfiltered KV API response', async () => {
+    const initial = await createPlatformInstallPlan(client(), input, null);
+    let manifest = createPlatformInstallationManifest({
+      account: initial.account,
+      deployment: initial.deployment,
+      id: initial.installationId,
+      ownershipNonce: '0123456789abcdef0123456789abcdef',
+      platformVersion: '1.0.0',
+      createdAt: '2026-09-17T00:00:00.000Z',
+    });
+    for (const [key, name] of [
+      ['routing-kv', initial.deployment.resources.routingKv],
+      ['isr-cache-kv', initial.deployment.resources.isrCacheKv],
+      ['legacy-assets-kv', initial.deployment.resources.legacyAssetsKv],
+    ]) {
+      manifest = recordInstallationResource(
+        manifest,
+        {
+          key,
+          id: `${key}-id`,
+          name,
+          kind: 'kv-namespace',
+          ownership: 'created',
+          state: 'ready',
+          configHash: 'test',
+        },
+        '2026-09-17T00:00:00.000Z',
+      );
+    }
+    const entries = manifest.resources.map(({ id, name }) => ({ id, title: name }));
+    const api = new PlatformCloudflareClient('test-token', {
+      fetcher: async (url, init) => {
+        expect(String(url)).toContain('/storage/kv/namespaces?');
+        expect(init?.method ?? 'GET').toBe('GET');
+        return Response.json({ success: true, result: entries });
+      },
+    });
+    const inspected: Array<string> = [];
+    const plannerClient = client({
+      listKvNamespaces: api.listKvNamespaces.bind(api),
+      getKvValue: async (_account: string, id: string) => {
+        inspected.push(id);
+        return id === 'routing-kv-id' ? JSON.stringify(manifest) : null;
+      },
+    });
+    const resumed = await createPlatformInstallPlan(plannerClient, input, manifest);
+    expect(inspected).toEqual(['routing-kv-id']);
+    expect(resumed.actions.filter((action) => action.kind === 'kv-namespace')).toEqual(
+      expect.arrayContaining(
+        manifest.resources.map((resource) =>
+          expect.objectContaining({
+            action: 'reuse',
+            id: resource.id,
+            name: resource.name,
+          }),
+        ),
+      ),
+    );
+    entries.push({ id: 'unowned-duplicate', title: initial.deployment.resources.routingKv });
+    await expect(createPlatformInstallPlan(plannerClient, input, manifest)).rejects.toThrow(
+      'More than one kv-namespace',
+    );
+  });
+
   it.each([false, true])(
     'bolds names and labels, not account IDs or URLs (workers.dev: %s)',
     async (workersDev) => {

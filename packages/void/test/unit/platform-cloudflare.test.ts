@@ -569,6 +569,56 @@ describe('platform Cloudflare client', () => {
     expect(pages).toEqual(['1', '2']);
   });
 
+  it('filters KV namespaces by exact title instead of trusting an unsupported API filter', async () => {
+    const entries = [
+      { id: 'routing-id', title: 'void-example-routing' },
+      { id: 'isr-id', title: 'void-example-isr-cache' },
+      { id: 'legacy-id', title: 'void-example-legacy-assets' },
+      { id: 'other-id', title: 'void-example-routing-other' },
+    ];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async () => Response.json({ success: true, result: entries }),
+    });
+    await expect(client.listKvNamespaces('account', 'void-example-routing')).resolves.toEqual([
+      { id: 'routing-id', name: 'void-example-routing' },
+    ]);
+    await expect(client.listKvNamespaces('account', 'missing')).resolves.toEqual([]);
+    await expect(client.listKvNamespaces('account')).resolves.toHaveLength(4);
+  });
+
+  it('keeps paginating before filtering and retains genuinely duplicate titles', async () => {
+    const pages: Array<string> = [];
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async (input) => {
+        const page = new URL(String(input)).searchParams.get('page')!;
+        pages.push(page);
+        const result =
+          page === '1'
+            ? Array.from({ length: 100 }, (_, index) => ({
+                id: `id-${index}`,
+                title: index === 99 ? 'routing' : `unrelated-${index}`,
+              }))
+            : [{ id: 'another-routing', title: 'routing' }];
+        return Response.json({ success: true, result });
+      },
+    });
+    await expect(client.listKvNamespaces('account', 'routing')).resolves.toEqual([
+      { id: 'id-99', name: 'routing' },
+      { id: 'another-routing', name: 'routing' },
+    ]);
+    expect(pages).toEqual(['1', '2']);
+  });
+
+  it('does not turn malformed KV inventory into an empty search result', async () => {
+    const client = new PlatformCloudflareClient('token', {
+      fetcher: async () =>
+        Response.json({ success: true, result: [{ id: 'unknown', title: null }] }),
+    });
+    await expect(client.listKvNamespaces('account', 'routing')).rejects.toThrow(
+      'KV namespace title',
+    );
+  });
+
   it('exhausts paginated collision checks for platform resource names', async () => {
     const calls: Array<string> = [];
     const client = new PlatformCloudflareClient('token', {
