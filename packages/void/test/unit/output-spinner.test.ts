@@ -23,13 +23,13 @@ it('passes interactive cancellation through to the native spinner', () => {
 it('uses plain progress messages in CI without starting an animated spinner', () => {
   mocks.ci.mockReturnValue(true);
   const progress = createSpinner();
-  progress.start('Installing the platform…');
-  progress.message('Preparing the platform database…');
+  progress.start('Installing the platform');
+  progress.message('Preparing the platform database');
   progress.stop('Platform installed.');
   expect(mocks.spinner).not.toHaveBeenCalled();
   expect(mocks.log.step.mock.calls).toEqual([
-    ['Installing the platform…'],
-    ['Preparing the platform database…'],
+    ['Installing the platform'],
+    ['Preparing the platform database'],
   ]);
   expect(mocks.log.info).toHaveBeenCalledWith('Platform installed.');
 });

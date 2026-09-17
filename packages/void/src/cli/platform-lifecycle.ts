@@ -392,7 +392,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
           'platform: DATABASE_URL is required to verify an interrupted installation before resuming it.',
         );
       }
-      progress = startProgress('Reading the saved installation…');
+      progress = startProgress('Reading the saved installation');
       const authoritative = await readPlatformDatabaseLifecycleManifest(
         databaseUrl,
         existing.id,
@@ -677,7 +677,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       projectSecretActiveKeyVersion:
         process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION || '',
     });
-    progress = startProgress('Installing the platform…');
+    progress = startProgress('Installing the platform');
     if (credentialSetup) {
       // Stop treating this as an untouched local draft before any database claim is attempted.
       saveValues({ projectSecretKey: secrets.projectSecretKey });

@@ -247,7 +247,7 @@ describe('platform installer', () => {
           configs.push(config);
         },
         migrateDatabase: async () => {
-          expect(progress.at(-1)).toBe('Applying platform database migrations…');
+          expect(progress.at(-1)).toBe('Applying platform database migrations');
         },
         revalidateBeforeWorkerDeploy: async () => {},
         verifyHealth: async (

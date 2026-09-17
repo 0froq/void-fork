@@ -360,12 +360,12 @@ describe('platform credential onboarding', () => {
 
   it('starts installation progress before the installer runs, updates it, and stops on success', async () => {
     mocks.install.mockImplementation(async (_plan, _secrets, manifest, dependencies) => {
-      expect(mocks.progress.start).toHaveBeenCalledWith('Installing the platform…');
-      dependencies.onProgress('Preparing the platform database…');
+      expect(mocks.progress.start).toHaveBeenCalledWith('Installing the platform');
+      dependencies.onProgress('Preparing the platform database');
       return { manifest, waitingForDns: false, waitingForSandboxDrain: false };
     });
     await runPlatformLifecycleCommand(parsePlatformArgs(args));
-    expect(mocks.progress.message).toHaveBeenCalledWith('Preparing the platform database…');
+    expect(mocks.progress.message).toHaveBeenCalledWith('Preparing the platform database');
     expect(mocks.progress.stop).toHaveBeenCalledWith('Platform installed.');
     expect(mocks.progress.error).not.toHaveBeenCalled();
     // Spinner cancellation must not swallow the CLI's cancellation signal.

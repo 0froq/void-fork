@@ -711,7 +711,7 @@ export async function installPlatform(
     databaseClaimState: 'claiming',
   });
 
-  dependencies.onProgress?.('Preparing the platform database…');
+  dependencies.onProgress?.('Preparing the platform database');
   try {
     await (dependencies.claimDatabase ?? claimPlatformDatabase)(
       secrets.databaseUrl,
@@ -729,7 +729,7 @@ export async function installPlatform(
     ...pendingSecrets,
     databaseClaimState: 'claimed',
   });
-  dependencies.onProgress?.('Acquiring the database lock…');
+  dependencies.onProgress?.('Acquiring the database lock');
   const releaseDatabaseLock = await dependencies.acquireDatabaseLifecycleLock(
     secrets.databaseUrl,
     manifest.id,
@@ -787,7 +787,7 @@ export async function installPlatform(
         authoritative !== null && authoritative !== undefined,
       );
     }
-    dependencies.onProgress?.('Checking and creating Cloudflare resources…');
+    dependencies.onProgress?.('Checking and creating Cloudflare resources');
     if (JSON.stringify(manifest.deployment) !== JSON.stringify(plan.deployment)) {
       manifest = { ...manifest, deployment: plan.deployment, updatedAt: now() };
       writeInstallationManifest(manifest);
@@ -944,7 +944,7 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
 
-    dependencies.onProgress?.('Checking the platform database schema…');
+    dependencies.onProgress?.('Checking the platform database schema');
     const rollbackDatabase = dependencies.databaseRollbackSource;
     const migrationStep = `database-schema:${runtime.database.schemaDigest}`;
     if (rollbackDatabase) {
@@ -963,7 +963,7 @@ export async function installPlatform(
       writeInstallationManifest(manifest);
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     } else if (!manifest.steps.some((step) => step.key === migrationStep)) {
-      dependencies.onProgress?.('Applying platform database migrations…');
+      dependencies.onProgress?.('Applying platform database migrations');
       const legacyMigrationStep = `database-migrations:${runtime.database.journalSha256}`;
       if (dependencies.migrateDatabase) {
         if (!manifest.steps.some((step) => step.key === legacyMigrationStep)) {
@@ -1015,7 +1015,7 @@ export async function installPlatform(
       }
     }
 
-    dependencies.onProgress?.('Checking platform safety…');
+    dependencies.onProgress?.('Checking platform safety');
     const targetSandboxDrainProtocol = runtime.safetyProtocols?.sandboxDrain ?? 0;
     const prepareSandboxDrain =
       dependencies.prepareSandboxDrain ?? releaseDatabaseLock.prepareSandboxDrain;
@@ -1310,7 +1310,7 @@ export async function installPlatform(
       );
     }
     for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
-      dependencies.onProgress?.(`Deploying the ${key} service…`);
+      dependencies.onProgress?.(`Deploying the ${key} service`);
       const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
       const workerSecrets = platformWorkerSecretPayload(
         key,
@@ -1488,7 +1488,7 @@ export async function installPlatform(
     }
     manifest = transitionInstallation(manifest, 'verifying', now());
     writeInstallationManifest(manifest);
-    dependencies.onProgress?.('Verifying platform health…');
+    dependencies.onProgress?.('Verifying platform health');
     await (dependencies.verifyHealth ?? verifyPlatformHealth)(
       plan.apiUrl,
       manifest.id,
@@ -1577,7 +1577,7 @@ export async function installPlatform(
         );
       }
       for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
-        dependencies.onProgress?.(`Enabling the ${key} service…`);
+        dependencies.onProgress?.(`Enabling the ${key} service`);
         const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
         const workerSecrets = platformWorkerSecretPayload(
           key,
@@ -1729,7 +1729,7 @@ export async function installPlatform(
       throw new Error('platform: Routing disablement removal is unavailable.');
     }
     if (requiresStagedCommit) {
-      dependencies.onProgress?.('Verifying the enabled platform…');
+      dependencies.onProgress?.('Verifying the enabled platform');
       await (dependencies.verifyHealth ?? verifyPlatformHealth)(
         plan.apiUrl,
         manifest.id,
