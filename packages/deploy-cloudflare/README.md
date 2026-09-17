@@ -12,6 +12,11 @@ an isolated config to retain Worker settings and triggers. Trigger snapshots
 record when configuration was preserved, so rollback can keep those settings
 for versions originally deployed outside Void.
 
+Handoff verifiers can accept an explicit list of new KV binding identities.
+Only those exact namespaces may be added; existing bindings, variables, secrets,
+and handlers must remain unchanged. New bindings cannot alias an existing KV
+namespace. The Void CLI uses this for the migration's explicit ISR cache choice.
+
 First-deployment readiness allows up to one minute for the new Worker's public
 route to propagate, with bounded requests and backoff. A successful check still
 requires the ready response, and Cloudflare Access denials fail immediately.

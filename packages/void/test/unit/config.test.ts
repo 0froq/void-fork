@@ -40,6 +40,16 @@ function cleanup() {
 }
 
 describe('readConfig', () => {
+  it.each([true, false])('accepts routing.isr: %s', (isr) => {
+    setup(JSON.stringify({ routing: { isr } }));
+    expect(readConfig(tmpDir).routing?.isr).toBe(isr);
+    cleanup();
+  });
+  it.each([0, 'false', null, {}])('rejects invalid routing.isr: %j', (isr) => {
+    setup(JSON.stringify({ routing: { isr } }));
+    expect(() => readConfig(tmpDir)).toThrow('"routing.isr" in void.json must be a boolean');
+    cleanup();
+  });
   it('returns empty config when no file exists', () => {
     setup();
     const config = readConfig(tmpDir);

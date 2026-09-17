@@ -54,6 +54,7 @@ import {
   readWranglerManagedQueueCleanupCandidates,
   readWranglerPublishedTrafficSnapshot,
   writeWranglerPublishedTrafficSnapshot,
+  writeProvisionedWranglerConfig,
 } from '../../src/cli/wrangler.ts';
 import { readConfig } from '../../src/config.ts';
 
@@ -646,8 +647,11 @@ describe('existing Cloudflare site handoff', () => {
     writeFileSync(join(root, 'pages/index.tsx'), 'export default () => null;');
     writeFileSync(join(root, 'pages/index.server.ts'), 'export const prerender = true;');
     const readExistingWorker = vi.fn().mockResolvedValue(existing);
+    const confirmIsrSetup = vi.fn().mockResolvedValue(false);
     const { deps } = harness({
       readExistingWorker,
+      isCI: false,
+      confirmIsrSetup,
       runBuild: () => {
         throw new Error('build failed');
       },
@@ -659,6 +663,7 @@ describe('existing Cloudflare site handoff', () => {
     deps.runBuild = () => build(root);
     await runCloudflareDeploy(root, {}, silentCliLog, deps);
     expect(readExistingWorker).toHaveBeenCalledTimes(2);
+    expect(confirmIsrSetup).toHaveBeenCalledOnce();
     expect(existsSync(join(root, '.void/cloudflare-link.json'))).toBe(false);
   });
   it('retries only through candidates recorded after uploaded Worker validation', async () => {
@@ -741,7 +746,7 @@ describe('existing Cloudflare site handoff', () => {
   });
 
   it.each(['prerender', 'markdown', 'revalidate'])(
-    'preserves uncached rendering for an existing %s site without an ISR namespace',
+    'keeps the declined ISR choice on subsequent deploys for a %s site',
     async (mode) => {
       const root = site();
       mkdirSync(join(root, 'pages'));
@@ -756,7 +761,10 @@ describe('existing Cloudflare site handoff', () => {
             : 'export const revalidate = 60; export const loader = () => ({});',
         );
       }
+      const confirmIsrSetup = vi.fn().mockResolvedValue(false);
       const { deps, trace, wranglerArgs } = harness({
+        isCI: false,
+        confirmIsrSetup,
         readExistingWorker: async () => existing,
         runBuild: () => build(root),
         verifyDeployConfig: verifyGeneratedDeployConfig,
@@ -775,13 +783,17 @@ describe('existing Cloudflare site handoff', () => {
       ).toBeUndefined();
       expect(readCloudflareLink(root)).toBeNull();
 
-      // Ordinary deploys still infer the cache after the one-time handoff completes.
+      expect(readConfig(root).routing?.isr).toBe(false);
+      await runCloudflareDeploy(root, {}, silentCliLog, deps);
+      expect(confirmIsrSetup).toHaveBeenCalledOnce();
+      expect(trace).not.toContain('provision');
+      // Completing the handoff must not change the saved cache policy.
       const { desired } = await computeDesiredCloudflareResources(
         root,
         readConfig(root),
         join(root, 'wrangler.jsonc'),
       );
-      expect(desired.kvNamespaces).toEqual([{ binding: 'ISR_CACHE', title: 'site-isr-cache' }]);
+      expect(desired.kvNamespaces).toEqual([]);
     },
   );
 
@@ -818,7 +830,7 @@ describe('existing Cloudflare site handoff', () => {
     expect(parseRootWranglerConfig(configPath).kv_namespaces).toEqual(config.kv_namespaces);
   });
 
-  it('does not defer an application KV binding named ISR_CACHE', async () => {
+  it('requires an application KV binding named ISR_CACHE', async () => {
     const root = site();
     writeFileSync(
       join(root, 'void.json'),
@@ -838,6 +850,8 @@ describe('existing Cloudflare site handoff', () => {
     mkdirSync(join(root, 'pages'));
     writeFileSync(join(root, 'pages/index.md'), '# Home');
     const { deps, trace } = harness({
+      isCI: false,
+      confirmIsrSetup: async () => false,
       readExistingWorker: async () => existing,
       runBuild: () => {
         build(root);
@@ -853,6 +867,141 @@ describe('existing Cloudflare site handoff', () => {
     ).rejects.toThrow('Linking cannot add or replace kv_namespaces');
     expect(trace).not.toContain('provision');
     expect(trace).not.toContain('wrangler:deploy');
+  });
+
+  it.each([false, true])(
+    'enables ISR during the first handoff (configured opt-in: %s)',
+    async (configured) => {
+      const root = site();
+      mkdirSync(join(root, 'pages'));
+      writeFileSync(join(root, 'pages/index.md'), '# Home');
+      if (configured) {
+        writeFileSync(join(root, 'void.json'), JSON.stringify({ routing: { isr: true } }));
+      }
+      const confirmIsrSetup = vi.fn().mockResolvedValue(true);
+      const provision = vi
+        .fn<NonNullable<CloudflareDeployDeps['provision']>>()
+        .mockImplementation(async (_root, configPath, desired) => {
+          expect(readConfig(root).routing?.isr).toBe(true);
+          expect(desired).toEqual({
+            kvNamespaces: [{ binding: 'ISR_CACHE', title: 'site-isr-cache' }],
+            queues: [],
+          });
+          writeProvisionedWranglerConfig(
+            root,
+            { kv: { binding: 'ISR_CACHE', id: REAL_KV_ID } },
+            { configPath },
+          );
+          return {
+            configPath,
+            accountIdWritten: false,
+            resources: [
+              {
+                kind: 'kv',
+                binding: 'ISR_CACHE',
+                name: 'site-isr-cache',
+                action: 'created',
+                id: REAL_KV_ID,
+              },
+            ],
+          };
+        });
+      const activateVersion = vi
+        .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
+        .mockImplementation(async (options) => {
+          expect(parseRootWranglerConfig(options.configPath!).kv_namespaces).toEqual([
+            { binding: 'ISR_CACHE', id: REAL_KV_ID },
+          ]);
+          await options.validateUploadedVersion?.('candidate');
+          return {
+            ok: true,
+            versionId: 'candidate',
+            previousVersionId: 'original',
+            previewUrl: 'https://site.example.com',
+          };
+        });
+      const { deps, wranglerArgs } = harness({
+        isCI: configured,
+        confirmIsrSetup,
+        provision,
+        readExistingWorker: async ({ versionId }) =>
+          versionId
+            ? {
+                ...existing,
+                versionId,
+                bindings: [{ name: 'ISR_CACHE', type: 'kv_namespace', namespace_id: REAL_KV_ID }],
+              }
+            : existing,
+        runBuild: () => build(root),
+        verifyDeployConfig: verifyGeneratedDeployConfig,
+        activateVersion,
+      });
+
+      await runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps);
+      expect(provision).toHaveBeenCalledOnce();
+      expect(confirmIsrSetup).toHaveBeenCalledTimes(configured ? 0 : 1);
+      expect(activateVersion).toHaveBeenCalledOnce();
+      expect(wranglerArgs.some((args) => ['d1', 'secret', 'containers'].includes(args[0]!))).toBe(
+        false,
+      );
+      expect(readCloudflareLink(root)).toBeNull();
+      await runCloudflareDeploy(root, {}, silentCliLog, deps);
+      expect(provision).toHaveBeenCalledOnce();
+      expect(confirmIsrSetup).toHaveBeenCalledTimes(configured ? 0 : 1);
+    },
+  );
+
+  it('reuses the cache recorded before a provisioning failure when retrying the handoff', async () => {
+    const root = site();
+    mkdirSync(join(root, 'pages'));
+    writeFileSync(join(root, 'pages/index.md'), '# Home');
+    const confirmIsrSetup = vi.fn().mockResolvedValue(true);
+    const provision = vi
+      .fn<NonNullable<CloudflareDeployDeps['provision']>>()
+      .mockImplementation(async (_root, configPath) => {
+        writeProvisionedWranglerConfig(
+          root,
+          { kv: { binding: 'ISR_CACHE', id: REAL_KV_ID } },
+          { configPath },
+        );
+        throw new Error('provisioning interrupted after config update');
+      });
+    const { deps, trace } = harness({
+      isCI: false,
+      confirmIsrSetup,
+      provision,
+      readExistingWorker: async () => existing,
+      runBuild: () => build(root),
+    });
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toThrow('provisioning interrupted');
+    expect(readCloudflareLink(root)).not.toBeNull();
+    expect(readConfig(root).routing?.isr).toBe(true);
+    await runCloudflareDeploy(root, {}, silentCliLog, deps);
+    expect(trace).toContain('wrangler:deploy');
+    expect(provision).toHaveBeenCalledOnce();
+    expect(confirmIsrSetup).toHaveBeenCalledOnce();
+    expect(readCloudflareLink(root)).toBeNull();
+  });
+
+  it('requires a configured ISR choice for non-interactive migration', async () => {
+    const root = site();
+    mkdirSync(join(root, 'pages'));
+    writeFileSync(join(root, 'pages/index.md'), '# Home');
+    const confirmIsrSetup = vi.fn();
+    const { deps, trace } = harness({
+      isCI: true,
+      confirmIsrSetup,
+      readExistingWorker: async () => existing,
+    });
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toThrow('Set routing.isr to true');
+    expect(confirmIsrSetup).not.toHaveBeenCalled();
+    expect(trace).not.toContain('build');
+    expect(trace).not.toContain('provision');
+    expect(readConfig(root).routing?.isr).toBeUndefined();
   });
 
   it.each([undefined, './migrations', 'db/migrations', './db/migrations'])(

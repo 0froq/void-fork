@@ -50,6 +50,18 @@ function configWith(revalidate: number | Record<string, number> | undefined): Vo
 }
 
 describe('collectRevalidate', () => {
+  it('disables every page policy when routing.isr is false', () => {
+    const scan = makeScan([makePage('/', 31536000), makePage('/dynamic', 60)]);
+    expect(collectRevalidate({ routing: { isr: false, revalidate: 120 } }, scan)).toBeUndefined();
+    expect(collectPages(scan, { '*': 120 }, false)).toEqual([
+      { pattern: '/' },
+      { pattern: '/dynamic' },
+    ]);
+    expect(collectRevalidate({ routing: { isr: true } }, scan)).toEqual({
+      '/': 31536000,
+      '/dynamic': 60,
+    });
+  });
   it('returns undefined with no config and no per-page rules', () => {
     expect(collectRevalidate(configWith(undefined), makeScan([]))).toBeUndefined();
     expect(collectRevalidate(configWith(undefined), null)).toBeUndefined();

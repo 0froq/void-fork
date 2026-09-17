@@ -15,6 +15,24 @@ const MINIMAL_BINDINGS: InferredBindings = {
   needsSandbox: false,
 };
 
+it('disables managed ISR policies and edge prerendering with routing.isr false', () => {
+  const manifest = assembleVoidManifest(
+    makeScan([makePage('/', 31536000)]),
+    false,
+    {
+      bindings: MINIMAL_BINDINGS,
+      revalidate: 60,
+      prerender: ['/'],
+    },
+    { '*': 120 },
+    false,
+  );
+  expect(manifest.revalidate).toBeUndefined();
+  expect(manifest.pathRevalidate).toBeUndefined();
+  expect(manifest.prerender).toBeUndefined();
+  expect(manifest.pages).toEqual([{ pattern: '/' }]);
+});
+
 function makePage(pattern: string, revalidate?: number): PageDefinition {
   return {
     pattern,

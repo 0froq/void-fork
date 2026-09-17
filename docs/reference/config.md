@@ -370,6 +370,20 @@ Fallback rewrites. Same shape as `rewrites`, but rules only fire when no static 
 }
 ```
 
+#### `routing.isr`
+
+Boolean switch for Void's ISR caching. When omitted or `true`, Void infers caching from your revalidate and prerender settings. Setting it to `false` disables ISR and edge prerendering for the whole app, including per-page exports:
+
+```json
+{
+  "routing": {
+    "isr": false
+  }
+}
+```
+
+This does not disable `output: "static"` build-time HTML generation or delete existing KV resources. Set it to `true` to enable your configured cache policies again. Existing-Worker migration saves this choice before provisioning, so it remains consistent on retries and later deployments.
+
 #### `routing.revalidate`
 
 ISR revalidation TTL in seconds, either globally or per path. See [Revalidation](../guide/edge/revalidation.md) for details.

@@ -8,6 +8,8 @@ Revalidation caches rendered pages and refreshes them in the background. When a 
 
 This requires [SSR](../ssr.md) or [Pages mode](../pages-routing/overview) to be configured.
 
+To disable Void's ISR caching across the app while keeping your per-page settings, set `"routing": { "isr": false }` in `void.json`. This overrides per-page revalidate and prerender policies. Set `isr` back to `true` to enable those policies again. Build-time HTML generation with `output: "static"` is unaffected.
+
 ## Enabling revalidation
 
 Add a `routing.revalidate` field to `void.json` with a TTL in seconds:

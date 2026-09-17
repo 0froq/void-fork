@@ -28,6 +28,106 @@ const config = {
   kv_namespaces: [{ binding: 'KV', id: 'existing-id' }],
 };
 describe('existing Worker preservation', () => {
+  const approved = [{ binding: 'ISR_CACHE', id: '0123456789abcdef0123456789abcdef' }];
+  const cache = { name: 'ISR_CACHE', type: 'kv_namespace', namespace_id: approved[0]!.id };
+  it('allows only the approved new KV identity and preserves the original bindings', () => {
+    const withCache = { ...config, kv_namespaces: [...config.kv_namespaces, approved[0]!] };
+    expect(() => assertExistingCloudflareConfig(worker, config, false, approved)).not.toThrow();
+    expect(() => assertExistingCloudflareConfig(worker, config, true, approved)).toThrow(
+      'approved KV namespace',
+    );
+    expect(() => assertExistingCloudflareConfig(worker, withCache, true, approved)).not.toThrow();
+    expect(() =>
+      assertCloudflareBindingsPreserved(
+        worker,
+        { ...worker, bindings: [...worker.bindings, cache] },
+        approved,
+      ),
+    ).not.toThrow();
+    expect(() => assertCloudflareBindingsPreserved(worker, worker, approved)).toThrow(
+      'approved KV namespace',
+    );
+    expect(() =>
+      assertCloudflareBindingsPreserved(worker, { ...worker, bindings: [cache] }, approved),
+    ).toThrow('preserve the existing Worker bindings');
+    expect(() =>
+      assertCloudflareBindingsPreserved(
+        worker,
+        { ...worker, bindings: [...worker.bindings, { ...cache, namespace_id: 'wrong-id' }] },
+        approved,
+      ),
+    ).toThrow('approved KV namespace');
+    expect(() =>
+      assertExistingCloudflareConfig(
+        worker,
+        { ...withCache, kv_namespaces: [approved[0]!] },
+        true,
+        approved,
+      ),
+    ).toThrow('existing Cloudflare resource');
+    expect(() =>
+      assertExistingCloudflareConfig(
+        worker,
+        {
+          ...withCache,
+          kv_namespaces: [...withCache.kv_namespaces, { binding: 'OTHER', id: approved[0]!.id }],
+        },
+        true,
+        approved,
+      ),
+    ).toThrow('cannot add');
+  });
+  it('cannot use approval to replace or weaken a production binding', () => {
+    const retarget = [{ binding: 'KV', id: approved[0]!.id }];
+    expect(() => assertExistingCloudflareConfig(worker, config, false, retarget)).toThrow(
+      'cannot replace',
+    );
+    expect(() => assertCloudflareBindingsPreserved(worker, worker, retarget)).toThrow(
+      'cannot replace',
+    );
+    const tampered = {
+      ...worker,
+      bindings: [
+        ...worker.bindings.map((binding) =>
+          binding.name === 'TOKEN' ? { ...binding, type: 'plain_text', text: 'private' } : binding,
+        ),
+        cache,
+      ],
+    };
+    expect(() => assertCloudflareBindingsPreserved(worker, tampered, approved)).toThrow(
+      'preserve the existing Worker bindings',
+    );
+    expect(() =>
+      assertCloudflareBindingsPreserved(
+        worker,
+        { ...worker, bindings: [...worker.bindings, cache], script: { handlers: ['fetch'] } },
+        approved,
+      ),
+    ).toThrow('event handlers');
+    const sharedNamespace = {
+      ...worker,
+      bindings: [{ name: 'KV', type: 'kv_namespace', namespace_id: approved[0]!.id }],
+    };
+    expect(() =>
+      assertCloudflareBindingsPreserved(
+        sharedNamespace,
+        { ...sharedNamespace, bindings: [...sharedNamespace.bindings, cache] },
+        approved,
+      ),
+    ).toThrow('separate namespace');
+  });
+  it('handles a completed activation retried before its local handoff was cleared', () => {
+    const active = { ...worker, bindings: [...worker.bindings, cache] };
+    expect(() => assertCloudflareBindingsPreserved(active, active, approved)).not.toThrow();
+    expect(() =>
+      assertExistingCloudflareConfig(
+        active,
+        { ...config, kv_namespaces: [...config.kv_namespaces, approved[0]!] },
+        true,
+        approved,
+      ),
+    ).not.toThrow();
+  });
   it('keeps remote-only vars/secrets while requiring exact resource identities', () => {
     expect(() => assertExistingCloudflareConfig(worker, config, true)).not.toThrow();
     expect(() =>

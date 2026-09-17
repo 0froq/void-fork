@@ -9,6 +9,9 @@ export type ExistingCloudflareWorker = {
   script: Record<string, unknown>;
 };
 
+/** Exact identities of new KV bindings explicitly approved before the build. */
+export type ApprovedCloudflareKvBinding = Readonly<{ binding: string; id: string }>;
+
 type ExistingCloudflareWorkerOptions = {
   runWrangler: CloudflareCommandRunner;
   configPath: string;
@@ -313,10 +316,27 @@ function isMissingWorkerOutput(output: string): boolean {
 export function assertCloudflareBindingsPreserved(
   before: ExistingCloudflareWorker,
   after: ExistingCloudflareWorker,
+  approvedKv: ReadonlyArray<ApprovedCloudflareKvBinding> = [],
 ): void {
+  const additions = newApprovedKvBindings(before, approvedKv);
+  for (const addition of additions) {
+    const matches = after.bindings.filter((binding) => binding.name === addition.binding);
+    if (
+      matches.length !== 1 ||
+      matches[0]!.type !== 'kv_namespace' ||
+      matches[0]!.namespace_id !== addition.id
+    ) {
+      throw new Error(
+        `The uploaded version did not use the approved KV namespace for ${addition.binding}. It has not been activated.`,
+      );
+    }
+  }
+  const preservedBindings = after.bindings.filter(
+    (binding) => !additions.some((addition) => addition.binding === binding.name),
+  );
   const sorted = (bindings: ExistingCloudflareWorker['bindings']) =>
     [...bindings].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  if (!isDeepStrictEqual(sorted(before.bindings), sorted(after.bindings))) {
+  if (!isDeepStrictEqual(sorted(before.bindings), sorted(preservedBindings))) {
     throw new Error(
       'The uploaded version did not preserve the existing Worker bindings and variables. It has not been activated.',
     );
@@ -335,12 +355,39 @@ export function assertCloudflareBindingsPreserved(
   }
 }
 
-/** Validate the supported handoff without creating or replacing resources. */
+/** Preserve the existing Worker, allowing only explicitly approved KV additions. */
 export function assertExistingCloudflareConfig(
   existing: ExistingCloudflareWorker,
   config: Record<string, unknown>,
   built = false,
+  approvedKv: ReadonlyArray<ApprovedCloudflareKvBinding> = [],
 ): void {
+  const additions = newApprovedKvBindings(existing, approvedKv);
+  if (additions.length > 0) {
+    const entries = config.kv_namespaces;
+    for (const addition of additions) {
+      const matches = Array.isArray(entries)
+        ? entries.filter((entry) => record(entry) && entry.binding === addition.binding)
+        : [];
+      if (
+        (built || matches.length > 0) &&
+        (matches.length !== 1 || matches[0]!.id !== addition.id)
+      ) {
+        throw new Error(
+          `Binding ${addition.binding} must reference its approved KV namespace when linking.`,
+        );
+      }
+    }
+    if (Array.isArray(entries)) {
+      config = {
+        ...config,
+        kv_namespaces: entries.filter(
+          (entry) =>
+            !record(entry) || !additions.some((addition) => addition.binding === entry.binding),
+        ),
+      };
+    }
+  }
   const handlers = existing.script.handlers;
   if (
     !Array.isArray(handlers) ||
@@ -470,6 +517,45 @@ export function assertExistingCloudflareConfig(
       );
     }
   }
+}
+
+function newApprovedKvBindings(
+  existing: ExistingCloudflareWorker,
+  approved: ReadonlyArray<ApprovedCloudflareKvBinding>,
+): Array<ApprovedCloudflareKvBinding> {
+  const additions: Array<ApprovedCloudflareKvBinding> = [];
+  const names = new Set<string>();
+  for (const binding of approved) {
+    if (!binding.binding || names.has(binding.binding) || !/^[a-f0-9]{32}$/i.test(binding.id)) {
+      throw new Error('Invalid approved KV binding identity.');
+    }
+    names.add(binding.binding);
+    const previous = existing.bindings.filter((entry) => entry.name === binding.binding);
+    if (previous.length > 0) {
+      if (
+        previous.length !== 1 ||
+        previous[0]!.type !== 'kv_namespace' ||
+        previous[0]!.namespace_id !== binding.id
+      ) {
+        throw new Error(
+          `The approved KV binding ${binding.binding} cannot replace an existing binding.`,
+        );
+      }
+    } else {
+      if (
+        existing.bindings.some(
+          (entry) => entry.type === 'kv_namespace' && entry.namespace_id === binding.id,
+        ) ||
+        additions.some((entry) => entry.id === binding.id)
+      ) {
+        throw new Error(
+          `The approved KV binding ${binding.binding} must use a separate namespace from existing bindings.`,
+        );
+      }
+      additions.push(binding);
+    }
+  }
+  return additions;
 }
 
 function stringSetEqual(left: unknown, right: unknown): boolean {

@@ -6,6 +6,7 @@ import {
   readExistingCloudflareWorker,
   type ExistingCloudflareWorker,
   type CloudflareCommandRunner,
+  type ApprovedCloudflareKvBinding,
 } from '@void/deploy-cloudflare';
 import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser';
 import { basename, join } from 'pathslash';
@@ -124,6 +125,7 @@ export async function prepareExistingCloudflareDeploy(options: {
   pinnedLink?: CloudflareLink | null;
   runWrangler: CloudflareCommandRunner;
   readExistingWorker?: typeof readExistingCloudflareWorker;
+  approvedKv?: ReadonlyArray<ApprovedCloudflareKvBinding>;
 }): Promise<ExistingCloudflareWorker | null> {
   const onDiskLink = readCloudflareLink(options.root);
   const pending = options.pinnedLink === undefined ? onDiskLink : options.pinnedLink;
@@ -151,7 +153,7 @@ export async function prepareExistingCloudflareDeploy(options: {
     configPath: options.configPath,
     workerName: config.name,
   });
-  assertExistingCloudflareConfig(existing, config);
+  assertExistingCloudflareConfig(existing, config, false, options.approvedKv);
   let updated = text;
   const patch: Record<string, unknown> = { account_id: options.accountId, keep_vars: true };
   for (const key of ['compatibility_date', 'compatibility_flags', 'limits']) {

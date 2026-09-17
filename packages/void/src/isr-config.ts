@@ -46,6 +46,9 @@ export function collectRevalidate(
   config: VoidConfig,
   pageScan: PageScanResult | null,
 ): number | Record<string, number> | undefined {
+  if (config.routing?.isr === false) {
+    return undefined;
+  }
   const vcRevalidate = config.routing?.revalidate;
   let revalidate: number | Record<string, number> | undefined;
   if (vcRevalidate != null) {
@@ -168,12 +171,13 @@ function resolvePageBuildTtl(
 export function collectPages(
   pageScan: PageScanResult | null,
   revalidateConfig?: number | Record<string, number> | undefined,
+  isrEnabled = true,
 ): Array<{ pattern: string; revalidate?: number }> | undefined {
   if (!pageScan || pageScan.pages.length === 0) {
     return undefined;
   }
   return pageScan.pages.map((page) => {
-    const ttl = resolvePageBuildTtl(page, revalidateConfig);
+    const ttl = isrEnabled ? resolvePageBuildTtl(page, revalidateConfig) : undefined;
     // `undefined` → inherit-eligible (omit `revalidate`); a number (0 or N) is
     // baked verbatim so dispatch can distinguish an explicit opt-out from inherit.
     return ttl === undefined

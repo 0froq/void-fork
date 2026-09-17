@@ -613,9 +613,9 @@ Auto-detects your project type and chooses the right pipeline. See [Supported Ap
 
 An unlinked project with a root `wrangler.jsonc` or `wrangler.json` gets a prompt to link and deploy to Cloudflare using its existing Worker and resources. Accepting verifies the target, saves Cloudflare as the destination, and continues deployment. A failed build retains the link for retry. Declining changes nothing. Explicit platform/project selections and saved destinations take precedence; CI must select a destination explicitly.
 
-The first handoff preserves production bindings, variables, secrets, event handlers, and triggers. The active version must be the latest uploaded version so inherited secrets have an unambiguous source. New resources, migrations, runtime features, auth setup, or local secret overrides must be handled separately. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker).
+The first handoff preserves production bindings, variables, secrets, event handlers, and triggers. The active version must be the latest uploaded version so inherited secrets have an unambiguous source. Apart from an explicitly enabled ISR cache, new resources, migrations, runtime features, auth setup, or local secret overrides must be handled separately. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker).
 
-Prerendered or revalidated pages can link without an `ISR_CACHE` binding: the first handoff preserves rendering without ISR caching, and a subsequent ordinary deploy provisions the cache. Existing ISR namespaces are reused; application KV bindings are still required.
+When prerendered or revalidated pages need a cache during migration, Void asks whether to enable ISR and saves `routing.isr` in `void.json`. Yes provisions the KV cache during this handoff; No keeps ISR disabled on every later deploy until you change the setting. CI must set `routing.isr` explicitly if a pending migration has no saved choice. Existing ISR namespaces are reused; application KV bindings are still required.
 
 For Drizzle projects, deploy performs a read-only schema drift check. If a new migration would be generated, deploy stops and tells you to run `void db generate`, review the migration, commit it yourself, and rerun `void deploy`.
 

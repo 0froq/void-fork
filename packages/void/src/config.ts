@@ -35,6 +35,8 @@ export type NotFoundHandling = 'single-page-application' | '404-page' | 'none';
 
 /** Routing configuration — headers, redirects, rewrites, fallbacks, revalidation, prerendering. */
 export type RoutingConfig = {
+  /** Disable ISR and edge prerendering, including per-page policies. Static output is unaffected. */
+  isr?: boolean;
   revalidate?: number | Record<string, number>;
   revalidateQueryAllowlist?: Record<string, Array<string>>;
   prerender?: Array<string>;
@@ -513,6 +515,10 @@ export function readConfig(root: string): VoidConfig {
           `config: "routing.notFound" in ${CONFIG_FILE} must be one of: ${[...VALID_NOT_FOUND_HANDLING].join(', ')}.`,
         );
       }
+    }
+
+    if (routing.isr !== undefined && typeof routing.isr !== 'boolean') {
+      throw new Error(`config: "routing.isr" in ${CONFIG_FILE} must be a boolean.`);
     }
 
     // Validate routing.revalidate

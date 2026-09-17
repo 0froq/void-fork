@@ -46,6 +46,7 @@ import {
   assertExistingCloudflareConfig,
   assertCloudflareBindingsPreserved,
   type ExistingCloudflareWorker,
+  type ApprovedCloudflareKvBinding,
 } from '@void/deploy-cloudflare';
 import { createDeployArtifact, createDeployUploadPayload } from '@void/deploy-core';
 import {
@@ -121,6 +122,7 @@ import {
   ensureCloudflareAuthentication,
 } from './cloudflare-auth.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
+import { approvedCloudflareIsrBinding, chooseCloudflareIsr } from './cloudflare-isr.ts';
 import {
   maybeLinkCloudflareDeploy,
   readCloudflareLink,
@@ -2215,6 +2217,8 @@ export type DeployWranglerRun = (
  * units (`cli/env-validation.ts`) use.
  */
 export interface CloudflareDeployDeps {
+  /** Interactive migration choice; persisted in void.json before provisioning. */
+  confirmIsrSetup?: (message: string) => Promise<boolean>;
   readExistingWorker?: typeof readExistingCloudflareWorker;
   /** Fail closed on a pending existing-Worker Durable Object class migration. */
   assertDurableObjectLifecycle?: typeof assertCloudflareDurableObjectLifecycleSupported;
@@ -4463,6 +4467,7 @@ export async function runCloudflareDeploy(
 
   let existingWorker: ExistingCloudflareWorker | null = null;
   let pinnedHandoffLink: CloudflareLink | null = null;
+  let approvedHandoffKv: Array<ApprovedCloudflareKvBinding> = [];
   if (options.reuseExistingWorker || initialCloudflareLink) {
     if (
       authEnabled ||
@@ -4476,6 +4481,7 @@ export async function runCloudflareDeploy(
         'Link the existing site without adding runtime features, auth setup, or database migrations. Make those changes in a later deployment.',
       );
     }
+    approvedHandoffKv = approvedCloudflareIsrBinding(voidConfig, rootConfig);
     existingWorker = await prepareExistingCloudflareDeploy({
       root,
       configPath,
@@ -4484,6 +4490,7 @@ export async function runCloudflareDeploy(
       pinnedLink: initialCloudflareLink,
       runWrangler,
       readExistingWorker: deps.readExistingWorker,
+      approvedKv: approvedHandoffKv,
     });
     pinnedHandoffLink = readCloudflareLink(root);
     if (!pinnedHandoffLink) {
@@ -4491,23 +4498,66 @@ export async function runCloudflareDeploy(
     }
     rootConfig = parseRootWranglerConfig(configPath);
 
-    // Direct builds already render without ISR when the Worker has no ISR_CACHE binding.
-    // Preserve that behavior during handoff instead of requiring a new namespace just
-    // because prerender/revalidate is enabled. An application KV renamed to ISR_CACHE
-    // is still required, and an existing cache must retain its verified identity.
+    // Resolve the cache choice now. The saved source setting applies to retries and
+    // ordinary deploys, so completing the handoff never changes the app's cache policy.
+    const isrNamespace = desired.kvNamespaces.find(
+      (namespace) => namespace.binding === 'ISR_CACHE',
+    );
     if (
       existingWorker &&
       !existingWorker.bindings.some((binding) => binding.name === 'ISR_CACHE') &&
       resolveBindingNames(voidConfig.inference?.bindings)?.kv !== 'ISR_CACHE' &&
-      desired.kvNamespaces.some((namespace) => namespace.binding === 'ISR_CACHE')
+      isrNamespace
     ) {
-      desired.kvNamespaces = desired.kvNamespaces.filter(
-        (namespace) => namespace.binding !== 'ISR_CACHE',
-      );
-      log.info(
-        'Preserving rendering without ISR caching for this handoff. A later deployment will provision ISR_CACHE if prerender or revalidate remains enabled.',
-      );
-      cliLog.info('cloudflare_handoff_isr_deferred', { binding: 'ISR_CACHE' });
+      const missing = provisionModule
+        .checkCloudflareProvisionDrift(configPath, desired)
+        .missing.filter((entry) => entry.binding !== 'ISR_CACHE');
+      if (missing.length) {
+        throw new Error(
+          formatCloudflareDriftMessage(
+            missing,
+            reasons,
+            'Linking cannot provision these inferred resources:',
+            'Keep new application resources separate from this migration.',
+          ),
+        );
+      }
+      const enabled = await chooseCloudflareIsr(root, voidConfig, {
+        interactive: !(deps.isCI ?? isWranglerNonInteractiveOrCI()),
+        confirm: deps.confirmIsrSetup,
+      });
+      if (!enabled) {
+        desired.kvNamespaces = desired.kvNamespaces.filter(
+          (namespace) => namespace.binding !== 'ISR_CACHE',
+        );
+      } else {
+        if (approvedHandoffKv.length === 0) {
+          if (!assertUploaderStillPinned()) {
+            return exit(1);
+          }
+          await (deps.provision ?? provisionModule.provisionCloudflareResources)(
+            root,
+            configPath,
+            {
+              kvNamespaces: [isrNamespace],
+              queues: [],
+            },
+            {
+              accountId,
+              log: { info: (message) => log.info(message), warn: (message) => log.warn(message) },
+            },
+          );
+          rootConfig = parseRootWranglerConfig(configPath);
+          approvedHandoffKv = approvedCloudflareIsrBinding(voidConfig, rootConfig);
+          if (approvedHandoffKv.length !== 1) {
+            throw new Error(
+              'ISR setup did not record a valid cache namespace. Rerun `void deploy` to retry.',
+            );
+          }
+        }
+        assertExistingCloudflareConfig(existingWorker, rootConfig, false, approvedHandoffKv);
+      }
+      cliLog.info('cloudflare_handoff_isr_choice', { enabled });
     }
   }
 
@@ -4948,7 +4998,7 @@ export async function runCloudflareDeploy(
   const emitted = (deps.readEmittedWorkerVars ?? readEmittedWorkerVarsDefault)(root);
   if (existingWorker) {
     const generated = readGeneratedDeployConfig(root);
-    assertExistingCloudflareConfig(existingWorker, generated.config, true);
+    assertExistingCloudflareConfig(existingWorker, generated.config, true, approvedHandoffKv);
   }
   if (!emitted.ok) {
     log.error(
@@ -5491,7 +5541,7 @@ export async function runCloudflareDeploy(
             workerName,
             versionId,
           });
-          assertCloudflareBindingsPreserved(existingWorker, uploaded);
+          assertCloudflareBindingsPreserved(existingWorker, uploaded, approvedHandoffKv);
         }
       : undefined,
     recordVerifiedCandidate: existingWorker
@@ -7053,19 +7103,24 @@ export function assembleVoidManifest(
   isFrameworkMode: boolean,
   opts: Parameters<typeof buildVoidManifest>[0],
   revalidateConfig?: number | Record<string, number> | undefined,
+  isrEnabled = true,
 ): DeployManifest {
   return buildVoidManifest({
     ...opts,
+    ...(isrEnabled ? {} : { revalidate: undefined, prerender: undefined }),
     // Bake each page's BUILD-time ISR TTL (3-state) from its own `export const
     // revalidate` first, then a global-NUMBER `routing.revalidate`. A page under
     // an OBJECT config bakes NO TTL (inherit-eligible) — see `collectPages`.
-    pages: isFrameworkMode ? undefined : collectPages(pageScan, revalidateConfig),
+    pages: isFrameworkMode ? undefined : collectPages(pageScan, revalidateConfig, isrEnabled),
     // Ship the RAW per-path OBJECT config alongside so dispatch can resolve those
     // inherit-eligible pages against the ACTUAL request path (honoring per-path
     // `0` opt-outs a dynamic pattern straddles). Object form only: a number
     // config is already baked into every `pages` entry, so it is never consulted.
     pathRevalidate:
-      isFrameworkMode || revalidateConfig == null || typeof revalidateConfig !== 'object'
+      !isrEnabled ||
+      isFrameworkMode ||
+      revalidateConfig == null ||
+      typeof revalidateConfig !== 'object'
         ? undefined
         : revalidateConfig,
   });
@@ -7945,7 +8000,10 @@ async function runFullDeploy(
     explicitPrerenderPaths: deployConfig.routing?.prerender,
   });
   const uniquePrerenderPaths =
-    deployConfig.output === 'static' || isFrameworkMode || !prerenderSourcesPresent
+    deployConfig.routing?.isr === false ||
+    deployConfig.output === 'static' ||
+    isFrameworkMode ||
+    !prerenderSourcesPresent
       ? []
       : isNodeTarget(deployConfig.target)
         ? await collectPrerenderPathsNode({
@@ -8073,6 +8131,7 @@ async function runFullDeploy(
       webSockets,
     },
     deployConfig.routing?.revalidate,
+    deployConfig.routing?.isr !== false,
   );
   const workerDir = join(distDir, workerDirName);
   if (isFrameworkMode) {

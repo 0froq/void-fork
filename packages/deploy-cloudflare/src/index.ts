@@ -7,6 +7,7 @@ export {
   assertCloudflareBindingsPreserved,
   type CloudflareWorkerMigrationTagOptions,
   type ExistingCloudflareWorker,
+  type ApprovedCloudflareKvBinding,
 } from './existing.ts';
 export {
   parseRootWranglerConfig,
