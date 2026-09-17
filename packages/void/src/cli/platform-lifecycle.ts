@@ -294,7 +294,9 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       // Clack stops its animation on cancellation. Forward that cancellation
       // to the CLI's existing signal coordinator (or normal process termination).
       onCancel: () => {
-        process.kill(process.pid, 'SIGINT');
+        if (!process.emit('SIGINT')) {
+          process.exit(130);
+        }
       },
     });
     active.start(message);

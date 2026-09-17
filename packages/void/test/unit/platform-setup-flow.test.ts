@@ -217,9 +217,15 @@ describe('platform credential onboarding', () => {
     expect(mocks.progress.stop).toHaveBeenCalledWith('Platform installed.');
     expect(mocks.progress.error).not.toHaveBeenCalled();
     // Spinner cancellation must not swallow the CLI's cancellation signal.
-    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    const emit = vi.spyOn(process, 'emit').mockReturnValueOnce(true);
     mocks.spinner.mock.calls[0]![0].onCancel();
-    expect(kill).toHaveBeenCalledWith(process.pid, 'SIGINT');
+    expect(emit).toHaveBeenCalledWith('SIGINT');
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('test exit');
+    });
+    emit.mockReturnValueOnce(false);
+    expect(() => mocks.spinner.mock.calls[0]![0].onCancel()).toThrow('test exit');
+    expect(exit).toHaveBeenCalledWith(130);
   });
 
   it('clears failed progress before printing recovery instructions', async () => {
