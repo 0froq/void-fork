@@ -611,6 +611,9 @@ importers:
         specifier: 'catalog:'
         version: 4.131.0(@cloudflare/workers-types@4.20260702.1)(@types/node@26.5.1)
     devDependencies:
+      '@clack/core':
+        specifier: 1.5.0
+        version: 1.5.0
       '@clack/prompts':
         specifier: 'catalog:'
         version: 1.8.0
