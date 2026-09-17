@@ -260,10 +260,20 @@ describe('platform installer', () => {
           _token,
           _fetcher,
           dispatchOrigin,
+          context,
         ) => {
           expect(dispatchOrigin).toBe(
             `https://${plan.deployment.resources.dispatchWorker}.workers-subdomain.workers.dev`,
           );
+          expect(context).toEqual({
+            accountName: plan.account.name,
+            workers: [
+              plan.deployment.resources.apiWorker,
+              plan.deployment.resources.proxyWorker,
+              plan.deployment.resources.dispatchWorker,
+            ],
+            resumeCommand: undefined,
+          });
         },
       });
       expect(result.manifest.status).toBe('installed');
@@ -1214,14 +1224,21 @@ describe('platform installer', () => {
         'probe-token',
         fetcher,
         'https://void-example-dispatch.account.workers.dev',
+        {
+          accountName: 'Example account',
+          workers: ['legacy-api-123', 'custom-proxy', 'custom-dispatch'],
+          resumeCommand: 'void-dev platform install --resume --name example-a1b2c3d4',
+        },
       ).catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
       const message = String(failure);
       expect(message).toContain(new URL(blockedUrl).origin);
-      expect(message).toContain('Default-Deny policy blocked the request before it reached Void');
+      expect(message).toContain('Cloudflare Access blocked the platform health checks');
       expect(message).toContain('error 1050');
-      expect(message).toContain('resume the installation');
+      expect(message).toContain('account "Example account"');
+      expect(message).toContain('legacy-api-123, custom-proxy, custom-dispatch');
+      expect(message).toContain('void-dev platform install --resume --name example-a1b2c3d4');
       expect(message).not.toContain('untrusted-response-content');
       expect(message).not.toContain('probe-token');
       expect(message).not.toContain('https://test.account.workers.dev');

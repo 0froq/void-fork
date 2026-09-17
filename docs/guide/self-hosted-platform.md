@@ -357,9 +357,18 @@ You can correct the database URL if the initial connection failed. Once Void has
 
 If installation reports **Default-Deny (error 1050)**, Cloudflare blocked the HTTP health check before it reached Void. This is separate from the API token used to deploy the Workers.
 
-Ask your account administrator to permit access to this installation's service hostnames. For a testing platform intended to be publicly reachable, use a narrowly scoped Access exception for those hostnames, not an account-wide change. The installer checks the API, proxy, and dispatch endpoints; its runtime probe credential does not authenticate to Cloudflare Access. A browser login does not authenticate the CLI's requests either. Deployed app hostnames will also need appropriate access rules.
+For a test platform intended to be publicly reachable:
+
+1. Select the account named in the error and open **Zero Trust → Access controls → Applications → Create new application**.
+2. Choose **Self-hosted**. When adding destinations, choose **Worker** and select the API, proxy, and dispatch Workers listed in the error.
+3. Add a policy with **Action → Bypass** and **Include → Everyone**.
+4. Save the policy and application, then run the resume command shown by Void.
+
+This removes Cloudflare Access protection for those Workers, not just their health-check URLs. Void's own authentication remains enabled. Keep account-wide Default-Deny on. Deployed apps will also need appropriate access rules.
 
 Once access is configured, rerun `void platform install --resume --name <id>`. You do not need to delete the installation or recreate its resources.
+
+If your platform must remain Access-protected, **do not add a Bypass policy**. The installer does not yet support Access authentication for self-hosted platform health checks; a browser login or Cloudflare API token does not authenticate those requests. Keep the protection in place until that integration is supported.
 
 ### Repair missing resources
 

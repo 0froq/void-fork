@@ -3,6 +3,12 @@ import pc from 'picocolors';
 
 export { pc };
 
+/** Keep recovery commands on the same CLI when using the local checkout launcher. */
+export function cliCommandName(): 'void' | 'void-dev' {
+  const entryName = process.argv[1]?.split(/[\\/]/).at(-1);
+  return entryName === 'void-dev' || entryName === 'void-dev.cmd' ? 'void-dev' : 'void';
+}
+
 /**
  * CI-safe spinner wrapper. In CI environments (GitHub Actions, etc.),
  * `@clack/prompts` spinner emits DEC Private Mode cursor hide/show codes

@@ -258,17 +258,8 @@ export type PlatformInstallerDependencies = Readonly<{
     manifest: PlatformInstallationManifest,
     databaseCheckpointExists: boolean,
   ) => Promise<void>;
-  verifyHealth?: (
-    apiUrl: string,
-    installationId: string,
-    proxyUrl: string,
-    applicationBaseDomain: string,
-    platformVersion: string,
-    usageProtocolVersion: 0 | 1,
-    healthProbeToken: string,
-    fetcher?: typeof fetch,
-    dispatchOrigin?: string,
-  ) => Promise<void>;
+  healthCheckResumeCommand?: string;
+  verifyHealth?: typeof verifyPlatformHealth;
   verifySandboxDrain?: (apiUrl: string, healthProbeToken: string) => Promise<boolean>;
   verifyWorkerCutover?: (
     manifest: PlatformInstallationManifest,
@@ -1489,6 +1480,15 @@ export async function installPlatform(
     manifest = transitionInstallation(manifest, 'verifying', now());
     writeInstallationManifest(manifest);
     dependencies.onProgress?.('Verifying platform health');
+    const healthCheckContext: PlatformHealthCheckContext = {
+      accountName: plan.account.name,
+      workers: [
+        plan.deployment.resources.apiWorker,
+        plan.deployment.resources.proxyWorker,
+        plan.deployment.resources.dispatchWorker,
+      ],
+      resumeCommand: dependencies.healthCheckResumeCommand,
+    };
     await (dependencies.verifyHealth ?? verifyPlatformHealth)(
       plan.apiUrl,
       manifest.id,
@@ -1501,6 +1501,7 @@ export async function installPlatform(
       !plan.deployment.application.zoneName
         ? `https://${plan.deployment.resources.dispatchWorker}.${plan.workersSubdomain}.workers.dev`
         : undefined,
+      healthCheckContext,
     );
     if (requiresSandboxDrain) {
       const drainComplete = await (dependencies.verifySandboxDrain ?? verifyPlatformSandboxDrain)(
@@ -1742,6 +1743,7 @@ export async function installPlatform(
         !plan.deployment.application.zoneName
           ? `https://${plan.deployment.resources.dispatchWorker}.${plan.workersSubdomain}.workers.dev`
           : undefined,
+        healthCheckContext,
       );
       await verifyCurrentWorkerCutover();
     }
@@ -4777,10 +4779,45 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export type PlatformHealthCheckContext = Readonly<{
+  accountName: string;
+  workers: ReadonlyArray<string>;
+  resumeCommand?: string;
+}>;
+
+export class PlatformAccessBlockedError extends Error {
+  constructor(url: string, context?: PlatformHealthCheckContext) {
+    super(
+      [
+        'platform: Cloudflare Access blocked the platform health checks (Default-Deny, error 1050).',
+        `Blocked URL: ${url}`,
+        '',
+        'To make this test platform publicly reachable:',
+        '',
+        `1. In ${context ? `account ${JSON.stringify(context.accountName)}` : 'your Cloudflare account'}, open:`,
+        '   Zero Trust → Access controls → Applications → Create new application.',
+        '2. Choose Self-hosted. When adding destinations, choose Worker and select:',
+        `   ${context ? context.workers.join(', ') + '.' : "This installation's API, proxy, and dispatch Workers."}`,
+        '3. Add a policy: Action → Bypass; Include → Everyone.',
+        context?.resumeCommand
+          ? `4. Save the policy and application, then resume:\n\n   ${context.resumeCommand}`
+          : '4. Save the policy and application, then rerun your platform command.',
+        '',
+        'This removes Cloudflare Access protection for these Workers.',
+        'Void’s own authentication stays enabled. Keep account-wide Default-Deny on.',
+        '',
+        'For platforms that must remain Access-protected:',
+        'https://void.cloud/guide/self-hosted-platform#cloudflare-access',
+      ].join('\n'),
+    );
+  }
+}
+
 async function platformProbeFailure(
   label: string,
   url: string,
   response: Response,
+  context?: PlatformHealthCheckContext,
 ): Promise<Error> {
   const message = `platform: ${label} failed at ${url} (HTTP ${response.status}).`;
   if (
@@ -4790,9 +4827,7 @@ async function platformProbeFailure(
   ) {
     const body = await response.text().catch(() => '');
     if (body.includes('Default-Deny') && /errorCode:\s*1050\b/.test(body)) {
-      return new Error(
-        `${message} Cloudflare Access's account Default-Deny policy blocked the request before it reached Void (error 1050). Ask your account administrator to allow CLI access to this installation's service hostnames, then resume the installation. Signing in to Cloudflare in your browser does not authenticate these CLI health checks. See https://void.cloud/guide/self-hosted-platform#cloudflare-access.`,
-      );
+      return new PlatformAccessBlockedError(url, context);
     }
   }
   return new Error(message);
@@ -4808,6 +4843,7 @@ export async function verifyPlatformHealth(
   healthProbeToken: string,
   fetcher: typeof fetch = fetch,
   dispatchOrigin?: string,
+  context?: PlatformHealthCheckContext,
 ): Promise<void> {
   const request = (url: string) =>
     fetcher(url, {
@@ -4827,10 +4863,10 @@ export async function verifyPlatformHealth(
     request(`${dispatchUrl}/health`),
   ]);
   if (!health.ok) {
-    throw await platformProbeFailure('Health check', apiUrl, health);
+    throw await platformProbeFailure('Health check', apiUrl, health, context);
   }
   if (!discovery.ok) {
-    throw await platformProbeFailure('Discovery check', apiUrl, discovery);
+    throw await platformProbeFailure('Discovery check', apiUrl, discovery, context);
   }
   const body = (await discovery.json()) as {
     installationId?: unknown;
@@ -4849,10 +4885,10 @@ export async function verifyPlatformHealth(
     );
   }
   if (!proxy.ok) {
-    throw await platformProbeFailure('Proxy health check', proxyUrl, proxy);
+    throw await platformProbeFailure('Proxy health check', proxyUrl, proxy, context);
   }
   if (!dispatch.ok) {
-    throw await platformProbeFailure('Dispatch health check', dispatchUrl, dispatch);
+    throw await platformProbeFailure('Dispatch health check', dispatchUrl, dispatch, context);
   }
 }
 

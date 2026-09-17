@@ -9,6 +9,7 @@ import {
   PlatformCloudflareApiError,
   PlatformCloudflareClient,
 } from '../../src/cli/platform-cloudflare.ts';
+import { PlatformAccessBlockedError } from '../../src/cli/platform-installer.ts';
 import { runPlatformLifecycleCommand } from '../../src/cli/platform-lifecycle.ts';
 import {
   listInstallationManifests,
@@ -396,6 +397,40 @@ describe('platform credential onboarding', () => {
       info.mock.invocationCallOrder[recoveryIndex]!,
     );
   });
+
+  it.each(['void', 'void-dev'])(
+    'includes a %s resume command without a duplicate recovery hint',
+    async (command) => {
+      const originalArgv = process.argv;
+      const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+      process.argv = [process.execPath, `/usr/local/bin/${command}`, ...args];
+      try {
+        mocks.install.mockImplementationOnce(async (plan, _secrets, manifest, dependencies) => {
+          expect(dependencies.healthCheckResumeCommand).toBe(
+            `${command} platform install --resume --name ${manifest.id}`,
+          );
+          throw new PlatformAccessBlockedError(plan.apiUrl, {
+            accountName: plan.account.name,
+            workers: [
+              plan.deployment.resources.apiWorker,
+              plan.deployment.resources.proxyWorker,
+              plan.deployment.resources.dispatchWorker,
+            ],
+            resumeCommand: dependencies.healthCheckResumeCommand,
+          });
+        });
+        await expect(runPlatformLifecycleCommand(parsePlatformArgs(args))).rejects.toThrow(
+          `${command} platform install --resume --name test-setup-123456abcdef`,
+        );
+        expect(mocks.progress.error).toHaveBeenCalledWith('Platform installation failed.');
+        expect(info.mock.calls.some(([message]) => message.startsWith('Continue with:'))).toBe(
+          false,
+        );
+      } finally {
+        process.argv = originalArgv;
+      }
+    },
+  );
 
   it.each(['waitingForDns', 'waitingForSandboxDrain'] as const)(
     'stops progress when installation pauses for %s',

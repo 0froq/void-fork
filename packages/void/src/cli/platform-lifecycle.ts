@@ -4,7 +4,7 @@ import {
   normalizeInstallationSlug,
   type PlatformInstallationManifest,
 } from '@void/platform';
-import { cliTitle, createSpinner, pc } from './output.ts';
+import { cliCommandName, cliTitle, createSpinner, pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
@@ -22,6 +22,7 @@ import {
   createPlatformInstallationSecrets,
   installPlatform,
   loadPlatformRuntime,
+  PlatformAccessBlockedError,
   readPlatformDatabaseLifecycleManifest,
   resolveBootstrapGitHubId,
 } from './platform-installer.ts';
@@ -687,6 +688,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       acquireDatabaseLifecycleLock: acquirePlatformDatabaseLifecycleLock,
       client,
       runtime,
+      healthCheckResumeCommand: `${cliCommandName()} platform install --resume --name ${existing.id}`,
       onProgress: (message) => progress?.message(message),
       replanWorkers: async (manifest) =>
         (
@@ -748,8 +750,10 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   } catch (error) {
     progress?.error('Platform installation failed.');
     progress = undefined;
-    if (existing && !args.plan) {
-      log.info('Continue with: void platform install --resume --name ' + existing.id);
+    if (existing && !args.plan && !(error instanceof PlatformAccessBlockedError)) {
+      log.info(
+        `Continue with: ${cliCommandName()} platform install --resume --name ${existing.id}`,
+      );
     }
     throw error;
   } finally {
