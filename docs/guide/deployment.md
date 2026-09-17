@@ -14,19 +14,19 @@ Direct Cloudflare deployment runs an application in your account. A self-hosted
 Void platform provides that deployment service to a team using the operator's
 account. Both use the same application APIs, with the following differences:
 
-| Feature                                          | Direct Cloudflare                | Core self-hosted platform                            |
-| ------------------------------------------------ | -------------------------------- | ---------------------------------------------------- |
-| Static sites, SPAs, and native Pages SSR         | Supported                        | Supported                                            |
-| Routing rules, WebSockets, queues, cron, and ISR | Supported                        | Supported                                            |
-| D1, KV, R2, and external SQL through Hyperdrive  | Supported                        | Supported                                            |
-| Workers AI and provider requests                 | Your account and gateway         | Installation gateway and proxy                       |
-| Runtime logs                                     | Live Cloudflare tail             | Retained platform logs                               |
-| Application rollback                             | Worker versions                  | Retained platform deployments                        |
-| Typed Durable State                              | Supported                        | Unavailable                                          |
-| Sandboxes                                        | Requires Workers Paid and Docker | Unavailable in beta                                  |
-| Custom application domains                       | Supported                        | Unavailable in the core installation                 |
-| Generated GitHub deployment workflow             | Supported                        | Use your CI with a scoped developer token            |
-| User dashboard and managed GitHub builds         | Not required                     | Optional source services, outside the core installer |
+| Feature                                          | Direct Cloudflare                | Core self-hosted platform                 |
+| ------------------------------------------------ | -------------------------------- | ----------------------------------------- |
+| Static sites, SPAs, and native Pages SSR         | Supported                        | Supported                                 |
+| Routing rules, WebSockets, queues, cron, and ISR | Supported                        | Supported                                 |
+| D1, KV, R2, and external SQL through Hyperdrive  | Supported                        | Supported                                 |
+| Workers AI and provider requests                 | Your account and gateway         | Installation gateway and proxy            |
+| Runtime logs                                     | Live Cloudflare tail             | Retained platform logs                    |
+| Application rollback                             | Worker versions                  | Retained platform deployments             |
+| Typed Durable State                              | Supported                        | Unavailable                               |
+| Sandboxes                                        | Requires Workers Paid and Docker | Unavailable in beta                       |
+| Custom application domains                       | Supported                        | Unavailable in the core installation      |
+| Generated GitHub deployment workflow             | Supported                        | Use your CI with a scoped developer token |
+| User dashboard and managed GitHub builds         | Not required                     | Not included in a standard installation   |
 
 Ordinary native applications remain compatible with Workers Free within its
 quotas. Installing a team platform requires Workers for Platforms and the
@@ -37,11 +37,7 @@ Routing-rule parity applies to native Void applications and static deployments.
 Framework-owned Worker output uses its framework's routing and asset policy;
 unsupported Void routing rules are rejected before direct deployment.
 
-For beta installations, use matching CLI, adapter, and platform release versions.
-Discovery and deployment contracts reject unsupported protocol versions and
-disabled capabilities; matching version numbers do not enable an omitted service.
-Upgrade an installation through `void platform`, and test your source-built
-runtime against the same release checks before sharing it with a team.
+Use matching CLI and framework adapter versions. For a team platform, the available features depend on its installed version and configuration. Ask your administrator if a feature is unavailable or an upgrade is required.
 
 ## CLI
 
@@ -62,7 +58,7 @@ Your choice is saved in `.void/project.json`, so the next deploy is just `void d
 
 Already have a Cloudflare Worker and a root `wrangler.jsonc` or `wrangler.json`? Run `void deploy`. If no destination is selected, Void offers to link and deploy using the existing Worker and resources. Accept once to keep deploying to that site. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker) for the first-deployment checks.
 
-To connect to your team's platform and sign in, run `void connect <url>` using the URL from your administrator. Use `void connect --platform cloudflare` to set up your own Cloudflare account. Connecting preserves existing project links. New Void projects need a platform connection. Older projects already linked to Void Cloud continue to use it.
+To connect to your team's platform and sign in, run `void connect <url>` using the URL from your administrator. Use `void connect --platform cloudflare` to set up your own Cloudflare account. Connecting preserves existing project links. New Void projects need a platform connection.
 
 ### Migrations
 

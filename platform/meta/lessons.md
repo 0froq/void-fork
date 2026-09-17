@@ -13,6 +13,10 @@
 - Introduce one idea, show a small example, then explain its behavior, following
   [Fate's guides](https://fate.technology/guide/requests). Put implementation
   details in maintainer docs and keep command references easy to scan.
+- User installation guides describe the published CLI. Keep `void-dev`, checkout
+  builds, and source-release workflows in contributor guidance; keep Void Cloud
+  maintenance in repository runbooks. Do not turn a one-off development failure
+  into a prerequisite for every user.
 - Run commands from the repository root. Use `vp run build:all` for the full
   SDK/platform/playground build and [TESTING.md](../../TESTING.md) for verification.
 - `vp run <script> -- <args>` forwards the literal `--`. For Wrangler that

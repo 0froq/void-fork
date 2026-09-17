@@ -6,7 +6,7 @@ outline: deep
 
 `void platform` lets you manage the people and apps on a Void platform from your terminal. You can give teammates access, inspect their projects, follow deployment logs, and check the platform's health.
 
-These commands require an administrator account. If you're setting up a platform for the first time, start with [Self-host a Void Platform](./self-hosted-platform.md).
+These commands require an administrator account. If you're setting up a platform for the first time, start with [Install a Void Platform](./self-hosted-platform.md).
 
 ## Signing In
 
@@ -175,7 +175,7 @@ void platform system health
 
 Health checks use the services configured for the selected platform. An unhealthy result exits with a nonzero status, so the same command can be used in a script.
 
-Self-hosted installations use `void platform upgrade`, `repair`, `disable`, and `enable` to manage their Workers. See [platform maintenance](./self-hosted-platform.md#resume-repair-recover-and-upgrade). Void Cloud operators can also inspect Worker versions and roll them back with the [`worker` commands](../reference/cli.md#operator-workers).
+Use `void platform upgrade`, `repair`, `disable`, and `enable` to maintain your platform. See [platform maintenance](./self-hosted-platform.md#resume-repair-recover-and-upgrade).
 
 For disaster recovery, keep a matching PostgreSQL backup, provider data backups, installation identity and complete project-encryption keyring, and immutable runtime artifacts. Keep traffic disabled while restoring data, run `discover` to reconstruct verified local metadata, and review `repair --plan` before recreating missing installer-owned infrastructure. Neither command restores backed-up data. See [Prepare for disaster recovery](./self-hosted-platform.md#prepare-for-disaster-recovery) for the full sequence.
 

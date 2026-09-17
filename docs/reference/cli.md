@@ -487,34 +487,11 @@ void platform system sandbox-drain [--cursor <opaque-cursor>]
 
 `events` shows the administrator, target, and outcome of changes. A pending event means the outcome has not been recorded. Previews and session login/logout do not create these events. `backfill-queue-tokens` repairs older queue entries that are missing authentication tokens and supports `--plan` before applying the repair.
 
-`sandbox-drain` is the resumable shutdown protocol for the paused managed
-Sandbox beta. Use `--plan` to inspect one bounded page of active deployments,
-deployment manifests, container resources, and verified container applications.
-Pass its `nextCursor` back with `--cursor` to preview later pages. Apply the
-command, wait for any canceled deployments to settle, and rerun until its
-database-backed checkpoint reports `complete: true`. The platform lifecycle
-remains closed while pages, blockers, or unverified applications remain. Normal
-operator login, session elevation, CLI token minting, and logout remain
-available with their existing authentication checks; application and deployment
-routes remain closed.
+Use `sandbox-drain` when an upgrade asks you to finish Sandbox cleanup. Preview with `--plan`; pass the returned `nextCursor` as `--cursor` to inspect later pages. Apply with `--yes` and rerun until it reports `complete: true`, then rerun the interrupted upgrade. Application traffic stays paused during cleanup, while administrator login remains available.
 
-#### Hosted Workers {#operator-workers}
+<span id="operator-workers"></span>
 
-Void Cloud operators can inspect the platform's five Workers and their versions:
-
-```sh
-void platform worker list
-void platform worker show <proxy|tail|api|dashboard|dispatch>
-void platform worker rollback <name> <version-id>
-void platform worker rollback-all
-void platform worker events [batch-id]
-```
-
-Each command accepts `--environment production|staging`. By default, it uses the platform's environment; `events <batch-id>` uses the batch's environment. Worker event lists accept `--page` and `--limit` when no batch ID is given. `worker list` always returns the fixed Worker inventory.
-
-Choose a version from `worker show` for a single rollback. `rollback-all` selects the previous version of each Worker, shows those versions in its preview, and rolls them back in dependency order. A failure stops the remaining changes and reports which Workers succeeded, failed, or were skipped. Use `worker events <batch-id>` to inspect the result.
-
-These commands are for Void Cloud's Workers. Self-hosted installations use the [platform lifecycle commands](../guide/self-hosted-platform.md#resume-repair-recover-and-upgrade).
+Use the [platform lifecycle commands](#lifecycle-commands) to maintain your installation's Workers.
 
 #### Pagination and JSON
 
@@ -603,21 +580,21 @@ After discovery on another machine, set `VOID_PLATFORM_DATABASE_URL`. Normal upg
 
 Repair and upgrade preserve disabled state. New, resumed, and previously disabled installations block user traffic until all target Workers pass verification; the installer's health probes can still run. Routes and custom domains remain attached.
 
-Commands preserve manually attached routes and domains in deployment and rollback snapshots. They also verify that Hyperdrive still points at the recorded database before migrations or uploads. A PostgreSQL advisory lock prevents concurrent administration, and the database's installation record prevents stale local state from undoing newer changes.
+Commands preserve existing routes and domains, verify the configured database, and coordinate concurrent administrators before making changes.
 
-`--runtime` selects a directory containing `manifest.json`, the four Worker bundles, and their Drizzle migrations. Relative paths resolve from the current directory. Void checks file sizes and SHA-256 digests before planning or changing Cloudflare.
+`--runtime` selects a custom platform build. Relative paths resolve from your current directory. Void verifies the build before making changes; see [Platform Development](../guide/platform-development.md#deploying-your-runtime) for creating one.
 
-Without `--runtime`, the CLI uses the runtime bundled in `@void/platform`. The installation record stores the runtime source, manifest digest, and optional source revision.
+Without `--runtime`, the CLI uses its packaged platform version.
 
-Platform migrations only move forward. Their recorded hashes and order must match the release's migration history. Pending SQL runs in one transaction, and only when the release declares rollback compatibility with the exact previous platform version and schema digest. Without that declaration, Void stops and asks you to upgrade through an intermediate release.
+Platform migrations only move forward. Void checks compatibility before updating the database and tells you if an intermediate release is needed.
 
-The previous platform version remains authoritative until the target runtime passes discovery and health checks. A failed rollout restores the old Workers against the compatible updated schema; retrying doesn't reapply completed migrations.
+An upgrade completes after the new Workers pass health checks. If rollout fails, Void attempts to restore the previous Workers. Retrying does not repeat completed migrations.
 
-`platform rollback` is an explicit post-success rollback. `--runtime` must point to the earlier runtime to restore. The current packaged runtime supplies the compatibility declaration by default; use `--from-runtime` when the installed runtime was built elsewhere. Void requires that current artifact's manifest digest to match the installed checkpoint, checks that the earlier migration journal is its exact prefix, verifies the database is still at the current forward schema, and deploys the earlier Workers without deleting or reversing migrations. A later `upgrade` rolls forward from the recovered checkpoint. A rollback target is rejected before upload if it lacks any safety protocol already required by the installation or its database, including completed Sandbox drain.
+`platform rollback` restores a compatible earlier runtime without reversing database migrations. Pass its files with `--runtime`. If the installed version is a custom build, also supply that version with `--from-runtime`. Void refuses rollbacks that are incompatible with the current database. A later `upgrade` can move forward again.
 
 Uninstall verifies remote ownership before removing anything. Data resources are retained unless you pass `--purge-data`. Workers, R2, AI Gateway, DNS records, routes, custom domains, adopted resources, external PostgreSQL, and zones are always retained for manual review.
 
-Cloudflare can't condition deletion of these resources on the exact generation Void inspected, so automatic deletion could affect a replacement. Traffic stays blocked through routing storage. PostgreSQL is never deleted or queried for project data during uninstall; its installation record is used to coordinate the command. The older `--delete-zone` flag is rejected.
+Resources that may have been shared or repurposed are retained for manual review. Platform traffic stays blocked. External PostgreSQL and its data are never deleted.
 
 See [Disable and safely uninstall](../guide/self-hosted-platform.md#disable-and-safely-uninstall) for the full removal policy.
 

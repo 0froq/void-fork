@@ -26,7 +26,7 @@ vp test run
 
 Void Cloud deploys the API after PostgreSQL migrations, then the proxy, tail, dispatch, and dashboard Workers. The API hosts the build scheduler and build-container Durable Objects. The optional dashboard uses the API for authentication and is deployed after the API it depends on.
 
-The `deploy` and `deploy:staging` scripts in `platform/package.json` target these existing hosted environments. Forks should use `void platform upgrade --runtime` as described in [source deployment](../../docs/guide/self-hosted-platform.md#continuously-deploy-a-source-build).
+The `deploy` and `deploy:staging` scripts in `platform/package.json` target these existing hosted environments. Forks should use `void platform upgrade --runtime` as described in [source deployment](../../docs/guide/platform-development.md#source-build-ci).
 
 ### GitHub Actions
 
@@ -45,6 +45,24 @@ Consult the workflow files for their current inputs. Store credentials in the
 selected GitHub environment and the deployment owner's secret manager. Keep
 secret-manager locations, account access assignments and credential-issuance
 procedures in that owner's private runbook.
+
+## Hosted Worker Maintenance
+
+Void Cloud operators can inspect the platform's five Workers and their versions:
+
+```sh
+void platform worker list
+void platform worker show <proxy|tail|api|dashboard|dispatch>
+void platform worker rollback <name> <version-id>
+void platform worker rollback-all
+void platform worker events [batch-id]
+```
+
+Each command accepts `--environment production|staging`. By default, it uses the platform's environment; `events <batch-id>` uses the batch's environment. Worker event lists accept `--page` and `--limit` when no batch ID is given. `worker list` always returns the fixed Worker inventory.
+
+Choose a version from `worker show` for a single rollback. `rollback-all` selects the previous version of each Worker, shows those versions in its preview, and rolls them back in dependency order. A failure stops the remaining changes and reports which Workers succeeded, failed, or were skipped. Use `worker events <batch-id>` to inspect the result.
+
+These commands are for Void Cloud's Workers. Self-hosted installations use the [platform lifecycle commands](../../docs/guide/self-hosted-platform.md#resume-repair-recover-and-upgrade).
 
 ## Secrets
 

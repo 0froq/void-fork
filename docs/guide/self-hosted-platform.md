@@ -8,7 +8,7 @@ A Void platform lets your team deploy apps into a shared Cloudflare account. As 
 
 If you're deploying an app for yourself, [deploy directly to Cloudflare](../integrations/cloudflare.md#deploy-to-your-own-cloudflare-account). You don't need to install a platform first.
 
-The core platform supports GitHub login, CLI deploys, D1, KV, R2, Queues, cron jobs, Workers AI, WebSockets, SSE, ISR, routing, logs, and rollback. It uses the same components as Void Cloud.
+The core platform supports GitHub login, CLI deploys, D1, KV, R2, Queues, cron jobs, Workers AI, WebSockets, SSE, ISR, routing, logs, and rollback.
 
 The user dashboard, GitHub builds and webhooks, build Containers, email, Google login, custom project domains, and sandbox orchestration aren't part of the core installation.
 
@@ -16,7 +16,7 @@ The user dashboard, GitHub builds and webhooks, build Containers, email, Google 
 
 Start with a Cloudflare account you can administer, a GitHub account, and an empty hosted PostgreSQL database. A domain is recommended. If yours is not ready, choose **Use workers.dev for testing** during installation and [add a domain later](#add-a-domain-later). The steps below explain how to get the credentials the installer asks for.
 
-Void creates the Workers, storage, queues, routing, and database tables. You do not need to create those resources yourself, install a separate deployment tool, or clone this repository.
+Void creates the Workers, storage, queues, routing, and database tables through the CLI.
 
 This setup has costs: Workers for Platforms requires a paid plan, and your database and Cloudflare usage have their own pricing. External PostgreSQL is required in either mode. Native single-app deployments remain Workers Free-compatible unless the app uses a paid-only product.
 
@@ -24,12 +24,9 @@ This setup has costs: Workers for Platforms requires a paid plan, and your datab
 
 In the [Cloudflare dashboard](https://dash.cloudflare.com/), select the account where you want the platform to live:
 
-1. Open **Workers & Pages**, finish onboarding, and choose the account's `workers.dev` subdomain.
-2. Open **Workers for Platforms** and enable its plan. Review [Workers for Platforms pricing](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/platform/pricing/) before confirming.
-3. Open **R2 Object Storage** and complete its activation. Void creates the bucket later.
-4. For a domain installation, choose a domain you own, such as `example.app`. If you need one, register it with your preferred registrar. Use a spare domain's root: apps will be served at `my-app.example.app`. For workers.dev testing, skip this step and the DNS setup below.
-
-If Workers & Pages already shows a **Subdomain** in the account details, that setup is complete even when the account has no Workers. You do not need to create a placeholder Worker. If Void cannot read an existing subdomain, retry and check the reported API status or account permissions.
+1. Open **Workers for Platforms** and enable its plan. Review [Workers for Platforms pricing](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/platform/pricing/) before confirming.
+2. Open **R2 Object Storage** and complete its activation. Void creates the bucket later.
+3. For a domain installation, choose a domain you own, such as `example.app`. If you need one, register it with your preferred registrar. Use a spare domain's root: apps will be served at `my-app.example.app`. For workers.dev testing, skip this step and the DNS setup below.
 
 If that domain is already in this Cloudflare account, use its existing zone. Otherwise, [add the domain to Cloudflare](https://developers.cloudflare.com/dns/zone-setups/full-setup/setup/) and follow the nameserver instructions until the zone is active. A zone is Cloudflare's DNS configuration for a domain; creating one does not buy the domain.
 
@@ -75,10 +72,6 @@ void platform install --workers-dev --plan
 ```
 
 `--workers-dev` cannot be combined with `--application-domain`, `--zone`, or `--dedicated-zone`.
-
-::: tip Working from this repository?
-Run `vpr install:void-dev` and use `void-dev` wherever this guide says `void`. Add `--runtime packages/platform/dist/runtime` to install, resume, and upgrade commands from the repository root to select your source build. No source-revision environment variable is needed. See [Platform Development](./platform-development.md).
-:::
 
 ## 3. Create the Platform Database
 
@@ -131,7 +124,7 @@ Use the following permissions for the core platform. Cloudflare may label write 
 
 The management token also needs **Zone Edit** with authority to create zones if you ask Void to create the zone. If it already exists, use the selected zone with Zone Read and DNS Edit. Nested application domains additionally need **SSL and Certificates: Read** on the management token. A custom runtime that enables custom project domains needs **SSL and Certificates: Edit** on the runtime token; the core runtime does not enable that feature.
 
-Void checks account and Hyperdrive access before provisioning. For an existing zone it verifies Cache Purge by purging one unique nonexistent URL, without logging the token or URL. This preflight cannot prove every write permission; a later permission error names the operation to check.
+Void checks access before provisioning. If it reports a missing permission, update the token's permissions for the selected account or zone and retry.
 
 :::
 
@@ -238,7 +231,7 @@ void deploy --platform void --project my-first-app
 
 The CLI stores login credentials in your system keychain, separately for each platform URL. With no URL, `void connect` offers Cloudflare or a Void platform; `void connect --platform void` offers saved platforms and an option to enter another URL.
 
-In CI, use `void connect <url> --no-login` to register the platform, and supply `VOID_TOKEN` and `VOID_API_URL` for deployment. To verify authentication during connection, omit `--no-login` and set both variables to credentials for that same platform. Older project files already linked to Void Cloud continue to work.
+In CI, use `void connect <url> --no-login` to register the platform, and supply `VOID_TOKEN` and `VOID_API_URL` for deployment. To verify authentication during connection, omit `--no-login` and set both variables to credentials for that same platform.
 
 Use these commands to inspect connections and installations:
 
@@ -315,7 +308,7 @@ Resources use a `void-<installation-name>-<random-suffix>-*` prefix where Cloudf
 | Resource                                  |                                 Count | Purpose                                                                        |
 | ----------------------------------------- | ------------------------------------: | ------------------------------------------------------------------------------ |
 | Workers                                   | 4, plus one per app using workers.dev | API/control plane, proxy, tail ingestion, dispatch, and test-origin forwarders |
-| KV namespaces                             |                                     3 | Routing, ISR cache, and legacy/static asset compatibility                      |
+| KV namespaces                             |                                     3 | Routing, ISR cache, and static asset storage                                   |
 | R2 buckets                                |                                     1 | Static and deployment assets                                                   |
 | Queues                                    |                                     2 | Usage events and cron firing                                                   |
 | Workers for Platforms dispatch namespaces |                                     1 | User application Workers                                                       |
@@ -364,7 +357,7 @@ An upgrade validates the runtime, applies supported pending migrations, deploys 
 
 ::: details Migration safety, credential rotation, and interrupted upgrades
 
-When a release changes the authenticated usage protocol shared by the platform Workers, the installer briefly puts the platform into maintenance mode before updating the first Worker. It restores traffic only after the API reports the target protocol and every Worker version in the runtime has been verified. If the command is interrupted, traffic stays blocked; rerun the same upgrade to resume. The installer never opens a compatibility window for unsigned usage messages.
+Some upgrades briefly put the platform into maintenance mode. Traffic resumes after the new version passes health checks. If an upgrade is interrupted during maintenance, rerun the same command to complete it.
 
 To update the runtime Cloudflare token, GitHub OAuth credentials, or R2 credentials,
 provide their `VOID_PLATFORM_*` environment variables when running the upgrade.
@@ -373,15 +366,9 @@ workstation does not overwrite them, and upgrades preserve the live signing keys
 and complete project-encryption keyring. Keep current credentials in your secret
 manager so they can also restore a missing Worker during repair.
 
-Database migrations only move forward. Void checks that the live migration history matches the release's files and order. If migrations are pending, the release must explicitly support running the previous Worker version against the updated schema. Otherwise, upgrade stops and asks you to use an intermediate release.
+Database migrations only move forward. Void checks compatibility before upgrading and tells you if an intermediate release is needed. If deployment fails, it attempts to restore the previous Workers against the compatible database schema. Retrying does not repeat completed migrations.
 
-Pending migrations run in one PostgreSQL transaction. If the Worker rollout fails, Void restores the previous Workers against that compatible schema. A retry recognizes migrations that already succeeded.
-
-The first upgrade to the Sandbox drain safety protocol is a two-stage cutover when the database contains deployments or container resources. Before accepting an empty inventory, Void transactionally closes legacy deployment admission. Requests already inserting a deployment finish and become visible to the drain; older Workers that try afterward are rejected by the database. Void then deploys and verifies the compatible candidate runtime in `sandbox-drain` maintenance mode, leaves application traffic closed, and trusts only its authenticated, database-backed status. An empty fresh installation records a completed checkpoint without making Container API calls. A disabled legacy installation records the protocol floor and pending drain before its upgrade completes, so later enablement still enters maintenance.
-
-The standard operator login, session elevation, CLI token minting, and logout flows remain available through an exact method-and-path allowlist and keep their normal authentication checks. Application and deployment routes remain closed throughout the drain.
-
-Preview bounded drain pages with `void platform system sandbox-drain --plan`, pass each returned `nextCursor` with `--cursor '<value>'`, then apply with `void platform system sandbox-drain --yes` and rerun until it reports `complete: true`. Rerun the interrupted lifecycle command afterward; Void verifies the completion checkpoint before enabling traffic. Never delete an unverified container application by name.
+If an upgrade asks you to finish Sandbox cleanup, follow the [`sandbox-drain` instructions](../reference/cli.md#operator-system), then rerun the upgrade. Administrator login remains available during that maintenance step.
 
 After a successful upgrade, you can restore a declared-compatible earlier runtime without reversing migrations:
 
@@ -390,7 +377,7 @@ void platform rollback [id] --runtime /path/to/earlier/runtime --plan
 void platform rollback [id] --runtime /path/to/earlier/runtime
 ```
 
-The installed packaged runtime provides the compatibility declaration. If the current installation used a custom build, also pass its exact artifact directory with `--from-runtime /path/to/current/runtime`. Void compares the current manifest digest with the installed checkpoint, requires the earlier migration journal to be an exact prefix, and verifies PostgreSQL remains at the current forward-only schema. Discovery on another machine preserves the running-runtime and database-schema provenance independently, so a normal `upgrade` can roll forward later. A target missing a safety protocol already required by the database, such as completed Sandbox drain, is rejected before any Worker upload.
+Keep the earlier runtime files if you need rollback. If the installed version is a custom build, also pass its files with `--from-runtime /path/to/current/runtime`. Void checks that the earlier version can run against your current database and refuses incompatible rollbacks. A later `upgrade` can move forward again. See [Platform Development](./platform-development.md#deploying-your-runtime) for working with custom builds.
 
 :::
 
@@ -402,11 +389,11 @@ Use `discover` to restore the administrator's local installation records:
 void platform discover --account <account-id> --installation <id-or-name>
 ```
 
-Discovery checks the recorded resources and their ownership before saving local state. For a healthy enabled installation, it also checks the live platform's identity. If an installer-owned resource is missing, discovery restores the verified installation record without requiring its endpoint to respond; run `void platform repair [id]` next to recreate the resource. Discovery refuses a same-name replacement or any surviving resource whose ownership marker belongs to another installation. Interrupted or disabled installations can also be recovered when their endpoints are unavailable.
+Discovery restores local installation records after verifying the resources belong to your platform. It also works for interrupted or disabled installations. If infrastructure is missing, run `void platform repair [id]` after discovery. If ownership cannot be verified, the command stops without changing resources.
 
 After discovery, provide `VOID_PLATFORM_DATABASE_URL` for migrations and to coordinate administrator commands. You don't need to re-enter the other secrets for a normal upgrade. If repair must recreate a missing API or proxy Worker, supply its original runtime token, GitHub, R2, JWT, and project-encryption secrets through the `VOID_PLATFORM_*` variables. Cloudflare can't return those values, so keep them in your organization's secret manager.
 
-For an installation whose project-secret keyring is still the original `v1` key, `VOID_PLATFORM_PROJECT_SECRET_KEY` remains the simple restore input. After rotating that keyring, instead supply both `VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON` and `VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION`. The JSON object must include every key version still needed to decrypt stored project secrets, and the active version must name one of those entries. Repair validates this pair and keeps its local copy only in the encrypted recovery checkpoint. It uses the pair when recreating a missing API Worker; it does not replace the live keyring during a normal upgrade or when the API Worker already exists. Inject these values directly from a secret manager without printing them or writing a plaintext secrets file.
+If you have not rotated the project-encryption key, restore it with `VOID_PLATFORM_PROJECT_SECRET_KEY`. After rotation, supply `VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON` with all retained keys and `VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION` with the active key's name. Keep older keys needed to decrypt existing project secrets. These values are used to recreate a missing API Worker; they do not replace the live keys during an ordinary upgrade. Supply them from your secret manager.
 
 ### Prepare for disaster recovery
 
@@ -425,24 +412,17 @@ During a restore, keep platform and application traffic disabled before changing
 
 ### Where local state lives
 
-Installation records live in `~/.void/platforms/` and contain no credentials. Recovery secrets are encrypted with AES-256-GCM in `.recovery.enc` files. The encryption key lives in your operating system's keychain; on systems with POSIX permissions, recovery files are readable only by their owner. Older plaintext `.recovery` files are encrypted and removed on first read.
+Installation records live in `~/.void/platforms/`. Credentials are stored separately in encrypted recovery files, with the encryption key in your operating system's keychain. Keep your original secrets in a password manager for recovery on another machine.
 
 If the keychain isn't available, Void stops before writing secrets. Headless environments can supply `VOID_PLATFORM_RECOVERY_KEY`: a canonical base64-encoded 32-byte key from a secret manager. A temporary CI runner can use a new recovery-encryption key for each run only when every original credential remains available in protected CI secrets, including `VOID_PLATFORM_JWT_SECRET` and either the original `VOID_PLATFORM_PROJECT_SECRET_KEY` or the complete rotated keyring and active-version pair.
 
-::: details How recovery protects existing resources
+::: details Ownership and interrupted maintenance
 
-Platform commands hold a PostgreSQL advisory lock so two administrators can't change the same installation at once. The database also stores the authoritative installation record; stale local or KV records cannot overwrite newer changes.
+Void checks resource ownership and the configured database before making changes. Concurrent maintenance commands are coordinated so one administrator cannot overwrite another's work.
 
-Before migrations or uploads, Void checks that Hyperdrive still points at the recorded database, including its scheme, host, port, database name, and user when Cloudflare provides it. The recorded fingerprint excludes the password. A changed origin stops the operation.
-
-New, resumed, and previously disabled installations block user traffic before Worker uploads begin. Upgrades also block traffic when the runtime changes its authenticated usage protocol. Only the installer's health probes can pass until the complete runtime is verified. An interrupted or ambiguous guarded upload leaves setup resumable with traffic blocked.
-
-Void preserves manually attached routes and custom domains in both the new configuration and rollback state. R2 recovery checks the bucket's recorded creation identity before completing an interrupted ownership marker write. It won't overwrite a replacement bucket or another installation's marker.
+If maintenance is interrupted, rerun the same command. Traffic may stay paused until verification succeeds. Existing routes, domains, and data are preserved.
 
 :::
-
-For local API and dashboard development, fork CI, and the source layout, see
-[Platform Development](./platform-development.md).
 
 ## Install from CI {#install-from-ci}
 
@@ -482,34 +462,9 @@ Mutations require `--yes` in CI; a read-only `--plan` does not. Custom runtimes 
 
 :::
 
-## Continuously deploy a source build
+## Customize the Platform {#continuously-deploy-a-source-build}
 
-Build `@void/platform` from your checkout and pass its runtime directory to `install`, `upgrade`, `repair`, `enable`, or `rollback` with `--runtime`. Custom runtimes get the same integrity, migration, health, and rollback checks as packaged releases.
-
-Void records the runtime's manifest digest, whether it was packaged or custom, and its source revision. A build from a Git checkout automatically records `HEAD`, or `<HEAD>-dirty` when the checkout has uncommitted files. Build systems can set `VOID_PLATFORM_SOURCE_REVISION` to override automatic detection.
-
-A fresh CI runner can discover the installation each time. Set `CLOUDFLARE_API_TOKEN` and `VOID_PLATFORM_DATABASE_URL` through its protected environment, then:
-
-::: details CI commands and recovery inputs
-
-```sh
-vp run build
-
-export VOID_PLATFORM_REGISTRY_DIR="$RUNNER_TEMP/void-platform-registry"
-export VOID_PLATFORM_RECOVERY_KEY="$(openssl rand -base64 32)"
-void platform discover --account "$CLOUDFLARE_ACCOUNT_ID" \
-  --installation "$VOID_PLATFORM_INSTALLATION"
-void platform upgrade "$VOID_PLATFORM_INSTALLATION" \
-  --runtime packages/platform/dist/runtime --plan
-void platform upgrade "$VOID_PLATFORM_INSTALLATION" \
-  --runtime packages/platform/dist/runtime --yes
-```
-
-Omit the installation selector only if the account has one discoverable installation. Run one deployment per installation at a time, and let it finish before starting the next. Cancelling during migrations or Worker rollout can leave an installation waiting for recovery.
-
-Keep the management token, database URL, JWT signing secret, and complete project-encryption keyring in a protected CI environment. Upgrades inherit deployed Worker secrets. The original values are needed when recreating a missing Worker; configuration credentials are also needed when explicitly rotating them.
-
-:::
+To change the platform's implementation or deploy your own build, follow [Platform Development](./platform-development.md). It covers local development, source builds, and CI for a fork.
 
 ## Disable and safely uninstall
 
@@ -520,7 +475,7 @@ void platform disable [id] --plan
 void platform disable [id]
 ```
 
-Disabled platforms reject requests through a flag in their routing storage. Their domains and routes remain attached. Repair and upgrade preserve the disabled state; restore traffic with:
+Disabled platforms reject application traffic while retaining domains and routes. Repair and upgrade preserve that state. Restore traffic with:
 
 ```sh
 void platform enable [id] --plan
@@ -548,14 +503,14 @@ To also remove eligible data resources owned by the installer:
 void platform uninstall [id] --purge-data
 ```
 
-Even with `--purge-data`, Void retains Workers, R2, AI Gateway, DNS records, routes, custom domains, adopted resources, external PostgreSQL, and zones. Review those in the Cloudflare dashboard if you want to remove them. The older `--delete-zone` flag is no longer supported.
+Even with `--purge-data`, Void retains Workers, R2, AI Gateway, DNS records, routes, custom domains, adopted resources, external PostgreSQL, and zones. Review those in the Cloudflare dashboard if you want to remove them.
 
 ::: details Why some resources require manual cleanup
 
-Cloudflare can't make deletion of these resources conditional on the exact resource generation Void inspected. A resource could be replaced or repurposed between that inspection and deletion. Void leaves it in place and blocks platform traffic instead.
+Resources that may have been shared or repurposed require manual review before deletion. Void verifies ownership, keeps those resources in place, and blocks platform traffic.
 
-Before removal, Void verifies remote ownership and compares the installation record with a fresh resource inventory. Changed or missing ownership proof stops the operation. A retry skips work already completed, and the routing namespace is removed last when eligible.
+If removal is interrupted, rerun the command to continue. If a resource has changed ownership, resolve the reported conflict before retrying.
 
-A default uninstall keeps the final `uninstalled` record and disabled flag in the retained routing namespace. PostgreSQL's installation claim and tables also remain; uninstall never deletes the external database.
+External PostgreSQL and its data always remain under your control.
 
 :::

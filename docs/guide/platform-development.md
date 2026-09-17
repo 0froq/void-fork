@@ -144,6 +144,35 @@ void-dev platform upgrade <installation-id> \
 
 Then run it without `--plan` to apply the upgrade. Source-built runtimes go through the same artifact, database, ownership, and health checks as released runtimes. The CLI preserves a disabled installation's state and records the source revision in its installation checkpoint.
 
+## Deploying Source Builds from CI {#source-build-ci}
+
+Build `@void/platform` from your checkout and pass its runtime directory to `install`, `upgrade`, `repair`, `enable`, or `rollback` with `--runtime`. Custom runtimes get the same integrity, migration, health, and rollback checks as packaged releases.
+
+Void records the runtime's manifest digest, whether it was packaged or custom, and its source revision. A build from a Git checkout automatically records `HEAD`, or `<HEAD>-dirty` when the checkout has uncommitted files. Build systems can set `VOID_PLATFORM_SOURCE_REVISION` to override automatic detection.
+
+A fresh CI runner can discover the installation each time. Set `CLOUDFLARE_API_TOKEN` and `VOID_PLATFORM_DATABASE_URL` through its protected environment, then:
+
+::: details CI commands and recovery inputs
+
+```sh
+vp run build:core
+
+export VOID_PLATFORM_REGISTRY_DIR="$RUNNER_TEMP/void-platform-registry"
+export VOID_PLATFORM_RECOVERY_KEY="$(openssl rand -base64 32)"
+node packages/void/dist/cli/cli.mjs platform discover --account "$CLOUDFLARE_ACCOUNT_ID" \
+  --installation "$VOID_PLATFORM_INSTALLATION"
+node packages/void/dist/cli/cli.mjs platform upgrade "$VOID_PLATFORM_INSTALLATION" \
+  --runtime packages/platform/dist/runtime --plan
+node packages/void/dist/cli/cli.mjs platform upgrade "$VOID_PLATFORM_INSTALLATION" \
+  --runtime packages/platform/dist/runtime --yes
+```
+
+Omit the installation selector only if the account has one discoverable installation. Run one deployment per installation at a time, and let it finish before starting the next. Cancelling during migrations or Worker rollout can leave an installation waiting for recovery.
+
+Keep the management token, database URL, JWT signing secret, and complete project-encryption keyring in a protected CI environment. Upgrades inherit deployed Worker secrets. The original values are needed when recreating a missing Worker; configuration credentials are also needed when explicitly rotating them.
+
+:::
+
 ## Changing the Platform Schema
 
 The schema lives in `platform/packages/api/src/schema.ts`. Generate a migration after changing it:
@@ -174,7 +203,7 @@ Advancing the production branch does not change the selected baseline. Fork
 workflows that call platform CI must grant `deployments: read` alongside
 `contents: read`.
 
-The upstream repository also contains workflows for deploying Void Cloud and publishing the official npm packages. Forks should configure their own release workflow around the built CLI and `platform upgrade --runtime`; the [source-build CI example](./self-hosted-platform.md#continuously-deploy-a-source-build) shows the required inputs. Keep production credentials in protected environments restricted to the appropriate release refs.
+The upstream repository also contains workflows for deploying Void Cloud and publishing the official npm packages. Forks should configure their own release workflow around the built CLI and `platform upgrade --runtime`; the [source-build CI example](#source-build-ci) shows the required inputs. Keep production credentials in protected environments restricted to the appropriate release refs.
 
 Public releases use matching versions for the CLI, scaffolder, adapters, and
 packaged platform. The publish workflow rejects mismatched versions and previously
