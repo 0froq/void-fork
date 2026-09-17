@@ -39,25 +39,64 @@ function plan(domain = ''): PlatformInstallPlan {
   };
 }
 describe('platform credential setup links', () => {
-  it('scopes the runtime form to the account and supplies documented permissions with an accurate fallback', () => {
+  it('scopes the runtime form to the account and preselects every required permission with an accurate fallback', () => {
     const pages = platformSetupPages(plan());
     const url = new URL(pages.runtime.url);
     expect(url.origin).toBe('https://dash.cloudflare.com');
     expect(url.searchParams.get('to')).toBe('/account/api-tokens');
     expect(url.searchParams.get('name')).toBe('Test & Team Runtime');
     const permissions = JSON.parse(url.searchParams.get('permissionGroupKeys')!);
-    expect(permissions).toContainEqual({ key: 'workers_scripts', type: 'edit' });
+    expect(permissions).toEqual([
+      { key: 'account_settings', type: 'read' },
+      { key: 'workers_scripts', type: 'edit' },
+      { key: 'workers_kv_storage', type: 'edit' },
+      { key: 'workers_r2', type: 'edit' },
+      { key: 'd1', type: 'edit' },
+      { key: 'queues', type: 'edit' },
+      { key: 'account_analytics', type: 'read' },
+      { key: 'workers_tail', type: 'read' },
+      { key: 'query_cache', type: 'edit' },
+      { key: 'aig', type: 'edit' },
+    ]);
     expect(
       permissions.some((permission: { key: string }) =>
         ['cache', 'ssl_and_certificates', 'account_api_tokens'].includes(permission.key),
       ),
     ).toBe(false);
+    expect(pages.runtime.instructions).toContain('Hyperdrive, AI Gateway.');
     expect(pages.runtime.instructions).toContain(
-      'Workers Tail: Read; Hyperdrive: Write; AI Gateway: Edit',
+      'Read: Account Settings, Account Analytics, Workers Tail.',
     );
+    expect(pages.runtime.instructions).not.toContain('Also select');
     expect(pages.runtime.instructions).not.toContain('Zone');
     expect(new URL(pages.r2.url).searchParams.get('to')).toBe('/account/r2/api-tokens');
     expect(pages.r2.instructions).toContain('Object Read & Write');
+  });
+  it('does not request AI Gateway permission when operator auth can manage it', () => {
+    const pages = platformSetupPages({ ...plan(), actions: [] });
+    const permissions = JSON.parse(
+      new URL(pages.runtime.url).searchParams.get('permissionGroupKeys')!,
+    );
+    expect(permissions).not.toContainEqual({ key: 'aig', type: 'edit' });
+    expect(pages.runtime.instructions).not.toContain('AI Gateway');
+    expect(permissions).toContainEqual({ key: 'query_cache', type: 'edit' });
+    expect(permissions).toContainEqual({ key: 'workers_tail', type: 'read' });
+  });
+  it('includes the catalog SSL key only when custom hostnames are enabled', () => {
+    const original = plan('example.com');
+    const custom = {
+      ...original,
+      deployment: {
+        ...original.deployment,
+        capabilities: { ...original.deployment.capabilities, customDomains: true },
+      },
+    };
+    const permissions = (input: PlatformInstallPlan) =>
+      JSON.parse(
+        new URL(platformSetupPages(input).runtime.url).searchParams.get('permissionGroupKeys')!,
+      );
+    expect(permissions(custom)).toContainEqual({ key: 'ssl_and_certificates', type: 'edit' });
+    expect(permissions(original)).not.toContainEqual({ key: 'ssl_and_certificates', type: 'edit' });
   });
   it('shows the final callback in previews as well as interactive setup', () => {
     const preview = formatPlatformSetupPlan(plan());

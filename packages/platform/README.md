@@ -4,7 +4,7 @@ Public, target-neutral contracts and packaged runtime artifacts for installing a
 
 For a first installation, follow [Install a Void Platform](../../docs/guide/self-hosted-platform.md). It explains how to prepare the Cloudflare account, domain, PostgreSQL database, and credentials before deploying. Void creates the platform resources and database tables.
 
-The CLI provides direct credential setup links in plans and opens missing-credential pages during an approved interactive install. Local credential drafts preserve the final Worker names and OAuth callback before provisioning, with partial secrets encrypted by the existing recovery store. A completed credential-setup marker separates these drafts from database-claimed installation recovery.
+The CLI provides direct credential setup links in plans and opens missing-credential pages during an approved interactive install. The runtime-token link preselects all required account permissions, including Workers Tail, Hyperdrive, and AI Gateway when needed, with a readable fallback summary. Local credential drafts preserve the final Worker names and OAuth callback before provisioning, with partial secrets encrypted by the existing recovery store. A completed credential-setup marker separates these drafts from database-claimed installation recovery.
 
 New platforms use readable resource names such as `void-team-api` and `void-team-routing`, without random suffixes. Choose an installation name that is unused in the selected account. Conflicting resources are never silently adopted, overwritten, or bypassed by choosing random names. Existing installations keep their recorded resource names, including older suffixed names; application/user resource naming is independent.
 

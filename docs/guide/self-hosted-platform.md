@@ -105,7 +105,7 @@ Browser login does not grant AI Gateway access. A preview can therefore show **i
 
 The management token lets your CLI install and maintain the platform. The runtime token is stored as a Worker secret so the platform can deploy apps after you close your terminal. They are separate credentials.
 
-The runtime-token link prefills Cloudflare's documented permission fields. Check the short summary beside the link: Workers Tail, Hyperdrive, and any required AI Gateway permission are listed explicitly because their template keys are not documented. For a domain installation, also select the indicated zone. See [Cloudflare's token template documentation](https://developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template/).
+The runtime-token link preselects all required account permissions, including Workers Tail, Hyperdrive, and AI Gateway when needed. Review them against the short summary beside the link before creating the token. If the form differs, use that summary to correct it. For a domain installation, also select the indicated zone. See [Cloudflare's token template documentation](https://developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template/).
 
 ::: details Permissions to select for each token
 

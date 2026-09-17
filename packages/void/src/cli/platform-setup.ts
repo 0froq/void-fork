@@ -27,12 +27,15 @@ function supportsSetupLinks(): boolean {
   );
 }
 
-/** Only documented dashboard permission keys are prefilled; other required permissions stay explicit. */
+/** Dashboard keys use permission-catalog labels, which can differ from product names. */
 export function platformSetupPages(plan: PlatformInstallPlan): {
   runtime: PlatformSetupPage;
   github: PlatformSetupPage;
   r2: PlatformSetupPage;
 } {
+  const needsGateway = plan.actions.some(
+    (action) => action.kind === 'ai-gateway' && action.action === 'inspect',
+  );
   const permissions = [
     { key: 'account_settings', type: 'read' },
     { key: 'workers_scripts', type: 'edit' },
@@ -41,6 +44,11 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
     { key: 'd1', type: 'edit' },
     { key: 'queues', type: 'edit' },
     { key: 'account_analytics', type: 'read' },
+    { key: 'workers_tail', type: 'read' },
+    // Hyperdrive's catalog label is query_cache_write, not hyperdrive_write.
+    { key: 'query_cache', type: 'edit' },
+    // AI Gateway similarly uses aig_write in the permission catalog.
+    ...(needsGateway ? [{ key: 'aig', type: 'edit' }] : []),
     ...(plan.deployment.application.zoneName ? [{ key: 'cache', type: 'purge' }] : []),
     ...(plan.deployment.capabilities.customDomains
       ? [{ key: 'ssl_and_certificates', type: 'edit' }]
@@ -51,25 +59,22 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
     name: plan.deployment.displayName + ' Runtime',
     permissionGroupKeys: JSON.stringify(permissions),
   });
-  const needsGateway = plan.actions.some(
-    (action) => action.kind === 'ai-gateway' && action.action === 'inspect',
-  );
   return {
     runtime: {
       title: 'Cloudflare runtime token',
       url: 'https://dash.cloudflare.com/?' + query,
       instructions: [
-        'Review the preset permissions for account ' + plan.account.name + '.',
-        'Edit: Workers Scripts, KV, R2, D1, Queues. Read: Account Settings, Account Analytics.',
-        'Also select Workers Tail: Read; Hyperdrive: Write' +
-          (needsGateway ? '; AI Gateway: Edit.' : '.'),
+        'Review the preselected permissions for account ' + plan.account.name + '.',
+        'Edit: Workers Scripts, KV, R2, D1, Queues, Hyperdrive' +
+          (needsGateway ? ', AI Gateway.' : '.'),
+        'Read: Account Settings, Account Analytics, Workers Tail.',
         ...(plan.deployment.application.zoneName
           ? ['Zone ' + plan.deployment.application.zoneName + ': Cache Purge: Purge.']
           : []),
         ...(plan.deployment.capabilities.customDomains
           ? ['Custom project domains also need SSL and Certificates: Edit on that zone.']
           : []),
-        'Create the token, then paste its value into the CLI.',
+        'If the form differs, match the permissions above. Create the token, then paste it here.',
       ].join('\n'),
     },
     github: {
