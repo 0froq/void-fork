@@ -262,7 +262,6 @@ export default extendConfig(
             Hono: 'logos:hono',
             Cloudflare: 'devicon:cloudflare',
             'Node.js / Bun / Deno': 'material-icon-theme:nodejs-alt',
-            'Auth Providers': 'lucide:shield',
           };
           return integrationItems.map((item) =>
             item.text === 'Meta Frameworks'
