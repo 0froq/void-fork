@@ -37,6 +37,7 @@ jobs:
     environment: Release
     permissions:
       contents: read
+      id-token: write
     env:
       VOID_PLATFORM_SOURCE_REVISION: ${{ github.sha }}
     steps:
@@ -54,14 +55,7 @@ jobs:
       - run: vp run build
 
       - run: npm install -g npm@11
-      - name: Verify npm release credentials
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          test -n "$NODE_AUTH_TOKEN" || { echo "Release environment is missing NPM_TOKEN." >&2; exit 1; }
-          npm whoami --registry https://registry.npmjs.org
       - name: Publish public packages
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_NPM_TAG: ${{ steps.release.outputs.npm-tag }}
         run: vp pm publish -r --access public --tag "$RELEASE_NPM_TAG" --no-git-checks

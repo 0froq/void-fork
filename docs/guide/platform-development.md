@@ -213,6 +213,14 @@ use `next`. The scaffolder installs its exact matching CLI version, so
 `create-void@beta` cannot silently select the stable CLI. Packaged platform
 runtimes record the release commit as their source revision.
 
+The npm release job uses [trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+from GitHub-hosted runners, with `id-token: write` and no stored npm publishing
+token. Configure a trusted publisher for each public package using this
+repository, `publish.yml`, and the `Release` environment, allowing direct
+`npm publish`. A brand-new package
+needs an initial authenticated publication before its trusted publisher can be
+configured; subsequent releases use OIDC.
+
 The managed build fallback CLI also derives its version from
 `packages/void/package.json`; there are no separate version pins to update.
 Build its image from the repository root with

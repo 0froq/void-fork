@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vite-plus/test';
 import { releasePolicy } from '../../../../.github/scripts/release-policy.ts';
 
@@ -37,5 +38,34 @@ describe('public package release policy', () => {
         { name: 'create-void', version: '0.10.14' },
       ]),
     ).toThrow('create-void@0.10.14 does not match');
+  });
+});
+
+describe('trusted publishing workflow', () => {
+  const workflow = readFileSync(
+    new URL('../../../../.github/workflows/publish.yml', import.meta.url),
+    'utf8',
+  );
+  const publishJob = workflow.split('\n  publish:\n')[1]!;
+
+  it('grants OIDC permission to the GitHub-hosted release job', () => {
+    expect(publishJob).toBeDefined();
+    expect(publishJob).toContain('    runs-on: ubuntu-latest\n');
+    expect(publishJob).toContain('    environment: Release\n');
+    expect(publishJob).toMatch(/ {4}permissions:\n(?: {6}[^\n]+\n)* {6}id-token: write\n/);
+  });
+
+  it('does not require a stored token or use whoami to validate OIDC', () => {
+    expect(publishJob).not.toMatch(/NPM_TOKEN|NODE_AUTH_TOKEN|npm whoami/);
+    expect(publishJob).toContain('npm install -g npm@11');
+    expect(publishJob).toContain(
+      'vp pm publish -r --access public --tag "$RELEASE_NPM_TAG" --no-git-checks',
+    );
+  });
+
+  it('keeps CI gates and validated stable or prerelease channel selection', () => {
+    expect(publishJob).toContain('    needs: [ci, platform-ci, prepublish-test]\n');
+    expect(publishJob).toContain('node .github/scripts/release-policy.ts');
+    expect(publishJob).toContain('RELEASE_NPM_TAG: ${{ steps.release.outputs.npm-tag }}');
   });
 });
