@@ -608,7 +608,7 @@ describe('platform credential onboarding', () => {
         const url = new URL(String(call[0]));
         return url.searchParams.get('to') ?? url.href;
       }),
-    ).toEqual(['https://github.com/settings/applications/new', '/account/r2/api-tokens']);
+    ).toEqual(['https://github.com/settings/applications/new', '/account/r2/api-tokens/create']);
     expect(JSON.stringify(mocks.open.mock.calls)).not.toContain('secret-value');
   });
   it('skips browsers and secret prompts for values supplied through the environment', async () => {

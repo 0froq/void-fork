@@ -140,7 +140,7 @@ Void checks access before provisioning. If it reports a missing permission, upda
 
 ### R2 Upload Credentials
 
-In the account's **R2 Object Storage** page, select **Manage API Tokens**, create an account token if your role permits it (otherwise a user token), and choose **Object Read & Write**. The installer needs these credentials before creating its bucket, so the initial token must cover that bucket when it is created; the dashboard's all-buckets option covers it. Save the **Access Key ID** and **Secret Access Key**. These are different from the two management/runtime tokens above. See [R2's token instructions](https://developers.cloudflare.com/r2/api/tokens/).
+The installer opens the **R2 token creation** form directly, requesting an account token (or a user token if your role cannot create account tokens). Select **Object Read & Write**—the form starts with read-only access—and keep **Apply to all buckets in this account (including newly created buckets)** selected. This lets the token access the buckets Void creates afterward. Create the token and save its **Access Key ID** and **Secret Access Key**. These are different from the management/runtime tokens above. See [R2's token instructions](https://developers.cloudflare.com/r2/api/tokens/).
 
 ### Signing and Encryption Keys {#signing-and-encryption-keys}
 

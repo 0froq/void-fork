@@ -94,8 +94,18 @@ describe('platform credential setup links', () => {
     );
     expect(pages.runtime.instructions).not.toContain('Also select');
     expect(pages.runtime.instructions).not.toContain('Zone');
-    expect(new URL(pages.r2.url).searchParams.get('to')).toBe('/account/r2/api-tokens');
+    expect(new URL(pages.r2.url).searchParams.get('to')).toBe('/account/r2/api-tokens/create');
+    expect(new URL(pages.r2.url).searchParams.get('type')).toBe('account');
     expect(pages.r2.instructions).toContain('Object Read & Write');
+  });
+  it('opens R2 creation without claiming unsupported permission prefills', () => {
+    const page = platformSetupPages(plan()).r2;
+    const url = new URL(page.url);
+    expect([...url.searchParams.keys()]).toEqual(['to', 'type']);
+    expect(page.instructions).toContain('the form defaults to read-only');
+    expect(page.instructions).toContain('including newly created buckets');
+    expect(page.instructions).toContain('Access Key ID and Secret Access Key');
+    expect(page.instructions).not.toContain('Admin Read');
   });
   it('does not request AI Gateway permission when operator auth can manage it', () => {
     const pages = platformSetupPages({ ...plan(), actions: [] });
