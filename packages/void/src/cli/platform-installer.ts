@@ -3682,7 +3682,7 @@ function platformWorkerCommandRunner(
   return (args, options) => runner(args, accountId, cwd, options.capture);
 }
 
-async function runPlatformWrangler(
+export async function runPlatformWrangler(
   args: ReadonlyArray<string>,
   accountId: string,
   cwd: string,
@@ -3712,7 +3712,9 @@ async function runPlatformWranglerAtApiBase(
   });
   const stdout = result.stdout || '';
   const stderr = result.stderr || '';
-  if (!capture) {
+  // Void owns progress output. Successful commands may still emit banners and
+  // warnings; keep those captured, but retain diagnostics for failed commands.
+  if (!capture && result.status !== 0) {
     if (stdout) {
       process.stdout.write(stdout);
     }
