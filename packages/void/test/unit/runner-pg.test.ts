@@ -9,10 +9,16 @@ import {
 let pglite: PGlite;
 let client: PgClient;
 
-beforeAll(() => {
-  pglite = new PGlite();
-  client = pglite;
-});
+beforeAll(
+  async () => {
+    pglite = new PGlite();
+    // Cold WASM startup can exceed 10s on Windows CI. Pay that cost once here,
+    // not in the first schema-reset hook; query and test deadlines stay unchanged.
+    await pglite.waitReady;
+    client = pglite;
+  },
+  process.platform === 'win32' ? 30_000 : undefined,
+);
 
 beforeEach(async () => {
   await pglite.exec('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public');
