@@ -134,32 +134,67 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   console.log();
   intro(cliTitle('platform install'));
   let existing = args.resume ? resolveInstallationManifest(args.name) : null;
-  let automaticDraft = false;
-  if (!existing && !args.name && !args.resume) {
-    const drafts = listInstallationManifests().filter(
-      (manifest) =>
-        isPlatformSetupDraft(manifest) &&
-        (!args.account ||
-          manifest.account.id === args.account ||
-          manifest.account.name.toLowerCase() === args.account.toLowerCase()),
-    );
-    if (drafts.length === 1) {
-      existing = drafts[0]!;
-      automaticDraft = true;
-      log.info('Continuing saved credential setup; your callback URL stays the same.');
-    }
-  }
-  if (existing?.endpoints.apiUrl && !readPendingInstallationSecrets(existing)) {
-    throw new Error(
-      `platform: Installation ${existing.id} has already been deployed. Use \`void platform repair ${existing.id}\` or \`void platform upgrade ${existing.id}\` instead.`,
-    );
-  }
+  let selectedDraft = false;
   const { input: installationSlug, credential: operatorCredential } =
     await resolvePlatformCloudflareCredentialWithInput(async () => {
+      let requestedName = args.name;
+      if (!args.resume && process.stdin.isTTY) {
+        const drafts = listInstallationManifests().filter(
+          (manifest) =>
+            isPlatformSetupDraft(manifest) &&
+            (!args.name ||
+              manifest.deployment.installationSlug === normalizeInstallationSlug(args.name)) &&
+            (!args.account ||
+              manifest.account.id === args.account ||
+              manifest.account.name.toLowerCase() === args.account.toLowerCase()),
+        );
+        if (drafts.length > 0) {
+          const choice = await select({
+            message: 'Continue a previous platform install?',
+            options: [
+              ...drafts.map((draft) => ({
+                value: draft.id,
+                label: `Continue setup for ${draft.deployment.displayName} (${draft.deployment.installationSlug})`,
+                hint: draft.account.name,
+              })),
+              { value: 'new', label: 'Start a new platform install' },
+            ],
+          });
+          if (isCancel(choice) || typeof choice === 'symbol') {
+            throw new Error('platform: Cancelled.');
+          }
+          if (choice === 'new') {
+            // Do not let --name silently reselect the draft the user just declined.
+            requestedName = '';
+          } else {
+            existing = drafts.find((draft) => draft.id === choice) ?? null;
+            if (!existing) {
+              throw new Error('platform: The selected setup is no longer available.');
+            }
+            selectedDraft = true;
+          }
+        }
+      }
+      if (existing?.endpoints.apiUrl && !readPendingInstallationSecrets(existing)) {
+        throw new Error(
+          `platform: Installation ${existing.id} has already been deployed. Use \`void platform repair ${existing.id}\` or \`void platform upgrade ${existing.id}\` instead.`,
+        );
+      }
       const name =
         existing?.deployment.installationSlug ??
-        (args.name || (await promptText('Installation name:', { placeholder: 'company' })));
-      return normalizeInstallationSlug(name);
+        (requestedName ||
+          (await promptText('Installation name:', { placeholder: 'company' }, false, (value) => {
+            try {
+              assertPlatformInstallationSlugAvailable(normalizeInstallationSlug(value));
+            } catch (error) {
+              return error instanceof Error ? error.message : 'Choose another installation name.';
+            }
+          })));
+      const slug = normalizeInstallationSlug(name);
+      if (!existing) {
+        assertPlatformInstallationSlugAvailable(slug);
+      }
+      return slug;
     });
   let client = new PlatformCloudflareClient(operatorCredential.token);
   const accounts = await readAccounts(client);
@@ -170,21 +205,6 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     (await selectAccount(accounts, args.account)) !== existing.account.id
   ) {
     throw new Error('platform: The installation belongs to a different Cloudflare account.');
-  }
-  if (!existing) {
-    existing =
-      listInstallationManifests().find(
-        (manifest) =>
-          manifest.account.id === accountId &&
-          manifest.deployment.installationSlug === installationSlug &&
-          isPlatformSetupDraft(manifest),
-      ) ?? null;
-    automaticDraft = existing !== null;
-    if (automaticDraft) {
-      log.info('Continuing saved credential setup; your callback URL stays the same.');
-    } else {
-      assertPlatformInstallationSlugAvailable(installationSlug);
-    }
   }
   const recorded = existing?.deployment;
   if (
@@ -242,12 +262,12 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   const displayName =
     recorded?.displayName ??
     (args.displayName || (await promptText('Platform display name:', `${installationSlug} Void`)));
-  const controlPlaneDomain =
-    recorded?.controlPlane.apiHostname ??
-    (args.controlPlaneDomain ||
+  const controlPlaneDomain = recorded
+    ? (recorded.controlPlane.apiHostname ?? '')
+    : args.controlPlaneDomain ||
       (process.stdin.isTTY
         ? await promptText('Optional custom API hostname (leave empty for workers.dev):', '', true)
-        : ''));
+        : '');
   let dedicatedZone = recorded?.application.dedicatedZone ?? args.dedicatedZone;
   if (
     !workersDev &&
@@ -272,7 +292,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     }
     if (existing && !args.plan) {
       existing = resolveInstallationManifest(existing.id);
-      if (automaticDraft && !isPlatformSetupDraft(existing)) {
+      if (selectedDraft && !isPlatformSetupDraft(existing)) {
         throw new Error(
           'platform: Setup advanced in another process. Rerun with --resume to review its current state.',
         );
@@ -724,6 +744,7 @@ async function promptText(
   message: string,
   value: string | { placeholder: string },
   optional = false,
+  validate?: (input: string) => string | undefined,
 ): Promise<string> {
   if (!process.stdin.isTTY) {
     if (optional) {
@@ -734,7 +755,8 @@ async function promptText(
   const input = await text({
     message,
     ...(typeof value === 'string' ? { initialValue: value } : value),
-    validate: optional ? undefined : (input) => (input ? undefined : 'A value is required.'),
+    validate: (input) =>
+      input ? validate?.(input) : optional ? undefined : 'A value is required.',
   });
   if (isCancel(input) || typeof input === 'symbol') {
     throw new Error('platform: Cancelled.');

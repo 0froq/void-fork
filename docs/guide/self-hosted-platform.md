@@ -214,7 +214,7 @@ void platform install --resume --name <installation-id>
 
 Keep the management token available for any remaining DNS changes. When using a source build, also pass the same `--runtime` directory. Resume uses the saved checkpoint and original secrets; do not start a second installation or generate replacement keys. If setup failed before a checkpoint was saved, rerun the original command.
 
-If you stop while entering credentials, rerun the same install command: it reuses the matching draft. With one unfinished credential draft, a bare `void platform install` continues it automatically. Once provisioning has begun, use the explicit `--resume --name <id>` command above. A cancelled setup preserves its callback URL and already collected credentials; it does not create Cloudflare resources just to save progress.
+If you stop while entering credentials, rerun `void platform install`. It offers **Continue setup for <platform name>** or **Start a new platform install**. Continuing restores your saved answers; starting new asks for an unused installation name and does not reuse or delete the previous setup's credentials. `--resume --name <id>` continues directly and is required for non-interactive recovery. Once provisioning has begun, use that explicit resume command. A cancelled setup preserves its callback URL and already collected credentials; it does not create Cloudflare resources just to save progress. Read-only `--plan` runs do not save drafts.
 
 :::
 

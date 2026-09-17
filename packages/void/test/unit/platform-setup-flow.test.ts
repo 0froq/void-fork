@@ -10,8 +10,13 @@ import { runPlatformLifecycleCommand } from '../../src/cli/platform-lifecycle.ts
 import {
   listInstallationManifests,
   readPendingInstallationSecrets,
+  writePendingInstallationSecrets,
 } from '../../src/cli/platform-registry.ts';
-import { isPlatformSetupDraft } from '../../src/cli/platform-setup-draft.ts';
+import {
+  completePlatformSetupDraft,
+  isPlatformSetupDraft,
+  savePlatformSetupDraft,
+} from '../../src/cli/platform-setup-draft.ts';
 
 const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
@@ -103,10 +108,12 @@ beforeEach(() => {
     { id: 'account', name: 'Account' },
   ]);
   mocks.confirm.mockResolvedValue(true);
-  mocks.select.mockResolvedValue('workers-dev');
+  mocks.select.mockImplementation(async ({ message, options }) =>
+    message === 'Continue a previous platform install?' ? options[0].value : 'workers-dev',
+  );
   mocks.preflight.mockResolvedValue(undefined);
   mocks.plan.mockImplementation(async (_client, input, existing) => {
-    const id = existing?.id ?? 'test-setup-123456abcdef';
+    const id = existing?.id ?? `${input.installationSlug}-123456abcdef`;
     const deployment = createPlatformDeploymentManifest({
       installationSlug: input.installationSlug,
       displayName: input.displayName,
@@ -175,7 +182,155 @@ afterEach(() => {
   rmSync(directory, { recursive: true, force: true });
 });
 
+async function savedSetup(name = 'test-setup') {
+  const plan = await mocks.plan(
+    null,
+    { installationSlug: name, displayName: `${name} Void` },
+    null,
+  );
+  const draft = savePlatformSetupDraft(plan, '1.0.0');
+  writePendingInstallationSecrets(draft, { cloudflareApiToken: 'saved-runtime-token' });
+  mocks.plan.mockClear();
+  return draft;
+}
+
 describe('platform credential onboarding', () => {
+  it('offers a named saved setup and a fresh installation instead of automatically continuing', async () => {
+    const draft = await savedSetup();
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan']));
+    expect(mocks.select).toHaveBeenCalledWith({
+      message: 'Continue a previous platform install?',
+      options: [
+        {
+          value: draft.id,
+          label: 'Continue setup for test-setup Void (test-setup)',
+          hint: 'Account',
+        },
+        { value: 'new', label: 'Start a new platform install' },
+      ],
+    });
+    expect(mocks.text).not.toHaveBeenCalled();
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ installationSlug: 'test-setup' }),
+      draft,
+      expect.anything(),
+    );
+  });
+
+  it.each([false, true])(
+    'starts fresh without reusing saved credentials, including with --name: %s',
+    async (named) => {
+      const previous = await savedSetup();
+      mocks.select.mockResolvedValue('new');
+      mocks.text.mockResolvedValue('fresh-install');
+      mocks.password.mockResolvedValueOnce(Symbol('cancel'));
+      await expect(
+        runPlatformLifecycleCommand(
+          parsePlatformArgs([
+            'install',
+            '--workers-dev',
+            '--account',
+            'account',
+            '--display-name',
+            'Fresh',
+            ...(named ? ['--name', 'test-setup'] : []),
+          ]),
+        ),
+      ).rejects.toThrow('Cancelled');
+      const manifests = listInstallationManifests();
+      expect(manifests).toHaveLength(2);
+      expect(readPendingInstallationSecrets(previous)).toEqual({
+        cloudflareApiToken: 'saved-runtime-token',
+      });
+      const fresh = manifests.find(
+        (manifest) => manifest.deployment.installationSlug === 'fresh-install',
+      )!;
+      expect(readPendingInstallationSecrets(fresh)).toEqual({});
+      expect(mocks.password).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'Paste runtime API token:' }),
+      );
+      expect(mocks.preflight).not.toHaveBeenCalled();
+      expect(mocks.install).not.toHaveBeenCalled();
+      const namePrompt = mocks.text.mock.calls.find(
+        ([prompt]) => prompt.message === 'Installation name:',
+      )![0];
+      expect(namePrompt.validate('test-setup')).toContain('already uses this name');
+    },
+  );
+
+  it('lets the user select among multiple saved setups', async () => {
+    const first = await savedSetup('first');
+    const second = await savedSetup('second');
+    mocks.select.mockResolvedValue(second.id);
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan']));
+    const choices = mocks.select.mock.calls[0]![0].options;
+    expect(choices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          value: first.id,
+          label: 'Continue setup for first Void (first)',
+        }),
+        expect.objectContaining({
+          value: second.id,
+          label: 'Continue setup for second Void (second)',
+        }),
+        { value: 'new', label: 'Start a new platform install' },
+      ]),
+    );
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ installationSlug: 'second' }),
+      second,
+      expect.anything(),
+    );
+  });
+
+  it('cancels before planning or collecting credentials when the chooser is cancelled', async () => {
+    const draft = await savedSetup();
+    mocks.select.mockResolvedValue(Symbol('cancel'));
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
+      'Cancelled',
+    );
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(readPendingInstallationSecrets(draft)).toEqual({
+      cloudflareApiToken: 'saved-runtime-token',
+    });
+  });
+
+  it('honors explicit --resume without asking and never auto-resumes in CI', async () => {
+    const draft = await savedSetup();
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    await expect(
+      runPlatformLifecycleCommand(parsePlatformArgs([...args, '--yes'])),
+    ).rejects.toThrow('--resume');
+    expect(mocks.plan).not.toHaveBeenCalled();
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs(['install', '--resume', '--name', draft.id, '--plan']),
+    );
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ installationSlug: 'test-setup' }),
+      draft,
+      expect.anything(),
+    );
+  });
+
+  it('does not silently adopt a selected draft that advanced while the chooser was open', async () => {
+    const draft = await savedSetup();
+    mocks.select.mockImplementation(async () => {
+      completePlatformSetupDraft(draft);
+      return draft.id;
+    });
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
+      'Setup advanced in another process',
+    );
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
   it('keeps real resource names and the callback stable from preview through install and resume', async () => {
     const info = vi.spyOn(log, 'info').mockImplementation(() => {});
     const actual = await vi.importActual<typeof import('../../src/cli/platform-plan.ts')>(
@@ -305,7 +460,7 @@ describe('platform credential onboarding', () => {
     const initialApi = mocks.plan.mock.results[0]!.value;
     mocks.password.mockImplementation(normalPassword);
     mocks.open.mockClear();
-    // With only one untouched draft, a bare invocation resumes its setup.
+    // A bare invocation resumes only after selecting the named saved setup.
     await runPlatformLifecycleCommand(parsePlatformArgs(['install']));
     const final = listInstallationManifests()[0]!;
     expect(final.deployment.resources).toEqual(first.deployment.resources);
