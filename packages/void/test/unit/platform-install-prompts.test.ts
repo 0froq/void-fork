@@ -81,6 +81,30 @@ afterEach(() => {
 });
 
 describe('interactive platform installation prompts', () => {
+  it('uses a placeholder, not a prefilled installation name', async () => {
+    mocks.text.mockResolvedValueOnce('my-team');
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs(['install', '--plan', '--account', 'account', '--workers-dev']),
+    );
+    const prompt = mocks.text.mock.calls[0]![0];
+    expect(prompt).toMatchObject({ message: 'Installation name:', placeholder: 'company' });
+    expect(prompt).not.toHaveProperty('initialValue');
+    expect(prompt.validate('')).toBe('A value is required.');
+    expect(prompt.validate('my-team')).toBeUndefined();
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ installationSlug: 'my-team' }),
+      null,
+      expect.anything(),
+    );
+    expect(mocks.text).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Platform display name:',
+        initialValue: 'my-team Void',
+      }),
+    );
+  });
+
   it.each([
     { name: 'explicit flag', flags: ['--workers-dev'] },
     { name: 'interactive selection', flags: [] },

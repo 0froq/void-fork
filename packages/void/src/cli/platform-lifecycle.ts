@@ -159,7 +159,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     await resolvePlatformCloudflareCredentialWithInput(async () => {
       const name =
         existing?.deployment.installationSlug ??
-        (args.name || (await promptText('Installation name:', 'company')));
+        (args.name || (await promptText('Installation name:', { placeholder: 'company' })));
       return normalizeInstallationSlug(name);
     });
   let client = new PlatformCloudflareClient(operatorCredential.token);
@@ -765,7 +765,7 @@ async function selectAccount(
 
 async function promptText(
   message: string,
-  initialValue: string,
+  value: string | { placeholder: string },
   optional = false,
 ): Promise<string> {
   if (!process.stdin.isTTY) {
@@ -774,15 +774,15 @@ async function promptText(
     }
     throw new Error(`platform: ${message.replace(/:$/, '')} is required in non-interactive mode.`);
   }
-  const value = await text({
+  const input = await text({
     message,
-    initialValue,
+    ...(typeof value === 'string' ? { initialValue: value } : value),
     validate: optional ? undefined : (input) => (input ? undefined : 'A value is required.'),
   });
-  if (isCancel(value) || typeof value === 'symbol') {
+  if (isCancel(input) || typeof input === 'symbol') {
     throw new Error('platform: Cancelled.');
   }
-  return value;
+  return input;
 }
 
 async function promptSecret(
