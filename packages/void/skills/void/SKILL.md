@@ -25,6 +25,8 @@ For first-time platform setup, follow `docs/guide/self-hosted-platform.md` in or
 
 For an existing Cloudflare site, run `void deploy` with its root `wrangler.jsonc` or `wrangler.json`. An unlinked project gets a prompt to link and deploy using the existing Worker and resources. Accepting verifies and saves the destination, then continues deployment. Keep new resources, migrations, auth setup, and secret changes separate from this first handoff. The active Worker Version must be the latest upload so inherited secrets have an unambiguous source. Failed builds retain the link for retry. Read `docs/integrations/cloudflare.md` for the supported configuration and rollback behavior.
 
+When linking reports missing inferred resources, check the listed bindings and inference reasons against the existing Worker and `void.json`; preserve `.void/cloudflare-link.json` for retries. Prerendered/revalidated sites without an existing `ISR_CACHE` retain uncached rendering during handoff, so keep their prerender settings; an ordinary deployment after linking provisions the cache. An application KV binding explicitly named `ISR_CACHE` is still required. Existing D1 bindings without checked-in migrations retain their local migration settings during handoff.
+
 Platform administration uses `void platform auth login` and the nested
 `user`, `project`, `deployment`, `build`, `signup`, `invitation`, `system`, and
 hosted-only `worker` groups. Open the operator section of `docs/reference/cli.md`

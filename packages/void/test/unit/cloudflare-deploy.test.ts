@@ -533,6 +533,9 @@ describe('existing Cloudflare site handoff', () => {
   });
   it('retains the link guard after a failed build and verifies the Worker again on retry', async () => {
     const root = site();
+    mkdirSync(join(root, 'pages'));
+    writeFileSync(join(root, 'pages/index.tsx'), 'export default () => null;');
+    writeFileSync(join(root, 'pages/index.server.ts'), 'export const prerender = true;');
     const readExistingWorker = vi.fn().mockResolvedValue(existing);
     const { deps } = harness({
       readExistingWorker,
@@ -614,6 +617,8 @@ describe('existing Cloudflare site handoff', () => {
   });
   it('rejects a newly inferred resource before provisioning and build', async () => {
     const root = site();
+    mkdirSync(join(root, 'pages'));
+    writeFileSync(join(root, 'pages/index.md'), '# Home');
     writeFileSync(
       join(root, 'routes/index.ts'),
       'import { kv } from "void/kv"; export const GET = () => kv.get("key");',
@@ -621,10 +626,162 @@ describe('existing Cloudflare site handoff', () => {
     const { deps, trace } = harness({ readExistingWorker: async () => existing });
     await expect(
       runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
-    ).rejects.toThrow('cannot provision');
+    ).rejects.toThrow(/cannot provision[\s\S]*KV \(KV namespace\)[\s\S]*app uses env.KV/);
     expect(trace).not.toContain('build');
     expect(trace).not.toContain('provision');
   });
+
+  it.each(['prerender', 'markdown', 'revalidate'])(
+    'preserves uncached rendering for an existing %s site without an ISR namespace',
+    async (mode) => {
+      const root = site();
+      mkdirSync(join(root, 'pages'));
+      if (mode === 'markdown') {
+        writeFileSync(join(root, 'pages/index.md'), '# Home');
+      } else {
+        writeFileSync(join(root, 'pages/index.tsx'), 'export default () => null;');
+        writeFileSync(
+          join(root, 'pages/index.server.ts'),
+          mode === 'prerender'
+            ? 'export const prerender = true; export const loader = () => ({});'
+            : 'export const revalidate = 60; export const loader = () => ({});',
+        );
+      }
+      const { deps, trace, wranglerArgs } = harness({
+        readExistingWorker: async () => existing,
+        runBuild: () => build(root),
+        verifyDeployConfig: verifyGeneratedDeployConfig,
+      });
+
+      await runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps);
+
+      expect(trace).toContain('wrangler:deploy');
+      expect(trace).not.toContain('provision');
+      expect(wranglerArgs.some((args) => ['kv', 'containers', 'secret'].includes(args[0]!))).toBe(
+        false,
+      );
+      expect(parseRootWranglerConfig(join(root, 'wrangler.jsonc')).kv_namespaces).toBeUndefined();
+      expect(
+        parseRootWranglerConfig(join(root, 'dist/ssr/wrangler.json')).kv_namespaces,
+      ).toBeUndefined();
+      expect(readCloudflareLink(root)).toBeNull();
+
+      // Ordinary deploys still infer the cache after the one-time handoff completes.
+      const { desired } = await computeDesiredCloudflareResources(
+        root,
+        readConfig(root),
+        join(root, 'wrangler.jsonc'),
+      );
+      expect(desired.kvNamespaces).toEqual([{ binding: 'ISR_CACHE', title: 'site-isr-cache' }]);
+    },
+  );
+
+  it('keeps an existing ISR namespace during handoff', async () => {
+    const root = site();
+    mkdirSync(join(root, 'pages'));
+    writeFileSync(join(root, 'pages/index.md'), '# Home');
+    const configPath = join(root, 'wrangler.jsonc');
+    const config = parseRootWranglerConfig(configPath);
+    config.kv_namespaces = [{ binding: 'ISR_CACHE', id: REAL_KV_ID }];
+    writeFileSync(configPath, JSON.stringify(config));
+    const verify = vi.fn(verifyGeneratedDeployConfig);
+    const { deps, trace } = harness({
+      readExistingWorker: async () => ({
+        ...existing,
+        bindings: [{ name: 'ISR_CACHE', type: 'kv_namespace', namespace_id: REAL_KV_ID }],
+      }),
+      runBuild: () => build(root),
+      verifyDeployConfig: verify,
+    });
+
+    await runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps);
+
+    expect(trace).toContain('wrangler:deploy');
+    expect(trace).not.toContain('provision');
+    expect(verify).toHaveBeenCalledWith(
+      root,
+      expect.objectContaining({
+        desired: expect.objectContaining({
+          kvNamespaces: [{ binding: 'ISR_CACHE', title: 'site-isr-cache' }],
+        }),
+      }),
+    );
+    expect(parseRootWranglerConfig(configPath).kv_namespaces).toEqual(config.kv_namespaces);
+  });
+
+  it('does not defer an application KV binding named ISR_CACHE', async () => {
+    const root = site();
+    writeFileSync(
+      join(root, 'void.json'),
+      JSON.stringify({ inference: { bindings: { kv: 'ISR_CACHE' } } }),
+    );
+    const { deps, trace } = harness({ readExistingWorker: async () => existing });
+
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toThrow(/cannot provision[\s\S]*ISR_CACHE \(KV namespace\)/);
+    expect(trace).not.toContain('build');
+    expect(trace).not.toContain('provision');
+  });
+
+  it('rejects an ISR namespace added by the build during handoff', async () => {
+    const root = site();
+    mkdirSync(join(root, 'pages'));
+    writeFileSync(join(root, 'pages/index.md'), '# Home');
+    const { deps, trace } = harness({
+      readExistingWorker: async () => existing,
+      runBuild: () => {
+        build(root);
+        const generatedPath = join(root, 'dist/ssr/wrangler.json');
+        const generated = parseRootWranglerConfig(generatedPath);
+        generated.kv_namespaces = [{ binding: 'ISR_CACHE', id: REAL_KV_ID }];
+        writeFileSync(generatedPath, JSON.stringify(generated));
+      },
+    });
+
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toThrow('Linking cannot add or replace kv_namespaces');
+    expect(trace).not.toContain('provision');
+    expect(trace).not.toContain('wrangler:deploy');
+  });
+
+  it.each([undefined, './migrations', 'db/migrations', './db/migrations'])(
+    'preserves an existing D1 binding with migrations_dir %s without provisioning',
+    async (migrationsDir) => {
+      const root = site();
+      const databaseId = '11111111-1111-4111-8111-111111111111';
+      const configPath = join(root, 'wrangler.jsonc');
+      const config = parseRootWranglerConfig(configPath);
+      const database = {
+        binding: 'DB',
+        database_name: 'existing-db',
+        database_id: databaseId,
+        ...(migrationsDir === undefined ? {} : { migrations_dir: migrationsDir }),
+      };
+      config.d1_databases = [database];
+      writeFileSync(configPath, JSON.stringify(config));
+      writeFileSync(
+        join(root, 'routes/index.ts'),
+        'export const GET = (c) => c.env.DB.prepare("SELECT 1").first();',
+      );
+      const { deps, trace, wranglerArgs } = harness({
+        readExistingWorker: async () => ({
+          ...existing,
+          bindings: [{ name: 'DB', type: 'd1', id: databaseId }],
+        }),
+        runBuild: () => build(root),
+      });
+
+      await runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps);
+
+      expect(trace).toContain('wrangler:deploy');
+      expect(trace).not.toContain('provision');
+      expect(wranglerArgs.some((args) => args[0] === 'd1')).toBe(false);
+      expect(parseRootWranglerConfig(configPath).d1_databases).toEqual([database]);
+      expect(readCloudflareLink(root)).toBeNull();
+    },
+  );
 });
 
 describe('ensureCloudflareAuthSecret', () => {

@@ -613,6 +613,8 @@ An unlinked project with a root `wrangler.jsonc` or `wrangler.json` gets a promp
 
 The first handoff preserves production bindings, variables, secrets, event handlers, and triggers. The active version must be the latest uploaded version so inherited secrets have an unambiguous source. New resources, migrations, runtime features, auth setup, or local secret overrides must be handled separately. See [Deploy an existing Worker](../integrations/cloudflare.md#deploy-an-existing-worker).
 
+Prerendered or revalidated pages can link without an `ISR_CACHE` binding: the first handoff preserves rendering without ISR caching, and a subsequent ordinary deploy provisions the cache. Existing ISR namespaces are reused; application KV bindings are still required.
+
 For Drizzle projects, deploy performs a read-only schema drift check. If a new migration would be generated, deploy stops and tells you to run `void db generate`, review the migration, commit it yourself, and rerun `void deploy`.
 
 | Flag                            | Purpose                                                                                            |

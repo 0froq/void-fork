@@ -4473,6 +4473,25 @@ export async function runCloudflareDeploy(
       throw new Error('The pending Cloudflare handoff was not saved before deployment.');
     }
     rootConfig = parseRootWranglerConfig(configPath);
+
+    // Direct builds already render without ISR when the Worker has no ISR_CACHE binding.
+    // Preserve that behavior during handoff instead of requiring a new namespace just
+    // because prerender/revalidate is enabled. An application KV renamed to ISR_CACHE
+    // is still required, and an existing cache must retain its verified identity.
+    if (
+      existingWorker &&
+      !existingWorker.bindings.some((binding) => binding.name === 'ISR_CACHE') &&
+      resolveBindingNames(voidConfig.inference?.bindings)?.kv !== 'ISR_CACHE' &&
+      desired.kvNamespaces.some((namespace) => namespace.binding === 'ISR_CACHE')
+    ) {
+      desired.kvNamespaces = desired.kvNamespaces.filter(
+        (namespace) => namespace.binding !== 'ISR_CACHE',
+      );
+      log.info(
+        'Preserving rendering without ISR caching for this handoff. A later deployment will provision ISR_CACHE if prerender or revalidate remains enabled.',
+      );
+      cliLog.info('cloudflare_handoff_isr_deferred', { binding: 'ISR_CACHE' });
+    }
   }
 
   // 3f. Sandbox is the one public Void feature whose native Cloudflare runtime has a hard
@@ -4507,8 +4526,16 @@ export async function runCloudflareDeploy(
   // the single authority for resource creation.
   const provisionAndVerify = async (): Promise<void> => {
     if (existingWorker) {
+      const { missing } = provisionModule.checkCloudflareProvisionDrift(configPath, desired);
       throw new Error(
-        'Linking cannot provision resources. Configure the existing resource IDs before deploying.',
+        missing.length > 0
+          ? formatCloudflareDriftMessage(
+              missing,
+              reasons,
+              'Linking cannot provision these inferred resources:',
+              `Check the existing Worker's binding names and resource IDs in ${basename(configPath)} and inference.bindings in void.json, then rerun \`void deploy\`. Keep new resources for a later deployment.`,
+            )
+          : 'Linking cannot provision resources. Remove --provision and rerun `void deploy` to reuse the existing Worker.',
       );
     }
     // Re-verify the uploader immediately before the credentialed provisioner, which runs
@@ -4590,6 +4617,9 @@ export async function runCloudflareDeploy(
     desired,
   );
   const d1NeedsConfigReconciliation =
+    // A handoff applies no migrations, so preserve the existing local migration settings.
+    // Reconciling migrations_dir must not send an already-bound database to the provisioner.
+    !existingWorker &&
     desired.d1 != null &&
     readStoredResourceName(
       parseRootWranglerConfig(configPath),
