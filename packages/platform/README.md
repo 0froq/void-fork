@@ -25,6 +25,8 @@ Interactive lifecycle operations authenticate the human operator through Cloudfl
 
 Fresh installations require a unique JWT signing secret with at least 32 bytes of random material and a unique, canonical base64-encoded 32-byte project-encryption key from the operator's durable secret manager. The installer never makes an ephemeral workstation or CI registry the only custodian of these installation identity keys. Existing Workers preserve their deployed values during routine lifecycle operations.
 
+Browser OAuth cannot manage AI Gateway. Installation previews mark an inaccessible gateway as requiring inspection; apply rechecks it with the already-required runtime token (AI Gateway: Edit) before provisioning. All other provider operations keep the operator credential. Later OAuth lifecycle operations can reuse that token from encrypted local recovery storage. On another workstation, use a management API token with AI Gateway access or supply the runtime token explicitly for that check.
+
 Runtime and installation manifests record the last usage protocol proven live across the complete Worker set. A protocol transition gates traffic before the first Worker update and opens it only after target health and immutable versions pass; interrupted transitions remain gated and resumable.
 
 Application-addressing contracts preserve schema v1 for existing domain installations. Schema v2 records an optional workers.dev installation identity, retained when a domain is added. Project ingress names include the stable project ID so a deleted project's hostname cannot be inherited by a later project with the same slug.

@@ -175,7 +175,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
   assertNoninteractivePlatformMutationAcknowledged(args, process.stdin.isTTY === true);
   const manifest = await resolveInstalledPlatformManifest(args.selector);
   const operatorCredential = await resolvePlatformCloudflareCredential();
-  const client = new PlatformCloudflareClient(operatorCredential.token);
+  const operatorClient = new PlatformCloudflareClient(operatorCredential.token);
   const runtime =
     args.subcommand === 'uninstall' || args.subcommand === 'disable'
       ? null
@@ -193,6 +193,12 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
       assertPlatformRollbackCompatibility(manifest, runtime!, rollbackSourceRuntime!);
     }
     const recovery = readInstallationRecoverySecrets(manifest);
+    const gatewayToken =
+      process.env.VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN || recovery?.cloudflareApiToken;
+    const client =
+      operatorCredential.source === 'oauth' && gatewayToken
+        ? operatorClient.withAiGatewayToken(gatewayToken)
+        : operatorClient;
     const databaseUrl = resolvePlatformInstallDatabaseUrl(recovery, manifest);
 
     if (args.subcommand === 'disable') {
@@ -231,6 +237,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
     const plan = await createPlatformInstallPlan(client, planInput, manifest, {
       authoritativeProvisionIntents: databaseCheckpointExists,
       repairMissing: args.subcommand === 'repair',
+      allowUnverifiedAiGateway: args.plan,
     });
     note(
       formatPlatformInstallPlan(plan),

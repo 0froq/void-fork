@@ -13,6 +13,7 @@ import {
 } from './platform-auth.ts';
 import {
   PlatformCloudflareClient,
+  PlatformCloudflareApiError,
   verifyPlatformRuntimeTokenPermissions,
   type CloudflareAccount,
 } from './platform-cloudflare.ts';
@@ -121,7 +122,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   console.log();
   intro(cliTitle('platform install'));
   const operatorCredential = await resolvePlatformCloudflareCredential();
-  const client = new PlatformCloudflareClient(operatorCredential.token);
+  let client = new PlatformCloudflareClient(operatorCredential.token);
   let existing = args.resume ? resolveInstallationManifest(args.name) : null;
   if (existing?.endpoints.apiUrl && !readPendingInstallationSecrets(existing)) {
     throw new Error(
@@ -242,7 +243,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       zoneName,
       ...(workersDev ? { workersDev: true } : {}),
     };
-    const plan = await createInitialPlatformInstallPlan(
+    let plan = await createInitialPlatformInstallPlan(
       client,
       planInput,
       existing,
@@ -281,6 +282,16 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         zoneId: plan.zone?.id ?? null,
       },
     );
+    if (plan.actions.some((action) => action.action === 'inspect')) {
+      client = client.withAiGatewayToken(runtimeCloudflareApiToken);
+      plan = await verifyPlatformAiGatewayPlan(
+        client,
+        planInput,
+        existing,
+        plan,
+        authoritativeProvisionIntents,
+      );
+    }
     const bootstrapGitHubLogin =
       checkpoint?.bootstrapGitHubLogin ||
       process.env.VOID_PLATFORM_ADMIN_GITHUB_LOGIN ||
@@ -408,6 +419,7 @@ export function formatPlatformAuthenticationSetup(apiUrl: string, accountId: str
     `Create a separate, scoped Void runtime API token here:\n${platformRuntimeTokenUrl(accountId)}\n` +
     'Account permissions: Workers Scripts: Edit, Workers Tail: Read, D1: Edit, Workers KV Storage: Edit, Workers R2 Storage: Edit, Queues: Edit, Hyperdrive: Write, Account Analytics: Read.\n' +
     'Zone permission for the application zone: Cache Purge: Purge. A custom runtime that enables custom project domains also requires SSL and Certificates: Edit.\n' +
+    'When browser login cannot manage AI Gateway, include AI Gateway: Edit on this runtime token; Void uses it for that resource.\n' +
     'The runtime token provisions application resources; your browser OAuth session is used only for platform lifecycle operations.'
   );
 }
@@ -419,6 +431,48 @@ function formatPlatformRuntime(runtime: ReturnType<typeof loadPlatformRuntime>):
     `Revision: ${runtime.manifest.sourceRevision ?? 'not recorded'}`,
     `Manifest SHA-256: ${runtime.manifestSha256}`,
   ].join('\n');
+}
+
+export async function verifyPlatformAiGatewayPlan(
+  client: Parameters<typeof createPlatformInstallPlan>[0],
+  input: Parameters<typeof createPlatformInstallPlan>[1],
+  existing: PlatformInstallationManifest | null,
+  preview: Awaited<ReturnType<typeof createPlatformInstallPlan>>,
+  authoritativeProvisionIntents: boolean,
+): Promise<Awaited<ReturnType<typeof createPlatformInstallPlan>>> {
+  let verified: Awaited<ReturnType<typeof createPlatformInstallPlan>>;
+  try {
+    verified = await createPlatformInstallPlan(client, input, existing, {
+      authoritativeProvisionIntents,
+      provisioningSuffix: preview.provisioningSuffix,
+    });
+  } catch (error) {
+    if (
+      error instanceof PlatformCloudflareApiError &&
+      (error.status === 401 || error.status === 403) &&
+      error.requestPath?.includes('/ai-gateway/')
+    ) {
+      throw new Error(
+        'platform: The runtime token could not verify AI Gateway access. Include Account → AI Gateway → Edit for this account, then retry. No platform resources were created.',
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+  const infrastructure = (plan: typeof preview) =>
+    plan.actions
+      .filter((action) => action.kind !== 'ai-gateway')
+      .map(({ action, id, key, kind, name }) => ({ action, id, key, kind, name }));
+  if (
+    verified.installationId !== preview.installationId ||
+    JSON.stringify(verified.deployment) !== JSON.stringify(preview.deployment) ||
+    JSON.stringify(infrastructure(verified)) !== JSON.stringify(infrastructure(preview))
+  ) {
+    throw new Error(
+      'platform: Resources changed while checking AI Gateway access. Rerun the command to review the updated plan. No platform resources were created.',
+    );
+  }
+  return verified;
 }
 
 export function assertNoninteractivePlatformMutationAcknowledged(
@@ -451,6 +505,7 @@ async function createInitialPlatformInstallPlan(
   if (existing || planOnly) {
     return createPlatformInstallPlan(client, input, existing, {
       authoritativeProvisionIntents,
+      allowUnverifiedAiGateway: true,
     });
   }
   let collision: unknown;
@@ -458,6 +513,7 @@ async function createInitialPlatformInstallPlan(
     try {
       return await createPlatformInstallPlan(client, input, null, {
         authoritativeProvisionIntents,
+        allowUnverifiedAiGateway: true,
         // A fresh apply receives a 128-bit resource namespace. Independent installers
         // therefore cannot accidentally choose the same Worker name during the API's
         // non-atomic create precondition window; installers resuming the SAME installation

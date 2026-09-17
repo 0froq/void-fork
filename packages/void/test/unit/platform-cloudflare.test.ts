@@ -9,6 +9,50 @@ import {
 } from '../../src/cli/platform-cloudflare.ts';
 
 describe('platform Cloudflare client', () => {
+  it('uses the runtime credential only for AI Gateway operations while keeping the API origin pinned', async () => {
+    const requests: Array<{ path: string; authorization: string | null }> = [];
+    const client = new PlatformCloudflareClient('operator-token', {
+      apiBase: 'https://cloudflare.example.test/client/v4',
+      fetcher: async (input, init) => {
+        const url = new URL(String(input));
+        expect(url.origin).toBe('https://cloudflare.example.test');
+        requests.push({
+          path: url.pathname,
+          authorization: new Headers(init?.headers).get('Authorization'),
+        });
+        return Response.json({
+          success: true,
+          result: init?.method === 'POST' ? { id: 'gateway' } : [],
+        });
+      },
+    }).withAiGatewayToken('runtime-token');
+    await client.listAiGateways('account');
+    await client.createAiGateway('account', 'gateway');
+    await client.listWorkerNames('account');
+    expect(requests.map((request) => request.authorization)).toEqual([
+      'Bearer runtime-token',
+      'Bearer runtime-token',
+      'Bearer operator-token',
+    ]);
+  });
+
+  it('identifies the rejected API operation without including query parameters or credentials', async () => {
+    const client = new PlatformCloudflareClient('secret-token', {
+      fetcher: async () =>
+        Response.json(
+          { success: false, errors: [{ message: 'Authentication error' }] },
+          { status: 403 },
+        ),
+    });
+    const error = await client
+      .request('/accounts/account/ai-gateway/gateways?secret=query-value')
+      .catch((error) => error as Error);
+    expect((error as Error).message).toContain(
+      'HTTP 403; GET /accounts/account/ai-gateway/gateways',
+    );
+    expect((error as Error).message).not.toContain('query-value');
+    expect((error as Error).message).not.toContain('secret-token');
+  });
   it.each([401, 403, 429, 500, 503])(
     'distinguishes HTTP %s from missing workers.dev onboarding',
     async (status) => {

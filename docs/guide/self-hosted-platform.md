@@ -99,28 +99,30 @@ For a domain installation, create two custom tokens using Cloudflare's [API toke
 
 For workers.dev testing with the default API hostname, browser login can authorize installation: you only need to create the runtime token and R2 credentials below. Skip the zone permissions until you add a domain.
 
+Browser login does not grant AI Gateway access. A preview can therefore show **inspect ai-gateway**: Void verifies that resource with the runtime token after you confirm installation, before creating any resources. Include **Account → AI Gateway → Edit** on that token. Other infrastructure continues using your browser login, and a normal API-token installation keeps using its management token when that token already has access.
+
 The management token lets your CLI install and maintain the platform. The runtime token is stored as a Worker secret so the platform can deploy apps after you close your terminal. They are separate credentials.
 
 ::: details Permissions to select for each token
 
 Use the following permissions for the core platform. Cloudflare may label write access as **Edit** or **Write**, depending on the token screen; see its [permission reference](https://developers.cloudflare.com/fundamentals/api/reference/permissions/).
 
-| Scope   | Permission         | Management | Runtime |
-| ------- | ------------------ | ---------- | ------- |
-| Account | Account Settings   | Read       | Read    |
-| Account | Workers Scripts    | Edit       | Edit    |
-| Account | Workers Tail       | Read       | Read    |
-| Account | D1                 | Edit       | Edit    |
-| Account | Workers KV Storage | Edit       | Edit    |
-| Account | Workers R2 Storage | Edit       | Edit    |
-| Account | Queues             | Edit       | Edit    |
-| Account | Hyperdrive         | Write      | Write   |
-| Account | Account Analytics  | Read       | Read    |
-| Account | AI Gateway         | Edit       | —       |
-| Zone    | Zone               | Read       | —       |
-| Zone    | DNS                | Edit       | —       |
-| Zone    | Workers Routes     | Edit       | —       |
-| Zone    | Cache Purge        | —          | Purge   |
+| Scope   | Permission         | Management | Runtime                                 |
+| ------- | ------------------ | ---------- | --------------------------------------- |
+| Account | Account Settings   | Read       | Read                                    |
+| Account | Workers Scripts    | Edit       | Edit                                    |
+| Account | Workers Tail       | Read       | Read                                    |
+| Account | D1                 | Edit       | Edit                                    |
+| Account | Workers KV Storage | Edit       | Edit                                    |
+| Account | Workers R2 Storage | Edit       | Edit                                    |
+| Account | Queues             | Edit       | Edit                                    |
+| Account | Hyperdrive         | Write      | Write                                   |
+| Account | Account Analytics  | Read       | Read                                    |
+| Account | AI Gateway         | Edit       | Edit when installing with browser login |
+| Zone    | Zone               | Read       | —                                       |
+| Zone    | DNS                | Edit       | —                                       |
+| Zone    | Workers Routes     | Edit       | —                                       |
+| Zone    | Cache Purge        | —          | Purge                                   |
 
 The management token also needs **Zone Edit** with authority to create zones if you ask Void to create the zone. If it already exists, use the selected zone with Zone Read and DNS Edit. Nested application domains additionally need **SSL and Certificates: Read** on the management token. A custom runtime that enables custom project domains needs **SSL and Certificates: Edit** on the runtime token; the core runtime does not enable that feature.
 

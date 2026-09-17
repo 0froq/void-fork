@@ -13,6 +13,7 @@ import {
   type PlatformDeploymentManifest,
   type PlatformInstallationManifest,
 } from '@void/platform';
+import { PlatformCloudflareApiError } from './platform-cloudflare.ts';
 import type {
   CloudflareAccount,
   CloudflareDnsRecord,
@@ -22,7 +23,7 @@ import type {
 } from './platform-cloudflare.ts';
 
 export type PlatformInstallPlanAction = Readonly<{
-  action: 'adopt' | 'create' | 'reuse' | 'update';
+  action: 'adopt' | 'create' | 'reuse' | 'update' | 'inspect';
   id: string | null;
   key: string;
   kind: InstallationResourceKind;
@@ -39,6 +40,7 @@ export type PlatformInstallPlan = Readonly<{
   proxyUrl: string;
   workersSubdomain: string;
   zone: CloudflareZone | null;
+  provisioningSuffix?: string;
 }>;
 
 export type PlatformInstallPlanInput = Readonly<{
@@ -82,6 +84,7 @@ export async function createPlatformInstallPlan(
     authoritativeProvisionIntents?: boolean;
     provisioningSuffix?: string;
     repairMissing?: boolean;
+    allowUnverifiedAiGateway?: boolean;
   },
 ): Promise<PlatformInstallPlan> {
   const accounts = await client.listAccounts();
@@ -174,6 +177,18 @@ export async function createPlatformInstallPlan(
       );
     }
   }
+  let needsAiGatewayCredential = false;
+  const gatewayInventory = client.listAiGateways(account.id).catch((error) => {
+    if (
+      options?.allowUnverifiedAiGateway &&
+      error instanceof PlatformCloudflareApiError &&
+      error.status === 403
+    ) {
+      needsAiGatewayCredential = true;
+      return [];
+    }
+    throw error;
+  });
   const [
     workersSubdomain,
     aiGateways,
@@ -188,7 +203,7 @@ export async function createPlatformInstallPlan(
     workers,
   ] = await Promise.all([
     Promise.resolve(accountSubdomain),
-    client.listAiGateways(account.id),
+    gatewayInventory,
     client.listKvNamespaces(account.id, names.routingKv),
     client.listKvNamespaces(account.id, names.isrCacheKv),
     client.listKvNamespaces(account.id, names.legacyAssetsKv),
@@ -354,18 +369,30 @@ export async function createPlatformInstallPlan(
     });
     addDnsPlan(actions, existing, wildcardHostname, dnsRecords, options);
   }
-  addNamedPlan(
-    actions,
-    existing,
-    'ai-gateway',
-    'ai-gateway',
-    names.aiGateway,
-    aiGateways.filter((resource) => resource.id === names.aiGateway),
-    'reuse',
-    options,
-    remoteOwnership,
-    intentProofs,
-  );
+  if (needsAiGatewayCredential) {
+    actions.push({
+      action: 'inspect',
+      id: null,
+      key: 'ai-gateway',
+      kind: 'ai-gateway',
+      name: names.aiGateway,
+      reason:
+        'AI Gateway access will be verified with the runtime token before provisioning (AI Gateway: Edit required).',
+    });
+  } else {
+    addNamedPlan(
+      actions,
+      existing,
+      'ai-gateway',
+      'ai-gateway',
+      names.aiGateway,
+      aiGateways.filter((resource) => resource.id === names.aiGateway),
+      'reuse',
+      options,
+      remoteOwnership,
+      intentProofs,
+    );
+  }
   addNamedPlan(
     actions,
     existing,
@@ -503,6 +530,7 @@ export async function createPlatformInstallPlan(
     proxyUrl,
     workersSubdomain,
     zone,
+    ...(options?.provisioningSuffix ? { provisioningSuffix: options.provisioningSuffix } : {}),
   };
 }
 
@@ -1006,6 +1034,9 @@ export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {
   ];
   for (const action of plan.actions) {
     lines.push(`${action.action.padEnd(6)} ${action.kind.padEnd(19)} ${action.name}`);
+    if (action.action === 'inspect') {
+      lines.push(`       ${action.reason}`);
+    }
   }
   return lines.join('\n');
 }

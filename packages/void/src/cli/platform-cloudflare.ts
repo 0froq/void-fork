@@ -15,11 +15,13 @@ type CloudflareEnvelope<T> = Readonly<{
 
 export class PlatformCloudflareApiError extends Error {
   readonly status: number;
+  readonly requestPath?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, requestPath?: string) {
     super(message);
     this.name = 'PlatformCloudflareApiError';
     this.status = status;
+    this.requestPath = requestPath;
   }
 }
 
@@ -151,8 +153,12 @@ export class PlatformCloudflareClient {
   readonly apiBaseUrl: string;
   readonly #fetcher: typeof fetch;
   readonly #token: string;
+  readonly #aiGatewayClient?: PlatformCloudflareClient;
 
-  constructor(token: string, options?: { apiBase?: string; fetcher?: typeof fetch }) {
+  constructor(
+    token: string,
+    options?: { apiBase?: string; fetcher?: typeof fetch; aiGatewayToken?: string },
+  ) {
     if (!token) {
       throw new Error(
         'platform: CLOUDFLARE_API_TOKEN is required. The installed control plane also uses this scoped token to provision app resources.',
@@ -161,6 +167,21 @@ export class PlatformCloudflareClient {
     this.#token = token;
     this.apiBaseUrl = (options?.apiBase ?? resolvePinnedApiBaseUrl()).replace(/\/+$/, '');
     this.#fetcher = options?.fetcher ?? fetch;
+    if (options?.aiGatewayToken) {
+      this.#aiGatewayClient = new PlatformCloudflareClient(options.aiGatewayToken, {
+        apiBase: this.apiBaseUrl,
+        fetcher: this.#fetcher,
+      });
+    }
+  }
+
+  /** Keep operator auth for infrastructure; use the existing runtime credential only for AI Gateway. */
+  withAiGatewayToken(token: string): PlatformCloudflareClient {
+    return new PlatformCloudflareClient(this.#token, {
+      apiBase: this.apiBaseUrl,
+      fetcher: this.#fetcher,
+      aiGatewayToken: token,
+    });
   }
 
   async request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -188,6 +209,7 @@ export class PlatformCloudflareClient {
       throw new PlatformCloudflareApiError(
         `Cloudflare returned a non-JSON response (HTTP ${response.status}).`,
         response.status,
+        path.split('?')[0],
       );
     }
     if (!response.ok || envelope.success !== true || envelope.result === undefined) {
@@ -196,7 +218,11 @@ export class PlatformCloudflareClient {
           ?.map((error) => error.message)
           .filter(Boolean)
           .join(', ') || `HTTP ${response.status}`;
-      throw new PlatformCloudflareApiError(`Cloudflare API error: ${details}`, response.status);
+      throw new PlatformCloudflareApiError(
+        `Cloudflare API error: ${details} (HTTP ${response.status}; ${init?.method ?? 'GET'} ${path.split('?')[0]}).`,
+        response.status,
+        path.split('?')[0],
+      );
     }
     return { result: envelope.result, resultInfo: envelope.result_info };
   }
@@ -248,6 +274,9 @@ export class PlatformCloudflareClient {
   }
 
   async listAiGateways(accountId: string): Promise<ReadonlyArray<CloudflareNamedResource>> {
+    if (this.#aiGatewayClient) {
+      return this.#aiGatewayClient.listAiGateways(accountId);
+    }
     const entries: Array<{ id?: unknown }> = [];
     for (let page = 1; ; page++) {
       const result = await this.request<ReadonlyArray<{ id?: unknown }>>(
@@ -265,6 +294,9 @@ export class PlatformCloudflareClient {
   }
 
   async createAiGateway(accountId: string, id: string): Promise<CloudflareNamedResource> {
+    if (this.#aiGatewayClient) {
+      return this.#aiGatewayClient.createAiGateway(accountId, id);
+    }
     const result = await this.request<{ id?: unknown }>(
       `/accounts/${encodeURIComponent(accountId)}/ai-gateway/gateways`,
       {

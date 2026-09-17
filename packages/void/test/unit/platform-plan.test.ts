@@ -7,7 +7,12 @@ import {
   recordInstallationStep,
 } from '@void/platform';
 import { describe, expect, it } from 'vite-plus/test';
-import { PlatformCloudflareClient } from '../../src/cli/platform-cloudflare.ts';
+import {
+  PlatformCloudflareApiError,
+  PlatformCloudflareClient,
+} from '../../src/cli/platform-cloudflare.ts';
+import { installPlatform } from '../../src/cli/platform-installer.ts';
+import { verifyPlatformAiGatewayPlan } from '../../src/cli/platform-lifecycle.ts';
 import {
   createPlatformInstallPlan,
   platformProvisionIntentHash,
@@ -56,6 +61,62 @@ function r2ConfigHash(name: string, fingerprint: string): string {
 }
 
 describe('platform installation planning', () => {
+  it('keeps an explicit pending AI Gateway check in previews, then verifies it without changing resource names', async () => {
+    const denied = client({
+      listAiGateways: async () => {
+        throw new PlatformCloudflareApiError(
+          'Authentication error',
+          403,
+          '/accounts/account/ai-gateway/gateways',
+        );
+      },
+    });
+    const preview = await createPlatformInstallPlan(denied, input, null, {
+      allowUnverifiedAiGateway: true,
+      provisioningSuffix: 'a'.repeat(32),
+    });
+    expect(preview.actions.find((action) => action.key === 'ai-gateway')).toMatchObject({
+      action: 'inspect',
+      reason: expect.stringContaining('AI Gateway: Edit'),
+    });
+    await expect(installPlatform(preview, {} as never, null, {} as never)).rejects.toThrow(
+      'verified before provisioning',
+    );
+    const verified = await verifyPlatformAiGatewayPlan(client(), input, null, preview, false);
+    expect(verified.actions.find((action) => action.key === 'ai-gateway')?.action).toBe('create');
+    expect(verified.deployment).toEqual(preview.deployment);
+    expect(verified.installationId).toBe(preview.installationId);
+    await expect(verifyPlatformAiGatewayPlan(denied, input, null, preview, false)).rejects.toThrow(
+      'runtime token could not verify AI Gateway',
+    );
+  });
+
+  it('does not conceal other permission failures or AI Gateway service errors in previews', async () => {
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          listAiGateways: async () => {
+            throw new PlatformCloudflareApiError('service unavailable', 503);
+          },
+        }),
+        input,
+        null,
+        { allowUnverifiedAiGateway: true },
+      ),
+    ).rejects.toThrow('service unavailable');
+    await expect(
+      createPlatformInstallPlan(
+        client({
+          listKvNamespaces: async () => {
+            throw new PlatformCloudflareApiError('KV access denied', 403);
+          },
+        }),
+        input,
+        null,
+        { allowUnverifiedAiGateway: true },
+      ),
+    ).rejects.toThrow('KV access denied');
+  });
   it('plans workers.dev without any zone, DNS, or certificate access', async () => {
     const forbidden = async () => {
       throw new Error('zone access must not occur');

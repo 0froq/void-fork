@@ -623,6 +623,11 @@ export async function installPlatform(
   existing: PlatformInstallationManifest | null,
   dependencies: PlatformInstallerDependencies,
 ): Promise<PlatformInstallationResult> {
+  if (plan.actions.some((action) => action.action === 'inspect')) {
+    throw new Error(
+      'platform: AI Gateway access must be verified before provisioning. Provide AI Gateway: Edit on the runtime token, then retry.',
+    );
+  }
   const now = dependencies.now ?? (() => new Date().toISOString());
   const cloudflareApiBaseUrl = dependencies.client.apiBaseUrl ?? resolvePinnedApiBaseUrl();
   const runPinnedPlatformWrangler: typeof runPlatformWrangler = (args, accountId, cwd, capture) =>
