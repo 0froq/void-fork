@@ -184,7 +184,13 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
         ? await promptText('Optional custom API hostname (leave empty for workers.dev):', '', true)
         : ''));
   let dedicatedZone = recorded?.application.dedicatedZone ?? args.dedicatedZone;
-  if (!recorded && !args.dedicatedZone && applicationDomain === zoneName && process.stdin.isTTY) {
+  if (
+    !workersDev &&
+    !recorded &&
+    !args.dedicatedZone &&
+    applicationDomain === zoneName &&
+    process.stdin.isTTY
+  ) {
     const catchAll = await confirm({
       message: `Dedicate all unmatched ${zoneName} traffic to Void apps?`,
       initialValue: false,
