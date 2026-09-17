@@ -16,12 +16,13 @@ Clone your fork and install the workspace dependencies with Vite+:
 git clone https://github.com/your-org/void.git
 cd void
 vp install
-vp run build:core
+vpr install:void-dev
+void-dev --help
 ```
 
 Use the Node.js version recorded in `.node-version`. The workspace uses public npm packages; a GitHub Packages token is not required.
 
-`build:core` builds the CLI, shared packages, and the platform runtime. Public packages export their built files, so run it before starting a source app or testing changes that use package exports. All commands in this guide run from the repository root.
+`install:void-dev` builds the CLI, shared packages, and platform runtime, then makes this checkout's built CLI globally available as `void-dev`. Public packages export their built files, so run `vp run build:core` after later source changes to refresh the alias. The installer refuses to replace an unrelated global command. Remove only this checkout's alias with `vpr uninstall:void-dev`. All commands in this guide run from the repository root.
 
 ## Finding the Implementation
 
@@ -122,7 +123,7 @@ Build systems may set `VOID_PLATFORM_SOURCE_REVISION` when they need to override
 The runtime is written to `packages/platform/dist/runtime`. Use the built CLI to preview a new installation from those files:
 
 ```sh
-node packages/void/dist/cli/cli.mjs platform install \
+void-dev platform install \
   --name my-team \
   --application-domain example.app \
   --zone example.app \
@@ -135,7 +136,7 @@ After reviewing the plan, run it without `--plan` to install. The command asks f
 For an existing installation, preview an upgrade using its connection ID:
 
 ```sh
-node packages/void/dist/cli/cli.mjs platform upgrade <installation-id> \
+void-dev platform upgrade <installation-id> \
   --runtime packages/platform/dist/runtime --plan
 ```
 
