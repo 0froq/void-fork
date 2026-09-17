@@ -143,10 +143,14 @@ export async function verifyPlatformRuntimeTokenPermissions(
 }
 
 function runtimeTokenPreflightError(permission: string, cause: unknown): Error {
-  return new Error(
-    `platform: The Void runtime API token failed its permission preflight. Required permission or scope: ${permission}.`,
-    { cause },
-  );
+  const status = cause instanceof PlatformCloudflareApiError ? cause.status : null;
+  const message =
+    status === 401 || status === 403
+      ? `Cloudflare denied the runtime-token check (HTTP ${status}). Check that the token is valid, scoped to this account, and includes ${permission}.`
+      : status === 429
+        ? `Cloudflare rate-limited the runtime-token check for ${permission} (HTTP 429). Retry shortly; this does not mean the token is missing a permission.`
+        : `Could not complete the runtime-token check for ${permission}${status === null ? '' : ` (Cloudflare HTTP ${status})`}. Retry the check; this failure does not establish that a permission is missing.`;
+  return new Error(`platform: ${message}`, { cause });
 }
 
 export class PlatformCloudflareClient {

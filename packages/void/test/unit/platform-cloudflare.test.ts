@@ -3,6 +3,7 @@ import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
   parsePostgresConnectionString,
+  PlatformCloudflareApiError,
   PlatformCloudflareClient,
   PlatformWorkerCustomDomainsChangedError,
   verifyPlatformRuntimeTokenPermissions,
@@ -433,7 +434,60 @@ describe('platform Cloudflare client', () => {
       message = String(error);
     }
     expect(message).toContain('Hyperdrive → Write');
+    expect(message).toContain('HTTP 403');
+    expect(message).toContain('token is valid, scoped to this account');
     expect(message).not.toContain(token);
+  });
+
+  it.each([401, 403, 404, 429, 500, 503])(
+    'distinguishes HTTP %s during token preflight without leaking upstream text',
+    async (status) => {
+      const secret = 'synthetic-runtime-secret';
+      const client = new PlatformCloudflareClient(secret, {
+        fetcher: async () =>
+          Response.json(
+            { success: false, errors: [{ message: `upstream echoed ${secret}` }] },
+            { status },
+          ),
+      });
+      const failure = await verifyPlatformRuntimeTokenPermissions(client, {
+        accountId: 'account',
+        applicationDomain: '',
+        customDomains: false,
+        zoneId: null,
+      }).catch((error: Error) => error);
+      expect(failure).toBeInstanceOf(Error);
+      const message = String(failure);
+      expect(message).toContain(`HTTP ${status}`);
+      expect(message).not.toContain(secret);
+      expect(message).not.toContain('upstream echoed');
+      if (status === 401 || status === 403) {
+        expect(message).toContain('Cloudflare denied');
+      } else if (status === 429) {
+        expect(message).toContain('rate-limited');
+      } else {
+        expect(message).toContain('does not establish that a permission is missing');
+        expect(message).not.toContain('Cloudflare denied');
+      }
+      expect((failure as Error).cause).toBeInstanceOf(PlatformCloudflareApiError);
+    },
+  );
+
+  it('does not describe transport failures as missing token permissions', async () => {
+    const client = new PlatformCloudflareClient('synthetic-runtime-secret', {
+      fetcher: async () => {
+        throw new Error('network failure with synthetic-runtime-secret');
+      },
+    });
+    const failure = verifyPlatformRuntimeTokenPermissions(client, {
+      accountId: 'account',
+      applicationDomain: '',
+      customDomains: false,
+      zoneId: null,
+    });
+    await expect(failure).rejects.toThrow('does not establish that a permission is missing');
+    await expect(failure).rejects.not.toThrow('synthetic-runtime-secret');
+    await expect(failure).rejects.not.toThrow('Required permission or scope');
   });
 
   it('refuses unattended custom-domain deletion without a generation precondition', async () => {
