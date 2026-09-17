@@ -542,9 +542,11 @@ void platform install [options] [--yes]
 | `--runtime <path>`                | Deploy a locally built, integrity-checked runtime directory                      |
 | `--yes`                           | Acknowledge Cloudflare changes in non-interactive use                            |
 
-Platform administration uses Cloudflare browser login and the system keychain. CI can use `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`.
+For a first installation, follow [Install a Void Platform](../guide/self-hosted-platform.md). It walks through account activation, choosing a domain, creating PostgreSQL, obtaining credentials, and connecting GitHub. Void creates the platform infrastructure and tables; a domain and external PostgreSQL are currently required even for a test installation.
 
-The installed platform needs a separate runtime token to provision resources for apps. The installer asks for it in a masked prompt. For non-interactive installs, set `VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN` and the database, GitHub OAuth, and R2 variables listed in the [setup guide](../guide/self-hosted-platform.md#install).
+Read-only plans and supported lifecycle operations can use Cloudflare browser login and the system keychain. Installation that writes DNS or creates a zone needs an explicit management token through `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`; browser login alone is not enough.
+
+The installed platform needs a separate runtime token to provision resources for apps. The interactive installer prompts for it and the other setup values. For non-interactive installs, inject the variables listed in [Install from CI](../guide/self-hosted-platform.md#install-from-ci).
 
 Use an empty PostgreSQL database dedicated to the installation. You can correct a failed initial connection, but after the database is claimed or Hyperdrive is provisioned, commands reject a different URL.
 

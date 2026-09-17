@@ -239,7 +239,7 @@ export default extendConfig(
               { text: 'Queues', link: '/guide/queues' },
               { text: 'Remote Development', link: '/guide/remote-dev' },
               { text: 'Deployment', link: '/guide/deployment' },
-              { text: 'Self-hosted Platform', link: '/guide/self-hosted-platform' },
+              { text: 'Install a Void Platform', link: '/guide/self-hosted-platform' },
               { text: 'Platform Administration', link: '/guide/platform-administration' },
               { text: 'Platform Development', link: '/guide/platform-development' },
             ],

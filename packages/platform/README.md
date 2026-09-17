@@ -2,6 +2,8 @@
 
 Public, target-neutral contracts and packaged runtime artifacts for installing a Void company platform in a Cloudflare account.
 
+For a first installation, follow [Install a Void Platform](../../docs/guide/self-hosted-platform.md). It explains how to prepare the Cloudflare account, domain, PostgreSQL database, and credentials before deploying. Void creates the platform resources and database tables.
+
 The packaged API also serves the `void platform` commands for managing users,
 projects, access, and logs. The installer applies the database migration needed
 for administrator sessions and audit records. See

@@ -2,144 +2,224 @@
 outline: deep
 ---
 
-# Self-host a Void platform
+# Install a Void Platform
 
 A Void platform lets your team deploy apps into a shared Cloudflare account. As an administrator, you install and maintain the platform. Developers connect the Void CLI to its URL, sign in with GitHub, and deploy their apps.
 
 If you're deploying an app for yourself, [deploy directly to Cloudflare](../integrations/cloudflare.md#deploy-to-your-own-cloudflare-account). You don't need to install a platform first.
 
-The CLI stores platform login credentials in your operating system's keychain, separately for each platform URL. For CI, supply `VOID_TOKEN` from a secret manager. Void doesn't create new plaintext token files if the keychain is unavailable.
-
 The core platform supports GitHub login, CLI deploys, D1, KV, R2, Queues, cron jobs, Workers AI, WebSockets, SSE, ISR, routing, logs, and rollback. It uses the same components as Void Cloud.
 
 The user dashboard, GitHub builds and webhooks, build Containers, email, Google login, custom project domains, and sandbox orchestration aren't part of the core installation.
 
-## Prerequisites
+## Before You Start {#prerequisites}
 
-You need:
+Start with a Cloudflare account you can administer and a GitHub account. To finish an installation, you also need a domain you own and an empty hosted PostgreSQL database. The steps below explain how to get them and the credentials the installer asks for.
 
-- A Cloudflare account with Workers for Platforms and the products represented in the footprint below.
-- Access to create the platform's resources in that account. Void can use browser OAuth for read-only plans and lifecycle operations that do not write zones or DNS. Wrangler's browser OAuth grants Zone Read, so a fresh installation needs `CLOUDFLARE_API_TOKEN` with Account → Zone → Edit when creating a zone and Zone → DNS → Edit when creating the application wildcard record.
-- CI can use a user-scoped or account-scoped API token. Scope it to the selected account and application zone. Void checks the accounts and resources the credential can access before provisioning.
-- A Cloudflare API token for the running platform. This is separate from your administrator login: the platform uses it to manage resources when developers deploy apps. See the permissions below.
-- An empty PostgreSQL database reachable through Cloudflare Hyperdrive, dedicated to this installation. Void records the installation in that database and won't let another platform share it. You manage the database itself.
-- An application base domain such as `example.app`. Using the zone apex lets Universal SSL cover app hostnames such as `my-app.example.app`. Its Cloudflare zone may already exist or the installer can create it.
-- A workers.dev subdomain configured for the account. On a new Cloudflare account, open Workers & Pages in the dashboard, finish Workers onboarding, and choose the subdomain before planning the installation.
-- A GitHub OAuth App for login. The installer prints the exact callback URL before asking for its client credentials.
-- An R2 API token with Object Read & Write access. This is separate from the Cloudflare management API token and is used to sign direct asset uploads.
+Void creates the Workers, storage, queues, routing, and database tables. You do not need to create those resources yourself, install a separate deployment tool, or clone this repository.
 
-Workers for Platforms is a platform-level Cloudflare product. This requirement does not change native single-app deploys: ordinary `void deploy --platform cloudflare` apps remain Workers Free-compatible unless the app explicitly uses a paid-only product such as Containers.
+This setup has costs: Workers for Platforms requires a paid plan, and your domain, database, and Cloudflare usage have their own pricing. A domain and external PostgreSQL are currently required even for a test platform. Native single-app deployments remain Workers Free-compatible unless the app uses a paid-only product.
 
-### Runtime token permissions
+## 1. Prepare Your Cloudflare Account and Domain
 
-The running platform needs these account permissions: Workers Scripts: Edit, Workers Tail: Read, D1: Edit, Workers KV Storage: Edit, Workers R2 Storage: Edit, Queues: Edit, Hyperdrive: Write, and Account Analytics: Read. It also needs Cache Purge: Purge on the application zone so ISR revalidation can remove stale edge entries. A custom runtime that enables custom project domains additionally needs SSL and Certificates: Edit on that zone; the core runtime does not enable that capability.
+In the [Cloudflare dashboard](https://dash.cloudflare.com/), select the account where you want the platform to live:
 
-The installer links to the account-token page and asks for the token in a masked prompt. Before provisioning, it checks account and Hyperdrive access. When the application zone already exists, it also purges one unique nonexistent URL to verify the exact Cache Purge permission. The token and probe URL are not logged. Hyperdrive provisioning still requires Write even though its non-mutating preflight can only verify that Hyperdrive is readable. If the installer creates the zone, the Cache Purge check runs when you resume after DNS activation. Keep a copy of the token in your secret manager for recovery.
+1. Open **Workers & Pages**, finish onboarding, and choose the account's `workers.dev` subdomain.
+2. Open **Workers for Platforms** and enable its plan. Review [Workers for Platforms pricing](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/platform/pricing/) before confirming.
+3. Open **R2 Object Storage** and complete its activation. Void creates the bucket later.
+4. Choose a domain you own, such as `example.app`. If you need one, register it with your preferred registrar. For a first installation, use a spare domain's root: apps will be served at `my-app.example.app`.
 
-## Preview the installation
+If that domain is already in this Cloudflare account, use its existing zone. Otherwise, [add the domain to Cloudflare](https://developers.cloudflare.com/dns/zone-setups/full-setup/setup/) and follow the nameserver instructions until the zone is active. A zone is Cloudflare's DNS configuration for a domain; creating one does not buy the domain.
 
-Run the interactive installer with `--plan` first:
+You can also let Void create the zone during installation. Setting it up now lets you scope the API tokens to that zone and finish installation without a DNS pause. The platform API uses `workers.dev` by default, so it needs no additional domain.
+
+## 2. Install the CLI and Preview {#preview-the-installation}
+
+With Node.js 24.21.0 or later, install the CLI:
 
 ```sh
+pnpm add --global void
 void platform install --plan
 ```
 
-The plan shows the account, resource names, domains, and changes Void would make. It doesn't change Cloudflare resources. The API and resource proxy use `workers.dev` hostnames by default.
+The plan command opens Cloudflare browser login when needed. It asks for the account and basic configuration, then shows the resources it would create. It does not require the database or runtime secrets and does not change Cloudflare resources.
 
-A preview uses an example suffix for resource names. Installation generates a fresh suffix and shows the final names before asking you to proceed.
+For the first installation, use these answers:
 
-For a repeatable non-interactive plan:
+| Prompt                                  | Answer                                              |
+| --------------------------------------- | --------------------------------------------------- |
+| Installation name                       | A short name, such as `team`                        |
+| Application base domain                 | Your domain, such as `example.app`                  |
+| Cloudflare zone                         | The same domain                                     |
+| Platform display name                   | Any name your team will recognize                   |
+| Optional custom API hostname            | Leave empty to use `workers.dev`                    |
+| Dedicate all unmatched traffic to Void? | Yes only if this whole zone belongs to the platform |
+
+The preview uses placeholder resource names. The real install prints its final names and GitHub callback URL.
+
+::: tip Working from this repository?
+Run `vpr install:void-dev` and use `void-dev` wherever this guide says `void`. Add `--runtime packages/platform/dist/runtime` to install, resume, and upgrade commands from the repository root to select your source build. No source-revision environment variable is needed. See [Platform Development](./platform-development.md).
+:::
+
+## 3. Create the Platform Database
+
+Use an empty PostgreSQL database dedicated to this platform. It stores users, projects, and deployments; individual apps can still use D1. Void creates the tables and the Hyperdrive connection, but does not provision the PostgreSQL server.
+
+If you already have hosted PostgreSQL, create a fresh database and a user that owns it. The connection must work both from your computer, for migrations, and from Cloudflare, for the running platform.
+
+For example, with [Neon](https://neon.com/):
+
+1. Create a new project for the platform.
+2. Open its connection details and select the new database and its owner role.
+3. Turn **connection pooling off** and copy the PostgreSQL connection URL, including the password and SSL settings, into your password manager. Copy only the URL, not a surrounding `psql` command.
+
+The direct connection is needed for installation locks and migrations. Cloudflare also recommends it for [Neon with Hyperdrive](https://developers.cloudflare.com/hyperdrive/examples/connect-to-postgres/postgres-database-providers/neon/). You will paste it into Void's `PostgreSQL DATABASE_URL` prompt.
+
+Once installation claims the database, continue using that same database for resume and maintenance commands. Uninstall never deletes external PostgreSQL.
+
+## 4. Prepare Credentials
+
+Keep one password-manager entry for this platform. Paste the saved values into the installer when asked; most do not need shell environment variables.
+
+### Cloudflare API Tokens {#runtime-token-permissions}
+
+Create two custom tokens using Cloudflare's [API token setup](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/). Name them **Void Platform Management** and **Void Platform Runtime**. Scope them to your selected account and application zone.
+
+The management token lets your CLI install and maintain the platform. The runtime token is stored as a Worker secret so the platform can deploy apps after you close your terminal. They are separate credentials.
+
+::: details Permissions to select for each token
+
+Use the following permissions for the core platform. Cloudflare may label write access as **Edit** or **Write**, depending on the token screen; see its [permission reference](https://developers.cloudflare.com/fundamentals/api/reference/permissions/).
+
+| Scope   | Permission         | Management | Runtime |
+| ------- | ------------------ | ---------- | ------- |
+| Account | Account Settings   | Read       | Read    |
+| Account | Workers Scripts    | Edit       | Edit    |
+| Account | Workers Tail       | Read       | Read    |
+| Account | D1                 | Edit       | Edit    |
+| Account | Workers KV Storage | Edit       | Edit    |
+| Account | Workers R2 Storage | Edit       | Edit    |
+| Account | Queues             | Edit       | Edit    |
+| Account | Hyperdrive         | Write      | Write   |
+| Account | Account Analytics  | Read       | Read    |
+| Account | AI Gateway         | Edit       | —       |
+| Zone    | Zone               | Read       | —       |
+| Zone    | DNS                | Edit       | —       |
+| Zone    | Workers Routes     | Edit       | —       |
+| Zone    | Cache Purge        | —          | Purge   |
+
+The management token also needs **Zone Edit** with authority to create zones if you ask Void to create the zone. If it already exists, use the selected zone with Zone Read and DNS Edit. Nested application domains additionally need **SSL and Certificates: Read** on the management token. A custom runtime that enables custom project domains needs **SSL and Certificates: Edit** on the runtime token; the core runtime does not enable that feature.
+
+Void checks account and Hyperdrive access before provisioning. For an existing zone it verifies Cache Purge by purging one unique nonexistent URL, without logging the token or URL. This preflight cannot prove every write permission; a later permission error names the operation to check.
+
+:::
+
+### R2 Upload Credentials
+
+In the account's **R2 Object Storage** page, select **Manage API Tokens**, create an account token if your role permits it (otherwise a user token), and choose **Object Read & Write**. The installer needs these credentials before creating its bucket, so the initial token must cover that bucket when it is created; the dashboard's all-buckets option covers it. Save the **Access Key ID** and **Secret Access Key**. These are different from the two management/runtime tokens above. See [R2's token instructions](https://developers.cloudflare.com/r2/api/tokens/).
+
+### Signing and Encryption Keys
+
+The current installer asks for two keys. Generate and save them before continuing: a JWT signing secret with at least 32 random bytes, and a separate project-encryption key containing exactly 32 random bytes encoded as base64. Generate each once per platform and keep the originals for recovery.
+
+::: details Generate the keys without printing them to your terminal
+
+On macOS, this copies a suitable random value to the clipboard:
 
 ```sh
-void platform install --plan \
-  --name company \
-  --display-name "Company Void" \
-  --account 0123456789abcdef0123456789abcdef \
-  --application-domain example.app \
-  --zone example.app
+node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))' | pbcopy
 ```
 
-Commands that change the platform require `--yes` in a non-interactive shell. A preview with `--plan` doesn't need it.
+Paste it into your password manager as **JWT signing secret**. Run the command again and save the second value as **Project encryption key**. On PowerShell, use `Set-Clipboard` instead of `pbcopy`; on other systems, use your secret manager's secure generator with the same byte length and encoding.
 
-Use `--control-plane-domain platform.example.net` when you want a custom API hostname. The hostname must be in a zone the selected account and token can manage. Omitting it keeps the control plane on `workers.dev` and avoids requiring another domain.
+:::
 
-Use `--dedicated-zone` if the entire application zone belongs to Void. This adds catch-all routes for unmatched hostnames. For example, you could use a spare domain such as `example.app` as the whole zone, or `apps.example.com` within an existing company zone without the catch-all.
+## 5. Install and Connect GitHub {#install}
 
-### Using a Nested Application Domain
-
-You can use `apps.example.com` inside the `example.com` zone when an active edge
-certificate already covers `*.apps.example.com`. Universal SSL for `example.com`
-covers first-level hostnames, so it does not cover an app at `my-app.apps.example.com`.
-
-Configure a wildcard certificate with [Advanced Certificate Manager](https://developers.cloudflare.com/ssl/edge-certificates/advanced-certificate-manager/), a paid add-on, or use an existing custom wildcard certificate. Wait until it is active, then run:
+The management token is the one value the current interactive installer needs in the shell. Its browser login cannot create the application's DNS record. In Bash or zsh, read the token without displaying it or putting its value in command history:
 
 ```sh
-void platform install --application-domain apps.example.com --zone example.com --plan
-```
-
-Void verifies the deployed certificate before provisioning. The management
-credential needs **Zone → SSL and Certificates → Read** (or Edit) on the zone.
-A pending certificate or a certificate for only `*.example.com` is insufficient.
-Void does not order a certificate or enable a paid product automatically.
-
-## Configure GitHub OAuth
-
-Create a GitHub OAuth App using the final API URL the installer prints. A `--plan` preview may use a placeholder resource suffix, so wait for the actual installation URL before saving the callback:
-
-- Homepage URL: the API origin, for example `https://void-company-api.example.workers.dev`
-- Authorization callback URL: `<API origin>/auth/callback`
-
-The installer asks for the app's client ID, client secret, and the GitHub username of the first administrator. That GitHub account becomes the first owner. Signup stays restricted until an administrator changes the access settings.
-
-## Install
-
-The interactive command asks for every missing value:
-
-```sh
+printf 'Cloudflare management API token: '
+read -rs CLOUDFLARE_API_TOKEN
+printf '\n'
+export CLOUDFLARE_API_TOKEN
 void platform install
 ```
 
-For CI or another non-interactive shell, supply the configuration through environment variables. The example below uses placeholders; load the real values from your secret manager.
+::: details PowerShell equivalent
 
-`CLOUDFLARE_API_TOKEN` authorizes the installation. `VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN` is the separate token the running platform will use.
-The installation token needs Zone → DNS → Edit for the application wildcard record. If the zone does not exist yet, it also needs Account → Zone → Edit. Keep this management token separate from the runtime token.
-
-```sh
-export CLOUDFLARE_API_TOKEN=your-scoped-management-token
-export VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN=your-scoped-runtime-token
-export VOID_PLATFORM_DATABASE_URL='postgresql://user:password@host/database?sslmode=require'
-export VOID_PLATFORM_GITHUB_CLIENT_ID=your-github-oauth-client-id
-export VOID_PLATFORM_GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
-export VOID_PLATFORM_ADMIN_GITHUB_LOGIN=your-github-username
-export VOID_PLATFORM_R2_ACCESS_KEY_ID=your-r2-access-key-id
-export VOID_PLATFORM_R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
-export VOID_PLATFORM_JWT_SECRET=your-platform-signing-secret
-export VOID_PLATFORM_PROJECT_SECRET_KEY=your-base64-encoded-32-byte-key
-
-void platform install \
-  --name company \
-  --display-name "Company Void" \
-  --account 0123456789abcdef0123456789abcdef \
-  --application-domain example.app \
-  --zone example.app \
-  --yes
+```powershell
+$env:CLOUDFLARE_API_TOKEN = [System.Net.NetworkCredential]::new('', (Read-Host 'Cloudflare management API token' -AsSecureString)).Password
+void platform install
 ```
 
-Use your secret manager's cryptographic generator to create a distinct pair for each platform installation: `VOID_PLATFORM_JWT_SECRET` must contain at least 32 random bytes, and `VOID_PLATFORM_PROJECT_SECRET_KEY` must be the canonical base64 encoding of exactly 32 random bytes. Store both before starting the install, then inject that installation's same values into every resume or repair run that may create a Worker. Do not print them or generate them only inside an ephemeral CI job. Void does not generate these installation identity keys.
+:::
 
-The database must be dedicated to this installation. Its ownership claim and platform tables remain after uninstall because external PostgreSQL is never purged automatically. To reuse it for a different installation, explicitly remove the old platform schema and data yourself or provide a fresh database.
+Use the same name, account, and domain as the preview. The command shows the final plan, API URL, and callback URL, then waits for confirmation. Leave that terminal open while you configure GitHub.
 
-Before making changes, Void shows the full plan and asks for confirmation, with No selected by default. It saves progress locally and in Cloudflare so an interrupted install can resume.
+### Configure GitHub OAuth {#configure-github-oauth}
 
-Void records which resources belong to the installation. If it cannot prove that a resource is yours to manage, it stops and asks you to resolve the conflict.
+1. Open [GitHub's new OAuth App form](https://github.com/settings/applications/new) while signed in as the account that will own the login integration.
+2. Set **Application name** to your platform's display name and **Homepage URL** to the API URL Void just printed.
+3. Set **Authorization callback URL** to the exact printed URL ending in `/auth/callback`, then register the application. Use the real install's URL, not the earlier preview's placeholder.
+4. Save the **Client ID**, generate a **Client Secret**, and save that too. GitHub's [registration guide](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) describes the form.
 
-If the requested zone does not exist, Void creates it and stops in a `waiting-for-dns` state. Update the domain at its registrar to use the printed Cloudflare nameservers, wait for the zone to become active, then resume:
+This OAuth App handles sign-in. A GitHub App with repository access and build webhooks is not required for the core platform.
+
+Back in the terminal, confirm the plan and answer the prompts in order: runtime Cloudflare token, your initial administrator's GitHub username, PostgreSQL URL, GitHub client ID and secret, signing and encryption keys, and R2 credentials. Secret values are masked.
+
+Void applies database migrations, provisions the resources, deploys the Workers, and verifies the platform. Installation progress is checkpointed for recovery. When it prints the installed API URL, continue to [connect and deploy an app](#connect-and-deploy-an-app).
+
+Remove the management token from the shell when finished:
+
+```sh
+unset CLOUDFLARE_API_TOKEN
+```
+
+In PowerShell, use `Remove-Item Env:CLOUDFLARE_API_TOKEN`. Keep the saved token for future maintenance.
+
+::: details If setup pauses for DNS or is interrupted
+
+If Void created a zone, it stops in `waiting-for-dns` and prints nameservers. Set those at your registrar, wait for the zone to become active, then resume using the installation ID printed by Void:
 
 ```sh
 void platform install --resume --name <installation-id>
 ```
 
-For application traffic, Void creates one proxied wildcard DNS record at `*.application-domain` and the matching Worker routes. A compatible existing proxied record is adopted and is never deleted by Void.
+Keep the management token available for any remaining DNS changes. When using a source build, also pass the same `--runtime` directory. Resume uses the saved checkpoint and original secrets; do not start a second installation or generate replacement keys. If setup failed before a checkpoint was saved, rerun the original command.
+
+:::
+
+## 6. Verify and Deploy Your First App {#connect-and-deploy-an-app}
+
+First verify the new platform and sign in as the GitHub administrator you chose:
+
+```sh
+void platform status
+void platform auth login
+void platform system health
+```
+
+Administrator login is separate from the credentials used to deploy apps. In a new or unlinked Void app directory, connect using the installed API URL and deploy your first project:
+
+```sh
+void connect https://void-company-api.example.workers.dev
+void deploy --platform void --project my-first-app
+```
+
+`void connect` validates the platform and signs you in when needed. Confirm project creation when deploy asks. To use a project that already exists, run `void project link` instead. An app already linked to another platform keeps its existing destination; use a fresh app directory for your first test.
+
+The CLI stores login credentials in your system keychain, separately for each platform URL. With no URL, `void connect` offers Cloudflare or a Void platform; `void connect --platform void` offers saved platforms and an option to enter another URL.
+
+In CI, use `void connect <url> --no-login` to register the platform, and supply `VOID_TOKEN` and `VOID_API_URL` for deployment. To verify authentication during connection, omit `--no-login` and set both variables to credentials for that same platform. Older project files already linked to Void Cloud continue to work.
+
+Use these commands to inspect connections and installations:
+
+```sh
+void platform list
+void platform use [id]
+void platform status [id]
+```
 
 ## Managing Access
 
@@ -155,6 +235,28 @@ Void shows the proposed access change and asks you to confirm it. Once approved,
 To see who can join, run `void platform signup show`. You can also allow an email address or a domain such as `*@example.com`. `void platform signup open` permits public signup; `void platform signup restrict` requires an allowlist match again.
 
 Your administrator session lasts for one hour. Use it to inspect users, projects, logs, and platform health. The [Platform Administration guide](./platform-administration.md) walks through those workflows, previews, and automation. You can also open `<API origin>/admin/login` to use the browser admin UI.
+
+## Other Domain Options
+
+::: details Custom API hostname
+
+Pass `--control-plane-domain platform.example.net` during installation. The hostname must belong to a zone the selected account and management token can manage. Omitting it keeps the API on `workers.dev`.
+
+:::
+
+### Using a Nested Application Domain
+
+::: details Use apps.example.com within an existing company zone
+
+An app at `my-app.apps.example.com` needs a certificate for `*.apps.example.com`. Universal SSL for `example.com` only covers first-level hostnames. Configure an active wildcard certificate with [Advanced Certificate Manager](https://developers.cloudflare.com/ssl/edge-certificates/advanced-certificate-manager/), a paid add-on, or use an existing custom wildcard certificate before installation:
+
+```sh
+void platform install --application-domain apps.example.com --zone example.com --plan
+```
+
+The management token needs **SSL and Certificates: Read** (or Edit) on that zone for the certificate check. Void does not order certificates or enable paid products automatically. Leave `--dedicated-zone` off: that flag is only for installations whose application domain is the entire zone and adds catch-all routes for otherwise unmatched traffic.
+
+:::
 
 ## Cloudflare footprint
 
@@ -173,28 +275,6 @@ Resources use a `void-<installation-name>-<random-suffix>-*` prefix where Cloudf
 | Zones                                     | 0 or 1 | Created only when the requested application zone is absent         |
 
 The API Worker uses four Durable Object classes for usage, cron scheduling, error monitoring, and concurrency. Worker bindings create the request and log datasets in Analytics Engine. The core installation doesn't create Container applications, a GitHub App, a dashboard Worker, or build Workers.
-
-## Connect and deploy an app
-
-The CLI selects your platform after installation. A developer, or an administrator on another workstation, can connect using its API URL:
-
-```sh
-void connect https://void-company-api.example.workers.dev
-void project link
-void deploy --platform void
-```
-
-`void connect` validates the platform and signs you in when needed. With no URL, it offers Cloudflare or a Void platform; `void connect --platform void` offers saved platforms and an option to enter another URL. New projects need a platform connection. Connecting elsewhere preserves an existing project link and explains which destination the project still uses.
-
-In CI, use `void connect <url> --no-login` to register the platform, and supply `VOID_TOKEN` and `VOID_API_URL` for deployment. To verify authentication during connection, omit `--no-login` and set both variables to credentials for that same platform. Older project files already linked to Void Cloud continue to work.
-
-Use these commands to inspect connections and installations:
-
-```sh
-void platform list
-void platform use [id]
-void platform status [id]
-```
 
 ## Resume, repair, recover, and upgrade
 
@@ -232,6 +312,8 @@ void platform upgrade [id]
 
 An upgrade validates the runtime, applies supported pending migrations, deploys the Workers, and checks their health. Existing Worker secrets are preserved.
 
+::: details Migration safety, credential rotation, and interrupted upgrades
+
 When a release changes the authenticated usage protocol shared by the platform Workers, the installer briefly puts the platform into maintenance mode before updating the first Worker. It restores traffic only after the API reports the target protocol and every Worker version in the runtime has been verified. If the command is interrupted, traffic stays blocked; rerun the same upgrade to resume. The installer never opens a compatibility window for unsigned usage messages.
 
 To update the runtime Cloudflare token, GitHub OAuth credentials, or R2 credentials,
@@ -259,6 +341,8 @@ void platform rollback [id] --runtime /path/to/earlier/runtime
 ```
 
 The installed packaged runtime provides the compatibility declaration. If the current installation used a custom build, also pass its exact artifact directory with `--from-runtime /path/to/current/runtime`. Void compares the current manifest digest with the installed checkpoint, requires the earlier migration journal to be an exact prefix, and verifies PostgreSQL remains at the current forward-only schema. Discovery on another machine preserves the running-runtime and database-schema provenance independently, so a normal `upgrade` can roll forward later. A target missing a safety protocol already required by the database, such as completed Sandbox drain, is rejected before any Worker upload.
+
+:::
 
 ### Manage an installation from another machine
 
@@ -310,6 +394,44 @@ Void preserves manually attached routes and custom domains in both the new confi
 For local API and dashboard development, fork CI, and the source layout, see
 [Platform Development](./platform-development.md).
 
+## Install from CI {#install-from-ci}
+
+For your first installation, follow the interactive walkthrough above. Use this section when automating a configured installation.
+
+::: details Non-interactive inputs
+
+Inject the following values from protected CI secrets. Do not commit them in a workflow or a plaintext secrets file.
+
+| Environment variable                         | Value from the interactive setup                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`                       | Management API token                                                                        |
+| `VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN` | Runtime API token                                                                           |
+| `VOID_PLATFORM_DATABASE_URL`                 | Dedicated PostgreSQL URL                                                                    |
+| `VOID_PLATFORM_GITHUB_CLIENT_ID`             | OAuth App client ID                                                                         |
+| `VOID_PLATFORM_GITHUB_CLIENT_SECRET`         | OAuth App client secret                                                                     |
+| `VOID_PLATFORM_ADMIN_GITHUB_LOGIN`           | Initial administrator's GitHub username                                                     |
+| `VOID_PLATFORM_R2_ACCESS_KEY_ID`             | R2 access key ID                                                                            |
+| `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`         | R2 secret access key                                                                        |
+| `VOID_PLATFORM_JWT_SECRET`                   | Original JWT signing secret                                                                 |
+| `VOID_PLATFORM_PROJECT_SECRET_KEY`           | Original base64-encoded project-encryption key                                              |
+| `VOID_PLATFORM_RECOVERY_KEY`                 | Base64-encoded 32-byte key for local encrypted recovery state when no keychain is available |
+
+Use that installation's saved signing and encryption keys on every resume or repair that needs them. After a keyring rotation, use the [complete keyring recovery inputs](#manage-an-installation-from-another-machine). The database claim and tables remain after uninstall; use a fresh database for a different installation.
+
+```sh
+void platform install \
+  --name team \
+  --display-name "Team Void" \
+  --account <account-id> \
+  --application-domain example.app \
+  --zone example.app \
+  --yes
+```
+
+Mutations require `--yes` in CI; a read-only `--plan` does not. Custom runtimes also require `--runtime <directory>`. For a new installation, GitHub's callback must match the final generated API URL; use an explicit `--control-plane-domain` if you need to configure that URL before an unattended first install. Plan output uses placeholder resource names.
+
+:::
+
 ## Continuously deploy a source build
 
 Build `@void/platform` from your checkout and pass its runtime directory to `install`, `upgrade`, `repair`, `enable`, or `rollback` with `--runtime`. Custom runtimes get the same integrity, migration, health, and rollback checks as packaged releases.
@@ -317,6 +439,8 @@ Build `@void/platform` from your checkout and pass its runtime directory to `ins
 Void records the runtime's manifest digest, whether it was packaged or custom, and its source revision. A build from a Git checkout automatically records `HEAD`, or `<HEAD>-dirty` when the checkout has uncommitted files. Build systems can set `VOID_PLATFORM_SOURCE_REVISION` to override automatic detection.
 
 A fresh CI runner can discover the installation each time. Set `CLOUDFLARE_API_TOKEN` and `VOID_PLATFORM_DATABASE_URL` through its protected environment, then:
+
+::: details CI commands and recovery inputs
 
 ```sh
 vp run build
@@ -334,6 +458,8 @@ void platform upgrade "$VOID_PLATFORM_INSTALLATION" \
 Omit the installation selector only if the account has one discoverable installation. Run one deployment per installation at a time, and let it finish before starting the next. Cancelling during migrations or Worker rollout can leave an installation waiting for recovery.
 
 Keep the management token, database URL, JWT signing secret, and complete project-encryption keyring in a protected CI environment. Upgrades inherit deployed Worker secrets. The original values are needed when recreating a missing Worker; configuration credentials are also needed when explicitly rotating them.
+
+:::
 
 ## Disable and safely uninstall
 

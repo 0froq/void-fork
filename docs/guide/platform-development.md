@@ -6,7 +6,7 @@ outline: deep
 
 The framework, CLI, and platform live in one repository. You can change the platform, test it locally, and deploy a runtime built from your fork into your own Cloudflare account.
 
-If you want to run the released platform without changing its implementation, start with [Self-host a Void Platform](./self-hosted-platform.md). Use [Platform Administration](./platform-administration.md) for managing an installed platform.
+If you want to run the released platform without changing its implementation, start with [Install a Void Platform](./self-hosted-platform.md). Use [Platform Administration](./platform-administration.md) for managing an installed platform.
 
 ## Setting Up the Repository
 
@@ -131,7 +131,7 @@ void-dev platform install \
   --plan
 ```
 
-After reviewing the plan, run it without `--plan` to install. The command asks for the remaining account, database, domain, and OAuth configuration described in the [installation guide](./self-hosted-platform.md#install).
+Before applying the plan, complete the [first-install walkthrough](./self-hosted-platform.md): a source build still needs the domain, PostgreSQL database, management token, and other credentials. Run the command without `--plan` to install. Use `void-dev` in place of `void` and keep `--runtime packages/platform/dist/runtime` on install and resume commands. For an interrupted installation, keep that runtime build available until it completes.
 
 For an existing installation, preview an upgrade using its connection ID:
 
