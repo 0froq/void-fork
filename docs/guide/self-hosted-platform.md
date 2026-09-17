@@ -187,7 +187,7 @@ Use the same name, account, and domain as the preview, then confirm the installa
 
 1. The installer opens [GitHub's new OAuth App form](https://github.com/settings/applications/new) when it needs OAuth credentials. Sign in as the account that will own the login integration.
 2. Set **Application name** to your platform's display name and **Homepage URL** to the API URL Void just printed.
-3. Set **Authorization callback URL** to the exact printed URL ending in `/auth/callback`, then register the application. This URL is now pinned in your saved draft and remains the same if credential setup is interrupted.
+3. Set the **Redirect URI** (also called **Authorization callback URL**) to the exact printed URL ending in `/auth/callback`, then register the application. This URL is now pinned in your saved draft and remains the same if credential setup is interrupted.
 4. Save the **Client ID**, generate a **Client Secret**, and save that too. GitHub's [registration guide](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) describes the form.
 
 This OAuth App handles sign-in. A GitHub App with repository access and build webhooks is not required for the core platform.
@@ -450,8 +450,8 @@ Inject the following values from protected CI secrets. Do not commit them in a w
 | `VOID_PLATFORM_GITHUB_CLIENT_ID`             | OAuth App client ID                                                                         |
 | `VOID_PLATFORM_GITHUB_CLIENT_SECRET`         | OAuth App client secret                                                                     |
 | `VOID_PLATFORM_ADMIN_GITHUB_LOGIN`           | Initial administrator's GitHub username                                                     |
-| `VOID_PLATFORM_R2_ACCESS_KEY_ID`             | R2 access key ID                                                                            |
-| `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`         | R2 secret access key                                                                        |
+| `VOID_PLATFORM_R2_ACCESS_KEY_ID`             | R2 Access Key ID                                                                            |
+| `VOID_PLATFORM_R2_SECRET_ACCESS_KEY`         | R2 Secret Access Key                                                                        |
 | `VOID_PLATFORM_JWT_SECRET`                   | Original JWT signing secret                                                                 |
 | `VOID_PLATFORM_PROJECT_SECRET_KEY`           | Original base64-encoded project-encryption key                                              |
 | `VOID_PLATFORM_RECOVERY_KEY`                 | Base64-encoded 32-byte key for local encrypted recovery state when no keychain is available |

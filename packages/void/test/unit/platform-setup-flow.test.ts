@@ -148,7 +148,7 @@ beforeEach(() => {
       ? 'octocat'
       : message.startsWith('GitHub OAuth client ID')
         ? 'github-id'
-        : message.startsWith('R2 access')
+        : message === 'Access Key ID:'
           ? 'r2-id'
           : '',
   );
@@ -162,7 +162,7 @@ beforeEach(() => {
     if (message.startsWith('GitHub OAuth')) {
       return environment.VOID_PLATFORM_GITHUB_CLIENT_SECRET;
     }
-    if (message.startsWith('R2 secret')) {
+    if (message === 'Secret Access Key:') {
       return environment.VOID_PLATFORM_R2_SECRET_ACCESS_KEY;
     }
     if (message.startsWith('JWT')) {
@@ -485,13 +485,13 @@ describe('platform credential onboarding', () => {
     expect(draft.deployment.resources).toEqual(preview.deployment.resources);
     expect(isPlatformSetupDraft(draft)).toBe(true);
     const callback = `https://${draft.deployment.resources.apiWorker}.void-platform-e2e-test.workers.dev/auth/callback`;
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Callback: ' + callback));
-    expect(info).toHaveBeenCalledWith(expect.stringContaining('Callback: ' + callback));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Redirect URI: ' + callback));
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('Redirect URI: ' + callback));
     mocks.password.mockImplementation(normalPassword);
     mocks.open.mockClear();
     info.mockClear();
     await runPlatformLifecycleCommand(parsePlatformArgs(['install']));
-    expect(info).toHaveBeenCalledWith(expect.stringContaining('Callback: ' + callback));
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('Redirect URI: ' + callback));
     const final = listInstallationManifests()[0]!;
     expect(final.id).toBe(draft.id);
     expect(final.deployment.resources).toEqual(draft.deployment.resources);

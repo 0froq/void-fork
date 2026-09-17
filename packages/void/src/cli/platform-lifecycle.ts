@@ -512,14 +512,14 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     const r2AccessKeyId = await collect(
       'r2AccessKeyId',
       'VOID_PLATFORM_R2_ACCESS_KEY_ID',
-      'R2 access key ID:',
+      'Access Key ID:',
       false,
       false,
     );
     const r2SecretAccessKey = await collect(
       'r2SecretAccessKey',
       'VOID_PLATFORM_R2_SECRET_ACCESS_KEY',
-      'R2 secret access key:',
+      'Secret Access Key:',
       true,
       false,
     );

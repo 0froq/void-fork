@@ -105,6 +105,11 @@ describe('platform credential setup links', () => {
     expect(platformSetupPages(plan()).github.instructions).toContain(
       plan().apiUrl + '/auth/callback',
     );
+    expect(preview).toContain('Redirect URI: ' + plan().apiUrl + '/auth/callback');
+    expect(preview).toContain(
+      'GitHub Auth will be used by the users of your Void Platform instance. Register a GitHub app and generate a client secret.',
+    );
+    expect(preview).not.toContain('Callback:');
   });
   it('includes zone permissions only for an application domain', () => {
     const page = platformSetupPages(plan('example.com')).runtime;

@@ -81,11 +81,11 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
       title: 'GitHub OAuth App',
       url: 'https://github.com/settings/applications/new',
       instructions:
-        'Homepage: ' +
+        'GitHub Auth will be used by the users of your Void Platform instance. Register a GitHub app and generate a client secret.\nHomepage: ' +
         plan.apiUrl +
-        '\nCallback: ' +
+        '\nRedirect URI: ' +
         plan.apiUrl +
-        '/auth/callback\nRegister the app and generate a client secret.',
+        '/auth/callback',
     },
     r2: {
       title: 'R2 upload token',
