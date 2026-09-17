@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { log } from '@clack/prompts';
-import { createPlatformDeploymentManifest } from '@void/platform';
+import { createPlatformDeploymentManifest, transitionInstallation } from '@void/platform';
 import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
@@ -14,10 +14,12 @@ import {
   listInstallationManifests,
   readPendingInstallationSecrets,
   writePendingInstallationSecrets,
+  writeInstallationManifest,
 } from '../../src/cli/platform-registry.ts';
 import {
   completePlatformSetupDraft,
   isPlatformSetupDraft,
+  isPlatformInstallInProgress,
   savePlatformSetupDraft,
 } from '../../src/cli/platform-setup-draft.ts';
 
@@ -205,7 +207,157 @@ async function savedSetup(name = 'test-setup') {
   return draft;
 }
 
+async function interruptedInstall() {
+  const draft = await savedSetup();
+  const manifest = transitionInstallation(
+    completePlatformSetupDraft(draft),
+    'failed',
+    new Date().toISOString(),
+  );
+  writeInstallationManifest(manifest);
+  writePendingInstallationSecrets(manifest, {
+    cloudflareApiToken: 'saved-runtime-token',
+    databaseUrl: environment.VOID_PLATFORM_DATABASE_URL,
+    databaseClaimState: 'claimed',
+  });
+  return manifest;
+}
+
 describe('platform credential onboarding', () => {
+  it('offers an interrupted install after credential collection and reads its database state', async () => {
+    const interrupted = await interruptedInstall();
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan']));
+    expect(mocks.select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.arrayContaining([expect.objectContaining({ value: interrupted.id })]),
+      }),
+    );
+    expect(mocks.database).toHaveBeenCalledWith(
+      environment.VOID_PLATFORM_DATABASE_URL,
+      interrupted.id,
+      interrupted.ownershipNonce,
+    );
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      interrupted,
+      expect.anything(),
+    );
+  });
+
+  it('asks to resume when an existing unfinished name is entered after choosing new', async () => {
+    const interrupted = await interruptedInstall();
+    mocks.select.mockResolvedValue('new');
+    mocks.text.mockResolvedValueOnce('test-setup');
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan']));
+    expect(mocks.confirm).toHaveBeenCalledWith({
+      message: 'Resume installation for test-setup Void (test-setup)?',
+      initialValue: true,
+    });
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      interrupted,
+      expect.anything(),
+    );
+    expect(listInstallationManifests()).toEqual([interrupted]);
+  });
+
+  it('lets the user choose another name when they decline resuming the typed name', async () => {
+    const previous = await interruptedInstall();
+    mocks.select.mockResolvedValue('new');
+    mocks.text.mockResolvedValueOnce('test-setup').mockResolvedValueOnce('fresh-install');
+    mocks.confirm.mockResolvedValueOnce(false);
+    await runPlatformLifecycleCommand(
+      parsePlatformArgs(['install', '--plan', '--workers-dev', '--display-name', 'Fresh']),
+    );
+    expect(mocks.plan).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ installationSlug: 'fresh-install' }),
+      null,
+      expect.anything(),
+    );
+    expect(listInstallationManifests()).toEqual([previous]);
+  });
+
+  it('cancels the typed-name resume confirmation without planning or changing saved state', async () => {
+    const previous = await interruptedInstall();
+    mocks.select.mockResolvedValue('new');
+    mocks.text.mockResolvedValueOnce('test-setup');
+    mocks.confirm.mockResolvedValueOnce(Symbol('cancel'));
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
+      'Cancelled',
+    );
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.database).not.toHaveBeenCalled();
+    expect(listInstallationManifests()).toEqual([previous]);
+  });
+
+  it('recognizes unfinished phases but excludes completed platforms and maintenance failures', async () => {
+    const draft = await savedSetup();
+    for (const status of [
+      'planned',
+      'provisioning',
+      'waiting-for-dns',
+      'waiting-for-oauth',
+      'deploying',
+      'verifying',
+      'failed',
+    ] as const) {
+      expect(isPlatformInstallInProgress({ ...draft, status })).toBe(true);
+    }
+    for (const status of [
+      'installed',
+      'disabled',
+      'disabling',
+      'uninstalling',
+      'uninstalled',
+    ] as const) {
+      expect(isPlatformInstallInProgress({ ...draft, status })).toBe(false);
+    }
+    expect(
+      isPlatformInstallInProgress({
+        ...draft,
+        status: 'failed',
+        runtime: { source: 'package', sourceRevision: null, manifestSha256: 'a'.repeat(64) },
+      }),
+    ).toBe(false);
+    expect(
+      isPlatformInstallInProgress({ ...draft, status: 'failed', desiredState: 'disabled' }),
+    ).toBe(false);
+  });
+
+  it('does not offer to reinstall an already completed platform when its name is entered', async () => {
+    const draft = await savedSetup();
+    writeInstallationManifest({ ...draft, status: 'installed' });
+    mocks.text.mockResolvedValueOnce('test-setup');
+    await expect(
+      runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan'])),
+    ).rejects.toThrow('void platform status');
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.plan).not.toHaveBeenCalled();
+  });
+
+  it('stops if the database says a selected installation completed elsewhere', async () => {
+    const interrupted = await interruptedInstall();
+    mocks.database.mockResolvedValueOnce({
+      ...interrupted,
+      status: 'installed',
+      runtime: {
+        source: 'package',
+        sourceRevision: null,
+        manifestSha256: 'a'.repeat(64),
+      },
+    });
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
+      'no longer unfinished',
+    );
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+    expect(listInstallationManifests()[0]!.status).toBe('installed');
+  });
+
   it('starts installation progress before the installer runs, updates it, and stops on success', async () => {
     mocks.install.mockImplementation(async (_plan, _secrets, manifest, dependencies) => {
       expect(mocks.progress.start).toHaveBeenCalledWith('Installing the platform…');
@@ -451,7 +603,7 @@ describe('platform credential onboarding', () => {
       const namePrompt = mocks.text.mock.calls.find(
         ([prompt]) => prompt.message === 'Installation name:',
       )![0];
-      expect(namePrompt.validate('test-setup')).toContain('already uses this name');
+      expect(namePrompt.validate('test-setup')).toBeUndefined();
     },
   );
 

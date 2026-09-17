@@ -42,6 +42,7 @@ import {
 import {
   completePlatformSetupDraft,
   isPlatformSetupDraft,
+  isPlatformInstallInProgress,
   savePlatformSetupDraft,
 } from './platform-setup-draft.ts';
 import {
@@ -136,28 +137,50 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   console.log();
   intro(cliTitle('platform install'));
   let existing = args.resume ? resolveInstallationManifest(args.name) : null;
+  let selectedInstall = false;
   let selectedDraft = false;
   const { input: installationSlug, credential: operatorCredential } =
     await resolvePlatformCloudflareCredentialWithInput(async () => {
       let requestedName = args.name;
-      if (!args.resume && process.stdin.isTTY) {
-        const drafts = listInstallationManifests().filter(
+      const resumableInstalls = () =>
+        listInstallationManifests().filter(
           (manifest) =>
-            isPlatformSetupDraft(manifest) &&
-            (!args.name ||
-              manifest.deployment.installationSlug === normalizeInstallationSlug(args.name)) &&
+            isPlatformInstallInProgress(manifest) &&
             (!args.account ||
               manifest.account.id === args.account ||
               manifest.account.name.toLowerCase() === args.account.toLowerCase()),
         );
-        if (drafts.length > 0) {
+      const selectInstall = (manifest: PlatformInstallationManifest) => {
+        existing = manifest;
+        selectedInstall = true;
+        selectedDraft = isPlatformSetupDraft(manifest);
+      };
+      const assertNewNameAvailable = (slug: string) => {
+        const collision = listInstallationManifests().find(
+          (manifest) =>
+            manifest.status !== 'uninstalled' && manifest.deployment.installationSlug === slug,
+        );
+        if (collision && !isPlatformInstallInProgress(collision)) {
+          throw new Error(
+            `platform: ${collision.deployment.displayName} (${slug}) already exists (${collision.status}). Run \`void platform status ${collision.id}\` to inspect it.`,
+          );
+        }
+        assertPlatformInstallationSlugAvailable(slug);
+      };
+      if (!args.resume && process.stdin.isTTY) {
+        const installs = resumableInstalls().filter(
+          (manifest) =>
+            !args.name ||
+            manifest.deployment.installationSlug === normalizeInstallationSlug(args.name),
+        );
+        if (installs.length > 0) {
           const choice = await select({
             message: 'Continue a previous platform install?',
             options: [
-              ...drafts.map((draft) => ({
-                value: draft.id,
-                label: `Continue setup for ${draft.deployment.displayName} (${draft.deployment.installationSlug})`,
-                hint: draft.account.name,
+              ...installs.map((install) => ({
+                value: install.id,
+                label: `Continue setup for ${install.deployment.displayName} (${install.deployment.installationSlug})`,
+                hint: install.account.name,
               })),
               { value: 'new', label: 'Start a new platform install' },
             ],
@@ -169,34 +192,76 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
             // Do not let --name silently reselect the draft the user just declined.
             requestedName = '';
           } else {
-            existing = drafts.find((draft) => draft.id === choice) ?? null;
-            if (!existing) {
+            const selected = installs.find((install) => install.id === choice);
+            if (!selected) {
               throw new Error('platform: The selected setup is no longer available.');
             }
-            selectedDraft = true;
+            selectInstall(selected);
           }
         }
       }
-      if (existing?.endpoints.apiUrl && !readPendingInstallationSecrets(existing)) {
+      while (!existing) {
+        const name =
+          requestedName ||
+          (await promptText('Installation name:', { placeholder: 'company' }, false, (value) => {
+            try {
+              const slug = normalizeInstallationSlug(value);
+              if (
+                !resumableInstalls().some((install) => install.deployment.installationSlug === slug)
+              ) {
+                assertNewNameAvailable(slug);
+              }
+            } catch (error) {
+              return error instanceof Error ? error.message : 'Choose another installation name.';
+            }
+          }));
+        const slug = normalizeInstallationSlug(name);
+        const matches = resumableInstalls().filter(
+          (install) => install.deployment.installationSlug === slug,
+        );
+        if (process.stdin.isTTY && matches.length > 0) {
+          let selected = matches[0]!;
+          if (matches.length > 1) {
+            const choice = await select({
+              message: `Which ${slug} installation do you want to resume?`,
+              options: matches.map((install) => ({
+                value: install.id,
+                label: install.deployment.displayName,
+                hint: install.account.name,
+              })),
+            });
+            if (isCancel(choice) || typeof choice === 'symbol') {
+              throw new Error('platform: Cancelled.');
+            }
+            const matching = matches.find((install) => install.id === choice);
+            if (!matching) {
+              throw new Error('platform: The selected setup is no longer available.');
+            }
+            selected = matching;
+          }
+          const resume = await confirm({
+            message: `Resume installation for ${selected.deployment.displayName} (${slug})?`,
+            initialValue: true,
+          });
+          if (isCancel(resume) || typeof resume === 'symbol') {
+            throw new Error('platform: Cancelled.');
+          }
+          if (resume) {
+            selectInstall(selected);
+          } else {
+            requestedName = '';
+          }
+          continue;
+        }
+        assertNewNameAvailable(slug);
+        return slug;
+      }
+      if (existing.endpoints.apiUrl && !readPendingInstallationSecrets(existing)) {
         throw new Error(
           `platform: Installation ${existing.id} has already been deployed. Use \`void platform repair ${existing.id}\` or \`void platform upgrade ${existing.id}\` instead.`,
         );
       }
-      const name =
-        existing?.deployment.installationSlug ??
-        (requestedName ||
-          (await promptText('Installation name:', { placeholder: 'company' }, false, (value) => {
-            try {
-              assertPlatformInstallationSlugAvailable(normalizeInstallationSlug(value));
-            } catch (error) {
-              return error instanceof Error ? error.message : 'Choose another installation name.';
-            }
-          })));
-      const slug = normalizeInstallationSlug(name);
-      if (!existing) {
-        assertPlatformInstallationSlugAvailable(slug);
-      }
-      return slug;
+      return existing.deployment.installationSlug;
     });
   let client = new PlatformCloudflareClient(operatorCredential.token);
   const accounts = await readAccounts(client);
@@ -308,7 +373,11 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     }
     if (existing && !args.plan) {
       existing = resolveInstallationManifest(existing.id);
-      if (selectedDraft && !isPlatformSetupDraft(existing)) {
+      if (
+        selectedInstall &&
+        (!isPlatformInstallInProgress(existing) ||
+          (selectedDraft && !isPlatformSetupDraft(existing)))
+      ) {
         throw new Error(
           'platform: Setup advanced in another process. Rerun with --resume to review its current state.',
         );
@@ -339,6 +408,11 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
           writeInstallationManifest(selected);
         }
         existing = selected;
+        if (selectedInstall && !isPlatformInstallInProgress(existing)) {
+          throw new Error(
+            `platform: Installation ${existing.id} is no longer unfinished. Run \`void platform status ${existing.id}\` to inspect it.`,
+          );
+        }
       }
     }
     const planInput = {

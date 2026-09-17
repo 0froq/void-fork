@@ -11,6 +11,24 @@ import { writeInstallationManifest, writePendingInstallationSecrets } from './pl
 const STARTED = 'credential-setup:v1';
 const COMPLETED = 'credential-setup-complete:v1';
 
+/** Includes interrupted provisioning, but not maintenance of an already deployed platform. */
+export function isPlatformInstallInProgress(manifest: PlatformInstallationManifest): boolean {
+  return (
+    manifest.runtime === null &&
+    manifest.desiredState === 'enabled' &&
+    !manifest.resources.some((resource) => resource.state === 'deleted') &&
+    [
+      'planned',
+      'provisioning',
+      'waiting-for-dns',
+      'waiting-for-oauth',
+      'deploying',
+      'verifying',
+      'failed',
+    ].includes(manifest.status)
+  );
+}
+
 export function isPlatformSetupDraft(manifest: PlatformInstallationManifest): boolean {
   return (
     manifest.status === 'planned' &&
