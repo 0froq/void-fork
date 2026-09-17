@@ -357,7 +357,6 @@
     "@cloudflare/sandbox": "^0.12.9",
     "@cloudflare/vite-plugin": "1.54.7",
     "@cloudflare/workers-types": "catalog:",
-    "@hono/oauth-providers": "^0.9.0",
     "@napi-rs/keyring": "2.0.0",
     "@void/deploy-cloudflare": "workspace:*",
     "@void/deploy-core": "workspace:*",

@@ -529,9 +529,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 4.20260702.1
-      '@hono/oauth-providers':
-        specifier: ^0.9.0
-        version: 0.9.0(hono@4.13.7)
       '@napi-rs/keyring':
         specifier: 2.0.0
         version: 2.0.0
@@ -723,9 +720,6 @@ importers:
       '@cloudflare/containers':
         specifier: 0.3.7
         version: 0.3.7
-      '@cloudflare/sandbox':
-        specifier: 0.12.9
-        version: 0.12.9
       '@void/deploy-core':
         specifier: workspace:*
         version: link:../../../packages/deploy-core
@@ -766,18 +760,12 @@ importers:
       '@electric-sql/pglite':
         specifier: 0.5.8
         version: 0.5.8
-      '@napi-rs/keyring':
-        specifier: 2.0.0
-        version: 2.0.0
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
-      miniflare:
-        specifier: ^4.20260421.0
-        version: 4.20260701.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -2811,12 +2799,6 @@ packages:
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
-
-  '@hono/oauth-providers@0.9.0':
-    resolution: {integrity: sha512-OgDPB+AM6OgA5ys1y+7G24bkb8V4OINr+6JFDSuSYni80Mmd7BGpJ0e02StQDMPL9ebuWI8ABhxx1bk+9VBcBA==}
-    engines: {node: '>=18.4.0'}
-    peerDependencies:
-      hono: '>=3.0.0'
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -12045,10 +12027,6 @@ snapshots:
     dependencies:
       hono: 4.13.7
 
-  '@hono/oauth-providers@0.9.0(hono@4.13.7)':
-    dependencies:
-      hono: 4.13.7
-
   '@humanfs/core@0.19.2':
     dependencies:
       '@humanfs/types': 0.15.0
@@ -17782,6 +17760,7 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+    optional: true
 
   miniflare@5.20260908.0-alpha:
     dependencies:
@@ -19712,6 +19691,7 @@ snapshots:
       '@img/sharp-win32-arm64': 0.34.5
       '@img/sharp-win32-ia32': 0.34.5
       '@img/sharp-win32-x64': 0.34.5
+    optional: true
 
   sharp@0.35.2:
     dependencies:
@@ -20281,7 +20261,8 @@ snapshots:
 
   undici-types@8.9.0: {}
 
-  undici@7.28.0: {}
+  undici@7.28.0:
+    optional: true
 
   undici@7.29.0: {}
 
@@ -21565,6 +21546,7 @@ snapshots:
       '@cloudflare/workerd-linux-64': 1.20260701.1
       '@cloudflare/workerd-linux-arm64': 1.20260701.1
       '@cloudflare/workerd-windows-64': 1.20260701.1
+    optional: true
 
   workerd@1.20260908.1:
     optionalDependencies:
