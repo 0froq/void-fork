@@ -144,6 +144,47 @@ export async function createUserForPlatform(
   return createUser(db, provider, providerId, login, email, existing ? 'user' : 'admin', 'custom');
 }
 
+/** Bootstrap the configured owner through admin OAuth without opening general signup. */
+export async function bootstrapPlatformAdmin(
+  db: Db,
+  provider: string,
+  providerId: string,
+  login: string,
+  email: string | null,
+  installationId?: string,
+  bootstrapGitHubId?: string,
+): Promise<User | null> {
+  if (
+    !installationId ||
+    provider !== 'github' ||
+    !bootstrapGitHubId ||
+    providerId !== bootstrapGitHubId
+  ) {
+    return null;
+  }
+  return db.transaction(async (tx) => {
+    const txDb = tx as unknown as Db;
+    let user: User;
+    try {
+      // Share the first-user lock and identity check with normal signup. Keep
+      // the user and OAuth identity in one transaction so neither can be orphaned.
+      user = await createUserForPlatform(txDb, provider, providerId, login, email, installationId, {
+        additionalSignupAllowed: false,
+        bootstrapGitHubId,
+      });
+    } catch (error) {
+      if (!(error instanceof SelfHostedSignupRestrictedError)) {
+        throw error;
+      }
+      // A concurrent dashboard/CLI login may have created the owner after the
+      // callback's initial lookup. Re-read under the lock, never promote a user.
+      return getUserByOAuthAccount(txDb, provider, providerId);
+    }
+    await createOAuthAccount(txDb, user.id, provider, providerId);
+    return user;
+  });
+}
+
 export class SelfHostedSignupRestrictedError extends Error {
   constructor() {
     super('Self-hosted platform signup is restricted.');

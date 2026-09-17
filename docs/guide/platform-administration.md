@@ -10,6 +10,8 @@ These commands require an administrator account. If you're setting up a platform
 
 ## Signing In
 
+For the browser dashboard, open `<API URL>/admin` and sign in with GitHub. On a new installation, signing in with the administrator account selected during setup creates the first admin user. You do not need to create an app or sign in through the CLI first.
+
 Connect to your platform's API URL, then sign in as an administrator:
 
 ```sh

@@ -10,6 +10,7 @@ import { hmacSignState, hmacVerifyState } from '../../auth/hmac.ts';
 import { signJwt } from '../../auth/jwt.ts';
 import { getPlatformCapabilities } from '../../capabilities.ts';
 import {
+  bootstrapPlatformAdmin,
   getUserByOAuthAccount,
   getUserByEmail,
   updateUserProviderId,
@@ -193,6 +194,18 @@ export async function handleAdminOAuthCallback(context: Context<ApiEnv>): Promis
       await createOAuthAccount(db, byEmail.id, provider, providerId);
       user = byEmail;
     }
+  }
+
+  if (!user) {
+    user = await bootstrapPlatformAdmin(
+      db,
+      provider,
+      providerId,
+      login,
+      emailVerified ? email : null,
+      context.env.PLATFORM_INSTALLATION_ID,
+      context.env.PLATFORM_BOOTSTRAP_GITHUB_ID,
+    );
   }
 
   if (!user || user.role !== 'admin' || isAdminSuspended(user.suspended_reason)) {

@@ -10,6 +10,7 @@ It owns platform auth, projects, deployments, domains, secrets, provisioning, ro
 - **Public API**: CLI and dashboard-facing JSON routes
 - **Internal API**: resource resolution and revalidation used by other platform workers
 - **Admin UI**: server-rendered HTML under `/admin/*`
+- **Self-hosted owner setup**: dashboard OAuth and normal signup share the first-user transaction and configured GitHub identity check. Dashboard login can create the first owner without a CLI login; it never promotes existing users. Void Cloud keeps its existing admin-only login behavior.
 - **Background work**:
   - `scheduled()` for periodic usage enforcement and rollover checks
   - `queue()` for usage-event ingestion
