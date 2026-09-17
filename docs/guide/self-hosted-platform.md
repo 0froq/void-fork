@@ -216,6 +216,8 @@ Keep the management token available for any remaining DNS changes. When using a 
 
 If you stop while entering credentials, rerun `void platform install`. It offers **Continue setup for <platform name>** or **Start a new platform install**. Continuing restores your saved answers; starting new asks for an unused installation name and does not reuse or delete the previous setup's credentials. `--resume --name <id>` continues directly and is required for non-interactive recovery. Once provisioning has begun, use that explicit resume command. A cancelled setup preserves its callback URL and already collected credentials; it does not create Cloudflare resources just to save progress. Read-only `--plan` runs do not save drafts.
 
+If Cloudflare rejects a saved runtime token during continued credential setup, Void opens the token page and asks for a replacement in the same run. Network or service failures do not discard saved tokens. Tokens supplied through the environment must be corrected there instead.
+
 :::
 
 ## 6. Verify and Deploy Your First App {#connect-and-deploy-an-app}

@@ -358,12 +358,13 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     if (!existing) {
       existing = savePlatformSetupDraft(plan, runtime.manifest.platformVersion);
     }
+    const setupManifest = existing;
     const credentialSetup = isPlatformSetupDraft(existing);
     const values: Record<string, string> = { ...checkpoint };
     const saveValues = (updates: Record<string, string>) => {
       Object.assign(values, updates);
       if (credentialSetup) {
-        writePendingInstallationSecrets(existing!, values);
+        writePendingInstallationSecrets(setupManifest, values);
       }
     };
     const configured = (key: string, environment: string) =>
@@ -393,47 +394,72 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       openPlatformSetupPage(pages.runtime);
     }
 
-    const runtimeCloudflareApiToken = await collect(
+    const usingSavedRuntimeToken =
+      credentialSetup &&
+      !process.env.VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN &&
+      Boolean(values.cloudflareApiToken);
+    let runtimeCloudflareApiToken = await collect(
       'cloudflareApiToken',
       'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN',
       'Paste runtime API token:',
       true,
       false,
     );
-    try {
-      await verifyPlatformRuntimeTokenPermissions(
-        new PlatformCloudflareClient(runtimeCloudflareApiToken),
-        {
+    let rejectedSavedRuntimeToken = false;
+    const verifyRuntimeToken = async (token: string) => {
+      let checkingRuntimePermissions = true;
+      try {
+        await verifyPlatformRuntimeTokenPermissions(new PlatformCloudflareClient(token), {
           accountId,
           applicationDomain,
           customDomains: plan.deployment.capabilities.customDomains,
           zoneId: plan.zone?.id ?? null,
-        },
-      );
-      if (plan.actions.some((action) => action.action === 'inspect')) {
-        client = client.withAiGatewayToken(runtimeCloudflareApiToken);
-        plan = await verifyPlatformAiGatewayPlan(
-          client,
-          planInput,
-          existing,
-          plan,
-          authoritativeProvisionIntents,
-        );
-      }
-    } catch (error) {
-      let cause: unknown = error;
-      for (let depth = 0; depth < 5 && cause instanceof Error; depth++, cause = cause.cause) {
+        });
+        checkingRuntimePermissions = false;
+        if (plan.actions.some((action) => action.action === 'inspect')) {
+          client = client.withAiGatewayToken(token);
+          plan = await verifyPlatformAiGatewayPlan(
+            client,
+            planInput,
+            existing,
+            plan,
+            authoritativeProvisionIntents,
+          );
+        }
+      } catch (error) {
         if (
           credentialSetup &&
-          cause instanceof PlatformCloudflareApiError &&
-          [401, 403].includes(cause.status)
+          token === values.cloudflareApiToken &&
+          isRuntimeTokenAuthorizationError(
+            error,
+            checkingRuntimePermissions ? undefined : '/ai-gateway/',
+          )
         ) {
           delete values.cloudflareApiToken;
-          writePendingInstallationSecrets(existing, values);
-          break;
+          writePendingInstallationSecrets(setupManifest, values);
+          rejectedSavedRuntimeToken = true;
         }
+        throw error;
       }
-      throw error;
+    };
+    try {
+      await verifyRuntimeToken(runtimeCloudflareApiToken);
+    } catch (error) {
+      if (!usingSavedRuntimeToken || !process.stdin.isTTY || !rejectedSavedRuntimeToken) {
+        throw error;
+      }
+      log.warn(
+        'Cloudflare rejected the saved runtime token. Create a replacement to continue setup.',
+      );
+      openPlatformSetupPage(pages.runtime);
+      runtimeCloudflareApiToken = await collect(
+        'cloudflareApiToken',
+        'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN',
+        'Paste runtime API token:',
+        true,
+        false,
+      );
+      await verifyRuntimeToken(runtimeCloudflareApiToken);
     }
     saveValues({ cloudflareApiToken: runtimeCloudflareApiToken });
     const previousLogin = values.bootstrapGitHubLogin;
@@ -619,6 +645,19 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
   } finally {
     release?.();
   }
+}
+
+function isRuntimeTokenAuthorizationError(error: unknown, requestPathIncludes?: string): boolean {
+  for (let depth = 0; depth < 5 && error instanceof Error; depth++, error = error.cause) {
+    if (
+      error instanceof PlatformCloudflareApiError &&
+      [401, 403].includes(error.status) &&
+      (!requestPathIncludes || error.requestPath?.includes(requestPathIncludes))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function formatPlatformRuntime(runtime: ReturnType<typeof loadPlatformRuntime>): string {

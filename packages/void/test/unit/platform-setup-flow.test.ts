@@ -5,7 +5,10 @@ import { createPlatformDeploymentManifest } from '@void/platform';
 import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
-import { PlatformCloudflareClient } from '../../src/cli/platform-cloudflare.ts';
+import {
+  PlatformCloudflareApiError,
+  PlatformCloudflareClient,
+} from '../../src/cli/platform-cloudflare.ts';
 import { runPlatformLifecycleCommand } from '../../src/cli/platform-lifecycle.ts';
 import {
   listInstallationManifests,
@@ -195,6 +198,107 @@ async function savedSetup(name = 'test-setup') {
 }
 
 describe('platform credential onboarding', () => {
+  it('replaces a revoked saved token during the same continued setup', async () => {
+    const draft = await savedSetup();
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    mocks.preflight.mockRejectedValueOnce(
+      new Error('Preflight failed', {
+        cause: new PlatformCloudflareApiError('Authentication error', 403),
+      }),
+    );
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install']));
+    expect(mocks.preflight).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(
+      'Cloudflare rejected the saved runtime token. Create a replacement to continue setup.',
+    );
+    expect(
+      mocks.password.mock.calls.filter(([input]) => input.message === 'Paste runtime API token:'),
+    ).toHaveLength(1);
+    expect(new URL(mocks.open.mock.calls[0]![0]).searchParams.get('to')).toBe(
+      '/account/api-tokens',
+    );
+    expect(mocks.install).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        cloudflareApiToken: environment.VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN,
+      }),
+      expect.objectContaining({ id: draft.id }),
+      expect.anything(),
+    );
+  });
+
+  it('does not retain a rejected cached token if replacement input is cancelled', async () => {
+    const draft = await savedSetup();
+    mocks.preflight.mockRejectedValueOnce(
+      new PlatformCloudflareApiError('Authentication error', 401),
+    );
+    mocks.password.mockResolvedValueOnce(Symbol('cancel'));
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
+      'Cancelled',
+    );
+    expect(readPendingInstallationSecrets(draft)?.cloudflareApiToken).toBeUndefined();
+    expect(mocks.preflight).toHaveBeenCalledOnce();
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
+  it('preserves saved credentials and stops on service failures instead of opening replacement pages', async () => {
+    const draft = await savedSetup();
+    mocks.preflight.mockRejectedValueOnce(
+      new PlatformCloudflareApiError('service unavailable', 503),
+    );
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
+      'service unavailable',
+    );
+    expect(readPendingInstallationSecrets(draft)?.cloudflareApiToken).toBe('saved-runtime-token');
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
+  it('does not blame the runtime token when operator authentication fails during AI Gateway replanning', async () => {
+    const draft = await savedSetup();
+    const original = mocks.plan.getMockImplementation()!;
+    mocks.plan
+      .mockImplementationOnce(async (...args) => ({
+        ...(await original(...args)),
+        actions: [
+          {
+            action: 'inspect',
+            id: null,
+            key: 'ai-gateway',
+            kind: 'ai-gateway',
+            name: 'gateway',
+            reason: 'Needs runtime-token check.',
+          },
+        ],
+      }))
+      .mockRejectedValueOnce(
+        new PlatformCloudflareApiError('Operator session expired', 403, '/accounts'),
+      );
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
+      'Operator session expired',
+    );
+    expect(readPendingInstallationSecrets(draft)?.cloudflareApiToken).toBe('saved-runtime-token');
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
+  it('does not replace an explicit environment token or clear a different saved token', async () => {
+    const draft = await savedSetup();
+    vi.stubEnv('VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN', 'environment-token');
+    mocks.preflight.mockRejectedValueOnce(
+      new PlatformCloudflareApiError('Authentication error', 403),
+    );
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
+      'Authentication error',
+    );
+    expect(readPendingInstallationSecrets(draft)?.cloudflareApiToken).toBe('saved-runtime-token');
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.password).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+  });
+
   it('offers a named saved setup and a fresh installation instead of automatically continuing', async () => {
     const draft = await savedSetup();
     await runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan']));
