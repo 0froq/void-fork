@@ -2460,13 +2460,33 @@ export function assertRequiredPlatformSecrets(
   }
 }
 
+/** Make pg's current strict TLS behavior explicit without rewriting saved connection details. */
+export function platformDatabaseClientUrl(databaseUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(databaseUrl);
+  } catch {
+    return databaseUrl;
+  }
+  // Match pg's last-value-wins query parsing and respect explicit libpq compatibility.
+  if (
+    (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
+    url.searchParams.getAll('sslmode').at(-1) !== 'require' ||
+    url.searchParams.getAll('uselibpqcompat').at(-1) === 'true'
+  ) {
+    return databaseUrl;
+  }
+  url.searchParams.set('sslmode', 'verify-full');
+  return url.toString();
+}
+
 export async function claimPlatformDatabase(
   databaseUrl: string,
   installationId: string,
   ownershipNonce: string,
 ): Promise<void> {
   const { Pool } = await import('pg');
-  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+  const pool = new Pool({ connectionString: platformDatabaseClientUrl(databaseUrl), max: 1 });
   const client = await pool.connect();
   try {
     await claimPlatformDatabaseConnection(client, installationId, ownershipNonce);
@@ -2482,7 +2502,7 @@ export async function acquirePlatformDatabaseLifecycleLock(
   ownershipNonce: string,
 ): Promise<PlatformDatabaseLifecycleLock> {
   const { Pool } = await import('pg');
-  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+  const pool = new Pool({ connectionString: platformDatabaseClientUrl(databaseUrl), max: 1 });
   const client = await pool.connect();
   try {
     const releaseConnectionLock = await acquirePlatformDatabaseLifecycleLockConnection(
@@ -2515,7 +2535,7 @@ export async function readPlatformDatabaseLifecycleManifest(
   ownershipNonce: string,
 ): Promise<PlatformInstallationManifest | null> {
   const { Pool } = await import('pg');
-  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+  const pool = new Pool({ connectionString: platformDatabaseClientUrl(databaseUrl), max: 1 });
   try {
     return await readPlatformDatabaseLifecycleManifestConnection(
       pool,
