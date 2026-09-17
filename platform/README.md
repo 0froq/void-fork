@@ -33,7 +33,7 @@ relative to `platform/` unless they begin with `../`.
 
 - **Always** read `meta/lessons.md` at the start of each session before taking any action.
 - **Never** commit without asking for confirmation.
-- When writing design docs or implementation plans to disk, place them in `meta/design-docs` and follow existing file name and frontmatter conventions.
+- When writing technical design docs or implementation plans to disk, place them in `meta/design-docs` and follow existing file name and frontmatter conventions. Keep commercial strategy, pricing research, competitor analysis, and private operational inventories out of the repository.
 - When adding new dependencies to the project, always run `npm view [package] version` to get the latest version.
 
 2. Subagent Strategy
@@ -68,7 +68,7 @@ relative to `platform/` unless they begin with `../`.
    - Documentation: after verification, update all docs if relevant and applicable:
      - `README.md` (this file)
      - affected packages's `README.md` or `AGENTS.md`
-   - Record implementation progress in the relevant current design or issue; the old `meta/progress.md` launch tracker is retired.
+   - Record implementation progress in the relevant current technical design or issue.
 
 ## Quick Reference
 
@@ -172,7 +172,6 @@ Void is one repository with an explicit dependency boundary:
 | `../packages/md`                                       | Markdown package                                                          |
 | `../docs`                                              | Public-facing SDK docs                                                    |
 | `meta/design-docs`                                     | Historical design archive                                                 |
-| `meta/progress.md`                                     | Retired launch tracker                                                    |
 | `meta/operations.md`                                   | Operations/runbook                                                        |
 
 ### Where Code for X Lives

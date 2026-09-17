@@ -26,7 +26,7 @@
 > | 8 Build container image       | Done                           | Agent runs `npx void deploy`, not FormData packaging.                                                                                                                                                                                       |
 > | 9 Dashboard / admin UI        | Done (admin) / Deferred (user) | Admin Hono-JSX build UI shipped (per-project Builds section + GET /admin/builds/:id with a client-side polling live-log panel, not WebSocket). User-facing Vue dashboard build views remain deferred.                                       |
 > | 10 Integration testing        | Done (backend)                 | ~180 tests across new suites.                                                                                                                                                                                                               |
-> | 11 Documentation              | Done                           | This annotation + 0010 divergences + progress.md.                                                                                                                                                                                           |
+> | 11 Documentation              | Done                           | This annotation and the implementation divergences in 0010.                                                                                                                                                                                 |
 >
 > A second executor — **GitHub Actions via OIDC** — was added on top of this
 > plan (it was container-only). `void init --github` scaffolds a workflow that

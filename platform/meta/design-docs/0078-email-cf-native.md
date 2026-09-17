@@ -167,16 +167,14 @@ supersedes: 0047-email.md
 
 ## Context
 
-[`0047-email.md`](./0047-email.md) designed a full Resend-based integration and was **deferred** because the outbound value over a plain Resend SDK install was too thin, the inbound-via-webhooks path was real platform work but couldn't justify the build on its own, and the Scale plan carried a $90/mo floor regardless of usage.
+[`0047-email.md`](./0047-email.md) describes the earlier Resend-based design, which used a proxy for sending and webhooks for inbound routing. It was superseded by the Cloudflare-native implementation.
 
 Since then we've re-scoped around **Cloudflare's native Email Service** (Email Routing + Email Workers + the `send_email` binding):
 
-- **No third-party dependency, no flat fee.** Outbound rides the existing `send_email` binding; cost is whatever Cloudflare charges (currently free within generous limits).
+- **No third-party dependency.** Outbound uses the `send_email` binding. See the [email guide](../../../docs/guide/email.md) for supported sending modes and Cloudflare requirements.
 - **Inbound is native.** Email Workers deliver messages straight into the user worker via an `email(message, env, ctx)` handler — no webhook-relay plumbing through `api.void.cloud` → dispatch → `*.void.app`.
 - **Already on the stack.** Users are on Workers; this is one more binding, not a new vendor.
 - **DX delta is much larger.** Raw CF email requires hand-rolling MIME, editing wrangler config, has no local-dev story, and needs platform plumbing for the multi-tenant case. Void closes all four gaps.
-
-The earlier "just use the SDK" argument that sank 0047 doesn't apply here: the alternative isn't a three-line SDK, it's hand-constructing RFC 5322 messages, editing `wrangler.jsonc`, and (for any multi-tenant deployment) building cross-worker email dispatch from scratch.
 
 ## Scope
 
@@ -713,11 +711,11 @@ Both work in Vitest without any worker-runtime mocking. The inbound harness uses
 
 ### Platform infrastructure
 
-#### Default sender setup (`mail.void.cloud`)
+#### Default sender setup
 
 One-time platform infrastructure, per environment (see [`meta/operations.md`](../operations.md#email) for the runbook). _(corrected 2026-09-11)_
 
-- The mail domain is a **subdomain of the existing `void.cloud` zone** — `mail.void.cloud`, `mail.staging.void.cloud` — added through Email Routing's subdomain setting. `void.cloud` already has Email Routing on. No zone registration, no nameserver change. As of 2026-09-11 neither subdomain has any DNS record.
+- Choose a mail subdomain of the installation's Cloudflare zone, such as `mail.example.com`, and add it through Email Routing's subdomain setting. Configure each environment separately.
 - Cloudflare adds and locks MX, SPF and DKIM on the subdomain.
 - The same name is onboarded to **Email Sending**, which adds the `cf-bounce` MX, SPF, DKIM and DMARC records and lifts the 200-destination account cap.
 - Catch-all routing rule on the subdomain → `void-proxy` worker (the proxy's `email()` export is bound by the `email-router.ts` module). Wrangler has no catch-all command; it is the dashboard or `PUT /zones/{z}/email/routing/rules/catch_all`.
@@ -1952,11 +1950,9 @@ _(added 2026-09-11)_ Only a live probe settles these.
 - Which token permission group the Email Sending subdomain endpoints accept.
   The OpenAPI schema lists none. The wrangler OAuth scope
   `email_sending (write)` is what `wrangler email sending enable` uses;
-  the enable itself was not run here. `GET /accounts/{a}/email/sending/zones`
-  answered `401 / 2036 Unauthorized` on an account with no onboarded
-  sending domain (plan unread) and `200` on two accounts with one — the
-  endpoint and the code are in neither the schema nor the docs.
-- Whether `mail.staging.void.cloud`, two labels deep, is accepted by the
+  verify the required permissions and onboarding state against the current
+  provider documentation before implementing support.
+- Whether a mail subdomain two labels deep is accepted by the
   subdomain form. The docs show one-label examples only.
 - The eight custom-domain probes listed under
   [Probes before building](#probes-before-building).
@@ -1988,7 +1984,7 @@ Per-domain setup flow:
 4. `void email status noreply@acme.com` polls for verification
 5. Once verified, the address joins the project's `email_senders` table — typed-sender codegen surfaces it
 
-Runtime: `sendEmail` dispatches to the configured provider; CF native (`mail.void.cloud` shared sender) remains the default. Dev inbox works identically regardless of backend. Phase-3 metering and logs continue to work — the proxy is provider-agnostic. Cost passthrough (e.g. Resend at $20/50k) needs a billing model; product decision when this scopes.
+Runtime: `sendEmail` dispatches to the configured provider; CF native (`mail.void.cloud` shared sender) remains the default. Dev inbox works identically regardless of backend. Phase-3 metering and logs continue to work — the proxy is provider-agnostic.
 
 ### Component templating
 
@@ -2095,9 +2091,7 @@ Evidence for the 2026-09-11 sections (framework paths under
   support apex domains only"), `cloudflare/api-schemas` `openapi.json`
   (`email_email_setting_dns_request_body.name`; GET `?subdomain=` deprecated
   2026-09; plan operation `x-forge-hidden`; `email_email_setting_status`
-  enum; sending 409 codes), measured reads with the session bearer on
-  three accounts (`support_subaddress: false` on every zone; `401 / 2036`
-  on `…/email/sending/zones`), `@cloudflare/vite-plugin` 1.43.0 `dist/index.mjs`
+  enum; sending 409 codes), `@cloudflare/vite-plugin` 1.43.0 `dist/index.mjs`
   (config customizer passes unknown keys through — reproduced with a scratch
   build), framework `cli/deploy.ts:3729-3865` (slot 3b-ii, `--provision` CI
   gate), `cli/preset.ts:238` (`resolveWranglerArgv`).
@@ -2113,7 +2107,7 @@ Evidence for the 2026-09-11 sections (framework paths under
   `cli/src/lib/cloudflare/auth.ts`); Cloudflare Apps discontinuation notice
   (2024-08-31); Tenant docs `tenant/get-started/` ("after you sign your
   partner agreement"). `GET /user/tokens/permission_groups` needs
-  `API Tokens: Read`; none of our stored tokens has it, so the dump stands in.
+  `API Tokens: Read`.
 - Compatibility date: workerd 1.20260701.1 via Miniflare; a
   `WorkerEntrypoint` subclass returns 200 at `2021-11-03` and `2024-01-01`
   with no flags.

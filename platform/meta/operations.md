@@ -41,21 +41,10 @@ These deployment and smoke-test workflows target Void Cloud, from `prod` for pro
 
 Both deploy workflows serialize deployments without cancelling an active rollout. Advancing `prod` requests a production deployment. A failed or interrupted deployment needs inspection before another rollout, particularly when database migrations already ran.
 
-Every platform secret is scoped to a GitHub environment (`Prod` or `Staging`); there are no repo-level platform secrets. The values live in the 1Password vault `VOID`:
-
-| Secret                            | Environment | Purpose                                                                                                        | 1Password item                                   |
-| --------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `CF_API_TOKEN`                    | Both        | Cloudflare deploy API token (see [Secrets](#secrets))                                                          | `Cloudflare` → `Github Deploy Token`             |
-| `CF_ACCOUNT_ID`                   | Both        | Cloudflare account ID (passed as `CLOUDFLARE_ACCOUNT_ID`)                                                      | `Cloudflare` → `CF_ACCOUNT_ID`                   |
-| `DATABASE_URL`                    | Prod        | PlanetScale direct connection string for drizzle-kit migrations                                                | `Plantscale prod-admin`                          |
-| `STAGING_DATABASE_URL`            | Staging     | PlanetScale direct connection string for drizzle-kit migrations                                                | `Plantscale staging`                             |
-| `CF_ACCESS_CLIENT_ID_STAGING`     | Staging     | CF Access service-token client id for reaching staging (see [Staging Access Control](#staging-access-control)) | `Void Cloudflare Zero Trust GitHub OAuth App`    |
-| `CF_ACCESS_CLIENT_SECRET_STAGING` | Staging     | CF Access service-token client secret for reaching staging                                                     | `Void Cloudflare Zero Trust GitHub OAuth App`    |
-| `VOID_TOKEN_STAGING`              | Staging     | Staging API token the smoke test deploys `kitchen-sink` with (see below)                                       | `VOID_TOKEN_STAGING (GitHub Actions smoke test)` |
-
-`VOID_TOKEN_STAGING` is an `aud: api` JWT for the staging account that owns the `kitchen-sink` project, signed by hand with the staging JWT secret (`Platform JWT secret` → `staging`) via `signJwt()` in `platform/packages/api/src/auth/jwt.ts` with a 2-year TTL, because tokens from `void auth login` expire after 30 days. The 1Password item records the expiry. To rotate it: sign a new token the same way, update the item, then `gh secret set VOID_TOKEN_STAGING --env Staging`. The token is signed with the staging `JWT_SECRET`, so rotating that secret invalidates it regardless of the recorded expiry — re-sign and re-set it as part of that coordinated rotation (see [Secrets](#secrets)).
-
-Consult the workflow files for their current inputs.
+Consult the workflow files for their current inputs. Store credentials in the
+selected GitHub environment and the deployment owner's secret manager. Keep
+secret-manager locations, account access assignments and credential-issuance
+procedures in that owner's private runbook.
 
 ## Secrets
 
@@ -98,7 +87,7 @@ Every project sends as `<slug>[+tag]@<mail domain>` and receives at `<slug>+anyt
 
 ### One-time zone setup, per environment
 
-Do these in order; step 4 before step 5, or the catch-all points at a Worker with no `email()` export. As of 2026-09-11 no step has been done in either environment.
+Do these in order; step 4 before step 5, or the catch-all points at a Worker with no `email()` export.
 
 1. Extend `CF_API_TOKEN` with Email Routing: Edit. Without it every destination add returns 403, which the CLI reports as a 502 and the owner auto-add on project creation swallows.
 2. Add the subdomain to Email Routing (dashboard: Email → Email Routing → the zone → Settings → Subdomains). Cloudflare adds and locks the MX, SPF, and DKIM records. The two-label staging name is unverified against this form.
