@@ -151,19 +151,6 @@ export class SelfHostedSignupRestrictedError extends Error {
   }
 }
 
-export async function getUserByProvider(
-  db: Db,
-  provider: string,
-  providerId: string,
-): Promise<User | null> {
-  const [row] = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.provider, provider), eq(users.provider_id, providerId)))
-    .limit(1);
-  return row ?? null;
-}
-
 export async function getUserByEmail(db: Db, email: string): Promise<User | null> {
   const [row] = await db
     .select()
@@ -1278,19 +1265,6 @@ export async function listProjectSecretNames(
     .orderBy(asc(projectSecrets.name));
 }
 
-export async function getProjectSecret(
-  db: Db,
-  projectId: string,
-  name: string,
-): Promise<ProjectSecret | null> {
-  const [row] = await db
-    .select()
-    .from(projectSecrets)
-    .where(and(eq(projectSecrets.project_id, projectId), eq(projectSecrets.name, name)))
-    .limit(1);
-  return row ?? null;
-}
-
 export async function getProjectSecrets(
   db: Db,
   projectId: string,
@@ -1379,12 +1353,6 @@ export async function getProjectDatabaseUrl(
   return row ?? null;
 }
 
-export async function deleteProjectDatabaseUrl(db: Db, projectId: string): Promise<void> {
-  await db
-    .delete(projectDatabaseCredentials)
-    .where(eq(projectDatabaseCredentials.project_id, projectId));
-}
-
 // --- Resources ---
 
 export async function createResource(
@@ -1426,64 +1394,6 @@ export async function getResourceByBinding(
       ),
     )
     .then((rows) => rows[0]);
-}
-
-/**
- * Upsert a `container` resource row, returning the prior `cf_id` when an
- * existing row's id was updated to a new application id.
- *
- * Container applications can be replaced out-of-band: the CF API can return
- * 404 when an operator deletes a stale same-name app (or the namespace-mismatch
- * remediation the deploy path now relies on tells the operator to delete it).
- * In those cases `upsertSandboxContainerApplication` POSTs a fresh app and
- * returns a new `application.id`. The old `createResource`-only path skipped
- * persistence whenever a row already existed for the binding, leaving the DB
- * pointing at a dead `cf_id` — cleanup later 404s on that id and the new app
- * leaks. This helper closes that hole by reconciling on the natural unique
- * key `(project_id, type, binding_name)`.
- *
- * Returns `{ priorCfId }` so callers can log the transition. `priorCfId` is
- * `null` when a new row was inserted, the same string as `cfId` when the row
- * already pointed at the same id (no-op), and the prior id when an existing
- * row was updated to point at a new application.
- */
-export async function upsertContainerResource(
-  db: Db,
-  projectId: string,
-  bindingName: string,
-  cfId: string,
-): Promise<{ priorCfId: string | null }> {
-  // Read first so we can report the prior cf_id even on the update path.
-  // Drizzle's RETURNING returns post-update columns; without this read we
-  // could not distinguish "inserted" from "updated to same id" from
-  // "updated to a new id" cleanly.
-  const prior = await db
-    .select({ cf_id: resources.cf_id })
-    .from(resources)
-    .where(
-      and(
-        eq(resources.project_id, projectId),
-        eq(resources.type, 'container'),
-        eq(resources.binding_name, bindingName),
-      ),
-    )
-    .then((rows) => rows[0]);
-
-  await db
-    .insert(resources)
-    .values({
-      id: generateId('res'),
-      project_id: projectId,
-      type: 'container',
-      cf_id: cfId,
-      binding_name: bindingName,
-    })
-    .onConflictDoUpdate({
-      target: [resources.project_id, resources.type, resources.binding_name],
-      set: { cf_id: cfId },
-    });
-
-  return { priorCfId: prior?.cf_id ?? null };
 }
 
 // --- Domains ---
@@ -1640,10 +1550,6 @@ export async function deleteDomainIfPending(db: Db, id: string): Promise<boolean
     .where(and(eq(domains.id, id), eq(domains.status, 'pending')))
     .returning({ id: domains.id });
   return deleted.length > 0;
-}
-
-export async function deleteProjectDomains(db: Db, projectId: string): Promise<void> {
-  await db.delete(domains).where(eq(domains.project_id, projectId));
 }
 
 // --- Email destinations ---
@@ -2095,14 +2001,6 @@ export async function promoteEmailDestinationWithOwnerAudit(
 
 // --- Deletion ---
 
-export async function deleteProjectResources(db: Db, projectId: string): Promise<void> {
-  await db.delete(resources).where(eq(resources.project_id, projectId));
-}
-
-export async function deleteProjectDeployments(db: Db, projectId: string): Promise<void> {
-  await db.delete(deployments).where(eq(deployments.project_id, projectId));
-}
-
 export async function deleteProject(db: Db, id: string): Promise<void> {
   await db.delete(projects).where(eq(projects.id, id));
 }
@@ -2356,14 +2254,6 @@ export async function deleteUser(db: Db, id: string): Promise<void> {
   });
 }
 
-export async function getAllProjects(
-  db: Db,
-  limit: number,
-  offset: number,
-): Promise<ReadonlyArray<Project>> {
-  return db.select().from(projects).orderBy(desc(projects.created_at)).limit(limit).offset(offset);
-}
-
 function getLatestDeploymentByProjectSubquery(db: Db) {
   return db
     .selectDistinctOn([deployments.project_id], {
@@ -2485,16 +2375,6 @@ export async function getFirstAdmin(db: Db) {
 
 export async function updateUserProviderId(db: Db, id: string, providerId: string): Promise<void> {
   await db.update(users).set({ provider_id: providerId }).where(eq(users.id, id));
-}
-
-export async function getAllUsersWithPlan(db: Db) {
-  return db
-    .select({
-      id: users.id,
-      plan: users.plan,
-      billing_cycle_start: users.billing_cycle_start,
-    })
-    .from(users);
 }
 
 export async function getUsersWithProjectsBatch(db: Db, limit: number, offset: number) {
@@ -2660,14 +2540,6 @@ export async function unsuspendUserIfReason(db: Db, id: string, reason: string):
 
 // --- Platform Events ---
 
-export async function createPlatformEvent(
-  db: Db,
-  event: Omit<PlatformEvent, 'created_at'>,
-): Promise<PlatformEvent> {
-  const [row] = await db.insert(platformEvents).values(event).returning();
-  return row;
-}
-
 export async function updatePlatformEventStatus(
   db: Db,
   id: string,
@@ -2678,13 +2550,6 @@ export async function updatePlatformEventStatus(
     .update(platformEvents)
     .set({ status, error_message: errorMessage ?? null })
     .where(eq(platformEvents.id, id));
-}
-
-export async function skipPendingBatchEvents(db: Db, batchId: string): Promise<void> {
-  await db
-    .update(platformEvents)
-    .set({ status: 'skipped' })
-    .where(and(eq(platformEvents.batch_id, batchId), eq(platformEvents.status, 'pending')));
 }
 
 export async function getPlatformEventsByBatchId(
@@ -3110,19 +2975,6 @@ function updatedRowCount(result: { rowCount?: number | null; affectedRows?: numb
 }
 
 /**
- * Count a user's in-flight builds (statuses `starting`/`building`/`deploying`).
- * Used by the scheduler to enforce per-user tier build concurrency before
- * claiming a queued build.
- */
-export async function countUserActiveBuilds(db: Db, userId: string): Promise<number> {
-  const [result] = await db
-    .select({ count: count() })
-    .from(builds)
-    .where(and(eq(builds.user_id, userId), inArray(builds.status, ACTIVE_BUILD_STATUSES)));
-  return result?.count ?? 0;
-}
-
-/**
  * The oldest queued container build for each project that has NO active build
  * (at most one row per project per tick). Only `container` builds are scheduled
  * by the platform — `github_actions` builds run on GitHub's runners and never
@@ -3261,59 +3113,6 @@ export async function hasQueuedContainerBuilds(db: Db): Promise<boolean> {
     .where(and(eq(builds.status, 'queued'), eq(builds.executor, 'container')))
     .limit(1);
   return row !== undefined;
-}
-
-/**
- * Supersede older queued container builds when a newer push arrives for the
- * same project+branch, so the newest commit wins instead of whichever build
- * happens to finish last. Only QUEUED rows are cancelled — already-running
- * builds are left alone (cancelling them would waste in-flight compute).
- */
-export async function cancelQueuedBuildsForProjectBranch(
-  db: Db,
-  projectId: string,
-  branch: string,
-): Promise<void> {
-  await db
-    .update(builds)
-    .set({ status: 'cancelled', error: 'superseded by newer push', completed_at: sql`now()` })
-    .where(
-      and(
-        eq(builds.project_id, projectId),
-        eq(builds.branch, branch),
-        eq(builds.status, 'queued'),
-        eq(builds.executor, 'container'),
-      ),
-    );
-}
-
-/**
- * The newest non-terminal (queued/starting/building/deploying) container build
- * for this exact commit on this project+branch, or null. Used to make webhook
- * redelivery idempotent — a redelivered push for a commit already in flight
- * must not create a duplicate build.
- */
-export async function findNonTerminalBuildForCommit(
-  db: Db,
-  projectId: string,
-  branch: string,
-  commitSha: string,
-): Promise<Build | null> {
-  const [row] = await db
-    .select()
-    .from(builds)
-    .where(
-      and(
-        eq(builds.project_id, projectId),
-        eq(builds.branch, branch),
-        eq(builds.commit_sha, commitSha),
-        inArray(builds.status, ['queued', 'starting', 'building', 'deploying']),
-        eq(builds.executor, 'container'),
-      ),
-    )
-    .orderBy(desc(builds.created_at))
-    .limit(1);
-  return row ?? null;
 }
 
 /**
@@ -3716,62 +3515,14 @@ export async function supersedeAndCreateContainerBuild(
 }
 
 /**
- * Atomically claim a queued build for starting. The `WHERE id=? AND
- * status='queued'` guard plus `RETURNING` removes the read-then-write race:
- * only one caller can flip a given build out of `queued`, so two schedulers
- * racing the same build will see exactly one non-null return. Stamps
- * `started_at` at claim time.
- */
-export async function claimBuildForStart(db: Db, id: string): Promise<Build | null> {
-  const [row] = await db
-    .update(builds)
-    .set({ status: 'starting', started_at: sql`now()` })
-    .where(and(eq(builds.id, id), eq(builds.status, 'queued')))
-    .returning();
-  return row ?? null;
-}
-
-/**
- * Look up a build by its owning project and the GitHub Actions `workflow_run.id`
- * recorded on the row at OIDC-exchange time. A GitHub `run_id` is unique only
- * WITHIN a repository, not globally, so build identity is scoped to the
- * connection's project: matching by `run_id` alone would let a `workflow_run`
- * webhook (or an OIDC reuse lookup) from one repo resolve a different project's
- * build that happens to share the numeric id. Used by the `workflow_run`
- * webhook (after resolving the connection by repo) to mark an Actions build
- * complete/failed, and by the OIDC exchange to reuse an in-flight build.
- *
- * A GitHub RERUN of the same `run_id` creates a fresh build once the prior
- * attempt is terminal, so a (project, run_id) can have multiple rows (one
- * active rerun + older terminal attempts). Active builds are ordered first so
- * the `workflow_run` webhook finalizes the in-flight rerun rather than an old
- * terminal row even when `created_at` ties; `created_at desc` breaks ties
- * within each group.
- */
-export async function getBuildByProjectAndRunId(
-  db: Db,
-  projectId: string,
-  githubRunId: string,
-): Promise<Build | null> {
-  const [row] = await db
-    .select()
-    .from(builds)
-    .where(and(eq(builds.project_id, projectId), eq(builds.github_run_id, githubRunId)))
-    .orderBy(sql`(${inArray(builds.status, ACTIVE_BUILD_STATUSES)}) desc`, desc(builds.created_at))
-    .limit(1);
-  return row ?? null;
-}
-
-/**
- * Resolve a build by `(project, run_id, run_attempt)` — the attempt-aware
- * counterpart of `getBuildByProjectAndRunId`. A GitHub RERUN reuses the same
- * `run_id` with an incremented `run_attempt`, so the `workflow_run` completion
+ * Resolve a build by `(project, run_id, run_attempt)`. A GitHub RERUN reuses
+ * the same `run_id` with an incremented `run_attempt`, so the `workflow_run` completion
  * handler must scope to the attempt: a redelivered/late completion for attempt
  * 1 must NOT resolve to attempt 2's active build (which would let it finalize
  * the wrong attempt). When `githubRunAttempt` is null (an old delivery whose
  * payload lacks `run_attempt`), it falls back to `IS NULL` so old null-attempt
  * rows still match. Active builds are ordered first (then `created_at desc`),
- * mirroring `getBuildByProjectAndRunId`, so the in-flight attempt wins on a tie.
+ * so the in-flight attempt wins on a tie.
  */
 export async function getBuildByProjectRunIdAndAttempt(
   db: Db,
@@ -3792,40 +3543,6 @@ export async function getBuildByProjectRunIdAndAttempt(
     .orderBy(sql`(${inArray(builds.status, ACTIVE_BUILD_STATUSES)}) desc`, desc(builds.created_at))
     .limit(1);
   return row ?? null;
-}
-
-/**
- * Terminalize every ACTIVE (`starting`/`building`/`deploying`) GitHub Actions
- * build for a project, marking them `cancelled` and stamping `completed_at`.
- *
- * Called when a project's GitHub connection is deleted. GitHub Actions builds
- * are created ACTIVE by the OIDC exchange and finalized by the `workflow_run`
- * webhook, which first resolves the CURRENT connection — so if the connection
- * is gone, a completion webhook is ignored and the build would stay active
- * forever, permanently consuming one of the owner's concurrency slots. Scoped
- * to `executor = 'github_actions'`: container builds free their slot via the
- * BuildManager DO timeout and must not be touched here. Returns the number of
- * builds terminalized.
- */
-export async function terminateActiveGithubActionsBuildsForProject(
-  db: Db,
-  projectId: string,
-): Promise<number> {
-  const result = await db
-    .update(builds)
-    .set({
-      status: 'cancelled',
-      error: sql`COALESCE(${builds.error}, 'github connection removed')`,
-      completed_at: sql`COALESCE(${builds.completed_at}, now())`,
-    })
-    .where(
-      and(
-        eq(builds.project_id, projectId),
-        eq(builds.executor, 'github_actions'),
-        inArray(builds.status, ACTIVE_BUILD_STATUSES),
-      ),
-    );
-  return result.rowCount ?? 0;
 }
 
 /**
@@ -5320,21 +5037,6 @@ export async function getInstallationRevocationAt(
     .limit(1);
   const value = rows[0]?.revokedAtMs;
   return value == null ? null : Number(value);
-}
-
-/**
- * True iff ANY revocation tombstone exists for this installation (any github account).
- * Used to tell a CLEARED-owner org install (member_removed wrote a tombstone atomically
- * with the owner-clear) apart from a FRESH webhook-precreated null-owner org install
- * (no tombstone), so the install callback never re-owns a cleared install (R15-1).
- */
-export async function hasInstallationRevocation(db: Db, installationId: string): Promise<boolean> {
-  const rows = await db
-    .select({ one: sql`1` })
-    .from(githubInstallationRevocations)
-    .where(eq(githubInstallationRevocations.installation_id, installationId))
-    .limit(1);
-  return rows.length > 0;
 }
 
 /**

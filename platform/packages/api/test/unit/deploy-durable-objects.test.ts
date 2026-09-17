@@ -5,7 +5,6 @@ import {
   buildSandboxUploadBindings,
   buildSandboxUploadContainers,
   buildWebSocketUploadBindings,
-  buildWebSocketUploadMigrations,
   enrichLiveManifest,
   enrichSandboxManifest,
   enrichWebSocketManifest,
@@ -314,44 +313,36 @@ describe('enrichWebSocketManifest', () => {
   });
 });
 
-describe('buildWebSocketUploadMigrations', () => {
+describe('buildDurableObjectUploadMigrations for WebSocket-only deployments', () => {
   it('returns Cloudflare upload metadata with new_tag and steps', () => {
     expect(
-      buildWebSocketUploadMigrations([
-        { tag: 'ws-v1', newClasses: ['ChatRoom', 'LegacyRoom'] },
-        { tag: 'ws-v2', newClasses: ['PresenceRoom'] },
-      ]),
+      buildDurableObjectUploadMigrations(
+        [
+          { tag: 'ws-v1', newClasses: ['ChatRoom', 'LegacyRoom'] },
+          { tag: 'ws-v2', newClasses: ['PresenceRoom'] },
+        ],
+        undefined,
+      ),
     ).toEqual({
       new_tag: 'ws-v2',
       steps: [{ new_classes: ['ChatRoom', 'LegacyRoom'] }, { new_classes: ['PresenceRoom'] }],
     });
   });
 
-  it('strips deleted_classes from legacy migration data', () => {
-    // Old migration data may still contain deletedClasses from before the fix.
-    // buildWebSocketUploadMigrations should not pass them to Cloudflare.
-    expect(
-      buildWebSocketUploadMigrations([
-        { tag: 'ws-v1', newClasses: ['ChatRoom'] },
-        { tag: 'ws-v2', deletedClasses: ['ChatRoom'] },
-      ]),
-    ).toEqual({
-      new_tag: 'ws-v2',
-      steps: [{ new_classes: ['ChatRoom'] }, {}],
-    });
-  });
-
   it('returns undefined when there are no websocket migrations', () => {
-    expect(buildWebSocketUploadMigrations([])).toBeUndefined();
-    expect(buildWebSocketUploadMigrations(undefined)).toBeUndefined();
+    expect(buildDurableObjectUploadMigrations([], undefined)).toBeUndefined();
+    expect(buildDurableObjectUploadMigrations(undefined, undefined)).toBeUndefined();
   });
 
   it('serializes SQLite WebSocket migrations without changing legacy steps', () => {
     expect(
-      buildWebSocketUploadMigrations([
-        { tag: 'ws-v1', newClasses: ['LegacyRoom'] },
-        { tag: 'ws-v2', newSqliteClasses: ['ChatRoom'] },
-      ]),
+      buildDurableObjectUploadMigrations(
+        [
+          { tag: 'ws-v1', newClasses: ['LegacyRoom'] },
+          { tag: 'ws-v2', newSqliteClasses: ['ChatRoom'] },
+        ],
+        undefined,
+      ),
     ).toEqual({
       new_tag: 'ws-v2',
       steps: [{ new_classes: ['LegacyRoom'] }, { new_sqlite_classes: ['ChatRoom'] }],

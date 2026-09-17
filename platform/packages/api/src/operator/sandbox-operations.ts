@@ -19,7 +19,6 @@ import {
   completeSandboxDrain,
   readSandboxDrainCheckpoint,
   writeSandboxDrainMirror,
-  type SandboxDrainCheckpoint,
   type SandboxDrainCursor,
   type SandboxDrainPhase,
 } from '../sandbox-drain.ts';

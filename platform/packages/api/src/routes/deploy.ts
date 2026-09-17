@@ -15,7 +15,6 @@ import {
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import {
-  AssetHashMismatchError,
   computeAssetHash,
   createAssetUploadSession,
   deleteWorkerBundle,
@@ -24,7 +23,6 @@ import {
   scanProjectAssetOrphanCandidates,
   uploadAssetBuckets,
   buildAssetMetadata,
-  uploadStaticAssets,
   deleteUnreferencedAssets,
   getContentType,
   persistWorkerBundle,
@@ -1381,21 +1379,6 @@ async function assertBoundBuildStillActive(
   }
 }
 
-export function buildWebSocketUploadMigrations(
-  migrations: ReadonlyArray<WebSocketMigrationMeta> | undefined,
-):
-  | {
-      new_tag: string;
-      steps: ReadonlyArray<{
-        new_classes?: ReadonlyArray<string>;
-        new_sqlite_classes?: ReadonlyArray<string>;
-        deleted_classes?: ReadonlyArray<string>;
-      }>;
-    }
-  | undefined {
-  return buildLegacyWebSocketUploadMigrations(migrations);
-}
-
 export function buildDurableObjectUploadMigrations(
   websocketMigrations: ReadonlyArray<WebSocketMigrationMeta> | undefined,
   sandboxMigrations: ReadonlyArray<SandboxMigrationMeta> | undefined,
@@ -1478,33 +1461,6 @@ function compareDurableObjectMigrationSteps(
 function parseMigrationTagVersion(tag: string): number | null {
   const match = /-v(\d+)$/.exec(tag);
   return match ? Number(match[1]) : null;
-}
-
-export function buildLegacyWebSocketUploadMigrations(
-  migrations: ReadonlyArray<WebSocketMigrationMeta> | undefined,
-):
-  | {
-      new_tag: string;
-      steps: ReadonlyArray<{
-        new_classes?: ReadonlyArray<string>;
-        new_sqlite_classes?: ReadonlyArray<string>;
-        deleted_classes?: ReadonlyArray<string>;
-      }>;
-    }
-  | undefined {
-  if (!migrations || migrations.length === 0) {
-    return undefined;
-  }
-
-  return {
-    new_tag: migrations[migrations.length - 1].tag,
-    steps: migrations.map((migration) => ({
-      ...(migration.newClasses?.length ? { new_classes: migration.newClasses } : {}),
-      ...(migration.newSqliteClasses?.length
-        ? { new_sqlite_classes: migration.newSqliteClasses }
-        : {}),
-    })),
-  };
 }
 
 export function buildWebSocketUploadBindings(
@@ -3138,16 +3094,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     // from R2 fetches further down — the CF asset upload session needs
     // the actual bytes to fan into upload buckets.
     const assetsByHash = new Map<string, AssetEntry>();
-    // For JSON mode, every asset lives in R2 (direct-to-R2 uploads never
-    // touch KV). We still pass `streamedHashStores` / `streamedLargeHashes`
-    // / `streamedStaticAssets=true` into the static branch so it builds
-    // the serving manifest correctly with `!` prefixes on every entry.
-    // The map stays empty for cleanup-on-abort: the bytes pre-existed
-    // this deploy and may be needed for a retry, so we never delete them
-    // on a JSON-mode failure.
-    const streamedHashStores = new Map<string, 'kv' | 'r2'>();
-    const streamedLargeHashes = new Set<string>();
-
     const heartbeat = setInterval(() => {
       emit(
         currentDeploymentId
@@ -3424,7 +3370,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
 
-        const preflightUsed = preflightRaw === 'true';
         const isStaticOnly = !hasWorkerFiles;
         logger = logger.with({ branch: isStaticOnly ? 'static' : 'wfp' });
 
@@ -3489,7 +3434,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           // direct-to-R2 by the CLI and always use the `!` prefix.
           //
           // We always read the prior serving manifest (not just when
-          // `preflightUsed` is true) — a CLI that re-declares the same
+          // preflight is used) — a CLI that re-declares the same
           // hashes without preflight still relies on carry-forward to
           // serve those bytes from their existing KV/R2 home.
           let prevServingManifest: Record<string, string> | null = null;

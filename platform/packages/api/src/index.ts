@@ -913,7 +913,6 @@ export {
   BuildManager,
   BuildManagerLarge,
 };
-export type AppType = typeof app;
 export { app, scheduled };
 
 export default {

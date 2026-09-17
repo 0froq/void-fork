@@ -1,8 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vite-plus/test';
 import {
-  applyDeclaredAssetManifest,
-  AssetHashMismatchError,
-  computeAssetHash,
   createAssetUploadSession,
   deleteUnreferencedAssets,
   deleteWorkerBundle,
@@ -11,7 +8,6 @@ import {
   replayWorkerBundle,
   scanProjectAssetOrphanCandidates,
   uploadAssetBuckets,
-  uploadStaticAssets,
   type AssetEntry,
 } from '../../src/assets.ts';
 
@@ -72,21 +68,6 @@ function createMockR2() {
   } as unknown as R2Bucket & { store: Map<string, ArrayBuffer> };
 }
 
-function toArrayBuffer(value: unknown): ArrayBuffer {
-  if (value instanceof ArrayBuffer) {
-    return value;
-  }
-  if (ArrayBuffer.isView(value)) {
-    const copy = new Uint8Array(value.byteLength);
-    copy.set(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
-    return copy.buffer;
-  }
-  if (typeof value === 'string') {
-    return new TextEncoder().encode(value).buffer;
-  }
-  throw new Error('unsupported mock storage value');
-}
-
 async function readBodyText(body: unknown): Promise<string> {
   if (body instanceof ReadableStream) {
     const reader = body.getReader();
@@ -120,185 +101,9 @@ function makeJwt(exp: number): string {
   return `${header}.${payload}.fake-signature`;
 }
 
-const KV_THRESHOLD = 2 * 1024 * 1024; // 2 MB
-
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-});
-
-describe('applyDeclaredAssetManifest', () => {
-  it('prefers the declared entry when both hash and size match the built entry', () => {
-    const bytes = enc.encode('hello');
-    const hash = computeAssetHash(bytes.buffer, '/index.html');
-    const built = { '/index.html': { hash, size: bytes.length } };
-    const declared = { '/index.html': { hash, size: bytes.length } };
-
-    const result = applyDeclaredAssetManifest(built, declared);
-
-    expect(result).toEqual(built);
-    expect(result['/index.html']).toBe(declared['/index.html']);
-  });
-
-  it('keeps the built entry when the declared size does not match', () => {
-    const bytes = enc.encode('hello');
-    const hash = computeAssetHash(bytes.buffer, '/index.html');
-    const built = { '/index.html': { hash, size: bytes.length } };
-    const declared = { '/index.html': { hash, size: bytes.length + 1 } };
-
-    const result = applyDeclaredAssetManifest(built, declared);
-
-    expect(result['/index.html']).toBe(built['/index.html']);
-  });
-
-  it('throws AssetHashMismatchError when the declared hash does not match the built hash', () => {
-    const bytes = enc.encode('hello');
-    const hash = computeAssetHash(bytes.buffer, '/index.html');
-    const built = { '/index.html': { hash, size: bytes.length } };
-    const declared = { '/index.html': { hash: 'a'.repeat(32), size: bytes.length } };
-
-    expect(() => applyDeclaredAssetManifest(built, declared)).toThrow(AssetHashMismatchError);
-  });
-});
-
-describe('uploadStaticAssets', () => {
-  it('uploads small assets to KV and large assets to R2', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-
-    const assetsByHash = new Map<string, AssetEntry>([
-      ['smallhash0000000000000000000000', entry('small file', 'text/html')],
-      ['largehash0000000000000000000000', entry(new Uint8Array(KV_THRESHOLD + 1), 'video/mp4')],
-    ]);
-
-    const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test');
-
-    expect(kv.put).toHaveBeenCalledTimes(1); // small asset
-    expect(r2.put).toHaveBeenCalledTimes(1); // large asset
-    expect(largeHashes.has('largehash0000000000000000000000')).toBe(true);
-    expect(largeHashes.has('smallhash0000000000000000000000')).toBe(false);
-  });
-
-  it('overwrites assets that already exist in KV (idempotent puts)', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-    kv.store.set('assets/proj_test/existinghash000000000000000000', new ArrayBuffer(1));
-
-    const assetsByHash = new Map<string, AssetEntry>([
-      ['existinghash000000000000000000', entry('exists', 'text/html')],
-      ['newhash00000000000000000000000', entry('new', 'text/css')],
-    ]);
-
-    await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test');
-
-    expect(kv.put).toHaveBeenCalledTimes(2); // both assets, no existence check
-  });
-
-  it('retries transient KV upload failures', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-    let attempts = 0;
-    vi.mocked(kv.put).mockImplementation(async (key, value, _opts) => {
-      attempts++;
-      if (attempts === 1) {
-        throw new Error('temporary KV failure');
-      }
-      kv.store.set(key, toArrayBuffer(value));
-    });
-
-    const assetsByHash = new Map<string, AssetEntry>([
-      ['retryhash000000000000000000000', entry('retry', 'text/plain')],
-    ]);
-
-    await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test', { retryDelayMs: 0 });
-
-    expect(kv.put).toHaveBeenCalledTimes(2);
-    expect(kv.store.has('assets/proj_test/retryhash000000000000000000000')).toBe(true);
-  });
-
-  it('overwrites assets that already exist in R2 (idempotent puts)', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-    r2.store.set(
-      'assets/proj_test/existinglarge00000000000000000',
-      new ArrayBuffer(KV_THRESHOLD + 1),
-    );
-
-    const assetsByHash = new Map<string, AssetEntry>([
-      ['existinglarge00000000000000000', entry(new Uint8Array(KV_THRESHOLD + 1), 'video/mp4')],
-    ]);
-
-    const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test');
-
-    expect(r2.put).toHaveBeenCalledTimes(1); // idempotent put, no existence check
-    expect(largeHashes.has('existinglarge00000000000000000')).toBe(true);
-  });
-
-  it('retries transient R2 upload failures', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-    let attempts = 0;
-    vi.mocked(r2.put).mockImplementation(async (key, value, _opts) => {
-      attempts++;
-      if (attempts === 1) {
-        throw new Error('temporary R2 failure');
-      }
-      r2.store.set(key, toArrayBuffer(value));
-      return { key } as R2Object;
-    });
-
-    const assetsByHash = new Map<string, AssetEntry>([
-      ['retrylarge00000000000000000000', entry(new Uint8Array(KV_THRESHOLD + 1), 'video/mp4')],
-    ]);
-
-    const largeHashes = await uploadStaticAssets(kv, r2, assetsByHash, 'proj_test', {
-      retryDelayMs: 0,
-    });
-
-    expect(r2.put).toHaveBeenCalledTimes(2);
-    expect(r2.store.has('assets/proj_test/retrylarge00000000000000000000')).toBe(true);
-    expect(largeHashes.has('retrylarge00000000000000000000')).toBe(true);
-  });
-
-  it('scopes asset keys by project ID', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-
-    const assetsByHash = new Map<string, AssetEntry>([
-      ['deadbeef12345678', entry('test', 'text/plain')],
-    ]);
-
-    await uploadStaticAssets(kv, r2, assetsByHash, 'proj_abc123');
-
-    expect(kv.put).toHaveBeenCalledWith(
-      'assets/proj_abc123/deadbeef12345678',
-      expect.any(Uint8Array),
-      expect.anything(),
-    );
-  });
-
-  it('different projects get different keys for same hash', async () => {
-    const kv = createMockKV();
-    const r2 = createMockR2();
-
-    const assetsByHash = new Map<string, AssetEntry>([
-      ['deadbeef12345678', entry('test', 'text/plain')],
-    ]);
-
-    await uploadStaticAssets(kv, r2, assetsByHash, 'proj_aaa');
-    await uploadStaticAssets(kv, r2, assetsByHash, 'proj_bbb');
-
-    expect(kv.put).toHaveBeenCalledWith(
-      'assets/proj_aaa/deadbeef12345678',
-      expect.any(Uint8Array),
-      expect.anything(),
-    );
-    expect(kv.put).toHaveBeenCalledWith(
-      'assets/proj_bbb/deadbeef12345678',
-      expect.any(Uint8Array),
-      expect.anything(),
-    );
-  });
 });
 
 describe('deleteUnreferencedAssets', () => {

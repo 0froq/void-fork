@@ -874,14 +874,6 @@ function preflightTerminalGroup(group: TerminalRenderGroup): TerminalPreflight {
   };
 }
 
-function serializeTerminalGroups(groups: Array<TerminalRenderGroup>): string {
-  return groups
-    .flatMap((group) =>
-      group.lines.map((line) => `${line.raw}${LINE_ENDING_TEXT[line.lineEnding]}`),
-    )
-    .join('');
-}
-
 /**
  * Preserve parser/REP boundaries without treating the at-most-100 captured
  * delimiters as hostile full-grid controls. A CR executes in the same ESC/CSI
@@ -996,41 +988,6 @@ async function renderTerminalGroups(groups: Array<TerminalRenderGroup>): Promise
   }
 }
 
-/**
- * Render one captured log line through the same maintained VT engine used by
- * VS Code. A token parser is insufficient here: correctness depends on screen
- * state (cursor, tab stops, protected cells, wide glyphs, REP, and erase modes),
- * which is exactly the terminal emulator's job.
- *
- * Input is untrusted. xterm correctly bounds mutations to its configured grid,
- * but some handlers loop or allocate from raw numeric parameters. The deterministic
- * preflight above bounds those paths before allocation; an unsafe row is omitted
- * rather than risking resource exhaustion or resurrecting text a terminal erased.
- */
-export async function sanitizeLogLineForMarkdown(raw: string): Promise<string> {
-  // Nearly every captured line is ordinary text. It cannot mutate terminal
-  // state, so avoid constructing a grid or yielding through the write queue.
-  if (!hasTerminalControl(raw)) {
-    return raw.trimEnd();
-  }
-  const preflight = preflightTerminalInput(raw);
-  if (!preflight.safe) {
-    return '';
-  }
-  const term = new Terminal({
-    cols: TERMINAL_RENDER_COLUMNS,
-    rows: 1,
-    allowProposedApi: true,
-    scrollback: 0,
-  });
-  try {
-    await new Promise<void>((resolve) => term.write(raw, resolve));
-    const buffer = term.buffer.active;
-    return (buffer.getLine(buffer.baseY)?.translateToString(false) ?? '').trimEnd();
-  } finally {
-    term.dispose();
-  }
-}
 /**
  * Render the check-run `output.text` log tail: `lines` (already chronological —
  * the newest CHECK_RUN_LOG_TAIL_LINES captured) in a `text` fence under a

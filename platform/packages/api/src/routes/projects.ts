@@ -34,7 +34,6 @@ import {
   updateRollbackLeaseState,
   cancelDeployment,
   setActiveDeployment,
-  updateDeploymentStatus,
   updateProjectType,
   appendAppliedMigrations,
   appendProjectMigrations,
