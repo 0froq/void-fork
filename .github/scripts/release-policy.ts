@@ -19,12 +19,16 @@ export function releasePolicy(
   tag: string,
   packages: ReadonlyArray<{ name: string; version: string }>,
 ): { version: string; npmTag: string } {
+  // Retry metadata identifies a Git release attempt, not a new npm version.
+  // Keep real prereleases in the captured version and in channel selection.
   const match =
-    /^v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?)$/.exec(
+    /^v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?)(?:\+retry\.[1-9]\d*)?$/.exec(
       tag,
     );
   if (!match || match[0] !== tag || match[2]?.split('.').some((part) => /^0\d+$/.test(part))) {
-    throw new Error('Release tags must be v followed by an exact semantic version.');
+    throw new Error(
+      'Release tags must be v followed by an exact semantic version, optionally ending in +retry.N (N is a positive integer).',
+    );
   }
   const version = match[1];
   if (UNAVAILABLE_VOID_VERSIONS.has(version)) {
@@ -35,7 +39,9 @@ export function releasePolicy(
   }
   for (const pkg of packages) {
     if (pkg.version !== version) {
-      throw new Error(`${pkg.name}@${pkg.version} does not match release ${tag}.`);
+      throw new Error(
+        `${pkg.name}@${pkg.version} does not match release ${tag}. Retry tags use +retry.N; the base version must still match every package.`,
+      );
     }
   }
   const prefix = match[2]?.split('.')[0];

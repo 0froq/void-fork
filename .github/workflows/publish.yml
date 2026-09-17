@@ -8,12 +8,31 @@ on:
 permissions: {}
 
 jobs:
+  validate-release:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1.12.0
+        with:
+          node-version-file: .node-version
+          run-install: false
+          cache: false
+      - name: Validate package versions and release channel
+        run: node .github/scripts/release-policy.ts
+
   ci:
+    needs: validate-release
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
   platform-ci:
+    needs: validate-release
     uses: ./.github/workflows/platform-ci.yml
     with:
       require-schema-compat: true
@@ -23,6 +42,7 @@ jobs:
 
   prepublish-test:
     name: Prepublish Test
+    needs: validate-release
     uses: ./.github/workflows/prepublish-test.yml
     with:
       suite: full
