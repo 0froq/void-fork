@@ -2003,7 +2003,7 @@ async function createResource(
   }
 }
 
-function recordResource(
+export function recordResource(
   manifest: PlatformInstallationManifest,
   action: PlatformInstallPlanAction,
   id: string,

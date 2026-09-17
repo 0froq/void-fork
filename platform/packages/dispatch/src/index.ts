@@ -628,7 +628,10 @@ export default {
       url.pathname === '/health' &&
       request.headers.get('X-Void-Platform-Probe') === env.PLATFORM_HEALTH_PROBE_TOKEN
     ) {
-      return Response.json({ ok: true });
+      return Response.json({
+        ok: true,
+        ...(env.PLATFORM_APPLICATION ? { installationId: env.PLATFORM_INSTALLATION_ID } : {}),
+      });
     }
     if (
       env.PLATFORM_TRAFFIC_STATE === 'staging' ||

@@ -229,6 +229,10 @@ const HELP_TREE: HelpTree = {
       { command: 'use [id]', description: 'Select the default Void platform' },
       { command: 'status [id]', description: 'Inspect a platform and its health' },
       { command: 'discover', description: 'Recover installations from a Cloudflare account' },
+      {
+        command: 'domain set <domain>',
+        description: 'Add an application domain to a test platform',
+      },
       { command: 'install', description: 'Install a Void platform in Cloudflare' },
       { command: 'upgrade [id]', description: 'Upgrade an installed Void platform' },
       {
@@ -242,6 +246,33 @@ const HELP_TREE: HelpTree = {
     ],
     children: {
       ...operatorHelpTree(),
+      domain: {
+        summary: 'Add an application domain while keeping existing workers.dev URLs.',
+        usage: ['void platform domain set <domain> [options]'],
+        children: {
+          set: {
+            summary:
+              'Set up DNS and verify HTTPS before making an application domain canonical. Rerun to resume.',
+            usage: ['void platform domain set <domain> [options]'],
+            options: [
+              {
+                command: '--installation <id>',
+                description: 'Choose an installed platform; otherwise select interactively',
+              },
+              {
+                command: '--zone <domain>',
+                description: 'Containing Cloudflare zone; detected when it already exists',
+              },
+              {
+                command: '--dedicated-zone',
+                description: 'Add catch-all routes for a zone dedicated to this platform',
+              },
+              { command: '--plan', description: 'Preview without making changes' },
+              { command: '--yes', description: 'Apply without an interactive confirmation' },
+            ],
+          },
+        },
+      },
       list: basicSubcommand('List installed and connected platforms.', 'void platform list'),
       use: basicSubcommand('Select the default Void platform.', 'void platform use [id]'),
       status: basicSubcommand('Inspect a platform and its health.', 'void platform status [id]'),

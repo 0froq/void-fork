@@ -1,4 +1,8 @@
-import { parsePlatformDeploymentManifest, type PlatformDeploymentManifest } from './manifest.ts';
+import {
+  createPlatformDeploymentManifest,
+  parsePlatformDeploymentManifest,
+  type PlatformDeploymentManifest,
+} from './manifest.ts';
 
 export const PLATFORM_INSTALLATION_SCHEMA_VERSION = 1 as const;
 export const PLATFORM_DISABLED_KEY = '__void/platform/disabled/v1';
@@ -77,6 +81,8 @@ export type PlatformInstallationManifest = Readonly<{
   /** Actual forward-only PostgreSQL schema, independent of the running runtime. */
   databaseSchemaDigest: string | null;
   deployment: PlatformDeploymentManifest;
+  /** Desired domain while DNS/TLS activation is pending; current addressing remains live. */
+  pendingDomain?: PlatformDeploymentManifest['application'];
   desiredState: 'enabled' | 'disabled';
   endpoints: PlatformInstallationEndpoints;
   id: string;
@@ -394,6 +400,22 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
     usageProtocolVersion: parseUsageProtocolVersion(value.usageProtocolVersion),
   });
   const runtime = parsePlatformRuntimeProvenance(value.runtime);
+  let pendingDomain: PlatformDeploymentManifest['application'] | undefined;
+  if (value.pendingDomain !== undefined) {
+    assertRecord(value.pendingDomain, 'pendingDomain');
+    pendingDomain = createPlatformDeploymentManifest({
+      ...manifest.deployment,
+      application: value.pendingDomain as PlatformDeploymentManifest['application'],
+    }).application;
+    if (
+      !manifest.deployment.application.workersDev ||
+      !pendingDomain.zoneName ||
+      JSON.stringify(pendingDomain.workersDev) !==
+        JSON.stringify(manifest.deployment.application.workersDev)
+    ) {
+      throw new Error('Pending domain must retain the installation workers.dev identity.');
+    }
+  }
   const updatedAt = assertTimestamp(requiredString(value.updatedAt, 'updatedAt'), 'updatedAt');
   let next: PlatformInstallationManifest = setInstallationEndpoints(
     {
@@ -406,6 +428,7 @@ export function parsePlatformInstallationManifest(value: unknown): PlatformInsta
             : 'enabled',
       status: value.status,
       runtime,
+      ...(pendingDomain ? { pendingDomain } : {}),
       updatedAt,
     },
     {

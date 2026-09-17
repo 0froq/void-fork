@@ -3,6 +3,23 @@ import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
 import { assertNoninteractivePlatformMutationAcknowledged } from '../../src/cli/platform-lifecycle.ts';
 
 describe('platform args', () => {
+  it('parses resumable domain setup without confusing app-domain commands', () => {
+    expect(
+      parsePlatformArgs(['domain', 'set', 'example.com', '--installation', 'team', '--plan']),
+    ).toEqual({
+      subcommand: 'domain',
+      domain: 'example.com',
+      selector: 'team',
+      zone: '',
+      dedicatedZone: false,
+      plan: true,
+      yes: false,
+    });
+    expect(() => parsePlatformArgs(['domain', 'set'])).toThrow('requires an application domain');
+    expect(() => parsePlatformArgs(['domain', 'set', 'example.com', '--plan', '--yes'])).toThrow(
+      'either',
+    );
+  });
   it('makes testing explicit and rejects competing domain choices', () => {
     expect(parsePlatformArgs(['install', '--workers-dev', '--plan'])).toMatchObject({
       workersDev: true,

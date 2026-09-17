@@ -12,6 +12,11 @@ export const platformSubcommands: Array<SubcommandDef> = [
   { name: 'status', arg: '[id]', description: 'Inspect a platform and its health' },
   { name: 'discover', description: 'Recover installations from a Cloudflare account' },
   {
+    name: 'domain',
+    hint: 'Set an application domain',
+    description: 'Add a domain to a workers.dev test platform',
+  },
+  {
     name: 'install',
     description: 'Install a Void platform with a domain or workers.dev for testing',
   },
@@ -29,6 +34,15 @@ export type PlatformArgs =
   | { subcommand: 'use'; selector: string }
   | { subcommand: 'status'; selector: string }
   | { subcommand: 'discover'; account: string; selector: string }
+  | {
+      subcommand: 'domain';
+      domain: string;
+      selector: string;
+      zone: string;
+      dedicatedZone: boolean;
+      plan: boolean;
+      yes: boolean;
+    }
   | {
       subcommand: 'install';
       account: string;
@@ -142,6 +156,60 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     return parseOperatorArgs(args);
   }
   const [subcommand, ...rest] = args;
+
+  if (subcommand === 'domain') {
+    if (rest.length === 0) {
+      return {
+        subcommand,
+        domain: '',
+        selector: '',
+        zone: '',
+        dedicatedZone: false,
+        plan: false,
+        yes: false,
+      };
+    }
+    if (rest[0] !== 'set') {
+      throw new Error(
+        'platform: Usage: void platform domain set <domain> [--installation <id>] [--zone <domain>] [--dedicated-zone] [--plan] [--yes].',
+      );
+    }
+    let domain = '';
+    let selector = '';
+    let zone = '';
+    let plan = false;
+    let yes = false;
+    let dedicatedZone = false;
+    for (let index = 1; index < rest.length; index++) {
+      const arg = rest[index]!;
+      if (arg === '--installation' || arg === '--zone') {
+        const [value, next] = readValue(rest, index, arg);
+        index = next;
+        if (arg === '--zone') {
+          zone = value;
+        } else {
+          selector = value;
+        }
+      } else if (arg === '--plan') {
+        plan = true;
+      } else if (arg === '--yes') {
+        yes = true;
+      } else if (arg === '--dedicated-zone') {
+        dedicatedZone = true;
+      } else if (!arg.startsWith('-') && !domain) {
+        domain = arg;
+      } else {
+        throw new Error(`platform: Unexpected argument '${arg}'.`);
+      }
+    }
+    if (!domain) {
+      throw new Error('platform: domain set requires an application domain.');
+    }
+    if (plan && yes) {
+      throw new Error('platform: Use either --plan or --yes.');
+    }
+    return { subcommand, domain, selector, zone, dedicatedZone, plan, yes };
+  }
 
   if (subcommand === 'list') {
     if (rest.length > 0) {
@@ -277,6 +345,6 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   }
 
   throw new Error(
-    'platform: Usage: void platform <auth|user|project|deployment|build|signup|invitation|system|worker|list|use|status|discover|install|upgrade|rollback|repair|disable|enable|uninstall>.',
+    'platform: Usage: void platform <auth|user|project|deployment|build|signup|invitation|system|worker|list|use|status|discover|install|domain|upgrade|rollback|repair|disable|enable|uninstall>.',
   );
 }

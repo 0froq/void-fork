@@ -135,7 +135,9 @@ const app = new Hono<ApiEnv>()
       context.req.header('X-Void-Platform-Probe') === healthProbeToken &&
       (context.req.path === '/health' ||
         context.req.path === '/.well-known/void-platform' ||
-        context.req.path === '/internal/platform/sandbox-drain');
+        context.req.path === '/internal/platform/sandbox-drain' ||
+        (context.req.path === '/internal/platform/domain-preflight' &&
+          context.req.method === 'POST'));
     const maintenanceSandboxDrain =
       context.env.PLATFORM_TRAFFIC_STATE === 'sandbox-drain' &&
       isSandboxDrainMaintenanceRequest(context.req.raw);
@@ -218,6 +220,7 @@ const app = new Hono<ApiEnv>()
       }),
     );
   })
+  .post('/internal/platform/domain-preflight', platformDomainPreflight)
   .get('/internal/platform/sandbox-drain', async (context) => {
     const healthProbeToken = context.env.PLATFORM_HEALTH_PROBE_TOKEN;
     if (!healthProbeToken || context.req.header('X-Void-Platform-Probe') !== healthProbeToken) {
@@ -931,3 +934,4 @@ export default {
     await processPlatformQueue(batch, env);
   },
 } satisfies ExportedHandler<ApiEnv['Bindings']>;
+import { platformDomainPreflight } from './platform-domain-preflight.ts';

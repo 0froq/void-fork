@@ -80,6 +80,11 @@ export function resolvePlatformInstallDatabaseUrl(
 }
 
 export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<void> {
+  if (args.subcommand === 'domain') {
+    const { runPlatformDomainCommand } = await import('./platform-domain.ts');
+    await runPlatformDomainCommand(args);
+    return;
+  }
   if (args.subcommand === 'discover') {
     const credential = await resolvePlatformCloudflareCredential();
     const client = new PlatformCloudflareClient(credential.token);
