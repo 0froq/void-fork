@@ -1,5 +1,6 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { log } from '@clack/prompts';
 import { createPlatformDeploymentManifest } from '@void/platform';
 import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -14,6 +15,7 @@ import { isPlatformSetupDraft } from '../../src/cli/platform-setup-draft.ts';
 
 const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
+  select: vi.fn(),
   text: vi.fn(),
   password: vi.fn(),
   open: vi.fn(),
@@ -25,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@clack/prompts', async (original) => ({
   ...(await original<typeof import('@clack/prompts')>()),
   confirm: mocks.confirm,
+  select: mocks.select,
   text: mocks.text,
   password: mocks.password,
   intro: vi.fn(),
@@ -100,6 +103,7 @@ beforeEach(() => {
     { id: 'account', name: 'Account' },
   ]);
   mocks.confirm.mockResolvedValue(true);
+  mocks.select.mockResolvedValue('workers-dev');
   mocks.preflight.mockResolvedValue(undefined);
   mocks.plan.mockImplementation(async (_client, input, existing, options) => {
     const id = existing?.id ?? 'test-setup-123456abcdef';
@@ -174,6 +178,64 @@ afterEach(() => {
 });
 
 describe('platform credential onboarding', () => {
+  it('uses the real planner for an eight-character name and resumes its generated callback', async () => {
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+    const actual = await vi.importActual<typeof import('../../src/cli/platform-plan.ts')>(
+      '../../src/cli/platform-plan.ts',
+    );
+    mocks.plan.mockImplementation(actual.createPlatformInstallPlan);
+    vi.spyOn(PlatformCloudflareClient.prototype, 'getWorkersSubdomain').mockResolvedValue(
+      'void-platform-e2e-test',
+    );
+    for (const method of [
+      'listAiGateways',
+      'listKvNamespaces',
+      'listR2Buckets',
+      'listQueues',
+      'listDispatchNamespaces',
+      'listHyperdriveConfigs',
+      'listWorkerNames',
+    ] as const) {
+      vi.spyOn(PlatformCloudflareClient.prototype, method).mockResolvedValue([]);
+    }
+    const normalText = mocks.text.getMockImplementation()!;
+    mocks.text.mockImplementation(async (input) =>
+      input.message === 'Installation name:'
+        ? 'void-e2e'
+        : input.message === 'Platform display name:'
+          ? 'void-e2e Void'
+          : normalText(input),
+    );
+    const normalPassword = mocks.password.getMockImplementation()!;
+    mocks.password.mockImplementation(async (input) =>
+      input.message.startsWith('GitHub OAuth') ? Symbol('cancel') : normalPassword(input),
+    );
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
+      'Cancelled',
+    );
+    expect(mocks.text).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Optional custom API hostname (leave empty for workers.dev):',
+      }),
+    );
+    const draft = listInstallationManifests()[0]!;
+    expect(draft.deployment.installationSlug).toBe('void-e2e');
+    expect(draft.deployment.resources.apiWorker).toMatch(/^void-void-e2-[a-f0-9]{32}-api$/);
+    expect(isPlatformSetupDraft(draft)).toBe(true);
+    const callback = `https://${draft.deployment.resources.apiWorker}.void-platform-e2e-test.workers.dev/auth/callback`;
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('Callback: ' + callback));
+    mocks.password.mockImplementation(normalPassword);
+    mocks.open.mockClear();
+    info.mockClear();
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install']));
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('Callback: ' + callback));
+    const final = listInstallationManifests()[0]!;
+    expect(final.id).toBe(draft.id);
+    expect(final.deployment.resources).toEqual(draft.deployment.resources);
+    expect(mocks.install).toHaveBeenCalledOnce();
+    expect(isPlatformSetupDraft(final)).toBe(false);
+  });
+
   it('keeps plan mode read-only, with direct links and no browser launches', async () => {
     await runPlatformLifecycleCommand(parsePlatformArgs([...args, '--plan']));
     expect(mocks.open).not.toHaveBeenCalled();

@@ -592,10 +592,11 @@ function resourceSlugForInstallation(
     // Existing schema-v1 installations used the human-readable slug directly.
     return installationSlug;
   }
-  // Keep every generated resource within Cloudflare's 63-character product-name
-  // ceiling even with the new 128-bit suffix and the longest (`-usage-events`) role.
+  // The resource-name builder validates its entire input as a 40-character slug.
+  // Keep all 128 random bits and shorten only the readable prefix to fit that
+  // budget. Preserve the legacy 12-character-suffix names unchanged.
   const readablePrefix = installationSlug
-    .slice(0, suffix.length === 32 ? 12 : 26)
+    .slice(0, suffix.length === 32 ? 7 : 26)
     .replace(/-+$/, '');
   return `${readablePrefix}-${suffix}`;
 }

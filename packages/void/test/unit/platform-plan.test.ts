@@ -293,6 +293,34 @@ describe('platform installation planning', () => {
     ).toBeLessThanOrEqual(63);
   });
 
+  it.each(['a', 'example', 'void-e2e', 'abcdef-team', 'x'.repeat(40)])(
+    'keeps the full random suffix within the resource-slug budget for %s',
+    async (installationSlug) => {
+      const suffix = '0123456789abcdef0123456789abcdef';
+      for (const workersDev of [false, true]) {
+        const plan = await createPlatformInstallPlan(
+          client(),
+          {
+            ...input,
+            installationSlug,
+            ...(workersDev ? { workersDev: true, applicationDomain: '', zoneName: '' } : {}),
+          },
+          null,
+          { provisioningSuffix: suffix },
+        );
+        expect(plan.deployment.installationSlug).toBe(installationSlug);
+        expect(plan.deployment.resources.apiWorker).toBe(
+          `void-${installationSlug.slice(0, 7).replace(/-+$/, '')}-${suffix}-api`,
+        );
+        for (const name of Object.values(plan.deployment.resources)) {
+          expect(name).toContain(suffix);
+          expect(name.length).toBeLessThanOrEqual(63);
+          expect(name).not.toContain('--');
+        }
+      }
+    },
+  );
+
   it('fails closed on an unowned deterministic-name collision', async () => {
     const fake = client({
       listKvNamespaces: async (_account: string, title: string) =>
