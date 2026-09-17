@@ -37,6 +37,10 @@ vi.mock('../../src/cli/auth.ts', async (original) => ({
 }));
 vi.mock('../../src/cli/platform-auth.ts', () => ({
   resolvePlatformCloudflareCredential: async () => ({ source: 'oauth', token: 'operator-token' }),
+  resolvePlatformCloudflareCredentialWithInput: async (input: () => Promise<unknown>) => ({
+    input: await input(),
+    credential: { source: 'oauth', token: 'operator-token' },
+  }),
   assertPlatformOperatorCredentialCanApplyPlan: vi.fn(),
 }));
 vi.mock('../../src/cli/platform-cloudflare.ts', async (original) => ({

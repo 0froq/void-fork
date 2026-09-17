@@ -5,7 +5,16 @@ import {
   assertPlatformOperatorCredentialCanApplyPlan,
   readWranglerOAuthCredential,
   resolvePlatformCloudflareCredential,
+  resolvePlatformCloudflareCredentialWithInput,
 } from '../../src/cli/platform-auth.ts';
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
 
 afterEach(() => {
   delete process.env.CLOUDFLARE_API_TOKEN;
@@ -54,14 +63,14 @@ describe('platform Cloudflare authentication', () => {
     expect(runWrangler).not.toHaveBeenCalled();
   });
 
-  it('reads OAuth through the supported Wrangler command', () => {
-    expect(
+  it('reads OAuth through the supported Wrangler command', async () => {
+    await expect(
       readWranglerOAuthCredential(() => ({
         status: 0,
         stderr: '',
         stdout: JSON.stringify({ token: 'oauth-token', type: 'oauth' }),
       })),
-    ).toEqual({ source: 'oauth', token: 'oauth-token' });
+    ).resolves.toEqual({ source: 'oauth', token: 'oauth-token' });
   });
 
   it('enables keyring storage before browser login', async () => {
@@ -109,14 +118,14 @@ describe('platform Cloudflare authentication', () => {
     expect(runWrangler).not.toHaveBeenCalled();
   });
 
-  it('does not accept a Wrangler API token from an implicit plaintext profile', () => {
-    expect(
+  it('does not accept a Wrangler API token from an implicit plaintext profile', async () => {
+    await expect(
       readWranglerOAuthCredential(() => ({
         status: 0,
         stderr: '',
         stdout: JSON.stringify({ token: 'implicit-token', type: 'api_token' }),
       })),
-    ).toBeNull();
+    ).resolves.toBeNull();
   });
 
   it('does not expose platform recovery or service secrets to Wrangler auth commands', () => {
@@ -133,5 +142,105 @@ describe('platform Cloudflare authentication', () => {
       PATH: '/bin',
       WRANGLER_LOG_SANITIZE: 'true',
     });
+  });
+});
+
+describe('platform authentication during input', () => {
+  const success = { status: 0, stderr: '', stdout: '' };
+  const oauth = {
+    ...success,
+    stdout: JSON.stringify({ token: 'browser-token', type: 'oauth' }),
+  };
+
+  it('shows input while the saved-login check is still pending', async () => {
+    const check = deferred<typeof success>();
+    const runWrangler = vi.fn().mockReturnValueOnce(check.promise).mockResolvedValue(oauth);
+    const readInput = vi.fn(async () => 'team');
+    const result = resolvePlatformCloudflareCredentialWithInput(readInput, {
+      interactive: true,
+      runWrangler,
+    });
+    expect(readInput).toHaveBeenCalledOnce();
+    expect(runWrangler.mock.calls).toEqual([[['auth', 'keyring', 'enable'], true]]);
+    check.resolve(success);
+    await expect(result).resolves.toEqual({
+      input: 'team',
+      credential: { source: 'oauth', token: 'browser-token' },
+    });
+    expect(runWrangler.mock.calls).toHaveLength(2);
+  });
+
+  it('waits for the name before opening browser login', async () => {
+    const input = deferred<string>();
+    const loginNotice = vi.spyOn(log, 'info').mockImplementation(() => {});
+    const runWrangler = vi
+      .fn()
+      .mockResolvedValueOnce(success)
+      .mockResolvedValueOnce({ ...success, status: 1 })
+      .mockResolvedValueOnce(success)
+      .mockResolvedValueOnce(oauth);
+    const result = resolvePlatformCloudflareCredentialWithInput(() => input.promise, {
+      interactive: true,
+      runWrangler,
+    });
+    await vi.waitFor(() => expect(runWrangler).toHaveBeenCalledTimes(2));
+    expect(loginNotice).not.toHaveBeenCalled();
+    input.resolve('team');
+    await expect(result).resolves.toEqual({
+      input: 'team',
+      credential: { source: 'oauth', token: 'browser-token' },
+    });
+    expect(runWrangler.mock.calls.map(([args]) => args.join(' '))).toEqual([
+      'auth keyring enable',
+      'auth token --json',
+      'login --use-keyring',
+      'auth token --json',
+    ]);
+    expect(loginNotice).toHaveBeenCalledOnce();
+  });
+
+  it('does not start another auth command after input is cancelled', async () => {
+    const check = deferred<typeof success>();
+    const runWrangler = vi.fn().mockReturnValue(check.promise);
+    await expect(
+      resolvePlatformCloudflareCredentialWithInput(
+        async () => {
+          throw new Error('platform: Cancelled.');
+        },
+        { interactive: true, runWrangler },
+      ),
+    ).rejects.toThrow('Cancelled.');
+    check.resolve(success);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(runWrangler).toHaveBeenCalledOnce();
+  });
+
+  it('handles background auth failure without interrupting the name prompt', async () => {
+    const input = deferred<string>();
+    const runWrangler = vi.fn().mockRejectedValue(new Error('secure storage unavailable'));
+    let settled = false;
+    const result = resolvePlatformCloudflareCredentialWithInput(() => input.promise, {
+      interactive: true,
+      runWrangler,
+    }).finally(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    input.resolve('team');
+    await expect(result).rejects.toThrow('secure storage unavailable');
+    expect(runWrangler).toHaveBeenCalledOnce();
+  });
+
+  it('still collects input when an environment credential skips authentication', async () => {
+    process.env.CLOUDFLARE_API_TOKEN = 'ci-token';
+    const runWrangler = vi.fn();
+    await expect(
+      resolvePlatformCloudflareCredentialWithInput(async () => 'team', {
+        interactive: false,
+        runWrangler,
+      }),
+    ).resolves.toEqual({ input: 'team', credential: { source: 'environment', token: 'ci-token' } });
+    expect(runWrangler).not.toHaveBeenCalled();
   });
 });

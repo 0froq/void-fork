@@ -41,7 +41,7 @@ pnpm add --global void
 void platform install --plan
 ```
 
-The plan command opens Cloudflare browser login when needed. It asks for the account and basic configuration, then shows the resources it would create. It does not require the database or runtime secrets and does not change Cloudflare resources.
+Void checks your saved Cloudflare login while you enter the installation name. If sign-in is needed, it opens your browser after you submit the name; press Ctrl+C to cancel. The plan command then asks for the account and basic configuration and shows the resources it would create. It does not require the database or runtime secrets and does not change Cloudflare resources.
 
 The installer first offers these choices, with the domain option selected:
 

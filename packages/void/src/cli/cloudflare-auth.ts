@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { log } from '@clack/prompts';
 import { resolveWranglerArgv } from './preset.ts';
 
@@ -227,6 +227,41 @@ export function createBundledCloudflareAuthRunner(root: string): CloudflareAuthR
       error: result.error?.message,
     };
   };
+}
+
+/** Run a captured auth command without blocking terminal input or exposing credentials. */
+export function runCloudflareAuthCommand(
+  root: string,
+  args: ReadonlyArray<string>,
+  signal?: AbortSignal,
+): Promise<CloudflareAuthRunResult> {
+  const [command, ...prefix] = resolveWranglerArgv(root);
+  return new Promise((resolve) => {
+    const child = execFile(
+      command!,
+      [...prefix, ...args],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: cloudflareAuthCommandEnvironment(args),
+        maxBuffer: 10 * 1024 * 1024,
+        shell: false,
+        signal,
+        timeout: 10 * 60 * 1000,
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        resolve({
+          status: error ? (typeof error.code === 'number' ? error.code : null) : 0,
+          stderr,
+          stdout,
+          signal: error?.signal,
+          error: error?.message,
+        });
+      },
+    );
+    child.stdin?.end();
+  });
 }
 
 export function cloudflareAuthCommandEnvironment(

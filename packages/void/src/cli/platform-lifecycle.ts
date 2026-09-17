@@ -10,6 +10,7 @@ import type { PlatformArgs } from './platform-args.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
   resolvePlatformCloudflareCredential,
+  resolvePlatformCloudflareCredentialWithInput,
 } from './platform-auth.ts';
 import {
   PlatformCloudflareClient,
@@ -133,8 +134,6 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
 
   console.log();
   intro(cliTitle('platform install'));
-  const operatorCredential = await resolvePlatformCloudflareCredential();
-  let client = new PlatformCloudflareClient(operatorCredential.token);
   let existing = args.resume ? resolveInstallationManifest(args.name) : null;
   let automaticDraft = false;
   if (!existing && !args.name && !args.resume) {
@@ -156,10 +155,14 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       `platform: Installation ${existing.id} has already been deployed. Use \`void platform repair ${existing.id}\` or \`void platform upgrade ${existing.id}\` instead.`,
     );
   }
-  const name =
-    existing?.deployment.installationSlug ??
-    (args.name || (await promptText('Installation name:', 'company')));
-  const installationSlug = normalizeInstallationSlug(name);
+  const { input: installationSlug, credential: operatorCredential } =
+    await resolvePlatformCloudflareCredentialWithInput(async () => {
+      const name =
+        existing?.deployment.installationSlug ??
+        (args.name || (await promptText('Installation name:', 'company')));
+      return normalizeInstallationSlug(name);
+    });
+  let client = new PlatformCloudflareClient(operatorCredential.token);
   const accounts = await readAccounts(client);
   const accountId = existing ? existing.account.id : await selectAccount(accounts, args.account);
   if (

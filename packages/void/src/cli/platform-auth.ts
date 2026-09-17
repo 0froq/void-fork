@@ -1,4 +1,8 @@
-import { announceCloudflareLogin, createBundledCloudflareAuthRunner } from './cloudflare-auth.ts';
+import {
+  announceCloudflareLogin,
+  runCloudflareAuthCommand,
+  type CloudflareAuthRunner,
+} from './cloudflare-auth.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
 export type PlatformCloudflareCredential = Readonly<{
@@ -6,15 +10,9 @@ export type PlatformCloudflareCredential = Readonly<{
   token: string;
 }>;
 
-type WranglerAuthResult = Readonly<{
-  status: number | null;
-  stderr: string;
-  stdout: string;
-}>;
-
 export type PlatformCloudflareAuthDependencies = Readonly<{
   interactive?: boolean;
-  runWrangler?: (args: ReadonlyArray<string>, capture: boolean) => WranglerAuthResult;
+  runWrangler?: CloudflareAuthRunner;
 }>;
 
 export function assertPlatformOperatorCredentialCanApplyPlan(
@@ -45,48 +43,100 @@ export function assertPlatformOperatorCredentialCanApplyPlan(
 export async function resolvePlatformCloudflareCredential(
   dependencies: PlatformCloudflareAuthDependencies = {},
 ): Promise<PlatformCloudflareCredential> {
+  const { credential } = await resolvePlatformCloudflareCredentialWithInput(
+    async () => undefined,
+    dependencies,
+  );
+  return credential;
+}
+
+/** Check saved credentials during input, but never start browser login until it succeeds. */
+export async function resolvePlatformCloudflareCredentialWithInput<T>(
+  readInput: () => Promise<T>,
+  dependencies: PlatformCloudflareAuthDependencies = {},
+): Promise<Readonly<{ input: T; credential: PlatformCloudflareCredential }>> {
+  const controller = new AbortController();
+  const runner =
+    dependencies.runWrangler ??
+    ((args) => runCloudflareAuthCommand(process.cwd(), args, controller.signal));
+  const runWrangler: CloudflareAuthRunner = (args, capture) => {
+    controller.signal.throwIfAborted();
+    return runner(args, capture);
+  };
+  // Handle failures immediately: a rejected background check must neither
+  // interrupt the active prompt nor become an unhandled rejection.
+  const pending = readExistingCredential(dependencies, runWrangler).then(
+    (credential) => ({ ok: true as const, credential }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  const cancel = () => controller.abort();
+  const assertNotCancelled = () => {
+    if (controller.signal.aborted) {
+      throw new Error('platform: Cancelled.');
+    }
+  };
+  try {
+    const input = await readInput();
+    // The prompt handles Ctrl+C while reading. Once it restores cooked input,
+    // handle SIGINT ourselves so cancelling auth prints a useful message.
+    process.once('SIGINT', cancel);
+    const result = await pending;
+    assertNotCancelled();
+    if (!result.ok) {
+      throw result.error;
+    }
+    if (result.credential) {
+      return { input, credential: result.credential };
+    }
+
+    announceCloudflareLogin();
+    const login = await runWrangler(['login', '--use-keyring'], true);
+    assertNotCancelled();
+    if (login.status !== 0) {
+      throw new Error('platform: Cloudflare browser login did not complete.');
+    }
+    const credential = await readWranglerOAuthCredential(runWrangler);
+    assertNotCancelled();
+    if (!credential) {
+      throw new Error('platform: Cloudflare sign-in completed without a usable OAuth credential.');
+    }
+    return { input, credential };
+  } finally {
+    process.removeListener('SIGINT', cancel);
+    // Cancelling the input also stops the child process. The background work
+    // cannot launch a browser, even if it settles after this function exits.
+    controller.abort();
+  }
+}
+
+async function readExistingCredential(
+  dependencies: PlatformCloudflareAuthDependencies,
+  runWrangler: CloudflareAuthRunner,
+): Promise<PlatformCloudflareCredential | null> {
   const environmentToken =
     process.env.CLOUDFLARE_API_TOKEN?.trim() || process.env.CF_API_TOKEN?.trim() || '';
   if (environmentToken) {
     return { source: 'environment', token: environmentToken };
   }
 
-  const runWrangler = dependencies.runWrangler ?? defaultWranglerAuthRunner;
   if (!(dependencies.interactive ?? process.stdin.isTTY === true)) {
     throw new Error(
       'platform: Cloudflare authentication is required. Run `void cloudflare login` interactively, or set CLOUDFLARE_API_TOKEN in CI.',
     );
   }
-  const keyring = runWrangler(['auth', 'keyring', 'enable'], true);
+  const keyring = await runWrangler(['auth', 'keyring', 'enable'], true);
   if (keyring.status !== 0) {
     throw new Error(
       'platform: Could not enable secure Cloudflare credential storage. Refusing to use a plaintext OAuth credential.',
     );
   }
-  const existing = readWranglerOAuthCredential(runWrangler);
-  if (existing) {
-    return existing;
-  }
-
-  announceCloudflareLogin();
-  const login = runWrangler(['login', '--use-keyring'], true);
-  if (login.status !== 0) {
-    throw new Error('platform: Cloudflare browser login did not complete.');
-  }
-  const credential = readWranglerOAuthCredential(runWrangler);
-  if (!credential) {
-    throw new Error('platform: Cloudflare sign-in completed without a usable OAuth credential.');
-  }
-  return credential;
+  return await readWranglerOAuthCredential(runWrangler);
 }
 
-export function readWranglerOAuthCredential(
-  runWrangler: (
-    args: ReadonlyArray<string>,
-    capture: boolean,
-  ) => WranglerAuthResult = defaultWranglerAuthRunner,
-): PlatformCloudflareCredential | null {
-  const result = runWrangler(['auth', 'token', '--json'], true);
+export async function readWranglerOAuthCredential(
+  runWrangler: CloudflareAuthRunner = (args) => runCloudflareAuthCommand(process.cwd(), args),
+): Promise<PlatformCloudflareCredential | null> {
+  const result = await runWrangler(['auth', 'token', '--json'], true);
   if (result.status !== 0) {
     return null;
   }
@@ -99,11 +149,4 @@ export function readWranglerOAuthCredential(
   } catch {
     return null;
   }
-}
-
-function defaultWranglerAuthRunner(
-  args: ReadonlyArray<string>,
-  capture: boolean,
-): WranglerAuthResult {
-  return createBundledCloudflareAuthRunner(process.cwd())(args, capture) as WranglerAuthResult;
 }
