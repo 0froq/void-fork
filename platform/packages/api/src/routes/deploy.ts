@@ -25,7 +25,6 @@ import {
   buildAssetMetadata,
   deleteUnreferencedAssets,
   getContentType,
-  persistWorkerBundle,
   type AssetEntry,
   type AssetManifestEntry,
 } from '../assets.ts';
@@ -63,7 +62,6 @@ import {
   getLastLiveAssetManifest,
   setActiveDeployment,
   markDeploymentRetained,
-  markDeploymentBundleStored,
   setAppliedMigrations,
   appendProjectMigrations,
   getRetainedDeployments,
@@ -3081,7 +3079,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
     let workerUploadUrl: string | undefined;
     let sandboxContainerAppId: string | undefined;
     let sandboxContainerAppName: string | undefined;
-    let bundleStored = false;
     let manifest: DeployManifest | undefined;
     let workerName: string | undefined;
     let dispatchNamespace: string | undefined;
@@ -3211,6 +3208,11 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         enrichedManifestResult.changed ||
         liveManifestResult.changed;
       manifest = liveManifestResult.manifest;
+      if (hasWorkerFiles && manifest.type === undefined) {
+        // Rollback identifies retained Workers from their manifest, including
+        // older clients that omit type and workerMain but configure asset fallbacks.
+        manifest = { ...manifest, type: manifest.framework ? 'framework' : 'void' };
+      }
       const finalManifestRaw = JSON.stringify(manifest);
 
       // Host-scoped routing rules — same logic as multipart path.
@@ -4193,27 +4195,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         );
         workerUploaded = true;
 
-        if (hasWorkerFiles) {
-          try {
-            await persistWorkerBundle(
-              context.env.STATIC_ASSETS_R2,
-              projectId,
-              deployment.id,
-              workerFiles,
-            );
-          } catch (err) {
-            await deleteWorkerBundle(context.env.STATIC_ASSETS_R2, projectId, deployment.id).catch(
-              (e) =>
-                logger.error('worker_upload', 'partial_bundle_cleanup_failed', e, {
-                  deploymentId: deployment!.id,
-                }),
-            );
-            throw err;
-          }
-          await markDeploymentBundleStored(context.get('db'), deployment.id);
-          bundleStored = true;
-        }
-
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
         await assertProjectNotDeleting(context.get('db'), projectId);
 
@@ -5098,7 +5079,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           currentPhase: currentStep,
           routingSwitched,
           workerUploaded,
-          bundleStored,
         });
 
         // Wfp mirror manifest cleanup on pre-routing failure (mirror of
@@ -5316,17 +5296,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               }),
             );
           }
-          if (bundleStored) {
-            await deleteWorkerBundle(
-              context.env.STATIC_ASSETS_R2,
-              projectId,
-              failedDeployment.id,
-            ).catch((e) =>
-              logger.error('catch', 'worker_bundle_delete_failed', e, {
-                deploymentId: failedDeployment.id,
-              }),
-            );
-          }
           if (sandboxContainerAppId) {
             await deleteContainerApplicationWithRetry(
               context.env.CF_ACCOUNT_ID,
@@ -5475,17 +5444,6 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               workerName: failedWorkerName,
             }),
           );
-          if (bundleStored) {
-            await deleteWorkerBundle(
-              context.env.STATIC_ASSETS_R2,
-              projectId,
-              failedDeployment.id,
-            ).catch((e) =>
-              logger.error('catch', 'worker_bundle_delete_failed', e, {
-                deploymentId: failedDeployment.id,
-              }),
-            );
-          }
           if (sandboxContainerAppId) {
             await deleteContainerApplicationWithRetry(
               context.env.CF_ACCOUNT_ID,

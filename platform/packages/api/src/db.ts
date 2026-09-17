@@ -856,21 +856,6 @@ export async function markDeploymentRetained(
   await db.update(deployments).set({ retained }).where(eq(deployments.id, deploymentId));
 }
 
-/**
- * Mark a deployment's worker bundle as durably persisted to R2 under
- * `worker-bundles/{project_id}/{deployment_id}/`. Set immediately AFTER
- * `persistWorkerBundle` resolves and BEFORE any cancellation check, so
- * the invariant `bundle_stored=true ⇒ rollbackable` holds: a future
- * rollback can validate the flag before invoking `replayWorkerBundle`.
- *
- * Static / SPA deploys never call this — they have no worker module to
- * bundle (their assets are content-addressed in R2 already), so their
- * `bundle_stored` correctly remains false.
- */
-export async function markDeploymentBundleStored(db: Db, deploymentId: string): Promise<void> {
-  await db.update(deployments).set({ bundle_stored: true }).where(eq(deployments.id, deploymentId));
-}
-
 export async function setAppliedMigrations(
   db: Db,
   deploymentId: string,

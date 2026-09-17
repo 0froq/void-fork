@@ -23,7 +23,6 @@ vi.mock('../../src/capabilities.ts', async (importOriginal) => {
   };
 });
 
-import { markDeploymentRetained } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { deployments, projects, resources } from '../../src/schema.ts';
 import {
@@ -52,12 +51,9 @@ import {
 // dispatch namespace are rejected by CF (the mock guards this); the
 // regression test asserts the rejection still fires.
 //
-// Worker bytes are stored in R2 at
-// `worker-bundles/{projectId}/{deploymentId}/{path}` so future rollbacks
-// can re-PUT them. `deployments.bundle_stored=true` after R2 puts succeed.
-// Retention deletes the per-deploy container app + R2 bundle objects when
-// evicting; project teardown deletes ALL retained deployments' container
-// apps via the orphan-recovery enumeration in `cleanup.ts`.
+// Retention deletes the per-deploy container app and any historical R2 bundle
+// objects when evicting. Project teardown deletes all retained deployments'
+// container apps via the orphan-recovery enumeration in cleanup.ts.
 // ---------------------------------------------------------------------------
 
 let env: TestEnv;
@@ -280,33 +276,6 @@ describe('per-deploy sandbox integration', () => {
   });
 
   // ----------------------------------------------------------------------
-  // 3. R2 bundle write
-  // ----------------------------------------------------------------------
-  it('successful sandbox deploy persists worker bundle to R2 and flips bundle_stored=true', async () => {
-    const user = await createTestUser(env.db);
-    const project = await createTestProject(env.db, user.id, 'sb-bundle');
-    mockCfApi();
-
-    const workerSource = "export default { fetch() { return new Response('hi'); } }";
-    const res = await deploy(project.id, user.jwt, buildSandboxManifest(), {
-      'index.js': workerSource,
-    });
-    expect(res.status).toBe(200);
-    const done = getDoneEvent(await readAllEvents(res));
-    expect(done).toBeDefined();
-    const deployId = done!.deployment;
-
-    // R2 has at least one object under `worker-bundles/{projectId}/{deploymentId}/`.
-    const bundleKeys = await listR2Keys(`worker-bundles/${project.id}/${deployId}/`);
-    expect(bundleKeys.length).toBeGreaterThan(0);
-    expect(bundleKeys).toContain(`worker-bundles/${project.id}/${deployId}/index.js`);
-
-    // bundle_stored flipped to true.
-    const [row] = await env.db.select().from(deployments).where(eq(deployments.id, deployId));
-    expect(row!.bundle_stored).toBe(true);
-  });
-
-  // ----------------------------------------------------------------------
   // 4. Static-only deploy doesn't write bundle
   // ----------------------------------------------------------------------
   it('static-only deploy does NOT write a worker bundle (bundle_stored stays false, no R2 objects)', async () => {
@@ -388,6 +357,13 @@ describe('per-deploy sandbox integration', () => {
     const v1Id = done1!.deployment;
     const v1WorkerName = `user-${project.slug}-${v1Id}`;
     const v1ContainerName = `${project.id}-${v1Id}-void-sandbox`.toLowerCase().replaceAll('_', '-');
+
+    // Model a retained deployment created before Worker bundle storage stopped.
+    await env.STATIC_ASSETS_R2.put(
+      `worker-bundles/${project.id}/${v1Id}/index.js`,
+      'legacy Worker bundle',
+    );
+    await env.db.update(deployments).set({ bundle_stored: true }).where(eq(deployments.id, v1Id));
 
     // Sanity: v1 state is in place.
     expect(cf.state.hostScripts.has(v1WorkerName)).toBe(true);

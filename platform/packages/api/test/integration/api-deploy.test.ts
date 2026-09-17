@@ -406,6 +406,76 @@ describe('POST /projects/:id/deploy', () => {
     });
   });
 
+  it.each([
+    { notFoundHandling: 'single-page-application', framework: undefined, type: 'void' },
+    { notFoundHandling: '404-page', framework: undefined, type: 'void' },
+    { notFoundHandling: 'single-page-application', framework: 'nuxt', type: 'framework' },
+  ])(
+    'rolls back a retained $type Worker with $notFoundHandling assets without storing R2 bundles',
+    async ({ notFoundHandling, framework, type }) => {
+      const user = await createTestUser(env.db, 'retained-worker', 'github', undefined, 'solo');
+      const project = await createTestProject(env.db, user.id, 'retained-worker');
+      const cf = mockCfApi();
+      const put = vi.spyOn(env.STATIC_ASSETS_R2, 'put');
+
+      // Omitted type and workerMain are accepted on the wire. Persist the
+      // Worker identity so asset fallback settings cannot make rollback static.
+      const first = await app.fetch(
+        await buildDeployRequest(env, project.id, user.jwt, {
+          manifest: {
+            version: 3,
+            bindings: {},
+            ...(framework ? { framework } : {}),
+            assetConfig: { not_found_handling: notFoundHandling },
+          },
+        }),
+        env,
+      );
+      expect(first.status).toBe(200);
+      const original = requireEvent<DoneEvent>(await readAllEvents(first), 'done');
+      const row = await getDeployment(env.db, original.deployment);
+      expect(row?.bundle_stored).toBe(false);
+      expect(JSON.parse(row!.manifest!)).toMatchObject({ type });
+
+      const second = await app.fetch(
+        await buildDeployRequest(env, project.id, user.jwt, {
+          workers: { 'index.js': "export default { fetch() { return new Response('v2'); } }" },
+        }),
+        env,
+      );
+      expect(second.status).toBe(200);
+      const latest = requireEvent<DoneEvent>(await readAllEvents(second), 'done');
+      expect(latest.deployment).not.toBe(original.deployment);
+      const workerName = `user-${project.slug}-${original.deployment}`;
+      expect(cf.state.hostScripts.has(workerName)).toBe(true);
+      const workerUploads = () =>
+        cf.state.recordedCalls.filter(
+          (call) => call.method === 'PUT' && call.url.includes('/scripts/'),
+        ).length;
+      const uploadsBeforeRollback = workerUploads();
+
+      const rollback = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/rollback`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${user.jwt}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ deploymentId: original.deployment }),
+        }),
+        env,
+      );
+      expect(rollback.status).toBe(200);
+      expect(await env.ROUTING.get(project.slug, 'json')).toMatchObject({ workerName, type });
+      expect((await getProject(env.db, project.id))?.type).toBe(type);
+      expect(workerUploads()).toBe(uploadsBeforeRollback);
+      expect(put.mock.calls.some(([key]) => key.startsWith('worker-bundles/'))).toBe(false);
+      expect(
+        (await env.STATIC_ASSETS_R2.list({ prefix: `worker-bundles/${project.id}/` })).objects,
+      ).toEqual([]);
+    },
+  );
+
   it('stores ssr flag in KV routing when manifest enables ssr', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'ssr-app');

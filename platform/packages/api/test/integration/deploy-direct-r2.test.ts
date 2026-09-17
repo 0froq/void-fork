@@ -910,7 +910,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
   it('decodes multi-entry workerFiles correctly (no per-entry corruption from delete-as-we-go)', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'jm-wfp-multi');
-    mockCfApi();
+    const cf = mockCfApi();
 
     const originalDispatch = env.DISPATCH;
     env.DISPATCH = {
@@ -971,17 +971,20 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
       expect(done).toBeDefined();
       expect(done!.workers).toBe(3);
 
-      // Verify each persisted module's bytes match the source — this would
-      // fail if `delete`-ing during iteration skipped an entry, or if the
-      // single-pass decode produced wrong bytes.
+      // Verify the actual Cloudflare upload, where every decoded module is consumed.
+      const upload = cf.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith('/scripts/user-' + project.slug + '-' + done!.deployment) &&
+          (init as RequestInit | undefined)?.method === 'PUT',
+      );
+      expect(upload).toBeDefined();
+      const form = (upload![1] as RequestInit).body as FormData;
+      expect(form).toBeInstanceOf(FormData);
       for (const [name, expected] of Object.entries(modules)) {
-        const obj = await env.STATIC_ASSETS_R2.get(
-          `worker-bundles/${project.id}/${done!.deployment}/${name}`,
-        );
-        expect(obj).not.toBeNull();
-        const persisted = new Uint8Array(await obj!.arrayBuffer());
-        expect(persisted.byteLength).toBe(expected.byteLength);
-        expect(persisted).toEqual(expected);
+        const file = form.get(name);
+        expect(file).toBeInstanceOf(Blob);
+        const uploaded = new Uint8Array(await (file as Blob).arrayBuffer());
+        expect(uploaded).toEqual(expected);
       }
     } finally {
       env.DISPATCH = originalDispatch;
