@@ -2518,10 +2518,9 @@ export async function acquirePlatformDatabaseLifecycleLock(
         await pool.end();
       }
     };
-    release.authoritativeManifest = releaseConnectionLock.authoritativeManifest;
-    release.checkpoint = releaseConnectionLock.checkpoint;
-    release.prepareDatabase = releaseConnectionLock.prepareDatabase;
-    return release;
+    // Keep the complete session-lock contract when adding pool cleanup. Safety
+    // and verification hooks must not disappear at this wrapper boundary.
+    return Object.assign(release, releaseConnectionLock);
   } catch (error) {
     client.release();
     await pool.end();

@@ -1,0 +1,68 @@
+import { PGlite } from '@electric-sql/pglite';
+import { getPlatformRuntimeDirectory, readPlatformRuntimeManifest } from '@void/platform/installer';
+import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
+import {
+  acquirePlatformDatabaseLifecycleLock,
+  claimPlatformDatabase,
+  type PlatformDatabaseLifecycleLock,
+} from '../../src/cli/platform-installer.ts';
+
+const mocks = vi.hoisted(() => ({ pool: vi.fn() }));
+vi.mock('pg', () => ({ Pool: mocks.pool }));
+let database: PGlite;
+let lock: PlatformDatabaseLifecycleLock | undefined;
+let queries: Array<string>;
+
+beforeEach(async () => {
+  database = new PGlite();
+  await database.waitReady;
+  queries = [];
+  mocks.pool.mockImplementation(function () {
+    const query = async (sql: string, values?: Array<unknown>) => {
+      queries.push(sql);
+      // PGlite has one session and no advisory locks. All ownership, migration,
+      // checkpoint, and protocol SQL still runs against real PostgreSQL.
+      if (sql.includes('pg_try_advisory_lock')) {
+        return { rows: [{ acquired: true }] };
+      }
+      if (sql.includes('pg_advisory_unlock')) {
+        return { rows: [{ pg_advisory_unlock: true }] };
+      }
+      return database.query(sql, values);
+    };
+    return {
+      connect: async () => ({ query, release: () => {} }),
+      query,
+      end: async () => {},
+    };
+  });
+});
+afterEach(async () => {
+  await lock?.();
+  lock = undefined;
+  await database.close();
+});
+
+it('preserves every database lifecycle capability through the pool wrapper on install and resume', async () => {
+  const url = 'postgresql://owner:pw@db.example.com/platform?sslmode=require';
+  await claimPlatformDatabase(url, 'test-install', 'test-owner');
+  lock = await acquirePlatformDatabaseLifecycleLock(url, 'test-install', 'test-owner');
+  expect(lock.prepareSandboxDrain).toBeTypeOf('function');
+  expect(lock.verifyDatabase).toBeTypeOf('function');
+  expect(lock.checkpoint).toBeTypeOf('function');
+  expect(lock.requiredSafetyProtocols).toEqual({ sandboxDrain: 0 });
+  const runtime = readPlatformRuntimeManifest();
+  const directory = getPlatformRuntimeDirectory();
+  await lock.prepareDatabase!(directory, runtime.database, null, false);
+  const checkpoint = await lock.prepareSandboxDrain!(2);
+  expect(checkpoint).toMatchObject({ admissionProtocol: 2, state: 'complete' });
+  await expect(lock.verifyDatabase!(directory, runtime.database)).resolves.toBeUndefined();
+  await lock();
+  lock = undefined;
+  expect(queries.some((sql) => sql.includes('pg_advisory_unlock'))).toBe(true);
+
+  lock = await acquirePlatformDatabaseLifecycleLock(url, 'test-install', 'test-owner');
+  expect(lock.requiredSafetyProtocols).toEqual({ sandboxDrain: 2 });
+  expect(await lock.prepareSandboxDrain!(2)).toEqual(checkpoint);
+  await expect(lock.verifyDatabase!(directory, runtime.database)).resolves.toBeUndefined();
+}, 30_000);
