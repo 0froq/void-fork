@@ -149,8 +149,6 @@ In Void's default mode and when using frameworks where Void controls the Cloudfl
 
 All other fields in your `wrangler.jsonc` -- `name`, `routes`, `services`, `vars`, `env`, `compatibility_date`, etc. -- are preserved in the resolved config and flow through to the build output.
 
-Compatibility flags from the root config, `void.json`, and Void's runtime requirements are combined without duplicates. This also applies after linking an existing Worker copies its production flags into the root config. The deploy CLI also removes duplicate flags from generated output produced by older project plugins, preserving the distinct flags and leaving the root config untouched.
-
 Fields that Void always sets (`main`, `triggers`, `assets`) don't need to be in your Cloudflare config -- they're added programmatically based on your project structure.
 
 In this mode, normal inferred bindings are merged purely in memory. Typed state modules in `durable-objects/` are the exception: Void persists their bindings and `new_sqlite_classes` entries to `wrangler.jsonc` because Cloudflare Durable Object migration history must remain append-only across builds. Commit those entries.

@@ -17,6 +17,7 @@ The `void` package on npm has these previous versions: '0.0.1', '0.1.0', '0.1.2'
 - **Do not use Python for repository scripts or automation**, including inline CI scripts and ad-hoc maintenance commands. Use Node.js with TypeScript/JavaScript, or shell/PowerShell where appropriate.
 - **Never** commit without asking for confirmation.
 - When adding new dependencies to the project, always run `npm view [package] version` to get the latest version.
+- **Keep user-facing documentation focused on using Void.** Explain public APIs, configuration, observable behavior, and actions users need to take. Do not add implementation details, internal workarounds, defensive checks, normalization rules, or bug-fix history unless they help users make a decision or resolve an actionable problem. Maintainer-only knowledge belongs in source comments, repository/package `AGENTS.md`, or contributor guides. This applies to app guides, API/CLI references, consumer-facing READMEs, and shipped app-development skills.
 - **Keep native Cloudflare deploys Workers Free-compatible by default.** New public Void SDK/runtime features must work with `void deploy --platform cloudflare` on Workers Free unless the underlying Cloudflare product has no Free offering. Paid-only functionality must be explicitly opt-in, inferred and emitted only when the app uses it, and checked before provisioning or building. Its documentation and deploy error must name the required Cloudflare product/plan, link to enable it, and explain any API-token permissions. Platform-internal paid services must never become requirements of a single-app native Cloudflare deploy. Add regression coverage proving that an app which does not use the paid feature emits no paid binding and performs no entitlement probe.
 - Every implementation plan should include the following:
   - During plan generation: ask clarifying questions when necessary, especially around developer-experience defining design decisions.
@@ -24,7 +25,7 @@ The `void` package on npm has these previous versions: '0.0.1', '0.1.0', '0.1.2'
     - Run `vp run check` for package typechecking after completing a batch of tasks.
     - Run `vp test run` on tests relevant to the current feature only during feature development. Only run the full test suite when everything is done for final verification.
     - If there are tests hanging or running particularly slow, investigate right there and attempt to fix. Testing velocity is something that should be maintained or improved at every opportunity.
-  - Documentation: after verification, update all docs if relevant and applicable:
+  - Documentation: after verification, update the relevant docs only when public behavior, configuration, or user workflows change. An internal fix often needs no user-facing documentation change:
     - `README.md`
     - affected packages's `README.md` or `AGENTS.md`
     - relevant docs md files in `docs`

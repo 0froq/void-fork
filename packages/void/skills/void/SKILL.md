@@ -27,7 +27,7 @@ For an existing Cloudflare site, run `void deploy` with its root `wrangler.jsonc
 
 When linking reports missing inferred resources, check the listed bindings and inference reasons against the existing Worker and `void.json`; preserve `.void/cloudflare-link.json` for retries. For prerendered/revalidated sites without a cache, migration saves an explicit `routing.isr` choice in `void.json`. True provisions the cache during this deployment; false keeps ISR disabled on retries and later deployments until changed. Keep page-level exports with either choice. CI must configure the boolean before resuming a migration with no saved choice. An application KV binding explicitly named `ISR_CACHE` is still required. Existing D1 bindings without checked-in migrations retain their local migration settings during handoff.
 
-For Cloudflare upload failures, use the underlying validation diagnostic printed with the error and saved in the deploy log. A numeric code such as `10021` alone does not identify the cause; it can cover duplicate compatibility flags or startup exceptions.
+For Cloudflare upload failures, use the detailed error message printed by the CLI and saved in the deploy log. A numeric error code alone may not identify the cause.
 
 Platform administration uses `void platform auth login` and the nested
 `user`, `project`, `deployment`, `build`, `signup`, `invitation`, `system`, and
