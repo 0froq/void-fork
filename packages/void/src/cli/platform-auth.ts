@@ -1,8 +1,4 @@
-import {
-  announceCloudflareLogin,
-  cloudflareAuthEnvironment,
-  createBundledCloudflareAuthRunner,
-} from './cloudflare-auth.ts';
+import { announceCloudflareLogin, createBundledCloudflareAuthRunner } from './cloudflare-auth.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
 export type PlatformCloudflareCredential = Readonly<{
@@ -110,10 +106,4 @@ function defaultWranglerAuthRunner(
   capture: boolean,
 ): WranglerAuthResult {
   return createBundledCloudflareAuthRunner(process.cwd())(args, capture) as WranglerAuthResult;
-}
-
-export function wranglerAuthEnvironment(
-  source: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
-  return cloudflareAuthEnvironment(source);
 }

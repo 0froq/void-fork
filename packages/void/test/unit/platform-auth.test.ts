@@ -1,10 +1,10 @@
 import { log } from '@clack/prompts';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { cloudflareAuthEnvironment } from '../../src/cli/cloudflare-auth.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
   readWranglerOAuthCredential,
   resolvePlatformCloudflareCredential,
-  wranglerAuthEnvironment,
 } from '../../src/cli/platform-auth.ts';
 
 afterEach(() => {
@@ -121,7 +121,7 @@ describe('platform Cloudflare authentication', () => {
 
   it('does not expose platform recovery or service secrets to Wrangler auth commands', () => {
     expect(
-      wranglerAuthEnvironment({
+      cloudflareAuthEnvironment({
         CF_ACCESS_CLIENT_SECRET: 'access-secret',
         DATABASE_URL: 'postgres://secret',
         PATH: '/bin',

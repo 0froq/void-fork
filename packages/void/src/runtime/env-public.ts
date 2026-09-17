@@ -315,7 +315,7 @@ function readKey(key: string): unknown {
     const unmask = isUnmaskActive();
     const redactedIssues = result.issues.map((i) => ({
       ...i,
-      message: redactMessage(key, rawValue, i.message, { unmask }),
+      message: redactMessage(rawValue, i.message, { unmask }),
     }));
     throw new EnvValidationError(key, redactedIssues);
   }
@@ -421,7 +421,7 @@ async function validateAllEnvWithValues(
       } else {
         report.invalid.push({
           key,
-          messages: result.issues.map((i) => redactMessage(key, raw, i.message, { unmask })),
+          messages: result.issues.map((i) => redactMessage(raw, i.message, { unmask })),
         });
       }
     } else {

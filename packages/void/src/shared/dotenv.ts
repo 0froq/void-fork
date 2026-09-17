@@ -217,23 +217,6 @@ function expandValue(value: string, resolve: (key: string) => string): string {
 }
 
 /**
- * Merge multiple parsed dotenv records with later-entries-win semantics,
- * then expand across the combined set. This is the recommended path for
- * callers that explicitly combine multiple dotenv records, since
- * expansion sees every earlier file's keys at once.
- */
-export function mergeAndExpand(
-  records: Array<Record<string, string>>,
-  options: { onWarn?: (message: string) => void } = {},
-): Record<string, string> {
-  const merged: Record<string, string> = {};
-  for (const record of records) {
-    Object.assign(merged, record);
-  }
-  return expandDotenv(merged, options);
-}
-
-/**
  * Wrangler 4.131's bundled `dotenv` LINE regex (verbatim), used ONLY to detect the
  * declared KEYS wrangler would load — including the OPTIONAL `export ` prefix, the `KEY: val`
  * form, and single/double/backtick quoting — so a transport-redirect / config-override fence

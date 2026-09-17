@@ -51,10 +51,6 @@ const DEFAULT_SEED_FILES = [
 ];
 const MODULE_SEED_EXTENSIONS = new Set(['.ts', '.mts', '.js', '.mjs']);
 
-export function getLocalD1PersistRoot(root: string): string {
-  return getLocalD1Target(root).persistRoot;
-}
-
 export function getLocalD1Target(root: string): LocalD1Target {
   const detected = detectFramework(root);
   const defaultPersistRoot =

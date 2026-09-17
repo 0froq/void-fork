@@ -456,15 +456,6 @@ export function readPendingInstallationSecrets(
   return readRecoveryMaterial(manifest, 'pending', directory);
 }
 
-export function removePendingInstallationSecrets(
-  manifest: PlatformInstallationManifest,
-  directory: string = platformRegistryDirectory(),
-): void {
-  const manifestPath = installationManifestPath(manifest.account.id, manifest.id, directory);
-  rmSync(manifestPath.replace(/\.json$/, '.secrets.enc'), { force: true });
-  rmSync(manifestPath.replace(/\.json$/, '.secrets'), { force: true });
-}
-
 export function promoteInstallationSecrets(
   manifest: PlatformInstallationManifest,
   directory: string = platformRegistryDirectory(),

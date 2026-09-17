@@ -17,7 +17,6 @@ import {
   resolveBindingNames,
   isNodeTarget,
   getDatabaseDialect,
-  getEmailFromHost,
   VALID_REDIRECT_STATUSES,
   countSplats,
 } from '../../src/config.ts';
@@ -1706,31 +1705,5 @@ describe('top-level email config validation', () => {
     expect(config.email?.from).toBe('noreply@mail.acme.com');
     expect(config.inference?.bindings?.email).toBe(true);
     cleanup();
-  });
-});
-
-describe('getEmailFromHost', () => {
-  it('returns the lowercased host of a bare address', () => {
-    expect(getEmailFromHost({ email: { from: 'noreply@Mail.Acme.com' } })).toBe('mail.acme.com');
-  });
-
-  it('returns the host from behind a display name', () => {
-    expect(getEmailFromHost({ email: { from: 'Acme <noreply@mail.acme.com>' } })).toBe(
-      'mail.acme.com',
-    );
-    expect(getEmailFromHost({ email: { from: '"Acme, Inc." <noreply@acme.com>' } })).toBe(
-      'acme.com',
-    );
-  });
-
-  it('returns undefined when email.from is not set', () => {
-    expect(getEmailFromHost({})).toBeUndefined();
-    expect(getEmailFromHost({ email: {} })).toBeUndefined();
-  });
-
-  it('throws the config error for an unparsable address', () => {
-    expect(() => getEmailFromHost({ email: { from: 'noreply' } })).toThrow(
-      '"email.from" in void.json must be a single email address',
-    );
   });
 });

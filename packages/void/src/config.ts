@@ -1028,18 +1028,6 @@ function parseEmailFrom(value: unknown): { email: string; name?: string } {
   }
 }
 
-/**
- * The host of `email.from`, lowercased — the domain `void deploy --platform
- * cloudflare` sets email up on. `undefined` when `email.from` is not set.
- */
-export function getEmailFromHost(config: VoidConfig): string | undefined {
-  if (config.email?.from === undefined) {
-    return undefined;
-  }
-  const { email } = parseEmailFrom(config.email.from);
-  return email.slice(email.indexOf('@') + 1).toLowerCase();
-}
-
 /** Returns true if the target is a non-Cloudflare runtime (Node.js, Bun, Deno). */
 export function isNodeTarget(target: VoidConfig['target']): boolean {
   return target === 'node' || target === 'bun' || target === 'deno';

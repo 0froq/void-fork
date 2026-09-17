@@ -166,11 +166,6 @@ export function cloudflareCredentialOverrides(
   return [...tokens, ...(key && email ? [key, email] : [])];
 }
 
-export function parseCloudflareAccounts(stdout: string): Array<CloudflareAccount> | null {
-  const session = parseCloudflareAuthSession(stdout);
-  return session ? [...session.accounts] : null;
-}
-
 export function parseCloudflareAuthSession(stdout: string): CloudflareAuthSession | null {
   let value: unknown;
   try {
