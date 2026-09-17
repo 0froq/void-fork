@@ -429,8 +429,8 @@ export function openBrowser(
   // argument so shell metacharacters in it can't be interpreted as commands.
   const ignore = (): void => {};
   if (process.platform === 'win32') {
-    // `start` is a cmd builtin; the empty "" is the (ignored) window title.
-    execFile('cmd.exe', ['/c', 'start', '', url], ignore);
+    // Avoid cmd.exe interpreting URL query separators such as & as shell commands.
+    execFile('rundll32.exe', ['url.dll,FileProtocolHandler', url], ignore);
     return;
   }
   if (process.platform === 'darwin') {
@@ -438,11 +438,11 @@ export function openBrowser(
     return;
   }
   // Linux — including WSL2 where `xdg-open` typically has no usable handler.
-  // Try `wslview` (wslu), then fall back to Windows `start` via cmd.exe.
+  // Try `wslview` (wslu), then fall back to the Windows URL handler.
   if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) {
     execFile('wslview', [url], (error) => {
       if (error) {
-        execFile('cmd.exe', ['/c', 'start', '', url], ignore);
+        execFile('rundll32.exe', ['url.dll,FileProtocolHandler', url], ignore);
       }
     });
     return;
