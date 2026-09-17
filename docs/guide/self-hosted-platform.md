@@ -62,9 +62,9 @@ For a domain installation, use these answers. Testing mode skips the application
 | Optional custom API hostname            | Leave empty to use `workers.dev`                    |
 | Dedicate all unmatched traffic to Void? | Yes only if this whole zone belongs to the platform |
 
-The preview uses placeholder resource names. The real install prints its final names and GitHub callback URL.
+Platform resources use your installation name: `team` creates names such as `void-team-api`, `void-team-proxy`, and `void-team-routing`, with no random suffix. Use a different installation name for another platform in the same account. If a required resource already exists and belongs to another installation, Void stops without overwriting it. Existing installations keep their recorded resource names.
 
-The preview also links directly to the runtime-token form, the account's R2 token page, and GitHub OAuth registration. It opens no browser tabs and saves no installation draft. For a new installation, configure the GitHub callback when the real installer opens that step; a saved setup draft keeps its existing callback.
+The preview shows the actual resource names and GitHub callback URL that installation will use with the same configuration. It also links directly to the runtime-token form, the account's R2 token page, and GitHub OAuth registration. It does not open credential setup pages or save an installation draft; Cloudflare browser login still opens when needed.
 
 You can select either path directly:
 
@@ -466,7 +466,7 @@ void platform install \
   --yes
 ```
 
-Mutations require `--yes` in CI; a read-only `--plan` does not. Custom runtimes also require `--runtime <directory>`. For a new installation, GitHub's callback must match the final generated API URL; use an explicit `--control-plane-domain` if you need to configure that URL before an unattended first install. Plan output uses placeholder resource names.
+Mutations require `--yes` in CI; a read-only `--plan` does not. Custom runtimes also require `--runtime <directory>`. For a new installation, register the GitHub callback shown by `--plan` before running the unattended install with the same account, name, and domain options. A custom API hostname is optional.
 
 :::
 

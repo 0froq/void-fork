@@ -40,7 +40,7 @@ function plan(domain = ''): PlatformInstallPlan {
 }
 describe('platform credential setup links', () => {
   it('scopes the runtime form to the account and supplies documented permissions with an accurate fallback', () => {
-    const pages = platformSetupPages(plan(), false);
+    const pages = platformSetupPages(plan());
     const url = new URL(pages.runtime.url);
     expect(url.origin).toBe('https://dash.cloudflare.com');
     expect(url.searchParams.get('to')).toBe('/account/api-tokens');
@@ -59,16 +59,16 @@ describe('platform credential setup links', () => {
     expect(new URL(pages.r2.url).searchParams.get('to')).toBe('/account/r2/api-tokens');
     expect(pages.r2.instructions).toContain('Object Read & Write');
   });
-  it('does not advertise a provisional callback as usable', () => {
-    const preview = formatPlatformSetupPlan(plan(), false);
+  it('shows the final callback in previews as well as interactive setup', () => {
+    const preview = formatPlatformSetupPlan(plan());
     expect(preview).toContain('https://github.com/settings/applications/new');
-    expect(preview).not.toContain(plan().apiUrl + '/auth/callback');
-    expect(platformSetupPages(plan(), true).github.instructions).toContain(
+    expect(preview).toContain(plan().apiUrl + '/auth/callback');
+    expect(platformSetupPages(plan()).github.instructions).toContain(
       plan().apiUrl + '/auth/callback',
     );
   });
   it('includes zone permissions only for an application domain', () => {
-    const page = platformSetupPages(plan('example.com'), true).runtime;
+    const page = platformSetupPages(plan('example.com')).runtime;
     expect(JSON.parse(new URL(page.url).searchParams.get('permissionGroupKeys')!)).toContainEqual({
       key: 'cache',
       type: 'purge',
@@ -81,7 +81,7 @@ describe('platform credential setup links', () => {
     });
     const output = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
-      const page = platformSetupPages(plan(), true).r2;
+      const page = platformSetupPages(plan()).r2;
       openPlatformSetupPage(page, { interactive: false, open });
       expect(open).not.toHaveBeenCalled();
       expect(() => openPlatformSetupPage(page, { interactive: true, open })).not.toThrow();

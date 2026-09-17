@@ -505,20 +505,20 @@ With `--json`, results go to standard output and command errors go to standard e
 void platform install [options] [--yes]
 ```
 
-| Option                            | Purpose                                                                          |
-| --------------------------------- | -------------------------------------------------------------------------------- |
-| `--name <slug>`                   | Human-readable installation/resource prefix                                      |
-| `--display-name <name>`           | Human-readable platform name                                                     |
-| `--account <id>`                  | Cloudflare account id                                                            |
-| `--application-domain <domain>`   | Base domain for deployed apps                                                    |
-| `--workers-dev`                   | Explicit testing mode; add an application domain later                           |
-| `--zone <domain>`                 | Cloudflare zone containing the application domain                                |
-| `--dedicated-zone`                | Add zone-wide catch-all routes; valid only when the app domain is the whole zone |
-| `--control-plane-domain <domain>` | Optional API custom hostname; defaults to `workers.dev`                          |
-| `--plan`                          | Resolve and print a read-only plan                                               |
-| `--resume`                        | Continue the matching checkpointed installation                                  |
-| `--runtime <path>`                | Deploy a locally built, integrity-checked runtime directory                      |
-| `--yes`                           | Acknowledge Cloudflare changes in non-interactive use                            |
+| Option                            | Purpose                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------ |
+| `--name <slug>`                   | Installation name used in `void-<name>-<role>` resource names; choose an unused name |
+| `--display-name <name>`           | Human-readable platform name                                                         |
+| `--account <id>`                  | Cloudflare account id                                                                |
+| `--application-domain <domain>`   | Base domain for deployed apps                                                        |
+| `--workers-dev`                   | Explicit testing mode; add an application domain later                               |
+| `--zone <domain>`                 | Cloudflare zone containing the application domain                                    |
+| `--dedicated-zone`                | Add zone-wide catch-all routes; valid only when the app domain is the whole zone     |
+| `--control-plane-domain <domain>` | Optional API custom hostname; defaults to `workers.dev`                              |
+| `--plan`                          | Resolve and print a read-only plan                                                   |
+| `--resume`                        | Continue the matching checkpointed installation                                      |
+| `--runtime <path>`                | Deploy a locally built, integrity-checked runtime directory                          |
+| `--yes`                           | Acknowledge Cloudflare changes in non-interactive use                                |
 
 For a first installation, follow [Install a Void Platform](../guide/self-hosted-platform.md). The interactive installer recommends using a domain and offers **Use workers.dev for testing** as a visible alternative. Void creates the platform infrastructure and tables. External PostgreSQL and GitHub OAuth are required in either mode. `--workers-dev` skips zone/DNS/certificate operations and cannot be combined with `--application-domain`, `--zone`, or `--dedicated-zone`.
 
@@ -526,7 +526,7 @@ Read-only plans, workers.dev installations with the default API hostname, and su
 
 The installed platform needs a separate runtime token to provision resources for apps. The interactive installer prompts for it and the other setup values. For non-interactive installs, inject the variables listed in [Install from CI](../guide/self-hosted-platform.md#install-from-ci).
 
-`--plan` prints direct setup links without opening a browser or saving a draft. After you confirm an interactive install, Void opens each missing credential's setup page and shows a short permission/checklist fallback. The runtime-token link prefills documented Cloudflare permissions; any additional required fields are named in the CLI. Supplied credentials skip browser opening. Setup drafts pin Worker names and the GitHub callback and save partial credentials encrypted locally. Rerunning the same command resumes an untouched credential draft; provisioning resumes explicitly with `--resume`.
+`--plan` prints the actual resource names, GitHub callback, and direct setup links without opening credential pages or saving a draft; Cloudflare browser login still opens if needed. New platform resources use `void-<name>-<role>` names without random suffixes. Existing installations keep their recorded names, and unowned name conflicts stop installation without overwriting resources. After you confirm an interactive install, Void opens each missing credential's setup page and shows a short permission/checklist fallback. The runtime-token link prefills documented Cloudflare permissions; any additional required fields are named in the CLI. Supplied credentials skip browser opening. Setup drafts pin Worker names and the GitHub callback and save partial credentials encrypted locally. Rerunning the same command resumes an untouched credential draft; provisioning resumes explicitly with `--resume`.
 
 Use an empty PostgreSQL database dedicated to the installation. You can correct a failed initial connection, but after the database is claimed or Hyperdrive is provisioned, commands reject a different URL.
 

@@ -176,7 +176,7 @@ afterEach(() => {
 });
 
 describe('platform credential onboarding', () => {
-  it('uses the real planner for an eight-character name and resumes its generated callback', async () => {
+  it('keeps real resource names and the callback stable from preview through install and resume', async () => {
     const info = vi.spyOn(log, 'info').mockImplementation(() => {});
     const actual = await vi.importActual<typeof import('../../src/cli/platform-plan.ts')>(
       '../../src/cli/platform-plan.ts',
@@ -208,6 +208,10 @@ describe('platform credential onboarding', () => {
     mocks.password.mockImplementation(async (input) =>
       input.message.startsWith('GitHub OAuth') ? Symbol('cancel') : normalPassword(input),
     );
+    await runPlatformLifecycleCommand(parsePlatformArgs(['install', '--plan']));
+    const preview = await mocks.plan.mock.results[0]!.value;
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(listInstallationManifests()).toEqual([]);
     await expect(runPlatformLifecycleCommand(parsePlatformArgs(['install']))).rejects.toThrow(
       'Cancelled',
     );
@@ -219,8 +223,10 @@ describe('platform credential onboarding', () => {
     const draft = listInstallationManifests()[0]!;
     expect(draft.deployment.installationSlug).toBe('void-e2e');
     expect(draft.deployment.resources.apiWorker).toBe('void-void-e2e-api');
+    expect(draft.deployment.resources).toEqual(preview.deployment.resources);
     expect(isPlatformSetupDraft(draft)).toBe(true);
     const callback = `https://${draft.deployment.resources.apiWorker}.void-platform-e2e-test.workers.dev/auth/callback`;
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Callback: ' + callback));
     expect(info).toHaveBeenCalledWith(expect.stringContaining('Callback: ' + callback));
     mocks.password.mockImplementation(normalPassword);
     mocks.open.mockClear();
@@ -232,6 +238,37 @@ describe('platform credential onboarding', () => {
     expect(final.deployment.resources).toEqual(draft.deployment.resources);
     expect(mocks.install).toHaveBeenCalledOnce();
     expect(isPlatformSetupDraft(final)).toBe(false);
+  });
+
+  it('stops an interactive install at an existing resource without retrying or opening setup', async () => {
+    const actual = await vi.importActual<typeof import('../../src/cli/platform-plan.ts')>(
+      '../../src/cli/platform-plan.ts',
+    );
+    mocks.plan.mockImplementation(actual.createPlatformInstallPlan);
+    vi.spyOn(PlatformCloudflareClient.prototype, 'getWorkersSubdomain').mockResolvedValue(
+      'account',
+    );
+    for (const method of [
+      'listAiGateways',
+      'listKvNamespaces',
+      'listR2Buckets',
+      'listQueues',
+      'listDispatchNamespaces',
+      'listHyperdriveConfigs',
+    ] as const) {
+      vi.spyOn(PlatformCloudflareClient.prototype, method).mockResolvedValue([]);
+    }
+    vi.spyOn(PlatformCloudflareClient.prototype, 'listWorkerNames').mockResolvedValue([
+      'void-test-setup-api',
+    ]);
+    await expect(runPlatformLifecycleCommand(parsePlatformArgs(args))).rejects.toThrow(
+      'Resume the owning installation, or choose another installation name.',
+    );
+    expect(mocks.plan).toHaveBeenCalledOnce();
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.install).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(listInstallationManifests()).toEqual([]);
   });
 
   it('keeps plan mode read-only, with direct links and no browser launches', async () => {

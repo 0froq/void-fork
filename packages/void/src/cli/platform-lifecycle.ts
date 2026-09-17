@@ -322,7 +322,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
     );
     note(formatPlatformRuntime(runtime), 'Platform runtime');
     if (args.plan) {
-      console.log(formatPlatformSetupPlan(plan, existing !== null));
+      console.log(formatPlatformSetupPlan(plan));
       outro('No Cloudflare or local installation state was changed.');
       return;
     }
@@ -368,7 +368,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       }
       return value;
     };
-    const pages = platformSetupPages(plan, true);
+    const pages = platformSetupPages(plan);
     if (!configured('cloudflareApiToken', 'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN')) {
       openPlatformSetupPage(pages.runtime);
     }

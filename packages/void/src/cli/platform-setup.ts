@@ -28,10 +28,7 @@ function supportsSetupLinks(): boolean {
 }
 
 /** Only documented dashboard permission keys are prefilled; other required permissions stay explicit. */
-export function platformSetupPages(
-  plan: PlatformInstallPlan,
-  stableCallback: boolean,
-): {
+export function platformSetupPages(plan: PlatformInstallPlan): {
   runtime: PlatformSetupPage;
   github: PlatformSetupPage;
   r2: PlatformSetupPage;
@@ -78,13 +75,12 @@ export function platformSetupPages(
     github: {
       title: 'GitHub OAuth App',
       url: 'https://github.com/settings/applications/new',
-      instructions: stableCallback
-        ? 'Homepage: ' +
-          plan.apiUrl +
-          '\nCallback: ' +
-          plan.apiUrl +
-          '/auth/callback\nRegister the app and generate a client secret.'
-        : 'Create this during installation; the CLI will show its final homepage and callback URL.',
+      instructions:
+        'Homepage: ' +
+        plan.apiUrl +
+        '\nCallback: ' +
+        plan.apiUrl +
+        '/auth/callback\nRegister the app and generate a client secret.',
     },
     r2: {
       title: 'R2 upload token',
@@ -97,11 +93,8 @@ export function platformSetupPages(
   };
 }
 
-export function formatPlatformSetupPlan(
-  plan: PlatformInstallPlan,
-  stableCallback: boolean,
-): string {
-  const pages = platformSetupPages(plan, stableCallback);
+export function formatPlatformSetupPlan(plan: PlatformInstallPlan): string {
+  const pages = platformSetupPages(plan);
   // Keep URLs outside wrapping note boxes so terminal links remain intact.
   return [
     'Credentials needed (paste them into the installer; keep a password-manager copy):',
