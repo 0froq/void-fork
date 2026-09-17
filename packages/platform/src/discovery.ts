@@ -47,6 +47,20 @@ export function createPlatformDiscoveryDocument(
   if (!input.platformVersion.trim()) {
     throw new Error('platformVersion must not be empty.');
   }
+  if (input.applicationRouting) {
+    const application = readPlatformApplication({
+      PLATFORM_APPLICATION: JSON.stringify(input.applicationRouting),
+    });
+    if (
+      !application.workersDev ||
+      application.baseDomain !== input.applicationDomain ||
+      application.workersDev.installationId !== input.installationId
+    ) {
+      throw new Error(
+        'Application routing must match the discovery domain and installation identity.',
+      );
+    }
+  }
   if (
     input.usageProtocolVersion !== undefined &&
     input.usageProtocolVersion !== 0 &&
@@ -91,6 +105,9 @@ export function parsePlatformDiscoveryDocument(value: unknown): PlatformDiscover
     );
   }
   const capabilities = document.capabilities;
+  if (document.schemaVersion === 1 && document.applicationRouting !== undefined) {
+    throw new Error('Application routing requires discovery schema version 2.');
+  }
   if (!capabilities || typeof capabilities !== 'object' || Array.isArray(capabilities)) {
     throw new Error('capabilities must be an object.');
   }

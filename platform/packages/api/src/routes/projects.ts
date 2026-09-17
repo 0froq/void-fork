@@ -206,6 +206,7 @@ class RollbackError extends Error {
 }
 
 type ProjectListItem = Awaited<ReturnType<typeof getProjectsByUserId>>[number] & {
+  url?: string;
   custom_domain: string | null;
   latest_deployment: Awaited<ReturnType<typeof getLatestDeploymentsByProjectIds>> extends Map<
     string,
@@ -578,7 +579,7 @@ const app = new Hono<ApiEnv>()
         pDomains?.find((d: { status: string }) => d.status === 'active') ?? pDomains?.[0];
       const overview = requestOverview.get(p.id);
       return {
-        ...p,
+        ...projectWithUrl(p, context.env),
         custom_domain: domain?.hostname ?? null,
         latest_deployment: latestDeployments.get(p.id) ?? null,
         traffic: {
@@ -688,7 +689,7 @@ const app = new Hono<ApiEnv>()
         // shows the outcome.
         return context.json({ ...project, owner_email_destination: { address } }, 201);
       }
-      return context.json(project, 201);
+      return context.json(projectWithUrl(project, context.env), 201);
     } catch (err) {
       // Unique constraint violation — slug was taken between check and insert
       if (
@@ -710,7 +711,7 @@ const app = new Hono<ApiEnv>()
     if (project.user_id !== context.get('user').id) {
       return context.json({ error: 'forbidden' }, 403);
     }
-    return context.json(project);
+    return context.json(projectWithUrl(project, context.env));
   })
 
   // Mint a narrowly scoped credential for deploy-time remote-binding access.
@@ -3269,3 +3270,4 @@ function isSyntheticProviderEmail(email: string): boolean {
 }
 
 export default app;
+import { projectWithUrl } from '../project-url.ts';

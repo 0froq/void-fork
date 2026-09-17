@@ -8,6 +8,7 @@ import {
   systemHealth,
   systemOverview,
 } from '../../operator/system-operations.ts';
+import { projectWithUrl } from '../../project-url.ts';
 export type { HealthCheck, HealthResult } from '../../operator/system-operations.ts';
 import { CliVersionsPage } from '../views/cli-versions.tsx';
 import { DashboardPage } from '../views/dashboard.tsx';
@@ -35,5 +36,12 @@ adminSystem.post('/backfill-queue-tokens', async (context) =>
 
 export const dashboardHandler: Handler<ApiEnv> = async (context) => {
   const overview = await systemOverview(context.get('db'), context.env);
-  return context.html(<DashboardPage {...overview} username={context.get('user').login} />);
+  return context.html(
+    <DashboardPage
+      {...overview}
+      projects={overview.projects.map((project) => projectWithUrl(project, context.env))}
+      topProjects={overview.topProjects.map((project) => projectWithUrl(project, context.env))}
+      username={context.get('user').login}
+    />,
+  );
 };

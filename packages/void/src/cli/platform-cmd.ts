@@ -107,7 +107,11 @@ function showConnection(connection: PlatformConnection, activeId: string | null)
   console.log(`${marker} ${pc.bold(connection.displayName)}  ${pc.dim(connection.id)}`);
   console.log(`  ${connection.apiUrl}`);
   if (connection.applicationDomain) {
-    console.log(`  apps: *.${connection.applicationDomain}`);
+    console.log(
+      connection.applicationDomain.endsWith('.workers.dev')
+        ? '  apps: workers.dev (testing)'
+        : `  apps: *.${connection.applicationDomain}`,
+    );
   }
 }
 
