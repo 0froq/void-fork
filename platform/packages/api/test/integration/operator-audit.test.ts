@@ -279,28 +279,26 @@ test('records the effective worker environment for implicit and explicit rollbac
     proxy: 'previous',
   };
 
-  expect(
-    await (await request('/workers/api/rollback', { versionId: 'previous' }, staging)).json(),
-  ).toMatchObject({ environment: 'staging' });
-  expect(
-    await (await request('/workers/rollback-all', { versions }, staging)).json(),
-  ).toMatchObject({ environment: 'staging' });
-  expect(
-    await (
-      await request(
-        '/workers/api/rollback',
-        { environment: 'production', versionId: 'previous' },
-        staging,
-      )
-    ).json(),
-  ).toMatchObject({ environment: 'production' });
+  const implicitWorker = await request('/workers/api/rollback', { versionId: 'previous' }, staging);
+  expect(await implicitWorker.json()).toMatchObject({ environment: 'staging' });
+  const implicitAll = await request('/workers/rollback-all', { versions }, staging);
+  expect(await implicitAll.json()).toMatchObject({ environment: 'staging' });
+  const explicitWorker = await request(
+    '/workers/api/rollback',
+    { environment: 'production', versionId: 'previous' },
+    staging,
+  );
+  expect(await explicitWorker.json()).toMatchObject({ environment: 'production' });
 
-  const events = await env.db.select().from(operatorEvents);
-  expect(events.map((event) => JSON.parse(event.target).environment)).toEqual([
-    'staging',
-    'staging',
-    'production',
-  ]);
+  // Read in target order to exercise results returned in a different order from the requests.
+  const events = await env.db.select().from(operatorEvents).orderBy(operatorEvents.target);
+  expect(
+    Object.fromEntries(events.map((event) => [event.id, JSON.parse(event.target).environment])),
+  ).toEqual({
+    [implicitWorker.headers.get('X-Void-Audit-Id')!]: 'staging',
+    [implicitAll.headers.get('X-Void-Audit-Id')!]: 'staging',
+    [explicitWorker.headers.get('X-Void-Audit-Id')!]: 'production',
+  });
 });
 
 test('records sanitized action targets and change arguments', async () => {
