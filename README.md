@@ -103,6 +103,8 @@ To install a shared company platform, follow [Install a Void Platform](./docs/gu
 
 Platform upgrades verify migrations and check the new Workers before completing the rollout. If a rollout fails, Void can restore the previous Workers against the compatible database schema. See the platform guide for recovery and upgrade details.
 
+For a test platform before your domain is ready, use `void platform install --workers-dev`. Later, `void platform domain set example.com` guides DNS setup and verifies HTTPS while preserving existing app URLs and the platform API connection.
+
 ## Contributing
 
 ### Setup

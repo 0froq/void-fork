@@ -14,11 +14,11 @@ The user dashboard, GitHub builds and webhooks, build Containers, email, Google 
 
 ## Before You Start {#prerequisites}
 
-Start with a Cloudflare account you can administer and a GitHub account. To finish an installation, you also need a domain you own and an empty hosted PostgreSQL database. The steps below explain how to get them and the credentials the installer asks for.
+Start with a Cloudflare account you can administer, a GitHub account, and an empty hosted PostgreSQL database. A domain is recommended. If yours is not ready, choose **Use workers.dev for testing** during installation and [add a domain later](#add-a-domain-later). The steps below explain how to get the credentials the installer asks for.
 
 Void creates the Workers, storage, queues, routing, and database tables. You do not need to create those resources yourself, install a separate deployment tool, or clone this repository.
 
-This setup has costs: Workers for Platforms requires a paid plan, and your domain, database, and Cloudflare usage have their own pricing. A domain and external PostgreSQL are currently required even for a test platform. Native single-app deployments remain Workers Free-compatible unless the app uses a paid-only product.
+This setup has costs: Workers for Platforms requires a paid plan, and your database and Cloudflare usage have their own pricing. External PostgreSQL is required in either mode. Native single-app deployments remain Workers Free-compatible unless the app uses a paid-only product.
 
 ## 1. Prepare Your Cloudflare Account and Domain
 
@@ -27,7 +27,7 @@ In the [Cloudflare dashboard](https://dash.cloudflare.com/), select the account 
 1. Open **Workers & Pages**, finish onboarding, and choose the account's `workers.dev` subdomain.
 2. Open **Workers for Platforms** and enable its plan. Review [Workers for Platforms pricing](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/platform/pricing/) before confirming.
 3. Open **R2 Object Storage** and complete its activation. Void creates the bucket later.
-4. Choose a domain you own, such as `example.app`. If you need one, register it with your preferred registrar. For a first installation, use a spare domain's root: apps will be served at `my-app.example.app`.
+4. For a domain installation, choose a domain you own, such as `example.app`. If you need one, register it with your preferred registrar. Use a spare domain's root: apps will be served at `my-app.example.app`. For workers.dev testing, skip this step and the DNS setup below.
 
 If that domain is already in this Cloudflare account, use its existing zone. Otherwise, [add the domain to Cloudflare](https://developers.cloudflare.com/dns/zone-setups/full-setup/setup/) and follow the nameserver instructions until the zone is active. A zone is Cloudflare's DNS configuration for a domain; creating one does not buy the domain.
 
@@ -44,7 +44,15 @@ void platform install --plan
 
 The plan command opens Cloudflare browser login when needed. It asks for the account and basic configuration, then shows the resources it would create. It does not require the database or runtime secrets and does not change Cloudflare resources.
 
-For the first installation, use these answers:
+The installer first offers these choices, with the domain option selected:
+
+```text
+Where should your apps live?
+  Use a domain — recommended
+  Use workers.dev for testing — add a domain later
+```
+
+For a domain installation, use these answers. Testing mode skips the application domain, zone, and catch-all questions:
 
 | Prompt                                  | Answer                                              |
 | --------------------------------------- | --------------------------------------------------- |
@@ -56,6 +64,15 @@ For the first installation, use these answers:
 | Dedicate all unmatched traffic to Void? | Yes only if this whole zone belongs to the platform |
 
 The preview uses placeholder resource names. The real install prints its final names and GitHub callback URL.
+
+You can select either path directly:
+
+```sh
+void platform install --application-domain example.app --plan
+void platform install --workers-dev --plan
+```
+
+`--workers-dev` cannot be combined with `--application-domain`, `--zone`, or `--dedicated-zone`.
 
 ::: tip Working from this repository?
 Run `vpr install:void-dev` and use `void-dev` wherever this guide says `void`. Add `--runtime packages/platform/dist/runtime` to install, resume, and upgrade commands from the repository root to select your source build. No source-revision environment variable is needed. See [Platform Development](./platform-development.md).
@@ -83,7 +100,9 @@ Keep one password-manager entry for this platform. Paste the saved values into t
 
 ### Cloudflare API Tokens {#runtime-token-permissions}
 
-Create two custom tokens using Cloudflare's [API token setup](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/). Name them **Void Platform Management** and **Void Platform Runtime**. Scope them to your selected account and application zone.
+For a domain installation, create two custom tokens using Cloudflare's [API token setup](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/). Name them **Void Platform Management** and **Void Platform Runtime**. Scope them to your selected account and application zone.
+
+For workers.dev testing with the default API hostname, browser login can authorize installation: you only need to create the runtime token and R2 credentials below. Skip the zone permissions until you add a domain.
 
 The management token lets your CLI install and maintain the platform. The runtime token is stored as a Worker secret so the platform can deploy apps after you close your terminal. They are separate credentials.
 
@@ -136,7 +155,13 @@ Paste it into your password manager as **JWT signing secret**. Run the command a
 
 ## 5. Install and Connect GitHub {#install}
 
-The management token is the one value the current interactive installer needs in the shell. Its browser login cannot create the application's DNS record. In Bash or zsh, read the token without displaying it or putting its value in command history:
+For workers.dev testing, start the interactive install and continue to the GitHub setup below:
+
+```sh
+void platform install --workers-dev
+```
+
+For a domain installation, the management token is the one value the interactive installer needs in the shell. Browser login cannot create the application's DNS record. In Bash or zsh, read the token without displaying it or putting its value in command history:
 
 ```sh
 printf 'Cloudflare management API token: '
@@ -236,6 +261,29 @@ To see who can join, run `void platform signup show`. You can also allow an emai
 
 Your administrator session lasts for one hour. Use it to inspect users, projects, logs, and platform health. The [Platform Administration guide](./platform-administration.md) walks through those workflows, previews, and automation. You can also open `<API origin>/admin/login` to use the browser admin UI.
 
+## Add a Domain Later
+
+When your domain is ready, run:
+
+```sh
+void platform domain set example.app --plan
+void platform domain set example.app
+```
+
+The command selects your installed platform (or offers a picker), finds or creates its zone, sets up DNS and routing, and verifies HTTPS before publishing the new application URLs. Set the management token as described [above](#install) when creating DNS or a zone. Grant the existing runtime token **Cache Purge: Purge** on the new zone; Void checks that permission through the running platform without asking you to paste its token again.
+
+If nameservers or certificates are pending, follow the printed guidance and rerun the same command. Your workers.dev app URLs continue working during and after setup. Projects, deployments, secrets, and the platform API URL stay the same, so developers do not reconnect and the platform's GitHub OAuth callback does not change. DNS and configuration changes may take time to propagate.
+
+Use `--installation <id>` to select an installation explicitly, `--zone example.com` for an app domain such as `apps.example.com`, or `--dedicated-zone` for catch-all routing on a dedicated zone. Nested domains still need the wildcard certificate described below. This command adds the first domain; replacing an existing application domain is not currently supported. It uses the installed runtime and does not require `--runtime` or an app redeploy.
+
+Browser login sessions are specific to each origin. Apps using their own OAuth providers may need to register their new callback URLs. Void's built-in auth uses the request origin automatically unless the app overrides that configuration.
+
+### What Changes in Testing Mode?
+
+Each deployed app gets a small forwarding Worker and its own `workers.dev` origin. It forwards requests, including WebSockets and SSE, through the same platform router. Names include installation and project IDs; a later project with the same slug cannot inherit a deleted project's test URL.
+
+Testing origins use shared ISR storage but bypass the extra edge response cache because you cannot use your zone's purge API for `workers.dev`. Custom-domain requests use the normal edge cache after activation. Existing test URLs and forwarding Workers are retained when you add a domain; new apps then use the domain without creating more forwarding Workers. Like other platform Workers, forwarders are retained for manual cleanup on uninstall; platform disablement and project suspension still apply to their traffic.
+
 ## Other Domain Options
 
 ::: details Custom API hostname
@@ -262,17 +310,17 @@ The management token needs **SSL and Certificates: Read** (or Edit) on that zone
 
 Resources use a `void-<installation-name>-<random-suffix>-*` prefix where Cloudflare allows names. This keeps installations recognizable and avoids predictable Worker names colliding during setup.
 
-| Resource                                  |  Count | Purpose                                                            |
-| ----------------------------------------- | -----: | ------------------------------------------------------------------ |
-| Workers                                   |      4 | API/control plane, proxy, tail ingestion, and application dispatch |
-| KV namespaces                             |      3 | Routing, ISR cache, and legacy/static asset compatibility          |
-| R2 buckets                                |      1 | Static and deployment assets                                       |
-| Queues                                    |      2 | Usage events and cron firing                                       |
-| Workers for Platforms dispatch namespaces |      1 | User application Workers                                           |
-| Hyperdrive configurations                 |      1 | External platform PostgreSQL                                       |
-| AI Gateways                               |      1 | Installation-isolated AI routing and metering                      |
-| Proxied wildcard DNS records              |      1 | Application hostname resolution                                    |
-| Zones                                     | 0 or 1 | Created only when the requested application zone is absent         |
+| Resource                                  |                                 Count | Purpose                                                                        |
+| ----------------------------------------- | ------------------------------------: | ------------------------------------------------------------------------------ |
+| Workers                                   | 4, plus one per app using workers.dev | API/control plane, proxy, tail ingestion, dispatch, and test-origin forwarders |
+| KV namespaces                             |                                     3 | Routing, ISR cache, and legacy/static asset compatibility                      |
+| R2 buckets                                |                                     1 | Static and deployment assets                                                   |
+| Queues                                    |                                     2 | Usage events and cron firing                                                   |
+| Workers for Platforms dispatch namespaces |                                     1 | User application Workers                                                       |
+| Hyperdrive configurations                 |                                     1 | External platform PostgreSQL                                                   |
+| AI Gateways                               |                                     1 | Installation-isolated AI routing and metering                                  |
+| Proxied wildcard DNS records              |                                0 or 1 | Created only when an application domain is configured                          |
+| Zones                                     |                                0 or 1 | Created only when the requested application zone is absent                     |
 
 The API Worker uses four Durable Object classes for usage, cron scheduling, error monitoring, and concurrency. Worker bindings create the request and log datasets in Analytics Engine. The core installation doesn't create Container applications, a GitHub App, a dashboard Worker, or build Workers.
 

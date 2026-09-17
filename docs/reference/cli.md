@@ -534,6 +534,7 @@ void platform install [options] [--yes]
 | `--display-name <name>`           | Human-readable platform name                                                     |
 | `--account <id>`                  | Cloudflare account id                                                            |
 | `--application-domain <domain>`   | Base domain for deployed apps                                                    |
+| `--workers-dev`                   | Explicit testing mode; add an application domain later                           |
 | `--zone <domain>`                 | Cloudflare zone containing the application domain                                |
 | `--dedicated-zone`                | Add zone-wide catch-all routes; valid only when the app domain is the whole zone |
 | `--control-plane-domain <domain>` | Optional API custom hostname; defaults to `workers.dev`                          |
@@ -542,9 +543,9 @@ void platform install [options] [--yes]
 | `--runtime <path>`                | Deploy a locally built, integrity-checked runtime directory                      |
 | `--yes`                           | Acknowledge Cloudflare changes in non-interactive use                            |
 
-For a first installation, follow [Install a Void Platform](../guide/self-hosted-platform.md). It walks through account activation, choosing a domain, creating PostgreSQL, obtaining credentials, and connecting GitHub. Void creates the platform infrastructure and tables; a domain and external PostgreSQL are currently required even for a test installation.
+For a first installation, follow [Install a Void Platform](../guide/self-hosted-platform.md). The interactive installer recommends using a domain and offers **Use workers.dev for testing** as a visible alternative. Void creates the platform infrastructure and tables. External PostgreSQL and GitHub OAuth are required in either mode. `--workers-dev` skips zone/DNS/certificate operations and cannot be combined with `--application-domain`, `--zone`, or `--dedicated-zone`.
 
-Read-only plans and supported lifecycle operations can use Cloudflare browser login and the system keychain. Installation that writes DNS or creates a zone needs an explicit management token through `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`; browser login alone is not enough.
+Read-only plans, workers.dev installations with the default API hostname, and supported lifecycle operations can use Cloudflare browser login and the system keychain. Installation that writes DNS or creates a zone needs an explicit management token through `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`.
 
 The installed platform needs a separate runtime token to provision resources for apps. The interactive installer prompts for it and the other setup values. For non-interactive installs, inject the variables listed in [Install from CI](../guide/self-hosted-platform.md#install-from-ci).
 
@@ -559,6 +560,16 @@ void platform install --resume --name <installation-id>
 ```
 
 See [Self-host a Void platform](../guide/self-hosted-platform.md) for prerequisites, token scope, exact footprint, domain behavior, and an end-to-end walkthrough.
+
+### `void platform domain set`
+
+```sh
+void platform domain set <domain> [--installation <id>] [--zone <domain>] [--dedicated-zone] [--plan] [--yes]
+```
+
+Add an application domain to a workers.dev test platform. Domain-based installations remain the recommended default. The command detects the zone when possible, creates missing DNS and routes after confirmation, and checks HTTPS before making the domain canonical. If DNS or certificates are pending, rerun the same command to resume. `--plan` is read-only; non-interactive mutations require `--yes`.
+
+Existing workers.dev URLs remain available, and the platform API origin, OAuth callback, projects, and deployments stay unchanged. The command verifies the running runtime token's Cache Purge permission for the new zone. A disabled platform stays disabled. Use the database URL from the original installation when administering from another machine. Replacing an already configured application domain is not supported. See [Add a Domain Later](../guide/self-hosted-platform.md#add-a-domain-later).
 
 ### Lifecycle commands
 
