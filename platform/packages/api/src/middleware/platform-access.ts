@@ -12,7 +12,8 @@ function internallyAuthenticated(method: string, path: string): boolean {
       path,
     ) ||
       path === '/internal/revalidate' ||
-      path === '/internal/email/domain-credential')
+      path === '/internal/email/domain-credential' ||
+      path === '/internal/github-webhook')
   );
 }
 

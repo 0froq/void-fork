@@ -12,6 +12,7 @@
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "deploy": "node ../../scripts/wrangler-deploy.ts",
+    "deploy:github-webhook-ingress": "node ../../scripts/wrangler-deploy.ts --config wrangler.github-webhook-ingress.jsonc",
     "dev": "wrangler dev",
     "migrate": "drizzle-kit migrate",
     "migrate:staging": "DATABASE_URL=$STAGING_DATABASE_URL drizzle-kit migrate",

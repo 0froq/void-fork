@@ -46,6 +46,8 @@ export type ApiEnv = Env & {
     /** App private key in PKCS#8 PEM form (`openssl pkcs8 -topk8 -nocrypt`). */
     GITHUB_APP_PRIVATE_KEY?: string;
     GITHUB_WEBHOOK_SECRET?: string;
+    /** Dedicated HMAC shared only with the optional, path-isolated GitHub ingress Worker. */
+    GITHUB_WEBHOOK_INGRESS_SECRET?: string;
     GITHUB_APP_SLUG?: string;
     /**
      * GitHub App user-to-server OAuth credentials (the App's own client id/secret,

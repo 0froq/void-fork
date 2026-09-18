@@ -76,6 +76,7 @@ import emailConfirm from './routes/email-confirm.ts';
 import emailRoutes from './routes/email.ts';
 import { githubProjectRoutes, githubRoutes } from './routes/github.ts';
 import internalEmailDomainCredential from './routes/internal-email.ts';
+import internalGitHubWebhook from './routes/internal-github-webhook.ts';
 import internalResolveResource from './routes/internal-resolve-resource.ts';
 import internalResolveWorker from './routes/internal-resolve-worker.ts';
 import internalRevalidate from './routes/internal-revalidate.ts';
@@ -334,6 +335,8 @@ const app = new Hono<ApiEnv>()
   .route('/internal/revalidate', internalRevalidate)
   .use('/internal/email/*', capabilityMiddleware('email'))
   .route('/internal/email/domain-credential', internalEmailDomainCredential)
+  .use('/internal/github-webhook', capabilityMiddleware('managedBuilds'))
+  .route('/internal/github-webhook', internalGitHubWebhook)
   .route('/internal/resolve-resource', internalResolveResource)
   .route('/internal/resolve-worker', internalResolveWorker)
   .route('/internal/verify-owner', internalVerifyOwner)
