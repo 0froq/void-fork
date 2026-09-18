@@ -1,4 +1,21 @@
 export {
+  DEFAULT_PLATFORM_SESSION_SECONDS,
+  GOOGLE_OIDC_ISSUER,
+  PLATFORM_LOGIN_KINDS,
+  parsePlatformAccessProtection,
+  parsePlatformAdmissionPolicy,
+  parsePlatformIdentityUrl,
+  parsePlatformLoginConfiguration,
+  parsePlatformLoginDescriptor,
+  parsePlatformLoginId,
+  validatePlatformAdmissionPolicy,
+  type PlatformAccessProtection,
+  type PlatformAdmissionPolicy,
+  type PlatformLoginConfiguration,
+  type PlatformLoginDescriptor,
+  type PlatformLoginKind,
+} from './authentication.ts';
+export {
   PLATFORM_DEPLOYMENT_SCHEMA_VERSION,
   createApplicationRoutes,
   createPlatformDeploymentManifest,
