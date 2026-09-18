@@ -18,12 +18,17 @@ import { createCodeChallenge } from '../../src/auth/pkce.ts';
 import { createHumanSession } from '../../src/auth/sessions.ts';
 import { app } from '../../src/index.ts';
 import {
+  githubInstallations,
+  invitations,
   platformAuthAttempts,
+  platformAuthSettings,
+  platformHumanSessions,
   platformLoginConnections,
   platformLoginIdentities,
   operatorEvents,
   users,
 } from '../../src/schema.ts';
+import { putAllowlist } from '../../src/signup-allowlist.ts';
 import { clearTables, createTestUser, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
 
 let env: TestEnv;
@@ -33,6 +38,9 @@ let authorization: URL;
 let callbackCount: number;
 let operatorToken: string;
 let browserAdminCookie: string;
+let oidcEmail: string | undefined;
+let oidcEmailVerified: boolean | undefined;
+let oidcGroups: Array<string> | undefined;
 const origin = 'https://api.example.com';
 const issuer = 'https://identity.login-example.com';
 const verifier = 'a'.repeat(64);
@@ -46,6 +54,8 @@ afterAll(teardownEnv);
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(async () => {
   await clearTables(env.db);
+  await env.ROUTING.delete('signup:allowlist');
+  await env.ROUTING.delete('signup:enabled');
   const admin = await createTestUser(
     env.db,
     'operator',
@@ -91,6 +101,9 @@ beforeEach(async () => {
     .set({ enabled: true, active_revision: 1 })
     .where(eq(platformLoginConnections.id, 'company'));
   callbackCount = 0;
+  oidcEmail = 'employee@example.com';
+  oidcEmailVerified = true;
+  oidcGroups = undefined;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
@@ -115,8 +128,9 @@ beforeEach(async () => {
         expect(body.get('redirect_uri')).toBe(`${origin}/auth/callback`);
         const idToken = await new SignJWT({
           nonce: authorization.searchParams.get('nonce'),
-          email: 'employee@example.com',
-          email_verified: true,
+          ...(oidcEmail === undefined ? {} : { email: oidcEmail }),
+          ...(oidcEmailVerified === undefined ? {} : { email_verified: oidcEmailVerified }),
+          ...(oidcGroups === undefined ? {} : { groups: oidcGroups }),
         })
           .setIssuer(issuer)
           .setAudience('client')
@@ -139,9 +153,9 @@ beforeEach(async () => {
   );
 });
 
-async function start() {
+async function start(provider = 'company') {
   const url = new URL('/auth/login', origin);
-  url.searchParams.set('provider', 'company');
+  url.searchParams.set('provider', provider);
   url.searchParams.set('redirect', 'http://localhost:3456/callback?state=cli-state');
   url.searchParams.set('code_challenge', await createCodeChallenge(verifier));
   url.searchParams.set('code_challenge_method', 'S256');
@@ -173,7 +187,209 @@ function operator(path: string, body?: unknown) {
   );
 }
 
+function mockGitHubLogin(input: {
+  id: number;
+  login: string;
+  email: string | null;
+  emailVerified: boolean;
+}) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (request: string | URL | Request) => {
+      const url = request.toString();
+      if (url === 'https://github.com/login/oauth/access_token') {
+        return Response.json({ access_token: 'github-access-token' });
+      }
+      if (url === 'https://api.github.com/user') {
+        return Response.json({ id: input.id, login: input.login, email: input.email });
+      }
+      if (url === 'https://api.github.com/user/emails') {
+        return Response.json(
+          input.email ? [{ email: input.email, primary: true, verified: input.emailVerified }] : [],
+        );
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }),
+  );
+}
+
 describe('configured platform login routes', () => {
+  async function ordinarySession() {
+    const user = await createTestUser(env.db, 'ordinary', 'github', 'ordinary-id');
+    await env.db.insert(platformLoginIdentities).values({
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      connection_id: 'github',
+      issuer: 'https://github.com',
+      subject: 'ordinary-id',
+    });
+    const human = await createHumanSession(env.db, env.JWT_SECRET, {
+      userId: user.id,
+      connectionId: 'github',
+      revision: 1,
+      generation: 1,
+      audience: 'api',
+    });
+    return { user, ...human };
+  }
+  async function launchLink(token: string, connectionId = 'company') {
+    return app.fetch(
+      new Request(origin + '/auth/link', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectionId }),
+      }),
+      env,
+    );
+  }
+  it('links an ordinary account only after recent login, provider proof, and explicit browser confirmation', async () => {
+    const human = await ordinarySession();
+    const launch = await launchLink(human.token);
+    expect(launch.status).toBe(200);
+    const launchUrl = (await launch.json<{ url: string }>()).url;
+    expect((await app.fetch(new Request(launchUrl), env)).status).toBe(401);
+    const retry = await launchLink(human.token);
+    const start = await app.fetch(
+      new Request((await retry.json<{ url: string }>()).url, {
+        headers: { Cookie: 'void_account_session=' + human.token },
+      }),
+      env,
+    );
+    authorization = new URL(start.headers.get('Location')!);
+    const response = await callback({
+      state: authorization.searchParams.get('state')!,
+      cookie: start.headers.get('Set-Cookie')!.split(';')[0]!,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('employee@example.com');
+    expect(
+      await env.db
+        .select()
+        .from(platformLoginIdentities)
+        .where(eq(platformLoginIdentities.connection_id, 'company')),
+    ).toHaveLength(0);
+    const cookie = response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith('void_link_confirm='))!
+      .split(';')[0]!;
+    const confirm = (originHeader: string) =>
+      app.fetch(
+        new Request(origin + '/auth/link/confirm', {
+          method: 'POST',
+          headers: {
+            Cookie: cookie,
+            Origin: originHeader,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: 'confirm=yes',
+        }),
+        env,
+      );
+    expect((await confirm('https://evil.example')).status).toBe(400);
+    expect((await confirm(origin)).status).toBe(200);
+    expect(
+      await env.db
+        .select()
+        .from(platformLoginIdentities)
+        .where(eq(platformLoginIdentities.connection_id, 'company')),
+    ).toMatchObject([{ user_id: human.user.id, subject: 'employee' }]);
+    expect((await confirm(origin)).status).toBe(400);
+  });
+  it('rejects old or revoked sessions and never tests a disabled method for an ordinary user', async () => {
+    const human = await ordinarySession();
+    await env.db
+      .update(platformHumanSessions)
+      .set({ created_at: new Date(Date.now() - 660_000).toISOString() })
+      .where(eq(platformHumanSessions.id, human.session.id));
+    expect((await launchLink(human.token)).status).toBe(401);
+    await env.db
+      .update(platformHumanSessions)
+      .set({ created_at: new Date().toISOString() })
+      .where(eq(platformHumanSessions.id, human.session.id));
+    await env.db
+      .update(platformLoginConnections)
+      .set({ enabled: false })
+      .where(eq(platformLoginConnections.id, 'company'));
+    expect((await launchLink(human.token)).status).toBe(404);
+    await env.db
+      .update(platformHumanSessions)
+      .set({ revoked_at: new Date().toISOString() })
+      .where(eq(platformHumanSessions.id, human.session.id));
+    expect((await launchLink(human.token)).status).toBe(401);
+  });
+  it.each(['revoked', 'expired', 'disabled', 'claimed'] as const)(
+    'rejects an ordinary link when authority changes before confirmation: %s',
+    async (reason) => {
+      const human = await ordinarySession();
+      const launch = await launchLink(human.token);
+      const start = await app.fetch(
+        new Request((await launch.json<{ url: string }>()).url, {
+          headers: { Cookie: 'void_account_session=' + human.token },
+        }),
+        env,
+      );
+      authorization = new URL(start.headers.get('Location')!);
+      const response = await callback({
+        state: authorization.searchParams.get('state')!,
+        cookie: start.headers.get('Set-Cookie')!.split(';')[0]!,
+      });
+      expect(response.status).toBe(200);
+      const cookie = response.headers
+        .getSetCookie()
+        .find((value) => value.startsWith('void_link_confirm='))!
+        .split(';')[0]!;
+      let otherId: string | undefined;
+      if (reason === 'revoked') {
+        await env.db
+          .update(platformHumanSessions)
+          .set({ revoked_at: new Date().toISOString() })
+          .where(eq(platformHumanSessions.id, human.session.id));
+      }
+      if (reason === 'expired') {
+        await env.db
+          .update(platformHumanSessions)
+          .set({ created_at: new Date(Date.now() - 660_000).toISOString() })
+          .where(eq(platformHumanSessions.id, human.session.id));
+      }
+      if (reason === 'disabled') {
+        await env.db
+          .update(platformLoginConnections)
+          .set({ enabled: false })
+          .where(eq(platformLoginConnections.id, 'company'));
+      }
+      if (reason === 'claimed') {
+        const other = await createTestUser(env.db, 'other', 'google', 'other-id');
+        otherId = other.id;
+        await env.db.insert(platformLoginIdentities).values({
+          id: crypto.randomUUID(),
+          user_id: other.id,
+          connection_id: 'company',
+          issuer,
+          subject: 'employee',
+        });
+      }
+      const confirm = await app.fetch(
+        new Request(origin + '/auth/link/confirm', {
+          method: 'POST',
+          headers: {
+            Cookie: cookie,
+            Origin: origin,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: 'confirm=yes',
+        }),
+        env,
+      );
+      expect(confirm.status).toBe(reason === 'revoked' || reason === 'expired' ? 401 : 409);
+      const identities = await env.db
+        .select()
+        .from(platformLoginIdentities)
+        .where(eq(platformLoginIdentities.connection_id, 'company'));
+      expect(identities).toEqual(
+        reason === 'claimed' ? [expect.objectContaining({ user_id: otherId })] : [],
+      );
+    },
+  );
   it('returns a browser administrator to review their verified identity without silently linking it', async () => {
     const launch = await app.fetch(
       new Request(`${origin}/admin/config/auth/connections/company/test`, {
@@ -207,6 +423,228 @@ describe('configured platform login routes', () => {
         .from(platformLoginIdentities)
         .where(eq(platformLoginIdentities.connection_id, 'company')),
     ).toHaveLength(0);
+  });
+  it('accepts a pending invitation only after a successful managed login with verified email', async () => {
+    await env.db.insert(invitations).values({
+      id: 'managed-invitation',
+      email: 'employee@example.com',
+      invited_by: 'installation-administrator',
+    });
+    expect((await callback(await start())).status).toBe(302);
+    expect((await env.db.select().from(invitations))[0]).toMatchObject({
+      status: 'accepted',
+      accepted_by: expect.any(String),
+      accepted_at: expect.any(String),
+    });
+  });
+  it.each([
+    { label: 'missing', email: undefined, verified: true },
+    { label: 'unverified', email: 'employee@example.com', verified: false },
+  ])('does not accept an invitation for $label provider email', async ({ email, verified }) => {
+    oidcEmail = email;
+    oidcEmailVerified = verified;
+    await env.db.update(platformAuthSettings).set({ admission: { mode: 'public' } });
+    await env.db.insert(invitations).values({
+      id: 'unverified-managed-invitation',
+      email: 'employee@example.com',
+      invited_by: 'installation-administrator',
+    });
+    expect((await callback(await start())).status).toBe(302);
+    expect((await env.db.select().from(invitations))[0]).toMatchObject({
+      status: 'pending',
+      accepted_by: null,
+      accepted_at: null,
+    });
+  });
+  it('does not accept an invitation through an implicit verified-email account match', async () => {
+    const existing = await createTestUser(env.db, 'existing-account', 'google', 'existing-subject');
+    await env.db
+      .update(users)
+      .set({ email: 'employee@example.com' })
+      .where(eq(users.id, existing.id));
+    await env.db.insert(invitations).values({
+      id: 'implicit-merge-invitation',
+      email: 'employee@example.com',
+      invited_by: 'installation-administrator',
+    });
+    expect((await callback(await start())).status).toBe(409);
+    expect((await env.db.select().from(invitations))[0]).toMatchObject({
+      status: 'pending',
+      accepted_by: null,
+      accepted_at: null,
+    });
+  });
+  it('admits an ordinary OIDC user without email by exact connection and subject', async () => {
+    oidcEmail = undefined;
+    oidcEmailVerified = undefined;
+    await env.db.update(platformAuthSettings).set({ admission: { mode: 'restricted' } });
+    await putAllowlist(env.ROUTING, [
+      { type: 'identity', connectionId: 'company', subject: 'employee' },
+    ]);
+
+    expect((await callback(await start())).status).toBe(302);
+    const created = (await env.db.select().from(users)).find((user) => user.login === 'employee');
+    expect(created).toMatchObject({ email: null, role: 'user', provider: 'oidc:company' });
+  });
+  it.each([
+    {
+      label: 'wrong connection',
+      entry: { type: 'identity', connectionId: 'github', subject: 'employee' } as const,
+    },
+    {
+      label: 'subject case change',
+      entry: { type: 'identity', connectionId: 'company', subject: 'Employee' } as const,
+    },
+    {
+      label: 'wrong subject',
+      entry: { type: 'identity', connectionId: 'company', subject: 'employee-2' } as const,
+    },
+    {
+      label: 'matching verified email only',
+      entry: {
+        type: 'identity',
+        connectionId: 'company',
+        subject: 'employee@example.com',
+      } as const,
+    },
+  ])('denies restricted signup for $label', async ({ entry }) => {
+    await env.db.update(platformAuthSettings).set({ admission: { mode: 'restricted' } });
+    await putAllowlist(env.ROUTING, [entry]);
+
+    expect((await callback(await start())).status).toBe(403);
+    expect(await env.db.select().from(users)).toHaveLength(1);
+  });
+  it('does not let an identity grant bypass the connection group restriction', async () => {
+    await stageLoginConfiguration(
+      env.db,
+      env,
+      {
+        id: 'company',
+        kind: 'oidc',
+        label: 'Company SSO',
+        clientId: 'client',
+        issuer,
+        requiredGroups: ['engineering'],
+      },
+      'client-secret',
+      1,
+    );
+    await env.db
+      .update(platformLoginConnections)
+      .set({ active_revision: 2 })
+      .where(eq(platformLoginConnections.id, 'company'));
+    await env.db.update(platformAuthSettings).set({ admission: { mode: 'restricted' } });
+    await putAllowlist(env.ROUTING, [
+      { type: 'identity', connectionId: 'company', subject: 'employee' },
+    ]);
+    oidcGroups = ['sales'];
+
+    expect((await callback(await start())).status).toBe(400);
+    expect(await env.db.select().from(users)).toHaveLength(1);
+
+    const existing = await createTestUser(
+      env.db,
+      'existing-subject-user',
+      'oidc:company',
+      'employee',
+    );
+    await env.db.insert(platformLoginIdentities).values({
+      id: crypto.randomUUID(),
+      user_id: existing.id,
+      connection_id: 'company',
+      issuer,
+      subject: 'employee',
+    });
+    expect((await callback(await start())).status).toBe(400);
+  });
+  it('backfills a GitHub App installation after successful managed GitHub login', async () => {
+    const user = await createTestUser(env.db, 'github-user', 'github', '4242');
+    await env.db.insert(platformLoginIdentities).values({
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      connection_id: 'github',
+      issuer: 'https://github.com',
+      subject: '4242',
+    });
+    await env.db.insert(githubInstallations).values({
+      id: 'managed-login-installation',
+      installation_id: '424200',
+      user_id: null,
+      account_login: 'github-user',
+      account_id: '4242',
+      account_type: 'User',
+    });
+    mockGitHubLogin({
+      id: 4242,
+      login: 'github-user',
+      email: 'github-user@example.com',
+      emailVerified: true,
+    });
+    expect((await callback(await start('github'))).status).toBe(302);
+    expect((await env.db.select().from(githubInstallations))[0]?.user_id).toBe(user.id);
+  });
+  it('backfills a GitHub App installation after explicit managed identity linking', async () => {
+    const user = await createTestUser(env.db, 'oidc-user', 'oidc:company', 'oidc-user-subject');
+    await env.db.insert(platformLoginIdentities).values({
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      connection_id: 'company',
+      issuer,
+      subject: 'oidc-user-subject',
+    });
+    const human = await createHumanSession(env.db, env.JWT_SECRET, {
+      userId: user.id,
+      connectionId: 'company',
+      revision: 1,
+      generation: 1,
+      audience: 'api',
+    });
+    await env.db.insert(githubInstallations).values({
+      id: 'managed-link-installation',
+      installation_id: '515000',
+      user_id: null,
+      account_login: 'linked-github-user',
+      account_id: '5150',
+      account_type: 'User',
+    });
+    mockGitHubLogin({
+      id: 5150,
+      login: 'linked-github-user',
+      email: 'linked@example.com',
+      emailVerified: true,
+    });
+    const launch = await launchLink(human.token, 'github');
+    expect(launch.status).toBe(200);
+    const providerStart = await app.fetch(
+      new Request((await launch.json<{ url: string }>()).url, {
+        headers: { Cookie: `void_account_session=${human.token}` },
+      }),
+      env,
+    );
+    authorization = new URL(providerStart.headers.get('Location')!);
+    const completed = await callback({
+      state: authorization.searchParams.get('state')!,
+      cookie: providerStart.headers.get('Set-Cookie')!.split(';')[0]!,
+    });
+    expect(completed.status).toBe(200);
+    const confirmationCookie = completed.headers
+      .getSetCookie()
+      .find((value) => value.startsWith('void_link_confirm='))!
+      .split(';')[0]!;
+    const confirmed = await app.fetch(
+      new Request(`${origin}/auth/link/confirm`, {
+        method: 'POST',
+        headers: {
+          Cookie: confirmationCookie,
+          Origin: origin,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'confirm=yes',
+      }),
+      env,
+    );
+    expect(confirmed.status).toBe(200);
+    expect((await env.db.select().from(githubInstallations))[0]?.user_id).toBe(user.id);
   });
   it('publishes only enabled named methods without exposing provider configuration or credentials', async () => {
     await env.db

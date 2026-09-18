@@ -1,4 +1,8 @@
 export {
+  platformAuthenticationRecoveryMessage,
+  type PlatformAuthenticationRecovery,
+} from './authentication-recovery.ts';
+export {
   DEFAULT_PLATFORM_SESSION_SECONDS,
   GOOGLE_OIDC_ISSUER,
   PLATFORM_LOGIN_KINDS,

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
 import { handleAdminOAuthCallback, isAdminOAuthState } from '../admin/routes/login.ts';
-import { readAuthSettings } from '../auth/configuration.ts';
+import { AuthenticationConfigurationError, readAuthSettings } from '../auth/configuration.ts';
 import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from '../auth/github.ts';
 import {
   getGoogleAuthorizeUrl,
@@ -11,7 +11,13 @@ import {
 import { hmacSignState, hmacVerifyState } from '../auth/hmac.ts';
 import { signJwt } from '../auth/jwt.ts';
 import { verifyJwt } from '../auth/jwt.ts';
-import { startPlatformLogin, completePlatformLogin, startLoginTest } from '../auth/login.ts';
+import {
+  startPlatformLogin,
+  completePlatformLogin,
+  startLoginTest,
+  createLoginTestLaunch,
+  confirmIdentityLink,
+} from '../auth/login.ts';
 import {
   CLI_CODE_CHALLENGE_METHOD,
   createCodeChallenge,
@@ -43,6 +49,7 @@ import { sendWelcomeEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
 import { isDevBypass } from '../env.ts';
 import { localhostRedirectResponse } from '../html-redirect.ts';
+import { authMiddleware } from '../middleware/auth.ts';
 import { users } from '../schema.ts';
 import { isSignupAllowed, getAllowlist } from '../signup-allowlist.ts';
 
@@ -56,7 +63,44 @@ app.use('*', async (context, next) => {
   context.header('Referrer-Policy', 'no-referrer');
   await next();
 });
-app.get('/test', startLoginTest);
+app.get('/test', (context) => startLoginTest(context));
+app.get('/link', (context) => startLoginTest(context, 'link'));
+app.post('/link/confirm', confirmIdentityLink);
+app.post('/link', authMiddleware, async (context) => {
+  const session = context.get('humanSession');
+  if (!session) {
+    return context.json(
+      {
+        error: 'reauthentication_required',
+        message: 'Sign in again before linking another login method.',
+      },
+      401,
+    );
+  }
+  const body = await context.req.json<{ connectionId?: unknown }>().catch(() => null);
+  if (typeof body?.connectionId !== 'string') {
+    return context.json({ error: 'connectionId is required' }, 400);
+  }
+  try {
+    const launch = await createLoginTestLaunch(
+      context,
+      {
+        userId: context.get('user').id,
+        sessionId: session.id,
+        audience: 'api',
+        companyIdentity: context.get('companyIdentity'),
+      },
+      body.connectionId,
+      'link',
+    );
+    return context.json(launch);
+  } catch (error) {
+    if (error instanceof AuthenticationConfigurationError) {
+      return context.json({ error: error.code, message: error.message }, error.status as 400);
+    }
+    throw error;
+  }
+});
 
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
 app.get('/login', async (context) => {

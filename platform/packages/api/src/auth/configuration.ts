@@ -47,6 +47,30 @@ export async function readAuthSettings(db: Db): Promise<AuthSettings | null> {
   return settings ?? null;
 }
 
+/** Acquire the installation lifecycle lock before any authentication state lock. */
+export async function guardAuthenticationLifecycleMutation(db: Db): Promise<void> {
+  const table = await db.execute<{ present: boolean }>(
+    sql`SELECT to_regclass('public.__void_platform_installation') IS NOT NULL AS present`,
+  );
+  if (!table.rows[0]?.present) {
+    return;
+  }
+  const lock = await db.execute<{ acquired: boolean }>(sql`
+    SELECT pg_try_advisory_xact_lock(hashtextextended(
+      'void-platform-lifecycle-v1:' || installation_id || ':' || ownership_nonce, 0
+    )) AS acquired
+    FROM __void_platform_installation
+    WHERE singleton = true
+  `);
+  if (lock.rows[0] && lock.rows[0].acquired !== true) {
+    throw new AuthenticationConfigurationError(
+      'Another installation lifecycle operation is active. Finish it before changing authentication.',
+      'lifecycle_busy',
+      409,
+    );
+  }
+}
+
 /** Shared lock order for provider changes, identity linking, and administrator removal. */
 export async function lockAuthSettings(db: Db): Promise<AuthSettings | null> {
   // Serialize first-time import too, when there is no singleton row to lock yet.
@@ -131,6 +155,7 @@ export async function importLegacyAuthentication(
 ): Promise<AuthSettings> {
   return db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await guardAuthenticationLifecycleMutation(tx);
     await lockAuthSettings(tx);
     const signupFlag = await env.ROUTING.get('signup:enabled');
     const signupOpen =
@@ -233,6 +258,7 @@ export async function stageLoginConfiguration(
   }
   return db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await guardAuthenticationLifecycleMutation(tx);
     if (!(await lockAuthSettings(tx))) {
       throw new AuthenticationConfigurationError(
         'Initialize platform authentication before configuring a connection.',

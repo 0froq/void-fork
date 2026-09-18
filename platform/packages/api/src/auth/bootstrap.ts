@@ -3,7 +3,7 @@ import {
   PLATFORM_AUTH_SETUP_PROOF_PREFIX,
   type PlatformAuthenticationSetup,
 } from '@void/platform';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { createOAuthAccount, createUser, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { encryptPlatformCredential } from '../project-secrets.ts';
@@ -52,6 +52,26 @@ export async function pendingAuthenticationSetup(db: Db) {
       and(eq(platformAuthBootstrap.singleton, true), isNull(platformAuthBootstrap.consumed_at)),
     );
   return pending ?? null;
+}
+
+/** Completed idempotent replays are governed by current perimeter protection. */
+export async function isCompletedAuthenticationSetupReplay(
+  db: Db,
+  setup: PlatformAuthenticationSetup,
+): Promise<boolean> {
+  const { resetPending: _, ...configuration } = setup;
+  const requestHash = await hashLoginProof(JSON.stringify(configuration));
+  const [completed] = await db
+    .select({ singleton: platformAuthBootstrap.singleton })
+    .from(platformAuthBootstrap)
+    .where(
+      and(
+        eq(platformAuthBootstrap.singleton, true),
+        eq(platformAuthBootstrap.request_hash, requestHash),
+        isNotNull(platformAuthBootstrap.consumed_at),
+      ),
+    );
+  return !!completed;
 }
 
 export async function initializeAuthentication(

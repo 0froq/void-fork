@@ -8,6 +8,7 @@ import {
   AUTH_SETUP_PROOF_PREFIX,
   confirmBootstrapIdentity,
   initializeAuthentication,
+  isCompletedAuthenticationSetupReplay,
   pendingAuthenticationSetup,
 } from '../auth/bootstrap.ts';
 import { AuthenticationConfigurationError, readLoginRevision } from '../auth/configuration.ts';
@@ -84,7 +85,8 @@ app.post(
         400,
       );
     }
-    if (setup.protection) {
+    const completedReplay = await isCompletedAuthenticationSetupReplay(context.get('db'), setup);
+    if (setup.protection && !completedReplay) {
       try {
         await platformAccessVerifier.verify(
           context.req.url,
@@ -121,7 +123,9 @@ app.get('/setup', async (context) => {
   const revision = await readLoginRevision(context.get('db'), pending.connection_id, 1);
   if (Date.parse(pending.expires_at) <= Date.now()) {
     return context.html(
-      '<!doctype html><title>Void setup expired</title><h1>Setup code expired</h1><p>Resume administrator setup from the installing CLI to generate a new code.</p>',
+      '<!doctype html><title>Void setup expired</title><h1>Setup code expired</h1><p>Run <code>void platform repair ' +
+        escapeHtml(pending.installation_id) +
+        '</code> from the installing computer to generate a new code. If installation was interrupted, resume the original install command instead.</p>',
       410,
     );
   }

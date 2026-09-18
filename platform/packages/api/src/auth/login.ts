@@ -1,9 +1,14 @@
-import type { PlatformLoginConfiguration } from '@void/platform';
+import type { PlatformLoginConfiguration, PlatformAuthenticationRecovery } from '@void/platform';
 import { and, eq, gt } from 'drizzle-orm';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { storeAuthCode, type Db } from '../db.ts';
+import {
+  acceptInvitationByEmail,
+  linkGitHubInstallationToUser,
+  storeAuthCode,
+  type Db,
+} from '../db.ts';
 import { escapeHtml } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
 import { platformAuthAttempts, platformLoginTests } from '../schema.ts';
@@ -18,10 +23,16 @@ import {
 } from './configuration.ts';
 import { exchangeCodeForToken, getGitHubAuthorizeUrl, getGitHubUser } from './github.ts';
 import { resolvePlatformLogin } from './identities.ts';
-import type { AuthenticationActor } from './management.ts';
+import { verifyJwt } from './jwt.ts';
+import {
+  linkTestedIdentity,
+  requireRecentAuthentication,
+  type AuthenticationActor,
+} from './management.ts';
 import { PlatformOidcProvider, type PlatformOidcIdentity } from './oidc.ts';
 import { createCodeChallenge } from './pkce.ts';
 import { hashLoginProof, randomLoginProof } from './proofs.ts';
+import { validateRecoveryTest } from './recovery.ts';
 import { isAllowedRedirect, isLocalhostRedirect } from './redirects.ts';
 import { createHumanSession, validateHumanSession, type CompanyIdentity } from './sessions.ts';
 
@@ -41,6 +52,7 @@ type LoginContext = {
   testId?: string;
   bootstrapCredentialHash?: string;
   bootstrapInstallationId?: string;
+  recovery?: PlatformAuthenticationRecovery;
 };
 
 function oidcProvider(configuration: PlatformLoginConfiguration): PlatformOidcProvider {
@@ -72,6 +84,36 @@ function authenticationError(context: Context<ApiEnv>, error: unknown): Response
     },
     400,
   );
+}
+
+async function preserveLegacyLoginEffects(
+  db: Db,
+  input: {
+    connectionKind: PlatformLoginConfiguration['kind'];
+    userId: string;
+    identity: PlatformOidcIdentity;
+  },
+): Promise<void> {
+  if (input.identity.emailVerified && input.identity.email) {
+    try {
+      await acceptInvitationByEmail(db, input.identity.email, input.userId);
+    } catch (error) {
+      console.error(
+        `Failed to accept invitation for ${input.identity.email} (user ${input.userId}):`,
+        error,
+      );
+    }
+  }
+  if (input.connectionKind === 'github') {
+    try {
+      await linkGitHubInstallationToUser(db, input.identity.subject, input.userId);
+    } catch (error) {
+      console.error(
+        `[github-app] Failed to backfill installations for ${input.identity.login}:`,
+        error,
+      );
+    }
+  }
 }
 
 async function authorizationFor(
@@ -106,6 +148,7 @@ export async function createLoginTestLaunch(
   context: Context<ApiEnv>,
   actor: AuthenticationActor,
   connectionId: string,
+  purpose: 'test' | 'link' = 'test',
 ): Promise<{ id: string; url: string; expiresAt: string }> {
   const db = context.get('db');
   const connection = await readLoginConnection(db, connectionId);
@@ -123,26 +166,42 @@ export async function createLoginTestLaunch(
       401,
     );
   }
-  const id = `test.${crypto.randomUUID()}`;
+  if (purpose === 'link') {
+    await requireRecentAuthentication(db, actor);
+    if (!connection.enabled || !connection.active_revision) {
+      throw new AuthenticationConfigurationError(
+        'This login method is unavailable.',
+        'provider_unavailable',
+        404,
+      );
+    }
+  }
+  const id = purpose + '.' + crypto.randomUUID();
   const proof = randomLoginProof();
   const expiresAt = new Date(Date.now() + FLOW_SECONDS * 1000).toISOString();
   await db.insert(platformAuthAttempts).values({
     id,
     connection_id: connectionId,
-    revision: connection.revision,
+    revision: purpose === 'link' ? connection.active_revision! : connection.revision,
     generation: connection.generation,
-    purpose: 'test',
+    purpose,
     browser_hash: await hashLoginProof(proof),
     context: { phase: 'launch', actor, companyIdentity: actor.companyIdentity },
     expires_at: expiresAt,
   });
-  const url = new URL('/auth/test', context.req.url);
+  const url = new URL(
+    purpose === 'link' ? '/auth/link' : '/auth/test',
+    context.env.AUTH_REDIRECT_URI ?? context.req.url,
+  );
   url.searchParams.set('id', id);
   url.searchParams.set('proof', proof);
   return { id, url: url.href, expiresAt };
 }
 
-export async function startLoginTest(context: Context<ApiEnv>): Promise<Response> {
+export async function startLoginTest(
+  context: Context<ApiEnv>,
+  purpose: 'test' | 'link' = 'test',
+): Promise<Response> {
   try {
     const db = context.get('db');
     const id = context.req.query('id');
@@ -155,37 +214,74 @@ export async function startLoginTest(context: Context<ApiEnv>): Promise<Response
       .where(
         and(
           eq(platformAuthAttempts.id, id),
-          eq(platformAuthAttempts.purpose, 'test'),
+          eq(platformAuthAttempts.purpose, purpose),
           eq(platformAuthAttempts.browser_hash, await hashLoginProof(proof)),
           gt(platformAuthAttempts.expires_at, new Date().toISOString()),
         ),
       )
       .returning();
-    const saved = launch?.context as { phase?: string; actor?: AuthenticationActor } | undefined;
+    const saved = launch?.context as
+      | { phase?: string; actor?: AuthenticationActor; recovery?: PlatformAuthenticationRecovery }
+      | undefined;
     const actor = saved?.actor;
+    if (purpose === 'link') {
+      const browserToken = getCookie(context, 'void_account_session');
+      const browserSession = browserToken
+        ? await verifyJwt(browserToken, context.env.JWT_SECRET, 'api')
+        : null;
+      if (
+        !browserSession ||
+        browserSession.sub !== actor?.userId ||
+        browserSession.sid !== actor.sessionId
+      ) {
+        throw new AuthenticationConfigurationError(
+          'Sign in to your existing account in this browser before linking a login method.',
+          'reauthentication_required',
+          401,
+        );
+      }
+    }
     if (
       !launch ||
       saved?.phase !== 'launch' ||
       !actor ||
-      !(await validateHumanSession(
-        db,
-        {
-          sub: actor.userId,
-          sid: actor.sessionId,
-          aud: actor.audience,
-        },
-        context.get('companyIdentity'),
-      ))
+      !(saved.recovery
+        ? purpose === 'test' &&
+          (await validateRecoveryTest(
+            db,
+            context.env,
+            saved.recovery,
+            launch,
+            launch.id,
+            actor.userId,
+          ))
+        : await validateHumanSession(
+            db,
+            {
+              sub: actor.userId,
+              sid: actor.sessionId,
+              aud: actor.audience,
+            },
+            context.get('companyIdentity'),
+          ))
     ) {
       throw new Error('Invalid test launch');
     }
     const connection = await readLoginConnection(db, launch.connection_id);
     if (
       !connection ||
-      connection.revision !== launch.revision ||
+      (purpose === 'link'
+        ? !connection.enabled || connection.active_revision !== launch.revision
+        : connection.revision !== launch.revision) ||
       connection.generation !== launch.generation
     ) {
       throw new Error('Configuration changed');
+    }
+    if (purpose === 'link') {
+      await requireRecentAuthentication(db, {
+        ...actor,
+        companyIdentity: context.get('companyIdentity'),
+      });
     }
     const revision = await readLoginRevision(db, connection.id, launch.revision);
     if (!revision) {
@@ -201,7 +297,7 @@ export async function startLoginTest(context: Context<ApiEnv>): Promise<Response
       connection_id: connection.id,
       revision: launch.revision,
       generation: launch.generation,
-      purpose: 'test',
+      purpose,
       browser_hash: await hashLoginProof(browserProof),
       context: {
         redirect: '',
@@ -209,6 +305,7 @@ export async function startLoginTest(context: Context<ApiEnv>): Promise<Response
         verifier: authorization.verifier,
         nonce: authorization.nonce,
         actor,
+        recovery: saved.recovery,
         testId: launch.id,
         companyIdentity: context.get('companyIdentity'),
       },
@@ -342,6 +439,7 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
       (attempt.purpose !== 'login' &&
         attempt.purpose !== 'admin' &&
         attempt.purpose !== 'test' &&
+        attempt.purpose !== 'link' &&
         attempt.purpose !== 'bootstrap')
     ) {
       throw new AuthenticationConfigurationError(
@@ -450,7 +548,7 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
           '</p><form method="post" action="/auth/bootstrap/confirm"><input type="hidden" name="confirm" value="yes"><button type="submit">Make this account the platform administrator</button></form>',
       );
     }
-    if (attempt.purpose === 'test') {
+    if (attempt.purpose === 'test' || attempt.purpose === 'link') {
       await db.transaction(async (transaction) => {
         const tx = transaction as unknown as Db;
         await lockAuthSettings(tx);
@@ -460,19 +558,34 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
           !actor ||
           !saved.testId ||
           !latest ||
-          latest.revision !== attempt.revision ||
+          (attempt.purpose === 'link'
+            ? !latest.enabled || latest.active_revision !== attempt.revision
+            : latest.revision !== attempt.revision) ||
           latest.generation !== attempt.generation ||
-          !(await validateHumanSession(
-            tx,
-            { sub: actor.userId, sid: actor.sessionId, aud: actor.audience },
-            currentCompany,
-          ))
+          !(saved.recovery
+            ? attempt.purpose === 'test' &&
+              (await validateRecoveryTest(
+                tx,
+                context.env,
+                saved.recovery,
+                attempt,
+                saved.testId,
+                actor.userId,
+              ))
+            : await validateHumanSession(
+                tx,
+                { sub: actor.userId, sid: actor.sessionId, aud: actor.audience },
+                currentCompany,
+              ))
         ) {
           throw new AuthenticationConfigurationError(
             'The test or administrator session changed. Start a new test.',
             'login_changed',
             401,
           );
+        }
+        if (attempt.purpose === 'link') {
+          await requireRecentAuthentication(tx, { ...actor, companyIdentity: currentCompany });
         }
         await tx.insert(platformLoginTests).values({
           id: saved.testId,
@@ -487,6 +600,35 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
       });
       context.header('Cache-Control', 'no-store');
       context.header('Referrer-Policy', 'no-referrer');
+      if (attempt.purpose === 'link') {
+        const proof = randomLoginProof();
+        await db.insert(platformAuthAttempts).values({
+          id: saved.testId!,
+          connection_id: connection.id,
+          revision: attempt.revision,
+          generation: attempt.generation,
+          purpose: 'link',
+          browser_hash: await hashLoginProof(proof),
+          context: { phase: 'confirm', actor: saved.actor },
+          expires_at: new Date(Date.now() + 300_000).toISOString(),
+        });
+        setCookie(context, 'void_link_confirm', saved.testId + ':' + proof, {
+          httpOnly: true,
+          secure: true,
+          sameSite: 'Strict',
+          path: '/auth/link/confirm',
+          maxAge: 300,
+        });
+        return context.html(
+          '<!doctype html><title>Link login method</title><h1>Link this identity to your Void account?</h1><p>' +
+            escapeHtml(identity.login) +
+            '</p><p>' +
+            escapeHtml(identity.issuer) +
+            '</p><p>' +
+            escapeHtml(identity.subject) +
+            '</p><form method="post" action="/auth/link/confirm"><input type="hidden" name="confirm" value="yes"><button>Link this identity</button></form>',
+        );
+      }
       if (saved.actor?.audience === 'admin') {
         return context.redirect(`/admin/config/auth?test=${encodeURIComponent(saved.testId!)}`);
       }
@@ -510,6 +652,11 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
       audience,
       companyIdentity: currentCompany,
     });
+    await preserveLegacyLoginEffects(db, {
+      connectionKind: connection.kind,
+      userId: user.id,
+      identity,
+    });
     context.header('Cache-Control', 'no-store');
     if (audience === 'admin') {
       setCookie(context, 'admin_token', token, {
@@ -521,6 +668,15 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
       });
       return context.redirect('/admin/');
     }
+    // Bind ordinary account-link launches to the browser that just proved the existing
+    // account. A copied launch URL must never let another browser attach its identity.
+    setCookie(context, 'void_account_session', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+      path: '/auth/link',
+      maxAge: FLOW_SECONDS,
+    });
     if (
       !isAllowedRedirect(
         saved.redirect,
@@ -593,6 +749,76 @@ export async function startBootstrapLogin(
     });
     bindBrowser(context, browserProof);
     return context.redirect(authorization.url);
+  } catch (error) {
+    return authenticationError(context, error);
+  }
+}
+
+/** Browser-bound confirmation; the original user's still-active session owns the new identity. */
+export async function confirmIdentityLink(context: Context<ApiEnv>): Promise<Response> {
+  try {
+    const origin = context.req.header('Origin');
+    if (
+      origin !== new URL(context.req.url).origin ||
+      (await context.req.parseBody()).confirm !== 'yes'
+    ) {
+      throw new Error('Confirmation required');
+    }
+    const [id, proof] = (getCookie(context, 'void_link_confirm') ?? '').split(':');
+    if (!id || !proof) {
+      throw new Error('Confirmation expired');
+    }
+    const db = context.get('db');
+    const [attempt] = await db
+      .delete(platformAuthAttempts)
+      .where(
+        and(
+          eq(platformAuthAttempts.id, id),
+          eq(platformAuthAttempts.purpose, 'link'),
+          eq(platformAuthAttempts.browser_hash, await hashLoginProof(proof)),
+          gt(platformAuthAttempts.expires_at, new Date().toISOString()),
+        ),
+      )
+      .returning();
+    const saved = attempt?.context as { phase?: string; actor?: AuthenticationActor } | undefined;
+    if (!attempt || saved?.phase !== 'confirm' || !saved.actor) {
+      throw new Error('Confirmation expired');
+    }
+    const [testedIdentity] = await db
+      .select()
+      .from(platformLoginTests)
+      .where(eq(platformLoginTests.id, attempt.id));
+    const connection = await readLoginConnection(db, attempt.connection_id);
+    await linkTestedIdentity(
+      db,
+      { ...saved.actor, companyIdentity: context.get('companyIdentity') },
+      {
+        connectionId: attempt.connection_id,
+        revision: attempt.revision,
+        testId: attempt.id,
+        activeOnly: true,
+      },
+    );
+    if (connection?.kind === 'github' && testedIdentity) {
+      await preserveLegacyLoginEffects(db, {
+        connectionKind: connection.kind,
+        userId: saved.actor.userId,
+        identity: {
+          issuer: testedIdentity.issuer,
+          subject: testedIdentity.subject,
+          login: testedIdentity.login,
+          email: null,
+          emailVerified: false,
+          groups: [],
+        },
+      });
+    }
+    await db.delete(platformLoginTests).where(eq(platformLoginTests.id, attempt.id));
+    deleteCookie(context, 'void_link_confirm', { path: '/auth/link/confirm' });
+    context.header('Cache-Control', 'no-store');
+    return context.html(
+      '<!doctype html><title>Login linked</title><p>Your login method is linked. You can close this window and return to Void.</p>',
+    );
   } catch (error) {
     return authenticationError(context, error);
   }

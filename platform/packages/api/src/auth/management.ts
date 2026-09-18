@@ -9,6 +9,7 @@ import {
   oauthAccounts,
   operatorSessions,
   platformAuthSettings,
+  platformHumanSessions,
   platformLoginConnections,
   platformLoginIdentities,
   platformLoginTests,
@@ -17,6 +18,7 @@ import {
 import { isAdminSuspended } from '../suspension.ts';
 import {
   AuthenticationConfigurationError,
+  guardAuthenticationLifecycleMutation,
   lockAuthSettings,
   readEnabledLoginConnections,
   readLoginConnection,
@@ -46,6 +48,7 @@ export async function updateAuthenticationAdmission(
 ): Promise<void> {
   await db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await guardAuthenticationLifecycleMutation(tx);
     const settings = await lockAuthSettings(tx);
     await requireActor(tx, actor, true);
     if (!settings || settings.revision !== input.revision) {
@@ -169,6 +172,31 @@ async function hasVerifiedAlternative(
   return verified.length > 0;
 }
 
+/** Linking requires a fresh login to the existing account, not merely possession of a token. */
+export async function requireRecentAuthentication(
+  db: Db,
+  actor: AuthenticationActor,
+): Promise<void> {
+  await requireActor(db, actor, false);
+  const [session] = await db
+    .select()
+    .from(platformHumanSessions)
+    .where(
+      and(
+        eq(platformHumanSessions.id, actor.sessionId),
+        eq(platformHumanSessions.user_id, actor.userId),
+        gt(platformHumanSessions.created_at, new Date(Date.now() - 600_000).toISOString()),
+      ),
+    );
+  if (!session) {
+    throw new AuthenticationConfigurationError(
+      'Sign in to your existing account again before linking another login method.',
+      'reauthentication_required',
+      401,
+    );
+  }
+}
+
 /** Explicitly confirmed linking; a successful provider test alone never merges accounts. */
 export async function linkTestedIdentity(
   db: Db,
@@ -177,21 +205,28 @@ export async function linkTestedIdentity(
     connectionId: string;
     revision: number;
     testId: string;
+    activeOnly?: boolean;
   },
   dryRun = false,
 ): Promise<void> {
   await db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await guardAuthenticationLifecycleMutation(tx);
     await lockAuthSettings(tx);
-    await requireActor(tx, actor, false);
+    await requireRecentAuthentication(tx, actor);
     const connection = await readLoginConnection(tx, input.connectionId);
-    if (!connection || connection.revision !== input.revision) {
+    if (
+      !connection ||
+      (input.activeOnly
+        ? !connection.enabled || connection.active_revision !== input.revision
+        : connection.revision !== input.revision)
+    ) {
       throw new AuthenticationConfigurationError(
         'Login settings changed. Reload before linking.',
         'revision_conflict',
       );
     }
-    const test = await freshTest(tx, actor, input.testId, connection.id, connection.revision);
+    const test = await freshTest(tx, actor, input.testId, connection.id, input.revision);
     const [subjectOwner] = await tx
       .select()
       .from(platformLoginIdentities)
@@ -272,6 +307,7 @@ export async function enableLoginConnection(
 ): Promise<void> {
   await db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await guardAuthenticationLifecycleMutation(tx);
     const settings = await lockAuthSettings(tx);
     await requireActor(tx, actor, true);
     const connection = await readLoginConnection(tx, input.connectionId);
@@ -347,6 +383,7 @@ export async function disableLoginConnection(
 ): Promise<void> {
   await db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await guardAuthenticationLifecycleMutation(tx);
     const settings = await lockAuthSettings(tx);
     await requireActor(tx, actor, true);
     const connection = await readLoginConnection(tx, input.connectionId);
