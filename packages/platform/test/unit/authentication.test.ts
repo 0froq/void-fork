@@ -5,6 +5,8 @@ import {
   parsePlatformAdmissionPolicy,
   parsePlatformLoginConfiguration,
   parsePlatformLoginDescriptor,
+  parsePlatformSignupAllowlistEntry,
+  isPlatformSignupAllowed,
   validatePlatformAdmissionPolicy,
 } from '../../src/authentication.ts';
 
@@ -175,5 +177,49 @@ describe('platform authentication configuration', () => {
         null,
       ),
     ).not.toThrow();
+  });
+
+  it('matches stable signup identities exactly without treating them as email grants', () => {
+    const entry = parsePlatformSignupAllowlistEntry({
+      type: 'identity',
+      connectionId: 'company',
+      subject: 'Employee-42',
+      note: 'No verified email',
+    });
+    const identity = {
+      connectionId: 'company',
+      subject: 'Employee-42',
+      provider: 'oidc',
+      login: 'employee@example.com',
+      email: 'employee@example.com',
+    };
+    expect(isPlatformSignupAllowed(identity, [entry])).toBe(true);
+    expect(isPlatformSignupAllowed({ ...identity, connectionId: 'another' }, [entry])).toBe(false);
+    expect(isPlatformSignupAllowed({ ...identity, subject: 'employee-42' }, [entry])).toBe(false);
+    expect(isPlatformSignupAllowed({ ...identity, subject: 'Employee-43' }, [entry])).toBe(false);
+    expect(
+      isPlatformSignupAllowed({ ...identity, subject: 'another', email: 'Employee-42' }, [entry]),
+    ).toBe(false);
+  });
+
+  it('validates the public identity allowlist contract without folding subjects', () => {
+    expect(
+      parsePlatformSignupAllowlistEntry({
+        type: 'identity',
+        connectionId: 'company',
+        subject: 'Case-Sensitive Subject',
+      }),
+    ).toEqual({
+      type: 'identity',
+      connectionId: 'company',
+      subject: 'Case-Sensitive Subject',
+    });
+    expect(() =>
+      parsePlatformSignupAllowlistEntry({
+        type: 'identity',
+        connectionId: 'missing/path',
+        subject: 'employee',
+      }),
+    ).toThrow('connection IDs');
   });
 });

@@ -15,6 +15,12 @@ function boundedString(value: unknown, maximum: number, lowerCase = false) {
   return lowerCase ? trimmed.toLowerCase() : trimmed;
 }
 
+function boundedExactString(value: unknown, maximum: number) {
+  return typeof value === 'string' && value.length > 0 && value.length <= maximum
+    ? value
+    : undefined;
+}
+
 function pathIdentifier(value: string | undefined) {
   return boundedString(value, 512);
 }
@@ -88,11 +94,17 @@ function auditTarget(
     if (segments[1] === 'restrict' || segments[1] === 'open') {
       return JSON.stringify({ restrictionsEnabled: segments[1] === 'restrict' });
     }
-    if (segments[1] === 'allow' || segments[1] === 'remove') {
+    if (segments[1] === 'allow' || segments[1] === 'remove' || segments[1] === 'disallow') {
       const patterns = accessPatterns(body.patterns);
+      const type = boundedString(body.type, 512);
       return JSON.stringify({
-        type: boundedString(body.type, 512),
-        pattern: boundedString(body.pattern, 320, true),
+        type,
+        ...(type === 'identity'
+          ? {
+              connectionId: boundedString(body.connectionId, 64),
+              subject: boundedExactString(body.subject, 255),
+            }
+          : { pattern: boundedString(body.pattern, 320, true) }),
         ...(patterns ? { patterns } : {}),
         ...(segments[1] === 'allow' ? { note: boundedString(body.note, 1000) } : {}),
       });

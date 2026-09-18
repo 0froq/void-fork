@@ -44,6 +44,7 @@ import {
   githubInstallationMembers,
   githubInstallationRevocations,
   githubWebhookRedeliveries,
+  platformLoginIdentities,
 } from './schema.ts';
 import type { DomainVerificationData, GitHubInstallationRepository } from './schema.ts';
 import type { AllowlistEntry } from './signup-allowlist.ts';
@@ -2477,23 +2478,25 @@ export async function getAllowlistEntryStatuses(
 
   const exactEmails = Array.from(
     new Set(
-      entries
-        .filter((entry) => entry.type === 'email' && !entry.pattern.startsWith('*@'))
-        .map((entry) => entry.pattern.toLowerCase()),
+      entries.flatMap((entry) =>
+        entry.type === 'email' && !entry.pattern.startsWith('*@')
+          ? [entry.pattern.toLowerCase()]
+          : [],
+      ),
     ),
   );
   const emailDomains = Array.from(
     new Set(
-      entries
-        .filter((entry) => entry.type === 'email' && entry.pattern.startsWith('*@'))
-        .map((entry) => entry.pattern.slice(1).toLowerCase()),
+      entries.flatMap((entry) =>
+        entry.type === 'email' && entry.pattern.startsWith('*@')
+          ? [entry.pattern.slice(1).toLowerCase()]
+          : [],
+      ),
     ),
   );
   const githubLogins = Array.from(
     new Set(
-      entries
-        .filter((entry) => entry.type === 'github')
-        .map((entry) => entry.pattern.toLowerCase()),
+      entries.flatMap((entry) => (entry.type === 'github' ? [entry.pattern.toLowerCase()] : [])),
     ),
   );
 
@@ -2518,6 +2521,28 @@ export async function getAllowlistEntryStatuses(
           .where(or(...userConditions))
       : [];
 
+  const identityEntries = entries.filter((entry) => entry.type === 'identity');
+  const matchingIdentities =
+    identityEntries.length > 0
+      ? await db
+          .select({
+            userId: platformLoginIdentities.user_id,
+            connectionId: platformLoginIdentities.connection_id,
+            subject: platformLoginIdentities.subject,
+          })
+          .from(platformLoginIdentities)
+          .where(
+            or(
+              ...identityEntries.map((entry) =>
+                and(
+                  eq(platformLoginIdentities.connection_id, entry.connectionId),
+                  eq(platformLoginIdentities.subject, entry.subject),
+                ),
+              ),
+            ),
+          )
+      : [];
+
   const invitationConditions = [
     exactEmails.length > 0
       ? inArray(sql<string>`lower(${invitations.email})`, exactEmails)
@@ -2533,7 +2558,12 @@ export async function getAllowlistEntryStatuses(
           .where(and(eq(invitations.status, 'accepted'), or(...invitationConditions)))
       : [];
 
-  const matchingUserIds = matchingUsers.map((user) => user.id);
+  const matchingUserIds = Array.from(
+    new Set([
+      ...matchingUsers.map((user) => user.id),
+      ...matchingIdentities.map((row) => row.userId),
+    ]),
+  );
   const deployedUserRows =
     matchingUserIds.length > 0
       ? await db
@@ -2546,6 +2576,9 @@ export async function getAllowlistEntryStatuses(
   const deployedUserIds = new Set(deployedUserRows.map((row) => row.id));
 
   function userMatchesEntry(user: (typeof matchingUsers)[number], entry: AllowlistEntry): boolean {
+    if (entry.type === 'identity') {
+      return false;
+    }
     if (entry.type === 'github') {
       return user.provider === 'github' && user.login.toLowerCase() === entry.pattern.toLowerCase();
     }
@@ -2572,6 +2605,19 @@ export async function getAllowlistEntryStatuses(
   }
 
   return entries.map((entry) => {
+    if (entry.type === 'identity') {
+      const userIds = matchingIdentities
+        .filter(
+          (identity) =>
+            identity.connectionId === entry.connectionId && identity.subject === entry.subject,
+        )
+        .map((identity) => identity.userId);
+      return {
+        ...entry,
+        accepted: userIds.length > 0,
+        deployed: userIds.some((userId) => deployedUserIds.has(userId)),
+      };
+    }
     const usersForEntry = matchingUsers.filter((user) => userMatchesEntry(user, entry));
     const hasAcceptedInvitation = acceptedInvitations.some((invitation) =>
       invitationMatchesEntry(invitation.email, entry),

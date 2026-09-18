@@ -10,6 +10,8 @@ export {
   parsePlatformLoginConfiguration,
   parsePlatformLoginDescriptor,
   parsePlatformLoginId,
+  parsePlatformSignupAllowlistEntry,
+  isPlatformSignupAllowed,
   validatePlatformAdmissionPolicy,
   type PlatformAccessProtection,
   type PlatformAdmissionPolicy,
@@ -17,6 +19,8 @@ export {
   type PlatformLoginConfiguration,
   type PlatformLoginDescriptor,
   type PlatformLoginKind,
+  type PlatformSignupAllowlistEntry,
+  type PlatformSignupIdentity,
 } from './authentication.ts';
 export {
   PLATFORM_DEPLOYMENT_SCHEMA_VERSION,

@@ -145,6 +145,8 @@ export async function resolvePlatformLogin(
             identity.login,
             identity.emailVerified ? identity.email : null,
             await getAllowlist(env.ROUTING),
+            connection.id,
+            identity.subject,
           ));
       if (!allowed) {
         throw new AuthenticationConfigurationError(

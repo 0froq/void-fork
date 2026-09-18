@@ -37,6 +37,90 @@ export type PlatformAdmissionPolicy =
       access: boolean;
     }>;
 
+/** One persisted grant used by invited/allowlisted platform signup. */
+export type PlatformSignupAllowlistEntry =
+  | Readonly<{
+      type: 'github' | 'email';
+      pattern: string;
+      note?: string;
+    }>
+  | Readonly<{
+      type: 'identity';
+      /** Stable login connection namespace. */
+      connectionId: string;
+      /** Exact, case-sensitive provider subject. */
+      subject: string;
+      note?: string;
+    }>;
+
+export type PlatformSignupIdentity = Readonly<{
+  connectionId: string;
+  subject: string;
+  provider: string;
+  login: string;
+  /** Only pass a provider email after its verification claim has been validated. */
+  email: string | null;
+}>;
+
+export function parsePlatformSignupAllowlistEntry(value: unknown): PlatformSignupAllowlistEntry {
+  const entry = record(value, 'Signup allowlist entry');
+  const note = entry.note;
+  if (note !== undefined && (typeof note !== 'string' || note.length > 1000)) {
+    throw new Error('Signup allowlist notes must be strings of at most 1000 characters.');
+  }
+  const optionalNote = note === undefined ? {} : { note };
+  if (entry.type === 'identity') {
+    const connectionId = parsePlatformLoginId(entry.connectionId);
+    if (
+      typeof entry.subject !== 'string' ||
+      entry.subject.length === 0 ||
+      entry.subject.length > 255
+    ) {
+      throw new Error('Identity subjects must be nonempty strings of at most 255 characters.');
+    }
+    return { type: 'identity', connectionId, subject: entry.subject, ...optionalNote };
+  }
+  if (entry.type !== 'github' && entry.type !== 'email') {
+    throw new Error('Signup allowlist entry type must be github, email, or identity.');
+  }
+  if (
+    typeof entry.pattern !== 'string' ||
+    !entry.pattern ||
+    entry.pattern.length > 320 ||
+    /[\s,]/.test(entry.pattern)
+  ) {
+    throw new Error(
+      'Signup allowlist patterns must be nonempty strings of at most 320 characters.',
+    );
+  }
+  return { type: entry.type, pattern: entry.pattern, ...optionalNote };
+}
+
+/** Match one verified login identity against persisted signup grants. */
+export function isPlatformSignupAllowed(
+  identity: PlatformSignupIdentity,
+  entries: ReadonlyArray<PlatformSignupAllowlistEntry>,
+): boolean {
+  return entries.some((entry) => {
+    if (entry.type === 'identity') {
+      return entry.connectionId === identity.connectionId && entry.subject === identity.subject;
+    }
+    if (entry.type === 'github') {
+      return (
+        identity.provider === 'github' &&
+        entry.pattern.toLowerCase() === identity.login.toLowerCase()
+      );
+    }
+    if (!identity.email) {
+      return false;
+    }
+    if (entry.pattern.startsWith('*@')) {
+      return identity.email.toLowerCase().endsWith(entry.pattern.slice(1).toLowerCase());
+    }
+    return entry.pattern.toLowerCase() === identity.email.toLowerCase();
+  });
+}
+
 export type PlatformAuthenticationSetup = Readonly<{
   connections: ReadonlyArray<
     Readonly<{ configuration: PlatformLoginConfiguration; clientSecret: string }>

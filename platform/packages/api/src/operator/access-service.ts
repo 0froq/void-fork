@@ -1,6 +1,12 @@
+import { parsePlatformSignupAllowlistEntry } from '@void/platform';
 import { eq, sql } from 'drizzle-orm';
 import type { Context } from 'hono';
-import { lockAuthSettings, readAuthSettings } from '../auth/configuration.ts';
+import {
+  lockAuthSettings,
+  readAuthSettings,
+  readLoginConnection,
+  readLoginRevision,
+} from '../auth/configuration.ts';
 import {
   type Db,
   countInvitations,
@@ -14,7 +20,7 @@ import {
 } from '../db.ts';
 import { sendInvitationEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
-import { platformAuthSettings } from '../schema.ts';
+import { platformAuthSettings, platformLoginConnections } from '../schema.ts';
 import { type AllowlistEntry, getAllowlist, putAllowlist } from '../signup-allowlist.ts';
 import type { Invitation } from '../types.ts';
 import { OperatorError, preview } from './common.ts';
@@ -30,17 +36,51 @@ export function parseAccessList(input: string): Array<string> {
   ];
 }
 
-function validateEntryType(type: string): asserts type is AllowlistEntry['type'] {
-  if (type !== 'github' && type !== 'email') {
-    throw new OperatorError(400, 'Invalid entry type; expected github or email.');
+function parseOperatorAllowlistEntry(input: unknown): AllowlistEntry {
+  try {
+    return parsePlatformSignupAllowlistEntry(input);
+  } catch (error) {
+    throw new OperatorError(
+      400,
+      error instanceof Error ? error.message : 'Invalid signup allowlist entry.',
+      'invalid_argument',
+    );
   }
 }
 
+function canonicalEntry(entry: AllowlistEntry): AllowlistEntry {
+  if (entry.type === 'identity') {
+    return { ...entry, note: entry.note?.trim() || undefined };
+  }
+  return { ...entry, pattern: entry.pattern.toLowerCase(), note: entry.note?.trim() || undefined };
+}
+
+function sameEntry(left: AllowlistEntry, right: AllowlistEntry): boolean {
+  if (left.type !== right.type) {
+    return false;
+  }
+  if (left.type === 'identity' && right.type === 'identity') {
+    return left.connectionId === right.connectionId && left.subject === right.subject;
+  }
+  return (
+    left.type !== 'identity' &&
+    right.type !== 'identity' &&
+    left.pattern.toLowerCase() === right.pattern.toLowerCase()
+  );
+}
+
+function entryTarget(entry: AllowlistEntry): Record<string, string> {
+  return entry.type === 'identity'
+    ? { type: entry.type, connectionId: entry.connectionId, subject: entry.subject }
+    : { type: entry.type, pattern: entry.pattern };
+}
+
 export async function getOperatorSignup(context: Context<ApiEnv>) {
-  const [raw, entries, settings] = await Promise.all([
+  const [raw, entries, settings, connectionRows] = await Promise.all([
     context.env.ROUTING.get('signup:enabled'),
     getAllowlist(context.env.ROUTING),
     readAuthSettings(context.get('db')),
+    context.get('db').select().from(platformLoginConnections).orderBy(platformLoginConnections.id),
   ]);
   const restricted = settings
     ? settings.admission.mode !== 'public'
@@ -51,6 +91,20 @@ export async function getOperatorSignup(context: Context<ApiEnv>) {
     signupsOpen: !restricted,
     ...(settings ? { admission: settings.admission } : {}),
     entries: await getAllowlistEntryStatuses(context.get('db'), entries),
+    connections: await Promise.all(
+      connectionRows.map(async (connection) => {
+        const revision = await readLoginRevision(
+          context.get('db'),
+          connection.id,
+          connection.revision,
+        );
+        return {
+          id: connection.id,
+          kind: connection.kind,
+          label: revision?.configuration.label ?? connection.id,
+        };
+      }),
+    ),
   };
 }
 
@@ -87,31 +141,40 @@ export async function setOperatorSignup(
 
 export async function allowOperatorSignup(
   context: Context<ApiEnv>,
-  type: string,
-  patterns: ReadonlyArray<string>,
-  note?: string,
+  input: ReadonlyArray<unknown>,
   dryRun = false,
 ) {
-  validateEntryType(type);
-  if (
-    patterns.length === 0 ||
-    patterns.length > 100 ||
-    patterns.some((pattern) => !pattern || pattern.length > 320 || /[\s,]/.test(pattern))
-  ) {
-    throw new OperatorError(400, 'Invalid entry; supply between 1 and 100 nonempty patterns.');
+  if (input.length === 0 || input.length > 100) {
+    throw new OperatorError(400, 'Supply between 1 and 100 signup allowlist entries.');
   }
-  if (note && note.length > 1000) {
-    throw new OperatorError(400, 'Note must be at most 1000 characters.');
+  const normalized = input.map(parseOperatorAllowlistEntry).map(canonicalEntry);
+  const unique = normalized.filter(
+    (entry, index) => normalized.findIndex((candidate) => sameEntry(candidate, entry)) === index,
+  );
+  for (const connectionId of new Set(
+    unique.flatMap((entry) => (entry.type === 'identity' ? [entry.connectionId] : [])),
+  )) {
+    if (!(await readLoginConnection(context.get('db'), connectionId))) {
+      throw new OperatorError(
+        400,
+        `Login connection '${connectionId}' is not configured.`,
+        'invalid_argument',
+      );
+    }
   }
-  const normalized = [...new Set(patterns.map((pattern) => pattern.toLowerCase()))];
   const entries = await getAllowlist(context.env.ROUTING);
-  const additions = normalized
-    .filter(
-      (pattern) =>
-        !entries.some((entry) => entry.type === type && entry.pattern.toLowerCase() === pattern),
-    )
-    .map((pattern): AllowlistEntry => ({ type, pattern, note: note?.trim() || undefined }));
-  const target = { type, patterns: normalized };
+  const additions = unique.filter(
+    (candidate) => !entries.some((entry) => sameEntry(entry, candidate)),
+  );
+  const target =
+    unique.length === 1 && unique[0]?.type === 'identity'
+      ? entryTarget(unique[0])
+      : unique.every((entry) => entry.type === unique[0]?.type && entry.type !== 'identity')
+        ? {
+            type: unique[0]!.type,
+            patterns: unique.map((entry) => (entry.type === 'identity' ? '' : entry.pattern)),
+          }
+        : { entries: unique.map(entryTarget) };
   if (dryRun) {
     return preview('signup.allow', target, { additions });
   }
@@ -122,37 +185,41 @@ export async function allowOperatorSignup(
     action: 'signup.allow',
     target,
     added: additions,
-    unchanged: normalized.length - additions.length,
+    unchanged: unique.length - additions.length,
   };
 }
 
 export async function removeOperatorSignup(
   context: Context<ApiEnv>,
-  type: string,
-  pattern: string,
+  input: unknown,
   dryRun = false,
+  action: 'remove' | 'disallow' = 'remove',
 ) {
-  validateEntryType(type);
-  const normalized = pattern.trim().toLowerCase();
-  if (!normalized || normalized.length > 320) {
-    throw new OperatorError(400, 'Invalid entry pattern.');
+  const candidate = canonicalEntry(parseOperatorAllowlistEntry(input));
+  if (
+    candidate.type === 'identity' &&
+    !(await readLoginConnection(context.get('db'), candidate.connectionId))
+  ) {
+    throw new OperatorError(
+      400,
+      `Login connection '${candidate.connectionId}' is not configured.`,
+      'invalid_argument',
+    );
   }
   const entries = await getAllowlist(context.env.ROUTING);
-  const removed = entries.filter(
-    (entry) => entry.type === type && entry.pattern.toLowerCase() === normalized,
-  );
+  const removed = entries.filter((entry) => sameEntry(entry, candidate));
   if (!removed.length) {
     throw new OperatorError(404, 'Signup allowlist entry not found.');
   }
-  const target = { type, pattern: normalized };
+  const target = entryTarget(candidate);
   if (dryRun) {
-    return preview('signup.remove', target, { removed });
+    return preview(`signup.${action}`, target, { removed });
   }
   await putAllowlist(
     context.env.ROUTING,
-    entries.filter((entry) => !(entry.type === type && entry.pattern.toLowerCase() === normalized)),
+    entries.filter((entry) => !sameEntry(entry, candidate)),
   );
-  return { action: 'signup.remove', target, removed };
+  return { action: `signup.${action}`, target, removed };
 }
 
 export async function listOperatorInvitations(
@@ -206,7 +273,7 @@ export async function sendOperatorInvitations(
     throw new OperatorError(400, 'A pending invitation already exists for one of these emails.');
   }
   const allowlistedEmails = new Set(
-    entries.filter((entry) => entry.type === 'email').map((entry) => entry.pattern.toLowerCase()),
+    entries.flatMap((entry) => (entry.type === 'email' ? [entry.pattern.toLowerCase()] : [])),
   );
   if (emails.some((email) => allowlistedEmails.has(email))) {
     throw new OperatorError(400, 'One of these emails is already on the signup allowlist.');
