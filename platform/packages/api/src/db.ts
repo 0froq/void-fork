@@ -559,6 +559,7 @@ export async function createDeployment(
     commitUrl?: string | null;
     gitRef?: string | null;
     repositoryUrl?: string | null;
+    assetHashes?: string;
   },
 ): Promise<Deployment> {
   const id = generateId('dpl');
@@ -574,6 +575,7 @@ export async function createDeployment(
       commit_url: metadata?.commitUrl ?? null,
       git_ref: metadata?.gitRef ?? null,
       cli_version: metadata?.cliVersion ?? null,
+      asset_hashes: metadata?.assetHashes ?? null,
     })
     .returning();
   return row;

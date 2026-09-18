@@ -38,3 +38,16 @@ export async function findR2Assets(
   return found;
 }
 import { R2_CONCURRENCY, uploadPool } from './concurrency.ts';
+
+/** Preflight is advisory: finalization protects its hashes from GC, then verifies presence. */
+export async function findMissingR2Assets(
+  r2: R2Bucket,
+  projectId: string,
+  manifest: Readonly<Record<string, { hash: string; size: number }>>,
+): Promise<Array<string>> {
+  const entries = Object.entries(manifest);
+  const found = await findR2Assets(r2, projectId, new Set(entries.map(([, entry]) => entry.hash)));
+  return entries
+    .filter(([, entry]) => found.get(entry.hash)?.size !== entry.size)
+    .map(([path]) => path);
+}

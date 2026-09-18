@@ -162,6 +162,33 @@ try {
     });
   }
   const uploaderStats = treeStats(dirname(wrangler));
+  if (selected('asset-reuse')) {
+    const { findMissingR2Assets } = await import(
+      pathToFileURL(join(root, 'platform/packages/api/src/asset-inventory.ts')).href
+    );
+    const manifest = Object.fromEntries(
+      Array.from({ length: 1000 }, (_, i) => [
+        `/${i}.js`,
+        { hash: i.toString(16).padStart(32, '0'), size: 128 * 1024 },
+      ]),
+    );
+    const existing = Object.values(manifest)
+      .slice(0, 990)
+      .map((entry) => ({ key: `assets/benchmark/${entry.hash}`, size: entry.size }));
+    await measure('managed-asset-reuse-99-percent', 5, async () => {
+      const needed = await findMissingR2Assets(
+        { list: async () => ({ objects: existing, truncated: false }) },
+        'benchmark',
+        manifest,
+      );
+      return {
+        beforeUploadFiles: 1000,
+        afterUploadFiles: needed.length,
+        beforeUploadBytes: 1000 * 128 * 1024,
+        afterUploadBytes: needed.reduce((sum, path) => sum + manifest[path].size, 0),
+      };
+    });
+  }
   if (selected('inventory')) {
     const { findR2Assets } = await import(
       pathToFileURL(join(root, 'platform/packages/api/src/asset-inventory.ts')).href

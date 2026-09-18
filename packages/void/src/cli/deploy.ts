@@ -7038,6 +7038,8 @@ async function streamDirectR2Deploy(
       assetFiles.delete(item.path);
     });
   } else {
+    // Fully reused Worker/static assets need no bytes during finalization.
+    assetFiles.clear();
     cliLog?.info('presign_skipped', { reason: 'no_needed_assets' });
   }
 

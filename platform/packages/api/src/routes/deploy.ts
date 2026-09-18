@@ -19,7 +19,7 @@ import {
 } from '@void/platform';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
-import { findR2Assets } from '../asset-inventory.ts';
+import { findMissingR2Assets, findR2Assets } from '../asset-inventory.ts';
 import {
   computeAssetHash,
   createAssetUploadSession,
@@ -2705,7 +2705,13 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           ? await getDeployment(txDb, committedActiveDeploymentId)
           : null);
       return {
-        deployment: await createDeployment(txDb, projectId, null, null, null, { cliVersion }),
+        deployment: await createDeployment(txDb, projectId, null, null, null, {
+          cliVersion,
+          // Protect reused objects before the first inventory read. Unlike new
+          // PUTs, old objects have no recent-upload grace period. GC acquires this
+          // same project lock and includes nonterminal rows in its protected set.
+          ...(hasWorkerFiles ? { assetHashes: JSON.stringify(incomingAssetManifest) } : {}),
+        }),
         currentLiveDeployment,
         ...(reconciledMarkerKeys.length > 0 && { reconciledMarkerKeys }),
       } as const;
@@ -3128,10 +3134,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           }
         }
       }
-      // WfP preflight intentionally requires every declared asset because the
-      // prior bytes may exist only in Cloudflare's asset store. Those hashes
-      // are freshly direct-uploaded even when content-identical. Static→static
-      // can safely carry prior platform KV/R2 placement forward.
+      // Worker preflight reuses only verified scoped R2 objects. Require every
+      // hash here again: a stale preflight cannot publish a missing object. The
+      // admission row already protects these hashes from platform GC.
       const newHashes =
         hasWorkerFiles || !previousBackendIsStatic
           ? declaredHashes
@@ -5582,6 +5587,32 @@ app.post('/:id/deploy/preflight', async (context) => {
   }>();
   const { assetManifest, hasWorker } = body;
   const total = Object.keys(assetManifest).length;
+
+  if (hasWorker === true) {
+    // Worker finalization needs a platform-owned copy even when CF deduplicates
+    // its asset upload. Check actual scoped R2 objects rather than inferring
+    // availability from a prior Worker manifest (which may be CF-only or KV).
+    // This also reuses renamed assets and acknowledged PUTs from failed attempts.
+    const valid =
+      total <= MAX_UPLOAD_URLS_BATCH &&
+      Object.values(assetManifest).every(
+        (entry) =>
+          entry &&
+          typeof entry.hash === 'string' &&
+          HEX_32_REGEX.test(entry.hash) &&
+          Number.isSafeInteger(entry.size) &&
+          entry.size >= 0,
+      );
+    if (!valid) {
+      return context.json({ needed: Object.keys(assetManifest), total, skipped: 0 });
+    }
+    const needed = await findMissingR2Assets(
+      context.env.STATIC_ASSETS_R2,
+      projectId,
+      assetManifest,
+    );
+    return context.json({ needed, total, skipped: total - needed.length });
+  }
 
   // `active_deployment_id` was introduced as a nullable column without a
   // backfill. Resolve it once under the same project lock used by deploy and

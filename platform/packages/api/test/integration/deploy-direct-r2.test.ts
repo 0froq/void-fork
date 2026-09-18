@@ -324,6 +324,128 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     };
   }
 
+  it('reuses scoped R2 bytes for Workers, including renamed files and resumed uploads', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'worker-reuse');
+    await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, HASH(1), new Uint8Array(12));
+    await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, HASH(2), new Uint8Array(7));
+    await stageAssetInR2(env.STATIC_ASSETS_R2, 'other-project', HASH(3), new Uint8Array(12));
+    await env.STATIC_ASSETS.put(`assets/${project.id}/${HASH(4)}`, new Uint8Array(12).buffer);
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hasWorker: true,
+          assetManifest: {
+            '/renamed.js': { hash: HASH(1), size: 12 },
+            '/duplicate.js': { hash: HASH(1), size: 12 },
+            '/wrong-size.js': { hash: HASH(2), size: 12 },
+            '/foreign.js': { hash: HASH(3), size: 12 },
+            '/legacy-kv.js': { hash: HASH(4), size: 12 },
+          },
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      needed: ['/wrong-size.js', '/foreign.js', '/legacy-kv.js'],
+      total: 5,
+      skipped: 2,
+    });
+  });
+
+  it('protects reused Worker assets from GC before verifying their presence', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'worker-reuse-protected');
+    const hash = HASH(8);
+    await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, hash, new Uint8Array(12));
+    mockCfApi();
+    const head = env.STATIC_ASSETS_R2.head.bind(env.STATIC_ASSETS_R2);
+    let sawProtected = false;
+    vi.spyOn(env.STATIC_ASSETS_R2, 'head').mockImplementation(async (key) => {
+      if (key === `assets/${project.id}/${hash}` && !sawProtected) {
+        const rows = await env.db
+          .select()
+          .from(deployments)
+          .where(eq(deployments.project_id, project.id));
+        const admitted = rows.find((row) => row.status === 'pending' && row.manifest === null);
+        expect(admitted).toBeDefined();
+        expect(JSON.parse(admitted!.asset_hashes!)).toEqual({ '/app.js': { hash, size: 12 } });
+        sawProtected = true;
+      }
+      return head(key);
+    });
+    const originalDispatch = env.DISPATCH;
+    env.DISPATCH = {
+      get: () => ({ fetch: async () => Response.json({ ready: true }) }),
+    } as unknown as DispatchNamespace;
+    try {
+      const res = await app.fetch(
+        new Request(`http://localhost/projects/${project.id}/deploy`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            manifest: v2Manifest({ type: 'void' }),
+            assetManifest: { '/app.js': { blake3: hash, md5: MD5(8), size: 12 } },
+            workerFiles: {
+              'index.js': btoa('export default { fetch() { return new Response("ok"); } };'),
+            },
+            preflight: 'true',
+          }),
+        }),
+        env,
+      );
+      const events = await readAllEvents(res);
+      expect(events.find((event) => isEvent(event, 'error'))).toBeUndefined();
+      expect(events.find((event) => isEvent(event, 'done'))).toBeDefined();
+      expect(sawProtected).toBe(true);
+    } finally {
+      env.DISPATCH = originalDispatch;
+    }
+  });
+
+  it('rejects a stale reuse decision before uploading a Worker and releases the claim', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'worker-reuse-missing');
+    const hash = HASH(9);
+    await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, hash, new Uint8Array(12));
+    const preflight = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy/preflight`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hasWorker: true, assetManifest: { '/app.js': { hash, size: 12 } } }),
+      }),
+      env,
+    );
+    expect(await preflight.json()).toMatchObject({ needed: [], skipped: 1 });
+    await env.STATIC_ASSETS_R2.delete(`assets/${project.id}/${hash}`);
+    const cf = mockCfApi();
+    const res = await app.fetch(
+      new Request(`http://localhost/projects/${project.id}/deploy`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          manifest: v2Manifest({ type: 'void' }),
+          assetManifest: { '/app.js': { blake3: hash, md5: MD5(9), size: 12 } },
+          workerFiles: { 'index.js': btoa('export default {};') },
+          preflight: 'true',
+        }),
+      }),
+      env,
+    );
+    const events = await readAllEvents(res);
+    expect(events.find((event) => isEvent(event, 'done'))).toBeUndefined();
+    expect(events.find((event) => isEvent(event, 'error'))).toMatchObject({ step: 'asset_verify' });
+    expect(
+      cf.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT'),
+    ).toBe(false);
+    expect(
+      await env.db.select().from(deployments).where(eq(deployments.project_id, project.id)),
+    ).toHaveLength(0);
+  });
+
   it('static deploy with all assets pre-uploaded reaches live', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'jm-static-ok');
