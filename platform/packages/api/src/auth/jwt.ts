@@ -21,6 +21,8 @@ export type JwtPayload = Readonly<{
   /** Dedicated, revocable operator session; never accepted by application APIs. */
   jti?: string;
   operatorOrigin?: string;
+  /** Revocable human session; never used for project-scoped build credentials. */
+  sid?: string;
 }>;
 
 const EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days

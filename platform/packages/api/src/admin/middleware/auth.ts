@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { verifyJwt } from '../../auth/jwt.ts';
+import { validateHumanSession } from '../../auth/sessions.ts';
 import { getUser, getFirstAdmin } from '../../db.ts';
 import { type ApiEnv, isDevBypass } from '../../env.ts';
 import { isAdminSuspended } from '../../suspension.ts';
@@ -40,7 +41,10 @@ export const adminAuthMiddleware: MiddlewareHandler<ApiEnv> = async (context, ne
   }
 
   const payload = await verifyJwt(token, context.env.JWT_SECRET, 'admin');
-  if (!payload) {
+  if (
+    !payload ||
+    !(await validateHumanSession(context.get('db'), payload, context.get('companyIdentity')))
+  ) {
     return context.redirect('/admin/login');
   }
 

@@ -337,6 +337,7 @@ app.post('/*', async (context, next) => {
         context.env.JWT_SECRET,
         projectId,
         payload.sub,
+        token,
       );
       if (!owns) {
         return context.json({ error: 'forbidden' }, 403);

@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono';
 import { verifyJwt } from '../auth/jwt.ts';
+import { validateHumanSession } from '../auth/sessions.ts';
 import { ACTIVE_BUILD_STATUSES, getBuild, getUser } from '../db.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
 import { users } from '../schema.ts';
@@ -88,6 +89,13 @@ export const authMiddleware: MiddlewareHandler<ApiEnv> = async (context, next) =
   const payload = await verifyJwt(token, context.env.JWT_SECRET);
   if (!payload || (payload.aud !== 'api' && payload.aud !== 'deploy')) {
     return context.json({ error: 'invalid or expired token' }, 401);
+  }
+
+  if (
+    payload.aud === 'api' &&
+    !(await validateHumanSession(context.get('db'), payload, context.get('companyIdentity')))
+  ) {
+    return context.json({ error: 'session revoked; sign in again' }, 401);
   }
 
   const user = await getUser(context.get('db'), payload.sub);

@@ -1,7 +1,10 @@
 import { Hono } from 'hono';
 import { hmacVerifyState } from '../auth/hmac.ts';
-import { getProject } from '../db.ts';
+import { verifyJwt } from '../auth/jwt.ts';
+import { validateHumanSession } from '../auth/sessions.ts';
+import { getProject, getUser } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
+import { isAdminSuspended } from '../suspension.ts';
 
 const app = new Hono<ApiEnv>();
 
@@ -25,9 +28,24 @@ app.post('/:projectId', async (context) => {
     return context.json({ error: 'invalid internal auth' }, 403);
   }
 
-  const { userId } = await context.req.json<{ userId: string }>();
-  if (!userId) {
+  const { userId, jwt } = await context.req.json<{ userId: string; jwt?: string }>();
+  if (typeof userId !== 'string' || !userId) {
     return context.json({ error: 'userId required' }, 400);
+  }
+
+  const payload = jwt
+    ? await verifyJwt(jwt, context.env.JWT_SECRET, 'api')
+    : { sub: userId, aud: 'api' };
+  if (
+    !payload ||
+    payload.sub !== userId ||
+    !(await validateHumanSession(context.get('db'), payload))
+  ) {
+    return context.json({ error: 'session revoked' }, 403);
+  }
+  const user = await getUser(context.get('db'), userId);
+  if (!user || isAdminSuspended(user.suspended_reason)) {
+    return context.json({ error: 'forbidden' }, 403);
   }
 
   const project = await getProject(context.get('db'), projectId);
