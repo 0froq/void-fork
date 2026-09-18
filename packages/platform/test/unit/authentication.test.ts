@@ -75,6 +75,7 @@ describe('platform authentication configuration', () => {
     expect(() => parsePlatformLoginConfiguration({ ...google, id: 'company' })).toThrow(
       'fixed connection ID',
     );
+    expect(() => parsePlatformLoginConfiguration({ ...company, id: 'github' })).toThrow('reserved');
   });
 
   it('rejects unsupported policy fields instead of silently pretending to enforce them', () => {

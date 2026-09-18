@@ -19,6 +19,7 @@ import {
 } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { alias } from 'drizzle-orm/pg-core';
+import { lockAuthSettings } from './auth/configuration.ts';
 import { generateId } from './id.ts';
 import * as schema from './schema.ts';
 import {
@@ -2197,14 +2198,35 @@ async function withAdminRemovalGuard<T>(
   return db.transaction(async (tx) => {
     // Serialize the check and access change with other removals and bootstrap.
     // A count outside this lock lets two administrators remove each other.
+    const authSettings = await lockAuthSettings(tx as unknown as Db);
     await tx.execute(sql`LOCK TABLE ${users} IN SHARE ROW EXCLUSIVE MODE`);
     const transactionDb = tx as unknown as Db;
     const user = await getUser(transactionDb, id);
     if (user?.role === 'admin') {
-      const others = await tx
+      let others = await tx
         .select({ suspended_reason: users.suspended_reason })
         .from(users)
         .where(and(eq(users.role, 'admin'), ne(users.id, id)));
+      if (authSettings?.sessions_required) {
+        others = await tx
+          .select({ suspended_reason: users.suspended_reason })
+          .from(users)
+          .innerJoin(
+            schema.platformLoginIdentities,
+            eq(schema.platformLoginIdentities.user_id, users.id),
+          )
+          .innerJoin(
+            schema.platformLoginConnections,
+            eq(schema.platformLoginConnections.id, schema.platformLoginIdentities.connection_id),
+          )
+          .where(
+            and(
+              eq(users.role, 'admin'),
+              ne(users.id, id),
+              eq(schema.platformLoginConnections.enabled, true),
+            ),
+          );
+      }
       if (!others.some((admin) => !isAdminSuspended(admin.suspended_reason))) {
         throw new LastAdminError();
       }

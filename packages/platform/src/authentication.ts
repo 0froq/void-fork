@@ -113,6 +113,9 @@ export function parsePlatformLoginDescriptor(value: unknown): PlatformLoginDescr
     throw new Error('Login kind must be github, google, oidc, or cloudflare-access.');
   }
   const kind = entry.kind as PlatformLoginKind;
+  if ((id === 'github' || id === 'google') && id !== kind) {
+    throw new Error(`Connection ID ${id} is reserved for ${id} login.`);
+  }
   if ((kind === 'github' || kind === 'google') && id !== kind) {
     throw new Error(`${kind} uses the fixed connection ID ${kind}.`);
   }
