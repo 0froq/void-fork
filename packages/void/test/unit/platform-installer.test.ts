@@ -36,7 +36,7 @@ import {
   platformWorkerSecretPayload,
   assertRequiredPlatformSecrets,
   classifyPlatformWorkerDeploymentLineage,
-  installPlatform,
+  installPlatform as installPlatformImplementation,
   claimPlatformDatabaseConnection,
   createPlatformHealthProbeToken,
   createPlatformInstallationSecrets,
@@ -82,6 +82,37 @@ import {
 } from '../../src/cli/platform-setup-draft.ts';
 
 const directories: Array<string> = [];
+type InstallArguments = Parameters<typeof installPlatformImplementation>;
+type InstallClient = InstallArguments[3]['client'];
+type TestInstallerDependencies = Omit<InstallArguments[3], 'client'> & {
+  client: Omit<InstallClient, 'getHyperdriveConfig' | 'disableHyperdriveCaching'> &
+    Partial<Pick<InstallClient, 'getHyperdriveConfig' | 'disableHyperdriveCaching'>>;
+};
+
+// These lifecycle fixtures model an already uncached dedicated database. Cache
+// drift, adoption, and verification failures are exercised by platform-auth-database.test.ts.
+function installPlatform(
+  plan: InstallArguments[0],
+  secrets: InstallArguments[1],
+  existing: InstallArguments[2],
+  dependencies: TestInstallerDependencies,
+) {
+  return installPlatformImplementation(plan, secrets, existing, {
+    ...dependencies,
+    client: {
+      ...dependencies.client,
+      getHyperdriveConfig:
+        dependencies.client.getHyperdriveConfig ??
+        (async (_account, id) => ({
+          id,
+          name: plan.actions.find((action) => action.key === 'hyperdrive')!.name,
+          origin: hyperdriveOriginFromConnectionString(secrets.databaseUrl),
+          cachingDisabled: true,
+        })),
+      disableHyperdriveCaching: dependencies.client.disableHyperdriveCaching ?? (async () => {}),
+    },
+  });
+}
 const TEST_PLATFORM_JWT_SECRET = 'test-only-platform-jwt-secret-material';
 const TEST_PLATFORM_PROJECT_SECRET_KEY = Buffer.alloc(32, 5).toString('base64');
 

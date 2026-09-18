@@ -14,6 +14,7 @@ export type PlatformWorkerConfigSet = Readonly<
 >;
 
 export function createPlatformWorkerConfigs(input: {
+  authenticationDatabaseUncached?: boolean;
   accountId: string;
   apiUrl: string;
   deployment: PlatformDeploymentManifest;
@@ -122,6 +123,7 @@ export function createPlatformWorkerConfigs(input: {
       DISPATCH_WORKER_NAME: names.dispatchWorker,
       LOGS_DATASET: names.logsDataset,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
+      ...(input.authenticationDatabaseUncached ? { PLATFORM_AUTH_DATABASE_UNCACHED: 'true' } : {}),
       PLATFORM_DISPLAY_NAME: deployment.displayName,
       PLATFORM_ENV: 'production',
       PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken,

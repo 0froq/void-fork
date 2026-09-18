@@ -47,6 +47,7 @@ import type {
 } from '@void/platform/installer';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
+import { verifyPlatformAuthenticationDatabase } from './platform-auth-database.ts';
 import {
   hyperdriveOriginConfigHash,
   hyperdriveOriginFromConnectionString,
@@ -174,6 +175,8 @@ type InstallerClient = Pick<
   | 'createDnsRecord'
   | 'createAiGateway'
   | 'createHyperdrive'
+  | 'getHyperdriveConfig'
+  | 'disableHyperdriveCaching'
   | 'createKvNamespace'
   | 'createQueue'
   | 'createR2Bucket'
@@ -935,6 +938,20 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
 
+    dependencies.onProgress?.('Verifying uncached authentication database reads');
+    const authenticationDatabase = manifest.resources.find(
+      (resource) => resource.key === 'hyperdrive',
+    );
+    if (!authenticationDatabase) {
+      throw new Error('platform: The authentication database resource is missing.');
+    }
+    await verifyPlatformAuthenticationDatabase(
+      dependencies.client,
+      plan.account.id,
+      authenticationDatabase,
+      secrets.databaseUrl,
+    );
+
     dependencies.onProgress?.('Checking the platform database schema');
     const rollbackDatabase = dependencies.databaseRollbackSource;
     const migrationStep = `database-schema:${runtime.database.schemaDigest}`;
@@ -1123,6 +1140,7 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
     const configInput = {
+      authenticationDatabaseUncached: true,
       accountId: plan.account.id,
       apiUrl: plan.apiUrl,
       deployment: plan.deployment,

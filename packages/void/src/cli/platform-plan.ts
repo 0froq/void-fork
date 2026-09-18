@@ -1012,6 +1012,7 @@ export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {
       : `${pc.bold('Applications:')} workers.dev (testing); add a domain with void platform domain set <domain>`,
     `${pc.bold('Control plane:')} ${plan.apiUrl}`,
     `${pc.bold('Resource proxy:')} ${plan.proxyUrl}`,
+    `${pc.bold('Database:')} Verify uncached Hyperdrive reads for authentication`,
     '',
   ];
   for (const action of plan.actions) {
