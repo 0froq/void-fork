@@ -119,6 +119,7 @@ import {
 } from './client.ts';
 import {
   CloudflareAuthenticationError,
+  cloudflareKeyringNeedsTerminal,
   ensureCloudflareAuthentication,
 } from './cloudflare-auth.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
@@ -3547,7 +3548,8 @@ export function createDeployWranglerRunner(
   const [command, ...prefix] = launcher;
   return (args, opts) => {
     const childEnv = deployChildEnv(accountId, apiBaseUrl);
-    if (!opts.capture) {
+    const keyringTerminal = cloudflareKeyringNeedsTerminal(args);
+    if (!opts.capture || keyringTerminal) {
       childEnv.WRANGLER_LOG = 'none';
     }
     if (opts.env) {
@@ -3555,8 +3557,9 @@ export function createDeployWranglerRunner(
     }
     const result = spawnSync(command as string, [...prefix, ...args], {
       cwd: root,
-      stdio:
-        opts.input === undefined
+      stdio: keyringTerminal
+        ? ['inherit', 'inherit', 'ignore']
+        : opts.input === undefined
           ? opts.capture
             ? ['ignore', 'pipe', 'pipe']
             : 'inherit'

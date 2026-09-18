@@ -1,4 +1,4 @@
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { log } from '@clack/prompts';
 import { resolveWranglerArgv } from './preset.ts';
 
@@ -215,7 +215,11 @@ export function createBundledCloudflareAuthRunner(root: string): CloudflareAuthR
       env,
       maxBuffer: 10 * 1024 * 1024,
       shell: false,
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      stdio: cloudflareKeyringNeedsTerminal(args)
+        ? ['inherit', 'inherit', 'ignore']
+        : capture
+          ? ['ignore', 'pipe', 'pipe']
+          : 'inherit',
       timeout: 10 * 60 * 1000,
       windowsHide: true,
     });
@@ -236,6 +240,27 @@ export function runCloudflareAuthCommand(
   signal?: AbortSignal,
 ): Promise<CloudflareAuthRunResult> {
   const [command, ...prefix] = resolveWranglerArgv(root);
+  if (cloudflareKeyringNeedsTerminal(args)) {
+    // Only backend setup inherits the terminal; token reads and browser login
+    // continue through execFile below with bounded, captured output.
+    return new Promise((resolve) => {
+      const child = spawn(command!, [...prefix, ...args], {
+        cwd: root,
+        env: cloudflareAuthCommandEnvironment(args),
+        shell: false,
+        signal,
+        stdio: ['inherit', 'inherit', 'ignore'],
+        timeout: 10 * 60 * 1000,
+        windowsHide: true,
+      });
+      child.once('error', (error) => {
+        resolve({ status: null, stdout: '', stderr: '', error: error.message });
+      });
+      child.once('close', (status, signal) => {
+        resolve({ status, signal, stdout: '', stderr: '' });
+      });
+    });
+  }
   return new Promise((resolve) => {
     const child = execFile(
       command!,
@@ -269,10 +294,29 @@ export function cloudflareAuthCommandEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const env = cloudflareAuthEnvironment(source);
-  if (args[0] === 'login' || args[0] === 'logout') {
+  if (args[0] === 'login' || args[0] === 'logout' || isCloudflareKeyringEnable(args)) {
     env.WRANGLER_LOG = 'none';
   }
   return env;
+}
+
+function isCloudflareKeyringEnable(args: ReadonlyArray<string>): boolean {
+  return args.length === 3 && args[0] === 'auth' && args[1] === 'keyring' && args[2] === 'enable';
+}
+
+/**
+ * Wrangler installs its Windows keyring backend only when stdin AND stdout are
+ * terminals. Capturing `auth keyring enable` makes first-time setup fail even
+ * inside PowerShell. This command only configures storage; it never reads or
+ * prints a credential. Keep every other auth command captured.
+ */
+export function cloudflareKeyringNeedsTerminal(args: ReadonlyArray<string>): boolean {
+  return (
+    process.platform === 'win32' &&
+    process.stdin.isTTY === true &&
+    process.stdout.isTTY === true &&
+    isCloudflareKeyringEnable(args)
+  );
 }
 
 export function cloudflareAuthEnvironment(
