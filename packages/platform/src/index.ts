@@ -63,6 +63,7 @@ export {
   createPlatformDiscoveryDocument,
   parsePlatformDiscoveryDocument,
   type PlatformDiscoveryDocument,
+  type PlatformAuthenticationDiscovery,
 } from './discovery.ts';
 export {
   createPlatformWorkerConfigs,

@@ -165,6 +165,28 @@ function operator(path: string, body?: unknown) {
 }
 
 describe('configured platform login routes', () => {
+  it('publishes only enabled named methods without exposing provider configuration or credentials', async () => {
+    await env.db
+      .update(platformLoginConnections)
+      .set({ enabled: false })
+      .where(eq(platformLoginConnections.id, 'google'));
+    const response = await app.fetch(new Request(`${origin}/.well-known/void-platform`), env);
+    const discovery = await response.json();
+    expect(discovery).toMatchObject({
+      schemaVersion: 3,
+      authenticationProviders: ['company', 'github'],
+      authentication: {
+        protectedByAccess: false,
+        methods: [
+          { id: 'company', kind: 'oidc', label: 'Company SSO' },
+          { id: 'github', kind: 'github', label: 'GitHub' },
+        ],
+      },
+    });
+    expect(JSON.stringify(discovery)).not.toContain(issuer);
+    expect(JSON.stringify(discovery)).not.toContain('client-secret');
+    expect(JSON.stringify(discovery)).not.toContain('ciphertext');
+  });
   it('completes OIDC browser authentication and a separate one-time PKCE CLI exchange', async () => {
     const flow = await start();
     const response = await callback(flow);

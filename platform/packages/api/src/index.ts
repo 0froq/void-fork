@@ -19,6 +19,7 @@ import adminProjects from './admin/routes/projects.tsx';
 import adminSignupControl from './admin/routes/signup-control.tsx';
 import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
 import adminUsers from './admin/routes/users.tsx';
+import { readAuthSettings, readEnabledLoginConnections } from './auth/configuration.ts';
 import { BuildManager, BuildManagerLarge } from './build-manager.ts';
 import { BuildScheduler } from './build-scheduler.ts';
 import { capabilityMiddleware, getPlatformCapabilities } from './capabilities.ts';
@@ -195,8 +196,24 @@ const app = new Hono<ApiEnv>()
       return context.json({ status: 'unhealthy' }, 503);
     }
   })
-  .get('/.well-known/void-platform', (context) => {
-    const capabilities = getPlatformCapabilities(context.env);
+  .get('/.well-known/void-platform', async (context) => {
+    const settings = await readAuthSettings(context.get('db'));
+    const methods = settings
+      ? (await readEnabledLoginConnections(context.get('db'))).map(({ configuration }) => ({
+          id: configuration.id,
+          kind: configuration.kind,
+          label: configuration.label,
+        }))
+      : undefined;
+    const capabilities = {
+      ...getPlatformCapabilities(context.env),
+      ...(methods
+        ? {
+            githubOAuth: methods.some((method) => method.kind === 'github'),
+            googleOAuth: methods.some((method) => method.kind === 'google'),
+          }
+        : {}),
+    };
     return context.json(
       createPlatformDiscoveryDocument({
         apiUrl: new URL(context.req.url).origin,
@@ -204,10 +221,13 @@ const app = new Hono<ApiEnv>()
         ...(context.env.PLATFORM_APPLICATION
           ? { applicationRouting: readPlatformApplication(context.env) }
           : {}),
-        authenticationProviders: [
+        authenticationProviders: methods?.map((method) => method.id) ?? [
           ...(capabilities.githubOAuth ? (['github'] as const) : []),
           ...(capabilities.googleOAuth ? (['google'] as const) : []),
         ],
+        ...(methods
+          ? { authentication: { methods, protectedByAccess: !!settings?.protection } }
+          : {}),
         capabilities,
         displayName: context.env.PLATFORM_DISPLAY_NAME ?? 'Void Cloud',
         installationId: context.env.PLATFORM_INSTALLATION_ID ?? null,

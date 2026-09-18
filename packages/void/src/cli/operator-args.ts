@@ -307,6 +307,7 @@ export type OperatorArgs = {
   follow: boolean;
   tokenStdin: boolean;
   provider: string;
+  providerExplicit?: boolean;
   timeoutMs?: number;
   method: 'GET' | 'POST';
   path: string;
@@ -357,6 +358,7 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
     follow: flags.has('follow'),
     tokenStdin: flags.has('token-stdin'),
     provider: values.provider ?? 'github',
+    ...(values.provider ? { providerExplicit: true } : {}),
     method: 'GET',
     path: '',
     query: {},
