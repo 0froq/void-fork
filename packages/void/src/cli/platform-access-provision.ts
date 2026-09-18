@@ -32,6 +32,7 @@ export type PlatformAccessProvisionInput = {
   installationId: string;
   apiUrl: string;
   proxyUrl: string;
+  additionalOrigins?: ReadonlyArray<string>;
   identityProviderIds: ReadonlyArray<string>;
   policyIds: ReadonlyArray<string>;
   login?: {
@@ -223,7 +224,7 @@ export async function verifyCompanyAccessPolicies(
   }
 }
 
-function publicDestinations(application: ObjectValue): Array<string> {
+export function platformAccessPublicDestinations(application: ObjectValue): Array<string> {
   const destinations = Array.isArray(application.destinations) ? application.destinations : [];
   return [
     ...(typeof application.domain === 'string' ? [application.domain] : []),
@@ -233,7 +234,7 @@ function publicDestinations(application: ObjectValue): Array<string> {
     }),
   ];
 }
-function overlapsOrigin(destination: string, origin: string): boolean {
+export function platformAccessOverlapsOrigin(destination: string, origin: string): boolean {
   const host = destination.split('/')[0]!;
   const pattern =
     '^' +
@@ -309,7 +310,19 @@ export async function provisionPlatformAccess(
     throw new Error('platform: Access account selection does not match its management client.');
   }
   const inspected = await inspectPlatformAccess(client, input);
-  const origins = [...new Set([new URL(input.apiUrl).origin, new URL(input.proxyUrl).origin])];
+  const origins = [
+    ...new Set(
+      [input.apiUrl, input.proxyUrl, ...(input.additionalOrigins ?? [])].map((value) => {
+        const url = new URL(value);
+        if (url.origin !== value || url.protocol !== 'https:') {
+          throw new Error(
+            'platform: Access requires exact HTTPS origins without credentials, paths, or query strings.',
+          );
+        }
+        return url.origin;
+      }),
+    ),
+  ];
   for (const origin of origins) {
     if (!origin.startsWith('https://')) {
       throw new Error('platform: Access protection requires HTTPS platform origins.');
@@ -335,6 +348,34 @@ export async function provisionPlatformAccess(
   save(state);
   const policies = input.policyIds.map((id, index) => ({ id, precedence: index + 1 }));
   const inventory = await client.list('apps');
+  const tokenInventory = input.protection ? await client.list('service_tokens') : [];
+  if (input.protection?.applicationId && !input.serviceToken) {
+    throw new Error(
+      'platform: Connecting an existing protection application requires its admitted service token.',
+    );
+  }
+  if (input.serviceToken) {
+    const token = tokenInventory.find((token) => token.id === input.serviceToken!.id);
+    if (
+      !token ||
+      token.client_id !== input.serviceToken.clientId ||
+      token.enabled === false ||
+      (typeof token.expires_at === 'string' && Date.parse(token.expires_at) <= Date.now())
+    ) {
+      throw new Error(
+        'platform: The selected Access service token is unavailable, expired, or belongs to another client.',
+      );
+    }
+    const prior = state.resources['service-token'];
+    state.resources['service-token'] = {
+      id: input.serviceToken.id,
+      name: text(token.name, 'service token name'),
+      fingerprint: fingerprint({ origins }),
+      pending: false,
+      adopted: prior?.id === input.serviceToken.id ? prior.adopted : true,
+    };
+    save(state);
+  }
   if (input.protection) {
     for (const app of inventory) {
       if (
@@ -345,9 +386,9 @@ export async function provisionPlatformAccess(
         continue;
       }
       if (
-        publicDestinations(app).some(
+        platformAccessPublicDestinations(app).some(
           (destination) =>
-            origins.some((origin) => overlapsOrigin(destination, origin)) &&
+            origins.some((origin) => platformAccessOverlapsOrigin(destination, origin)) &&
             (destination.includes('/') ||
               origins.some((origin) => destination === new URL(origin).hostname)),
         )
@@ -373,6 +414,14 @@ export async function provisionPlatformAccess(
       if (found.id !== existingId) {
         throw new Error('platform: Access returned a different application ID.');
       }
+      state.resources[key] = {
+        id: existingId,
+        name: text(found.name, 'application name'),
+        fingerprint: fingerprint(expected),
+        pending: true,
+        adopted: true,
+      };
+      save(state);
       return found;
     }
     const desiredHash = fingerprint(expected);
@@ -408,6 +457,11 @@ export async function provisionPlatformAccess(
     }
     const name =
       `void-${input.installationId}-${key}`.slice(0, 90) + '-' + state.nonce.slice(0, 16);
+    if (inventory.some((app) => app.name === name)) {
+      throw new Error(
+        'platform: An Access application with this installation identity already exists. Connect it explicitly; no duplicate was created.',
+      );
+    }
     checkpoint = { name, fingerprint: desiredHash, pending: true };
     state.resources[key] = checkpoint;
     save(state);
@@ -417,7 +471,6 @@ export async function provisionPlatformAccess(
         'Access application',
       );
       checkpoint.id = text(created.id, 'application ID');
-      checkpoint.pending = false;
       if (created.saas_app) {
         const oidc = object(created.saas_app, 'OIDC application');
         checkpoint.clientId = text(oidc.client_id, 'OIDC client ID');
@@ -443,39 +496,13 @@ export async function provisionPlatformAccess(
     }
   };
 
-  const verifyApplication = async (app: ObjectValue, type: string, machineId?: string) => {
-    if (app.type !== type || !sameSet(ids(app.allowed_idps), input.identityProviderIds)) {
-      throw new Error(
-        'platform: Access application identity-provider configuration does not match the reviewed plan.',
-      );
+  const completeApplication = (key: string, app: ObjectValue) => {
+    const checkpoint = state.resources[key];
+    if (!checkpoint?.id || checkpoint.id !== app.id || checkpoint.name !== app.name) {
+      throw new Error('platform: The verified Access application changed ownership identity.');
     }
-    const currentPolicies = await client.list(
-      `apps/${encodeURIComponent(text(app.id, 'application ID'))}/policies`,
-    );
-    await verifyCompanyAccessPolicies(client, currentPolicies);
-    const allowIds = currentPolicies
-      .filter((policy) => policy.decision === 'allow' || policy.decision === 'deny')
-      .map((policy) => text(policy.id, 'policy ID'));
-    if (!sameSet(allowIds, input.policyIds)) {
-      throw new Error(
-        'platform: Access application policies do not match the reviewed company policies.',
-      );
-    }
-    for (const policy of currentPolicies.filter((policy) => policy.decision === 'non_identity')) {
-      const includes = Array.isArray(policy.include) ? policy.include : [];
-      if (
-        !machineId ||
-        includes.length !== 1 ||
-        object(includes[0], 'service policy').service_token === undefined ||
-        object(object(includes[0], 'service policy').service_token, 'service token rule')
-          .token_id !== machineId
-      ) {
-        throw new Error('platform: Access application contains an unexpected machine policy.');
-      }
-    }
-    if (machineId && !currentPolicies.some((policy) => policy.decision === 'non_identity')) {
-      throw new Error('platform: The platform service token is not admitted by Access.');
-    }
+    checkpoint.pending = false;
+    save(state);
   };
 
   if (input.login) {
@@ -497,7 +524,7 @@ export async function provisionPlatformAccess(
       },
     };
     const app = await application(key, expected, input.login.applicationId);
-    await verifyApplication(app, 'saas');
+    await verifyPlatformAccessApplication(client, input, app, 'saas');
     const oidc = object(app.saas_app, 'OIDC configuration');
     if (
       oidc.auth_type !== 'oidc' ||
@@ -525,6 +552,7 @@ export async function provisionPlatformAccess(
       }),
       clientSecret,
     };
+    completeApplication(key, app);
   }
 
   if (input.protection) {
@@ -540,6 +568,11 @@ export async function provisionPlatformAccess(
         };
         state.resources[tokenKey] = saved;
         save(state);
+        if (tokenInventory.some((token) => token.name === saved!.name)) {
+          throw new Error(
+            'platform: An Access service token for this installation already exists. Supply its credentials explicitly; no duplicate was created.',
+          );
+        }
         const created = object(
           await client.create('service_tokens', { name: saved.name, duration: '8760h' }),
           'Access service token',
@@ -559,6 +592,11 @@ export async function provisionPlatformAccess(
         }
         throw new Error(
           'platform: Access service-token creation has an uncertain outcome or its secret was lost. Supply an existing admitted service token; no creation was retried.',
+        );
+      }
+      if (saved.fingerprint !== fingerprint({ origins })) {
+        throw new Error(
+          'platform: The saved Access service token belongs to different platform origins. Connect the intended service token explicitly.',
         );
       }
       service = { id: saved.id, clientId: saved.clientId, clientSecret: saved.clientSecret };
@@ -581,8 +619,8 @@ export async function provisionPlatformAccess(
       ],
     };
     const app = await application('protection', expected, input.protection.applicationId);
-    await verifyApplication(app, 'self_hosted', service.id);
-    const covered = publicDestinations(app);
+    await verifyPlatformAccessApplication(client, input, app, 'self_hosted', service.id);
+    const covered = platformAccessPublicDestinations(app);
     if (origins.some((origin) => !covered.includes(new URL(origin).hostname))) {
       throw new Error(
         'platform: Access must protect both the API and proxy origins without path exclusions.',
@@ -599,31 +637,56 @@ export async function provisionPlatformAccess(
         { CF_ACCESS_CLIENT_ID: service.clientId, CF_ACCESS_CLIENT_SECRET: service.clientSecret },
       ]),
     );
+    completeApplication('protection', app);
+    const savedService = state.resources[tokenKey];
+    if (savedService?.id === service.id) {
+      savedService.pending = false;
+      save(state);
+    }
   }
   output.resources = Object.entries(state.resources).flatMap(([key, value]) =>
     value.id ? [{ key, id: value.id, name: value.name, adopted: value.adopted === true }] : [],
   );
-  if (input.login?.applicationId) {
-    output.resources = [
-      ...output.resources,
-      {
-        key: `login-${input.login.id}`,
-        id: input.login.applicationId,
-        name: input.login.label,
-        adopted: true,
-      },
-    ];
-  }
-  if (input.protection?.applicationId) {
-    output.resources = [
-      ...output.resources,
-      {
-        key: 'protection',
-        id: input.protection.applicationId,
-        name: 'Existing platform protection',
-        adopted: true,
-      },
-    ];
-  }
   return output;
+}
+
+export async function verifyPlatformAccessApplication(
+  client: PlatformAccessClient,
+  input: Pick<PlatformAccessProvisionInput, 'identityProviderIds' | 'policyIds'>,
+  app: ObjectValue,
+  type: string,
+  machineId?: string,
+): Promise<void> {
+  if (app.type !== type || !sameSet(ids(app.allowed_idps), input.identityProviderIds)) {
+    throw new Error(
+      'platform: Access application identity-provider configuration does not match the reviewed plan.',
+    );
+  }
+  const currentPolicies = await client.list(
+    `apps/${encodeURIComponent(text(app.id, 'application ID'))}/policies`,
+  );
+  await verifyCompanyAccessPolicies(client, currentPolicies);
+  const allowIds = currentPolicies
+    .filter((policy) => policy.decision === 'allow' || policy.decision === 'deny')
+    .map((policy) => text(policy.id, 'policy ID'));
+  if (!sameSet(allowIds, input.policyIds)) {
+    throw new Error(
+      'platform: Access application policies do not match the reviewed company policies.',
+    );
+  }
+  for (const policy of currentPolicies.filter((policy) => policy.decision === 'non_identity')) {
+    const includes = Array.isArray(policy.include) ? policy.include : [];
+    if (
+      !machineId ||
+      includes.length !== 1 ||
+      object(includes[0], 'service policy').service_token === undefined ||
+      object(object(includes[0], 'service policy').service_token, 'service token rule').token_id !==
+        machineId
+    ) {
+      throw new Error('platform: Access application contains an unexpected machine policy.');
+    }
+  }
+  if (machineId && !currentPolicies.some((policy) => policy.decision === 'non_identity')) {
+    throw new Error('platform: The platform service token is not admitted by Access.');
+  }
 }

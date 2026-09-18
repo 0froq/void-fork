@@ -205,6 +205,7 @@ export class PlatformCloudflareClient {
         ...init?.headers,
       },
       signal: init?.signal ?? AbortSignal.timeout(30_000),
+      redirect: 'manual',
     });
     let envelope: CloudflareEnvelope<T>;
     try {

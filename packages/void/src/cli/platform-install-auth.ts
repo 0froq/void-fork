@@ -10,6 +10,13 @@ import {
   type PlatformDeploymentManifest,
   type PlatformLoginKind,
 } from '@void/platform';
+import {
+  activatePlatformAccessCredentials,
+  parsePlatformAccessSetupSpec,
+  preparePlatformAccessSetup,
+  type PlatformAccessSetupSpec,
+} from './platform-access-setup.ts';
+import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
 type AuthFile = {
@@ -17,6 +24,7 @@ type AuthFile = {
   administratorConnectionId?: string;
   admission?: unknown;
   protection?: unknown;
+  cloudflareAccess?: PlatformAccessSetupSpec;
 };
 export type PlatformAuthSelection = {
   authentication: PlatformDeploymentManifest['authentication'];
@@ -55,7 +63,11 @@ export async function selectInstallationAuthentication(
     if (
       entries.some(
         (entry) =>
+          !entry ||
+          typeof entry !== 'object' ||
           !entry.configuration ||
+          typeof entry.configuration !== 'object' ||
+          Array.isArray(entry.configuration) ||
           !PLATFORM_LOGIN_KINDS.includes(entry.configuration.kind as PlatformLoginKind) ||
           entry.clientSecret !== undefined ||
           entry.configuration.clientSecret !== undefined,
@@ -66,6 +78,9 @@ export async function selectInstallationAuthentication(
       );
     }
     const selected = input as AuthFile;
+    if (selected.cloudflareAccess !== undefined) {
+      selected.cloudflareAccess = parsePlatformAccessSetupSpec(selected.cloudflareAccess);
+    }
     const authentication = {
       providers: [
         ...new Set(entries.map((entry) => entry.configuration!.kind as PlatformLoginKind)),
@@ -118,12 +133,14 @@ export async function collectInstallationAuthentication(
   plan: PlatformInstallPlan,
   checkpoint: Record<string, string>,
   save: (values: Record<string, string>) => void,
+  access?: { client: PlatformCloudflareClient; ownershipNonce: string; yes: boolean },
 ): Promise<
   { authenticationSetupJson: string; authSetupToken: string; authBootstrapCode: string } | undefined
 > {
   if (!selection.authentication.configurable) {
     return undefined;
   }
+  activatePlatformAccessCredentials(checkpoint.accessCredentialsJson, [plan.apiUrl, plan.proxyUrl]);
   if (checkpoint.authenticationSetupJson && !selection.file) {
     parsePlatformAuthenticationSetup(JSON.parse(checkpoint.authenticationSetupJson));
     return {
@@ -160,12 +177,47 @@ export async function collectInstallationAuthentication(
       clientSecretEnv: undefined,
     }));
   const connections = [];
+  const accessEntry = entries.find((entry) => entry.configuration.kind === 'cloudflare-access');
+  const prepared =
+    access &&
+    (selection.authentication.accessProtection ||
+      (accessEntry && (!selection.file || selection.file.cloudflareAccess)))
+      ? await preparePlatformAccessSetup({
+          plan,
+          ownershipNonce: access.ownershipNonce,
+          protection: !!selection.authentication.accessProtection,
+          ...(accessEntry
+            ? {
+                login: {
+                  id: String(accessEntry.configuration.id ?? 'access'),
+                  label: String(accessEntry.configuration.label ?? 'Cloudflare Access'),
+                  ...(Array.isArray(accessEntry.configuration.requiredGroups)
+                    ? { requiredGroups: accessEntry.configuration.requiredGroups as Array<string> }
+                    : {}),
+                },
+              }
+            : {}),
+          spec: selection.file?.cloudflareAccess,
+          client: access.client,
+          checkpoint,
+          save,
+          yes: access.yes,
+        })
+      : undefined;
   console.log(`Login callback URL: ${plan.apiUrl}/auth/callback`);
   for (const entry of entries) {
     const config = { ...entry.configuration };
     const kind = config.kind as PlatformLoginKind;
     if (!config.id) {
       config.id = kind === 'oidc' ? 'company' : kind === 'cloudflare-access' ? 'access' : kind;
+    }
+    if (prepared?.login && prepared.login.configuration.id === config.id) {
+      const connection = prepared.login;
+      save({
+        [`authenticationConnection:${connection.configuration.id}`]: JSON.stringify(connection),
+      });
+      connections.push(connection);
+      continue;
     }
     const partialKey = `authenticationConnection:${String(config.id)}`;
     const stored = checkpoint[partialKey]
@@ -230,7 +282,7 @@ export async function collectInstallationAuthentication(
             }),
           )
         : connections[0]!.configuration.id);
-  let protection = selection.file?.protection ?? null;
+  let protection = prepared?.protection ?? selection.file?.protection ?? null;
   if (selection.authentication.accessProtection && !protection) {
     const teamDomain = await prompt('Access team origin (https://team.cloudflareaccess.com):');
     const apiAudience = await prompt(`Access application audience for ${plan.apiUrl}:`);

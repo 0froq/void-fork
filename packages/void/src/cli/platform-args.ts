@@ -6,7 +6,7 @@ export const platformSubcommands: Array<SubcommandDef> = [
   {
     name: 'config',
     hint: 'Configure authentication',
-    description: 'Configure platform login methods and access',
+    description: 'Configure login methods, company protection, or provider recovery',
   },
   ...operatorGroups.map((name) => ({
     name,

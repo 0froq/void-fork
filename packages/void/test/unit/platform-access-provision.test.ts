@@ -1,95 +1,11 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
-  PlatformAccessClient,
   provisionPlatformAccess,
   type PlatformAccessCheckpoint,
   type PlatformAccessProvisionInput,
 } from '../../src/cli/platform-access-provision.ts';
+import { platformAccessFixture as fixture } from '../fixtures/platform-access.ts';
 
-type RecordValue = Record<string, unknown>;
-function fixture() {
-  const apps = new Map<string, RecordValue>();
-  const tokens = new Map<string, RecordValue>();
-  const policy: RecordValue = {
-    id: 'employees',
-    name: 'Employees and managed devices',
-    decision: 'allow',
-    include: [{ email_domain: { domain: 'example.com' } }],
-    require: [{ device_posture: { integration_uid: 'managed-devices' } }],
-  };
-  const calls: Array<{ method: string; path: string; body?: RecordValue }> = [];
-  let loseApplicationResponse = false;
-  let sequence = 0;
-  const client = new PlatformAccessClient(
-    {
-      request: async <T>(path: string, init?: RequestInit): Promise<T> => {
-        const target = path.split('?')[0]!.replace('/accounts/account/access/', '');
-        const method = init?.method ?? 'GET';
-        const body = init?.body ? (JSON.parse(String(init.body)) as RecordValue) : undefined;
-        calls.push({ method, path: target, body });
-        let result: unknown;
-        if (target === 'organizations') {
-          result = { auth_domain: 'company.cloudflareaccess.com' };
-        } else if (target === 'identity_providers') {
-          result = [{ id: 'company-idp', name: 'Company SSO' }];
-        } else if (target === 'policies/employees') {
-          result = policy;
-        } else if (target === 'apps' && method === 'GET') {
-          result = [...apps.values()];
-        } else if (target === 'service_tokens' && method === 'GET') {
-          result = [...tokens.values()];
-        } else if (target === 'service_tokens' && method === 'POST') {
-          const token = {
-            ...body,
-            id: `token-${++sequence}`,
-            client_id: 'ci.access',
-            client_secret: 'service-secret',
-          };
-          tokens.set(token.id, token);
-          result = token;
-        } else if (target === 'apps' && method === 'POST') {
-          const id = `app-${++sequence}`;
-          const app: RecordValue = { ...body, id, aud: `${id}-audience` };
-          const oidc = app.saas_app as RecordValue | undefined;
-          if (oidc) {
-            app.saas_app = { ...oidc, client_id: `${id}-client`, client_secret: 'oidc-secret' };
-          }
-          apps.set(id, app);
-          if (loseApplicationResponse) {
-            loseApplicationResponse = false;
-            throw new Error('response lost');
-          }
-          result = app;
-        } else if (target.startsWith('apps/') && target.endsWith('/policies')) {
-          const app = apps.get(target.split('/')[1]!)!;
-          result = (app.policies as Array<RecordValue>).map((entry, index) =>
-            entry.id === 'employees' ? policy : { id: `inline-${index}`, ...entry },
-          );
-        } else if (target.startsWith('apps/')) {
-          const app = structuredClone(apps.get(target.slice(5))!);
-          if (app.saas_app) {
-            delete (app.saas_app as RecordValue).client_secret;
-          }
-          result = app;
-        } else {
-          throw new Error(`Unexpected request ${method} ${target}`);
-        }
-        return structuredClone(result) as T;
-      },
-    },
-    'account',
-  );
-  return {
-    client,
-    calls,
-    apps,
-    tokens,
-    policy,
-    loseNextApplicationResponse() {
-      loseApplicationResponse = true;
-    },
-  };
-}
 const base: PlatformAccessProvisionInput = {
   accountId: 'account',
   installationId: 'team-installation',
@@ -100,6 +16,42 @@ const base: PlatformAccessProvisionInput = {
 };
 
 describe('Cloudflare Access provisioning', () => {
+  it('connects externally managed protection and records its service token without writes', async () => {
+    const env = fixture();
+    env.tokens.set('ci-token', { id: 'ci-token', name: 'Managed CI', client_id: 'external-ci' });
+    env.apps.set('external-gate', {
+      id: 'external-gate',
+      name: 'Managed perimeter',
+      type: 'self_hosted',
+      allowed_idps: ['company-idp'],
+      aud: 'external-audience',
+      destinations: [base.apiUrl, base.proxyUrl].map((origin) => ({
+        type: 'public',
+        uri: new URL(origin).hostname,
+      })),
+      policies: [
+        { id: 'employees' },
+        { decision: 'non_identity', include: [{ service_token: { token_id: 'ci-token' } }] },
+      ],
+    });
+    const output = await provisionPlatformAccess(
+      env.client,
+      {
+        ...base,
+        protection: { applicationId: 'external-gate' },
+        serviceToken: { id: 'ci-token', clientId: 'external-ci', clientSecret: 'external-secret' },
+      },
+      undefined,
+      () => {},
+    );
+    expect(output.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'ci-token', adopted: true }),
+        expect.objectContaining({ id: 'external-gate', adopted: true }),
+      ]),
+    );
+    expect(env.calls.every((call) => call.method === 'GET')).toBe(true);
+  });
   it('performs no Access probes or writes when neither capability is selected', async () => {
     const env = fixture();
     expect(

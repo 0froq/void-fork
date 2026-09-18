@@ -1027,6 +1027,15 @@ export function formatPlatformInstallPlan(plan: PlatformInstallPlan): string {
     `${pc.bold('Resource proxy:')} ${plan.proxyUrl}`,
     `${pc.bold('Login methods:')} ${plan.deployment.authentication.providers.join(', ')}`,
     `${pc.bold('Access protection:')} ${plan.deployment.authentication.accessProtection ? 'Enabled' : 'Not enabled'}`,
+    `${pc.bold('Login callback:')} ${plan.apiUrl}/auth/callback`,
+    ...(plan.deployment.authentication.providers.includes('cloudflare-access')
+      ? ['Access login: create a dedicated OIDC application or connect an existing issuer.']
+      : []),
+    ...(plan.deployment.authentication.accessProtection
+      ? [
+          `Access protection: verify an application covering ${plan.apiUrl} and ${plan.proxyUrl}, with a separate scoped service token for installation and CI.`,
+        ]
+      : []),
     `${pc.bold('Database:')} Verify uncached Hyperdrive reads for authentication`,
     '',
   ];

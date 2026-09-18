@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { parsePlatformArgs } from '../../src/cli/platform-args.ts';
+import type { PlatformCloudflareClient } from '../../src/cli/platform-cloudflare.ts';
 import {
   collectInstallationAuthentication,
   selectInstallationAuthentication,
@@ -40,6 +41,42 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 describe('installer login selection', () => {
+  it('connects Access login in a separate identity account without Cloudflare management calls', async () => {
+    const file = join(directory, 'auth.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        connections: [
+          {
+            configuration: {
+              id: 'company-access',
+              kind: 'cloudflare-access',
+              label: 'Company Access',
+              issuer:
+                'https://identity.cloudflareaccess.com/cdn-cgi/access/sso/oidc/external-client',
+              clientId: 'external-client',
+            },
+            clientSecretEnv: 'TEST_EXTERNAL_SECRET',
+          },
+        ],
+      }),
+    );
+    vi.stubEnv('TEST_EXTERNAL_SECRET', 'external-secret');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const request = vi.fn(() => {
+      throw new Error('No Cloudflare management calls expected');
+    });
+    const selection = await selectInstallationAuthentication(file);
+    const result = await collectInstallationAuthentication(selection, plan, {}, () => {}, {
+      client: { request } as unknown as PlatformCloudflareClient,
+      ownershipNonce: 'owned',
+      yes: true,
+    });
+    expect(JSON.parse(result!.authenticationSetupJson).connections[0].configuration.id).toBe(
+      'company-access',
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
   it('reads a nonsecret plan without requiring provider credentials', async () => {
     const file = join(directory, 'auth.json');
     await writeFile(file, JSON.stringify(input));

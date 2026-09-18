@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { confirm, intro, isCancel, log, note, outro, password, select, text } from '@clack/prompts';
 import {
   normalizeApplicationDomain,
@@ -39,6 +40,7 @@ import {
   acquirePlatformLifecycleLock,
   assertPlatformInstallationSlugAvailable,
   listInstallationManifests,
+  readInstallationRecoverySecrets,
   readPendingInstallationSecrets,
   resolveInstallationManifest,
   writeInstallationManifest,
@@ -572,12 +574,28 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       await verifyRuntimeToken(runtimeCloudflareApiToken);
     }
     saveValues({ cloudflareApiToken: runtimeCloudflareApiToken });
-    const authenticationSecrets = await collectInstallationAuthentication(
-      authenticationSelection,
-      plan,
-      values,
-      saveValues,
-    );
+    const deferAuthentication =
+      !!authenticationSelection.authentication.accessProtection ||
+      authenticationSelection.authentication.providers.includes('cloudflare-access');
+    const saveAuthenticationValues = (updates: Record<string, string>) => {
+      Object.assign(values, updates);
+      const latest = readPendingInstallationSecrets(setupManifest) ?? {};
+      writePendingInstallationSecrets(setupManifest, { ...latest, ...updates });
+    };
+    const authenticationSecrets = deferAuthentication
+      ? {
+          authSetupToken: values.authSetupToken || randomBytes(32).toString('hex'),
+          authBootstrapCode: values.authBootstrapCode || randomBytes(32).toString('hex'),
+        }
+      : await collectInstallationAuthentication(
+          authenticationSelection,
+          plan,
+          values,
+          saveAuthenticationValues,
+        );
+    if (authenticationSecrets) {
+      saveAuthenticationValues(authenticationSecrets);
+    }
     let bootstrapGitHubLogin = '';
     let bootstrapGitHubId = '';
     let githubClientId = '';
@@ -655,6 +673,7 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       process.env.VOID_PLATFORM_PROJECT_SECRET_ACTIVE_KEY_VERSION,
     );
     const secrets = createPlatformInstallationSecrets({
+      configurableAuthentication: !!authenticationSelection.authentication.configurable,
       ...authenticationSecrets,
       bootstrapGitHubId,
       bootstrapGitHubLogin,
@@ -714,6 +733,27 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       runtime,
       healthCheckResumeCommand: `${cliCommandName()} platform install --resume --name ${existing.id}`,
       onProgress: (message) => progress?.message(message),
+      ...(deferAuthentication
+        ? {
+            prepareAuthentication: async (manifest: PlatformInstallationManifest) => {
+              progress?.stop('Preparing Cloudflare Access configuration.');
+              progress = undefined;
+              const result = await collectInstallationAuthentication(
+                authenticationSelection,
+                plan,
+                values,
+                saveAuthenticationValues,
+                { client, ownershipNonce: manifest.ownershipNonce, yes: args.yes },
+              );
+              progress = startProgress('Continuing platform installation');
+              return {
+                ...result,
+                accessProvisioningJson: values.accessProvisioningJson,
+                accessCredentialsJson: values.accessCredentialsJson,
+              };
+            },
+          }
+        : {}),
       replanWorkers: async (manifest) =>
         (
           await createPlatformInstallPlan(client, planInput, manifest, {
@@ -768,9 +808,10 @@ export async function runPlatformLifecycleCommand(args: PlatformArgs): Promise<v
       `${result.manifest.deployment.displayName} is installed at ${new URL('/admin', plan.apiUrl).href}.`,
     );
     log.info(`API URL: ${plan.apiUrl}`);
-    if (secrets.authenticationSetupJson && secrets.authBootstrapCode) {
+    const completedAuthCode = readInstallationRecoverySecrets(result.manifest)?.authBootstrapCode;
+    if (result.setupPending && completedAuthCode) {
       log.info(`First administrator setup: ${plan.apiUrl}/setup`);
-      console.log(`One-time administrator setup code: ${secrets.authBootstrapCode}`);
+      console.log(`One-time administrator setup code: ${completedAuthCode}`);
       log.info(
         'Confirm your identity in the browser, then test and enable any additional login methods in Settings.',
       );

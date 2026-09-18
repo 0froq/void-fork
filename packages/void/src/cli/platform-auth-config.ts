@@ -246,6 +246,14 @@ async function configurationInput(
 }
 
 export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<void> {
+  if (args.action === 'recover') {
+    const { runPlatformAuthRecovery } = await import('./platform-auth-recovery.ts');
+    return runPlatformAuthRecovery(args);
+  }
+  if (args.action === 'protection') {
+    const { runPlatformProtectionConfig } = await import('./platform-auth-protection.ts');
+    return runPlatformProtectionConfig(args);
+  }
   const origin = resolveOperatorOrigin(args.connection);
   const client = new OperatorClient(origin, readOperatorToken(origin));
   const listing = (await client.request('/config/auth')) as unknown as Listing;
@@ -261,7 +269,7 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
     }
     const chosen = value(
       await select({
-        message: 'Platform login methods:',
+        message: 'Platform authentication:',
         options: [
           ...listing.methods.map((method) => ({
             value: method.id,
@@ -269,9 +277,23 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
           })),
           { value: ':add', label: 'Add login method' },
           { value: ':admission', label: 'Who can join?' },
+          { value: ':protection', label: 'Platform protection (Cloudflare Access)' },
         ],
       }),
     );
+    if (chosen === ':protection') {
+      const target = value(
+        await select({
+          message: 'Platform protection:',
+          options: [
+            { value: 'show', label: 'Show current protection' },
+            { value: 'enable', label: 'Create or connect Access protection' },
+            { value: 'disable', label: 'Remove runtime protection and revoke sessions' },
+          ],
+        }),
+      );
+      return runPlatformAuthConfig({ ...args, action: 'protection', target });
+    }
     if (chosen === ':admission') {
       return runPlatformAuthConfig({ ...args, action: 'admission' });
     }

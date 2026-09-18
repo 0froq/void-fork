@@ -1,7 +1,41 @@
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { parsePlatformAuthenticationSetup, PLATFORM_AUTH_SETUP_PROOF_PREFIX } from '@void/platform';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
+import { ensurePlatformAccessToken } from './cf-access.ts';
 import { normalizePlatformApiUrl } from './platform-registry.ts';
+
+/** Checkpoint a replacement before submission so an interrupted response is safely replayable. */
+export async function resumeInstalledPlatformAuthentication(
+  input: {
+    apiUrl: string;
+    installationId: string;
+    setupToken: string;
+    setupJson: string;
+    checkpoint: (replacement: {
+      authenticationSetupJson: string;
+      authBootstrapCode: string;
+    }) => void;
+  },
+  initialize: typeof initializeInstalledPlatformAuthentication = initializeInstalledPlatformAuthentication,
+): Promise<{ setupPending: boolean; expiresAt: string | null }> {
+  const result = await initialize(
+    input.apiUrl,
+    input.installationId,
+    input.setupToken,
+    input.setupJson,
+  );
+  if (!result.setupPending || !result.expiresAt || Date.parse(result.expiresAt) > Date.now()) {
+    return result;
+  }
+  const authBootstrapCode = randomBytes(32).toString('hex');
+  const authenticationSetupJson = JSON.stringify({
+    ...parsePlatformAuthenticationSetup(JSON.parse(input.setupJson)),
+    resetPending: true,
+    bootstrapCredentialHash: createHash('sha256').update(authBootstrapCode).digest('hex'),
+  });
+  input.checkpoint({ authenticationSetupJson, authBootstrapCode });
+  return initialize(input.apiUrl, input.installationId, input.setupToken, authenticationSetupJson);
+}
 
 export async function initializeInstalledPlatformAuthentication(
   apiUrl: string,
@@ -11,7 +45,11 @@ export async function initializeInstalledPlatformAuthentication(
   fetcher: typeof fetch = fetch,
 ): Promise<{ setupPending: boolean; expiresAt: string | null }> {
   const origin = normalizePlatformApiUrl(apiUrl);
-  const body = JSON.stringify(parsePlatformAuthenticationSetup(JSON.parse(setupJson)));
+  const setup = parsePlatformAuthenticationSetup(JSON.parse(setupJson));
+  if (setup.protection) {
+    ensurePlatformAccessToken(origin, false, true);
+  }
+  const body = JSON.stringify(setup);
   const signature = createHmac('sha256', setupToken)
     .update(`${PLATFORM_AUTH_SETUP_PROOF_PREFIX}\n${installationId}\n${body}`)
     .digest('base64url');

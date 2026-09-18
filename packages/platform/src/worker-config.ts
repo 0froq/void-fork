@@ -60,7 +60,7 @@ export function createPlatformWorkerConfigs(input: {
     account_id: accountId,
     compatibility_date: '2026-02-24',
     observability: { enabled: true },
-    preview_urls: publicEndpoints,
+    preview_urls: publicEndpoints && !deployment.authentication.accessProtection,
     workers_dev: publicEndpoints,
   };
   const kv = [
@@ -78,6 +78,10 @@ export function createPlatformWorkerConfigs(input: {
 
   const api: Record<string, unknown> = {
     ...common,
+    workers_dev:
+      publicEndpoints &&
+      (!deployment.authentication.accessProtection ||
+        new URL(apiUrl).hostname.endsWith('.workers.dev')),
     name: names.apiWorker,
     main: runtimeEntrypoints.api,
     no_bundle: true,
@@ -148,6 +152,10 @@ export function createPlatformWorkerConfigs(input: {
 
   const proxy: Record<string, unknown> = {
     ...common,
+    workers_dev:
+      publicEndpoints &&
+      (!deployment.authentication.accessProtection ||
+        new URL(proxyUrl).hostname.endsWith('.workers.dev')),
     name: names.proxyWorker,
     main: runtimeEntrypoints.proxy,
     no_bundle: true,

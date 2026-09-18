@@ -11,6 +11,8 @@ export const PLATFORM_AUTH_ACTIONS = [
   'disable',
   'link',
   'admission',
+  'protection',
+  'recover',
 ] as const;
 export type PlatformAuthAction = (typeof PLATFORM_AUTH_ACTIONS)[number];
 export type PlatformConfigArgs = Readonly<{
@@ -18,6 +20,7 @@ export type PlatformConfigArgs = Readonly<{
   action: PlatformAuthAction | '';
   target: string;
   connection: string;
+  installation: string;
   id: string;
   file: string;
   clientSecretEnv: string;
@@ -34,7 +37,7 @@ export function parsePlatformConfigArgs(args: ReadonlyArray<string>): PlatformCo
   const positional: Array<string> = [];
   const flags = new Set<string>();
   const values = new Map<string, string>();
-  const valueFlags = ['connection', 'id', 'file', 'client-secret-env', 'test-id'];
+  const valueFlags = ['connection', 'installation', 'id', 'file', 'client-secret-env', 'test-id'];
   for (let index = 1; index < args.length; index++) {
     const arg = args[index]!;
     if (!arg.startsWith('-')) {
@@ -78,6 +81,12 @@ export function parsePlatformConfigArgs(args: ReadonlyArray<string>): PlatformCo
     if (!PLATFORM_LOGIN_KINDS.includes(target as (typeof PLATFORM_LOGIN_KINDS)[number])) {
       throw new Error(`platform: Login kind must be ${PLATFORM_LOGIN_KINDS.join(', ')}.`);
     }
+  } else if (action === 'protection') {
+    if (!['enable', 'disable', 'show'].includes(target)) {
+      throw new Error(
+        'platform: Usage: void platform config auth protection <enable|disable|show>.',
+      );
+    }
   } else if (target) {
     parsePlatformLoginId(target);
   }
@@ -93,12 +102,16 @@ export function parsePlatformConfigArgs(args: ReadonlyArray<string>): PlatformCo
   if (values.has('id') && action !== 'add') {
     throw new Error('platform: --id is only valid when adding a login method.');
   }
+  if (values.has('installation') && action !== 'recover' && action !== 'protection') {
+    throw new Error('platform: --installation is only valid for recovery or platform protection.');
+  }
   if (
-    (values.has('file') && !['add', 'configure', 'admission'].includes(action)) ||
-    (values.has('client-secret-env') && action !== 'add' && action !== 'configure')
+    (values.has('file') &&
+      !['add', 'configure', 'admission', 'recover', 'protection'].includes(action)) ||
+    (values.has('client-secret-env') && !['add', 'configure', 'recover'].includes(action))
   ) {
     throw new Error(
-      'platform: --file is valid for add, configure, or admission; --client-secret-env is valid for add or configure.',
+      'platform: --file is valid for add, configure, admission, recover, or protection; --client-secret-env is valid for add, configure, or recover.',
     );
   }
   if (values.has('test-id') && action !== 'enable' && action !== 'link') {
@@ -116,6 +129,7 @@ export function parsePlatformConfigArgs(args: ReadonlyArray<string>): PlatformCo
     action: action as PlatformAuthAction | '',
     target,
     connection: values.get('connection') ?? '',
+    installation: values.get('installation') ?? '',
     id: values.get('id') ?? '',
     file: values.get('file') ?? '',
     clientSecretEnv: secretEnv,
