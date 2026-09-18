@@ -6668,6 +6668,49 @@ describe('runCloudflareDeploy — migrations dir / count / auth', () => {
     expect(trace).toContain('wrangler:deploy');
   });
 
+  it('asks to repair invalid existing SQL instead of regenerating from its snapshot', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'authapp' }),
+      'void.json': JSON.stringify({ auth: {} }),
+      'routes/index.ts': `export const GET = () => new Response('ok');`,
+      'db/migrations/0000_auth.sql': 'CREATE TABLE session (id TEXT PRIMARY KEY);',
+      'db/migrations/0001_auth.sql': 'SELECT "impersonatedBy" FROM session;',
+      'wrangler.jsonc': JSON.stringify({
+        account_id: 'acc123',
+        name: 'authapp',
+        d1_databases: [
+          {
+            binding: 'DB',
+            database_name: 'authapp-db',
+            database_id: REAL_D1_ID,
+            migrations_dir: './db/migrations',
+          },
+        ],
+      }),
+    });
+    writeAuthSchemaArtifact(root, [{ name: 'session', fields: ['impersonatedBy'] }]);
+    const { deps, wranglerArgs, trace } = harness({
+      validateAuthMigrations: validateAuthMigrationSchema,
+    });
+    const output = vi.spyOn(log, 'error').mockImplementation(() => {});
+    try {
+      await expect(
+        runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps),
+      ).rejects.toBeInstanceOf(ExitError);
+      expect(output).toHaveBeenCalledWith(expect.stringContaining('0001_auth.sql'));
+      expect(output).toHaveBeenCalledWith(
+        expect.stringContaining('Repair the unapplied migration'),
+      );
+      expect(output).toHaveBeenCalledWith(
+        expect.stringContaining('cannot repair existing invalid SQL'),
+      );
+      expect(wranglerArgs.some((args) => args[0] === 'd1')).toBe(false);
+      expect(trace).not.toContain('wrangler:deploy');
+    } finally {
+      output.mockRestore();
+    }
+  });
+
   it('allows the DO bootstrap when first-secret provisioning proved the Worker was absent', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'authapp' }),

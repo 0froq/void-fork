@@ -400,8 +400,16 @@ async function runGenerate(root: string, dialect: DatabaseDialect): Promise<void
   );
 
   try {
-    runDrizzleKit(root, ['generate', '--config', configPath]);
-  } catch {
+    if (dialect === 'sqlite') {
+      const { generateValidatedSqliteMigrations } = await import('../drizzle/generate.ts');
+      await generateValidatedSqliteMigrations(readProjectPaths(root).migrationsDir, () => {
+        runDrizzleKit(root, ['generate', '--config', configPath]);
+      });
+    } else {
+      runDrizzleKit(root, ['generate', '--config', configPath]);
+    }
+  } catch (error) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
   outro('Done.');
