@@ -16,6 +16,7 @@ export {
   parsePlatformLoginId,
   parsePlatformSignupAllowlistEntry,
   isPlatformSignupAllowed,
+  platformProtectionProofMessage,
   validatePlatformAdmissionPolicy,
   type PlatformAccessProtection,
   type PlatformAdmissionPolicy,

@@ -1,6 +1,11 @@
-import { parsePlatformLoginConfiguration, parsePlatformAdmissionPolicy } from '@void/platform';
-import { and, eq, gt } from 'drizzle-orm';
+import {
+  parsePlatformLoginConfiguration,
+  parsePlatformAdmissionPolicy,
+  parsePlatformAccessProtection,
+} from '@void/platform';
+import { and, eq, gt, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
+import { platformAccessVerifier } from '../auth/access.ts';
 import { requireUncachedAuthenticationDatabase } from '../auth/bootstrap.ts';
 import {
   importLegacyAuthentication,
@@ -18,6 +23,10 @@ import {
   type AuthenticationActor,
   updateAuthenticationAdmission,
 } from '../auth/management.ts';
+import {
+  updatePlatformProtection,
+  verifyProtectionAuthority,
+} from '../auth/protection-management.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
 import type { ApiEnv } from '../env.ts';
 import { platformLoginConnections, platformLoginTests } from '../schema.ts';
@@ -196,6 +205,126 @@ export async function changeAuthenticationConnection(
 }
 
 export const authenticationConfigRoutes = new Hono<ApiEnv>();
+
+function protectionOrigins(context: Context<ApiEnv>): Array<string> {
+  if (!context.env.PROXY_URL) {
+    throw new OperatorError(
+      409,
+      'Configure the platform proxy origin before changing protection.',
+      'invalid_protection',
+    );
+  }
+  return [
+    ...new Set([
+      new URL(context.req.url).origin,
+      new URL(context.env.PROXY_URL).origin,
+      ...(context.env.DASHBOARD_URL ? [new URL(context.env.DASHBOARD_URL).origin] : []),
+    ]),
+  ];
+}
+
+authenticationConfigRoutes.get('/config/auth/protection', async (context) => {
+  const actor = authenticationActor(context);
+  const settings = await readAuthSettings(context.get('db'));
+  const installation = await context.get('db').execute<{ lifecycle_version: string }>(sql`
+    SELECT md5(COALESCE((to_jsonb(installation)->'lifecycle_manifest')::text, 'null')) AS lifecycle_version
+    FROM __void_platform_installation AS installation
+    WHERE singleton = true AND installation_id = ${context.env.PLATFORM_INSTALLATION_ID ?? ''}
+  `);
+  if (!installation.rows[0]) {
+    throw new OperatorError(
+      409,
+      'Protection configuration requires this installation’s ownership record.',
+      'invalid_installation',
+    );
+  }
+  return context.json({
+    installationId: context.env.PLATFORM_INSTALLATION_ID,
+    userId: actor.userId,
+    sessionId: actor.sessionId,
+    revision: settings?.revision,
+    lifecycleVersion: installation.rows[0].lifecycle_version,
+    protection: settings?.protection ?? null,
+    origins: protectionOrigins(context),
+  });
+});
+authenticationConfigRoutes.post('/config/auth/protection', async (context) => {
+  const body = await readBody(context);
+  const actor = authenticationActor(context);
+  const revision = revisionField(body.revision)!;
+  let protection;
+  try {
+    // Missing protection must never accidentally mean disable.
+    if (!Object.hasOwn(body, 'protection')) {
+      throw new Error('A protection configuration or explicit null is required.');
+    }
+    protection = parsePlatformAccessProtection(body.protection);
+  } catch (error) {
+    throw new OperatorError(
+      400,
+      error instanceof Error ? error.message : 'Invalid protection.',
+      'invalid_protection',
+    );
+  }
+  await verifyProtectionAuthority({
+    installationId: context.env.PLATFORM_INSTALLATION_ID,
+    secret: context.env.JWT_SECRET,
+    origin: new URL(context.req.url).origin,
+    actor,
+    revision,
+    protection,
+    expiresAt: body.expiresAt,
+    signature: body.signature,
+    lifecycleVersion: stringField(body, 'lifecycleVersion'),
+  });
+  let identity;
+  if (protection) {
+    try {
+      identity = await platformAccessVerifier.verify(
+        context.req.url,
+        context.req.header('Cf-Access-Jwt-Assertion'),
+        protection,
+      );
+    } catch {
+      throw new OperatorError(
+        403,
+        'Authenticate through the proposed Access application before enabling it.',
+        'access_verification_required',
+      );
+    }
+    if (identity.kind !== 'human') {
+      throw new OperatorError(
+        403,
+        'A company user identity is required, not an Access service token.',
+        'access_human_identity_required',
+      );
+    }
+  }
+  await updatePlatformProtection(
+    context.get('db'),
+    actor,
+    {
+      revision,
+      protection,
+      installationId: context.env.PLATFORM_INSTALLATION_ID,
+      proofExpiresAt: body.expiresAt as string,
+      lifecycleVersion: stringField(body, 'lifecycleVersion'),
+      origins: protectionOrigins(context),
+      verifiedIdentity: identity?.kind === 'human' ? identity : undefined,
+    },
+    dryRun(body),
+  );
+  return context.json(
+    dryRun(body)
+      ? preview('Change platform protection', 'platform', {
+          protection,
+          revokesHumanSessions: true,
+          preservesScopedDeploymentTokens: true,
+          retainsAccessApplications: true,
+        })
+      : { ok: true, signInAgain: true, revision: revision + 1 },
+  );
+});
 export async function configureAuthenticationAdmission(
   context: Context<ApiEnv>,
   body: Record<string, unknown>,

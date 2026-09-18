@@ -27,6 +27,29 @@ export type PlatformAccessProtection = Readonly<{
   applications: ReadonlyArray<Readonly<{ origin: string; audience: string }>>;
 }>;
 
+/** Operator-side coverage verification, bound to one administrator and settings revision. */
+export function platformProtectionProofMessage(input: {
+  installationId: string;
+  origin: string;
+  userId: string;
+  sessionId: string;
+  revision: number;
+  lifecycleVersion: string;
+  protection: PlatformAccessProtection | null;
+  expiresAt: string;
+}): string {
+  return `void-platform-protection-v1\n${JSON.stringify({
+    installationId: input.installationId,
+    origin: input.origin,
+    userId: input.userId,
+    sessionId: input.sessionId,
+    revision: input.revision,
+    lifecycleVersion: input.lifecycleVersion,
+    protection: parsePlatformAccessProtection(input.protection),
+    expiresAt: input.expiresAt,
+  })}`;
+}
+
 export type PlatformAdmissionPolicy =
   | Readonly<{ mode: 'restricted' | 'public' }>
   | Readonly<{

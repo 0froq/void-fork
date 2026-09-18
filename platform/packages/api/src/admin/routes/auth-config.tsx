@@ -161,6 +161,21 @@ app.get('/', async (context) => {
         .
       </p>
       <p>Access protection and login methods are configured independently.</p>
+      <details>
+        <summary>Change platform protection</summary>
+        <p>
+          Use the installing CLI to create or connect a Cloudflare Access application, verify every
+          platform origin, and sign in through the company policy. The CLI needs the installation's
+          recovery credentials and separate Cloudflare Access setup permission.
+        </p>
+        <pre>void platform config auth protection enable --installation &lt;id&gt;</pre>
+        <p>To remove protection, first change any signup policy that relies on Access, then run:</p>
+        <pre>void platform config auth protection disable --installation &lt;id&gt;</pre>
+        <p>
+          Changes revoke existing human sessions. Access applications remain available for
+          deliberate cleanup. Login methods and deployed applications keep their own settings.
+        </p>
+      </details>
       {!data.initialized ? (
         <form method="post" action={`${HOME}/initialize`}>
           <p>
