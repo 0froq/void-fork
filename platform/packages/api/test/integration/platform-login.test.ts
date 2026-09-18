@@ -15,15 +15,23 @@ import {
   stageLoginConfiguration,
 } from '../../src/auth/configuration.ts';
 import { createCodeChallenge } from '../../src/auth/pkce.ts';
+import { createHumanSession } from '../../src/auth/sessions.ts';
 import { app } from '../../src/index.ts';
-import { platformAuthAttempts, platformLoginConnections } from '../../src/schema.ts';
-import { clearTables, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
+import {
+  platformAuthAttempts,
+  platformLoginConnections,
+  platformLoginIdentities,
+  operatorEvents,
+  users,
+} from '../../src/schema.ts';
+import { clearTables, createTestUser, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let privateKey: CryptoKey;
 let jwk: Record<string, unknown>;
 let authorization: URL;
 let callbackCount: number;
+let operatorToken: string;
 const origin = 'https://api.example.com';
 const issuer = 'https://identity.login-example.com';
 const verifier = 'a'.repeat(64);
@@ -37,7 +45,31 @@ afterAll(teardownEnv);
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(async () => {
   await clearTables(env.db);
+  const admin = await createTestUser(
+    env.db,
+    'operator',
+    'github',
+    'operator-subject',
+    'custom',
+    'admin',
+  );
   await importLegacyAuthentication(env.db, env);
+  const human = await createHumanSession(env.db, env.JWT_SECRET, {
+    userId: admin.id,
+    connectionId: 'github',
+    revision: 1,
+    generation: 1,
+    audience: 'api',
+  });
+  const elevation = await app.fetch(
+    new Request(`${origin}/operator/v1/session`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${human.token}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    }),
+    env,
+  );
+  operatorToken = (await elevation.json<{ token: string }>()).token;
   await stageLoginConfiguration(
     env.db,
     env,
@@ -116,6 +148,17 @@ function callback(flow: { state: string; cookie: string }) {
   return app.fetch(
     new Request(`${origin}/auth/callback?code=provider-code&state=${flow.state}`, {
       headers: { Cookie: flow.cookie },
+    }),
+    env,
+  );
+}
+
+function operator(path: string, body?: unknown) {
+  return app.fetch(
+    new Request(`${origin}/operator/v1/config/auth${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { Authorization: `Bearer ${operatorToken}`, 'Content-Type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }),
     env,
   );
@@ -203,5 +246,98 @@ describe('configured platform login routes', () => {
       .set({ enabled: false })
       .where(eq(platformLoginConnections.id, 'github'));
     expect((await app.fetch(new Request(`${origin}/admin/login/github`), env)).status).toBe(404);
+  });
+
+  it('tests a pending configuration without signing in or merging accounts, then explicitly links and enables it', async () => {
+    const configuration = {
+      id: 'company',
+      kind: 'oidc',
+      label: 'Updated company SSO',
+      clientId: 'client',
+      issuer,
+    };
+    const preview = await operator('/connections/company/configure', {
+      configuration,
+      revision: 1,
+      dryRun: true,
+    });
+    expect(preview.status).toBe(200);
+    expect(
+      (
+        await env.db
+          .select()
+          .from(platformLoginConnections)
+          .where(eq(platformLoginConnections.id, 'company'))
+      )[0]?.revision,
+    ).toBe(1);
+    const updated = await operator('/connections/company/configure', {
+      configuration,
+      revision: 1,
+    });
+    expect(updated.status).toBe(200);
+    const launchResponse = await operator('/connections/company/test', {});
+    expect(launchResponse.status).toBe(200);
+    const launch = await launchResponse.json<{ id: string; url: string }>();
+    const browser = await app.fetch(new Request(launch.url), env);
+    expect(browser.status).toBe(302);
+    authorization = new URL(browser.headers.get('Location')!);
+    const flow = {
+      state: authorization.searchParams.get('state')!,
+      cookie: browser.headers.get('Set-Cookie')!.split(';')[0]!,
+    };
+    const completed = await callback(flow);
+    expect(completed.status).toBe(200);
+    expect(completed.headers.get('Set-Cookie')).not.toContain('admin_token');
+    expect(await env.db.select().from(users)).toHaveLength(1);
+    expect(
+      await env.db
+        .select()
+        .from(platformLoginIdentities)
+        .where(eq(platformLoginIdentities.connection_id, 'company')),
+    ).toHaveLength(0);
+    const proof = await (await operator(`/tests/${launch.id}`)).json();
+    expect(proof).toMatchObject({ complete: true, revision: 2, subject: 'employee', issuer });
+    expect(
+      (
+        await operator('/connections/company/link', {
+          revision: 2,
+          testId: launch.id,
+          dryRun: true,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      await env.db
+        .select()
+        .from(platformLoginIdentities)
+        .where(eq(platformLoginIdentities.connection_id, 'company')),
+    ).toHaveLength(0);
+    expect(
+      (await operator('/connections/company/link', { revision: 2, testId: launch.id })).status,
+    ).toBe(200);
+    expect(
+      (await operator('/connections/company/enable', { revision: 2, testId: launch.id })).status,
+    ).toBe(200);
+    const listing = await (await operator('')).text();
+    expect(listing).toContain('Updated company SSO');
+    expect(listing).not.toContain('client-secret');
+    expect(listing).not.toContain('ciphertext');
+    const audits = JSON.stringify(await env.db.select().from(operatorEvents));
+    expect(audits).toContain('company');
+    expect(audits).not.toContain('client-secret');
+    expect(audits).not.toContain(launch.url);
+  });
+
+  it('invalidates a launch when the initiating session is revoked and never launches it twice', async () => {
+    const launch = await (await operator('/connections/company/test', {})).json<{ url: string }>();
+    const first = await app.fetch(new Request(launch.url), env);
+    expect(first.status).toBe(302);
+    expect((await app.fetch(new Request(launch.url), env)).status).toBe(400);
+    const next = await (await operator('/connections/company/test', {})).json<{ url: string }>();
+    await env.db
+      .update(platformLoginConnections)
+      .set({ enabled: false })
+      .where(eq(platformLoginConnections.id, 'github'));
+    expect((await app.fetch(new Request(next.url), env)).status).toBe(400);
   });
 });

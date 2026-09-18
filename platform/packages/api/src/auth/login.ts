@@ -3,11 +3,12 @@ import { and, eq, gt } from 'drizzle-orm';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { storeAuthCode } from '../db.ts';
+import { storeAuthCode, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
-import { platformAuthAttempts } from '../schema.ts';
+import { platformAuthAttempts, platformLoginTests } from '../schema.ts';
 import {
   AuthenticationConfigurationError,
+  lockAuthSettings,
   readAuthSettings,
   readLoginConnection,
   readLoginRevision,
@@ -15,10 +16,11 @@ import {
 } from './configuration.ts';
 import { exchangeCodeForToken, getGitHubAuthorizeUrl, getGitHubUser } from './github.ts';
 import { resolvePlatformLogin } from './identities.ts';
+import type { AuthenticationActor } from './management.ts';
 import { PlatformOidcProvider, type PlatformOidcIdentity } from './oidc.ts';
 import { createCodeChallenge } from './pkce.ts';
 import { isAllowedRedirect, isLocalhostRedirect } from './redirects.ts';
-import { createHumanSession, type CompanyIdentity } from './sessions.ts';
+import { createHumanSession, validateHumanSession, type CompanyIdentity } from './sessions.ts';
 
 const COOKIE = 'void_platform_auth';
 const FLOW_SECONDS = 600;
@@ -32,6 +34,8 @@ type LoginContext = {
   cliState?: string;
   codeChallenge?: string;
   companyIdentity?: CompanyIdentity;
+  actor?: AuthenticationActor;
+  testId?: string;
 };
 
 function oidcProvider(configuration: PlatformLoginConfiguration): PlatformOidcProvider {
@@ -68,6 +72,153 @@ function authenticationError(context: Context<ApiEnv>, error: unknown): Response
     },
     400,
   );
+}
+
+async function authorizationFor(
+  configuration: PlatformLoginConfiguration,
+  redirectUri: string,
+  state: string,
+): Promise<{ url: string; verifier: string; nonce?: string }> {
+  if (configuration.kind !== 'github') {
+    return oidcProvider(configuration).authorize(redirectUri, state);
+  }
+  const verifier = crypto.randomUUID() + crypto.randomUUID();
+  const url = new URL(getGitHubAuthorizeUrl(configuration.clientId, redirectUri, state));
+  url.searchParams.set('code_challenge', await createCodeChallenge(verifier));
+  url.searchParams.set('code_challenge_method', 'S256');
+  return { url: url.href, verifier };
+}
+
+function bindBrowser(context: Context<ApiEnv>, proof: string): void {
+  setCookie(context, COOKIE, proof, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    path: '/auth/callback',
+    maxAge: FLOW_SECONDS,
+  });
+  context.header('Cache-Control', 'no-store');
+  context.header('Referrer-Policy', 'no-referrer');
+}
+
+/** A launch grants only a test, whose identity must be separately confirmed before linking/enabling. */
+export async function createLoginTestLaunch(
+  context: Context<ApiEnv>,
+  actor: AuthenticationActor,
+  connectionId: string,
+): Promise<{ id: string; url: string; expiresAt: string }> {
+  const db = context.get('db');
+  const connection = await readLoginConnection(db, connectionId);
+  if (
+    !connection ||
+    !(await validateHumanSession(
+      db,
+      { sub: actor.userId, aud: actor.audience, sid: actor.sessionId },
+      actor.companyIdentity,
+    ))
+  ) {
+    throw new AuthenticationConfigurationError(
+      'Sign in again before testing a login method.',
+      'reauthentication_required',
+      401,
+    );
+  }
+  const id = `test.${crypto.randomUUID()}`;
+  const proof = crypto.randomUUID() + crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + FLOW_SECONDS * 1000).toISOString();
+  await db.insert(platformAuthAttempts).values({
+    id,
+    connection_id: connectionId,
+    revision: connection.revision,
+    generation: connection.generation,
+    purpose: 'test',
+    browser_hash: await hashLoginProof(proof),
+    context: { phase: 'launch', actor, companyIdentity: actor.companyIdentity },
+    expires_at: expiresAt,
+  });
+  const url = new URL('/auth/test', context.req.url);
+  url.searchParams.set('id', id);
+  url.searchParams.set('proof', proof);
+  return { id, url: url.href, expiresAt };
+}
+
+export async function startLoginTest(context: Context<ApiEnv>): Promise<Response> {
+  try {
+    const db = context.get('db');
+    const id = context.req.query('id');
+    const proof = context.req.query('proof');
+    if (!id || !proof) {
+      throw new Error('Missing test launch');
+    }
+    const [launch] = await db
+      .delete(platformAuthAttempts)
+      .where(
+        and(
+          eq(platformAuthAttempts.id, id),
+          eq(platformAuthAttempts.purpose, 'test'),
+          eq(platformAuthAttempts.browser_hash, await hashLoginProof(proof)),
+          gt(platformAuthAttempts.expires_at, new Date().toISOString()),
+        ),
+      )
+      .returning();
+    const saved = launch?.context as { phase?: string; actor?: AuthenticationActor } | undefined;
+    const actor = saved?.actor;
+    if (
+      !launch ||
+      saved?.phase !== 'launch' ||
+      !actor ||
+      !(await validateHumanSession(
+        db,
+        {
+          sub: actor.userId,
+          sid: actor.sessionId,
+          aud: actor.audience,
+        },
+        context.get('companyIdentity'),
+      ))
+    ) {
+      throw new Error('Invalid test launch');
+    }
+    const connection = await readLoginConnection(db, launch.connection_id);
+    if (
+      !connection ||
+      connection.revision !== launch.revision ||
+      connection.generation !== launch.generation
+    ) {
+      throw new Error('Configuration changed');
+    }
+    const revision = await readLoginRevision(db, connection.id, launch.revision);
+    if (!revision) {
+      throw new Error('Configuration missing');
+    }
+    const redirectUri =
+      context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).href;
+    const state = `platform.${crypto.randomUUID()}`;
+    const browserProof = crypto.randomUUID() + crypto.randomUUID();
+    const authorization = await authorizationFor(revision.configuration, redirectUri, state);
+    await db.insert(platformAuthAttempts).values({
+      id: state,
+      connection_id: connection.id,
+      revision: launch.revision,
+      generation: launch.generation,
+      purpose: 'test',
+      browser_hash: await hashLoginProof(browserProof),
+      context: {
+        redirect: '',
+        redirectUri,
+        verifier: authorization.verifier,
+        nonce: authorization.nonce,
+        actor,
+        testId: launch.id,
+        companyIdentity: context.get('companyIdentity'),
+      },
+      expires_at: launch.expires_at,
+    });
+    bindBrowser(context, browserProof);
+    return context.redirect(authorization.url);
+  } catch (error) {
+    return authenticationError(context, error);
+  }
 }
 
 /** Null means this installation still uses its existing deployment-time login configuration. */
@@ -138,24 +289,9 @@ export async function startPlatformLogin(
       saved.cliState = cliState;
       saved.codeChallenge = challenge;
     }
-    let authorizationUrl: string;
-    if (connection.kind === 'github') {
-      saved.verifier = crypto.randomUUID() + crypto.randomUUID();
-      const url = new URL(
-        getGitHubAuthorizeUrl(revision.configuration.clientId, redirectUri, state),
-      );
-      url.searchParams.set('code_challenge', await createCodeChallenge(saved.verifier));
-      url.searchParams.set('code_challenge_method', 'S256');
-      authorizationUrl = url.href;
-    } else {
-      const authorization = await oidcProvider(revision.configuration).authorize(
-        redirectUri,
-        state,
-      );
-      authorizationUrl = authorization.url;
-      saved.verifier = authorization.verifier;
-      saved.nonce = authorization.nonce;
-    }
+    const authorization = await authorizationFor(revision.configuration, redirectUri, state);
+    saved.verifier = authorization.verifier;
+    saved.nonce = authorization.nonce;
     await db.insert(platformAuthAttempts).values({
       id: state,
       connection_id: id,
@@ -166,15 +302,8 @@ export async function startPlatformLogin(
       context: saved,
       expires_at: new Date(Date.now() + FLOW_SECONDS * 1000).toISOString(),
     });
-    setCookie(context, COOKIE, browserProof, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'Lax',
-      path: '/auth/callback',
-      maxAge: FLOW_SECONDS,
-    });
-    context.header('Cache-Control', 'no-store');
-    return context.redirect(authorizationUrl);
+    bindBrowser(context, browserProof);
+    return context.redirect(authorization.url);
   } catch (error) {
     return authenticationError(context, error);
   }
@@ -202,7 +331,10 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
         ),
       )
       .returning();
-    if (!attempt || (attempt.purpose !== 'login' && attempt.purpose !== 'admin')) {
+    if (
+      !attempt ||
+      (attempt.purpose !== 'login' && attempt.purpose !== 'admin' && attempt.purpose !== 'test')
+    ) {
       throw new AuthenticationConfigurationError(
         'The login attempt expired or was already used.',
         'invalid_state',
@@ -224,8 +356,10 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
     }
     const connection = await readLoginConnection(db, attempt.connection_id);
     if (
-      !connection?.enabled ||
-      connection.active_revision !== attempt.revision ||
+      !connection ||
+      (attempt.purpose !== 'test' && !connection.enabled) ||
+      (attempt.purpose === 'test' ? connection.revision : connection.active_revision) !==
+        attempt.revision ||
       connection.generation !== attempt.generation
     ) {
       throw new AuthenticationConfigurationError(
@@ -273,6 +407,46 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
         nonce: saved.nonce,
         clientSecret: secret,
       });
+    }
+    if (attempt.purpose === 'test') {
+      await db.transaction(async (transaction) => {
+        const tx = transaction as unknown as Db;
+        await lockAuthSettings(tx);
+        const latest = await readLoginConnection(tx, connection.id);
+        const actor = saved.actor;
+        if (
+          !actor ||
+          !saved.testId ||
+          !latest ||
+          latest.revision !== attempt.revision ||
+          latest.generation !== attempt.generation ||
+          !(await validateHumanSession(
+            tx,
+            { sub: actor.userId, sid: actor.sessionId, aud: actor.audience },
+            currentCompany,
+          ))
+        ) {
+          throw new AuthenticationConfigurationError(
+            'The test or administrator session changed. Start a new test.',
+            'login_changed',
+            401,
+          );
+        }
+        await tx.insert(platformLoginTests).values({
+          id: saved.testId,
+          user_id: actor.userId,
+          connection_id: connection.id,
+          revision: attempt.revision,
+          issuer: identity.issuer,
+          subject: identity.subject,
+          expires_at: new Date(Date.now() + FLOW_SECONDS * 1000).toISOString(),
+        });
+      });
+      context.header('Cache-Control', 'no-store');
+      context.header('Referrer-Policy', 'no-referrer');
+      return context.html(
+        '<!doctype html><title>Void login test</title><p>Login verified. Return to Void to review the identity and finish configuration.</p>',
+      );
     }
     const { user } = await resolvePlatformLogin(
       db,

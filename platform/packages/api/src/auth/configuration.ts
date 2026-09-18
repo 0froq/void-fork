@@ -218,6 +218,7 @@ export async function stageLoginConfiguration(
   input: unknown,
   clientSecret: string,
   expectedRevision: number | null,
+  dryRun = false,
 ): Promise<LoginConnection> {
   const configuration = parsePlatformLoginConfiguration(input);
   if (typeof clientSecret !== 'string' || !clientSecret.trim() || clientSecret.length > 8192) {
@@ -256,6 +257,19 @@ export async function stageLoginConfiguration(
       }
     }
     const revision = (existing?.revision ?? 0) + 1;
+    if (dryRun) {
+      return existing
+        ? { ...existing, revision }
+        : {
+            id: configuration.id,
+            kind: configuration.kind,
+            revision,
+            generation: 1,
+            active_revision: null,
+            enabled: false,
+            created_at: new Date().toISOString(),
+          };
+    }
     const secret = await encryptPlatformCredential(
       env,
       env.PLATFORM_INSTALLATION_ID ?? 'hosted',

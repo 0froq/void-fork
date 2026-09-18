@@ -107,6 +107,9 @@ export const authMiddleware: MiddlewareHandler<ApiEnv> = async (context, next) =
   }
 
   context.set('user', user);
+  if (payload.aud === 'api' && payload.sid) {
+    context.set('humanSession', { id: payload.sid, audience: 'api' });
+  }
 
   if (payload.aud === 'deploy') {
     if (!payload.project) {

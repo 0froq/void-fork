@@ -54,6 +54,9 @@ export const adminAuthMiddleware: MiddlewareHandler<ApiEnv> = async (context, ne
   }
 
   context.set('user', user);
+  if (payload.sid) {
+    context.set('humanSession', { id: payload.sid, audience: 'admin' });
+  }
   await next();
 };
 

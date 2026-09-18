@@ -180,6 +180,7 @@ export type ApiEnv = Env & {
     operatorSession: { id: string; expiresAt: string };
     /** Set only after validating an Access assertion against this installation's gate. */
     companyIdentity?: { issuer: string; subject: string };
+    humanSession?: { id: string; audience: 'api' | 'admin' };
     /**
      * Project id a scoped deploy token is pinned to. Set by `authMiddleware`
      * for `aud:'deploy'` tokens; absent for full `aud:'api'` tokens. The deploy

@@ -57,6 +57,9 @@ export const operatorAuth: MiddlewareHandler<ApiEnv> = async (context, next) => 
   }
   context.set('user', user);
   context.set('operatorSession', { id: session.id, expiresAt: session.expires_at });
+  if (session.human_session_id) {
+    context.set('humanSession', { id: session.human_session_id, audience: 'api' });
+  }
   await next();
 };
 

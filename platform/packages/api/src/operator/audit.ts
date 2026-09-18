@@ -59,6 +59,13 @@ function auditTarget(
 ): string | undefined {
   const segments = path.split('/');
   const id = pathIdentifier(segments[1]);
+  if (segments[0] === 'config' && segments[1] === 'auth') {
+    return JSON.stringify({
+      connectionId: pathIdentifier(segments[3]),
+      action: pathIdentifier(segments[4] ?? segments[2]),
+      revision: typeof body.revision === 'number' ? body.revision : undefined,
+    });
+  }
   if (segments[0] === 'users' && id) {
     if (segments[2] === 'plan') {
       return JSON.stringify({ userId: id, plan: boundedString(body.plan, 512) });

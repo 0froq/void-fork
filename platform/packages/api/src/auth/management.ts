@@ -135,6 +135,7 @@ export async function linkTestedIdentity(
     revision: number;
     testId: string;
   },
+  dryRun = false,
 ): Promise<void> {
   await db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
@@ -198,9 +199,12 @@ export async function linkTestedIdentity(
             'identity_conflict',
           );
         }
-        if (!existing) {
+        if (!existing && !dryRun) {
           await createOAuthAccount(tx, actor.userId, connection.kind, test.subject);
         }
+      }
+      if (dryRun) {
+        return;
       }
       await tx.insert(platformLoginIdentities).values({
         id: crypto.randomUUID(),
@@ -221,6 +225,7 @@ export async function enableLoginConnection(
     revision: number;
     testId: string;
   },
+  dryRun = false,
 ): Promise<void> {
   await db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
@@ -267,6 +272,9 @@ export async function enableLoginConnection(
       [...alternative.map((row) => row.configuration), revision.configuration],
       parsePlatformAccessProtection(settings.protection),
     );
+    if (dryRun) {
+      return;
+    }
     await revokeConnectionSessions(tx, connection.id);
     await tx
       .update(platformLoginConnections)
@@ -286,6 +294,7 @@ export async function disableLoginConnection(
     connectionId: string;
     revision: number;
   },
+  dryRun = false,
 ): Promise<void> {
   await db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
@@ -321,6 +330,9 @@ export async function disableLoginConnection(
       remaining.map((row) => row.configuration),
       parsePlatformAccessProtection(settings.protection),
     );
+    if (dryRun) {
+      return;
+    }
     await tx
       .update(platformLoginConnections)
       .set({ enabled: false })

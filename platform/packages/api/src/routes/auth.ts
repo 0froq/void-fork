@@ -11,7 +11,7 @@ import {
 import { hmacSignState, hmacVerifyState } from '../auth/hmac.ts';
 import { signJwt } from '../auth/jwt.ts';
 import { verifyJwt } from '../auth/jwt.ts';
-import { startPlatformLogin, completePlatformLogin } from '../auth/login.ts';
+import { startPlatformLogin, completePlatformLogin, startLoginTest } from '../auth/login.ts';
 import {
   CLI_CODE_CHALLENGE_METHOD,
   createCodeChallenge,
@@ -51,6 +51,7 @@ const DASHBOARD_AUTH_CODE_TTL_SECONDS = 5 * 60;
 const CLI_AUTH_CODE_TTL_SECONDS = 5 * 60;
 
 const app = new Hono<ApiEnv>();
+app.get('/test', startLoginTest);
 
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
 app.get('/login', async (context) => {
