@@ -260,7 +260,7 @@ const HELP_TREE: HelpTree = {
             summary:
               'Manage platform login methods. Without a command, opens interactive configuration.',
             usage: [
-              'void platform config auth [list|show|initialize|add|configure|test|enable|disable|link] [method] [options]',
+              'void platform config auth [list|show|initialize|add|configure|test|enable|disable|link|admission] [method] [options]',
             ],
             commands: [
               {
@@ -289,6 +289,10 @@ const HELP_TREE: HelpTree = {
               {
                 command: 'link <id>',
                 description: 'Explicitly link a tested identity to your account',
+              },
+              {
+                command: 'admission',
+                description: 'Choose invited, company-approved, or public signup',
               },
             ],
             options: [

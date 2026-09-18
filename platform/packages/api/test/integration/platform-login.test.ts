@@ -32,6 +32,7 @@ let jwk: Record<string, unknown>;
 let authorization: URL;
 let callbackCount: number;
 let operatorToken: string;
+let browserAdminCookie: string;
 const origin = 'https://api.example.com';
 const issuer = 'https://identity.login-example.com';
 const verifier = 'a'.repeat(64);
@@ -70,6 +71,14 @@ beforeEach(async () => {
     env,
   );
   operatorToken = (await elevation.json<{ token: string }>()).token;
+  const browserAdmin = await createHumanSession(env.db, env.JWT_SECRET, {
+    userId: admin.id,
+    connectionId: 'github',
+    revision: 1,
+    generation: 1,
+    audience: 'admin',
+  });
+  browserAdminCookie = `admin_token=${browserAdmin.token}`;
   await stageLoginConfiguration(
     env.db,
     env,
@@ -165,6 +174,40 @@ function operator(path: string, body?: unknown) {
 }
 
 describe('configured platform login routes', () => {
+  it('returns a browser administrator to review their verified identity without silently linking it', async () => {
+    const launch = await app.fetch(
+      new Request(`${origin}/admin/config/auth/connections/company/test`, {
+        method: 'POST',
+        headers: { Cookie: browserAdminCookie, Origin: origin },
+      }),
+      env,
+    );
+    expect(launch.status).toBe(302);
+    const start = await app.fetch(
+      new Request(launch.headers.get('Location')!, { headers: { Cookie: browserAdminCookie } }),
+      env,
+    );
+    authorization = new URL(start.headers.get('Location')!);
+    const response = await callback({
+      state: authorization.searchParams.get('state')!,
+      cookie: `${browserAdminCookie}; ${start.headers.get('Set-Cookie')!.split(';')[0]}`,
+    });
+    expect(response.status).toBe(302);
+    expect(response.headers.get('Location')).toContain('/admin/config/auth?test=');
+    const page = await app.fetch(
+      new Request(new URL(response.headers.get('Location')!, origin), {
+        headers: { Cookie: browserAdminCookie },
+      }),
+      env,
+    );
+    expect(await page.text()).toContain('employee@example.com');
+    expect(
+      await env.db
+        .select()
+        .from(platformLoginIdentities)
+        .where(eq(platformLoginIdentities.connection_id, 'company')),
+    ).toHaveLength(0);
+  });
   it('publishes only enabled named methods without exposing provider configuration or credentials', async () => {
     await env.db
       .update(platformLoginConnections)

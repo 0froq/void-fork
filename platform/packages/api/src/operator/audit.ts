@@ -1,5 +1,6 @@
 import { count, desc, eq } from 'drizzle-orm';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
+import { AuthenticationConfigurationError } from '../auth/configuration.ts';
 import type { ApiEnv } from '../env.ts';
 import { operatorEvents } from '../schema.ts';
 import { dryRun, OperatorError, pagination, readBody } from './common.ts';
@@ -255,7 +256,14 @@ export async function executeAuditedMutation(
       )) ?? result.response
     );
   } catch (error) {
-    await completeAudit(context, id, false, error instanceof OperatorError ? error.status : 500);
+    await completeAudit(
+      context,
+      id,
+      false,
+      error instanceof OperatorError || error instanceof AuthenticationConfigurationError
+        ? error.status
+        : 500,
+    );
     throw error;
   }
 }

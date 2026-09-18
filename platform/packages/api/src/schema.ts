@@ -224,6 +224,7 @@ export const platformLoginTests = pgTable(
     revision: integer('revision').notNull(),
     issuer: text('issuer').notNull(),
     subject: text('subject').notNull(),
+    login: text('login').notNull().default(''),
     expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
   },
   (table) => [index('platform_login_tests_expiry').on(table.expires_at)],

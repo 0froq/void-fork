@@ -2,11 +2,13 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { stripVTControlCharacters } from 'node:util';
-import { confirm, isCancel, password, select, text } from '@clack/prompts';
+import { confirm, isCancel, multiselect, password, select, text } from '@clack/prompts';
 import {
   parsePlatformLoginConfiguration,
   type PlatformLoginConfiguration,
   type PlatformLoginKind,
+  parsePlatformAdmissionPolicy,
+  type PlatformAdmissionPolicy,
 } from '@void/platform';
 import { openBrowser } from './auth.ts';
 import { readOperatorToken, resolveOperatorOrigin } from './operator-auth.ts';
@@ -20,7 +22,14 @@ type Method = {
   revision: number;
   configuration: PlatformLoginConfiguration;
 };
-type Listing = { initialized: boolean; methods: Array<Method>; callbackUrl?: string };
+type Listing = {
+  initialized: boolean;
+  methods: Array<Method>;
+  callbackUrl?: string;
+  revision?: number;
+  admission?: PlatformAdmissionPolicy;
+  protection?: unknown;
+};
 
 function value<T>(input: T | symbol): T {
   if (isCancel(input) || typeof input === 'symbol') {
@@ -259,9 +268,13 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
             label: `${stripVTControlCharacters(method.label)} (${method.enabled ? 'enabled' : 'disabled'})`,
           })),
           { value: ':add', label: 'Add login method' },
+          { value: ':admission', label: 'Who can join?' },
         ],
       }),
     );
+    if (chosen === ':admission') {
+      return runPlatformAuthConfig({ ...args, action: 'admission' });
+    }
     if (chosen === ':add') {
       const kind = value(
         await select({
@@ -303,6 +316,73 @@ export async function runPlatformAuthConfig(args: PlatformConfigArgs): Promise<v
   }
   if (!listing.initialized) {
     throw new Error('platform: Run void platform config auth initialize, then sign in again.');
+  }
+  if (args.action === 'admission') {
+    let admission: unknown;
+    if (args.file) {
+      admission = JSON.parse(await readFile(args.file, 'utf8'));
+    } else {
+      if (!process.stdin.isTTY || args.json) {
+        throw new Error('platform: Supply --file with the signup policy in non-interactive mode.');
+      }
+      const mode = value(
+        await select({
+          message: 'Who can create an account?',
+          initialValue: listing.admission?.mode ?? 'restricted',
+          options: [
+            { value: 'restricted', label: 'Invited or allowlisted users' },
+            { value: 'company', label: 'Company-approved users — automatic accounts' },
+            { value: 'public', label: 'Public signup — all enabled logins' },
+          ],
+        }),
+      );
+      if (mode === 'company') {
+        const access =
+          !!listing.protection &&
+          value(
+            await confirm({
+              message: 'Allow everyone approved by Cloudflare Access protection?',
+              initialValue: true,
+            }),
+          );
+        const eligible = listing.methods.filter(
+          (method) =>
+            method.enabled &&
+            method.configuration.kind !== 'github' &&
+            (method.configuration.kind !== 'google' ||
+              method.configuration.allowedDomains.length > 0),
+        );
+        if (!access && eligible.length === 0) {
+          throw new Error(
+            'platform: Configure a company-restricted login or Access protection first.',
+          );
+        }
+        const connections = eligible.length
+          ? value(
+              await multiselect({
+                message: 'Login methods whose company policies qualify new users:',
+                required: !access,
+                options: eligible.map((method) => ({
+                  value: method.id,
+                  label: stripVTControlCharacters(method.label),
+                })),
+              }),
+            )
+          : [];
+        admission = { mode, access, connections };
+      } else {
+        admission = { mode };
+      }
+    }
+    print(
+      await apply(
+        client,
+        '/config/auth/admission',
+        { revision: listing.revision, admission: parsePlatformAdmissionPolicy(admission) },
+        args,
+      ),
+    );
+    return;
   }
   const method = listing.methods.find((method) => method.id === args.target);
   if (args.action !== 'add' && !method) {

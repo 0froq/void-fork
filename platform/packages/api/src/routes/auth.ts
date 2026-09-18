@@ -51,6 +51,11 @@ const DASHBOARD_AUTH_CODE_TTL_SECONDS = 5 * 60;
 const CLI_AUTH_CODE_TTL_SECONDS = 5 * 60;
 
 const app = new Hono<ApiEnv>();
+app.use('*', async (context, next) => {
+  context.header('Cache-Control', 'no-store');
+  context.header('Referrer-Policy', 'no-referrer');
+  await next();
+});
 app.get('/test', startLoginTest);
 
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google

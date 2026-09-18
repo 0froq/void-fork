@@ -35,6 +35,49 @@ export type AuthenticationActor = Readonly<{
   companyIdentity?: CompanyIdentity;
 }>;
 
+export async function updateAuthenticationAdmission(
+  db: Db,
+  actor: AuthenticationActor,
+  input: {
+    revision: number;
+    admission: unknown;
+  },
+  dryRun = false,
+): Promise<void> {
+  await db.transaction(async (transaction) => {
+    const tx = transaction as unknown as Db;
+    const settings = await lockAuthSettings(tx);
+    await requireActor(tx, actor, true);
+    if (!settings || settings.revision !== input.revision) {
+      throw new AuthenticationConfigurationError(
+        'Authentication settings changed. Reload before changing signup.',
+        'revision_conflict',
+      );
+    }
+    let admission;
+    try {
+      admission = parsePlatformAdmissionPolicy(input.admission);
+      validatePlatformAdmissionPolicy(
+        admission,
+        (await readEnabledLoginConnections(tx)).map((row) => row.configuration),
+        parsePlatformAccessProtection(settings.protection),
+      );
+    } catch (error) {
+      throw new AuthenticationConfigurationError(
+        error instanceof Error ? error.message : 'Invalid signup policy.',
+        'invalid_argument',
+        400,
+      );
+    }
+    if (!dryRun) {
+      await tx
+        .update(platformAuthSettings)
+        .set({ admission, revision: sql`${platformAuthSettings.revision} + 1` })
+        .where(eq(platformAuthSettings.singleton, true));
+    }
+  });
+}
+
 async function requireActor(db: Db, actor: AuthenticationActor, admin: boolean): Promise<void> {
   if (
     !actor.sessionId ||
@@ -248,6 +291,12 @@ export async function enableLoginConnection(
     }
     const enabled = await readEnabledLoginConnections(tx);
     const alternative = enabled.filter((row) => row.connection.id !== connection.id);
+    if (alternative.length >= 32) {
+      throw new AuthenticationConfigurationError(
+        'A platform supports at most 32 enabled login methods.',
+        'login_method_limit',
+      );
+    }
     if (connection.enabled && !(await hasVerifiedAlternative(tx, actor, connection.id))) {
       const [linked] = await tx
         .select()

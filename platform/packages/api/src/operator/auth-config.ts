@@ -1,4 +1,4 @@
-import { parsePlatformLoginConfiguration } from '@void/platform';
+import { parsePlatformLoginConfiguration, parsePlatformAdmissionPolicy } from '@void/platform';
 import { and, eq, gt } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import {
@@ -15,6 +15,7 @@ import {
   enableLoginConnection,
   linkTestedIdentity,
   type AuthenticationActor,
+  updateAuthenticationAdmission,
 } from '../auth/management.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
 import type { ApiEnv } from '../env.ts';
@@ -194,6 +195,28 @@ export async function changeAuthenticationConnection(
 }
 
 export const authenticationConfigRoutes = new Hono<ApiEnv>();
+export async function configureAuthenticationAdmission(
+  context: Context<ApiEnv>,
+  body: Record<string, unknown>,
+) {
+  await updateAuthenticationAdmission(
+    context.get('db'),
+    authenticationActor(context),
+    {
+      revision: revisionField(body.revision)!,
+      admission: body.admission,
+    },
+    dryRun(body),
+  );
+  return dryRun(body)
+    ? preview('Change signup policy', 'platform', {
+        admission: parsePlatformAdmissionPolicy(body.admission),
+      })
+    : { ok: true };
+}
+authenticationConfigRoutes.post('/config/auth/admission', async (context) =>
+  context.json(await configureAuthenticationAdmission(context, await readBody(context))),
+);
 authenticationConfigRoutes.get('/config/auth', async (context) =>
   context.json(await getAuthenticationConfiguration(context)),
 );
@@ -252,6 +275,7 @@ authenticationConfigRoutes.get('/config/auth/tests/:id', async (context) => {
           revision: result.revision,
           issuer: result.issuer,
           subject: result.subject,
+          login: result.login || result.subject,
           expiresAt: result.expires_at,
         }
       : { complete: false },

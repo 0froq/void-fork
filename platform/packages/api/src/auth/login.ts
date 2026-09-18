@@ -439,11 +439,15 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
           revision: attempt.revision,
           issuer: identity.issuer,
           subject: identity.subject,
+          login: identity.login,
           expires_at: new Date(Date.now() + FLOW_SECONDS * 1000).toISOString(),
         });
       });
       context.header('Cache-Control', 'no-store');
       context.header('Referrer-Policy', 'no-referrer');
+      if (saved.actor?.audience === 'admin') {
+        return context.redirect(`/admin/config/auth?test=${encodeURIComponent(saved.testId!)}`);
+      }
       return context.html(
         '<!doctype html><title>Void login test</title><p>Login verified. Return to Void to review the identity and finish configuration.</p>',
       );

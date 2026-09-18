@@ -386,6 +386,7 @@ void platform config auth test company
 void platform config auth link company
 void platform config auth enable company
 void platform config auth disable github
+void platform config auth admission
 ```
 
 When configuring an existing installation for the first time, run
@@ -405,6 +406,13 @@ nonsecret fields and `--client-secret-env <name>` for the environment variable
 containing the secret. Omit the secret when editing to retain its saved value.
 For `enable` or `link` in scripts, supply `--test-id <id>` from a completed test.
 `test --json` returns a browser URL, test ID, and expiry without waiting for completion.
+
+`admission` chooses invited/allowlisted, company-approved, or public signup.
+Company-approved signup creates ordinary accounts automatically when a user
+passes a configured company rule. Select an enabled, company-restricted OIDC or
+Google Workspace method, or an enabled Cloudflare Access gate. In scripts,
+`admission --file <path> --yes` reads a policy such as
+`{"mode":"company","connections":["company"],"access":false}`.
 
 Browser login defaults to GitHub; Google is available when enabled on the platform. Login saves a one-hour administrator session in your system keychain. Logout revokes that session and removes its local credential.
 

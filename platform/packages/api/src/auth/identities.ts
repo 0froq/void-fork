@@ -200,6 +200,7 @@ export async function resolvePlatformLogin(
       revision: attempt.revision,
       issuer: identity.issuer,
       subject: identity.subject,
+      login: identity.login,
       expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     });
     return { user, created, primaryProvider };

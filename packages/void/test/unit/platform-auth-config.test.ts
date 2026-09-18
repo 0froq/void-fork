@@ -39,6 +39,7 @@ beforeEach(async () => {
       if (init?.method === 'GET') {
         return Response.json({
           initialized: true,
+          revision: 1,
           methods: [
             { id: 'company', label: 'Company SSO', enabled: true, revision: 1, configuration },
           ],
@@ -113,6 +114,29 @@ describe('platform config auth arguments', () => {
 });
 
 describe('platform config auth execution', () => {
+  it('submits a normalized signup policy without requiring a login-method positional argument', async () => {
+    const file = join(directory, 'signup.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mode: 'company',
+        connections: ['company'],
+        access: false,
+        clientSecret: 'unrelated-secret',
+      }),
+    );
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runPlatformAuthConfig(
+      parsePlatformConfigArgs(['auth', 'admission', '--file', file, '--yes', '--json']),
+    );
+    const changes = calls.filter((call) => call.body);
+    expect(changes[1]?.url).toBe('https://api.example.com/operator/v1/config/auth/admission');
+    expect(changes[1]?.body).toEqual({
+      revision: 1,
+      admission: { mode: 'company', connections: ['company'], access: false },
+    });
+    expect(JSON.stringify(output.mock.calls)).not.toContain('unrelated-secret');
+  });
   it('prints exactly one JSON preview without applying a change or displaying its secret', async () => {
     const file = join(directory, 'config.json');
     await writeFile(file, JSON.stringify(configuration));

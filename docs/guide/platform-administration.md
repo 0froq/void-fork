@@ -61,6 +61,16 @@ Use an ID or URL from the connection list. Administrative commands use this sele
 
 ## Giving People Access
 
+Open **Settings** in the administrator UI, or run `void platform config auth`,
+to add, test, enable, or disable login methods. Access protection and login
+methods are separate settings. A provider test shows the authenticated account
+before you explicitly link it or enable the configuration.
+
+For company installations, choose **Company-approved users** under **Who can
+join?** to create accounts automatically for users accepted by your configured
+company rules. Individual invitations are not required. Invited/allowlisted
+signup remains available when you need to approve people individually.
+
 A newly installed platform restricts signup to approved identities. To let a teammate join with GitHub, add their login to the allowlist:
 
 ```sh

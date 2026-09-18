@@ -10,6 +10,7 @@ export const PLATFORM_AUTH_ACTIONS = [
   'enable',
   'disable',
   'link',
+  'admission',
 ] as const;
 export type PlatformAuthAction = (typeof PLATFORM_AUTH_ACTIONS)[number];
 export type PlatformConfigArgs = Readonly<{
@@ -66,7 +67,8 @@ export function parsePlatformConfigArgs(args: ReadonlyArray<string>): PlatformCo
       `platform: Usage: void platform config auth <${PLATFORM_AUTH_ACTIONS.join('|')}>.`,
     );
   }
-  const needsTarget = action && action !== 'list' && action !== 'initialize';
+  const needsTarget =
+    action && action !== 'list' && action !== 'initialize' && action !== 'admission';
   if ((needsTarget && !target) || (!needsTarget && target)) {
     throw new Error(
       `platform: ${action || 'config auth'} ${needsTarget ? 'requires a method' : 'does not accept a method'}.`,
@@ -92,12 +94,11 @@ export function parsePlatformConfigArgs(args: ReadonlyArray<string>): PlatformCo
     throw new Error('platform: --id is only valid when adding a login method.');
   }
   if (
-    (values.has('file') || values.has('client-secret-env')) &&
-    action !== 'add' &&
-    action !== 'configure'
+    (values.has('file') && !['add', 'configure', 'admission'].includes(action)) ||
+    (values.has('client-secret-env') && action !== 'add' && action !== 'configure')
   ) {
     throw new Error(
-      'platform: --file and --client-secret-env are only valid for add or configure.',
+      'platform: --file is valid for add, configure, or admission; --client-secret-env is valid for add or configure.',
     );
   }
   if (values.has('test-id') && action !== 'enable' && action !== 'link') {

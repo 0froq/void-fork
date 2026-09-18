@@ -46,6 +46,10 @@ alternative before disabling a method. Disabling revokes its human sessions,
 including human tokens used in CI, while scoped deployment tokens remain valid.
 For scripted configuration, use nonsecret JSON with `--file` and read secrets
 with `--client-secret-env`; never put client secrets in command arguments.
+Use `void platform config auth admission` to select company-approved automatic
+signup when the organization's identity policy already determines eligibility;
+individual invitations remain optional. The same controls are available under
+Settings in the administrator UI.
 Operator credentials are separate from application deployment credentials and
 ignore repository platform selections. `VOID_OPERATOR_TOKEN` requires an
 explicit `VOID_API_URL` or `--connection`; credentials must never be written to

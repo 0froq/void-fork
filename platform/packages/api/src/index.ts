@@ -9,6 +9,7 @@ import { lt, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
 import { adminCsrfMiddleware } from './admin/middleware/csrf.ts';
+import adminAuthConfig from './admin/routes/auth-config.tsx';
 import adminBuilds from './admin/routes/builds.tsx';
 import adminDeployments from './admin/routes/deployments.tsx';
 import adminEmail from './admin/routes/email.tsx';
@@ -87,7 +88,12 @@ import { projectUsage, accountUsage } from './routes/usage.ts';
 import { webhookRoutes } from './routes/webhooks.ts';
 import { setProjectsRoutingSuspension } from './routing.ts';
 import { SandboxConcurrencyCounter } from './sandbox-concurrency-counter.ts';
-import { operatorSessions } from './schema.ts';
+import {
+  operatorSessions,
+  platformAuthAttempts,
+  platformLoginTests,
+  platformHumanSessions,
+} from './schema.ts';
 import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart, getPlanLimits } from './tiers.ts';
 import type { Domain, Project } from './types.ts';
@@ -200,6 +206,7 @@ const app = new Hono<ApiEnv>()
     }
   })
   .get('/.well-known/void-platform', async (context) => {
+    context.header('Cache-Control', 'no-store');
     const settings = await readAuthSettings(context.get('db'));
     const methods = settings
       ? (await readEnabledLoginConnections(context.get('db'))).map(({ configuration }) => ({
@@ -354,6 +361,7 @@ app.route('/admin/email', adminEmail);
 app.route('/admin/builds', adminBuilds);
 app.route('/admin/deployments', adminDeployments);
 app.route('/admin/signup-control', adminSignupControl);
+app.route('/admin/config/auth', adminAuthConfig);
 app.route('/admin/invitations', adminInvitations);
 app.route('/admin/platform', adminPlatform);
 app.route('/admin', adminSystem);
@@ -522,6 +530,14 @@ async function scheduled(
     .delete(operatorSessions)
     .where(lt(operatorSessions.expires_at, new Date().toISOString()))
     .catch((err) => console.error('[scheduled] failed to purge expired operator sessions:', err));
+  for (const table of [platformAuthAttempts, platformLoginTests, platformHumanSessions]) {
+    await db
+      .delete(table)
+      .where(lt(table.expires_at, new Date().toISOString()))
+      .catch((err) =>
+        console.error('[scheduled] failed to purge expired authentication state:', err),
+      );
+  }
 
   // Catch up on missed GitHub webhooks (design-doc 0074): list GitHub's own
   // `status=failure` delivery log and redeliver any failed event we haven't
