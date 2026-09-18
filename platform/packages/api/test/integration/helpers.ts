@@ -491,6 +491,12 @@ export async function clearTables(db: Db): Promise<void> {
   await db.delete(authCodes);
   await db.delete(operatorSessions);
   await db.delete(operatorEvents);
+  await db.delete(schema.platformAuthAttempts);
+  await db.delete(schema.platformAuthBootstrap);
+  await db.delete(schema.platformLoginTests);
+  await db.delete(schema.platformLoginRevisions);
+  await db.delete(schema.platformLoginConnections);
+  await db.delete(schema.platformAuthSettings);
 }
 
 /** Establish a real revocable operator session for integration requests. */
