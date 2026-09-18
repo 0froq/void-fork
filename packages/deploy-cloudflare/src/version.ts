@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual, stripVTControlCharacters } from 'node:util';
 import { join } from 'pathslash';
 import { parseRootWranglerConfig } from './config.ts';
 import { cloudflareCommandDiagnostic } from './diagnostics.ts';
@@ -965,10 +965,14 @@ async function activateCloudflareVersionWithSecretsFile(
     ),
   );
   if (!isCleanCommandExit(upload)) {
-    const output = `${upload.stdout}\n${upload.stderr}`;
+    const output = stripVTControlCharacters(`${upload.stdout}\n${upload.stderr}`);
     const cloudflareErrorCode = parseCloudflareErrorCode(output);
     const isBootstrapError =
       cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR ||
+      // Recent Wrangler versions reject this locally, before Cloudflare can return 10211.
+      /This\s+Worker\s+has\s+a\s+pending\s+Durable\s+Object\s+migration,\s+which\s+cannot\s+be\s+applied\s+by\s+`wrangler\s+versions\s+upload`/i.test(
+        output,
+      ) ||
       /cannot upload a new version of a worker that does not yet exist/i.test(output);
     if (
       !options.preserveTriggers &&
