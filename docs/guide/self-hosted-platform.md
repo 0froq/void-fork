@@ -241,7 +241,7 @@ environment-variable references for secrets. For example:
 `--plan` reads this configuration without requiring the referenced secret.
 Supply the secret through your secret manager when applying the installation.
 
-#### Cloudflare Access
+#### Cloudflare Access {#cloudflare-access-setup}
 
 Choose Access login, platform protection, or both. Protection can also be used
 with GitHub or another login method. With company-approved signup, a colleague
