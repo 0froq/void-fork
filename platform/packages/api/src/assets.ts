@@ -28,6 +28,27 @@ export type AssetEntry = Readonly<{
   contentType: string;
 }>;
 
+/** Resolve upload metadata using the first manifest path for each content hash. */
+export function resolveAssetContentTypes(
+  manifest: Readonly<Record<string, AssetManifestEntry>>,
+  hashes: ReadonlyArray<string>,
+): Map<string, string> {
+  if (hashes.length === 0) {
+    return new Map();
+  }
+  const pending = new Set(hashes);
+  const paths = new Map<string, string>();
+  for (const [path, entry] of Object.entries(manifest)) {
+    if (pending.delete(entry.hash)) {
+      paths.set(entry.hash, path);
+      if (pending.size === 0) {
+        break;
+      }
+    }
+  }
+  return new Map(hashes.map((hash) => [hash, getContentType(paths.get(hash) ?? '')]));
+}
+
 type UploadSessionResponse = Readonly<{
   result: {
     jwt: string;

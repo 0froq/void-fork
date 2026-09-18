@@ -30,7 +30,7 @@ import {
   uploadAssetBuckets,
   buildAssetMetadata,
   deleteUnreferencedAssets,
-  getContentType,
+  resolveAssetContentTypes,
   type AssetEntry,
   type AssetManifestEntry,
 } from '../assets.ts';
@@ -3939,6 +3939,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
             (hash) => !assetsByHash.has(hash),
           );
           const newHashSetForHydration = new Set(newHashes);
+          const contentTypes = resolveAssetContentTypes(incomingAssetManifest, hashesNeedingBytes);
           const hydratedStoreByHash = new Map<string, 'kv' | 'r2'>();
           await uploadPool(hashesNeedingBytes, R2_HEAD_VERIFY_CONCURRENCY, async (hash) => {
             const previousEntry = previousHashEntry.get(hash);
@@ -3976,19 +3977,9 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
               );
             }
             hydratedStoreByHash.set(hash, resolvedStore!);
-            // Find a path in the asset manifest with this hash so we
-            // can derive the content type for the CF asset upload.
-            // Multiple paths can share a hash; any one is correct.
-            let path = '';
-            for (const [p, e] of Object.entries(incomingAssetManifest)) {
-              if (e.hash === hash) {
-                path = p;
-                break;
-              }
-            }
             assetsByHash.set(hash, {
               bytes: new Uint8Array(assetBytes),
-              contentType: getContentType(path),
+              contentType: contentTypes.get(hash)!,
             });
           });
           // `new` reflects "newly uploaded by the CLI this deploy" —

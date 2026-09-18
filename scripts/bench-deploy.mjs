@@ -162,6 +162,22 @@ try {
     });
   }
   const uploaderStats = treeStats(dirname(wrangler));
+  if (selected('asset-types')) {
+    const { resolveAssetContentTypes } = await import(
+      pathToFileURL(join(root, 'platform/packages/api/src/assets.ts')).href
+    );
+    const manifest = Object.fromEntries(
+      Array.from({ length: 5000 }, (_, i) => [`/${i}.js`, { hash: String(i), size: 1 }]),
+    );
+    const hashes = Object.values(manifest).map((entry) => entry.hash);
+    await measure('asset-types-5000', 5, () => {
+      const types = resolveAssetContentTypes(manifest, hashes);
+      if (types.size !== hashes.length) {
+        throw new Error('Missing content types');
+      }
+      return { files: hashes.length };
+    });
+  }
   if (selected('prerender')) {
     const { prerenderPagesNode } = await import(
       pathToFileURL(join(root, 'packages/void/src/prerender.ts')).href

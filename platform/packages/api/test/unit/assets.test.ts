@@ -4,12 +4,29 @@ import {
   deleteUnreferencedAssets,
   deleteWorkerBundle,
   normalizeForCfAssetSession,
+  resolveAssetContentTypes,
   scanProjectAssetOrphanCandidates,
   uploadAssetBuckets,
   type AssetEntry,
 } from '../../src/assets.ts';
 
 const enc = new TextEncoder();
+
+describe('asset content-type indexing', () => {
+  it('keeps the first matching path, requested order, and the unknown-type sentinel', () => {
+    const manifest = {
+      '/first.js': { hash: 'same', size: 1 },
+      '/later.css': { hash: 'same', size: 1 },
+      '/image.png': { hash: 'image', size: 2 },
+    };
+    expect([...resolveAssetContentTypes(manifest, ['image', 'same', 'missing'])]).toEqual([
+      ['image', 'image/png'],
+      ['same', 'text/javascript; charset=utf-8'],
+      ['missing', 'application/null'],
+    ]);
+    expect(resolveAssetContentTypes(manifest, [])).toEqual(new Map());
+  });
+});
 function entry(content: string | Uint8Array, contentType: string): AssetEntry {
   return {
     bytes: typeof content === 'string' ? enc.encode(content) : content,
