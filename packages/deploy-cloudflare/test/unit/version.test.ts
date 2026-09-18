@@ -2744,4 +2744,122 @@ describe('Cloudflare version activation', () => {
     });
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
   });
+
+  const firstSecretTriggers = {
+    preserveRoutes: true,
+    preserveWorkersDev: true,
+    preservePreviewUrls: true,
+    workers_dev: true,
+    preview_urls: true,
+    routes: [],
+    crons: [],
+    queueConsumers: [],
+    workflows: [],
+  };
+
+  function firstSecretRunner(inspection: CloudflareCommandResult) {
+    const base = runner({
+      // Cloudflare's list response has annotations but no resources, unlike versions view.
+      versions: ok(
+        JSON.stringify([
+          { id: CONCURRENT, number: 1, annotations: { 'workers/triggered_by': 'upload' } },
+          { id: CURRENT, number: 2, annotations: { 'workers/triggered_by': 'secret' } },
+        ]),
+      ),
+      upload: {
+        stdout: '',
+        stderr: 'Durable Object migrations require deploy. [code: 10211]',
+        status: 1,
+      },
+      bootstrap: ok(`Current Version ID: ${NEXT}\nhttps://first.example.workers.dev`),
+    });
+    return vi.fn((args: Array<string>) => {
+      if (args[0] === 'versions' && args[1] === 'view') {
+        expect(args[2]).toBe(CURRENT);
+        return inspection;
+      }
+      return base(args);
+    });
+  }
+
+  it.each([{}, { limits: {} }])(
+    'retries a first secret-only deploy with runtime limits %j',
+    async (limits) => {
+      const draft = secretOnlyDraftVersion();
+      const runWrangler = firstSecretRunner(
+        ok(
+          JSON.stringify({
+            ...draft,
+            resources: {
+              ...draft.resources,
+              script_runtime: { usage_model: 'standard', ...limits },
+            },
+          }),
+        ),
+      );
+      await expect(
+        activateCloudflareVersion({
+          runWrangler,
+          verifyUploader: () => true,
+          verifyInheritedSecrets: true,
+          workerName: 'first-with-existing-secret',
+          message: encodeCloudflareVersionMessage(['0001_state.sql'], firstSecretTriggers),
+          fetch: async () => Response.json({ ready: true }),
+        }),
+      ).resolves.toMatchObject({ ok: true, previousVersionId: CURRENT });
+      expect(runWrangler.mock.calls.some(([args]) => args[1] === 'view')).toBe(true);
+      expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(true);
+    },
+  );
+
+  it.each([{ limits: { cpu_ms: 100 } }, { limits: null }, { compatibility_date: '2026-09-01' }])(
+    'preserves existing traffic when the secret-triggered version has runtime settings %j',
+    async (runtime) => {
+      const draft = secretOnlyDraftVersion();
+      const runWrangler = firstSecretRunner(
+        ok(
+          JSON.stringify({
+            ...draft,
+            resources: {
+              ...draft.resources,
+              script_runtime: { usage_model: 'standard', ...runtime },
+            },
+          }),
+        ),
+      );
+      await expect(
+        activateCloudflareVersion({
+          runWrangler,
+          verifyUploader: () => true,
+          workerName: 'existing-with-secret',
+          message: encodeCloudflareVersionMessage([], firstSecretTriggers),
+        }),
+      ).resolves.toMatchObject({ ok: false, reason: 'traffic-preservation-unavailable' });
+      expect(
+        runWrangler.mock.calls.some(([args]) => args[1] === 'upload' || args[0] === 'deploy'),
+      ).toBe(false);
+    },
+  );
+
+  it.each([
+    { stdout: '', stderr: 'Permission denied', status: 1 },
+    ok('invalid JSON'),
+    ok(JSON.stringify({ ...secretOnlyDraftVersion(), id: CONCURRENT })),
+  ])(
+    'does not bypass traffic preservation when inspection fails or returns another version',
+    async (inspection) => {
+      const runWrangler = firstSecretRunner(inspection);
+      await expect(
+        activateCloudflareVersion({
+          runWrangler,
+          verifyUploader: () => true,
+          workerName: 'existing-with-secret',
+          message: encodeCloudflareVersionMessage([], firstSecretTriggers),
+        }),
+      ).resolves.toMatchObject({ ok: false, reason: 'traffic-preservation-unavailable' });
+      expect(
+        runWrangler.mock.calls.some(([args]) => args[1] === 'upload' || args[0] === 'deploy'),
+      ).toBe(false);
+    },
+  );
 });

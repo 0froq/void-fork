@@ -1540,9 +1540,30 @@ async function readCloudflareVersionInspection(
       }
       const annotations = isRecord(entry.annotations) ? entry.annotations : undefined;
       const message = annotations?.['workers/message'];
+      // The list endpoint omits resources. Inspect the exact active version before deciding
+      // whether secret provisioning left a placeholder rather than an existing application.
+      let draft = entry;
+      if (
+        annotations?.['workers/triggered_by'] === 'secret' &&
+        Object.keys(annotations).length === 1 &&
+        !isRecord(entry.resources)
+      ) {
+        const inspection = await Promise.resolve(
+          options.runWrangler(
+            ['versions', 'view', versionId, ...commonArgs, '--name', options.workerName, '--json'],
+            { capture: true },
+          ),
+        );
+        if (isCleanCommandExit(inspection)) {
+          const inspected: unknown = JSON.parse(inspection.stdout);
+          if (isRecord(inspected) && inspected.id === versionId) {
+            draft = inspected;
+          }
+        }
+      }
       return {
         metadata: typeof message === 'string' ? parseCloudflareVersionMessage(message) : null,
-        isSecretOnlyDraft: isWranglerSecretOnlyDraft(entry),
+        isSecretOnlyDraft: isWranglerSecretOnlyDraft(draft),
       };
     }
   } catch {
@@ -1715,8 +1736,9 @@ function isWranglerSecretOnlyDraft(entry: Record<string, unknown>): boolean {
   const runtimeKeys = Object.keys(scriptRuntime);
   return (
     scriptRuntime.usage_model === 'standard' &&
-    isRecord(scriptRuntime.limits) &&
-    Object.keys(scriptRuntime.limits).length === 0 &&
+    // Cloudflare may omit unset limits instead of returning an empty object.
+    (scriptRuntime.limits === undefined ||
+      (isRecord(scriptRuntime.limits) && Object.keys(scriptRuntime.limits).length === 0)) &&
     runtimeKeys.every((key) => key === 'usage_model' || key === 'limits')
   );
 }
