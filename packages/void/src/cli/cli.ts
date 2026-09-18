@@ -250,7 +250,7 @@ if (helpPath) {
     {
       name: 'auth',
       hint: 'login | logout | whoami | token',
-      description: 'Login, logout, and token management',
+      description: 'Login, account linking, logout, and token management',
     },
     {
       name: 'platform',

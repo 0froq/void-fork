@@ -516,7 +516,31 @@ export class PlatformClient {
     return send().response;
   }
 
-  async whoami(): Promise<{ login: string; plan: string }> {
+  async startIdentityLink(
+    connectionId: string,
+  ): Promise<{ id: string; url: string; expiresAt: string }> {
+    const response = await this.request(this.baseUrl + '/auth/link', {
+      method: 'POST',
+      headers: { ...this.authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionId }),
+    });
+    if (!response.ok) {
+      await throwPlatformApiError('Failed to link login method', response);
+    }
+    const result = (await response.json()) as { id: string; url: string; expiresAt: string };
+    const url = new URL(result.url);
+    if (
+      url.origin !== this.baseUrl ||
+      url.pathname !== '/auth/link' ||
+      url.username ||
+      url.password
+    ) {
+      throw new Error('auth: Invalid account-link URL from platform.');
+    }
+    return result;
+  }
+
+  async whoami(): Promise<{ id: string; login: string; plan: string }> {
     const res = await this.request(`${this.baseUrl}/me`, {
       headers: {
         ...this.authHeaders,
