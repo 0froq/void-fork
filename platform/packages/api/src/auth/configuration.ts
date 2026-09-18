@@ -49,6 +49,8 @@ export async function readAuthSettings(db: Db): Promise<AuthSettings | null> {
 
 /** Shared lock order for provider changes, identity linking, and administrator removal. */
 export async function lockAuthSettings(db: Db): Promise<AuthSettings | null> {
+  // Serialize first-time import too, when there is no singleton row to lock yet.
+  await db.execute(sql`LOCK TABLE ${platformAuthSettings} IN SHARE ROW EXCLUSIVE MODE`);
   const [settings] = await db
     .select()
     .from(platformAuthSettings)
@@ -127,11 +129,12 @@ export async function importLegacyAuthentication(
   db: Db,
   env: AuthEnvironment,
 ): Promise<AuthSettings> {
-  const signupFlag = await env.ROUTING.get('signup:enabled');
-  const signupOpen =
-    signupFlag === 'false' || (!env.PLATFORM_INSTALLATION_ID && signupFlag !== 'true');
   return db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
+    await lockAuthSettings(tx);
+    const signupFlag = await env.ROUTING.get('signup:enabled');
+    const signupOpen =
+      signupFlag === 'false' || (!env.PLATFORM_INSTALLATION_ID && signupFlag !== 'true');
     // The insert serializes concurrent first imports; its winner owns the snapshot.
     const inserted = await tx
       .insert(platformAuthSettings)

@@ -114,8 +114,8 @@ export async function createUser(
  * Creates a user and grants the first account on a self-hosted installation
  * the admin role. Call this inside the same transaction that links the OAuth
  * identity. The table lock makes concurrent first logins observe one winner.
- * Hosted Void Cloud passes no installation id and retains the existing user
- * default without taking the lock.
+ * Hosted Void Cloud retains its existing user default. Both paths reject an
+ * old callback racing the migration to configurable authentication.
  */
 export async function createUserForPlatform(
   db: Db,
@@ -129,6 +129,9 @@ export async function createUserForPlatform(
     bootstrapGitHubId: string;
   },
 ): Promise<User> {
+  if (await lockAuthSettings(db)) {
+    throw new SelfHostedSignupRestrictedError();
+  }
   if (!installationId) {
     return createUser(db, provider, providerId, login, email);
   }

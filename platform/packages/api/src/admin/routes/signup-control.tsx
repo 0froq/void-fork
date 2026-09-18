@@ -22,7 +22,7 @@ app.get('/', async (context) => {
 });
 
 app.post('/toggle', async (context) => {
-  const current = (await context.env.ROUTING.get('signup:enabled')) === 'true';
+  const current = (await getOperatorSignup(context)).enabled;
   const enabled = !current;
   return executeAuditedMutation(
     context,

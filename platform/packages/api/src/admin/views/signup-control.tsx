@@ -1,3 +1,4 @@
+import type { PlatformAdmissionPolicy } from '@void/platform';
 import type { AllowlistEntryStatus } from '../../db.ts';
 import { Layout } from './layout.tsx';
 
@@ -9,14 +10,22 @@ export function SignupControlPage({
   enabled,
   entries,
   username,
+  admission,
 }: {
   enabled: boolean;
   entries: ReadonlyArray<AllowlistEntryStatus>;
   username?: string;
+  admission?: PlatformAdmissionPolicy;
 }) {
   return (
     <Layout title="Signup Control" username={username}>
       <h1>Signup Control</h1>
+      {admission?.mode === 'company' && (
+        <p>
+          Company-approved users can join automatically. Manage the company policy in{' '}
+          <a href="/admin/config/auth">authentication settings</a>.
+        </p>
+      )}
 
       {/* Toggle */}
       <form method="post" action="/admin/signup-control/toggle" style="margin-bottom: 20px">

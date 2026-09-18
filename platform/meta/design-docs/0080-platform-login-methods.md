@@ -107,6 +107,15 @@ Client secrets are write-only in APIs and redacted in previews, audit, and logs.
 Do not retain upstream access or refresh tokens unless a specified feature needs
 them; initial login needs neither long-term storage nor offline scopes.
 
+The platform's dedicated Hyperdrive configuration must have SQL result caching
+disabled. Hyperdrive otherwise caches reads by default and does not invalidate
+them on writes, which would violate immediate revocation and read-after-write
+configuration behavior. Configure and verify this during installation, upgrade,
+repair, and adoption before activating managed authentication. Do not mutate an
+unrelated or externally owned Hyperdrive configuration. Source-built/custom
+runtimes must supply the same uncached database guarantee; connection pooling
+remains enabled. Do not depend on SQL comments as a cache-control mechanism.
+
 Separate runtime support from administrator enablement. The deployment manifest
 declares supported authentication features and initial configuration, while the
 database is authoritative after initialization. Upgrades and stale local recovery
@@ -497,6 +506,10 @@ Required meaningful regressions:
   remains unaffected and Workers Free-compatible by default.
 - Supported runtime/CLI upgrade pairs; disabled providers survive an upgrade;
   incompatible rollback cannot restore a revoked login path.
+- Platform Hyperdrive creation and owned upgrades explicitly disable result
+  caching; preflight verifies that guarantee before authentication activation,
+  including adopted/custom-runtime cases. Application Hyperdrive settings remain
+  independent.
 
 After all code changes, run the final full `vp test run` and required formatting,
 lint, builds, and typechecks through the repository's `vpr test:all` workflow;

@@ -1,4 +1,6 @@
+import { eq, sql } from 'drizzle-orm';
 import type { Context } from 'hono';
+import { lockAuthSettings, readAuthSettings } from '../auth/configuration.ts';
 import {
   type Db,
   countInvitations,
@@ -12,6 +14,7 @@ import {
 } from '../db.ts';
 import { sendInvitationEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
+import { platformAuthSettings } from '../schema.ts';
 import { type AllowlistEntry, getAllowlist, putAllowlist } from '../signup-allowlist.ts';
 import type { Invitation } from '../types.ts';
 import { OperatorError, preview } from './common.ts';
@@ -34,14 +37,19 @@ function validateEntryType(type: string): asserts type is AllowlistEntry['type']
 }
 
 export async function getOperatorSignup(context: Context<ApiEnv>) {
-  const [raw, entries] = await Promise.all([
+  const [raw, entries, settings] = await Promise.all([
     context.env.ROUTING.get('signup:enabled'),
     getAllowlist(context.env.ROUTING),
+    readAuthSettings(context.get('db')),
   ]);
+  const restricted = settings
+    ? settings.admission.mode !== 'public'
+    : raw === 'true' || (raw !== 'false' && !!context.env.PLATFORM_INSTALLATION_ID);
   return {
-    enabled: raw === 'true',
-    restricted: raw === 'true',
-    signupsOpen: raw !== 'true',
+    enabled: restricted,
+    restricted,
+    signupsOpen: !restricted,
+    ...(settings ? { admission: settings.admission } : {}),
     entries: await getAllowlistEntryStatuses(context.get('db'), entries),
   };
 }
@@ -51,7 +59,7 @@ export async function setOperatorSignup(
   enabled: boolean,
   dryRun = false,
 ) {
-  const previous = (await context.env.ROUTING.get('signup:enabled')) === 'true';
+  const previous = (await getOperatorSignup(context)).enabled;
   const action = enabled ? 'signup.restrict' : 'signup.open';
   const target = { restrictionsEnabled: enabled };
   if (dryRun) {
@@ -60,7 +68,20 @@ export async function setOperatorSignup(
       effect: enabled ? 'Only allowlisted users may sign up.' : 'All users may sign up.',
     });
   }
-  await context.env.ROUTING.put('signup:enabled', String(enabled));
+  await context.get('db').transaction(async (transaction) => {
+    const tx = transaction as unknown as Db;
+    const settings = await lockAuthSettings(tx);
+    await context.env.ROUTING.put('signup:enabled', String(enabled));
+    if (settings) {
+      await tx
+        .update(platformAuthSettings)
+        .set({
+          admission: { mode: enabled ? 'restricted' : 'public' },
+          revision: sql`${platformAuthSettings.revision} + 1`,
+        })
+        .where(eq(platformAuthSettings.singleton, true));
+    }
+  });
   return { action, target, enabled, restricted: enabled, signupsOpen: !enabled };
 }
 

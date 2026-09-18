@@ -129,6 +129,20 @@ function request(
 }
 
 describe('Access-protected platform requests', () => {
+  it('keeps existing signup controls authoritative after authentication migration without removing the gate', async () => {
+    const access = await assertion();
+    const elevation = await request('/operator/v1/session', access, humanToken, {});
+    const operator = (await elevation.json<{ token: string }>()).token;
+    expect((await request('/operator/v1/signup/restrict', access, operator, {})).status).toBe(200);
+    expect((await env.db.select().from(platformAuthSettings))[0]?.admission).toEqual({
+      mode: 'restricted',
+    });
+    expect((await request('/operator/v1/signup/open', access, operator, {})).status).toBe(200);
+    const settings = (await env.db.select().from(platformAuthSettings))[0]!;
+    expect(settings.admission).toEqual({ mode: 'public' });
+    expect(settings.protection?.teamDomain).toBe(issuer);
+    expect((await request('/auth/login')).status).toBe(403);
+  });
   it('requires both the company identity and the matching Void session', async () => {
     expect((await request('/me', undefined, humanToken)).status).toBe(403);
     expect((await request('/me', await assertion())).status).toBe(401);

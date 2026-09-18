@@ -13,6 +13,7 @@ import {
   type AuthenticationActor,
 } from '../../src/auth/management.ts';
 import { createHumanSession, validateHumanSession } from '../../src/auth/sessions.ts';
+import { createUserForPlatform } from '../../src/db.ts';
 import {
   platformAuthSettings,
   platformLoginConnections,
@@ -64,6 +65,19 @@ async function proof(connectionId: string, subject: string, revision = 1, userId
 }
 
 describe('platform authentication management', () => {
+  it('rejects legacy signup callbacks that race authentication initialization', async () => {
+    await expect(
+      env.db.transaction((tx) =>
+        createUserForPlatform(
+          tx as unknown as typeof env.db,
+          'github',
+          'late-legacy-user',
+          'late-user',
+          null,
+        ),
+      ),
+    ).rejects.toThrow('signup is restricted');
+  });
   it('requires a real test of the exact pending revision and preserves the active method on failure', async () => {
     await stageLoginConfiguration(env.db, env, company, 'secret', null);
     await expect(
