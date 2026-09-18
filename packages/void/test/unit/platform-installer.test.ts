@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -200,6 +201,119 @@ describe('platform installer', () => {
     Object.assign(async () => {}, {
       prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
     });
+
+  it('installs a Google-only platform without GitHub credentials and initializes auth after deploying the API', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'void-platform-google-install-'));
+    directories.push(directory);
+    process.env.VOID_PLATFORM_REGISTRY_DIR = directory;
+    const plan = await createPlatformInstallPlan(
+      planningClient(),
+      {
+        accountId: 'account',
+        installationSlug: 'google-team',
+        displayName: 'Google Team',
+        applicationDomain: '',
+        zoneName: '',
+        controlPlaneDomain: '',
+        dedicatedZone: false,
+        workersDev: true,
+        authentication: { providers: ['google'], configurable: true },
+      },
+      null,
+    );
+    const code = 'a'.repeat(64);
+    const setupJson = JSON.stringify({
+      connections: [
+        {
+          configuration: {
+            id: 'google',
+            kind: 'google',
+            label: 'Google',
+            clientId: 'google-client',
+            allowedDomains: ['example.com'],
+          },
+          clientSecret: 'google-secret',
+        },
+      ],
+      administratorConnectionId: 'google',
+      bootstrapCredentialHash: createHash('sha256').update(code).digest('hex'),
+      admission: { mode: 'company', connections: ['google'], access: false },
+      protection: null,
+    });
+    const secrets = createPlatformInstallationSecrets({
+      bootstrapGitHubId: '',
+      bootstrapGitHubLogin: '',
+      githubClientId: '',
+      githubClientSecret: '',
+      cloudflareApiToken: 'runtime',
+      databaseUrl: 'postgresql://user:password@db.example.com/platform',
+      jwtSecret: TEST_PLATFORM_JWT_SECRET,
+      projectSecretKey: TEST_PLATFORM_PROJECT_SECRET_KEY,
+      r2AccessKeyId: 'r2',
+      r2SecretAccessKey: 'r2-secret',
+      authenticationSetupJson: setupJson,
+      authSetupToken: 't'.repeat(64),
+      authBootstrapCode: code,
+    });
+    const deployed: Array<{
+      config: Record<string, unknown>;
+      secrets: Record<string, string> | null;
+    }> = [];
+    const create = async (_account: string, name: string) => ({ id: `${name}-id`, name });
+    let initialized = 0;
+    const result = await installPlatform(plan, secrets, null, {
+      claimDatabase,
+      acquireDatabaseLifecycleLock,
+      client: {
+        createAiGateway: create,
+        createDispatchNamespace: create,
+        createHyperdrive: create,
+        createKvNamespace: create,
+        createQueue: create,
+        createR2Bucket: create,
+        createDnsRecord: async () => {
+          throw new Error('No DNS expected');
+        },
+        createZone: async () => {
+          throw new Error('No zone expected');
+        },
+        putKvValue: async () => {},
+        deleteKvValue: async () => {},
+        putR2Object: async () => {},
+      },
+      deployWorker: async (config, payload) => {
+        deployed.push({ config, secrets: payload });
+      },
+      migrateDatabase: async () => {},
+      revalidateBeforeWorkerDeploy: async () => {},
+      verifyHealth: async () => {},
+      initializeAuthentication: async (url, id, token, json) => {
+        initialized++;
+        expect(url).toBe(plan.apiUrl);
+        expect(id).toBe(plan.installationId);
+        expect(token).toBe(secrets.authSetupToken);
+        expect(json).toBe(setupJson);
+        const api = deployed.find(
+          (worker) => worker.config.name === plan.deployment.resources.apiWorker,
+        )!;
+        expect(api.secrets).toHaveProperty('PLATFORM_AUTH_SETUP_TOKEN', secrets.authSetupToken);
+        expect(api.secrets).not.toHaveProperty('GITHUB_CLIENT_SECRET');
+        expect(api.config.vars).toHaveProperty('PLATFORM_AUTH_DATABASE_UNCACHED', 'true');
+        return { setupPending: true, expiresAt: new Date(Date.now() + 1_800_000).toISOString() };
+      },
+    });
+    expect(initialized).toBe(1);
+    expect(result.manifest.status).toBe('installed');
+    expect(result.manifest.deployment.authentication).toEqual({
+      providers: ['google'],
+      configurable: true,
+    });
+    expect(JSON.stringify(result.manifest)).not.toContain('google-secret');
+    expect(JSON.stringify(result.manifest)).not.toContain(code);
+    expect(
+      result.manifest.steps.some((step) => step.key.startsWith('authentication-initialized:v1:')),
+    ).toBe(true);
+  });
 
   it.each([false, true])(
     'installs all four Workers without a zone and probes the actual dispatch hostname (credential draft: %s)',

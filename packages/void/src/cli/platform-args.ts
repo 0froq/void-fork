@@ -52,6 +52,7 @@ export type PlatformArgs =
     }
   | {
       subcommand: 'install';
+      authConfig?: string;
       account: string;
       applicationDomain: string;
       controlPlaneDomain: string;
@@ -301,6 +302,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     let yes = false;
     const valueFlags = new Set([
       '--account',
+      '--auth-config',
       '--application-domain',
       '--control-plane-domain',
       '--display-name',
@@ -340,6 +342,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     return {
       subcommand,
       ...(workersDev ? { workersDev: true } : {}),
+      ...(values.has('--auth-config') ? { authConfig: values.get('--auth-config')! } : {}),
       account: values.get('--account') ?? '',
       applicationDomain: values.get('--application-domain') ?? '',
       controlPlaneDomain: values.get('--control-plane-domain') ?? '',

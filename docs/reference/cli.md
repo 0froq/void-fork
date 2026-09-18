@@ -563,6 +563,7 @@ void platform install [options] [--yes]
 | `--name <slug>`                   | Installation name used in `void-<name>-<role>` resource names; choose an unused name |
 | `--display-name <name>`           | Human-readable platform name                                                         |
 | `--account <id>`                  | Cloudflare account id                                                                |
+| `--auth-config <path>`            | Login methods, signup policy, and environment references for provider secrets        |
 | `--application-domain <domain>`   | Base domain for deployed apps                                                        |
 | `--workers-dev`                   | Explicit testing mode; add an application domain later                               |
 | `--zone <domain>`                 | Cloudflare zone containing the application domain                                    |

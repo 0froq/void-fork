@@ -2,6 +2,7 @@ export {
   DEFAULT_PLATFORM_SESSION_SECONDS,
   GOOGLE_OIDC_ISSUER,
   PLATFORM_LOGIN_KINDS,
+  PLATFORM_AUTH_SETUP_PROOF_PREFIX,
   parsePlatformAccessProtection,
   parsePlatformAdmissionPolicy,
   parsePlatformAuthenticationSetup,

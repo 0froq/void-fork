@@ -1,4 +1,8 @@
-import { parsePlatformAuthenticationSetup, type PlatformAuthenticationSetup } from '@void/platform';
+import {
+  parsePlatformAuthenticationSetup,
+  PLATFORM_AUTH_SETUP_PROOF_PREFIX,
+  type PlatformAuthenticationSetup,
+} from '@void/platform';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { createOAuthAccount, createUser, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
@@ -25,7 +29,7 @@ import type { PlatformOidcIdentity } from './oidc.ts';
 import { hashLoginProof, randomLoginProof } from './proofs.ts';
 import { createHumanSession, type CompanyIdentity } from './sessions.ts';
 
-export const AUTH_SETUP_PROOF_PREFIX = 'void.platform.auth.setup.v1';
+export const AUTH_SETUP_PROOF_PREFIX = PLATFORM_AUTH_SETUP_PROOF_PREFIX;
 const SETUP_SECONDS = 30 * 60;
 
 export function requireUncachedAuthenticationDatabase(

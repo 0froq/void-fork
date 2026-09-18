@@ -4,17 +4,17 @@ outline: deep
 
 # Install a Void Platform
 
-A Void platform lets your team deploy apps into a shared Cloudflare account. As an administrator, you install and maintain the platform. Developers connect the Void CLI to its URL, sign in with GitHub, and deploy their apps.
+A Void platform lets your team deploy apps into a shared Cloudflare account. As an administrator, you install and maintain the platform. Developers connect the Void CLI to its URL, sign in through an enabled login method, and deploy their apps.
 
 If you're deploying an app for yourself, [deploy directly to Cloudflare](../integrations/cloudflare.md#deploy-to-your-own-cloudflare-account). You don't need to install a platform first.
 
-The core platform supports GitHub login, CLI deploys, D1, KV, R2, Queues, cron jobs, Workers AI, WebSockets, SSE, ISR, routing, logs, and rollback.
+The core platform supports GitHub, Google, generic OIDC, and Cloudflare Access login, CLI deploys, D1, KV, R2, Queues, cron jobs, Workers AI, WebSockets, SSE, ISR, routing, logs, and rollback.
 
-The user dashboard, GitHub builds and webhooks, build Containers, email, Google login, custom project domains, and sandbox orchestration aren't part of the core installation.
+The user dashboard, GitHub builds and webhooks, build Containers, email, custom project domains, and sandbox orchestration aren't part of the core installation.
 
 ## Before You Start {#prerequisites}
 
-Start with a Cloudflare account you can administer, a GitHub account, and an empty hosted PostgreSQL database. A domain is recommended. If yours is not ready, choose **Use workers.dev for testing** during installation and [add a domain later](#add-a-domain-later). The steps below explain how to get the credentials the installer asks for.
+Start with a Cloudflare account you can administer, an account with your chosen login provider, and an empty hosted PostgreSQL database. GitHub is the default and is optional when another method is selected. A domain is recommended. If yours is not ready, choose **Use workers.dev for testing** during installation and [add a domain later](#add-a-domain-later). The steps below explain how to get the credentials the installer asks for.
 
 Void creates the Workers, storage, queues, routing, and database tables through the CLI.
 
@@ -194,6 +194,54 @@ void platform install
 Use the same name, account, and domain as the preview, then confirm the installation plan. Void saves a local setup draft and opens the runtime-token page when that token is missing. Paste the token into the masked prompt. As you continue, it opens GitHub and R2 at their respective steps. Each page has a short checklist and a clickable fallback link in the terminal. Values already supplied through the environment or saved setup are reused without opening their pages again.
 
 ### Configure GitHub OAuth {#configure-github-oauth}
+
+The installer offers GitHub, Google, generic OIDC, and Cloudflare Access login.
+Cloudflare Access protection is a separate choice from Access login. The
+GitHub-only setup below retains the existing workflow.
+
+For Google, create an OAuth client and register the printed callback URL. You
+can restrict it to named Google Workspace domains. For OIDC or Access login,
+provide the issuer URL, client ID, and client secret. Select **Company-approved
+users** when the configured company policy should allow colleagues to create
+accounts automatically without individual invitations.
+
+When using the configurable setup, installation prints a one-time setup code
+and a `/setup` URL. Enter the code, authenticate with the chosen administrator
+method, and review the identity before confirming its administrator role. That
+method becomes enabled; additional selected methods are saved as pending
+configurations to test and enable in Settings. No GitHub account is required
+for a Google-only or OIDC-only installation.
+
+For scripts, pass `--auth-config <path>` with nonsecret configuration and
+environment-variable references for secrets. For example:
+
+```json
+{
+  "connections": [
+    {
+      "configuration": {
+        "id": "google",
+        "kind": "google",
+        "label": "Company Google",
+        "clientId": "your-google-client-id",
+        "allowedDomains": ["example.com"]
+      },
+      "clientSecretEnv": "GOOGLE_CLIENT_SECRET"
+    }
+  ],
+  "administratorConnectionId": "google",
+  "admission": {
+    "mode": "company",
+    "connections": ["google"],
+    "access": false
+  }
+}
+```
+
+`--plan` reads this configuration without requiring the referenced secret.
+Supply the secret through your secret manager when applying the installation.
+
+For the default GitHub-only setup:
 
 1. The installer opens [GitHub's new OAuth App form](https://github.com/settings/applications/new) when it needs OAuth credentials. Sign in as the account that will own the login integration.
 2. Set **Application name** to your platform's display name and **Homepage URL** to the API URL Void just printed.

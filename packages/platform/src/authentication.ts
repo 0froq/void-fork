@@ -100,6 +100,7 @@ export function parsePlatformAuthenticationSetup(value: unknown): PlatformAuthen
 
 export const DEFAULT_PLATFORM_SESSION_SECONDS: number = 30 * 24 * 60 * 60;
 export const GOOGLE_OIDC_ISSUER = 'https://accounts.google.com';
+export const PLATFORM_AUTH_SETUP_PROOF_PREFIX = 'void.platform.auth.setup.v1';
 
 function record(value: unknown, name: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -216,6 +217,20 @@ export function parsePlatformLoginConfiguration(value: unknown): PlatformLoginCo
     }
   } else {
     issuer = parsePlatformIdentityUrl(entry.issuer, 'OIDC issuer');
+    if (descriptor.kind === 'cloudflare-access') {
+      const url = new URL(issuer);
+      const prefix = '/cdn-cgi/access/sso/oidc/';
+      if (
+        !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(url.hostname) ||
+        url.port ||
+        !url.pathname.startsWith(prefix) ||
+        decodeURIComponent(url.pathname.slice(prefix.length).replace(/\/$/, '')) !== clientId
+      ) {
+        throw new Error(
+          'Cloudflare Access login requires its application issuer URL and matching client ID. Use generic OIDC for another issuer.',
+        );
+      }
+    }
   }
   return { ...descriptor, clientId, ...(issuer ? { issuer } : {}), allowedDomains, requiredGroups };
 }

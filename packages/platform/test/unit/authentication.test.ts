@@ -47,7 +47,11 @@ describe('platform authentication configuration', () => {
     ).toThrow('unique');
   });
   it('keeps Access login and Access protection independent', () => {
-    const login = parsePlatformLoginConfiguration({ ...company, kind: 'cloudflare-access' });
+    const login = parsePlatformLoginConfiguration({
+      ...company,
+      kind: 'cloudflare-access',
+      issuer: 'https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client',
+    });
     expect(login.kind).toBe('cloudflare-access');
     expect(parsePlatformAccessProtection(null)).toBeNull();
     expect(parsePlatformAccessProtection(protection)).toEqual(protection);

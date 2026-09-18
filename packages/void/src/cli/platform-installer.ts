@@ -37,6 +37,7 @@ import {
   transitionInstallation,
   type InstallationResource,
   type PlatformInstallationManifest,
+  parsePlatformAuthenticationSetup,
 } from '@void/platform';
 import { platformDatabaseSchemaDigest, resolvePlatformRuntime } from '@void/platform/installer';
 import type {
@@ -47,6 +48,7 @@ import type {
 } from '@void/platform/installer';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
+import { initializeInstalledPlatformAuthentication } from './platform-auth-bootstrap.ts';
 import { verifyPlatformAuthenticationDatabase } from './platform-auth-database.ts';
 import {
   hyperdriveOriginConfigHash,
@@ -83,6 +85,9 @@ import { createDefaultRunWrangler, resolvePinnedApiBaseUrl } from './provision.t
 export const REMOTE_INSTALLATION_MANIFEST_KEY: string = PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY;
 
 export type PlatformInstallationSecrets = Readonly<{
+  authenticationSetupJson?: string;
+  authSetupToken?: string;
+  authBootstrapCode?: string;
   bootstrapGitHubId: string;
   bootstrapGitHubLogin: string;
   cloudflareApiToken: string;
@@ -213,6 +218,7 @@ export class PlatformWorkerRecoveryIncompleteError extends Error {
 }
 
 export type PlatformInstallerDependencies = Readonly<{
+  initializeAuthentication?: typeof initializeInstalledPlatformAuthentication;
   acquireDatabaseLifecycleLock: (
     databaseUrl: string,
     installationId: string,
@@ -284,6 +290,9 @@ export function loadPlatformRuntime(customRuntimeDirectory: string): PlatformRun
 }
 
 export function createPlatformInstallationSecrets(input: {
+  authenticationSetupJson?: string;
+  authSetupToken?: string;
+  authBootstrapCode?: string;
   bootstrapGitHubId: string;
   bootstrapGitHubLogin: string;
   cloudflareApiToken: string;
@@ -316,6 +325,26 @@ export function createPlatformInstallationSecrets(input: {
   const restoredIdentity = (explicit: string, name: string): string =>
     existingInstallation ? checkpoint[name] || explicit || '' : explicit || checkpoint[name] || '';
   const configured = (explicit: string, name: string): string => explicit || checkpoint[name] || '';
+  const authenticationSetupJson = configured(
+    input.authenticationSetupJson ?? '',
+    'authenticationSetupJson',
+  );
+  const authSetupToken = configured(input.authSetupToken ?? '', 'authSetupToken');
+  const authBootstrapCode = configured(input.authBootstrapCode ?? '', 'authBootstrapCode');
+  if (authenticationSetupJson) {
+    const setup = parsePlatformAuthenticationSetup(JSON.parse(authenticationSetupJson));
+    if (
+      !existingInstallation &&
+      (authSetupToken.length < 32 ||
+        !/^[a-f0-9]{64}$/.test(authBootstrapCode) ||
+        createHash('sha256').update(authBootstrapCode).digest('hex') !==
+          setup.bootstrapCredentialHash)
+    ) {
+      throw new Error(
+        'platform: Valid installation setup authority and a matching administrator setup code are required.',
+      );
+    }
+  }
   const jwtSecret = restoredIdentity(input.jwtSecret || '', 'jwtSecret');
   const resolvedJwtSecret = input.existingInstallation
     ? jwtSecret
@@ -344,22 +373,27 @@ export function createPlatformInstallationSecrets(input: {
     R2_SECRET_ACCESS_KEY: input.r2SecretAccessKey,
   });
   return {
+    ...(authenticationSetupJson
+      ? { authenticationSetupJson, authSetupToken, authBootstrapCode }
+      : {}),
     workerSecretUpdates: input.updateExistingWorkers ? explicitWorkerSecretUpdates : {},
     pendingWorkerSecretUpdateIntent: input.updateExistingWorkers
       ? pendingWorkerSecretUpdateIntent
       : undefined,
-    bootstrapGitHubId: existingInstallation
-      ? configured(input.bootstrapGitHubId, 'bootstrapGitHubId')
-      : required(
-          configured(input.bootstrapGitHubId, 'bootstrapGitHubId'),
-          'resolved administrator GitHub account id',
-        ),
-    bootstrapGitHubLogin: existingInstallation
-      ? configured(input.bootstrapGitHubLogin, 'bootstrapGitHubLogin')
-      : required(
-          configured(input.bootstrapGitHubLogin, 'bootstrapGitHubLogin'),
-          'VOID_PLATFORM_ADMIN_GITHUB_LOGIN',
-        ),
+    bootstrapGitHubId:
+      existingInstallation || authenticationSetupJson
+        ? configured(input.bootstrapGitHubId, 'bootstrapGitHubId')
+        : required(
+            configured(input.bootstrapGitHubId, 'bootstrapGitHubId'),
+            'resolved administrator GitHub account id',
+          ),
+    bootstrapGitHubLogin:
+      existingInstallation || authenticationSetupJson
+        ? configured(input.bootstrapGitHubLogin, 'bootstrapGitHubLogin')
+        : required(
+            configured(input.bootstrapGitHubLogin, 'bootstrapGitHubLogin'),
+            'VOID_PLATFORM_ADMIN_GITHUB_LOGIN',
+          ),
     cloudflareApiToken: existingInstallation
       ? configured(input.cloudflareApiToken, 'cloudflareApiToken')
       : required(
@@ -367,18 +401,20 @@ export function createPlatformInstallationSecrets(input: {
           'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN',
         ),
     databaseUrl: required(input.databaseUrl || checkpoint.databaseUrl || '', 'DATABASE_URL'),
-    githubClientId: existingInstallation
-      ? configured(input.githubClientId, 'githubClientId')
-      : required(
-          configured(input.githubClientId, 'githubClientId'),
-          'VOID_PLATFORM_GITHUB_CLIENT_ID',
-        ),
-    githubClientSecret: existingInstallation
-      ? configured(input.githubClientSecret, 'githubClientSecret')
-      : required(
-          configured(input.githubClientSecret, 'githubClientSecret'),
-          'VOID_PLATFORM_GITHUB_CLIENT_SECRET',
-        ),
+    githubClientId:
+      existingInstallation || authenticationSetupJson
+        ? configured(input.githubClientId, 'githubClientId')
+        : required(
+            configured(input.githubClientId, 'githubClientId'),
+            'VOID_PLATFORM_GITHUB_CLIENT_ID',
+          ),
+    githubClientSecret:
+      existingInstallation || authenticationSetupJson
+        ? configured(input.githubClientSecret, 'githubClientSecret')
+        : required(
+            configured(input.githubClientSecret, 'githubClientSecret'),
+            'VOID_PLATFORM_GITHUB_CLIENT_SECRET',
+          ),
     jwtSecret: resolvedJwtSecret,
     projectSecretActiveKeyVersion: projectSecretKeyring.activeVersion,
     projectSecretKey: projectSecretKeyring.v1Key,
@@ -524,6 +560,13 @@ function secretCheckpoint(
   workerSecretUpdateIntent?: PlatformWorkerSecretUpdateIntent | null,
 ): Record<string, string> {
   return {
+    ...(secrets.authenticationSetupJson
+      ? {
+          authenticationSetupJson: secrets.authenticationSetupJson,
+          authSetupToken: secrets.authSetupToken ?? '',
+          authBootstrapCode: secrets.authBootstrapCode ?? '',
+        }
+      : {}),
     bootstrapGitHubId: secrets.bootstrapGitHubId,
     bootstrapGitHubLogin: secrets.bootstrapGitHubLogin,
     cloudflareApiToken: secrets.cloudflareApiToken,
@@ -630,6 +673,11 @@ export async function installPlatform(
   const resolvedRuntime = dependencies.runtime ?? resolvePlatformRuntime();
   const runtimeDirectory = resolvedRuntime.directory;
   const runtime = resolvedRuntime.manifest;
+  if (plan.deployment.authentication.configurable && runtime.authenticationProtocolVersion !== 1) {
+    throw new Error(
+      'platform: This runtime does not support configurable authentication. Upgrade Void or use a compatible runtime.',
+    );
+  }
   if (plan.deployment.application.workersDev && runtime.applicationRoutingVersion !== 1) {
     throw new Error(
       'platform: This runtime does not support workers.dev application routing. Use a current platform runtime.',
@@ -1085,7 +1133,7 @@ export async function installPlatform(
         {
           completedAt: now(),
           key: bootstrapStep,
-          resultHash: hash(secrets.bootstrapGitHubId),
+          resultHash: hash(secrets.authenticationSetupJson ?? secrets.bootstrapGitHubId),
         },
         now(),
       );
@@ -1495,8 +1543,40 @@ export async function installPlatform(
         zoneNameServers: zone?.nameServers ?? [],
       };
     }
+    const authenticationStep = secrets.authenticationSetupJson
+      ? 'authentication-initialized:v1:' + hash(secrets.authenticationSetupJson)
+      : '';
     manifest = transitionInstallation(manifest, 'verifying', now());
     writeInstallationManifest(manifest);
+    if (
+      plan.deployment.authentication.configurable &&
+      authenticationStep &&
+      !manifest.steps.some((step) => step.key === authenticationStep)
+    ) {
+      if (!secrets.authenticationSetupJson || !secrets.authSetupToken) {
+        throw new Error(
+          'platform: Restore the encrypted authentication setup checkpoint before resuming.',
+        );
+      }
+      dependencies.onProgress?.('Initializing platform authentication');
+      await (dependencies.initializeAuthentication ?? initializeInstalledPlatformAuthentication)(
+        plan.apiUrl,
+        manifest.id,
+        secrets.authSetupToken,
+        secrets.authenticationSetupJson,
+      );
+      manifest = recordInstallationStep(
+        manifest,
+        {
+          key: authenticationStep,
+          completedAt: now(),
+          resultHash: hash(secrets.authenticationSetupJson),
+        },
+        now(),
+      );
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+    }
     dependencies.onProgress?.('Verifying platform health');
     const healthCheckContext: PlatformHealthCheckContext = {
       accountName: plan.account.name,
@@ -2345,6 +2425,7 @@ export function apiWorkerSecrets(
     GITHUB_CLIENT_SECRET: secrets.githubClientSecret,
     JWT_SECRET: secrets.jwtSecret,
     PLATFORM_BOOTSTRAP_GITHUB_ID: secrets.bootstrapGitHubId,
+    PLATFORM_AUTH_SETUP_TOKEN: secrets.authSetupToken ?? '',
     ...(secrets.projectSecretKeysJson && secrets.projectSecretActiveKeyVersion
       ? {
           PROJECT_SECRET_ACTIVE_KEY_VERSION: secrets.projectSecretActiveKeyVersion,
@@ -2450,7 +2531,17 @@ export function assertRequiredPlatformSecrets(
       missing.add(name);
     }
   };
-  if (!manifest.steps.some((step) => step.key === 'bootstrap-access:v1')) {
+  if (
+    plan.deployment.authentication.configurable &&
+    !manifest.steps.some((step) => step.key.startsWith('authentication-initialized:v1:'))
+  ) {
+    requireSecret(secrets.authenticationSetupJson ?? '', 'authentication setup configuration');
+    requireSecret(secrets.authSetupToken ?? '', 'installation authentication setup authority');
+    requireSecret(secrets.authBootstrapCode ?? '', 'administrator setup code');
+  } else if (
+    !plan.deployment.authentication.configurable &&
+    !manifest.steps.some((step) => step.key === 'bootstrap-access:v1')
+  ) {
     requireSecret(secrets.bootstrapGitHubId, 'VOID_PLATFORM_ADMIN_GITHUB_ID');
     requireSecret(secrets.bootstrapGitHubLogin, 'VOID_PLATFORM_ADMIN_GITHUB_LOGIN');
   }
@@ -2461,8 +2552,10 @@ export function assertRequiredPlatformSecrets(
     )
   ) {
     requireSecret(secrets.cloudflareApiToken, 'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN');
-    requireSecret(secrets.githubClientId, 'VOID_PLATFORM_GITHUB_CLIENT_ID');
-    requireSecret(secrets.githubClientSecret, 'VOID_PLATFORM_GITHUB_CLIENT_SECRET');
+    if (!plan.deployment.authentication.configurable) {
+      requireSecret(secrets.githubClientId, 'VOID_PLATFORM_GITHUB_CLIENT_ID');
+      requireSecret(secrets.githubClientSecret, 'VOID_PLATFORM_GITHUB_CLIENT_SECRET');
+    }
     requireSecret(secrets.jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
     requireSecret(
       secrets.projectSecretKeysJson,

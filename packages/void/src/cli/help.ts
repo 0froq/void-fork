@@ -356,6 +356,11 @@ const HELP_TREE: HelpTree = {
         summary: 'Install or resume a Void platform with a domain, or workers.dev for testing.',
         usage: ['void platform install [options]'],
         options: [
+          {
+            command: '--auth-config <path>',
+            description:
+              'Read login methods and signup policy from nonsecret JSON with environment secret references',
+          },
           { command: '--name <slug>', description: 'Installation name' },
           {
             command: '--workers-dev',
