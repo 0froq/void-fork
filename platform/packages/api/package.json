@@ -30,6 +30,7 @@
     "hono": "catalog:platform",
     "jose": "6.2.12",
     "mime": "^4.1.0",
+    "oauth4webapi": "catalog:",
     "pg": "8.23.0"
   },
   "devDependencies": {
