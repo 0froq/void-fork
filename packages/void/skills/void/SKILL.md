@@ -44,17 +44,33 @@ manages your administrator session. Test a pending configuration before enabling
 it, explicitly link identities when switching methods, and verify a linked
 alternative before disabling a method. Disabling revokes its human sessions,
 including human tokens used in CI, while scoped deployment tokens remain valid.
+Create CI credentials with `void project token create`; they are bound to one
+project, expire within 90 days, and support explicit renewal and revocation.
+Cloudflare Access service credentials pass only the perimeter and never renew or
+elevate a human or operator token.
 For scripted configuration, use nonsecret JSON with `--file` and read secrets
 with `--client-secret-env`; never put client secrets in command arguments.
 Use `void platform config auth admission` to select company-approved automatic
 signup when the organization's identity policy already determines eligibility;
 individual invitations remain optional. The same controls are available under
 Settings in the administrator UI.
+Access login and platform protection are independent. The installer can create
+dedicated Access applications or connect existing ones, including a separate
+identity account. Protection setup verifies API/proxy coverage and uses scoped
+service credentials for installation and CI. Use `platform config auth protection`
+to show, enable, or disable protection; retain the company gate when probes fail.
+Users link another enabled method with `void auth link [connection-id]` after
+recent sign-in and explicit browser identity confirmation. For expired first-admin
+codes, resume installation or repair completed provisioning. Lost-provider recovery
+uses `platform config auth recover` with installation ownership, original recovery
+keys, an existing administrator ID, and a real provider login; never reopen signup.
 Operator credentials are separate from application deployment credentials and
 ignore repository platform selections. `VOID_OPERATOR_TOKEN` requires an
 explicit `VOID_API_URL` or `--connection`; credentials must never be written to
 project files. `signup open` allows public signup and `signup restrict` enforces
-the allowlist. Inspect `system events` and the target object after an ambiguous
+the allowlist. For OIDC identities without verified email, use `signup allow identity
+<connection-id> <subject>` and the exact `signup disallow` counterpart; never infer an
+email or link accounts. Inspect `system events` and the target object after an ambiguous
 mutation failure before retrying.
 
 Use `void connect` for deployment onboarding: no arguments offers Cloudflare or a Void platform, `--platform cloudflare` signs in and selects an account, and a platform URL verifies discovery and signs in with a supported provider. It preserves existing project links when connecting elsewhere. `--no-login` saves only verified Void connection metadata; authenticated headless connection requires a valid origin-scoped keychain session or `VOID_TOKEN` with matching `VOID_API_URL`. Platform installation and administration use `void platform`.

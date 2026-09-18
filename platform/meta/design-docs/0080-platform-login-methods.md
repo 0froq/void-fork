@@ -1,6 +1,6 @@
 ---
 title: Configurable Platform Login Methods
-status: proposed
+status: implemented
 created: 2026-09-18
 ---
 
@@ -65,7 +65,7 @@ identity-provider configuration or deployed platform changes are part of this ta
   restricted admission; never interpret an unrestricted social login as proof
   of employment. Automatically created accounts have the ordinary user role.
 
-## Current implementation and affected areas
+## Starting point and affected areas
 
 The deployment manifest and discovery document accept only `github | google`.
 Provider availability is derived from deployment-time capability flags; the core
@@ -353,6 +353,21 @@ on an otherwise unprotected alternate origin is not equivalent to Access policy
 enforcement or Access credential revocation. Preserve these invariants during
 upgrade, repair, rollback, and recovery.
 
+The optional source-built GitHub integration uses a dedicated exception that does
+not expose an alternate API origin. A standalone Worker accepts only
+`POST /github`, applies GitHub's 25 MB payload class as a hard body bound, verifies
+the raw GitHub HMAC, and forwards only `POST /internal/github-webhook` over an API
+service binding. It strips caller authorization, cookies, and Access headers and
+adds a purpose-separated five-minute HMAC over timestamp, GitHub delivery GUID,
+event, and body digest. The API exempts only that exact internal operation from
+its runtime Access assertion, independently verifies the ingress proof and raw
+GitHub signature, then reuses the existing idempotent, capability-gated webhook
+handler. The ingress secret is optional and distinct from platform management,
+JWT, Access, and GitHub webhook credentials. The core installer does not deploy
+or configure this optional Worker; source operators configure its private secrets,
+API binding, and isolated GitHub App webhook URL explicitly. Unprotected installs
+retain the direct `/webhooks/github` path.
+
 The feature is complete only after Access-login-only, Access-protection-only with
 GitHub automatic enrollment, and combined Access protection/login pass the relevant
 full matrix, including rejection tests, along with unchanged non-Access
@@ -544,3 +559,49 @@ and organization-specific identity details out of public repository documentatio
 Recheck exact Access provisioning API permissions, available plan limits, and the
 selected OIDC library's Workers support while implementing. These are verification
 tasks, not assumptions that deployment credentials or a paid service are required.
+
+## Reconciliation of the remaining implementation
+
+The core provider/session work was already committed when this branch was resumed.
+The completion work covers these previously unfinished paths:
+
+- Access installer create/connect flows, encrypted provisioning checkpoints and
+  resource inventory, independent protection-only/login-only selection, scoped
+  machine credentials, and disabled unprotected preview/alternate origins.
+- Post-install protection management through `platform config auth protection`,
+  with Cloudflare coverage verification, installation authority, lifecycle and
+  settings revision checks, human company proof, and session revocation.
+- Expired setup-code renewal during resume/repair and owner-authorized recovery
+  of an existing administrator after a real provider test. Recovery preserves
+  the required company gate and never creates an administrator or reopens signup.
+- Live authentication preservation and runtime compatibility checks during
+  lifecycle operations, including refusal of authentication-incompatible rollback.
+- Ordinary-user account linking in the CLI/dashboard, current dashboard login
+  discovery, scoped development/prerender Access credentials, and authoritative
+  revalidation of long-lived human proxy streams. API build-log clients poll
+  authenticated endpoints; internal BuildManager sockets are not public routes.
+- Exact connection-and-subject allowlisting for identities without verified
+  email, and owner-issued project deployment credentials with expiry, renewal,
+  revocation, and derived-prerender authority checks for protected CI.
+- An optional isolated GitHub webhook ingress for source-built managed-build
+  installations, preserving signature checks without opening the protected API.
+  This service remains outside the core installer's footprint.
+- Access-safe optional GitHub webhook delivery through the standalone source
+  ingress, with an exact service-binding operation and no external API bypass.
+
+Focused regression suites exercise the installer combinations, explicit linking
+and callback races, Access policy verification and ambiguous creation, recovery,
+revocation, scoped machine paths, and compatibility checks. The final repository
+workflow, packed-consumer checks, and four independent review results are recorded
+with the task handoff. Real provider sign-in and live Cloudflare provisioning are
+separate acceptance evidence: no live identity-provider or deployed-platform
+changes are authorized by this design task.
+
+Local verification completed on Node 24.21.0: `vpr test:all` passed 537 files
+and 10,544 tests, with 11 skipped. The full packed-consumer matrix passed for
+npm and pnpm across React, Vue, Svelte, and Solid, and the optional webhook
+Worker compiled in deployment dry-run mode. Four independent GPT-6 Astra high
+reviews were completed; GPT-5.6 Sol high fixes and follow-up reviews resolved
+all reported P1 findings. A shared browser-test readiness fix requires both
+islands on the two-island fixture, without changing production behavior or
+timeouts.

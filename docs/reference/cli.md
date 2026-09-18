@@ -166,7 +166,7 @@ In a non-interactive shell, supply a URL or explicit target. Cloudflare requires
 
 ### `void auth login`
 
-OAuth login. You choose GitHub or Google at the prompt, and the token is saved in the operating-system keychain, scoped to the platform origin. Login fails closed when no keychain is available instead of writing the token to a plaintext file; headless environments use `VOID_TOKEN` from their secret manager.
+Browser login through one of the platform's currently enabled methods. The token is saved in the operating-system keychain, scoped to the platform origin. Login fails closed when no keychain is available instead of writing the token to a plaintext file; headless environments use `VOID_TOKEN` from their secret manager.
 
 Set `VOID_API_URL` alongside `VOID_TOKEN` to identify the platform that issued it.
 A token without an API URL is only used for Void Cloud's production API; a saved
@@ -174,6 +174,13 @@ connection or project cannot forward it to another platform. To use a platform's
 saved login instead, unset `VOID_TOKEN`.
 
 This is optional if you already completed auth during `void connect` or the interactive `void init` flow.
+
+### `void auth link [connection-id]`
+
+Link another enabled login method to your current account. Sign in again if your
+session is no longer recent, complete the additional provider's browser login,
+and confirm the displayed identity. With no connection ID, choose an enabled
+method interactively. The optional dashboard exposes the same flow in **Account**.
 
 ### `void auth logout`
 
@@ -185,7 +192,11 @@ Prints your current login.
 
 ### `void auth token`
 
-Copies your auth token to the system clipboard. Useful for setting up CI secrets.
+Copies your human auth token to the system clipboard. It is intended for
+interactive troubleshooting and remains subject to login-method revocation. Do
+not combine it with a Cloudflare Access service token for CI; machine Access
+proof cannot turn a human Void token into an automation identity. Create a
+project-scoped credential with `void project token create` instead.
 
 ## Cloudflare authentication
 
@@ -218,6 +229,49 @@ Link current directory to an existing hosted Void project by slug, or select int
 ### `void project list`
 
 List all hosted projects (slug, mode, URL). For a saved Cloudflare target, this displays the current Worker's versions instead because there is no Void project registry.
+
+### `void project token <create|list|renew|revoke>`
+
+Manage revocable `aud: deploy` credentials for one Void platform project. The
+credential can only call the endpoints used by `void deploy`; it cannot access
+operator, account, secret-writing, project-deletion, or other projects' routes.
+
+```sh
+void project token create --name github-actions --expires-in 30
+void project token list
+void project token renew <credential-id> --expires-in 30
+void project token revoke <credential-id>
+```
+
+Pass `--project <name>` outside a linked project. Expiry is bounded to 1–90
+days. Create and renew display the bearer value once; replace the stored secret
+immediately after renewal because the previous credential is revoked in the
+same operation. Project deletion and owner suspension also stop its use. Login
+method disablement does not revoke these independent deploy credentials.
+
+Store the printed `VOID_TOKEN` and `VOID_API_URL` in the CI secret manager. The
+Access pair passes the perimeter; the scoped Void credential authorizes only
+this project's deploy workflow. When prerendering or remote proxy bindings are
+used on an Access-protected platform, store `VOID_ACCESS_CREDENTIALS` as an
+origin-keyed JSON secret containing both exact HTTPS origins, even if both use
+the same service-token pair:
+
+```json
+{
+  "https://void-company-api.example.workers.dev": {
+    "CF_ACCESS_CLIENT_ID": "<service-token client ID>",
+    "CF_ACCESS_CLIENT_SECRET": "<service-token client secret>"
+  },
+  "https://void-company-proxy.example.workers.dev": {
+    "CF_ACCESS_CLIENT_ID": "<service-token client ID>",
+    "CF_ACCESS_CLIENT_SECRET": "<service-token client secret>"
+  }
+}
+```
+
+`VOID_ACCESS_ORIGIN` scopes a pair to one origin, so selecting only the API
+origin is insufficient for a workflow that calls the proxy. Use distinct pairs
+in the two entries when the Access policies require them.
 
 ### `void project logs`
 
@@ -387,6 +441,10 @@ void platform config auth link company
 void platform config auth enable company
 void platform config auth disable github
 void platform config auth admission
+void platform config auth protection show
+void platform config auth protection enable --installation <id>
+void platform config auth protection disable --installation <id>
+void platform config auth recover company --installation <id> --file recovery.json
 ```
 
 When configuring an existing installation for the first time, run
@@ -414,7 +472,22 @@ Google Workspace method, or an enabled Cloudflare Access gate. In scripts,
 `admission --file <path> --yes` reads a policy such as
 `{"mode":"company","connections":["company"],"access":false}`.
 
-Browser login defaults to GitHub; Google is available when enabled on the platform. Login saves a one-hour administrator session in your system keychain. Logout revokes that session and removes its local credential.
+Browser login offers the platform's enabled methods; `--provider <connection-id>` selects one. Login saves a one-hour administrator session in your system keychain. Logout revokes that session and removes its local credential.
+
+`protection enable` creates or connects Cloudflare Access applications independently
+of login methods. Its `--file` accepts the `cloudflareAccess` object described in
+[installation setup](../guide/self-hosted-platform.md#configure-github-oauth).
+Protection changes require installation ownership, the saved recovery credentials,
+and a human administrator session. They revoke current human sessions. Before
+removing protection, change any signup rule that depends on that gate. Cloudflare
+applications are retained for deliberate cleanup.
+
+`recover <connection-id>` restores an existing administrator when normal login is
+unavailable. Its file contains `administratorUserId`, optional nonsecret provider
+`configuration`, and an `expectedIdentity` object with exact `issuer` and `subject`
+when using `--yes`. Recovery requires Cloudflare management/database authority,
+original recovery keys, and a successful browser provider test. Use
+`--client-secret-env <name>` for new or rotated credentials.
 
 `auth token` prints your current operator token. With `--token-stdin`, it exchanges a full administrator API login session from standard input for a new operator token. `auth login --token-stdin` saves the exchanged token to the keychain instead of printing it.
 
@@ -502,14 +575,24 @@ void platform signup open
 void platform signup restrict
 ```
 
-Add and remove entries by their type and pattern:
+Add and remove GitHub or email entries by their type and pattern:
 
 ```sh
 void platform signup allow <github|email> <pattern> [--note <text>]
+void platform signup disallow <github|email> <pattern>
 void platform signup remove <github|email> <pattern>
 ```
 
-GitHub entries match a login. Email entries match an address or a domain pattern such as `*@example.com`, across sign-in providers. Quote wildcard patterns in your shell. With restrictions enabled and an empty allowlist, nobody new can sign up.
+`remove` remains available as an alias for existing scripts. GitHub entries match a login. Email entries match an address or a domain pattern such as `*@example.com`, across sign-in providers. Quote wildcard patterns in your shell.
+
+For an OIDC identity that has no verified email, grant access using its configured connection ID and stable provider subject:
+
+```sh
+void platform signup allow identity <connection-id> <subject> [--note <text>]
+void platform signup disallow identity <connection-id> <subject>
+```
+
+Connection IDs are shown by `void platform config auth list`. Identity subjects match exactly and case-sensitively; wildcards, email inference, and account linking are not applied. The login method's domain or group restrictions must still pass, and a newly admitted account has the ordinary user role. With restrictions enabled and an empty allowlist, nobody new can sign up.
 
 #### Invitations {#operator-invitations}
 
@@ -580,7 +663,7 @@ Read-only plans, workers.dev installations with the default API hostname, and su
 
 The installed platform needs a separate runtime token to provision resources for apps. The interactive installer prompts for it and the other setup values. For non-interactive installs, inject the variables listed in [Install from CI](../guide/self-hosted-platform.md#install-from-ci).
 
-`--plan` prints the actual resource names, GitHub callback, and direct setup links without opening credential pages or saving a draft; Cloudflare browser login still opens if needed. New platform resources use `void-<name>-<role>` names without random suffixes. Existing installations keep their recorded names, and unowned name conflicts stop installation without overwriting resources. After you confirm an interactive install, Void opens each missing credential's setup page and shows a short permission/checklist fallback. The runtime-token link preselects all required account permissions, including Workers Tail, Hyperdrive, and AI Gateway when needed; domain installations must also select the indicated zone. Supplied credentials skip browser opening. Setup drafts pin Worker names and the GitHub callback and save partial credentials encrypted locally. Interactive installs list unfinished installations, including interrupted provisioning, or offer a new install. Entering an existing unfinished name asks to resume it; declining returns to name entry. Starting new leaves previous setup, credentials, and resources untouched. Completed platforms are not offered for resumption. `--resume` skips the choice and is required for non-interactive recovery.
+`--plan` prints the actual resource names, selected login methods, login callback, and direct setup links without opening credential pages or saving a draft; Cloudflare browser login still opens if needed. New platform resources use `void-<name>-<role>` names without random suffixes. Existing installations keep their recorded names, and unowned name conflicts stop installation without overwriting resources. After you confirm an interactive install, Void opens each missing credential's setup page and shows a short permission/checklist fallback. The runtime-token link preselects all required account permissions, including Workers Tail, Hyperdrive, and AI Gateway when needed; domain installations must also select the indicated zone. Supplied credentials skip browser opening. Setup drafts pin Worker names and the login callback and save partial credentials encrypted locally. Interactive installs list unfinished installations, including interrupted provisioning, or offer a new install. Entering an existing unfinished name asks to resume it; declining returns to name entry. Starting new leaves previous setup, credentials, and resources untouched. Completed platforms are not offered for resumption. `--resume` skips the choice and is required for non-interactive recovery.
 
 Use an empty PostgreSQL database dedicated to the installation. You can correct a failed initial connection, but after the database is claimed or Hyperdrive is provisioned, commands reject a different URL.
 
