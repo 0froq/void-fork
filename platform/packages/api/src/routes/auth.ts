@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
 import { handleAdminOAuthCallback, isAdminOAuthState } from '../admin/routes/login.ts';
+import { readAuthSettings } from '../auth/configuration.ts';
 import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from '../auth/github.ts';
 import {
   getGoogleAuthorizeUrl,
@@ -9,14 +10,18 @@ import {
 } from '../auth/google.ts';
 import { hmacSignState, hmacVerifyState } from '../auth/hmac.ts';
 import { signJwt } from '../auth/jwt.ts';
+import { verifyJwt } from '../auth/jwt.ts';
+import { startPlatformLogin, completePlatformLogin } from '../auth/login.ts';
 import {
   CLI_CODE_CHALLENGE_METHOD,
   createCodeChallenge,
   isValidCodeVerifier,
 } from '../auth/pkce.ts';
 import { updateUserRevokingInheritedDestinations } from '../auth/profile.ts';
+import { isAllowedRedirect, isLocalhostRedirect } from '../auth/redirects.ts';
+import { validateHumanSession } from '../auth/sessions.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
-import { DEFAULT_DASHBOARD_URL } from '../constants.ts';
+export { isAllowedRedirect, isLocalhostRedirect } from '../auth/redirects.ts';
 import {
   getUserByOAuthAccount,
   getUserByEmail,
@@ -47,44 +52,12 @@ const CLI_AUTH_CODE_TTL_SECONDS = 5 * 60;
 
 const app = new Hono<ApiEnv>();
 
-export function isAllowedRedirect(
-  url: string,
-  dashboardUrl?: string,
-  platformInstallationId?: string,
-): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-
-  // Localhost: allow any port, require exact hostname and http protocol
-  if (
-    parsed.protocol === 'http:' &&
-    (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
-  ) {
-    return true;
-  }
-
-  // Dashboard: compare exact origin (protocol + hostname + port)
-  const origin = dashboardUrl ?? (platformInstallationId ? null : DEFAULT_DASHBOARD_URL);
-  if (!origin) {
-    return false;
-  }
-  try {
-    return parsed.origin === new URL(origin).origin;
-  } catch {
-    return false;
-  }
-}
-
-export function isLocalhostRedirect(url: URL): boolean {
-  return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
-}
-
 // GET /auth/login?redirect=http://localhost:PORT/callback&provider=github|google
 app.get('/login', async (context) => {
+  const managed = await startPlatformLogin(context, 'login');
+  if (managed) {
+    return managed;
+  }
   const redirect = context.req.query('redirect');
   if (!redirect) {
     return context.json({ error: 'redirect parameter is required' }, 400);
@@ -214,9 +187,19 @@ app.get('/dev-login', async (context) => {
 app.get('/callback', async (context) => {
   const code = context.req.query('code');
   const state = context.req.query('state');
+  if (state?.startsWith('platform.')) {
+    return completePlatformLogin(context);
+  }
 
   if (!code || !state) {
     return context.json({ error: 'missing code or state' }, 400);
+  }
+
+  if (await readAuthSettings(context.get('db'))) {
+    return context.json(
+      { error: 'login_changed', message: 'Login settings changed. Start a new login.' },
+      409,
+    );
   }
 
   if (isAdminOAuthState(state)) {
@@ -484,7 +467,8 @@ app.post('/exchange', async (context) => {
 
   const db = context.get('db');
   const jwt = await consumeAuthCode(db, code);
-  if (!jwt) {
+  const payload = jwt ? await verifyJwt(jwt, context.env.JWT_SECRET, 'api') : null;
+  if (!payload || !(await validateHumanSession(db, payload, context.get('companyIdentity')))) {
     return context.json({ error: 'invalid or expired code' }, 400);
   }
 
@@ -517,7 +501,8 @@ app.post('/cli/token', async (context) => {
     CLI_CODE_CHALLENGE_METHOD,
   );
 
-  if (!jwt) {
+  const payload = jwt ? await verifyJwt(jwt, context.env.JWT_SECRET, 'api') : null;
+  if (!payload || !(await validateHumanSession(db, payload, context.get('companyIdentity')))) {
     return context.json({ error: 'invalid or expired code' }, 400);
   }
 
