@@ -18,6 +18,8 @@ export type JwtPayload = Readonly<{
    * or run). Absent on full `aud:'api'` tokens and legacy deploy tokens.
    */
   build?: string;
+  /** Revocable project automation credential record. */
+  credential?: string;
   /** Dedicated, revocable operator session; never accepted by application APIs. */
   jti?: string;
   operatorOrigin?: string;

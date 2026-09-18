@@ -118,13 +118,17 @@ describe('platform human session revocation', () => {
   it('checks session revocation in the proxy ownership authority', async () => {
     const session = await mint();
     const project = await createTestProject(env.db, admin.id, 'proxy-project');
-    const internalToken = await hmacSignState(project.id, env.JWT_SECRET);
+    const proxyOrigin = 'http://localhost';
+    const internalToken = await hmacSignState(
+      `void-proxy-owner-v2\n${project.id}\n${proxyOrigin}`,
+      env.JWT_SECRET,
+    );
     const proxyCheck = (jwt?: string) =>
       app.fetch(
         new Request(`http://localhost/internal/verify-owner/${project.id}`, {
           method: 'POST',
           headers: { 'X-Void-Internal': internalToken, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: admin.id, jwt }),
+          body: JSON.stringify({ userId: admin.id, jwt, proxyOrigin }),
         }),
         env,
       );

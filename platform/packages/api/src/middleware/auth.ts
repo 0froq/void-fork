@@ -1,9 +1,10 @@
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import type { MiddlewareHandler } from 'hono';
 import { verifyJwt } from '../auth/jwt.ts';
 import { validateHumanSession } from '../auth/sessions.ts';
 import { ACTIVE_BUILD_STATUSES, getBuild, getUser } from '../db.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
-import { users } from '../schema.ts';
+import { projectDeployCredentials, users } from '../schema.ts';
 import { isAdminSuspended } from '../suspension.ts';
 
 /**
@@ -121,6 +122,27 @@ export const authMiddleware: MiddlewareHandler<ApiEnv> = async (context, next) =
     // deploy. Undefined for legacy deploy tokens with no build claim — the
     // guard only fires when this is set.
     context.set('deployBuild', payload.build);
+    if (payload.credential) {
+      const credential = await context
+        .get('db')
+        .select({ id: projectDeployCredentials.id })
+        .from(projectDeployCredentials)
+        .where(
+          and(
+            eq(projectDeployCredentials.id, payload.credential),
+            eq(projectDeployCredentials.project_id, payload.project),
+            eq(projectDeployCredentials.issued_by, payload.sub),
+            isNull(projectDeployCredentials.revoked_at),
+            gt(projectDeployCredentials.expires_at, new Date().toISOString()),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0]);
+      if (!credential) {
+        return context.json({ error: 'deploy credential revoked or expired' }, 401);
+      }
+      context.set('deployCredential', payload.credential);
+    }
     // Default-deny: a deploy token may only reach the handful of endpoints the
     // real `void deploy` flow needs, and only for its own project. The
     // deploy.ts cross-project guard remains as defense-in-depth.

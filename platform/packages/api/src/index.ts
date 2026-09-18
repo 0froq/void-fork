@@ -83,6 +83,7 @@ import internalVerifyOwner from './routes/internal-verify-owner.ts';
 import internalVerifyPrerenderBuild from './routes/internal-verify-prerender-build.ts';
 import me from './routes/me.ts';
 import platformBootstrapRoutes from './routes/platform-bootstrap.ts';
+import projectTokens from './routes/project-tokens.ts';
 import projects from './routes/projects.ts';
 import revalidate from './routes/revalidate.ts';
 import secrets from './routes/secrets.ts';
@@ -352,6 +353,7 @@ const app = new Hono<ApiEnv>()
   .route('/me', me)
   .use('/projects/*', authMiddleware)
   .route('/projects', projects)
+  .route('/projects', projectTokens)
   .route('/projects', deploy)
   .route('/projects', deleteRoute)
   .route('/projects', revalidate)

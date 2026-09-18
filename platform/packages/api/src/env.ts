@@ -199,5 +199,11 @@ export type ApiEnv = Env & {
      * a stale runner can't deploy an older commit after being superseded.
      */
     deployBuild?: string;
+    /**
+     * Durable credential provenance already validated by `authMiddleware`.
+     * Set only for deploy tokens carrying a credential claim, after the
+     * credential's project, owner, revocation, and expiry checks pass.
+     */
+    deployCredential?: string;
   };
 };

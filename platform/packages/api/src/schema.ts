@@ -310,6 +310,34 @@ export const projects = pgTable(
   ],
 );
 
+// Revocable project-scoped credentials for headless CI. The bearer value is a
+// signed aud:deploy JWT; this row is the authoritative revocation and expiry
+// record checked on every request. Human login-provider lifecycle does not
+// revoke these independent deployment credentials.
+export const projectDeployCredentials = pgTable(
+  'project_deploy_credentials',
+  {
+    id: text('id').primaryKey(),
+    project_id: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    issued_by: text('issued_by')
+      .notNull()
+      .references(() => users.id),
+    name: text('name').notNull(),
+    expires_at: timestamp('expires_at', { mode: 'string', withTimezone: true }).notNull(),
+    revoked_at: timestamp('revoked_at', { mode: 'string', withTimezone: true }),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('project_deploy_credentials_project').on(table.project_id, table.created_at),
+    index('project_deploy_credentials_expiry').on(table.expires_at),
+    check('project_deploy_credentials_name', sql`length(${table.name}) BETWEEN 1 AND 80`),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // deployments
 // ---------------------------------------------------------------------------

@@ -260,6 +260,13 @@
       "when": 1789705129808,
       "tag": "0043_nostalgic_meggan",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1789719174762,
+      "tag": "0044_smart_mentor",
+      "breakpoints": true
     }
   ]
 }

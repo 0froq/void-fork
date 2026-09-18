@@ -16,7 +16,9 @@ const app = new Hono<ApiEnv>();
  * Authenticated via HMAC token in X-Void-Internal header.
  *
  * POST /internal/verify-owner/:projectId
- * Body: { "userId": "..." }
+ * Body: { "userId": "...", "proxyOrigin": "https://proxy.example.com", ... }
+ * The actual proxy origin is included in the HMAC and is also the audience used
+ * to verify a human Cloudflare Access assertion.
  * Returns: 200 { ok: true } or 403 { error: "forbidden" }
  */
 app.post('/:projectId', async (context) => {
@@ -26,15 +28,34 @@ app.post('/:projectId', async (context) => {
   if (!token) {
     return context.json({ error: 'missing internal auth' }, 401);
   }
-  if (!(await hmacVerifyState(projectId, token, context.env.JWT_SECRET))) {
-    return context.json({ error: 'invalid internal auth' }, 403);
-  }
 
-  const { userId, jwt, accessAssertion } = await context.req.json<{
+  const body = await context.req.json<{
     userId: string;
     jwt?: string;
     accessAssertion?: string;
+    proxyOrigin?: string;
   }>();
+  const proxyOrigin = body.proxyOrigin;
+  if (
+    typeof proxyOrigin !== 'string' ||
+    !proxyOrigin ||
+    (() => {
+      try {
+        return new URL(proxyOrigin).origin !== proxyOrigin;
+      } catch {
+        return true;
+      }
+    })()
+  ) {
+    return context.json({ error: 'proxyOrigin required' }, 400);
+  }
+
+  const signed = `void-proxy-owner-v2\n${projectId}\n${proxyOrigin}`;
+  if (!(await hmacVerifyState(signed, token, context.env.JWT_SECRET))) {
+    return context.json({ error: 'invalid internal auth' }, 403);
+  }
+
+  const { userId, jwt, accessAssertion } = body;
   if (typeof userId !== 'string' || !userId) {
     return context.json({ error: 'userId required' }, 400);
   }
@@ -45,12 +66,9 @@ app.post('/:projectId', async (context) => {
   const settings = await readAuthSettings(context.get('db'));
   let companyIdentity;
   if (settings?.protection) {
-    if (!context.env.PROXY_URL) {
-      return context.json({ error: 'proxy protection is not configured' }, 503);
-    }
     try {
       const identity = await platformAccessVerifier.verify(
-        context.env.PROXY_URL,
+        proxyOrigin,
         accessAssertion,
         settings.protection,
       );

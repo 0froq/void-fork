@@ -264,8 +264,8 @@ if (helpPath) {
     },
     {
       name: 'project',
-      hint: 'status | link | list | logs | requests | rollback | cancel | delete | purge-cache',
-      description: 'Manage projects and deployments',
+      hint: 'status | link | list | token | logs | requests | rollback | cancel | delete | purge-cache',
+      description: 'Manage projects, deployments, and scoped CI credentials',
     },
     { name: 'secret', hint: 'list | put | delete | sync', description: 'Manage project secrets' },
     {

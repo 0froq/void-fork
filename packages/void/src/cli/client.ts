@@ -117,6 +117,18 @@ export type ProjectResponse = {
   custom_domain: string | null;
 };
 
+export type ProjectDeployCredentialResponse = {
+  id: string;
+  name: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+};
+
+export type IssuedProjectDeployCredentialResponse = ProjectDeployCredentialResponse & {
+  token: string;
+};
+
 export type CreateProjectResponse = {
   url?: string;
   id: string;
@@ -565,6 +577,61 @@ export class PlatformClient {
       await throwPlatformApiError('Failed to list projects', res);
     }
 
+    return res.json();
+  }
+
+  async listProjectTokens(projectId: string): Promise<Array<ProjectDeployCredentialResponse>> {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/tokens`, {
+      headers: { ...this.authHeaders },
+    });
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to list project tokens', res);
+    }
+    return res.json();
+  }
+
+  async createProjectToken(
+    projectId: string,
+    input: { name?: string; expiresInDays?: number },
+  ): Promise<IssuedProjectDeployCredentialResponse> {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/tokens`, {
+      method: 'POST',
+      headers: { ...this.authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to create project token', res);
+    }
+    return res.json();
+  }
+
+  async renewProjectToken(
+    projectId: string,
+    credentialId: string,
+    expiresInDays?: number,
+  ): Promise<IssuedProjectDeployCredentialResponse> {
+    const res = await this.request(
+      `${this.baseUrl}/projects/${projectId}/tokens/${encodeURIComponent(credentialId)}/renew`,
+      {
+        method: 'POST',
+        headers: { ...this.authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify(expiresInDays ? { expiresInDays } : {}),
+      },
+    );
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to renew project token', res);
+    }
+    return res.json();
+  }
+
+  async revokeProjectToken(projectId: string, credentialId: string): Promise<{ ok: boolean }> {
+    const res = await this.request(
+      `${this.baseUrl}/projects/${projectId}/tokens/${encodeURIComponent(credentialId)}`,
+      { method: 'DELETE', headers: { ...this.authHeaders } },
+    );
+    if (!res.ok) {
+      await throwPlatformApiError('Failed to revoke project token', res);
+    }
     return res.json();
   }
 

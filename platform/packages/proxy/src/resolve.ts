@@ -56,9 +56,13 @@ export async function verifyProjectOwner(
   userId: string,
   jwt?: string,
   accessAssertion?: string,
+  proxyOrigin?: string,
 ): Promise<boolean> {
   try {
-    const token = await hmacSign(projectId, jwtSecret);
+    if (!proxyOrigin || new URL(proxyOrigin).origin !== proxyOrigin) {
+      return false;
+    }
+    const token = await hmacSign(ownerVerificationMessage(projectId, proxyOrigin), jwtSecret);
     const res = await api.fetch(`https://api/internal/verify-owner/${projectId}`, {
       method: 'POST',
       headers: {
@@ -69,6 +73,7 @@ export async function verifyProjectOwner(
         userId,
         ...(jwt ? { jwt } : {}),
         ...(accessAssertion ? { accessAssertion } : {}),
+        proxyOrigin,
       }),
     });
     return res.ok;
@@ -77,12 +82,17 @@ export async function verifyProjectOwner(
   }
 }
 
-/** Check that a build-bound prerender credential is still in flight. */
-export async function verifyPrerenderBuild(
+export function ownerVerificationMessage(projectId: string, proxyOrigin: string): string {
+  return `void-proxy-owner-v2\n${projectId}\n${proxyOrigin}`;
+}
+
+/** Revalidate the authority from which a scoped prerender credential was derived. */
+export async function verifyPrerenderAuthority(
   api: Fetcher,
   jwtSecret: string,
   projectId: string,
-  buildId: string,
+  userId: string,
+  provenance: { buildId?: string; credentialId?: string },
 ): Promise<boolean> {
   try {
     const token = await hmacSign(projectId, jwtSecret);
@@ -92,7 +102,7 @@ export async function verifyPrerenderBuild(
         'content-type': 'application/json',
         'x-void-internal': token,
       },
-      body: JSON.stringify({ buildId }),
+      body: JSON.stringify({ userId, ...provenance }),
     });
     return res.ok;
   } catch {
