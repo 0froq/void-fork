@@ -72,6 +72,7 @@ export default defineConfig({
   pack: {
     entry: [
       'src/index.ts',
+      'src/prerender-render.ts',
       'src/database-provider.ts',
       'src/edge.ts',
       'src/runtime/handler.ts',

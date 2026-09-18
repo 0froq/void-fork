@@ -15,13 +15,18 @@ import { ensurePlatformProxyAccess } from './cli/cf-access.ts';
 import { ensureWranglerCompat } from './cli/wrangler.ts';
 import { readConfig } from './config.ts';
 import { voidLog, voidWarn } from './log.ts';
+import { renderPrerenderPaths, type PrerenderResult } from './prerender-render.ts';
+export type { PrerenderResult } from './prerender-render.ts';
 import { scopedAccessCredentials } from './shared/cf-access.ts';
 import { stripInternalEnvKeys } from './shared/env.ts';
 import { DEFAULT_PROXY_URL, STAGING_PROXY_URL } from './shared/proxy.ts';
 import { buildEnv } from './shared/untrusted-env.ts';
 
 const PRERENDER_PATHS_ENDPOINT = '/__void/prerender-paths';
-const STATIC_PAGE_DATA_DIR = '_void/pages';
+const nodeRendererUrl = new URL(
+  import.meta.url.endsWith('.ts') ? './prerender-render.ts' : './prerender-render.mjs',
+  import.meta.url,
+).href;
 
 type PrerenderWorkerModuleType = 'ESModule' | 'CommonJS' | 'CompiledWasm' | 'Text' | 'Data';
 
@@ -31,23 +36,12 @@ export type PrerenderWorkerModule = {
   contents: string | Uint8Array;
 };
 
-export type PrerenderResult = {
-  rendered: Array<string>;
-  failed: Array<{ path: string; error: string }>;
-};
-
 export type PrerenderRunResult = PrerenderResult & {
   paths: Array<string>;
 };
 
 function outputFileForPath(path: string): string {
   return path === '/' ? 'index.html' : `${path.slice(1)}.html`;
-}
-
-function pageDataFileForPath(path: string): string {
-  return path === '/'
-    ? `${STATIC_PAGE_DATA_DIR}/index.json`
-    : `${STATIC_PAGE_DATA_DIR}/${path.slice(1)}.json`;
 }
 
 async function readPrerenderPathsResponse(response: Response): Promise<Array<string>> {
@@ -61,53 +55,6 @@ async function readPrerenderPathsResponse(response: Response): Promise<Array<str
   }
 
   return payload.paths;
-}
-
-async function renderPrerenderPaths(
-  paths: Array<string>,
-  clientDir: string,
-  fetchPath: (path: string) => Promise<Response>,
-  fetchPageData?: (path: string) => Promise<Response>,
-): Promise<PrerenderResult> {
-  const result: PrerenderResult = { rendered: [], failed: [] };
-
-  for (const path of paths) {
-    try {
-      const response = await fetchPath(path);
-      const html = await response.text();
-
-      if (!response.ok) {
-        result.failed.push({ path, error: `HTTP ${response.status}` });
-        voidWarn(`prerender ${path} failed: HTTP ${response.status}`);
-        continue;
-      }
-
-      const outputFile = outputFileForPath(path);
-      const outputPath = join(clientDir, outputFile);
-      mkdirSync(dirname(outputPath), { recursive: true });
-      writeFileSync(outputPath, html);
-
-      if (fetchPageData) {
-        const pageDataResponse = await fetchPageData(path);
-        if (pageDataResponse.headers.get('X-VoidPages')) {
-          const pageData = await pageDataResponse.json();
-          const pageDataFile = pageDataFileForPath(path);
-          const pageDataPath = join(clientDir, pageDataFile);
-          mkdirSync(dirname(pageDataPath), { recursive: true });
-          writeFileSync(pageDataPath, JSON.stringify(pageData));
-        }
-      }
-
-      result.rendered.push(path);
-      voidLog(`prerender \x1b[36m${outputFile}\x1b[39m`);
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      result.failed.push({ path, error });
-      voidWarn(`prerender ${path} failed: ${error}`);
-    }
-  }
-
-  return result;
 }
 
 function normalizeWorkerModulePath(path: string): string {
@@ -463,6 +410,13 @@ export async function prerenderPages(options: {
       options.clientDir,
       (path) => runner.fetchPath(path),
       (path) => runner.fetchPageData(path),
+      (path, outputFile, error) => {
+        if (error !== undefined) {
+          voidWarn(`prerender ${path} failed: ${error}`);
+        } else {
+          voidLog(`prerender \x1b[36m${outputFile}\x1b[39m`);
+        }
+      },
     );
     return { paths, ...result };
   } finally {
@@ -482,7 +436,7 @@ async function runNodePrerenderRunner<T>(root: string, config: NodeRunnerConfig)
     `
 import { pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { renderPrerenderPaths } from ${JSON.stringify(nodeRendererUrl)};
 
 const config = JSON.parse(process.argv[2]);
 const { mode, ssrDir, clientDir } = config;
@@ -513,37 +467,13 @@ async function collectPaths() {
 
 async function renderPaths(paths) {
   if (!clientDir) return { rendered: [], failed: [] };
-  const result = { rendered: [], failed: [] };
-
-  for (const path of paths) {
-    try {
-      const response = await fetch(new Request("http://localhost" + path));
-      const html = await response.text();
-      if (!response.ok) {
-        result.failed.push({ path, error: "HTTP " + response.status });
-        continue;
-      }
-      const outputFile = path === "/" ? "index.html" : path.slice(1) + ".html";
-      const outputPath = join(clientDir, outputFile);
-      mkdirSync(dirname(outputPath), { recursive: true });
-      writeFileSync(outputPath, html);
-      const pageDataResponse = await fetch(new Request("http://localhost" + path, {
-        headers: { "Accept": "application/json", "Purpose": "prefetch", "X-VoidPages": "true" },
-      }));
-      if (pageDataResponse.headers.get("X-VoidPages")) {
-        const pageData = await pageDataResponse.json();
-        const pageDataFile = path === "/" ? "_void/pages/index.json" : "_void/pages/" + path.slice(1) + ".json";
-        const pageDataPath = join(clientDir, pageDataFile);
-        mkdirSync(dirname(pageDataPath), { recursive: true });
-        writeFileSync(pageDataPath, JSON.stringify(pageData));
-      }
-      result.rendered.push(path);
-    } catch (err) {
-      result.failed.push({ path, error: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  return result;
+  return renderPrerenderPaths(
+    paths, clientDir,
+    (path) => fetch(new Request("http://localhost" + path)),
+    (path) => fetch(new Request("http://localhost" + path, {
+      headers: { "Accept": "application/json", "Purpose": "prefetch", "X-VoidPages": "true" },
+    })),
+  );
 }
 
 if (mode === "collect") {

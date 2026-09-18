@@ -162,6 +162,35 @@ try {
     });
   }
   const uploaderStats = treeStats(dirname(wrangler));
+  if (selected('prerender')) {
+    const { prerenderPagesNode } = await import(
+      pathToFileURL(join(root, 'packages/void/src/prerender.ts')).href
+    );
+    const ssrDir = join(scratch, 'render-ssr');
+    const clientDir = join(scratch, 'render-client');
+    mkdirSync(ssrDir);
+    writeFileSync(
+      join(ssrDir, 'app.js'),
+      `
+      const paths = Array.from({ length: 36 }, (_, i) => '/page-' + i);
+      export default { async fetch(request) {
+        const path = new URL(request.url).pathname;
+        if (path === '/__void/prerender-paths') return Response.json({ paths });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return request.headers.has('X-VoidPages')
+          ? Response.json({ path }, { headers: { 'X-VoidPages': 'true' } })
+          : new Response('<h1>' + path + '</h1>');
+      } };
+    `,
+    );
+    await measure('prerender-36-pages-10ms-io', 5, async () => {
+      const result = await prerenderPagesNode({ root: scratch, ssrDir, clientDir });
+      if (result.rendered.length !== 36 || result.failed.length) {
+        throw new Error('Prerender benchmark failed');
+      }
+      return { pages: result.rendered.length, delayPerRequestMs: 10 };
+    });
+  }
   if (selected('asset-reuse')) {
     const { findMissingR2Assets } = await import(
       pathToFileURL(join(root, 'platform/packages/api/src/asset-inventory.ts')).href
