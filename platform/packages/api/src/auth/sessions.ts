@@ -14,9 +14,9 @@ import {
   readAuthSettings,
   readLoginConnection,
 } from './configuration.ts';
+import type { CompanyIdentity } from './identity-types.ts';
 import { signJwt, type JwtPayload } from './jwt.ts';
-
-export type CompanyIdentity = Readonly<{ issuer: string; subject: string }>;
+export type { CompanyIdentity } from './identity-types.ts';
 export type PlatformHumanSession = typeof platformHumanSessions.$inferSelect;
 
 /** Called only after authenticating and linking the external identity. */

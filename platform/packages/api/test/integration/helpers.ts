@@ -58,6 +58,7 @@ export type TestEnv = {
   CF_ACCOUNT_ID: string;
   CF_ZONE_ID: string;
   JWT_SECRET: string;
+  PLATFORM_AUTH_DATABASE_UNCACHED: string;
   PROJECT_SECRET_KEYS_JSON: string;
   PROJECT_SECRET_ACTIVE_KEY_VERSION: string;
   R2_ACCESS_KEY_ID: string;
@@ -429,6 +430,7 @@ export async function setupEnv(): Promise<TestEnv> {
     CF_ACCOUNT_ID,
     CF_ZONE_ID,
     JWT_SECRET,
+    PLATFORM_AUTH_DATABASE_UNCACHED: 'true',
     PROJECT_SECRET_KEYS_JSON,
     PROJECT_SECRET_ACTIVE_KEY_VERSION,
     R2_ACCESS_KEY_ID: 'test-r2-access-key-id',

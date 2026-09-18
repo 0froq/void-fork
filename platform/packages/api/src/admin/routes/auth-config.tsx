@@ -7,6 +7,7 @@ import { and, eq, gt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { deleteCookie } from 'hono/cookie';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { requireUncachedAuthenticationDatabase } from '../../auth/bootstrap.ts';
 import {
   AuthenticationConfigurationError,
   importLegacyAuthentication,
@@ -375,6 +376,7 @@ app.get('/connections/:id', async (context) => {
 });
 app.post('/initialize', async (context) =>
   executeAuditedMutation(context, operatorAuditIntent('config/auth/initialize'), async () => {
+    requireUncachedAuthenticationDatabase(context.env);
     await importLegacyAuthentication(context.get('db'), context.env);
     deleteCookie(context, 'admin_token', { path: '/' });
     return { response: context.redirect('/admin/login'), succeeded: true };

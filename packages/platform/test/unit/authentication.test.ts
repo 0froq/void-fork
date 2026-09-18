@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
   parsePlatformAccessProtection,
+  parsePlatformAuthenticationSetup,
   parsePlatformAdmissionPolicy,
   parsePlatformLoginConfiguration,
   parsePlatformLoginDescriptor,
@@ -21,6 +22,30 @@ const protection = {
 };
 
 describe('platform authentication configuration', () => {
+  it('validates bootstrap authority and preserves opaque client secrets', () => {
+    const input = {
+      connections: [{ configuration: company, clientSecret: ' opaque-secret ' }],
+      administratorConnectionId: 'company',
+      bootstrapCredentialHash: 'a'.repeat(64),
+      admission: { mode: 'restricted' },
+      protection: null,
+    };
+    expect(parsePlatformAuthenticationSetup(input).connections[0]?.clientSecret).toBe(
+      ' opaque-secret ',
+    );
+    expect(() =>
+      parsePlatformAuthenticationSetup({ ...input, bootstrapCredentialHash: 'short' }),
+    ).toThrow('SHA-256');
+    expect(() =>
+      parsePlatformAuthenticationSetup({ ...input, administratorConnectionId: 'missing' }),
+    ).toThrow('included');
+    expect(() =>
+      parsePlatformAuthenticationSetup({
+        ...input,
+        connections: [...input.connections, ...input.connections],
+      }),
+    ).toThrow('unique');
+  });
   it('keeps Access login and Access protection independent', () => {
     const login = parsePlatformLoginConfiguration({ ...company, kind: 'cloudflare-access' });
     expect(login.kind).toBe('cloudflare-access');

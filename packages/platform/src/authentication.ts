@@ -37,6 +37,67 @@ export type PlatformAdmissionPolicy =
       access: boolean;
     }>;
 
+export type PlatformAuthenticationSetup = Readonly<{
+  connections: ReadonlyArray<
+    Readonly<{ configuration: PlatformLoginConfiguration; clientSecret: string }>
+  >;
+  administratorConnectionId: string;
+  bootstrapCredentialHash: string;
+  admission: PlatformAdmissionPolicy;
+  protection: PlatformAccessProtection | null;
+  resetPending?: boolean;
+}>;
+
+export function parsePlatformAuthenticationSetup(value: unknown): PlatformAuthenticationSetup {
+  const input = record(value, 'Authentication setup');
+  if (
+    !Array.isArray(input.connections) ||
+    input.connections.length === 0 ||
+    input.connections.length > 32
+  ) {
+    throw new Error('Authentication setup requires between 1 and 32 connections.');
+  }
+  const connections = input.connections.map((value) => {
+    const entry = record(value, 'Login connection');
+    string(entry.clientSecret, 'Client secret', 8192);
+    return {
+      configuration: parsePlatformLoginConfiguration(entry.configuration),
+      clientSecret: entry.clientSecret as string,
+    };
+  });
+  if (new Set(connections.map((entry) => entry.configuration.id)).size !== connections.length) {
+    throw new Error('Authentication setup connection IDs must be unique.');
+  }
+  const administratorConnectionId = parsePlatformLoginId(input.administratorConnectionId);
+  if (!connections.some((entry) => entry.configuration.id === administratorConnectionId)) {
+    throw new Error('The administrator login method must be included in setup.');
+  }
+  if (
+    typeof input.bootstrapCredentialHash !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(input.bootstrapCredentialHash)
+  ) {
+    throw new Error('A SHA-256 bootstrap credential hash is required.');
+  }
+  const admission = parsePlatformAdmissionPolicy(input.admission);
+  const protection = parsePlatformAccessProtection(input.protection ?? null);
+  validatePlatformAdmissionPolicy(
+    admission,
+    connections.map((entry) => entry.configuration),
+    protection,
+  );
+  if (input.resetPending !== undefined && typeof input.resetPending !== 'boolean') {
+    throw new Error('resetPending must be a boolean.');
+  }
+  return {
+    connections,
+    administratorConnectionId,
+    bootstrapCredentialHash: input.bootstrapCredentialHash,
+    admission,
+    protection,
+    ...(input.resetPending === true ? { resetPending: true } : {}),
+  };
+}
+
 export const DEFAULT_PLATFORM_SESSION_SECONDS: number = 30 * 24 * 60 * 60;
 export const GOOGLE_OIDC_ISSUER = 'https://accounts.google.com';
 

@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie, deleteCookie } from 'hono/cookie';
+import { pendingAuthenticationSetup } from '../../auth/bootstrap.ts';
 import { readAuthSettings, readEnabledLoginConnections } from '../../auth/configuration.ts';
 import { getGitHubAuthorizeUrl, exchangeCodeForToken, getGitHubUser } from '../../auth/github.ts';
 import {
@@ -42,6 +43,9 @@ export function isAdminOAuthState(state: string): boolean {
 
 // GET /login
 app.get('/login', async (context) => {
+  if (await pendingAuthenticationSetup(context.get('db'))) {
+    return context.redirect('/setup');
+  }
   const capabilities = getPlatformCapabilities(context.env);
   const configured = await readAuthSettings(context.get('db'));
   const providers = configured

@@ -72,6 +72,10 @@ export type ApiEnv = Env & {
     CF_ACCESS_CLIENT_SECRET_STAGING?: string;
     GOOGLE_CLIENT_ID: string;
     GOOGLE_CLIENT_SECRET: string;
+    /** Installation-only capability; never shared with health probes or tenant Workers. */
+    PLATFORM_AUTH_SETUP_TOKEN?: string;
+    /** Installer attestation after verifying the dedicated Hyperdrive cache is disabled. */
+    PLATFORM_AUTH_DATABASE_UNCACHED?: string;
     AUTH_REDIRECT_URI?: string;
     DEV_AUTH_BYPASS?: string;
     DISPATCH_NAMESPACE?: string;

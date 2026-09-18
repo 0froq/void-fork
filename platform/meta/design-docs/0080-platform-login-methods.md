@@ -243,7 +243,7 @@ Remove the first-admin GitHub dependency using an installation-bound bootstrap:
 2. The administrator authenticates through a selected connection and proves
    possession of that credential using a POST/browser-bound ceremony. Keep it out
    of query strings, history, referrers, and server logs.
-3. Show the authenticated identity in the installer for confirmation before
+3. Show the authenticated identity on the setup browser page for confirmation before
    consuming the setup claim and granting the first admin role atomically.
 4. Bind the ceremony to the installation, selected connection/revision, and browser.
    Serialize concurrent first-admin attempts. An ordinary first visitor gets no role.
@@ -253,6 +253,13 @@ finish provisioning with setup pending, returning a secure completion step.
 Provisioning complete and administrator setup complete must be separate statuses.
 Existing interrupted installations retain their pinned GitHub bootstrap until
 explicitly migrated; a timeout must not reopen unrestricted first-user signup.
+
+For new installations using configurable authentication, the chosen administrator
+method becomes enabled after that confirmation. Other selected methods remain
+configured and pending; the administrator tests and enables them in Settings.
+Bootstrap initialization uses its own installation-only setup capability, never
+the health-probe credential, and stops accepting configuration replacement once
+the first administrator has been created.
 
 ## 4. Installation experience and Cloudflare Access setup
 

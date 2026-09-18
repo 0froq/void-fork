@@ -20,6 +20,7 @@ import adminProjects from './admin/routes/projects.tsx';
 import adminSignupControl from './admin/routes/signup-control.tsx';
 import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
 import adminUsers from './admin/routes/users.tsx';
+import { pendingAuthenticationSetup } from './auth/bootstrap.ts';
 import { readAuthSettings, readEnabledLoginConnections } from './auth/configuration.ts';
 import { BuildManager, BuildManagerLarge } from './build-manager.ts';
 import { BuildScheduler } from './build-scheduler.ts';
@@ -81,6 +82,7 @@ import internalRevalidate from './routes/internal-revalidate.ts';
 import internalVerifyOwner from './routes/internal-verify-owner.ts';
 import internalVerifyPrerenderBuild from './routes/internal-verify-prerender-build.ts';
 import me from './routes/me.ts';
+import platformBootstrapRoutes from './routes/platform-bootstrap.ts';
 import projects from './routes/projects.ts';
 import revalidate from './routes/revalidate.ts';
 import secrets from './routes/secrets.ts';
@@ -150,7 +152,13 @@ const app = new Hono<ApiEnv>()
     const maintenanceSandboxDrain =
       context.env.PLATFORM_TRAFFIC_STATE === 'sandbox-drain' &&
       isSandboxDrainMaintenanceRequest(context.req.raw);
+    const authenticationSetup =
+      context.env.PLATFORM_AUTH_SETUP_TOKEN &&
+      context.req.header('X-Void-Auth-Setup') &&
+      context.req.method === 'POST' &&
+      context.req.path === '/internal/platform/auth-initialize';
     if (
+      !authenticationSetup &&
       !installerProbe &&
       !maintenanceSandboxDrain &&
       (context.env.PLATFORM_TRAFFIC_STATE === 'staging' ||
@@ -208,6 +216,7 @@ const app = new Hono<ApiEnv>()
   .get('/.well-known/void-platform', async (context) => {
     context.header('Cache-Control', 'no-store');
     const settings = await readAuthSettings(context.get('db'));
+    const setupPending = settings && !!(await pendingAuthenticationSetup(context.get('db')));
     const methods = settings
       ? (await readEnabledLoginConnections(context.get('db'))).map(({ configuration }) => ({
           id: configuration.id,
@@ -236,7 +245,13 @@ const app = new Hono<ApiEnv>()
           ...(capabilities.googleOAuth ? (['google'] as const) : []),
         ],
         ...(methods
-          ? { authentication: { methods, protectedByAccess: !!settings?.protection } }
+          ? {
+              authentication: {
+                methods,
+                protectedByAccess: !!settings?.protection,
+                ...(setupPending ? { setupPending: true } : {}),
+              },
+            }
           : {}),
         capabilities,
         displayName: context.env.PLATFORM_DISPLAY_NAME ?? 'Void Cloud',
@@ -312,6 +327,7 @@ const app = new Hono<ApiEnv>()
 </div>
 </body></html>`);
   })
+  .route('/', platformBootstrapRoutes)
   .route('/auth', auth)
   .route('/auth', oidcRoutes)
   .route('/internal/revalidate', internalRevalidate)

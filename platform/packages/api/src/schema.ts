@@ -19,6 +19,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import type { PlatformWorkerName, PlatformEnv } from './admin/platform-workers.ts';
+import type { PlatformOidcIdentity, CompanyIdentity } from './auth/identity-types.ts';
 import type { PlanId } from './tiers.ts';
 import type { InvitationStatus } from './types.ts';
 
@@ -78,7 +79,9 @@ export const platformAuthSettings = pgTable(
     protection: jsonb('protection').$type<PlatformAccessProtection>(),
     session_seconds: integer('session_seconds').notNull().default(2592000),
     sessions_required: boolean('sessions_required').notNull().default(false),
-    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [
     check('platform_auth_settings_singleton', sql`${table.singleton} = true`),
@@ -99,7 +102,9 @@ export const platformLoginConnections = pgTable(
     active_revision: integer('active_revision'),
     revision: integer('revision').notNull().default(1),
     generation: integer('generation').notNull().default(1),
-    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [
     check(
@@ -133,7 +138,9 @@ export const platformLoginRevisions = pgTable(
     secret: jsonb('secret')
       .notNull()
       .$type<{ ciphertext: string; iv: string; keyVersion: string }>(),
-    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.connection_id, table.revision] })],
 );
@@ -150,10 +157,15 @@ export const platformLoginIdentities = pgTable(
       .references(() => platformLoginConnections.id),
     issuer: text('issuer').notNull(),
     subject: text('subject').notNull(),
-    last_authenticated_at: timestamp('last_authenticated_at', { mode: 'string' })
+    last_authenticated_at: timestamp('last_authenticated_at', {
+      mode: 'string',
+      withTimezone: true,
+    })
       .notNull()
       .defaultNow(),
-    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [
     uniqueIndex('platform_login_identity_subject').on(
@@ -180,9 +192,11 @@ export const platformHumanSessions = pgTable(
     // When a company gate is required, both identities must belong to the same person.
     access_issuer: text('access_issuer'),
     access_subject: text('access_subject'),
-    expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
-    revoked_at: timestamp('revoked_at', { mode: 'string' }),
-    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    expires_at: timestamp('expires_at', { mode: 'string', withTimezone: true }).notNull(),
+    revoked_at: timestamp('revoked_at', { mode: 'string', withTimezone: true }),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => [
     index('platform_human_sessions_connection').on(table.connection_id),
@@ -225,7 +239,7 @@ export const platformLoginTests = pgTable(
     issuer: text('issuer').notNull(),
     subject: text('subject').notNull(),
     login: text('login').notNull().default(''),
-    expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
+    expires_at: timestamp('expires_at', { mode: 'string', withTimezone: true }).notNull(),
   },
   (table) => [index('platform_login_tests_expiry').on(table.expires_at)],
 );
@@ -243,7 +257,7 @@ export const platformAuthAttempts = pgTable(
     browser_hash: text('browser_hash').notNull(),
     // Contains the upstream PKCE verifier and callback context; consumed atomically.
     context: jsonb('context').notNull().$type<Record<string, unknown>>(),
-    expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
+    expires_at: timestamp('expires_at', { mode: 'string', withTimezone: true }).notNull(),
   },
   (table) => [index('platform_auth_attempts_expiry').on(table.expires_at)],
 );
@@ -254,11 +268,20 @@ export const platformAuthBootstrap = pgTable(
     singleton: boolean('singleton').primaryKey().default(true),
     installation_id: text('installation_id').notNull(),
     credential_hash: text('credential_hash').notNull(),
+    request_hash: text('request_hash').notNull().default(''),
+    claim_hash: text('claim_hash'),
+    pending_identity: jsonb('pending_identity').$type<{
+      revision: number;
+      generation: number;
+      identity: PlatformOidcIdentity;
+      companyIdentity?: CompanyIdentity;
+      expiresAt: string;
+    }>(),
     connection_id: text('connection_id')
       .notNull()
       .references(() => platformLoginConnections.id),
-    expires_at: timestamp('expires_at', { mode: 'string' }).notNull(),
-    consumed_at: timestamp('consumed_at', { mode: 'string' }),
+    expires_at: timestamp('expires_at', { mode: 'string', withTimezone: true }).notNull(),
+    consumed_at: timestamp('consumed_at', { mode: 'string', withTimezone: true }),
   },
   (table) => [check('platform_auth_bootstrap_singleton', sql`${table.singleton} = true`)],
 );

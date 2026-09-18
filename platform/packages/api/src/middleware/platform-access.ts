@@ -18,6 +18,15 @@ function internallyAuthenticated(method: string, path: string): boolean {
 
 export const platformAccessProtection: MiddlewareHandler<ApiEnv> = async (context, next) => {
   const settings = await readAuthSettings(context.get('db'));
+  if (settings && context.env.PLATFORM_AUTH_DATABASE_UNCACHED !== 'true') {
+    return context.json(
+      {
+        error: 'auth_database_cache_enabled',
+        message: 'Upgrade the platform to verify uncached authentication database reads.',
+      },
+      503,
+    );
+  }
   if (!settings?.protection) {
     if (settings?.admission.mode === 'company' && settings.admission.access) {
       return context.json({ error: 'company_protection_unavailable' }, 503);
@@ -55,6 +64,10 @@ export const platformAccessProtection: MiddlewareHandler<ApiEnv> = async (contex
     }
     if (path === '/auth/github-oidc' && method === 'POST') {
       // The route additionally verifies GitHub's scoped workload identity.
+      return next();
+    }
+    if (path === '/internal/platform/auth-initialize' && method === 'POST') {
+      // This route also requires its own installation-specific setup HMAC, never a health token.
       return next();
     }
     if (path === '/projects' || path.startsWith('/projects/')) {

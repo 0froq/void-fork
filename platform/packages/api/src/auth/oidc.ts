@@ -3,14 +3,8 @@ import * as oauth from 'oauth4webapi';
 import { assertPublicIdentityUrl, boundedIdentityResponse } from './identity-network.ts';
 export { assertPublicIdentityUrl } from './identity-network.ts';
 
-export type PlatformOidcIdentity = Readonly<{
-  issuer: string;
-  subject: string;
-  login: string;
-  email: string | null;
-  emailVerified: boolean;
-  groups: ReadonlyArray<string>;
-}>;
+import type { PlatformOidcIdentity } from './identity-types.ts';
+export type { PlatformOidcIdentity } from './identity-types.ts';
 
 type IdentityFetch = (url: string, options: RequestInit) => Promise<Response>;
 const GOOGLE_ENDPOINTS = new Set([

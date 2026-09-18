@@ -1,6 +1,7 @@
 import { parsePlatformLoginConfiguration, parsePlatformAdmissionPolicy } from '@void/platform';
 import { and, eq, gt } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
+import { requireUncachedAuthenticationDatabase } from '../auth/bootstrap.ts';
 import {
   importLegacyAuthentication,
   readAuthSettings,
@@ -222,6 +223,7 @@ authenticationConfigRoutes.get('/config/auth', async (context) =>
 );
 authenticationConfigRoutes.post('/config/auth/initialize', async (context) => {
   const body = await readBody(context);
+  requireUncachedAuthenticationDatabase(context.env);
   if (dryRun(body)) {
     return context.json(
       preview('Initialize authentication settings', 'platform', {

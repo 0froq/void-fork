@@ -4,8 +4,10 @@ import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { storeAuthCode, type Db } from '../db.ts';
+import { escapeHtml } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
 import { platformAuthAttempts, platformLoginTests } from '../schema.ts';
+import { stageBootstrapIdentity, verifyBootstrapCode } from './bootstrap.ts';
 import {
   AuthenticationConfigurationError,
   lockAuthSettings,
@@ -19,6 +21,7 @@ import { resolvePlatformLogin } from './identities.ts';
 import type { AuthenticationActor } from './management.ts';
 import { PlatformOidcProvider, type PlatformOidcIdentity } from './oidc.ts';
 import { createCodeChallenge } from './pkce.ts';
+import { hashLoginProof, randomLoginProof } from './proofs.ts';
 import { isAllowedRedirect, isLocalhostRedirect } from './redirects.ts';
 import { createHumanSession, validateHumanSession, type CompanyIdentity } from './sessions.ts';
 
@@ -36,6 +39,8 @@ type LoginContext = {
   companyIdentity?: CompanyIdentity;
   actor?: AuthenticationActor;
   testId?: string;
+  bootstrapCredentialHash?: string;
+  bootstrapInstallationId?: string;
 };
 
 function oidcProvider(configuration: PlatformLoginConfiguration): PlatformOidcProvider {
@@ -49,11 +54,6 @@ function oidcProvider(configuration: PlatformLoginConfiguration): PlatformOidcPr
     providers.set(key, provider);
   }
   return provider;
-}
-
-export async function hashLoginProof(value: string): Promise<string> {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function authenticationError(context: Context<ApiEnv>, error: unknown): Response {
@@ -82,7 +82,7 @@ async function authorizationFor(
   if (configuration.kind !== 'github') {
     return oidcProvider(configuration).authorize(redirectUri, state);
   }
-  const verifier = crypto.randomUUID() + crypto.randomUUID();
+  const verifier = randomLoginProof();
   const url = new URL(getGitHubAuthorizeUrl(configuration.clientId, redirectUri, state));
   url.searchParams.set('code_challenge', await createCodeChallenge(verifier));
   url.searchParams.set('code_challenge_method', 'S256');
@@ -124,7 +124,7 @@ export async function createLoginTestLaunch(
     );
   }
   const id = `test.${crypto.randomUUID()}`;
-  const proof = crypto.randomUUID() + crypto.randomUUID();
+  const proof = randomLoginProof();
   const expiresAt = new Date(Date.now() + FLOW_SECONDS * 1000).toISOString();
   await db.insert(platformAuthAttempts).values({
     id,
@@ -194,7 +194,7 @@ export async function startLoginTest(context: Context<ApiEnv>): Promise<Response
     const redirectUri =
       context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).href;
     const state = `platform.${crypto.randomUUID()}`;
-    const browserProof = crypto.randomUUID() + crypto.randomUUID();
+    const browserProof = randomLoginProof();
     const authorization = await authorizationFor(revision.configuration, redirectUri, state);
     await db.insert(platformAuthAttempts).values({
       id: state,
@@ -229,6 +229,12 @@ export async function startPlatformLogin(
 ): Promise<Response | null> {
   const db = context.get('db');
   if (!(await readAuthSettings(db))) {
+    if (context.env.PLATFORM_AUTH_SETUP_TOKEN) {
+      return context.json(
+        { error: 'setup_pending', message: 'Finish platform administrator setup first.' },
+        503,
+      );
+    }
     return null;
   }
   try {
@@ -264,7 +270,7 @@ export async function startPlatformLogin(
     const redirectUri =
       context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).href;
     const state = `platform.${crypto.randomUUID()}`;
-    const browserProof = crypto.randomUUID() + crypto.randomUUID();
+    const browserProof = randomLoginProof();
     const saved: LoginContext = {
       redirect,
       redirectUri,
@@ -333,7 +339,10 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
       .returning();
     if (
       !attempt ||
-      (attempt.purpose !== 'login' && attempt.purpose !== 'admin' && attempt.purpose !== 'test')
+      (attempt.purpose !== 'login' &&
+        attempt.purpose !== 'admin' &&
+        attempt.purpose !== 'test' &&
+        attempt.purpose !== 'bootstrap')
     ) {
       throw new AuthenticationConfigurationError(
         'The login attempt expired or was already used.',
@@ -357,9 +366,10 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
     const connection = await readLoginConnection(db, attempt.connection_id);
     if (
       !connection ||
-      (attempt.purpose !== 'test' && !connection.enabled) ||
-      (attempt.purpose === 'test' ? connection.revision : connection.active_revision) !==
-        attempt.revision ||
+      (attempt.purpose !== 'test' && attempt.purpose !== 'bootstrap' && !connection.enabled) ||
+      (attempt.purpose === 'test' || attempt.purpose === 'bootstrap'
+        ? connection.revision
+        : connection.active_revision) !== attempt.revision ||
       connection.generation !== attempt.generation
     ) {
       throw new AuthenticationConfigurationError(
@@ -407,6 +417,38 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
         nonce: saved.nonce,
         clientSecret: secret,
       });
+    }
+    if (attempt.purpose === 'bootstrap') {
+      if (!saved.bootstrapCredentialHash || !saved.bootstrapInstallationId) {
+        throw new Error('Missing setup authority');
+      }
+      const proof = await stageBootstrapIdentity(db, {
+        installationId: saved.bootstrapInstallationId,
+        credentialHash: saved.bootstrapCredentialHash,
+        connectionId: connection.id,
+        revision: attempt.revision,
+        generation: attempt.generation,
+        identity,
+        companyIdentity: currentCompany,
+      });
+      setCookie(context, 'void_bootstrap_confirm', proof, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Strict',
+        path: '/auth/bootstrap/confirm',
+        maxAge: 300,
+      });
+      context.header('Cache-Control', 'no-store');
+      context.header('Referrer-Policy', 'no-referrer');
+      return context.html(
+        '<!doctype html><title>Confirm platform administrator</title><h1>Confirm the first administrator</h1><p>Account: ' +
+          escapeHtml(identity.login) +
+          '</p><p>Provider: ' +
+          escapeHtml(identity.issuer) +
+          '</p><p>Identity: ' +
+          escapeHtml(identity.subject) +
+          '</p><form method="post" action="/auth/bootstrap/confirm"><input type="hidden" name="confirm" value="yes"><button type="submit">Make this account the platform administrator</button></form>',
+      );
     }
     if (attempt.purpose === 'test') {
       await db.transaction(async (transaction) => {
@@ -505,6 +547,52 @@ export async function completePlatformLogin(context: Context<ApiEnv>): Promise<R
     redirect.searchParams.delete('token');
     redirect.searchParams.set('code', code);
     return context.redirect(redirect.href);
+  } catch (error) {
+    return authenticationError(context, error);
+  }
+}
+
+export async function startBootstrapLogin(
+  context: Context<ApiEnv>,
+  code: string,
+): Promise<Response> {
+  try {
+    const db = context.get('db');
+    const pending = await verifyBootstrapCode(db, context.env.PLATFORM_INSTALLATION_ID, code);
+    const connection = await readLoginConnection(db, pending.connection_id);
+    const revision = connection
+      ? await readLoginRevision(db, connection.id, connection.revision)
+      : null;
+    if (!connection || !revision) {
+      throw new Error('Setup configuration is unavailable');
+    }
+    const redirectUri =
+      context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).href;
+    const state = 'platform.' + crypto.randomUUID();
+    const browserProof = randomLoginProof();
+    const authorization = await authorizationFor(revision.configuration, redirectUri, state);
+    await db.insert(platformAuthAttempts).values({
+      id: state,
+      connection_id: connection.id,
+      revision: connection.revision,
+      generation: connection.generation,
+      purpose: 'bootstrap',
+      browser_hash: await hashLoginProof(browserProof),
+      expires_at: new Date(
+        Math.min(Date.parse(pending.expires_at), Date.now() + FLOW_SECONDS * 1000),
+      ).toISOString(),
+      context: {
+        redirect: '/admin/',
+        redirectUri,
+        verifier: authorization.verifier,
+        nonce: authorization.nonce,
+        bootstrapCredentialHash: pending.credential_hash,
+        bootstrapInstallationId: pending.installation_id,
+        companyIdentity: context.get('companyIdentity'),
+      },
+    });
+    bindBrowser(context, browserProof);
+    return context.redirect(authorization.url);
   } catch (error) {
     return authenticationError(context, error);
   }
