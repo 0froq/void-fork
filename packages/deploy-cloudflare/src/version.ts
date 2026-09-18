@@ -118,6 +118,7 @@ type CurrentProductionVersion =
 type RecentCloudflareVersion = Readonly<{
   id: string;
   number: number;
+  inspection: Record<string, unknown>;
 }>;
 
 /** Encode migration state into Cloudflare's version annotation for safe rollback diagnostics. */
@@ -866,7 +867,12 @@ async function activateCloudflareVersionWithSecretsFile(
         : triggerConfigFromWrangler({});
   let previousVersion =
     previousVersionId && desiredMetadata?.schema === 2
-      ? await readCloudflareVersionInspection(options, commonArgs, previousVersionId)
+      ? await readCloudflareVersionInspection(
+          options,
+          commonArgs,
+          previousVersionId,
+          inheritanceBaseline?.map((version) => version.inspection),
+        )
       : null;
   async function previousIsSecretOnlyDraft(): Promise<boolean> {
     if (!previousVersionId) {
@@ -876,6 +882,7 @@ async function activateCloudflareVersionWithSecretsFile(
       options,
       commonArgs,
       previousVersionId,
+      inheritanceBaseline?.map((version) => version.inspection),
     );
     return previousVersion?.isSecretOnlyDraft === true;
   }
@@ -1524,18 +1531,22 @@ async function readCloudflareVersionInspection(
   options: Pick<Parameters<typeof activateCloudflareVersion>[0], 'runWrangler' | 'workerName'>,
   commonArgs: Array<string>,
   versionId: string,
+  knownVersions?: ReadonlyArray<unknown>,
 ): Promise<CloudflareVersionInspection | null> {
-  const result = await Promise.resolve(
-    options.runWrangler(
-      ['versions', 'list', ...commonArgs, '--name', options.workerName, '--json'],
-      { capture: true },
-    ),
-  );
-  if (!isCleanCommandExit(result)) {
-    return null;
-  }
   try {
-    const versions = JSON.parse(result.stdout) as Array<unknown>;
+    // Version metadata is immutable. Reuse the pre-upload inheritance snapshot,
+    // but keep ownership and the post-upload inheritance checks as fresh reads.
+    let versions = knownVersions;
+    if (versions === undefined) {
+      const result = await options.runWrangler(
+        ['versions', 'list', ...commonArgs, '--name', options.workerName, '--json'],
+        { capture: true },
+      );
+      if (!isCleanCommandExit(result)) {
+        return null;
+      }
+      versions = JSON.parse(result.stdout) as Array<unknown>;
+    }
     if (!Array.isArray(versions)) {
       return null;
     }
@@ -1611,6 +1622,7 @@ async function readRecentCloudflareVersionIds(
     return versions.map((version) => ({
       id: version.id as string,
       number: version.number as number,
+      inspection: version,
     }));
   } catch {
     return null;

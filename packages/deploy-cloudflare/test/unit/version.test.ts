@@ -158,6 +158,33 @@ function runner(overrides?: {
 }
 
 describe('Cloudflare version activation', () => {
+  it('shares the initial version snapshot while rechecking inheritance after upload', async () => {
+    const runWrangler = runner();
+    const result = await activateCloudflareVersion({
+      runWrangler,
+      workerName: 'my-worker',
+      verifyUploader: () => true,
+      verifyInheritedSecrets: true,
+      message: encodeCloudflareVersionMessage([], {
+        workers_dev: true,
+        preview_urls: true,
+        routes: [],
+        crons: [],
+        queueConsumers: [],
+        workflows: [],
+      }),
+      fetch: async () => Response.json({ ready: true }),
+    });
+    expect(result).toMatchObject({ ok: true, versionId: NEXT });
+    const commands = runWrangler.mock.calls.map(([args]) => args.slice(0, 2).join(' '));
+    expect(commands.filter((command) => command === 'versions list')).toHaveLength(2);
+    expect(commands.indexOf('versions list')).toBeLessThan(commands.indexOf('versions upload'));
+    expect(commands.lastIndexOf('versions list')).toBeGreaterThan(
+      commands.indexOf('versions upload'),
+    );
+    expect(commands.filter((command) => command === 'deployments status')).toHaveLength(4);
+  });
+
   it('links an existing version without publishing routes or Worker settings', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'void-link-version-'));
     const configPath = join(directory, 'wrangler.json');

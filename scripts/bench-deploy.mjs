@@ -23,6 +23,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const outputArg = process.argv.find((arg) => arg.startsWith('--output='));
+const filter = process.argv.find((arg) => arg.startsWith('--filter='))?.slice('--filter='.length);
+const selected = (name) => filter === undefined || name.includes(filter);
+const activationSource = process.argv
+  .find((arg) => arg.startsWith('--activation-source='))
+  ?.slice('--activation-source='.length);
 mkdirSync(join(root, 'playground-local'), { recursive: true });
 const scratch = mkdtempSync(join(root, 'playground-local/deploy-bench-'));
 const isolatedHome = join(scratch, 'home');
@@ -51,6 +56,9 @@ const report = {
   measurements: [],
 };
 async function measure(name, repetitions, fn) {
+  if (!selected(name)) {
+    return;
+  }
   const samplesMs = [];
   let detail;
   for (let i = 0; i < repetitions; i++) {
@@ -124,7 +132,10 @@ try {
     join(root, 'packages/deploy-cloudflare/src/static.ts')
   );
   const { activateCloudflareVersion, encodeCloudflareVersionMessage, readCloudflareTriggerConfig } =
-    await import(join(root, 'packages/deploy-cloudflare/src/version.ts'));
+    await import(
+      pathToFileURL(join(root, activationSource ?? 'packages/deploy-cloudflare/src/version.ts'))
+        .href
+    );
   const wrangler = resolveWranglerArgv(root).at(-1);
   const dist = join(root, 'packages/void/dist');
   const deployChunk = readdirSync(dist).find((file) => /^deploy-[\w-]+\.mjs$/.test(file));
@@ -173,6 +184,9 @@ try {
     [5000, 4096],
     [1000, 131072],
   ]) {
+    if (!selected(`hash-${count}x${size}`) && !selected(`static-stage-${count}x${size}`)) {
+      continue;
+    }
     const directory = join(scratch, `assets-${count}-${size}`);
     mkdirSync(directory);
     for (let i = 0; i < count; i++) {
@@ -191,7 +205,11 @@ try {
       });
     });
   }
-  const kitchen = cloneFixture('kitchen-sink');
+  const kitchen =
+    ['infer-kitchen-sink', 'scan-kitchen-sink', 'drift-kitchen-sink'].some(selected) ||
+    process.argv.includes('--builds')
+      ? cloneFixture('kitchen-sink')
+      : undefined;
   await measure('infer-kitchen-sink', 10, () => {
     inferProjectBindings(kitchen);
   });
@@ -215,6 +233,7 @@ try {
   let uploaded = false;
   let integrityChecks = 0;
   const commands = [];
+  const activationStarted = performance.now();
   const activation = await activateCloudflareVersion({
     workerName: 'bench',
     configPath,
@@ -228,6 +247,10 @@ try {
     runWrangler: async (args) => {
       const key = args.slice(0, 2).join(' ');
       commands.push(key);
+      if (process.argv.includes('--activation-cli-startup')) {
+        // Measure real CLI startup without invoking an authenticated command.
+        child([wrangler, ...args.slice(0, 2), '--help']);
+      }
       const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
       if (key === 'deployments status') {
         return ok(JSON.stringify({ versions: [{ version_id: active, percentage: 100 }] }));
@@ -264,7 +287,9 @@ try {
   report.activationTrace = {
     commands,
     integrityChecks,
-    note: 'No network latency simulated; command count only.',
+    durationMs: performance.now() - activationStarted,
+    cliStartupMeasured: process.argv.includes('--activation-cli-startup'),
+    note: 'No provider calls. Optional CLI startup timing runs help commands only.',
   };
 
   if (process.argv.includes('--builds')) {
