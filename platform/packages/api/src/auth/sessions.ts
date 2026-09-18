@@ -4,6 +4,7 @@ import {
   platformHumanSessions,
   platformLoginConnections,
   platformLoginIdentities,
+  platformLoginTests,
   users,
 } from '../schema.ts';
 import { isAdminSuspended } from '../suspension.ts';
@@ -156,6 +157,7 @@ export async function validateHumanSession(
 
 /** Call within the settings mutation transaction, after its lockout checks. */
 export async function revokeConnectionSessions(db: Db, connectionId: string): Promise<void> {
+  await db.delete(platformLoginTests).where(eq(platformLoginTests.connection_id, connectionId));
   await db
     .update(platformLoginConnections)
     .set({ generation: sql`${platformLoginConnections.generation} + 1` })

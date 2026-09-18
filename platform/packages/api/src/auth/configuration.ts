@@ -203,6 +203,7 @@ export async function importLegacyAuthentication(
           connection_id: source.id,
           issuer: loginIdentityIssuer(configuration),
           subject: identity.provider_id,
+          last_authenticated_at: new Date(0).toISOString(),
         });
       }
     }

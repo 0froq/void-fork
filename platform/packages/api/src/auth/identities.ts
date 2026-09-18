@@ -2,7 +2,12 @@ import { parsePlatformAdmissionPolicy } from '@void/platform';
 import { and, eq } from 'drizzle-orm';
 import { createOAuthAccount, createUser, getUserByEmail, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
-import { platformCompanyIdentities, platformLoginIdentities, users } from '../schema.ts';
+import {
+  platformCompanyIdentities,
+  platformLoginIdentities,
+  platformLoginTests,
+  users,
+} from '../schema.ts';
 import { getAllowlist, isSignupAllowed } from '../signup-allowlist.ts';
 import { isAdminSuspended } from '../suspension.ts';
 import type { User } from '../types.ts';
@@ -188,6 +193,15 @@ export async function resolvePlatformLogin(
           eq(platformLoginIdentities.connection_id, connection.id),
         ),
       );
+    await tx.insert(platformLoginTests).values({
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      connection_id: connection.id,
+      revision: attempt.revision,
+      issuer: identity.issuer,
+      subject: identity.subject,
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    });
     return { user, created, primaryProvider };
   });
   if (
