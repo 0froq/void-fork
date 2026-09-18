@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { parseRootWranglerConfig } from './config.ts';
 import type { CloudflareCommandRunner } from './execute.ts';
+import { isWranglerSecretOnlyDraft } from './secret-draft.ts';
 
 export type ExistingCloudflareWorker = {
   versionId: string;
@@ -17,6 +18,11 @@ type ExistingCloudflareWorkerOptions = {
   configPath: string;
   workerName: string;
   versionId?: string;
+};
+
+type CloudflareWorkerInspection = {
+  snapshot: ExistingCloudflareWorker;
+  isSecretOnlyDraft: boolean;
 };
 
 export type CloudflareWorkerMigrationTagOptions = {
@@ -37,13 +43,13 @@ export async function readExistingCloudflareWorker(options: {
   if (!worker) {
     throw new Error(`Cloudflare Worker "${options.workerName}" does not have an active version.`);
   }
-  return worker;
+  return worker.snapshot;
 }
 
 async function readCloudflareWorker(
   options: ExistingCloudflareWorkerOptions,
   allowMissing: boolean,
-): Promise<ExistingCloudflareWorker | null> {
+): Promise<CloudflareWorkerInspection | null> {
   const target = ['-c', options.configPath, '--env=', '--name', options.workerName];
   const read = async (
     args: Array<string>,
@@ -112,10 +118,13 @@ async function readCloudflareWorker(
     );
   }
   return {
-    versionId,
-    bindings: resources.bindings,
-    runtime: resources.script_runtime,
-    script: resources.script,
+    snapshot: {
+      versionId,
+      bindings: resources.bindings,
+      runtime: resources.script_runtime,
+      script: resources.script,
+    },
+    isSecretOnlyDraft: isWranglerSecretOnlyDraft(version),
   };
 }
 
@@ -254,10 +263,19 @@ export async function assertCloudflareDurableObjectLifecycleSupported(options: {
   const activeTag = await readMigrationTag(migrationOptions);
   const after = await readCloudflareWorker(options, false);
   const afterTag = await readMigrationTag(migrationOptions);
-  if (!after || after.versionId !== existing.versionId || afterTag !== activeTag) {
+  if (
+    !after ||
+    after.snapshot.versionId !== existing.snapshot.versionId ||
+    afterTag !== activeTag
+  ) {
     throw new Error(
       'Cloudflare production or Durable Object migration state changed during verification. Retry from the current deployment.',
     );
+  }
+  // A retry after first-secret provisioning still needs its initial class migration. Use the
+  // same complete-version check as activation, and require no prior class migration history.
+  if (activeTag === null && existing.isSecretOnlyDraft && after.isSecretOnlyDraft) {
+    return;
   }
   const activeIndex =
     activeTag === null ? -1 : migrations.findIndex((migration) => migration.tag === activeTag);

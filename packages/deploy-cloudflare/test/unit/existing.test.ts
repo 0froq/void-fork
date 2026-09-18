@@ -494,6 +494,79 @@ describe('existing Worker preservation', () => {
     }
   });
 
+  it.each([
+    {
+      tag: 'older',
+      runtime: { usage_model: 'standard' },
+      binding: { name: 'TOKEN', type: 'secret_text' },
+      annotation: 'secret',
+    },
+    {
+      tag: null,
+      runtime: { usage_model: 'standard', compatibility_date: '2026-09-18' },
+      binding: { name: 'TOKEN', type: 'secret_text' },
+      annotation: 'secret',
+    },
+    {
+      tag: null,
+      runtime: { usage_model: 'standard' },
+      binding: { name: 'DB', type: 'd1', id: 'existing-database' },
+      annotation: 'secret',
+    },
+    {
+      tag: null,
+      runtime: { usage_model: 'standard' },
+      binding: { name: 'TOKEN', type: 'secret_text' },
+      annotation: 'upload',
+    },
+  ])(
+    'does not treat an established Worker as an initial-secret bootstrap: %j',
+    async ({ tag, runtime, binding, annotation }) => {
+      const root = mkdtempSync(join(tmpdir(), 'void-do-existing-secret-'));
+      const configPath = join(root, 'wrangler.jsonc');
+      writeFileSync(
+        configPath,
+        JSON.stringify({ migrations: [{ tag: 'live-v1', new_sqlite_classes: ['Room'] }] }),
+      );
+      const runWrangler = vi.fn((args: Array<string>) => ({
+        status: 0,
+        stderr: '',
+        stdout: JSON.stringify(
+          args[0] === 'deployments'
+            ? { versions: [{ version_id: 'active', percentage: 100 }] }
+            : {
+                id: 'active',
+                annotations: { 'workers/triggered_by': annotation },
+                resources: {
+                  bindings: [binding],
+                  script: { handlers: ['fetch'] },
+                  script_runtime: runtime,
+                },
+              },
+        ),
+      }));
+      try {
+        await expect(
+          assertCloudflareDurableObjectLifecycleSupported({
+            runWrangler,
+            configPath,
+            workerName: 'app',
+            accountId: 'account',
+            apiBaseUrl: 'https://api.cloudflare.test/client/v4',
+            readMigrationTag: async () => tag,
+          }),
+        ).rejects.toThrow(/native Cloudflare beta.*existing Worker[\s\S]*live-v1/);
+        expect(
+          runWrangler.mock.calls.every(
+            ([args]) => args[0] === 'deployments' || (args[0] === 'versions' && args[1] === 'view'),
+          ),
+        ).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('reads current and legacy Worker version migration-tag shapes', () => {
     expect(
       readCloudflareVersionMigrationTag({
@@ -560,10 +633,11 @@ describe('existing Worker preservation', () => {
           ? { versions: [{ version_id: 'active', percentage: 100 }] }
           : {
               id: 'active',
+              annotations: { 'workers/triggered_by': 'secret' },
               resources: {
-                bindings: [],
+                bindings: [{ name: 'TOKEN', type: 'secret_text' }],
                 script: { handlers: ['fetch'] },
-                script_runtime: {},
+                script_runtime: { usage_model: 'standard' },
               },
             },
       ),

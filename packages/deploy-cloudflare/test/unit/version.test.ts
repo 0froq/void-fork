@@ -4,6 +4,7 @@ import { join } from 'pathslash';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import {
   activateCloudflareVersion,
+  assertCloudflareDurableObjectLifecycleSupported,
   deployCloudflareVersionTriggers,
   encodeCloudflareVersionMessage,
   extractWorkersDevSubdomain,
@@ -2783,7 +2784,7 @@ describe('Cloudflare version activation', () => {
   }
 
   it.each([{}, { limits: {} }])(
-    'retries a first secret-only deploy with runtime limits %j',
+    'passes lifecycle preflight and retries a first secret-only deploy with runtime limits %j',
     async (limits) => {
       const draft = secretOnlyDraftVersion();
       const runWrangler = firstSecretRunner(
@@ -2797,18 +2798,44 @@ describe('Cloudflare version activation', () => {
           }),
         ),
       );
-      await expect(
-        activateCloudflareVersion({
-          runWrangler,
-          verifyUploader: () => true,
-          verifyInheritedSecrets: true,
-          workerName: 'first-with-existing-secret',
-          message: encodeCloudflareVersionMessage(['0001_state.sql'], firstSecretTriggers),
-          fetch: async () => Response.json({ ready: true }),
+      const root = mkdtempSync(join(tmpdir(), 'void-secret-lifecycle-retry-'));
+      const configPath = join(root, 'wrangler.jsonc');
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          migrations: [{ tag: 'live-v1', new_sqlite_classes: ['VoidLiveStreamDurableObject'] }],
         }),
-      ).resolves.toMatchObject({ ok: true, previousVersionId: CURRENT });
-      expect(runWrangler.mock.calls.some(([args]) => args[1] === 'view')).toBe(true);
-      expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(true);
+      );
+      const readMigrationTag = vi.fn(async () => null);
+      try {
+        await assertCloudflareDurableObjectLifecycleSupported({
+          runWrangler,
+          configPath,
+          workerName: 'first-with-existing-secret',
+          accountId: 'account',
+          apiBaseUrl: 'https://api.cloudflare.test/client/v4',
+          readMigrationTag,
+        });
+        expect(readMigrationTag).toHaveBeenCalledTimes(2);
+        expect(
+          runWrangler.mock.calls.some(([args]) => args[0] === 'deploy' || args[1] === 'upload'),
+        ).toBe(false);
+        await expect(
+          activateCloudflareVersion({
+            runWrangler,
+            configPath,
+            verifyUploader: () => true,
+            verifyInheritedSecrets: true,
+            workerName: 'first-with-existing-secret',
+            message: encodeCloudflareVersionMessage(['0001_state.sql'], firstSecretTriggers),
+            fetch: async () => Response.json({ ready: true }),
+          }),
+        ).resolves.toMatchObject({ ok: true, previousVersionId: CURRENT });
+        expect(runWrangler.mock.calls.some(([args]) => args[1] === 'view')).toBe(true);
+        expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     },
   );
 
