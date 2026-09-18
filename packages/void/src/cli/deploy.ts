@@ -6170,7 +6170,9 @@ async function runCloudflareStaticDeploy(
             workerName,
             versionId,
           });
-          assertCloudflareBindingsPreserved(existingWorker, uploaded);
+          assertCloudflareBindingsPreserved(existingWorker, uploaded, [], {
+            staticAssetsBinding: 'ASSETS',
+          });
         }
       : undefined,
     recordVerifiedCandidate: existingWorker

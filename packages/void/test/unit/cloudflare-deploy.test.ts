@@ -1820,6 +1820,73 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
   const generatedStaticConfig = (root: string) =>
     join(root, '.void/deploy/cloudflare/wrangler-static.json');
 
+  it('links an assets-only SPA and validates the static adapter before activation, including retries', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'site' }),
+      'void.json': JSON.stringify({ inference: { appType: 'spa' } }),
+      'wrangler.jsonc': JSON.stringify({
+        name: 'site',
+        account_id: 'personal',
+        compatibility_date: '2026-02-24',
+        assets: { directory: 'dist', not_found_handling: 'single-page-application' },
+      }),
+      'dist/index.html': '<!doctype html><div id="app"></div>',
+    });
+    const existing = {
+      versionId: 'original',
+      bindings: [],
+      script: { handlers: null },
+      runtime: { compatibility_date: '2026-02-24', assets: {} },
+    };
+    const uploaded = {
+      ...existing,
+      versionId: 'new',
+      bindings: [{ type: 'assets', name: 'ASSETS' }],
+      script: { handlers: ['fetch'] },
+    };
+    const readExistingWorker = vi
+      .fn<NonNullable<CloudflareDeployDeps['readExistingWorker']>>()
+      .mockImplementation(async ({ versionId }) => (versionId ? uploaded : existing));
+    let attempts = 0;
+    const activateVersion = vi
+      .fn<NonNullable<CloudflareDeployDeps['activateVersion']>>()
+      .mockImplementation(async (options) => {
+        expect(options.preserveTriggers).toBe(true);
+        expect(options.expectedPreviousVersionId).toBe('original');
+        expect(options.validateUploadedVersion).toBeTypeOf('function');
+        expect(parseRootWranglerConfig(options.configPath!)).toMatchObject({
+          keep_vars: true,
+          assets: { binding: 'ASSETS', not_found_handling: 'single-page-application' },
+        });
+        await options.validateUploadedVersion!('new');
+        await options.recordVerifiedCandidate!('new');
+        if (attempts++ === 0) {
+          return { ok: false, reason: 'readiness-failed', rollback: 'succeeded' };
+        }
+        expect(options.trustedInheritanceVersionIds).toEqual(['new']);
+        return {
+          ok: true,
+          versionId: 'new',
+          previousVersionId: 'original',
+          previewUrl: 'https://site.example.com',
+        };
+      });
+    const { deps, trace } = harness({ readExistingWorker, activateVersion });
+    await expect(
+      runCloudflareDeploy(root, { reuseExistingWorker: true }, silentCliLog, deps),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(readCloudflareLink(root)?.candidateReceipt).toEqual({
+      parentVersionId: 'original',
+      versionIds: ['new'],
+    });
+    await runCloudflareDeploy(root, { backend: 'cloudflare' }, silentCliLog, deps);
+    expect(readCloudflareLink(root)).toBeNull();
+    expect(activateVersion).toHaveBeenCalledTimes(2);
+    expect(readExistingWorker).toHaveBeenCalledTimes(4);
+    expect(trace).not.toContain('provision');
+    expect(trace).not.toContain('auth-secret');
+  });
+
   it('rejects a static-looking non-Cloudflare runtime before any account operation', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'node-static', dependencies: { vite: '6.0.0' } }),

@@ -317,7 +317,14 @@ export function assertCloudflareBindingsPreserved(
   before: ExistingCloudflareWorker,
   after: ExistingCloudflareWorker,
   approvedKv: ReadonlyArray<ApprovedCloudflareKvBinding> = [],
+  options: { staticAssetsBinding?: string } = {},
 ): void {
+  // Only the static adapter may introduce its fetch wrapper around an assets-only
+  // deployment. All existing bindings (including colliding names) remain protected.
+  const staticAssetsBinding = isAssetsOnlyWorker(before) ? options.staticAssetsBinding : undefined;
+  const addsAssetsBinding =
+    staticAssetsBinding !== undefined &&
+    !before.bindings.some((binding) => binding.name === staticAssetsBinding);
   const additions = newApprovedKvBindings(before, approvedKv);
   for (const addition of additions) {
     const matches = after.bindings.filter((binding) => binding.name === addition.binding);
@@ -336,23 +343,47 @@ export function assertCloudflareBindingsPreserved(
   );
   const sorted = (bindings: ExistingCloudflareWorker['bindings']) =>
     [...bindings].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  if (!isDeepStrictEqual(sorted(before.bindings), sorted(preservedBindings))) {
+  const expectedBindings = addsAssetsBinding
+    ? [...before.bindings, { type: 'assets', name: staticAssetsBinding }]
+    : before.bindings;
+  if (
+    (staticAssetsBinding !== undefined &&
+      !after.bindings.some(
+        (binding) => binding.type === 'assets' && binding.name === staticAssetsBinding,
+      )) ||
+    !isDeepStrictEqual(sorted(expectedBindings), sorted(preservedBindings))
+  ) {
     throw new Error(
       'The uploaded version did not preserve the existing Worker bindings and variables. It has not been activated.',
     );
   }
   const handlers = (worker: ExistingCloudflareWorker): Array<string> | null => {
-    const value = worker.script.handlers;
+    const value = existingWorkerHandlers(worker);
     return Array.isArray(value) &&
       value.every((handler): handler is string => typeof handler === 'string')
       ? [...new Set(value)].sort()
       : null;
   };
-  if (!isDeepStrictEqual(handlers(before), handlers(after))) {
+  const expectedHandlers = staticAssetsBinding !== undefined ? ['fetch'] : handlers(before);
+  if (!isDeepStrictEqual(expectedHandlers, handlers(after))) {
     throw new Error(
       'The uploaded version did not preserve the existing Worker event handlers. It has not been activated.',
     );
   }
+}
+
+function isAssetsOnlyWorker(worker: ExistingCloudflareWorker): boolean {
+  const handlers = worker.script.handlers;
+  return (
+    record(worker.runtime.assets) &&
+    (handlers === null || (Array.isArray(handlers) && handlers.length === 0))
+  );
+}
+
+function existingWorkerHandlers(worker: ExistingCloudflareWorker): unknown {
+  // Cloudflare represents the absence of a script on assets-only Workers as null.
+  // Missing or malformed handler metadata on other Workers must still fail closed.
+  return isAssetsOnlyWorker(worker) ? [] : worker.script.handlers;
 }
 
 /** Preserve the existing Worker, allowing only explicitly approved KV additions. */
@@ -388,7 +419,7 @@ export function assertExistingCloudflareConfig(
       };
     }
   }
-  const handlers = existing.script.handlers;
+  const handlers = existingWorkerHandlers(existing);
   if (
     !Array.isArray(handlers) ||
     handlers.some((handler) => handler !== 'fetch' && handler !== 'scheduled')

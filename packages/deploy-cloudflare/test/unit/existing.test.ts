@@ -27,6 +27,104 @@ const config = {
   compatibility_date: '2026-02-24',
   kv_namespaces: [{ binding: 'KV', id: 'existing-id' }],
 };
+
+describe('assets-only Worker handoff', () => {
+  const assetsOnly: ExistingCloudflareWorker = {
+    versionId: 'original',
+    bindings: [],
+    script: { handlers: null },
+    runtime: { compatibility_date: config.compatibility_date, assets: {} },
+  };
+  const assets = { type: 'assets', name: 'ASSETS' };
+  const uploaded = { ...assetsOnly, bindings: [assets], script: { handlers: ['fetch'] } };
+  const options = { staticAssetsBinding: 'ASSETS' };
+  const staticConfig = {
+    name: 'site',
+    compatibility_date: config.compatibility_date,
+    assets: { directory: 'dist', binding: 'ASSETS' },
+  };
+
+  it.each([null, []])('accepts assets metadata with handlers %j', (handlers) => {
+    const existing = { ...assetsOnly, script: { handlers } };
+    expect(() => assertExistingCloudflareConfig(existing, staticConfig)).not.toThrow();
+    expect(() => assertExistingCloudflareConfig(existing, staticConfig, true)).not.toThrow();
+    expect(() => assertCloudflareBindingsPreserved(existing, uploaded, [], options)).not.toThrow();
+    expect(() => assertCloudflareBindingsPreserved(existing, uploaded)).toThrow('bindings');
+  });
+
+  it.each([undefined, 'fetch', ['queue'], ['email']])(
+    'rejects missing, malformed, or unsupported handlers %j even with assets',
+    (handlers) => {
+      expect(() =>
+        assertExistingCloudflareConfig({ ...assetsOnly, script: { handlers } }, staticConfig),
+      ).toThrow('handlers');
+    },
+  );
+
+  it.each([undefined, null, false, []])('does not infer assets-only from assets %j', (assets) => {
+    const existing = { ...assetsOnly, runtime: { ...assetsOnly.runtime, assets } };
+    expect(() => assertExistingCloudflareConfig(existing, staticConfig)).toThrow('handlers');
+    expect(() => assertCloudflareBindingsPreserved(existing, uploaded, [], options)).toThrow();
+  });
+
+  it('requires exactly the static assets binding and fetch handler', () => {
+    for (const bindings of [
+      [],
+      [{ ...assets, name: 'OTHER' }],
+      [assets, assets],
+      [assets, { type: 'kv_namespace', name: 'KV', namespace_id: 'new-id' }],
+    ]) {
+      expect(() =>
+        assertCloudflareBindingsPreserved(assetsOnly, { ...uploaded, bindings }, [], options),
+      ).toThrow('bindings');
+    }
+    for (const handlers of [null, [], ['fetch', 'scheduled'], ['fetch', 'queue']]) {
+      expect(() =>
+        assertCloudflareBindingsPreserved(
+          assetsOnly,
+          { ...uploaded, script: { handlers } },
+          [],
+          options,
+        ),
+      ).toThrow('event handlers');
+    }
+  });
+
+  it('preserves variables, secrets, and existing resources and rejects name collisions', () => {
+    const existing = { ...assetsOnly, bindings: worker.bindings };
+    const candidate = { ...uploaded, bindings: [...worker.bindings, assets] };
+    expect(() => assertCloudflareBindingsPreserved(existing, candidate, [], options)).not.toThrow();
+    expect(() => assertCloudflareBindingsPreserved(existing, uploaded, [], options)).toThrow(
+      'bindings',
+    );
+    const collision = { ...assetsOnly, bindings: [{ name: 'ASSETS', type: 'secret_text' }] };
+    for (const bindings of [[assets], collision.bindings, [...collision.bindings, assets]]) {
+      expect(() =>
+        assertCloudflareBindingsPreserved(collision, { ...uploaded, bindings }, [], options),
+      ).toThrow('bindings');
+    }
+    expect(() =>
+      assertExistingCloudflareConfig(assetsOnly, {
+        ...staticConfig,
+        kv_namespaces: config.kv_namespaces,
+      }),
+    ).toThrow('cannot add');
+  });
+
+  it('does not exempt Workers with existing handlers and supports a completed activation retry', () => {
+    expect(() =>
+      assertCloudflareBindingsPreserved(
+        { ...assetsOnly, script: { handlers: ['scheduled'] } },
+        uploaded,
+        [],
+        options,
+      ),
+    ).toThrow();
+    expect(() => assertExistingCloudflareConfig(uploaded, staticConfig, true)).not.toThrow();
+    expect(() => assertCloudflareBindingsPreserved(uploaded, uploaded, [], options)).not.toThrow();
+  });
+});
+
 describe('existing Worker preservation', () => {
   const approved = [{ binding: 'ISR_CACHE', id: '0123456789abcdef0123456789abcdef' }];
   const cache = { name: 'ISR_CACHE', type: 'kv_namespace', namespace_id: approved[0]!.id };
