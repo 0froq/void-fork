@@ -1992,23 +1992,29 @@ app.post('/:id/deploy/upload-urls', async (context) => {
       if (!lockedProject || lockedProject.status === 'deleting') {
         throw new Error(UPLOAD_URLS_PROJECT_DELETING);
       }
+      // Derived signing keys are identical within this request. Keep the cache
+      // request-local so credentials and derived keys are released with the batch.
+      const signingKeyCache = new Map<string, ArrayBuffer>();
       await uploadPool(assets, PRESIGN_BATCH_CONCURRENCY, async (asset) => {
-        const result = await presignAssetPut({
-          accountId: context.env.CF_ACCOUNT_ID,
-          accessKeyId: context.env.R2_ACCESS_KEY_ID,
-          secretAccessKey: context.env.R2_SECRET_ACCESS_KEY,
-          bucket: context.env.R2_STATIC_ASSETS_BUCKET,
-          key: `assets/${projectId}/${asset.blake3}`,
-          md5: asset.md5,
-          contentType: asset.contentType,
-          // 30 minutes. With ~570 assets, concurrency=10, and a slow uplink
-          // a tail asset can sit in the pool for >10 min before its first
-          // PUT — 600s expired and R2 returned 403 SignatureExpired which
-          // the CLI treats as terminal. 1800s covers all realistic
-          // deploys; pathological multi-hour deploys are deferred to the
-          // re-presign-on-expiry follow-up noted in the docstring above.
-          ttlSeconds: 1800,
-        });
+        const result = await presignAssetPut(
+          {
+            accountId: context.env.CF_ACCOUNT_ID,
+            accessKeyId: context.env.R2_ACCESS_KEY_ID,
+            secretAccessKey: context.env.R2_SECRET_ACCESS_KEY,
+            bucket: context.env.R2_STATIC_ASSETS_BUCKET,
+            key: `assets/${projectId}/${asset.blake3}`,
+            md5: asset.md5,
+            contentType: asset.contentType,
+            // 30 minutes. With ~570 assets, concurrency=10, and a slow uplink
+            // a tail asset can sit in the pool for >10 min before its first
+            // PUT — 600s expired and R2 returned 403 SignatureExpired which
+            // the CLI treats as terminal. 1800s covers all realistic
+            // deploys; pathological multi-hour deploys are deferred to the
+            // re-presign-on-expiry follow-up noted in the docstring above.
+            ttlSeconds: 1800,
+          },
+          signingKeyCache,
+        );
         // Last-write-wins on duplicate blake3 — see docstring above. Map
         // assignment is synchronous so concurrent pool tasks do not race
         // beyond a benign last-writer.

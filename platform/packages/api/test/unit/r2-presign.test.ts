@@ -16,6 +16,21 @@ const BASE_OPTS = {
 };
 
 describe('presignAssetPut', () => {
+  it('reuses derived keys without changing signatures across keys, dates, or credentials', async () => {
+    const cache = new Map<string, ArrayBuffer>();
+    const variants = [
+      BASE_OPTS,
+      { ...BASE_OPTS, key: 'assets/proj_abc/another', contentType: 'text/plain' },
+      { ...BASE_OPTS, md5: '900150983cd24fb0d6963f7d28e17f72' },
+      { ...BASE_OPTS, now: new Date('2026-05-08T00:00:01.000Z') },
+      { ...BASE_OPTS, accessKeyId: 'other-access-key', secretAccessKey: 'other-secret-key' },
+    ];
+    for (const options of variants) {
+      expect(await presignAssetPut(options, cache)).toEqual(await presignAssetPut(options));
+    }
+    expect(cache.size).toBe(3);
+  });
+
   it('returns a URL pointing at the right host, bucket, and key', async () => {
     const out = await presignAssetPut(BASE_OPTS);
     const u = new URL(out.url);

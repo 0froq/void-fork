@@ -162,6 +162,36 @@ try {
     });
   }
   const uploaderStats = treeStats(dirname(wrangler));
+  if (selected('presign')) {
+    const { presignAssetPut } = await import(
+      pathToFileURL(join(root, 'platform/packages/api/src/r2-presign.ts')).href
+    );
+    const { uploadPool } = await import(
+      pathToFileURL(join(root, 'platform/packages/api/src/concurrency.ts')).href
+    );
+    const assets = Array.from({ length: 5000 }, (_, index) => index);
+    for (const cached of [false, true]) {
+      await measure(`presign-5000-${cached ? 'shared-key' : 'per-file-key'}`, 7, async () => {
+        const cache = cached ? new Map() : undefined;
+        await uploadPool(assets, 50, (index) =>
+          presignAssetPut(
+            {
+              accountId: 'benchmark',
+              bucket: 'benchmark',
+              accessKeyId: 'benchmark',
+              secretAccessKey: 'not-a-credential',
+              key: `assets/benchmark/${index}`,
+              md5: 'd41d8cd98f00b204e9800998ecf8427e',
+              contentType: 'application/javascript',
+              now: new Date('2026-09-18T00:00:00Z'),
+            },
+            cache,
+          ),
+        );
+        return { assets: assets.length, sharedSigningKeys: cached };
+      });
+    }
+  }
   await measure('uploader-content-hash', 20, () => {
     if (!deploy.hashWranglerUploader(root)) {
       throw new Error('hash failed');

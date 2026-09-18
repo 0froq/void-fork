@@ -104,7 +104,10 @@ function formatAmzDate(d: Date): string {
  * `X-Amz-SignedHeaders` so they are covered by the signature, which means
  * R2 rejects any PUT whose body MD5 doesn't match the declared header.
  */
-export async function presignAssetPut(opts: PresignAssetPutOptions): Promise<PresignedAssetPut> {
+export async function presignAssetPut(
+  opts: PresignAssetPutOptions,
+  signingKeyCache?: Map<string, ArrayBuffer>,
+): Promise<PresignedAssetPut> {
   const ttl = opts.ttlSeconds ?? 600;
   if (!Number.isFinite(ttl) || ttl <= 0) {
     throw new Error(`ttlSeconds must be a positive number, got ${ttl}`);
@@ -134,6 +137,7 @@ export async function presignAssetPut(opts: PresignAssetPutOptions): Promise<Pre
     signQuery: true,
     allHeaders: true,
     datetime: opts.now ? formatAmzDate(opts.now) : undefined,
+    cache: signingKeyCache,
   });
 
   const signed = await signer.sign();
