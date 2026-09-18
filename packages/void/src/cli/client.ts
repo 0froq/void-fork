@@ -3,7 +3,11 @@ import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { getPackageDir } from './agents.ts';
 import { getApiUrl } from './auth.ts';
-import { ensureCloudflaredToken } from './cf-access.ts';
+import {
+  ensureCloudflaredToken,
+  ensurePlatformAccessToken,
+  isCloudflareAccessChallenge,
+} from './cf-access.ts';
 import type { CliLogger } from './log-file.ts';
 import { normalizePlatformApiUrl } from './platform-registry.ts';
 import type { DeployAssetUploadRequest, DeployEvent, DeployUploadPayload } from './types.ts';
@@ -435,6 +439,7 @@ const DEPLOY_POST_BACKOFF_MS = [1000, 5000, 10000];
 export class PlatformClient {
   private readonly baseUrl: string;
   private readonly authHeaders: Record<string, string>;
+  private readonly accessHeaders: Record<string, string>;
   private readonly cliLog?: CliLogger;
   readonly apiUrl: string;
 
@@ -450,6 +455,7 @@ export class PlatformClient {
     }
     this.apiUrl = this.baseUrl;
     ensureCloudflaredToken(this.baseUrl);
+    this.accessHeaders = cfAccessHeaders(process.env, this.baseUrl);
     this.authHeaders = {
       Authorization: `Bearer ${token}`,
       // Conditional spread: omit the header entirely if package.json was
@@ -460,19 +466,54 @@ export class PlatformClient {
     };
   }
 
-  private request(url: string | URL, options: RequestInit = {}): Promise<Response> {
+  private async request(url: string | URL, options: RequestInit = {}): Promise<Response> {
     if (new URL(url).origin !== this.baseUrl) {
       throw new Error('Platform credentials cannot be sent to another origin.');
     }
-    ensureCloudflaredToken(this.baseUrl);
-    return fetch(url, {
-      ...options,
-      headers: {
-        ...(options.headers as Record<string, string>),
-        ...cfAccessHeaders(process.env, this.baseUrl),
-      },
-      redirect: 'manual',
-    });
+    // A service-token pair is long-lived and was captured before managed deploy
+    // scrubs the parent environment. User tokens can be renewed in the browser,
+    // so keep checking for a newer environment value when no service pair was
+    // captured and let current credentials override the fallback below.
+    if (!this.accessHeaders['CF-Access-Client-Id']) {
+      ensureCloudflaredToken(this.baseUrl);
+    }
+    const send = () => {
+      const currentAccessHeaders = cfAccessHeaders(process.env, this.baseUrl);
+      const accessHeaders = this.accessHeaders['CF-Access-Client-Id']
+        ? this.accessHeaders
+        : Object.keys(currentAccessHeaders).length > 0
+          ? currentAccessHeaders
+          : this.accessHeaders;
+      return {
+        accessHeaders,
+        response: fetch(url, {
+          ...options,
+          headers: {
+            ...(options.headers as Record<string, string>),
+            ...accessHeaders,
+          },
+          redirect: 'manual',
+        }),
+      };
+    };
+
+    const first = send();
+    const response = await first.response;
+    if (!isCloudflareAccessChallenge(response)) {
+      return response;
+    }
+
+    // Service-token rejection is an operator/CI configuration error. Never
+    // replace a scoped machine credential with an interactive human session.
+    if (first.accessHeaders['CF-Access-Client-Id']) {
+      return response;
+    }
+
+    await response.body?.cancel();
+    ensurePlatformAccessToken(this.baseUrl, true, false, first.accessHeaders['cf-access-token']);
+    // One retry only, at the exact original endpoint. `redirect: 'manual'`
+    // above means credentials are never forwarded to the challenge Location.
+    return send().response;
   }
 
   async whoami(): Promise<{ login: string; plan: string }> {

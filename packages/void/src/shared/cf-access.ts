@@ -103,3 +103,22 @@ export function trustedCloudflareWorkerAccessHeaders(
 ): Record<string, string> {
   return accessHeaders(env);
 }
+
+/** Keep only this recipient's credentials when crossing into a local Worker runtime. */
+export function scopedAccessCredentials(
+  env: Record<string, unknown>,
+  targetUrl: string,
+): string | undefined {
+  const headers = cfAccessHeaders(env, targetUrl);
+  if (Object.keys(headers).length === 0) {
+    return undefined;
+  }
+  return JSON.stringify({
+    [new URL(targetUrl).origin]: headers['CF-Access-Client-Id']
+      ? {
+          CF_ACCESS_CLIENT_ID: headers['CF-Access-Client-Id'],
+          CF_ACCESS_CLIENT_SECRET: headers['CF-Access-Client-Secret'],
+        }
+      : { CF_ACCESS_TOKEN: headers['cf-access-token'] },
+  });
+}

@@ -178,6 +178,53 @@ describe('origin-scoped self-hosted Access login', () => {
     expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
+  it('reuses a valid cached human token when Access is known to be required', async () => {
+    const token = jwt(Math.floor(Date.now() / 1000) + 600);
+    keyring.read.mockReturnValue(token);
+    const stdinTty = process.stdin.isTTY;
+    const stdoutTty = process.stdout.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: false });
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: false });
+    try {
+      const { ensurePlatformAccessToken } = await import('../../src/cli/cf-access.ts');
+      ensurePlatformAccessToken('https://api.example.com', false, true);
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: stdinTty });
+      Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: stdoutTty });
+    }
+    expect(cfAccessHeaders(process.env, 'https://api.example.com')).toEqual({
+      'cf-access-token': token,
+    });
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('acquires a separate proxy token for development and never reuses the API audience', async () => {
+    const apiToken = jwt(Math.floor(Date.now() / 1000) + 600);
+    const proxyToken = jwt(Math.floor(Date.now() / 1000) + 900);
+    process.env.VOID_ACCESS_CREDENTIALS = JSON.stringify({
+      'https://api.example.com': { CF_ACCESS_TOKEN: apiToken },
+    });
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: proxyToken });
+    const { ensurePlatformProxyAccess } = await import('../../src/cli/cf-access.ts');
+    ensurePlatformProxyAccess('https://api.example.com', 'https://proxy.example.com');
+    expect(spawnSyncMock.mock.calls[0]?.[1]).toEqual([
+      'access',
+      'token',
+      '-app=https://proxy.example.com',
+    ]);
+    expect(cfAccessHeaders(process.env, 'https://proxy.example.com')).toEqual({
+      'cf-access-token': proxyToken,
+    });
+    expect(cfAccessHeaders(process.env, 'https://api.example.com')).toEqual({
+      'cf-access-token': apiToken,
+    });
+  });
+  it('does not probe Access for ordinary unprotected development', async () => {
+    const { ensurePlatformProxyAccess } = await import('../../src/cli/cf-access.ts');
+    ensurePlatformProxyAccess('https://api.example.com', 'https://proxy.example.com');
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+    expect(process.env.VOID_ACCESS_CREDENTIALS).toBe('');
+  });
   it('refreshes an expired cached token without storing it in a project file', async () => {
     const token = jwt(Math.floor(Date.now() / 1000) + 600);
     keyring.read.mockReturnValue(jwt(1));
@@ -193,6 +240,34 @@ describe('origin-scoped self-hosted Access login', () => {
     expect(cfAccessHeaders(process.env, 'https://api.example.com')).toEqual({
       'cf-access-token': token,
     });
+  });
+
+  it('forces interactive renewal after Access rejects an otherwise unexpired cached token', async () => {
+    const rejected = jwt(Math.floor(Date.now() / 1000) + 600);
+    const fresh = jwt(Math.floor(Date.now() / 1000) + 900);
+    keyring.read.mockReturnValue(rejected);
+    spawnSyncMock.mockImplementation((_command, args: Array<string>) =>
+      args[1] === 'login' ? { status: 0, stdout: '' } : { status: 0, stdout: fresh },
+    );
+    const stdinTty = process.stdin.isTTY;
+    const stdoutTty = process.stdout.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
+    try {
+      const { ensurePlatformAccessToken } = await import('../../src/cli/cf-access.ts');
+      ensurePlatformAccessToken('https://api.example.com', true);
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: stdinTty });
+      Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: stdoutTty });
+    }
+    expect(spawnSyncMock.mock.calls.map((call) => call[1])).toEqual([
+      ['access', 'login', 'https://api.example.com'],
+      ['access', 'token', '-app=https://api.example.com'],
+    ]);
+    expect(cfAccessHeaders(process.env, 'https://api.example.com')).toEqual({
+      'cf-access-token': fresh,
+    });
+    expect(keyring.write).toHaveBeenCalledWith('dev.void.cli.access', expect.any(String), fresh);
   });
 
   it('does not treat arbitrary redirects as company authentication challenges', async () => {

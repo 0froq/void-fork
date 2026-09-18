@@ -34,6 +34,19 @@ function rememberOriginToken(origin: string, token: string): void {
   });
 }
 
+function forgetOriginToken(origin: string): void {
+  if (!process.env.VOID_ACCESS_CREDENTIALS) {
+    return;
+  }
+  const parsed = JSON.parse(process.env.VOID_ACCESS_CREDENTIALS) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('platform: VOID_ACCESS_CREDENTIALS must contain an origin-keyed JSON object.');
+  }
+  const entries = { ...(parsed as Record<string, unknown>) };
+  delete entries[origin];
+  process.env.VOID_ACCESS_CREDENTIALS = JSON.stringify(entries);
+}
+
 export function isCloudflareAccessChallenge(response: Response): boolean {
   const location = response.headers.get('Location');
   if (!location || response.status < 300 || response.status >= 400) {
@@ -54,7 +67,12 @@ export function isCloudflareAccessChallenge(response: Response): boolean {
 }
 
 /** Called for a selected origin, never for a redirect destination. */
-export function ensurePlatformAccessToken(apiUrl: string, challenged = false): void {
+export function ensurePlatformAccessToken(
+  apiUrl: string,
+  challenged = false,
+  required = false,
+  rejectedToken?: string,
+): void {
   const origin = normalizePlatformApiUrl(apiUrl);
   if (!origin.startsWith('https://')) {
     return;
@@ -63,7 +81,7 @@ export function ensurePlatformAccessToken(apiUrl: string, challenged = false): v
   if (headers['CF-Access-Client-Id']) {
     return;
   }
-  if (headers['cf-access-token'] && usableToken(headers['cf-access-token'])) {
+  if (!challenged && headers['cf-access-token'] && usableToken(headers['cf-access-token'])) {
     return;
   }
   const account = platformCredentialAccount(origin);
@@ -74,14 +92,33 @@ export function ensurePlatformAccessToken(apiUrl: string, challenged = false): v
     keyringTokens.set(origin, readKeyringPassword(ACCESS_KEYRING_SERVICE, account));
   }
   const stored = keyringTokens.get(origin);
-  if (stored && usableToken(stored)) {
+  if (!challenged && stored && usableToken(stored)) {
     rememberOriginToken(origin, stored);
     return;
   }
-  if (!challenged && !stored && !headers['cf-access-token']) {
+  if (!challenged && !required && !stored && !headers['cf-access-token']) {
     return;
   }
+  const rejectedTokens = new Set(
+    [headers['cf-access-token'], stored, rejectedToken].filter(
+      (token): token is string => typeof token === 'string' && token.length > 0,
+    ),
+  );
+  if (challenged && rejectedTokens.size > 0) {
+    forgetOriginToken(origin);
+    keyringTokens.set(origin, null);
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      throw new Error(
+        `platform: Cloudflare Access rejected the cached credential for ${origin}. Re-run this command in an interactive terminal to renew it.`,
+      );
+    }
+    console.error(`Renew Cloudflare Access authentication for ${origin}.`);
+    runCloudflared(['access', 'login', origin], { inherit: true, timeoutMs: 120_000 });
+  }
   let token = runCloudflared(['access', 'token', `-app=${origin}`]);
+  if (token && rejectedTokens.has(token)) {
+    token = null;
+  }
   if ((!token || !usableToken(token)) && process.stdin.isTTY && process.stdout.isTTY) {
     console.error(`Authenticate to Cloudflare Access for ${origin}.`);
     runCloudflared(['access', 'login', origin], { inherit: true, timeoutMs: 120_000 });
@@ -171,4 +208,14 @@ function runCloudflared(
   } catch {
     return null;
   }
+}
+
+/** A protected API and proxy have separate audiences and separately scoped credentials. */
+export function ensurePlatformProxyAccess(apiUrl: string, proxyUrl: string): void {
+  ensurePlatformAccessToken(apiUrl);
+  ensurePlatformAccessToken(
+    proxyUrl,
+    false,
+    Object.keys(cfAccessHeaders(process.env, apiUrl)).length > 0,
+  );
 }
