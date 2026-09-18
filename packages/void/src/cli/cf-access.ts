@@ -1,5 +1,102 @@
 import { spawnSync } from 'node:child_process';
-import { isVoidAccessGatedUrl } from '../shared/cf-access.ts';
+import { cfAccessHeaders, isVoidAccessGatedUrl } from '../shared/cf-access.ts';
+import { readKeyringPassword, writeKeyringPassword } from './keyring.ts';
+import { normalizePlatformApiUrl, platformCredentialAccount } from './platform-registry.ts';
+
+const ACCESS_KEYRING_SERVICE = 'dev.void.cli.access';
+const keyringTokens = new Map<string, string | null>();
+
+function usableToken(token: string): boolean {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString('utf8')) as {
+      exp?: unknown;
+    };
+    return typeof payload.exp === 'number' && payload.exp > Date.now() / 1000 + 60;
+  } catch {
+    return false;
+  }
+}
+
+function rememberOriginToken(origin: string, token: string): void {
+  let entries: Record<string, unknown> = {};
+  if (process.env.VOID_ACCESS_CREDENTIALS) {
+    const parsed = JSON.parse(process.env.VOID_ACCESS_CREDENTIALS) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(
+        'platform: VOID_ACCESS_CREDENTIALS must contain an origin-keyed JSON object.',
+      );
+    }
+    entries = parsed as Record<string, unknown>;
+  }
+  process.env.VOID_ACCESS_CREDENTIALS = JSON.stringify({
+    ...entries,
+    [origin]: { CF_ACCESS_TOKEN: token },
+  });
+}
+
+export function isCloudflareAccessChallenge(response: Response): boolean {
+  const location = response.headers.get('Location');
+  if (!location || response.status < 300 || response.status >= 400) {
+    return false;
+  }
+  try {
+    const target = new URL(location);
+    return (
+      target.protocol === 'https:' &&
+      !target.username &&
+      !target.password &&
+      /^[a-z0-9-]+\.cloudflareaccess\.com$/.test(target.hostname) &&
+      target.pathname.startsWith('/cdn-cgi/access/login')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Called for a selected origin, never for a redirect destination. */
+export function ensurePlatformAccessToken(apiUrl: string, challenged = false): void {
+  const origin = normalizePlatformApiUrl(apiUrl);
+  if (!origin.startsWith('https://')) {
+    return;
+  }
+  const headers = cfAccessHeaders(process.env, origin);
+  if (headers['CF-Access-Client-Id']) {
+    return;
+  }
+  if (headers['cf-access-token'] && usableToken(headers['cf-access-token'])) {
+    return;
+  }
+  const account = platformCredentialAccount(origin);
+  if (!keyringTokens.has(origin)) {
+    if (keyringTokens.size >= 64) {
+      keyringTokens.delete(keyringTokens.keys().next().value!);
+    }
+    keyringTokens.set(origin, readKeyringPassword(ACCESS_KEYRING_SERVICE, account));
+  }
+  const stored = keyringTokens.get(origin);
+  if (stored && usableToken(stored)) {
+    rememberOriginToken(origin, stored);
+    return;
+  }
+  if (!challenged && !stored && !headers['cf-access-token']) {
+    return;
+  }
+  let token = runCloudflared(['access', 'token', `-app=${origin}`]);
+  if ((!token || !usableToken(token)) && process.stdin.isTTY && process.stdout.isTTY) {
+    console.error(`Authenticate to Cloudflare Access for ${origin}.`);
+    runCloudflared(['access', 'login', origin], { inherit: true, timeoutMs: 120_000 });
+    token = runCloudflared(['access', 'token', `-app=${origin}`]);
+  }
+  if (!token || !usableToken(token)) {
+    throw new Error(
+      'platform: Cloudflare Access authentication is required. Install cloudflared and sign in interactively, or set VOID_ACCESS_ORIGIN with scoped CF_ACCESS_CLIENT_ID/CF_ACCESS_CLIENT_SECRET credentials for CI.',
+    );
+  }
+  rememberOriginToken(origin, token);
+  keyringTokens.set(origin, token);
+  // Keychain failure keeps the credential only in process memory, never in a plaintext file.
+  writeKeyringPassword(ACCESS_KEYRING_SERVICE, account, token);
+}
 
 const probedHosts = new Set<string>();
 
@@ -18,6 +115,14 @@ const probedHosts = new Set<string>();
  *   - `cloudflared` is not installed
  */
 export function ensureCloudflaredToken(apiUrl: string): void {
+  if (
+    !isVoidAccessGatedUrl(apiUrl) ||
+    process.env.VOID_ACCESS_ORIGIN ||
+    process.env.VOID_ACCESS_CREDENTIALS
+  ) {
+    ensurePlatformAccessToken(apiUrl);
+    return;
+  }
   if (process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET) {
     return;
   }

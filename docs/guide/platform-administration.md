@@ -29,6 +29,19 @@ void platform auth status
 
 This shows your account, the session's expiry, and the features available on the platform. To end the session, run `void platform auth logout`.
 
+If the platform is protected by Cloudflare Access, `void connect <url>` handles
+the company sign-in before Void login. Interactive Access authentication uses a
+locally installed `cloudflared` and saves its short-lived credential in your
+system keychain for that platform origin. You do not need to copy browser cookies.
+
+For CI, scope an admitted Access service-token pair to its recipient with
+`VOID_ACCESS_ORIGIN`, then provide `CF_ACCESS_CLIENT_ID` and
+`CF_ACCESS_CLIENT_SECRET` from your secret manager. Access credentials do not
+replace Void deployment credentials. When API and proxy origins need different
+credentials, `VOID_ACCESS_CREDENTIALS` accepts a JSON object keyed by exact HTTPS
+origin; each entry contains either `CF_ACCESS_TOKEN` or the service-token pair.
+Keep this value in your secret manager, not in application configuration.
+
 ## Choosing a Platform
 
 If you manage more than one platform, list your connections and choose a default:

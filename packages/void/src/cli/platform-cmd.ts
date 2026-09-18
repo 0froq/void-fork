@@ -1,7 +1,11 @@
 import { isCancel, log, select, text } from '@clack/prompts';
 import { parsePlatformDiscoveryDocument, type PlatformDiscoveryDocument } from '@void/platform';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
-import { ensureCloudflaredToken } from './cf-access.ts';
+import {
+  ensureCloudflaredToken,
+  ensurePlatformAccessToken,
+  isCloudflareAccessChallenge,
+} from './cf-access.ts';
 import { pc } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {
@@ -19,11 +23,18 @@ export async function discoverPlatform(
 ): Promise<PlatformDiscoveryDocument> {
   const apiUrl = normalizePlatformApiUrl(input);
   ensureCloudflaredToken(apiUrl);
-  const response = await fetcher(`${apiUrl}/.well-known/void-platform`, {
-    headers: { Accept: 'application/json', ...cfAccessHeaders(process.env, apiUrl) },
-    redirect: 'manual',
-    signal: AbortSignal.timeout(15_000),
-  });
+  const request = () =>
+    fetcher(`${apiUrl}/.well-known/void-platform`, {
+      headers: { Accept: 'application/json', ...cfAccessHeaders(process.env, apiUrl) },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15_000),
+    });
+  let response = await request();
+  if (isCloudflareAccessChallenge(response)) {
+    await response.body?.cancel();
+    ensurePlatformAccessToken(apiUrl, true);
+    response = await request();
+  }
   if (!response.ok) {
     throw new Error(`platform: Discovery failed at ${apiUrl} (HTTP ${response.status}).`);
   }

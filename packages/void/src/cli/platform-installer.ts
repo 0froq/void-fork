@@ -4903,6 +4903,7 @@ export async function verifyPlatformSandboxDrain(
       ...cfAccessHeaders(process.env, apiUrl),
     },
     signal: AbortSignal.timeout(30_000),
+    redirect: 'manual',
   });
   if (!response.ok) {
     throw new Error(

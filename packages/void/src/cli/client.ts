@@ -457,12 +457,26 @@ export class PlatformClient {
       // sending a placeholder like "unknown" would trip the fail-closed
       // 426 path and brick the CLI permanently.
       ...(VOID_CLI_VERSION !== null && { 'X-Void-CLI-Version': VOID_CLI_VERSION }),
-      ...cfAccessHeaders(process.env, this.baseUrl),
     };
   }
 
+  private request(url: string | URL, options: RequestInit = {}): Promise<Response> {
+    if (new URL(url).origin !== this.baseUrl) {
+      throw new Error('Platform credentials cannot be sent to another origin.');
+    }
+    ensureCloudflaredToken(this.baseUrl);
+    return fetch(url, {
+      ...options,
+      headers: {
+        ...(options.headers as Record<string, string>),
+        ...cfAccessHeaders(process.env, this.baseUrl),
+      },
+      redirect: 'manual',
+    });
+  }
+
   async whoami(): Promise<{ login: string; plan: string }> {
-    const res = await fetch(`${this.baseUrl}/me`, {
+    const res = await this.request(`${this.baseUrl}/me`, {
       headers: {
         ...this.authHeaders,
       },
@@ -476,7 +490,7 @@ export class PlatformClient {
   }
 
   async listProjects(): Promise<Array<ProjectResponse>> {
-    const res = await fetch(`${this.baseUrl}/projects`, {
+    const res = await this.request(`${this.baseUrl}/projects`, {
       headers: {
         ...this.authHeaders,
       },
@@ -490,7 +504,7 @@ export class PlatformClient {
   }
 
   async listDeployments(projectId: string): Promise<DeploymentListResponse> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/deployments`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/deployments`, {
       headers: {
         ...this.authHeaders,
       },
@@ -519,7 +533,7 @@ export class PlatformClient {
     if (options?.allowDestructive && options.allowDestructive.length > 0) {
       body.allowDestructive = options.allowDestructive;
     }
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/rollback`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/rollback`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -539,7 +553,7 @@ export class PlatformClient {
     projectId: string,
     deploymentId: string,
   ): Promise<{ ok: boolean; deploymentId: string; status: string }> {
-    const res = await fetch(
+    const res = await this.request(
       `${this.baseUrl}/projects/${projectId}/deployments/${deploymentId}/cancel`,
       {
         method: 'POST',
@@ -557,7 +571,7 @@ export class PlatformClient {
   }
 
   async createProject(slug: string): Promise<CreateProjectResponse> {
-    const res = await fetch(`${this.baseUrl}/projects`, {
+    const res = await this.request(`${this.baseUrl}/projects`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -580,7 +594,7 @@ export class PlatformClient {
   ): Promise<{ needed: Array<string>; total: number; skipped: number }> {
     const total = Object.keys(assetManifest).length;
     try {
-      const res = await fetch(`${this.baseUrl}/projects/${projectId}/deploy/preflight`, {
+      const res = await this.request(`${this.baseUrl}/projects/${projectId}/deploy/preflight`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -621,7 +635,7 @@ export class PlatformClient {
     const url = `${this.baseUrl}/projects/${projectId}/deploy/upload-urls`;
     this.cliLog?.info('upload_urls_post', { url, assetCount: assets.length });
 
-    const res = await fetch(url, {
+    const res = await this.request(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -688,7 +702,7 @@ export class PlatformClient {
     let attempt = 0;
     while (true) {
       try {
-        res = await fetch(url, init);
+        res = await this.request(url, init);
         break;
       } catch (err) {
         if (!(err instanceof TypeError) || attempt >= DEPLOY_POST_MAX_RETRIES) {
@@ -809,7 +823,7 @@ export class PlatformClient {
   }
 
   async listSecrets(projectId: string): Promise<Array<{ name: string }>> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/secrets`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/secrets`, {
       headers: {
         ...this.authHeaders,
       },
@@ -823,7 +837,7 @@ export class PlatformClient {
   }
 
   async setSecret(projectId: string, name: string, value: string): Promise<SecretResponse> {
-    const res = await fetch(
+    const res = await this.request(
       `${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`,
       {
         method: 'PUT',
@@ -843,7 +857,7 @@ export class PlatformClient {
   }
 
   async deleteProject(projectId: string): Promise<DeleteProjectResponse> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}`, {
       method: 'DELETE',
       headers: {
         ...this.authHeaders,
@@ -865,7 +879,7 @@ export class PlatformClient {
     if (dialect) {
       url.searchParams.set('dialect', dialect);
     }
-    const res = await fetch(url, {
+    const res = await this.request(url, {
       headers: {
         ...this.authHeaders,
       },
@@ -890,7 +904,7 @@ export class PlatformClient {
     migration_stability?: 'stable' | 'legacy';
     warnings?: Array<string>;
   }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/migrations/apply`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/migrations/apply`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -910,7 +924,7 @@ export class PlatformClient {
     projectId: string,
     renames: Array<{ from: string; to: string }>,
   ): Promise<{ ok: boolean }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/migrations/rename`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/migrations/rename`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -927,7 +941,7 @@ export class PlatformClient {
   }
 
   async addDomain(projectId: string, hostname: string): Promise<DomainResponse> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/domains`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/domains`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -944,7 +958,7 @@ export class PlatformClient {
   }
 
   async listDomains(projectId: string): Promise<Array<DomainResponse>> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/domains`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/domains`, {
       headers: {
         ...this.authHeaders,
       },
@@ -958,7 +972,7 @@ export class PlatformClient {
   }
 
   async getDomainStatus(projectId: string, domainId: string): Promise<DomainStatusResponse> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/domains/${domainId}`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/domains/${domainId}`, {
       headers: {
         ...this.authHeaders,
       },
@@ -972,7 +986,7 @@ export class PlatformClient {
   }
 
   async removeDomain(projectId: string, domainId: string): Promise<{ ok: boolean }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/domains/${domainId}`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/domains/${domainId}`, {
       method: 'DELETE',
       headers: {
         ...this.authHeaders,
@@ -987,7 +1001,7 @@ export class PlatformClient {
   }
 
   async deleteSecret(projectId: string, name: string): Promise<SecretResponse> {
-    const res = await fetch(
+    const res = await this.request(
       `${this.baseUrl}/projects/${projectId}/secrets/${encodeURIComponent(name)}`,
       {
         method: 'DELETE',
@@ -1005,7 +1019,7 @@ export class PlatformClient {
   }
 
   async getResources(projectId: string): Promise<Array<{ type: string; binding_name: string }>> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/resources`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/resources`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1019,7 +1033,7 @@ export class PlatformClient {
   }
 
   async createPrerenderToken(projectId: string): Promise<string> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/prerender-token`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/prerender-token`, {
       method: 'POST',
       headers: {
         ...this.authHeaders,
@@ -1035,7 +1049,7 @@ export class PlatformClient {
   }
 
   async provisionDatabase(projectId: string, connectionString: string): Promise<{ ok: boolean }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/database`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/database`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1052,7 +1066,7 @@ export class PlatformClient {
   }
 
   async setDatabaseUrl(projectId: string, connectionString: string): Promise<{ ok: boolean }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/database-url`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/database-url`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -1069,7 +1083,7 @@ export class PlatformClient {
   }
 
   async getDatabaseUrl(projectId: string): Promise<{ url: string }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/database-url`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/database-url`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1083,7 +1097,7 @@ export class PlatformClient {
   }
 
   async purgeCache(projectId: string): Promise<{ purged: number }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/revalidate`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/revalidate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1117,7 +1131,7 @@ export class PlatformClient {
       params.set('level', level);
     }
 
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/logs?${params}`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/logs?${params}`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1145,7 +1159,7 @@ export class PlatformClient {
       params.set('status', status);
     }
 
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/requests?${params}`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/requests?${params}`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1161,7 +1175,7 @@ export class PlatformClient {
 
   async listBuilds(projectId: string, limit = 20): Promise<Array<BuildSummary>> {
     const params = new URLSearchParams({ limit: String(limit) });
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/builds?${params}`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/builds?${params}`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1177,7 +1191,7 @@ export class PlatformClient {
 
   async getBuildLogs(projectId: string, buildId: string, since = 0): Promise<BuildLogsResponse> {
     const params = new URLSearchParams({ since: String(since) });
-    const res = await fetch(
+    const res = await this.request(
       `${this.baseUrl}/projects/${projectId}/builds/${buildId}/logs?${params}`,
       {
         headers: {
@@ -1194,7 +1208,7 @@ export class PlatformClient {
   }
 
   async getGithubInstallUrl(): Promise<{ url: string }> {
-    const res = await fetch(`${this.baseUrl}/github/install-url`, {
+    const res = await this.request(`${this.baseUrl}/github/install-url`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1208,7 +1222,7 @@ export class PlatformClient {
   }
 
   async listGithubInstallations(): Promise<Array<GithubInstallation>> {
-    const res = await fetch(`${this.baseUrl}/github/installations`, {
+    const res = await this.request(`${this.baseUrl}/github/installations`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1233,7 +1247,7 @@ export class PlatformClient {
       codeVerifier?: string;
     },
   ): Promise<GithubConnection> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/github`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/github`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1269,7 +1283,7 @@ export class PlatformClient {
       installationId,
       repoFullName,
     });
-    const res = await fetch(`${this.baseUrl}/github/connect-authorize-url?${params}`, {
+    const res = await this.request(`${this.baseUrl}/github/connect-authorize-url?${params}`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1283,7 +1297,7 @@ export class PlatformClient {
   }
 
   async getGithubConnection(projectId: string): Promise<GithubConnection> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/github`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/github`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1304,7 +1318,7 @@ export class PlatformClient {
       workflowPath?: string;
     },
   ): Promise<GithubConnection> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/github`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/github`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -1321,7 +1335,7 @@ export class PlatformClient {
   }
 
   async deleteGithubConnection(projectId: string): Promise<{ ok: boolean }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/github`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/github`, {
       method: 'DELETE',
       headers: {
         ...this.authHeaders,
@@ -1341,7 +1355,7 @@ export class PlatformClient {
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
     });
-    const res = await fetch(`${this.baseUrl}/github/link-url?${params}`, {
+    const res = await this.request(`${this.baseUrl}/github/link-url?${params}`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1358,7 +1372,7 @@ export class PlatformClient {
     linkCode: string,
     codeVerifier: string,
   ): Promise<{ status: 'linked' | 'already_linked' }> {
-    const res = await fetch(`${this.baseUrl}/github/link/complete`, {
+    const res = await this.request(`${this.baseUrl}/github/link/complete`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1380,7 +1394,7 @@ export class PlatformClient {
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
     });
-    const res = await fetch(`${this.baseUrl}/github/join-url?${params}`, {
+    const res = await this.request(`${this.baseUrl}/github/join-url?${params}`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1397,7 +1411,7 @@ export class PlatformClient {
     joinCode: string,
     codeVerifier: string,
   ): Promise<{ status: 'joined'; count: number }> {
-    const res = await fetch(`${this.baseUrl}/github/join/complete`, {
+    const res = await this.request(`${this.baseUrl}/github/join/complete`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1414,7 +1428,7 @@ export class PlatformClient {
   }
 
   async getEmailUsage(projectId: string): Promise<EmailUsageResponse> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/email/usage`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/email/usage`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1433,7 +1447,7 @@ export class PlatformClient {
       url.searchParams.set('limit', String(limit));
     }
 
-    const res = await fetch(url, {
+    const res = await this.request(url, {
       headers: {
         ...this.authHeaders,
       },
@@ -1447,7 +1461,7 @@ export class PlatformClient {
   }
 
   async listEmailDestinations(projectId: string): Promise<Array<EmailDestinationResponse>> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/email/destinations`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/email/destinations`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1464,7 +1478,7 @@ export class PlatformClient {
     projectId: string,
     address: string,
   ): Promise<EmailDestinationResponse & { created: boolean }> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/email/destinations`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/email/destinations`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1486,7 +1500,7 @@ export class PlatformClient {
   }
 
   async removeEmailDestination(projectId: string, destinationId: string): Promise<{ ok: boolean }> {
-    const res = await fetch(
+    const res = await this.request(
       `${this.baseUrl}/projects/${projectId}/email/destinations/${destinationId}`,
       {
         method: 'DELETE',
@@ -1504,7 +1518,7 @@ export class PlatformClient {
   }
 
   async listEmailDomains(projectId: string): Promise<Array<EmailDomainResponse>> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/email/domains`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/email/domains`, {
       headers: {
         ...this.authHeaders,
       },
@@ -1528,7 +1542,7 @@ export class PlatformClient {
     projectId: string,
     input: { domain: string; refreshToken?: string; apiToken?: string; attemptId?: string },
   ): Promise<EmailDomainResponse> {
-    const res = await fetch(`${this.baseUrl}/projects/${projectId}/email/domains`, {
+    const res = await this.request(`${this.baseUrl}/projects/${projectId}/email/domains`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1550,7 +1564,7 @@ export class PlatformClient {
   }
 
   async getEmailDomain(projectId: string, domain: string): Promise<EmailDomainStatusResponse> {
-    const res = await fetch(
+    const res = await this.request(
       `${this.baseUrl}/projects/${projectId}/email/domains/${encodeURIComponent(domain)}`,
       {
         headers: {
@@ -1568,7 +1582,7 @@ export class PlatformClient {
 
   /** Redeploys the relay at the current version and rotates its secret (0078, `sync`). */
   async syncEmailDomain(projectId: string, domain: string): Promise<EmailDomainSyncResponse> {
-    const res = await fetch(
+    const res = await this.request(
       `${this.baseUrl}/projects/${projectId}/email/domains/${encodeURIComponent(domain)}/sync`,
       {
         method: 'POST',
@@ -1602,7 +1616,7 @@ export class PlatformClient {
     if (force) {
       url.searchParams.set('force', '1');
     }
-    const res = await fetch(url, {
+    const res = await this.request(url, {
       method: 'DELETE',
       headers: {
         ...this.authHeaders,
