@@ -8683,6 +8683,37 @@ describe('env-schema probe (real subprocess)', () => {
   // The probe spawns a plain `node` on this repo's source `.ts`, so its runtime imports must use
   // type-strippable syntax supported by Node without extra NODE_OPTIONS flags.
 
+  it('does not start a child when no schema exists', async () => {
+    const root = makeProject({ 'package.json': '{"type":"module"}' });
+    const spawn = vi.fn();
+    expect(await resolveEnvSchemaFactsViaSubprocess({ root }, {}, spawn)).toEqual({
+      kind: 'ok',
+      facts: { hasSchema: false, serverKeys: [], requiredKeys: [] },
+    });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it.each(['env.ts', 'env.mts', 'env.js', 'env.mjs'])(
+    'still isolates %s under a configured source directory',
+    async (filename) => {
+      const root = makeProject({
+        'void.json': '{"sourceDir":"app"}',
+        [`app/${filename}`]: 'throw new Error("must never run in parent");',
+      });
+      const spawn = vi.fn(() => ({
+        status: 0,
+        fd3: JSON.stringify({
+          kind: 'ok',
+          facts: { hasSchema: true, serverKeys: [], requiredKeys: [] },
+        }),
+        error: null,
+        signal: null,
+      }));
+      expect((await resolveEnvSchemaFactsViaSubprocess({ root }, {}, spawn)).kind).toBe('ok');
+      expect(spawn).toHaveBeenCalledOnce();
+    },
+  );
+
   it('derives server + required facts and the fd-3 result survives noisy stdout', async () => {
     const root = makeProject({
       'package.json': JSON.stringify({ name: 'envapp', type: 'module' }),
@@ -8803,6 +8834,7 @@ describe('env-schema probe (real subprocess)', () => {
   });
 
   it('parses ONLY the dedicated fd-3 result channel (injected spawn)', async () => {
+    const root = makeProject({ 'env.ts': 'export default {};' });
     const facts = { hasSchema: true, serverKeys: ['X'], requiredKeys: ['X'] };
     const okSpawn = (): EnvSchemaProbeSpawnResult => ({
       status: 0,
@@ -8810,11 +8842,7 @@ describe('env-schema probe (real subprocess)', () => {
       error: null,
       signal: null,
     });
-    const r = await resolveEnvSchemaFactsViaSubprocess(
-      { root: tmpDir },
-      { ...process.env },
-      okSpawn,
-    );
+    const r = await resolveEnvSchemaFactsViaSubprocess({ root }, { ...process.env }, okSpawn);
     expect(r.kind).toBe('ok');
     if (r.kind === 'ok') {
       expect(r.facts).toEqual(facts);
@@ -8827,7 +8855,7 @@ describe('env-schema probe (real subprocess)', () => {
       signal: null,
     });
     await expect(
-      resolveEnvSchemaFactsViaSubprocess({ root: tmpDir }, { ...process.env }, failSpawn),
+      resolveEnvSchemaFactsViaSubprocess({ root }, { ...process.env }, failSpawn),
     ).rejects.toThrow(/exited with code/);
   });
 

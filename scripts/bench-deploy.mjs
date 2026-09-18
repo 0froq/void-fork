@@ -296,15 +296,13 @@ try {
     return uploaderStats;
   });
   const probe = join(dist, 'cli/env-schema-probe.mjs');
+  const { resolveEnvSchemaFactsViaSubprocess } = await import(pathToFileURL(probe).href);
   await measure('schema-facts-absent-subprocess', 7, () => {
-    const result = child(
-      [probe, '__void-deploy-env-schema-probe__', JSON.stringify({ op: 'facts', root: scratch })],
-      scratch,
-      { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] },
-    );
-    if (JSON.parse(result.output[3]).kind !== 'ok') {
-      throw new Error('probe failed');
-    }
+    return resolveEnvSchemaFactsViaSubprocess({ root: scratch }, env).then((result) => {
+      if (result.kind !== 'ok' || result.facts.hasSchema) {
+        throw new Error('probe failed');
+      }
+    });
   });
   for (const [count, size] of [
     [1000, 4096],

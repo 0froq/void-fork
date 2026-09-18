@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { writeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { findEnvFile } from '../codegen/env-types.ts';
 import type { SelfHostSchemaFacts, SelfHostSchemaFailureReason } from './env-validation.ts';
 
 /**
@@ -157,6 +158,11 @@ export async function resolveEnvSchemaFactsViaSubprocess(
   env: NodeJS.ProcessEnv,
   spawn: EnvSchemaProbeSpawn = defaultSpawn,
 ): Promise<EnvSchemaProbeResult> {
+  // File discovery executes no project code. An absent schema has no validators
+  // to isolate; use the same resolver as the child, including sourceDir/extensions.
+  if (findEnvFile(input.root) === null) {
+    return { kind: 'ok', facts: { hasSchema: false, serverKeys: [], requiredKeys: [] } };
+  }
   const result = await spawnEnvSchemaProbe('facts', input, env, spawn);
   if (result.kind === 'invalid-keys') {
     // The `facts` operation never emits invalid-keys; treat it as an infra fault.
