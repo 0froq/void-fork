@@ -55,6 +55,7 @@ export async function verifyProjectOwner(
   projectId: string,
   userId: string,
   jwt?: string,
+  accessAssertion?: string,
 ): Promise<boolean> {
   try {
     const token = await hmacSign(projectId, jwtSecret);
@@ -64,7 +65,11 @@ export async function verifyProjectOwner(
         'content-type': 'application/json',
         'x-void-internal': token,
       },
-      body: JSON.stringify({ userId, ...(jwt ? { jwt } : {}) }),
+      body: JSON.stringify({
+        userId,
+        ...(jwt ? { jwt } : {}),
+        ...(accessAssertion ? { accessAssertion } : {}),
+      }),
     });
     return res.ok;
   } catch {

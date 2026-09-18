@@ -338,6 +338,7 @@ app.post('/*', async (context, next) => {
         projectId,
         payload.sub,
         token,
+        context.req.header('Cf-Access-Jwt-Assertion'),
       );
       if (!owns) {
         return context.json({ error: 'forbidden' }, 403);

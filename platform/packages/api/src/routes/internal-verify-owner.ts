@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { platformAccessVerifier } from '../auth/access.ts';
+import { readAuthSettings } from '../auth/configuration.ts';
 import { hmacVerifyState } from '../auth/hmac.ts';
 import { verifyJwt } from '../auth/jwt.ts';
 import { validateHumanSession } from '../auth/sessions.ts';
@@ -28,7 +30,11 @@ app.post('/:projectId', async (context) => {
     return context.json({ error: 'invalid internal auth' }, 403);
   }
 
-  const { userId, jwt } = await context.req.json<{ userId: string; jwt?: string }>();
+  const { userId, jwt, accessAssertion } = await context.req.json<{
+    userId: string;
+    jwt?: string;
+    accessAssertion?: string;
+  }>();
   if (typeof userId !== 'string' || !userId) {
     return context.json({ error: 'userId required' }, 400);
   }
@@ -36,10 +42,30 @@ app.post('/:projectId', async (context) => {
   const payload = jwt
     ? await verifyJwt(jwt, context.env.JWT_SECRET, 'api')
     : { sub: userId, aud: 'api' };
+  const settings = await readAuthSettings(context.get('db'));
+  let companyIdentity;
+  if (settings?.protection) {
+    if (!context.env.PROXY_URL) {
+      return context.json({ error: 'proxy protection is not configured' }, 503);
+    }
+    try {
+      const identity = await platformAccessVerifier.verify(
+        context.env.PROXY_URL,
+        accessAssertion,
+        settings.protection,
+      );
+      if (identity.kind !== 'human') {
+        return context.json({ error: 'company user identity required' }, 403);
+      }
+      companyIdentity = identity;
+    } catch {
+      return context.json({ error: 'invalid company identity' }, 403);
+    }
+  }
   if (
     !payload ||
     payload.sub !== userId ||
-    !(await validateHumanSession(context.get('db'), payload))
+    !(await validateHumanSession(context.get('db'), payload, companyIdentity))
   ) {
     return context.json({ error: 'session revoked' }, 403);
   }

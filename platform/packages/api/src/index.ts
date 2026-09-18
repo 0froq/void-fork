@@ -49,6 +49,7 @@ import type { ApiEnv } from './env.ts';
 import { ErrorAlertMonitor } from './error-alert-monitor.ts';
 import { cancelContainerBuildDos } from './github/cancel-builds.ts';
 import { authMiddleware } from './middleware/auth.ts';
+import { platformAccessProtection } from './middleware/platform-access.ts';
 import { operatorApi } from './operator/index.ts';
 import { sandboxDrainStatus } from './operator/sandbox-operations.ts';
 import {
@@ -161,6 +162,8 @@ const app = new Hono<ApiEnv>()
     context.set('db', createDb(context.env.HYPERDRIVE.connectionString));
     await next();
   })
+
+  .use('*', platformAccessProtection)
 
   .get('/health', async (context) => {
     try {
