@@ -1,5 +1,6 @@
 import { asc, eq, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
+import { getPlatformCapabilities } from '../../capabilities.ts';
 import {
   countProjectsUsingDestination,
   deleteEmailDestination,
@@ -11,6 +12,7 @@ import {
   revokeOauthGrantSerialized,
   withEmailDomainRowLock,
 } from '../../email/credential-lease.ts';
+import { addEmailDomainForProject } from '../../email/domain-service.ts';
 import {
   clearEmailDomainMirror,
   decryptEmailDomainRelaySecret,
@@ -18,45 +20,117 @@ import {
   hashEmailRelaySecret,
   writeEmailDomainMirror,
 } from '../../email/domains.ts';
+import {
+  DEFAULT_EMAIL_BURST_LIMIT as DEFAULT_BURST_LIMIT,
+  DEFAULT_EMAIL_MONTHLY_LIMIT as DEFAULT_MONTHLY_LIMIT,
+  emailBurstLimitKey as burstLimitKey,
+  emailMonthlyLimitKey as monthlyLimitKey,
+  emailSuspendKey as suspendKey,
+  parseEmailLimit as parseLimit,
+} from '../../email/limits.ts';
 import { removeEmailDomain } from '../../email/relay-engine.ts';
+import {
+  getEmailDomainManagement,
+  getEmailRecipientPolicy,
+  repairEmailRecipientPolicyMirror,
+} from '../../email/settings.ts';
 import type { ApiEnv } from '../../env.ts';
+import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
+import { OperatorError } from '../../operator/common.ts';
+import { setOperatorEmailPolicy, setOperatorEmailSettings } from '../../operator/email-routes.ts';
 import {
   syncProjectAllowlistKv,
   syncProjectAllowlistKvBestEffort,
 } from '../../provisioning/email-allowlist.ts';
 import { deleteDestination } from '../../provisioning/email-routing.ts';
 import { emailDomains } from '../../schema.ts';
+import { renderOperationError } from '../operation-error.tsx';
+import { EmailSettingsPage } from '../views/email-settings.tsx';
 import { STATUS_COLORS, formatDateTime } from '../views/format.ts';
 import { Layout } from '../views/layout.tsx';
 
 const app = new Hono<ApiEnv>();
+app.onError(renderOperationError);
+// The same capability boundary the owner and operator email routes sit
+// behind: a platform that does not enable email must not have its policy,
+// settings or domains changed from the browser either.
+app.use('*', async (context, next) => {
+  if (!getPlatformCapabilities(context.env).email) {
+    return context.html('<h1>Email is not enabled on this platform</h1>', 501);
+  }
+  await next();
+});
 
 /**
- * Per-project email control plane for operators.
+ * Email control plane for operators: installation-wide settings at `/`,
+ * one project's usage, caps, kill switch, destinations and domains at
+ * `/:projectId`.
  *
- * Every number on this page is read straight out of `ROUTING` KV, which is
- * where the proxy worker (`packages/proxy/src/email.ts`) keeps the counters
- * and reads the caps from. The keys and the defaults below MUST stay in
- * lockstep with that worker — they are the same contract written from both
- * ends, and nothing at build time catches a drift.
+ * Every number on the project page is read straight out of `ROUTING` KV,
+ * which is where the proxy worker (`packages/proxy/src/email.ts`) keeps the
+ * counters and reads the caps from. The keys and defaults come from
+ * `email/limits.ts`, the one spelling the api's writers share with the
+ * proxy's readers — nothing at build time catches a drift.
  *
  * The destination and custom-domain rows are Postgres. The proxy's only
  * view of a custom domain is the `email-domain:` ROUTING mirror, so the
  * revoke below clears that key before the row.
  */
-const suspendKey = (projectId: string) => `email-suspended:${projectId}`;
-const monthlyLimitKey = (projectId: string) => `email-limit:${projectId}`;
-const burstLimitKey = (projectId: string) => `email-burst-limit:${projectId}`;
 const sentKey = (projectId: string, month: string) => `email-sent:${projectId}:${month}`;
 const recvKey = (projectId: string, month: string) => `email-recv:${projectId}:${month}`;
 
-/** Mirrors `getMonthlyLimit` in `packages/proxy/src/email.ts`. */
-const DEFAULT_MONTHLY_LIMIT = 200;
-/** Mirrors `getBurstLimit` in `packages/proxy/src/email.ts`. */
-const DEFAULT_BURST_LIMIT = 10;
-
 /** The admin layout has no utility classes, so secondary text is inline. */
 const META = 'font-size: 0.8rem; color: #666';
+
+// GET /email/ — installation-wide recipient policy and domain management
+app.get('/', async (context) => {
+  const db = context.get('db');
+  // Every read surface republishes a drifted mirror, this page included:
+  // an administrator who sees `verified` here must be seeing what the
+  // proxy enforces.
+  await repairEmailRecipientPolicyMirror(db, context.env.ROUTING);
+  const [policy, management] = await Promise.all([
+    getEmailRecipientPolicy(db),
+    getEmailDomainManagement(db),
+  ]);
+  return context.html(
+    <EmailSettingsPage
+      policy={policy}
+      management={management}
+      senderDomain={context.env.EMAIL_SENDER_DOMAIN}
+      username={context.get('user').login}
+    />,
+  );
+});
+
+// POST /email/policy — the shared-sender recipient policy
+app.post('/policy', async (context) => {
+  const body = await context.req.parseBody();
+  const mode = String(body.mode ?? '');
+  const domains = typeof body.domains === 'string' ? body.domains : '';
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent('email/policy', { mode, domains }),
+    async () => {
+      await setOperatorEmailPolicy(context, { mode, domains: domains || undefined });
+      return { response: context.redirect('/admin/email'), succeeded: true };
+    },
+  );
+});
+
+// POST /email/settings — who manages email domains
+app.post('/settings', async (context) => {
+  const body = await context.req.parseBody();
+  const domains = String(body.domains ?? '');
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent('email/settings', { domains }),
+    async () => {
+      await setOperatorEmailSettings(context, domains);
+      return { response: context.redirect('/admin/email'), succeeded: true };
+    },
+  );
+});
 
 // GET /email/:projectId — usage, caps, kill switch, destinations
 app.get('/:projectId', async (context) => {
@@ -266,16 +340,40 @@ app.get('/:projectId', async (context) => {
 
       <h2>Custom domains ({domains.length})</h2>
       <p style={META}>
-        Sender/recipient domains on the customer's own Cloudflare zone, registered by the project
-        owner through <code>POST /projects/:id/email/domains</code>. Revoke clears the{' '}
-        <code>email-domain:</code> ROUTING mirror FIRST — the proxy trusts only that key, and a
-        failed clear keeps the row so the retry can finish — then deletes the relay worker and
-        catch-all rule in the customer's account best-effort (a stranded relay is inert without the
-        mirror entry) and drops the row. For <code>oauth_grant</code> rows, revoke grant is the
-        lighter escape hatch: it kills just the customer's OAuth grant at Cloudflare and flips the
-        row to <code>token_revoked</code>, leaving the row and mirror in place. The customer's
-        credential and the relay secret are never shown here.
+        Sender/recipient domains on a Cloudflare zone, registered by the project owner through{' '}
+        <code>void email domain add</code> or by an administrator below (the row then runs on the
+        platform's own credential and the zone must be in the platform's account — paste a token for
+        a zone elsewhere). Revoke clears the <code>email-domain:</code> ROUTING mirror FIRST — the
+        proxy trusts only that key, and a failed clear keeps the row so the retry can finish — then
+        deletes the relay worker and catch-all rule in the customer's account best-effort (a
+        stranded relay is inert without the mirror entry) and drops the row. For{' '}
+        <code>oauth_grant</code> rows, revoke grant is the lighter escape hatch: it kills just the
+        customer's OAuth grant at Cloudflare and flips the row to <code>token_revoked</code>,
+        leaving the row and mirror in place. The customer's credential and the relay secret are
+        never shown here.
       </p>
+      <form
+        method="post"
+        action={`/admin/email/${projectId}/domains/add`}
+        style="margin-bottom: 12px; display: flex; gap: 8px; align-items: center"
+      >
+        <input
+          type="text"
+          name="domain"
+          placeholder="mail.example.com"
+          autocomplete="off"
+          required
+          style="width: 240px"
+        />
+        <input
+          type="password"
+          name="token"
+          placeholder="API token (blank = platform credential)"
+          autocomplete="off"
+          style="width: 300px"
+        />
+        <button type="submit">Add domain</button>
+      </form>
       {domains.length === 0 ? (
         <p>
           <em>No custom domains.</em>
@@ -286,6 +384,7 @@ app.get('/:projectId', async (context) => {
             <tr>
               <th>Domain</th>
               <th>Status</th>
+              <th>Managed by</th>
               <th>Mode</th>
               <th>Relay worker</th>
               <th>v</th>
@@ -300,6 +399,10 @@ app.get('/:projectId', async (context) => {
                 <td>{domain.domain}</td>
                 <td>
                   <span style={`color: ${domainStatusColor(domain.status)}`}>{domain.status}</span>
+                </td>
+                <td>
+                  {domain.managed_by}
+                  {domain.credential_kind === 'platform' ? ' (platform credential)' : ''}
                 </td>
                 <td>{domain.mode ?? '-'}</td>
                 <td>{domain.relay_worker_name ?? '-'}</td>
@@ -352,6 +455,76 @@ app.get('/:projectId', async (context) => {
         </table>
       )}
     </Layout>,
+  );
+});
+
+// POST /email/:projectId/domains/add — register a domain for the project as
+// an administrator (design doc 0078, "Administrator-managed domains"). The
+// same operation the operator CLI runs; a blank token means the platform's
+// own credential. The token is never echoed or audited.
+app.post('/:projectId/domains/add', async (context) => {
+  const projectId = context.req.param('projectId');
+  const project = await getProject(context.get('db'), projectId);
+  if (!project) {
+    return context.html('<h1>Project not found</h1>', 404);
+  }
+  const body = await context.req.parseBody();
+  const domain = typeof body.domain === 'string' ? body.domain.trim() : '';
+  const token = typeof body.token === 'string' ? body.token.trim() : '';
+  if (domain === '' || domain.length > 253) {
+    throw new OperatorError(400, 'Enter the mail domain to register.');
+  }
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent('email/domains', { domain, project: projectId }),
+    async () => {
+      const res = await addEmailDomainForProject(context, project, {
+        domain,
+        apiToken: token || undefined,
+        managedBy: 'admin',
+      });
+      if (!res.ok) {
+        const json = (await res.json()) as { error?: unknown };
+        throw new OperatorError(
+          res.status,
+          typeof json.error === 'string' ? json.error : 'Adding the email domain failed.',
+        );
+      }
+      const row = (await res.json()) as {
+        status?: string;
+        error?: string;
+        setup_state?: { failed_step?: string };
+      };
+      if (
+        row.status === 'failed' ||
+        row.status === 'token_revoked' ||
+        row.status === 'token_expired'
+      ) {
+        const message =
+          row.error ??
+          (row.setup_state?.failed_step
+            ? `Setup failed at step "${row.setup_state.failed_step}".`
+            : 'The email domain setup did not finish.');
+        return {
+          response: await context.html(
+            <Layout title={`Adding ${domain} did not finish`} username={context.get('user').login}>
+              <h1>Adding {domain} did not finish</h1>
+              <p>{message}</p>
+              <p>
+                Fix the step named above, then add the domain again — adding again retries it; rules
+                stay.
+              </p>
+              <p>
+                <a href={`/admin/email/${projectId}`}>&larr; Back to project email</a>
+              </p>
+            </Layout>,
+            502,
+          ),
+          succeeded: false,
+        };
+      }
+      return { response: context.redirect(`/admin/email/${projectId}`), succeeded: true };
+    },
   );
 });
 
@@ -796,19 +969,6 @@ function parseCounter(raw: string | null): number {
   }
   const n = parseInt(raw, 10);
   return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
-/**
- * Undefined means "no usable override" — either the key is absent or it holds
- * a value the proxy would itself reject, in which case the proxy is already
- * serving the default and this page must say so too.
- */
-function parseLimit(raw: string | null): number | undefined {
-  if (!raw) {
-    return undefined;
-  }
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 export default app;

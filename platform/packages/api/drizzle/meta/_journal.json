@@ -267,6 +267,20 @@
       "when": 1789719174762,
       "tag": "0044_smart_mentor",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1789733718999,
+      "tag": "0045_platform_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1789733775150,
+      "tag": "0046_email_domains_platform_credential",
+      "breakpoints": true
     }
   ]
 }

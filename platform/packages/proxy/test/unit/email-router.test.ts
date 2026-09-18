@@ -1778,6 +1778,132 @@ describe('routeInbound — per-project gating on forward/reply (HIGH H1)', () =>
     expect(forwardCalls).toHaveLength(1);
   });
 
+  it('widens the gate to a same-domain forward under the `domains` recipient policy', async () => {
+    const { env } = makeEnv({
+      kvSeed: withAllowlist(['admin@example.com'], {
+        'email-recipient-policy': JSON.stringify({ mode: 'domains', domains: ['corp.test'] }),
+      }),
+      emailReturn: [
+        { type: 'forward', to: 'anyone@corp.test' },
+        { type: 'forward', to: 'anyone@other.test' },
+      ],
+    });
+    const { message, forwardCalls } = createFakeMessage({ to: `myslug@${PROD_DOMAIN}` });
+    const { ctx } = createCtx();
+    await routeInbound(message, env, ctx);
+    expect(forwardCalls.map((call) => call.to)).toEqual(['anyone@corp.test']);
+  });
+
+  it('still enacts an allowlisted forward when the recipient-policy read rejects', async () => {
+    const { env } = makeEnv({
+      kvSeed: withAllowlist(['admin@example.com']),
+      kvGetFailures: ['email-recipient-policy'],
+      emailReturn: [{ type: 'forward', to: 'admin@example.com' }],
+    });
+    const { message, forwardCalls } = createFakeMessage({ to: `myslug@${PROD_DOMAIN}` });
+    const { ctx } = createCtx();
+    await routeInbound(message, env, ctx);
+    expect(forwardCalls.map((call) => call.to)).toEqual(['admin@example.com']);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[email-policy] recipient policy read failed; enforcing verified:',
+      expect.any(Error),
+    );
+  });
+
+  it('under `any`, still drops a reply that claims another project as sender', async () => {
+    const { env } = makeEnv({
+      kvSeed: withAllowlist([], {
+        'email-recipient-policy': JSON.stringify({ mode: 'any', domains: [] }),
+      }),
+      emailReturn: [
+        {
+          type: 'reply',
+          from: `otherproject+support@${PROD_DOMAIN}`,
+          to: 'anyone@elsewhere.test',
+          raw: replyRaw(`otherproject+support@${PROD_DOMAIN}`, 'r'),
+        },
+        {
+          type: 'reply',
+          from: `myslug+support@${PROD_DOMAIN}`,
+          to: 'anyone@elsewhere.test',
+          raw: replyRaw(`myslug+support@${PROD_DOMAIN}`, 'r'),
+        },
+      ],
+    });
+    const { message, replyCalls } = createFakeMessage({ to: `myslug+tag@${PROD_DOMAIN}` });
+    const { ctx } = createCtx();
+    await routeInbound(message, env, ctx);
+    // The sender pin does not move with the policy: only the project's own
+    // sender goes out, to a recipient the policy now permits.
+    expect(replyCalls).toHaveLength(1);
+  });
+
+  it("never widens a forward to another tenant's inbox on the platform's own mail domain", async () => {
+    const { env } = makeEnv({
+      kvSeed: withAllowlist([`consented+tag@${PROD_DOMAIN}`], {
+        'email-recipient-policy': JSON.stringify({ mode: 'any', domains: [] }),
+      }),
+      emailReturn: [
+        { type: 'forward', to: `otherproject+intake@${PROD_DOMAIN}` },
+        { type: 'forward', to: `consented+tag@${PROD_DOMAIN}` },
+        { type: 'forward', to: 'anyone@elsewhere.test' },
+      ],
+    });
+    const { message, forwardCalls } = createFakeMessage({ to: `myslug@${PROD_DOMAIN}` });
+    const { ctx } = createCtx();
+    await routeInbound(message, env, ctx);
+    expect(forwardCalls.map((call) => call.to)).toEqual([
+      `consented+tag@${PROD_DOMAIN}`,
+      'anyone@elsewhere.test',
+    ]);
+  });
+
+  it("uses the received domain when EMAIL_SENDER_DOMAIN is absent, so `any` cannot reach another tenant's inbox", async () => {
+    const { env } = makeEnv({
+      senderDomain: null,
+      kvSeed: withAllowlist([], {
+        'email-recipient-policy': JSON.stringify({ mode: 'any', domains: [] }),
+      }),
+      emailReturn: [{ type: 'forward', to: `project-b+x@${PROD_DOMAIN}` }],
+    });
+    const { message, forwardCalls } = createFakeMessage({ to: `myslug@${PROD_DOMAIN}` });
+    const { ctx } = createCtx();
+    await routeInbound(message, env, ctx);
+    expect(forwardCalls).toHaveLength(0);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('recipient policy'));
+  });
+
+  it('protects both the configured sender domain and a distinct received domain', async () => {
+    const receivedDomain = 'example.test';
+    const configuredDomain = 'mail.example.test';
+    const { env } = makeEnv({
+      senderDomain: configuredDomain,
+      kvSeed: withAllowlist([], {
+        'email-recipient-policy': JSON.stringify({ mode: 'any', domains: [] }),
+      }),
+      emailReturn: [
+        { type: 'forward', to: `b+x@${receivedDomain}` },
+        { type: 'forward', to: `b+x@${configuredDomain}` },
+        { type: 'forward', to: 'someone@other.test' },
+      ],
+    });
+    const { message, forwardCalls } = createFakeMessage({ to: `myslug@${receivedDomain}` });
+    const { ctx } = createCtx();
+    await routeInbound(message, env, ctx);
+    expect(forwardCalls.map((call) => call.to)).toEqual(['someone@other.test']);
+  });
+
+  it('keeps the gate closed for the same forward under the default `verified` policy', async () => {
+    const { env } = makeEnv({
+      kvSeed: withAllowlist(['admin@example.com']),
+      emailReturn: [{ type: 'forward', to: 'anyone@corp.test' }],
+    });
+    const { message, forwardCalls } = createFakeMessage({ to: `myslug@${PROD_DOMAIN}` });
+    const { ctx } = createCtx();
+    await routeInbound(message, env, ctx);
+    expect(forwardCalls).toHaveLength(0);
+  });
+
   it('fails CLOSED when the routing entry has no projectId — refused before dispatch', async () => {
     // No projectId → no per-project guard is available, so forward/reply
     // must be refused rather than falling back to CF's account-wide flag.

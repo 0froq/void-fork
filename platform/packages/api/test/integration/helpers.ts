@@ -23,6 +23,7 @@ import {
   authCodes,
   operatorSessions,
   operatorEvents,
+  platformSettings,
   sandboxDrainCheckpoints,
   builds,
   githubConnections,
@@ -499,6 +500,7 @@ export async function clearTables(db: Db): Promise<void> {
   await db.delete(schema.platformLoginRevisions);
   await db.delete(schema.platformLoginConnections);
   await db.delete(schema.platformAuthSettings);
+  await db.delete(platformSettings);
 }
 
 /** Establish a real revocable operator session for integration requests. */

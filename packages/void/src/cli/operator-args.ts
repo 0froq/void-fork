@@ -268,6 +268,85 @@ export const operatorCommands: Array<OperatorCommand> = [
     method: 'POST',
   },
   {
+    group: 'email',
+    action: 'policy',
+    description: 'Show the recipient policy for the shared sender',
+    path: '/email/policy',
+  },
+  {
+    group: 'email',
+    action: 'policy-set',
+    description: 'Set the recipient policy: verified, domains, or any',
+    path: '/email/policy',
+    positional: ['mode'],
+    values: { domains: 'Comma-separated recipient domains for mode=domains' },
+    method: 'POST',
+  },
+  {
+    group: 'email',
+    action: 'settings',
+    description: 'Show platform email settings',
+    path: '/email/settings',
+  },
+  {
+    group: 'email',
+    action: 'settings-set',
+    description: 'Set who manages email domains: self-serve or admin',
+    path: '/email/settings',
+    values: { domains: 'self-serve or admin' },
+    method: 'POST',
+  },
+  {
+    group: 'email',
+    action: 'limit',
+    description: "Set a project's monthly and burst email caps",
+    path: '/email/projects/:project/limit',
+    positional: ['project'],
+    values: { monthly: 'Messages per month', burst: 'Messages per minute' },
+    method: 'POST',
+  },
+  {
+    group: 'email',
+    action: 'domains',
+    description: 'List email domains registered on this platform',
+    path: '/email/domains',
+    values: { project: 'Project id or slug' },
+  },
+  {
+    group: 'email',
+    action: 'domain-add',
+    description: 'Register an email domain for a project with the platform credential',
+    path: '/email/domains',
+    positional: ['domain'],
+    values: { project: 'Project id or slug' },
+    booleans: ['token-stdin'],
+    method: 'POST',
+  },
+  {
+    group: 'email',
+    action: 'domain-status',
+    description: "Inspect an email domain's setup, credential and relay",
+    path: '/email/domains/:domain',
+    positional: ['domain'],
+  },
+  {
+    group: 'email',
+    action: 'domain-sync',
+    description: 'Redeploy an email domain relay and rotate its secret',
+    path: '/email/domains/:domain/sync',
+    positional: ['domain'],
+    method: 'POST',
+  },
+  {
+    group: 'email',
+    action: 'domain-remove',
+    description: 'Remove an email domain and its Cloudflare setup',
+    path: '/email/domains/:domain/remove',
+    positional: ['domain'],
+    booleans: ['force'],
+    method: 'POST',
+  },
+  {
     group: 'worker',
     action: 'list',
     description: 'List hosted platform workers',
@@ -336,7 +415,7 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
   const positional: Array<string> = [];
   const values: Record<string, string> = {};
   const flags = new Set<string>();
-  const booleanFlags = new Set(['json', 'plan', 'yes', 'follow', 'token-stdin']);
+  const booleanFlags = new Set(['json', 'plan', 'yes', 'follow', 'token-stdin', 'force']);
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
     if (!arg.startsWith('-')) {
@@ -503,6 +582,13 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
   }
   if (parsed.body.type && !['github', 'email', 'identity'].includes(String(parsed.body.type))) {
     throw new Error('platform: Signup grant type must be github, email, or identity.');
+  }
+  // Command-specific booleans other than the session's own `--token-stdin`
+  // ride the body, where the server reads them as JSON booleans.
+  for (const name of command.booleans ?? []) {
+    if (name !== 'token-stdin' && flags.has(name)) {
+      parsed.body[name] = true;
+    }
   }
   return parsed;
 }

@@ -100,6 +100,8 @@ Two rules bound registrations: one live email domain per Cloudflare zone (a seco
 
 Sends from a registered domain skip the verified-recipient allowlist — the domain's own Email Sending onboarding replaces it — while platform quota and abuse controls still apply. Inbound needs nothing further: once the domain is `active`, mail to any address on it reaches your `email/` handlers.
 
+**On a platform your administrator runs.** Some platforms register email domains for their projects centrally — typically a company installation whose users have no Cloudflare account. There, `void email domain add` opens no consent page; it prints the command to ask your administrator for and stops — unless your project registered that domain itself before the switch, which `add` still renews as before. `void email domain list` and `status` work as usual on such a domain; `status` names the administrator's command for any step you cannot take, and `sync` and `remove` point you at the administrator too. The administrator may also have widened who the shared sender reaches, so `void email allow` can be unnecessary for colleagues; `void email destinations` still lists what your project verified itself.
+
 ## Options
 
 | Option        | Type                         | Notes                                                            |
@@ -406,7 +408,11 @@ So the ticket example above answers only senders you have allowlisted. An
 auto-responder to arbitrary senders needs
 [your own Cloudflare account](#your-own-cloudflare-account)
 (`--platform cloudflare`), where `reply()` is Cloudflare's own reply-to-sender
-and Void adds no allowlist.
+and Void adds no allowlist — or a platform whose administrator has widened the
+recipient policy for the whole installation (see
+[On a platform your administrator runs](#your-own-domain-on-the-platform)),
+which lifts this gate for the listed domains; addresses on the platform's own
+mail domain always stay verified-recipient-only.
 :::
 
 Note the asymmetry with `sendEmail`: `sendEmail` returns an error result and

@@ -27,6 +27,13 @@ import { EmailMessage } from 'cloudflare:email';
 import { validate as isValidEmailSyntax } from 'email-validator';
 import { dropEmailDomainLease, leaseBearer, leaseEmailDomainCredential } from './email-lease.ts';
 import {
+  VERIFIED_ONLY,
+  readAllowlist,
+  readRecipientPolicy,
+  recipientAllowed,
+  type RecipientPolicy,
+} from './email-policy.ts';
+import {
   MAX_MIME_BYTES,
   readEmailDomainMirror,
   readMimeFromAddrSpec,
@@ -587,28 +594,6 @@ function monthTtlSeconds(now: Date): number {
   return Math.max(60, seconds);
 }
 
-async function readAllowlist(kv: KVNamespace, projectId: string): Promise<Set<string>> {
-  const raw = await kv.get(`email-allowlist:${projectId}`, { cacheTtl: 60 });
-  if (!raw) {
-    return new Set();
-  }
-  try {
-    const arr = JSON.parse(raw) as unknown;
-    if (!Array.isArray(arr)) {
-      return new Set();
-    }
-    const out = new Set<string>();
-    for (const v of arr) {
-      if (typeof v === 'string') {
-        out.add(v.toLowerCase());
-      }
-    }
-    return out;
-  } catch {
-    return new Set();
-  }
-}
-
 async function getBurstLimit(kv: KVNamespace, projectId: string): Promise<number> {
   const raw = await kv.get(`email-burst-limit:${projectId}`, { cacheTtl: 60 });
   if (raw) {
@@ -646,6 +631,10 @@ interface OutboundGate {
   /** Relay lane (custom-domain sends): the recipient allowlist does not gate; quotas still apply. */
   skipAllowlist: boolean;
   allowlist: Set<string>;
+  /** The installation's recipient policy (email-policy.ts); `VERIFIED_ONLY` when the allowlist is skipped. */
+  policy: RecipientPolicy;
+  /** The platform mail domains — the policy never widens delivery to them. */
+  platformDomains: ReadonlyArray<string>;
   burstKey: string;
   burstLimit: number;
   burstCurrent: number;
@@ -849,7 +838,7 @@ export async function routeInbound(
   // per-project allowlist is the security boundary.
   let gate: OutboundGate;
   try {
-    gate = await loadOutboundGate(env, routing.projectId);
+    gate = await loadOutboundGate(env, routing.projectId, { receivedDomain });
   } catch (e) {
     console.error(
       `[email-router] failed to load outbound gate for ${sanitize(routing.projectId ?? '', 64)}:`,
@@ -863,6 +852,8 @@ export async function routeInbound(
       projectId: routing.projectId,
       skipAllowlist: false,
       allowlist: new Set(),
+      policy: VERIFIED_ONLY,
+      platformDomains: [],
       burstKey: '',
       burstLimit: 0,
       burstCurrent: 0,
@@ -1068,6 +1059,8 @@ export async function routeRelayed(
       projectId,
       skipAllowlist: true,
       allowlist: new Set(),
+      policy: VERIFIED_ONLY,
+      platformDomains: [],
       burstKey: '',
       burstLimit: 0,
       burstCurrent: 0,
@@ -1291,7 +1284,7 @@ function envelopeRawStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
 async function loadOutboundGate(
   env: Env,
   projectId: string | undefined,
-  opts?: { skipAllowlist?: boolean },
+  opts?: { skipAllowlist?: boolean; receivedDomain?: string },
 ): Promise<OutboundGate> {
   const skipAllowlist = opts?.skipAllowlist ?? false;
   if (!projectId) {
@@ -1300,6 +1293,8 @@ async function loadOutboundGate(
       projectId: undefined,
       skipAllowlist,
       allowlist: new Set(),
+      policy: VERIFIED_ONLY,
+      platformDomains: [],
       burstKey: '',
       burstLimit: 0,
       burstCurrent: 0,
@@ -1309,11 +1304,12 @@ async function loadOutboundGate(
       quotaExhausted: true,
     };
   }
-  const allowlist = skipAllowlist ? new Set<string>() : await readAllowlist(env.ROUTING, projectId);
   const now = new Date();
   const burstKey = `email-burst:${projectId}:${minuteBucket(now)}`;
   const monthKey = `email-sent:${projectId}:${monthBucket(now)}`;
-  const [burstLimit, monthLimit, burstRaw, monthRaw] = await Promise.all([
+  const [allowlist, policy, burstLimit, monthLimit, burstRaw, monthRaw] = await Promise.all([
+    skipAllowlist ? new Set<string>() : readAllowlist(env.ROUTING, projectId),
+    skipAllowlist ? VERIFIED_ONLY : readRecipientPolicy(env.ROUTING),
     getBurstLimit(env.ROUTING, projectId),
     getMonthlyLimit(env.ROUTING, projectId),
     env.ROUTING.get(burstKey),
@@ -1323,6 +1319,14 @@ async function loadOutboundGate(
     projectId,
     skipAllowlist,
     allowlist,
+    policy,
+    platformDomains: [
+      ...new Set(
+        [readSenderDomain(env), opts?.receivedDomain].flatMap((domain) =>
+          domain ? [domain.toLowerCase()] : [],
+        ),
+      ),
+    ],
     burstKey,
     burstLimit,
     burstCurrent: readCounter(burstRaw),
@@ -1782,9 +1786,12 @@ function checkOutboundGate(gate: OutboundGate, target: string, kind: 'forward' |
     return false;
   }
   const lowered = target.toLowerCase();
-  if (!gate.skipAllowlist && !gate.allowlist.has(lowered)) {
+  if (
+    !gate.skipAllowlist &&
+    !recipientAllowed(gate.policy, gate.allowlist, lowered, gate.platformDomains)
+  ) {
     console.error(
-      `[email-router] ${kind} dropped: recipient not in project allowlist (target=${sanitize(target, 320)})`,
+      `[email-router] ${kind} dropped: recipient not in project allowlist or recipient policy (target=${sanitize(target, 320)})`,
     );
     return false;
   }

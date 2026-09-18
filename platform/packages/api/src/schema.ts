@@ -615,10 +615,18 @@ export const emailDomains = pgTable(
       .notNull()
       .default('pending')
       .$type<'pending' | 'active' | 'token_revoked' | 'token_expired' | 'failed'>(),
-    credential_kind: text('credential_kind').notNull().$type<'oauth_grant' | 'api_token'>(),
-    token_ciphertext: text('token_ciphertext').notNull(),
-    token_iv: text('token_iv').notNull(),
-    token_key_version: text('token_key_version').notNull(),
+    // `platform` rows carry no credential of their own: the engine and the
+    // lease resolve them to the runtime token (`CF_API_TOKEN`), so their
+    // `token_*` triple is null — the CHECK below pins that pairing.
+    credential_kind: text('credential_kind')
+      .notNull()
+      .$type<'oauth_grant' | 'api_token' | 'platform'>(),
+    token_ciphertext: text('token_ciphertext'),
+    token_iv: text('token_iv'),
+    token_key_version: text('token_key_version'),
+    // Who registered the row. An administrator's row runs on the platform's
+    // credential; owners may read it but not sync or remove it.
+    managed_by: text('managed_by').notNull().default('owner').$type<'owner' | 'admin'>(),
     relay_ciphertext: text('relay_ciphertext').notNull(),
     relay_iv: text('relay_iv').notNull(),
     relay_key_version: text('relay_key_version').notNull(),
@@ -669,10 +677,26 @@ export const emailDomains = pgTable(
     ),
     check(
       'email_domains_credential_kind_check',
-      sql`${table.credential_kind} IN ('oauth_grant', 'api_token')`,
+      sql`${table.credential_kind} IN ('oauth_grant', 'api_token', 'platform')`,
     ),
+    check(
+      'email_domains_platform_token_check',
+      sql`(${table.credential_kind} = 'platform' AND ${table.token_ciphertext} IS NULL AND ${table.token_iv} IS NULL AND ${table.token_key_version} IS NULL) OR (${table.credential_kind} <> 'platform' AND ${table.token_ciphertext} IS NOT NULL AND ${table.token_iv} IS NOT NULL AND ${table.token_key_version} IS NOT NULL)`,
+    ),
+    check('email_domains_managed_by_check', sql`${table.managed_by} IN ('owner', 'admin')`),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Installation-scoped settings an administrator changes at runtime (design
+// doc 0078, "Recipient policy"). Authoritative here; hot-path readers get a
+// ROUTING KV mirror written by the setting's own writer.
+// ---------------------------------------------------------------------------
+export const platformSettings = pgTable('platform_settings', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
+  updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
+});
 
 // ---------------------------------------------------------------------------
 // Operator sessions and mutation audit, separate from browser/deployment auth.

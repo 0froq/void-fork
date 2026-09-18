@@ -534,10 +534,15 @@ const ADD_RECONCILE_INTERVAL_MS = 1000;
  * the template-link + clipboard fallback (Enter switches to the masked paste
  * at any point) → POST the credential once → render the resulting row. A
  * failed add leaves the platform row 'failed' and re-running add replaces
- * the credential — the api's replace path, not anything here.
+ * the credential — the api's replace path, not anything here. On an
+ * administrator-managed platform, only a row the owner registered before
+ * the switch continues into that renewal flow.
  */
 export async function emailDomainAdd(
-  client: Pick<PlatformClient, 'addEmailDomain' | 'getEmailDomain'>,
+  client: Pick<
+    PlatformClient,
+    'addEmailDomain' | 'getEmailDomain' | 'getEmailSettings' | 'listEmailDomains'
+  >,
   projectId: string,
   rawDomain: string,
   subdomain: string | undefined,
@@ -562,35 +567,83 @@ export async function emailDomainAdd(
 
   // The MX decision. Forced (--subdomain) needs no default, only a warning
   // when the named host already carries MX; unforced reads the apex and
-  // falls back to mail.<domain> — exactly the doc's two render lines.
+  // falls back to mail.<domain>. Shared by the owner flow and the printed
+  // administrator command, so the handoff names the target setup accepts.
   const dns = deps.dns ?? (await createNodeEmailDns());
-  if (target.forced) {
-    const mx = await lookupMxForRender(dns, target.emailDomain);
-    if (mx !== null && mx.length > 0) {
-      log.warn(
-        `MX        ${target.emailDomain} already carries MX (${mx.join(', ')}) — the platform re-checks over public DNS and may refuse it.`,
-      );
-    }
-  } else {
-    const mx = await lookupMxForRender(dns, domain);
-    if (mx === null) {
-      log.info(
-        `MX        could not read ${domain}'s MX from here — the platform decides over public DNS.`,
-      );
-    } else if (mx.length > 0) {
-      target = { emailDomain: `mail.${domain}`, forced: false };
-      log.info(
-        `MX        ${domain} carries MX for ${mx[0]} → apex is off limits\n          using ${target.emailDomain}  [change with --subdomain]`,
-      );
-      const subMx = await lookupMxForRender(dns, target.emailDomain);
-      if (subMx !== null && subMx.length > 0) {
+  const decideTarget = async (): Promise<void> => {
+    if (target.forced) {
+      const mx = await lookupMxForRender(dns, target.emailDomain);
+      if (mx !== null && mx.length > 0) {
         log.warn(
-          `MX        ${target.emailDomain} also carries MX (${subMx.join(', ')}) — the platform may refuse it; pick another with --subdomain.`,
+          `MX        ${target.emailDomain} already carries MX (${mx.join(', ')}) — the platform re-checks over public DNS and may refuse it.`,
         );
       }
     } else {
-      log.info(`MX        ${domain} has no MX records → using the apex`);
+      const mx = await lookupMxForRender(dns, domain);
+      if (mx === null) {
+        log.info(
+          `MX        could not read ${domain}'s MX from here — the platform decides over public DNS.`,
+        );
+      } else if (mx.length > 0) {
+        target = { emailDomain: `mail.${domain}`, forced: false };
+        log.info(
+          `MX        ${domain} carries MX for ${mx[0]} → apex is off limits\n          using ${target.emailDomain}  [change with --subdomain]`,
+        );
+        const subMx = await lookupMxForRender(dns, target.emailDomain);
+        if (subMx !== null && subMx.length > 0) {
+          log.warn(
+            `MX        ${target.emailDomain} also carries MX (${subMx.join(', ')}) — the platform may refuse it; pick another with --subdomain.`,
+          );
+        }
+      } else {
+        log.info(`MX        ${domain} has no MX records → using the apex`);
+      }
     }
+  };
+
+  // On an administrator-managed platform owners normally hold no Cloudflare
+  // credential, so there is no grant to open a browser for. The handoff does
+  // DNS and the two platform GETs, never a Cloudflare call or browser flow. A
+  // row the owner registered before the switch stays theirs to renew
+  // (ownership table: add on an owner row), so that owner flow continues for
+  // an existing target.
+  let renewal: string | undefined;
+  const settings = await client.getEmailSettings(projectId);
+  if (settings.domains.management === 'admin') {
+    const rows = await client.listEmailDomains(projectId);
+    const candidates = [target.emailDomain, ...(target.forced ? [] : [`mail.${domain}`])];
+    const existing = candidates
+      .map((candidate) =>
+        rows.find((row) => row.domain === candidate && row.managed_by !== 'admin'),
+      )
+      .find((row) => row !== undefined);
+    if (!existing) {
+      await decideTarget();
+      const project = settings.domains.projectSlug ?? projectId;
+      log.info(
+        [
+          'Email domains on this platform are managed by its administrator.',
+          'Ask them to run:',
+          '',
+          `  void platform email domain-add ${target.emailDomain} --project ${project}`,
+          '',
+          '`void email domain list` and `void email domain status` keep working here.',
+        ].join('\n'),
+      );
+      return exit(0);
+    }
+    // The pre-switch row IS the target: Email Routing itself put MX on the
+    // apex it serves, so the MX decision below would retarget a renewal.
+    renewal = existing.domain;
+    target = { emailDomain: existing.domain, forced: true };
+  }
+
+  // A renewal keeps its stored target: Email Routing itself put MX on the
+  // apex it serves, so the MX decision would retarget it.
+  if (renewal !== undefined) {
+    log.info(`Renewing ${renewal} — the stored credential is replaced; rules and the relay stay.`);
+  } else {
+    await decideTarget();
   }
 
   // Both grant paths need a human: a browser, a clipboard, or a paste prompt.
@@ -896,6 +949,17 @@ export async function emailDomainAdd(
   printEmailDomainOutcome(row);
 }
 
+/** An administrator's row runs on the platform's own credential; the owner never held one. */
+function emailCredentialLabel(row: Pick<EmailDomainResponse, 'credential_kind' | 'managed_by'>) {
+  const kind =
+    row.credential_kind === 'oauth_grant'
+      ? 'OAuth grant'
+      : row.credential_kind === 'platform'
+        ? 'platform credential'
+        : 'API token';
+  return row.managed_by === 'admin' ? `${kind} · managed by the administrator` : kind;
+}
+
 function emailDomainStatusText(status: EmailDomainResponse['status']): string {
   if (status === 'active') {
     return pc.green('active');
@@ -937,7 +1001,7 @@ function printEmailDomainOutcome(row: EmailDomainResponse): void {
     `Domain:      ${row.domain}`,
     `Status:      ${emailDomainStatusText(row.status)}`,
     `Mode:        ${row.mode ?? '—'}`,
-    `Credential:  ${row.credential_kind === 'oauth_grant' ? 'OAuth grant' : 'API token'}`,
+    `Credential:  ${emailCredentialLabel(row)}`,
   ];
   if (row.relay_worker_name) {
     lines.push(
@@ -981,12 +1045,13 @@ function printEmailDomainOutcome(row: EmailDomainResponse): void {
  * also the drift report: it never fights the customer's edits, it names them.
  */
 export async function emailDomainStatus(
-  client: Pick<PlatformClient, 'getEmailDomain'>,
+  client: Pick<PlatformClient, 'getEmailDomain' | 'getEmailSettings'>,
   projectId: string,
   rawDomain: string,
 ): Promise<void> {
   const domain = normalizeEmailDomainInput(rawDomain);
   const row: EmailDomainStatusResponse = await client.getEmailDomain(projectId, domain);
+  const adminRow = row.managed_by === 'admin';
 
   const lines = [
     `Domain:      ${row.domain}`,
@@ -995,8 +1060,8 @@ export async function emailDomainStatus(
   ];
   const credential =
     row.credential_status === 'probe_failed'
-      ? `${row.credential_kind === 'oauth_grant' ? 'OAuth grant' : 'API token'} · probe failed (stored view shown)`
-      : `${row.credential_kind === 'oauth_grant' ? 'OAuth grant' : 'API token'} · ${row.credential_status}`;
+      ? `${emailCredentialLabel(row)} · probe failed (stored view shown)`
+      : `${emailCredentialLabel(row)} · ${row.credential_status}`;
   lines.push(`Credential:  ${credential}`);
   if (row.token_id) {
     lines.push(
@@ -1021,25 +1086,53 @@ export async function emailDomainStatus(
   if (row.error) {
     log.error(`email: ${row.error}`);
   }
+  const failedAdminRow = adminRow && row.status === 'failed';
+  if (failedAdminRow) {
+    const slug = (await client.getEmailSettings(projectId)).domains.projectSlug ?? projectId;
+    log.warn(
+      `Ask your administrator to re-run the setup: \`void platform email domain-add ${row.domain} --project ${slug}${row.credential_kind === 'api_token' ? ' --token-stdin' : ''}\` — adding again retries the failed step; rules stay.`,
+    );
+  }
   const remaining = row.setup_state?.remaining_steps ?? [];
   if (remaining.includes('routing_subdomain')) {
-    log.warn(`One step only you can do: ${routingSubdomainInstruction(row.domain, row.mode)}.`);
+    log.warn(
+      adminRow
+        ? `One step for your administrator, in the platform's Cloudflare account: ${routingSubdomainInstruction(row.domain, row.mode)}.`
+        : `One step only you can do: ${routingSubdomainInstruction(row.domain, row.mode)}.`,
+    );
   }
   if (remaining.includes('sending_onboarding')) {
     log.info(
-      `Sending to arbitrary recipients needs Workers Paid — inbound works; sendEmail() to verified destinations only. After upgrading, run \`void email domain sync ${row.domain}\`.`,
+      adminRow
+        ? `Sending to arbitrary recipients needs Workers Paid on the platform's Cloudflare account — inbound works; sendEmail() to verified destinations only. After the upgrade, ask your administrator to run \`void platform email domain-sync ${row.domain}\`.`
+        : `Sending to arbitrary recipients needs Workers Paid — inbound works; sendEmail() to verified destinations only. After upgrading, run \`void email domain sync ${row.domain}\`.`,
     );
   }
-  if (row.relay_missing === true || row.relay_drift) {
-    log.info(`Run \`void email domain sync ${row.domain}\` to redeploy the relay in place.`);
+  if (!failedAdminRow && (row.relay_missing === true || row.relay_drift)) {
+    log.info(
+      adminRow
+        ? `Ask your administrator to run \`void platform email domain-sync ${row.domain}\` to redeploy the relay in place.`
+        : `Run \`void email domain sync ${row.domain}\` to redeploy the relay in place.`,
+    );
   }
-  if (row.catch_all_drift) {
-    log.info(`Catch-all drifted — run \`void email domain sync ${row.domain}\` to re-point it.`);
+  if (!failedAdminRow && row.catch_all_drift) {
+    log.info(
+      adminRow
+        ? `Catch-all drifted — ask your administrator to run \`void platform email domain-sync ${row.domain}\` to re-point it.`
+        : `Catch-all drifted — run \`void email domain sync ${row.domain}\` to re-point it.`,
+    );
   }
   if (row.status === 'token_revoked' || row.status === 'token_expired') {
-    log.warn(
-      `Re-run \`void email domain add ${row.domain}\` with a fresh grant or token — adding again replaces the credential, rules stay.`,
-    );
+    if (adminRow) {
+      const slug = (await client.getEmailSettings(projectId)).domains.projectSlug ?? projectId;
+      log.warn(
+        `Ask your administrator to re-add it: \`void platform email domain-add ${row.domain} --project ${slug} --token-stdin\` — adding again replaces the credential, rules stay.`,
+      );
+    } else {
+      log.warn(
+        `Re-run \`void email domain add ${row.domain}\` with a fresh grant or token — adding again replaces the credential, rules stay.`,
+      );
+    }
   }
 }
 

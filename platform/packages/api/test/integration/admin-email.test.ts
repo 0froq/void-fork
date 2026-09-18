@@ -20,7 +20,7 @@ import {
   type EmailDomain,
 } from '../../src/email/domains.ts';
 import { app } from '../../src/index.ts';
-import { emailDomains } from '../../src/schema.ts';
+import { emailDomains, operatorEvents, platformSettings } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -1256,5 +1256,242 @@ describe('POST /admin/email/:projectId/domains/:domain/revoke-grant', () => {
     expect(res.status).toBe(404);
     expect(cfCalls).toEqual([]);
     expect((await domainRow(sibling.id, 'acme-grant-elsewhere.com'))?.status).toBe('active');
+  });
+});
+
+describe('admin email settings page', () => {
+  test('renders the recipient policy and domain management forms with the defaults selected', async () => {
+    const { adminJwt } = await seedAdminAndProject();
+    // A stale, looser mirror is republished from the database on this read.
+    await env.ROUTING.put('email-recipient-policy', JSON.stringify({ mode: 'any', domains: [] }));
+    const res = await get('/admin/email', adminJwt);
+    expect(res.status).toBe(200);
+    expect(await env.ROUTING.get('email-recipient-policy')).toBe(
+      JSON.stringify({ mode: 'verified', domains: [] }),
+    );
+    const html = await res.text();
+    expect(html).toContain('Recipient policy');
+    expect(html).toContain('Domain management');
+    expect(html).toMatch(/name="mode" value="verified" checked/);
+    expect(html).toMatch(/name="domains" value="self-serve" checked/);
+    expect(html).toContain('UNVERIFIED_DESTINATION');
+    expect(html).toContain('own mail domain');
+  });
+
+  test('saves the recipient policy, mirrors it, audits it, and re-renders it selected', async () => {
+    const { adminJwt } = await seedAdminAndProject();
+    const res = await post('/admin/email/policy', adminJwt, {
+      mode: 'domains',
+      domains: 'Corp.Example\nexample.net',
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe('/admin/email');
+    expect(res.headers.get('X-Void-Audit-Id')).toBeTruthy();
+    expect(await env.ROUTING.get('email-recipient-policy')).toBe(
+      JSON.stringify({ mode: 'domains', domains: ['corp.example', 'example.net'] }),
+    );
+    const events = await env.db.select().from(operatorEvents);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ action: 'email/policy', status: 'success' });
+
+    const html = await (await get('/admin/email', adminJwt)).text();
+    expect(html).toMatch(/name="mode" value="domains" checked/);
+    expect(html).toContain('corp.example');
+  });
+
+  test('renders a 400 for an invalid policy and stores nothing', async () => {
+    const { adminJwt } = await seedAdminAndProject();
+    await env.ROUTING.delete('email-recipient-policy');
+    const res = await post('/admin/email/policy', adminJwt, { mode: 'domains', domains: '' });
+    expect(res.status).toBe(400);
+    expect(await env.db.select().from(platformSettings)).toHaveLength(0);
+    expect(await env.ROUTING.get('email-recipient-policy')).toBeNull();
+  });
+
+  test('is unavailable, reads and writes alike, when the platform does not enable email', async () => {
+    const { adminJwt, projectId } = await seedAdminAndProject();
+    const disabled = {
+      ...env,
+      PLATFORM_CAPABILITIES: JSON.stringify({
+        ai: true,
+        customDomains: true,
+        email: false,
+        githubActions: true,
+        githubOAuth: true,
+        googleOAuth: false,
+        managedBuilds: false,
+        sandbox: false,
+      }),
+    };
+    const page = await app.fetch(
+      new Request('http://localhost/admin/email', {
+        headers: { Cookie: `admin_token=${adminJwt}` },
+      }),
+      disabled,
+    );
+    expect(page.status).toBe(501);
+    const write = await app.fetch(
+      new Request('http://localhost/admin/email/settings', {
+        method: 'POST',
+        headers: {
+          Cookie: `admin_token=${adminJwt}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Origin: 'http://localhost',
+        },
+        body: new URLSearchParams({ domains: 'admin' }).toString(),
+      }),
+      disabled,
+    );
+    expect(write.status).toBe(501);
+    expect(await env.db.select().from(platformSettings)).toHaveLength(0);
+    const project = await app.fetch(
+      new Request(`http://localhost/admin/email/${projectId}`, {
+        headers: { Cookie: `admin_token=${adminJwt}` },
+      }),
+      disabled,
+    );
+    expect(project.status).toBe(501);
+  });
+
+  test('saves the domain management mode', async () => {
+    const { adminJwt } = await seedAdminAndProject();
+    const res = await post('/admin/email/settings', adminJwt, { domains: 'admin' });
+    expect(res.status).toBe(302);
+    const html = await (await get('/admin/email', adminJwt)).text();
+    expect(html).toMatch(/name="domains" value="admin" checked/);
+    const bad = await post('/admin/email/settings', adminJwt, { domains: 'nobody' });
+    expect(bad.status).toBe(400);
+  });
+
+  test('the project page still resolves under the index route', async () => {
+    const { adminJwt, projectId, slug } = await seedAdminAndProject();
+    const res = await get(`/admin/email/${projectId}`, adminJwt);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain(slug);
+  });
+});
+
+describe('admin add domain form', () => {
+  test('registers an administrator-managed row on the platform credential and audits it', async () => {
+    const { adminJwt, projectId } = await seedAdminAndProject();
+    const cfCalls: Array<string> = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      const method = init?.method ?? 'GET';
+      cfCalls.push(`${method} ${url}`);
+      if (url.startsWith('https://cloudflare-dns.com/')) {
+        return Response.json({ Answer: [] });
+      }
+      if (url.includes('/zones?')) {
+        return Response.json({
+          success: true,
+          errors: [],
+          result: [{ id: 'zone_p', name: 'example.com', account: { id: env.CF_ACCOUNT_ID } }],
+        });
+      }
+      if (/\/workers\/scripts\/[^/]+$/.test(url) && method === 'GET') {
+        return new Response('not found', { status: 404 });
+      }
+      if (url.endsWith('/email/routing/rules/catch_all') && method === 'GET') {
+        return Response.json({
+          success: true,
+          errors: [],
+          result: { enabled: false, matchers: [{ type: 'all' }], actions: [{ type: 'drop' }] },
+        });
+      }
+      return Response.json({ success: true, errors: [], result: {} });
+    });
+
+    const res = await post(`/admin/email/${projectId}/domains/add`, adminJwt, {
+      domain: 'example.com',
+      token: '',
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('Location')).toBe(`/admin/email/${projectId}`);
+    const row = (await domainRow(projectId, 'example.com'))!;
+    expect(row).toMatchObject({
+      credential_kind: 'platform',
+      managed_by: 'admin',
+      status: 'active',
+    });
+    expect(row.token_ciphertext).toBeNull();
+    expect(cfCalls.some((call) => call.includes('/user/tokens/verify'))).toBe(false);
+    const events = await env.db.select().from(operatorEvents);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ action: 'email/domains', status: 'success' });
+    expect(JSON.parse(events[0]!.target)).toEqual({ domain: 'example.com', project: projectId });
+
+    const html = await (await get(`/admin/email/${projectId}`, adminJwt)).text();
+    expect(html).toContain('admin (platform credential)');
+  });
+
+  test('renders a failed setup as a failed audited mutation while keeping the row', async () => {
+    const { adminJwt, projectId } = await seedAdminAndProject();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/zones?')) {
+        return Response.json(
+          { success: false, errors: [{ code: 10000, message: 'zone lookup unavailable' }] },
+          { status: 502 },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const res = await post(`/admin/email/${projectId}/domains/add`, adminJwt, {
+      domain: 'failed.example',
+      token: '',
+    });
+    expect(res.status).toBe(502);
+    const html = await res.text();
+    expect(html).toContain('Adding failed.example did not finish');
+    expect(html).toContain('zone lookup unavailable');
+    expect(await domainRow(projectId, 'failed.example')).toMatchObject({ status: 'failed' });
+    const events = await env.db.select().from(operatorEvents);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ action: 'email/domains', status: 'failed' });
+  });
+
+  test('refuses to take over a row the project owner registered', async () => {
+    const { adminJwt, projectId } = await seedAdminAndProject();
+    const row = await seedEmailDomain(projectId, 'owned.test', { credentialKind: 'api_token' });
+    const cfCalls = recordCustomerCfCalls();
+    const res = await post(`/admin/email/${projectId}/domains/add`, adminJwt, {
+      domain: 'owned.test',
+      token: '',
+    });
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain('registered by its project owner');
+    const after = (await domainRow(projectId, 'owned.test'))!;
+    expect(after.managed_by).toBe('owner');
+    expect(after.credential_kind).toBe('api_token');
+    expect(after.token_ciphertext).toBe(row.token_ciphertext);
+    expect(cfCalls).toEqual([]);
+  });
+
+  test('renders a 400 for a blank domain and records the failed attempt', async () => {
+    const { adminJwt, projectId } = await seedAdminAndProject();
+    const res = await post(`/admin/email/${projectId}/domains/add`, adminJwt, { domain: '  ' });
+    expect(res.status).toBe(400);
+    expect(await env.db.select().from(emailDomains)).toHaveLength(0);
+  });
+
+  test('keeps a pasted token out of the audit log', async () => {
+    const { adminJwt, projectId } = await seedAdminAndProject();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      Response.json(
+        { success: false, errors: [{ code: 10000, message: 'nope' }] },
+        { status: 403 },
+      ),
+    );
+    const res = await post(`/admin/email/${projectId}/domains/add`, adminJwt, {
+      domain: 'elsewhere.test',
+      token: 'cf-pasted-token-dummy',
+    });
+    // The engine records the refusal on the row; the form redirects.
+    expect([302, 400, 502]).toContain(res.status);
+    expect(JSON.stringify(await env.db.select().from(operatorEvents))).not.toContain(
+      'cf-pasted-token-dummy',
+    );
   });
 });

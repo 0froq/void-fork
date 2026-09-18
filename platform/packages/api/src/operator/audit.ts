@@ -121,6 +121,39 @@ function auditTarget(
   if (segments[0] === 'deployments' && id && segments[2] === 'cancel') {
     return JSON.stringify({ deploymentId: id });
   }
+  if (segments[0] === 'email') {
+    if (segments[1] === 'policy') {
+      return JSON.stringify({
+        mode: boundedString(body.mode, 512),
+        domains: boundedString(body.domains, 100 * 254, true),
+      });
+    }
+    if (segments[1] === 'settings') {
+      return JSON.stringify({ domains: boundedString(body.domains, 512) });
+    }
+    // Never the credential: `apiToken` rides the add body and stays out.
+    const domain = boundedString(segments[2], 253, true);
+    if (segments[1] === 'domains' && segments.length === 2) {
+      return JSON.stringify({
+        domain: boundedString(body.domain, 253, true),
+        project: boundedString(body.project, 512),
+      });
+    }
+    if (segments[1] === 'domains' && domain && segments[3] === 'sync') {
+      return JSON.stringify({ domain });
+    }
+    if (segments[1] === 'domains' && domain && segments[3] === 'remove') {
+      return JSON.stringify({ domain, force: body.force === true });
+    }
+    const project = pathIdentifier(segments[2]);
+    if (segments[1] === 'projects' && project && segments[3] === 'limit') {
+      return JSON.stringify({
+        project,
+        monthly: boundedString(body.monthly, 16),
+        burst: boundedString(body.burst, 16),
+      });
+    }
+  }
   if (segments[0] === 'system' && segments[1] === 'backfill-queue-tokens') {
     return JSON.stringify({ entries: 'queue:*' });
   }

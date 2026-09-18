@@ -1605,6 +1605,102 @@ describe('POST /email/send — allowlist fails closed', () => {
   });
 });
 
+describe('POST /email/send — recipient policy', () => {
+  const policyKv = (policy: unknown, allowlist: Array<string> = ['dev@example.com']) =>
+    createMockKv({
+      'email-slug:proj_1': 'acme',
+      'email-allowlist:proj_1': JSON.stringify(allowlist),
+      'email-recipient-policy': typeof policy === 'string' ? policy : JSON.stringify(policy),
+    });
+
+  it('still delivers to an allowlisted recipient when the policy read rejects', async () => {
+    const kv = policyKv({ mode: 'any', domains: [] });
+    kv.get.mockImplementation(async (key: string) => {
+      if (key === 'email-recipient-policy') {
+        throw new Error('policy KV unavailable');
+      }
+      return kv.store.get(key) ?? null;
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sender = createSender();
+    const res = await postSend(
+      createMockEnv(kv, { SEND_EMAIL: sender.binding }),
+      await sendBody({ recipients: ['dev@example.com'] }),
+    );
+    expect((await readSend(res)).ok).toBe(true);
+    expect(sender.recipients()).toEqual(['dev@example.com']);
+    expect(error).toHaveBeenCalledWith(
+      '[email-policy] recipient policy read failed; enforcing verified:',
+      expect.any(Error),
+    );
+  });
+
+  it('under `domains`, reaches a same-domain recipient the allowlist lacks and refuses others', async () => {
+    const kv = policyKv({ mode: 'domains', domains: ['acme.test'] });
+    const sender = createSender();
+    const env = createMockEnv(kv, { SEND_EMAIL: sender.binding });
+    const res = await postSend(
+      env,
+      await sendBody({ recipients: ['x@acme.test', 'dev@example.com', 'x@other.test'] }),
+    );
+    const body = await readSend(res);
+    expect(body.ok).toBe(false);
+    expect(body.deliveries?.find((d) => d.recipient === 'x@acme.test')?.ok).toBe(true);
+    expect(body.deliveries?.find((d) => d.recipient === 'dev@example.com')?.ok).toBe(true);
+    const other = body.deliveries?.find((d) => d.recipient === 'x@other.test');
+    expect(other?.ok).toBe(false);
+    expect(other?.error?.code).toBe('UNVERIFIED_DESTINATION');
+    expect(other?.error?.message).toContain("platform's recipient policy");
+    expect(sender.recipients().sort()).toEqual(['dev@example.com', 'x@acme.test']);
+  });
+
+  it('under `any`, sends to every recipient with an empty allowlist', async () => {
+    const kv = policyKv({ mode: 'any', domains: [] }, []);
+    const sender = createSender();
+    const env = createMockEnv(kv, { SEND_EMAIL: sender.binding });
+    const res = await postSend(env, await sendBody({ recipients: ['a@x.test', 'b@y.test'] }));
+    expect((await readSend(res)).ok).toBe(true);
+    expect(sender.recipients().sort()).toEqual(['a@x.test', 'b@y.test']);
+  });
+
+  it("does not widen `any` to another tenant's address on the platform sender domain", async () => {
+    const consented = `consented+tag@${PROD_DOMAIN}`;
+    const refused = `otherproject+tag@${PROD_DOMAIN}`;
+    const kv = policyKv({ mode: 'any', domains: [] }, [consented]);
+    const sender = createSender();
+    const env = createMockEnv(kv, { SEND_EMAIL: sender.binding });
+    const res = await postSend(
+      env,
+      await sendBody({ recipients: [refused, consented, 'someone@other.test'] }),
+    );
+    const body = await readSend(res);
+    expect(body.deliveries?.find((delivery) => delivery.recipient === refused)).toMatchObject({
+      ok: false,
+      error: { code: 'UNVERIFIED_DESTINATION' },
+    });
+    expect(sender.recipients().sort()).toEqual([consented, 'someone@other.test'].sort());
+  });
+
+  it.each([
+    ['malformed JSON', 'not json'],
+    ['an unknown mode', { mode: 'open', domains: [] }],
+    ['`domains` with an empty list', { mode: 'domains', domains: [] }],
+    ['a bare array', ['acme.test']],
+  ])('falls back to verified-only when the mirror holds %s', async (_label, policy) => {
+    const kv = policyKv(policy, []);
+    const sender = createSender();
+    const env = createMockEnv(kv, { SEND_EMAIL: sender.binding });
+    const res = await postSend(env, await sendBody({ recipients: ['x@acme.test'] }));
+    const body = await readSend(res);
+    expect(body.ok).toBe(false);
+    expect(body.deliveries?.[0].error?.code).toBe('UNVERIFIED_DESTINATION');
+    expect(body.deliveries?.[0].error?.message).toBe(
+      "recipient 'x@acme.test' is not a verified destination for this project",
+    );
+    expect(sender.calls).toHaveLength(0);
+  });
+});
+
 describe('POST /email/send — quota', () => {
   it('charges both counters by the ALLOWED recipient count and scopes the burst key', async () => {
     const kv = happyPathKv({
