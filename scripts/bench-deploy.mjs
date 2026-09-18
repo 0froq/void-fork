@@ -1,6 +1,7 @@
 // Local-only investigation harness. No account operations or real deployments.
 // Run with the repository's Node version and --experimental-transform-types.
 // --builds adds three builds of each isolated playground copy.
+// --skip-build uses existing dist artifacts and marks them unverified in the report.
 import { spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -18,7 +19,7 @@ import {
 import { cpus, platform, arch, tmpdir } from 'node:os';
 // This standalone harness uses native paths for subprocesses and filesystem snapshots.
 // oxlint-disable-next-line no-restricted-imports
-import { basename, dirname, join, relative } from 'node:path';
+import { basename, delimiter, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -28,33 +29,32 @@ const selected = (name) => filter === undefined || name.includes(filter);
 const activationSource = process.argv
   .find((arg) => arg.startsWith('--activation-source='))
   ?.slice('--activation-source='.length);
+const skipBuild = process.argv.includes('--skip-build');
+const vitePlusLauncher = join(root, 'node_modules/vite-plus/bin/vp');
 mkdirSync(join(root, 'playground-local'), { recursive: true });
 const scratch = mkdtempSync(join(root, 'playground-local/deploy-bench-'));
 const isolatedHome = join(scratch, 'home');
 mkdirSync(isolatedHome);
 const env = {
-  PATH: `${dirname(process.execPath)}:${process.env.PATH}`,
+  PATH: [dirname(process.execPath), join(root, 'node_modules/.bin'), process.env.PATH]
+    .filter(Boolean)
+    .join(delimiter),
   HOME: isolatedHome,
+  USERPROFILE: isolatedHome,
   TMPDIR: tmpdir(),
+  TEMP: tmpdir(),
+  TMP: tmpdir(),
+  SystemRoot: process.env.SystemRoot,
+  WINDIR: process.env.WINDIR,
+  ComSpec: process.env.ComSpec,
+  PATHEXT: process.env.PATHEXT,
   CI: 'true',
   NODE_ENV: 'production',
   WRANGLER_SEND_METRICS: 'false',
   VOID_CLOUDFLARE_DEPLOY_BUILD: '1',
   VOID_REMOTE: '0',
 };
-const report = {
-  sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-  node: process.version,
-  platform: `${platform()}-${arch()}`,
-  cpu: cpus()[0]?.model,
-  date: new Date().toISOString(),
-  notes: [
-    'Local timings only; no provider calls.',
-    'Filesystem cache not flushed.',
-    'Samples are sequential; fixtures share installed workspace dependencies.',
-  ],
-  measurements: [],
-};
+let report;
 async function measure(name, repetitions, fn) {
   if (!selected(name)) {
     return;
@@ -82,7 +82,13 @@ function child(args, cwd = scratch, extra = {}, executable = process.execPath) {
     ...extra,
   });
   if (result.status !== 0) {
-    throw new Error(`${basename(args[0])}: ${result.error ?? result.stderr ?? result.signal}`);
+    const detail =
+      result.error?.message ||
+      result.stderr?.trim() ||
+      result.stdout?.trim() ||
+      result.signal ||
+      `exit ${result.status}`;
+    throw new Error(`${basename(args[0])}: ${detail}`);
   }
   return result;
 }
@@ -93,7 +99,7 @@ function cloneFixture(name) {
     recursive: true,
     filter(path) {
       return !relative(source, path)
-        .split('/')
+        .split(sep)
         .some(
           (part) =>
             ['node_modules', 'dist', '.void', '.wrangler', '.git'].includes(part) ||
@@ -101,7 +107,11 @@ function cloneFixture(name) {
         );
     },
   });
-  symlinkSync(join(source, 'node_modules'), join(dest, 'node_modules'), 'dir');
+  symlinkSync(
+    join(source, 'node_modules'),
+    join(dest, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   return dest;
 }
 function treeStats(directory) {
@@ -121,15 +131,47 @@ function treeStats(directory) {
   return { bytes, files };
 }
 try {
-  const deploy = await import(join(root, 'packages/void/src/cli/deploy.ts'));
-  const { resolveWranglerArgv } = await import(join(root, 'packages/void/src/cli/preset.ts'));
-  const { collectAndHashAssets } = await import(join(root, 'packages/void/src/cli/package.ts'));
-  const { inferProjectBindings } = await import(
-    join(root, 'packages/void/src/plugin-inference.ts')
+  if (!skipBuild) {
+    // Dist process-startup measurements must describe this working tree. Build
+    // the relevant package graph once, outside every measured span.
+    child([vitePlusLauncher, 'run', 'build:core'], root, { timeout: 600_000 });
+  }
+  report = {
+    sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim(),
+    sourceDirty:
+      execFileSync('git', ['status', '--porcelain=v1'], { cwd: root, encoding: 'utf8' }).trim() !==
+      '',
+    distPreparedByHarness: !skipBuild,
+    node: process.version,
+    platform: `${platform()}-${arch()}`,
+    cpu: cpus()[0]?.model,
+    date: new Date().toISOString(),
+    notes: [
+      'Local timings only; no provider calls.',
+      'Filesystem cache not flushed.',
+      'Samples are sequential; fixtures share installed workspace dependencies.',
+      ...(skipBuild ? ['Existing dist artifacts were used without a freshness guarantee.'] : []),
+    ],
+    measurements: [],
+  };
+  const deploy = await import(pathToFileURL(join(root, 'packages/void/src/cli/deploy.ts')).href);
+  const { resolveWranglerArgv } = await import(
+    pathToFileURL(join(root, 'packages/void/src/cli/preset.ts')).href
   );
-  const { scanRoutes } = await import(join(root, 'packages/void/src/router/scan.ts'));
+  const { collectAndHashAssets } = await import(
+    pathToFileURL(join(root, 'packages/void/src/cli/package.ts')).href
+  );
+  const { inferProjectBindings } = await import(
+    pathToFileURL(join(root, 'packages/void/src/plugin-inference.ts')).href
+  );
+  const { scanRoutes } = await import(
+    pathToFileURL(join(root, 'packages/void/src/router/scan.ts')).href
+  );
   const { stageCloudflareStaticAssets } = await import(
-    join(root, 'packages/deploy-cloudflare/src/static.ts')
+    pathToFileURL(join(root, 'packages/deploy-cloudflare/src/static.ts')).href
   );
   const { activateCloudflareVersion, encodeCloudflareVersionMessage, readCloudflareTriggerConfig } =
     await import(
@@ -139,6 +181,18 @@ try {
   const wrangler = resolveWranglerArgv(root).at(-1);
   const dist = join(root, 'packages/void/dist');
   const deployChunk = readdirSync(dist).find((file) => /^deploy-[\w-]+\.mjs$/.test(file));
+  if (!deployChunk) {
+    throw new Error(`Void's packaged deploy chunk is missing from ${dist}.`);
+  }
+  report.distArtifacts = {
+    cliSha256: createHash('sha256')
+      .update(readFileSync(join(dist, 'cli/cli.mjs')))
+      .digest('hex'),
+    deployChunk,
+    deployChunkSha256: createHash('sha256')
+      .update(readFileSync(join(dist, deployChunk)))
+      .digest('hex'),
+  };
   await measure('node-empty-process', 9, () => {
     child(['-e', '']);
   });
@@ -439,6 +493,8 @@ try {
       workerName: 'bench',
       configPath,
       verifyUploader: () => true,
+      // Keep this deterministic local transport independent of the host's proxy setup.
+      env: {},
       getToken: async () => {
         cliCommands.push('auth token');
         if (process.argv.includes('--activation-cli-startup')) {
@@ -484,10 +540,9 @@ try {
   if (process.argv.includes('--builds')) {
     for (const name of ['spa', 'react-pages', 'static-pages', 'kitchen-sink']) {
       const fixture = name === 'kitchen-sink' ? kitchen : cloneFixture(name);
-      const vp = join(root, 'node_modules/.bin', process.platform === 'win32' ? 'vp.cmd' : 'vp');
       const artifactDigests = [];
       await measure(`build-${name}`, 3, () => {
-        const result = child(['build'], fixture, {}, vp);
+        const result = child([vitePlusLauncher, 'build'], fixture);
         const worker = join(fixture, 'dist/ssr/index.js');
         if (existsSync(worker)) {
           artifactDigests.push(createHash('sha256').update(readFileSync(worker)).digest('hex'));
