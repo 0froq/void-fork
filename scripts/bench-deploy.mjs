@@ -162,6 +162,47 @@ try {
     });
   }
   const uploaderStats = treeStats(dirname(wrangler));
+  if (selected('inventory')) {
+    const { findR2Assets } = await import(
+      pathToFileURL(join(root, 'platform/packages/api/src/asset-inventory.ts')).href
+    );
+    const count = 50_000;
+    const objects = Array.from({ length: count }, (_, i) => ({
+      key: `assets/benchmark/${i.toString(16).padStart(32, '0')}`,
+      size: 1024,
+    }));
+    const wanted = new Set([objects.at(-1).key.split('/').at(-1)]);
+    await measure('inventory-one-of-50000', 5, async () => {
+      let requests = 0;
+      const roundTrip = async () => {
+        requests++;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      };
+      const found = await findR2Assets(
+        {
+          head: async (key) => {
+            await roundTrip();
+            return objects.find((object) => object.key === key) ?? null;
+          },
+          list: async ({ cursor, limit }) => {
+            await roundTrip();
+            const start = Number(cursor ?? 0);
+            return {
+              objects: objects.slice(start, start + limit),
+              truncated: start + limit < count,
+              cursor: String(start + limit),
+            };
+          },
+        },
+        'benchmark',
+        wanted,
+      );
+      if (found.size !== 1) {
+        throw new Error('Inventory benchmark did not find its object');
+      }
+      return { requests, simulatedRttMs: 5, objects: count };
+    });
+  }
   if (selected('presign')) {
     const { presignAssetPut } = await import(
       pathToFileURL(join(root, 'platform/packages/api/src/r2-presign.ts')).href

@@ -19,6 +19,7 @@ import {
 } from '@void/platform';
 import { eq, sql as drizzleSql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
+import { findR2Assets } from '../asset-inventory.ts';
 import {
   computeAssetHash,
   createAssetUploadSession,
@@ -1193,33 +1194,6 @@ class StaticAssetDisappearedError extends Error {
     super(`static assets disappeared before cutover: ${hashes.slice(0, 10).join(', ')}`);
     this.name = 'StaticAssetDisappearedError';
   }
-}
-
-async function findR2Assets(
-  r2: R2Bucket,
-  projectId: string,
-  requiredHashes: ReadonlySet<string>,
-): Promise<Map<string, R2Object>> {
-  const found = new Map<string, R2Object>();
-  if (requiredHashes.size === 0) {
-    return found;
-  }
-  const prefix = `assets/${projectId}/`;
-  let cursor: string | undefined;
-  do {
-    const listed = await r2.list({ prefix, cursor, limit: 1000 });
-    for (const object of listed.objects) {
-      const hash = object.key.slice(prefix.length);
-      if (requiredHashes.has(hash)) {
-        found.set(hash, object);
-      }
-    }
-    if (found.size === requiredHashes.size) {
-      break;
-    }
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor !== undefined);
-  return found;
 }
 
 function inferPersistedAssetStore(
