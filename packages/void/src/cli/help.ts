@@ -227,6 +227,10 @@ const HELP_TREE: HelpTree = {
         command: `${group} <command>`,
         description: `Administer platform ${group}`,
       })),
+      {
+        command: 'config auth [command]',
+        description: 'Configure, test, enable, or disable platform login methods',
+      },
       { command: 'list', description: 'List installed and connected platforms' },
       { command: 'use [id]', description: 'Select the default Void platform' },
       { command: 'status [id]', description: 'Inspect a platform and its health' },
@@ -248,6 +252,61 @@ const HELP_TREE: HelpTree = {
     ],
     children: {
       ...operatorHelpTree(),
+      config: {
+        summary: 'Configure platform settings.',
+        usage: ['void platform config auth [command] [options]'],
+        children: {
+          auth: {
+            summary:
+              'Manage platform login methods. Without a command, opens interactive configuration.',
+            usage: [
+              'void platform config auth [list|show|initialize|add|configure|test|enable|disable|link] [method] [options]',
+            ],
+            commands: [
+              {
+                command: 'list',
+                description: 'List configured login methods and platform protection',
+              },
+              {
+                command: 'show <id>',
+                description: 'Inspect a login method without displaying secrets',
+              },
+              {
+                command: 'initialize',
+                description: 'Import existing login settings before first configuration',
+              },
+              {
+                command: 'add <github|google|oidc|cloudflare-access>',
+                description: 'Configure a new login method',
+              },
+              { command: 'configure <id>', description: 'Stage an update to a login method' },
+              { command: 'test <id>', description: 'Verify a login configuration in the browser' },
+              { command: 'enable <id>', description: 'Enable a successfully tested configuration' },
+              {
+                command: 'disable <id>',
+                description: 'Disable a method and revoke its human sessions',
+              },
+              {
+                command: 'link <id>',
+                description: 'Explicitly link a tested identity to your account',
+              },
+            ],
+            options: [
+              { command: '--connection <id-or-url>', description: 'Select a registered platform' },
+              { command: '--id <id>', description: 'Name a new OIDC or Access connection' },
+              { command: '--file <path>', description: 'Read nonsecret configuration from JSON' },
+              {
+                command: '--client-secret-env <name>',
+                description: 'Read the client secret from an environment variable',
+              },
+              { command: '--test-id <id>', description: 'Use a completed test for enable or link' },
+              { command: '--plan', description: 'Validate and preview a change' },
+              { command: '--yes', description: 'Apply without prompting' },
+              { command: '--json', description: 'Print structured output' },
+            ],
+          },
+        },
+      },
       domain: {
         summary: 'Add an application domain while keeping existing workers.dev URLs.',
         usage: ['void platform domain set <domain> [options]'],

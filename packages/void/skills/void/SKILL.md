@@ -39,6 +39,13 @@ to inspect mutations; approved noninteractive mutations require `--yes`.
 The last active administrator cannot be deleted or suspended. If an allowed
 administrator removal reports partial cleanup, access remains revoked; use a
 remaining administrator to inspect the result and retry.
+Use `void platform config auth` to configure login methods; `platform auth`
+manages your administrator session. Test a pending configuration before enabling
+it, explicitly link identities when switching methods, and verify a linked
+alternative before disabling a method. Disabling revokes its human sessions,
+including human tokens used in CI, while scoped deployment tokens remain valid.
+For scripted configuration, use nonsecret JSON with `--file` and read secrets
+with `--client-secret-env`; never put client secrets in command arguments.
 Operator credentials are separate from application deployment credentials and
 ignore repository platform selections. `VOID_OPERATOR_TOKEN` requires an
 explicit `VOID_API_URL` or `--connection`; credentials must never be written to

@@ -98,6 +98,7 @@ export async function getAuthenticationConfiguration(context: Context<ApiEnv>) {
     revision: settings.revision,
     admission: settings.admission,
     protection: settings.protection,
+    callbackUrl: context.env.AUTH_REDIRECT_URI ?? new URL('/auth/callback', context.req.url).href,
     sessionSeconds: settings.session_seconds,
     methods,
   };

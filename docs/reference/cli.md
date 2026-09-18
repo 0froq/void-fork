@@ -362,11 +362,49 @@ Void does not automatically retry changes. If a request loses its connection or 
 Sign in, inspect your session, or sign out:
 
 ```sh
-void platform auth login [--provider github|google] [--token-stdin]
+void platform auth login [--provider <connection-id>] [--token-stdin]
 void platform auth status
 void platform auth logout
 void platform auth token [--token-stdin]
 ```
+
+With no `--provider`, browser login offers the platform's enabled login methods.
+
+#### Authentication configuration
+
+`void platform config auth` opens interactive configuration. These commands use
+your administrator session from `void platform auth login`:
+
+```sh
+void platform config auth list
+void platform config auth show company
+void platform config auth add google
+void platform config auth add oidc --id company
+void platform config auth add cloudflare-access --id access
+void platform config auth configure company
+void platform config auth test company
+void platform config auth link company
+void platform config auth enable company
+void platform config auth disable github
+```
+
+When configuring an existing installation for the first time, run
+`void platform config auth initialize`, then sign in again. Its current login
+methods and signup policy are preserved.
+
+Adding or editing a method saves a pending configuration. Enabling it verifies the
+login in your browser before applying it. Linking the verified identity to your
+account is a separate, explicit action. Before disabling a method, verify a linked
+alternative; the last method cannot be disabled. Disabling revokes human sessions
+created through that method, including operator sessions. Scoped deployment tokens
+remain valid; a human login token used as `VOID_TOKEN` is still revoked.
+
+Commands accept `--connection <registered-id-or-url>` and `--json`. Changes accept
+`--plan` or `--yes`. For scripted configuration, use `--file <path>` for the
+nonsecret fields and `--client-secret-env <name>` for the environment variable
+containing the secret. Omit the secret when editing to retain its saved value.
+For `enable` or `link` in scripts, supply `--test-id <id>` from a completed test.
+`test --json` returns a browser URL, test ID, and expiry without waiting for completion.
 
 Browser login defaults to GitHub; Google is available when enabled on the platform. Login saves a one-hour administrator session in your system keychain. Logout revokes that session and removes its local credential.
 

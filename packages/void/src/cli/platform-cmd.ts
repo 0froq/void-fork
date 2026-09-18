@@ -128,6 +128,11 @@ export function saveDiscoveredPlatform(discovery: PlatformDiscoveryDocument): Pl
 }
 
 export async function runPlatformCommand(_root: string, args: PlatformArgs): Promise<void> {
+  if (args.subcommand === 'config') {
+    const { runPlatformAuthConfig } = await import('./platform-auth-config.ts');
+    await runPlatformAuthConfig(args);
+    return;
+  }
   if (args.subcommand === 'operator') {
     const { runOperatorCommand } = await import('./operator-cmd.ts');
     await runOperatorCommand(args);

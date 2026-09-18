@@ -1,7 +1,13 @@
 import { operatorGroups, parseOperatorArgs, type OperatorArgs } from './operator-args.ts';
+import { parsePlatformConfigArgs, type PlatformConfigArgs } from './platform-config-args.ts';
 import type { SubcommandDef } from './subcommand-prompt.ts';
 
 export const platformSubcommands: Array<SubcommandDef> = [
+  {
+    name: 'config',
+    hint: 'Configure authentication',
+    description: 'Configure platform login methods and access',
+  },
   ...operatorGroups.map((name) => ({
     name,
     hint: 'Operator commands',
@@ -29,6 +35,7 @@ export const platformSubcommands: Array<SubcommandDef> = [
 ];
 
 export type PlatformArgs =
+  | PlatformConfigArgs
   | OperatorArgs
   | { subcommand: 'list' }
   | { subcommand: 'use'; selector: string }
@@ -156,6 +163,9 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     return parseOperatorArgs(args);
   }
   const [subcommand, ...rest] = args;
+  if (subcommand === 'config') {
+    return parsePlatformConfigArgs(rest);
+  }
 
   if (subcommand === 'domain') {
     if (rest.length === 0) {
@@ -345,6 +355,6 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   }
 
   throw new Error(
-    'platform: Usage: void platform <auth|user|project|deployment|build|signup|invitation|system|worker|list|use|status|discover|install|domain|upgrade|rollback|repair|disable|enable|uninstall>.',
+    'platform: Usage: void platform <config|auth|user|project|deployment|build|signup|invitation|system|worker|list|use|status|discover|install|domain|upgrade|rollback|repair|disable|enable|uninstall>.',
   );
 }
