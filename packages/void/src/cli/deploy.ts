@@ -29,6 +29,7 @@ import {
 } from '@clack/prompts';
 import {
   activateCloudflareVersion,
+  createCloudflareMetadataRunner,
   encodeCloudflareVersionMessage,
   parseRootWranglerConfig,
   readCloudflareTriggerConfig,
@@ -2237,6 +2238,8 @@ export interface CloudflareDeployDeps {
   prepareFrameworkArtifact?: typeof prepareCloudflareFrameworkArtifact;
   /** Upload, readiness-probe, and activate the verified Worker Version. */
   activateVersion?: typeof activateCloudflareVersion;
+  /** Read-only metadata transport; writes always use the pinned uploader. */
+  metadataFetch?: typeof globalThis.fetch;
   /**
    * Wrangler-uploader content-hash seam (default: {@link hashWranglerUploader}). Snapshotted
    * BEFORE the build and re-checked AFTER, so a build that overwrote the wrangler bundle the
@@ -5521,8 +5524,20 @@ export async function runCloudflareDeploy(
     assertCloudflareLinkUnchanged(root, pinnedHandoffLink);
   }
   const candidateReceipt = pinnedHandoffLink?.candidateReceipt;
+  const activationRunner = preBuildRootConfig.compliance_region
+    ? runWrangler
+    : createCloudflareMetadataRunner({
+        runWrangler,
+        accountId,
+        apiBaseUrl,
+        workerName,
+        configPath: generatedConfigPath,
+        fetch: deps.metadataFetch,
+        verifyUploader: assertUploaderStillPinned,
+        getToken: () => runWranglerAuthToken(runWrangler, generatedConfigPath),
+      });
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
-    runWrangler,
+    runWrangler: activationRunner,
     verifyUploader: assertUploaderStillPinned,
     workerName,
     configPath: generatedConfigPath,
@@ -6148,8 +6163,20 @@ async function runCloudflareStaticDeploy(
     assertCloudflareLinkUnchanged(root, pinnedHandoffLink);
   }
   const candidateReceipt = pinnedHandoffLink?.candidateReceipt;
+  const activationRunner = rootConfig.compliance_region
+    ? runWrangler
+    : createCloudflareMetadataRunner({
+        runWrangler,
+        accountId,
+        apiBaseUrl,
+        workerName,
+        configPath: staticConfigPath,
+        fetch: deps.metadataFetch,
+        verifyUploader: uploaderIsPinned,
+        getToken: () => runWranglerAuthToken(runWrangler, staticConfigPath),
+      });
   const execution = await (deps.activateVersion ?? activateCloudflareVersion)({
-    runWrangler,
+    runWrangler: activationRunner,
     verifyUploader: uploaderIsPinned,
     configPath: staticConfigPath,
     preserveTriggers: existingWorker !== null,

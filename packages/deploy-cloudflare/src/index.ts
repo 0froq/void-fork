@@ -50,3 +50,4 @@ export {
   type CloudflareVersionActivationOptions,
   type CloudflareVersionMetadata,
 } from './version.ts';
+export { createCloudflareMetadataRunner } from './metadata.ts';

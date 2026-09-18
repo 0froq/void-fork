@@ -358,7 +358,89 @@ try {
   let uploaded = false;
   let integrityChecks = 0;
   const commands = [];
+  const cliCommands = [];
+  const simulateCommand = async (args, launchCli) => {
+    const key = args.slice(0, 2).join(' ');
+    commands.push(key);
+    if (launchCli) {
+      cliCommands.push(key);
+    }
+    if (launchCli && process.argv.includes('--activation-cli-startup')) {
+      // Measure real CLI startup without invoking an authenticated command.
+      child([wrangler, ...args.slice(0, 2), '--help']);
+    }
+    const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
+    if (key === 'deployments status') {
+      return ok(JSON.stringify({ versions: [{ version_id: active, percentage: 100 }] }));
+    }
+    if (key === 'versions list') {
+      return ok(
+        JSON.stringify([
+          {
+            id: previous,
+            number: 1,
+            metadata: { created_on: '2026-09-17' },
+            annotations: { 'workers/message': message },
+          },
+          ...(uploaded
+            ? [
+                {
+                  id: next,
+                  number: 2,
+                  metadata: { created_on: '2026-09-18' },
+                  annotations: { 'workers/message': message },
+                },
+              ]
+            : []),
+        ]),
+      );
+    }
+    if (key === 'versions upload') {
+      uploaded = true;
+      return ok(
+        `Worker Version ID: ${next}\nVersion Preview Alias URL: https://ready.bench.workers.dev`,
+      );
+    }
+    if (key === 'versions deploy') {
+      active = next;
+      return ok();
+    }
+    if (key === 'triggers deploy') {
+      return ok();
+    }
+    throw new Error(`Unexpected command ${key}`);
+  };
+  let activationRunner = (args) => simulateCommand(args, true);
   const activationStarted = performance.now();
+  if (process.argv.includes('--direct-metadata')) {
+    const { createCloudflareMetadataRunner } = await import(
+      pathToFileURL(join(root, 'packages/deploy-cloudflare/src/metadata.ts')).href
+    );
+    activationRunner = createCloudflareMetadataRunner({
+      runWrangler: activationRunner,
+      accountId: 'benchmark',
+      apiBaseUrl: 'https://api.example.com/client/v4',
+      workerName: 'bench',
+      configPath,
+      verifyUploader: () => true,
+      getToken: async () => {
+        cliCommands.push('auth token');
+        if (process.argv.includes('--activation-cli-startup')) {
+          child([wrangler, 'auth', 'token', '--help']);
+        }
+        return 'not-a-credential';
+      },
+      fetch: async (url) => {
+        const versions = String(url).includes('/versions?');
+        const args = versions ? ['versions', 'list'] : ['deployments', 'status'];
+        const result = JSON.parse((await simulateCommand(args, false)).stdout);
+        return Response.json({
+          success: true,
+          result: versions ? { items: result } : { deployments: [result] },
+        });
+      },
+    });
+  }
   const activation = await activateCloudflareVersion({
     workerName: 'bench',
     configPath,
@@ -369,48 +451,14 @@ try {
       return true;
     },
     fetch: async () => Response.json({ ready: true }),
-    runWrangler: async (args) => {
-      const key = args.slice(0, 2).join(' ');
-      commands.push(key);
-      if (process.argv.includes('--activation-cli-startup')) {
-        // Measure real CLI startup without invoking an authenticated command.
-        child([wrangler, ...args.slice(0, 2), '--help']);
-      }
-      const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
-      if (key === 'deployments status') {
-        return ok(JSON.stringify({ versions: [{ version_id: active, percentage: 100 }] }));
-      }
-      if (key === 'versions list') {
-        return ok(
-          JSON.stringify([
-            { id: previous, number: 1, annotations: { 'workers/message': message } },
-            ...(uploaded
-              ? [{ id: next, number: 2, annotations: { 'workers/message': message } }]
-              : []),
-          ]),
-        );
-      }
-      if (key === 'versions upload') {
-        uploaded = true;
-        return ok(
-          `Worker Version ID: ${next}\nVersion Preview Alias URL: https://ready.bench.workers.dev`,
-        );
-      }
-      if (key === 'versions deploy') {
-        active = next;
-        return ok();
-      }
-      if (key === 'triggers deploy') {
-        return ok();
-      }
-      throw new Error(`Unexpected command ${key}`);
-    },
+    runWrangler: activationRunner,
   });
   if (!activation.ok) {
     throw new Error(`Activation trace failed: ${JSON.stringify(activation)}`);
   }
   report.activationTrace = {
     commands,
+    cliCommands,
     integrityChecks,
     durationMs: performance.now() - activationStarted,
     cliStartupMeasured: process.argv.includes('--activation-cli-startup'),
