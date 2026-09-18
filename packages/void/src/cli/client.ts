@@ -411,6 +411,25 @@ export type UploadUrlAssetRequest = DeployAssetUploadRequest;
 export type ManifestOnlyDeployPayload = DeployUploadPayload;
 
 /**
+ * Retry contract for the deploy POST's transport phase.
+ *
+ * - Only `fetch` rejections (`TypeError` — no HTTP response) are retried.
+ *   A Response of any status means the server answered; surface it
+ *   verbatim rather than replay a request it may have accepted.
+ * - A rejected fetch does NOT prove the request never arrived — the
+ *   connection may have dropped after delivery. Arbitration is left to
+ *   the server's precheck, the only atomic (project-locked) verdict: if
+ *   an earlier attempt or a concurrent deploy is still in flight, the
+ *   replay is rejected with 409 and surfaced as a deploy conflict
+ *   naming the deployment id. A client-side GET-then-decide lookup can
+ *   never be authoritative (the row can transition between lookup and
+ *   replay), so no dedupe query is made — the residual case is the lost
+ *   attempt completing within seconds and being redeployed identically.
+ */
+const DEPLOY_POST_MAX_RETRIES = 3;
+const DEPLOY_POST_BACKOFF_MS = [1000, 5000, 10000];
+
+/**
  * HTTP client for the Void platform API.
  */
 export class PlatformClient {
@@ -640,7 +659,7 @@ export class PlatformClient {
     payload: ManifestOnlyDeployPayload,
   ): AsyncGenerator<DeployEvent> {
     const url = `${this.baseUrl}/projects/${projectId}/deploy`;
-    yield* this.streamDeployRequest(url, {
+    yield* this.streamDeployRequest(url, projectId, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -654,16 +673,37 @@ export class PlatformClient {
    * POST + NDJSON-stream-reader used by `finalizeDeploy()`. Captures
    * `cf-ray` + `cf-cache-status` for postmortem correlation.
    */
-  private async *streamDeployRequest(url: string, init: RequestInit): AsyncGenerator<DeployEvent> {
+  private async *streamDeployRequest(
+    url: string,
+    projectId: string,
+    init: RequestInit,
+  ): AsyncGenerator<DeployEvent> {
     const cliLog = this.cliLog;
     cliLog?.info('deploy_post', { url });
 
+    // `fetch` reports transport failures as TypeError ('fetch failed') —
+    // the only retryable case per the DEPLOY_POST_* contract above.
+    // Anything else (e.g. AbortError) is not transient and fails fast.
     let res: Response;
-    try {
-      res = await fetch(url, init);
-    } catch (err) {
-      cliLog?.error('deploy_fetch_rejected', err, { url });
-      throw err;
+    let attempt = 0;
+    while (true) {
+      try {
+        res = await fetch(url, init);
+        break;
+      } catch (err) {
+        if (!(err instanceof TypeError) || attempt >= DEPLOY_POST_MAX_RETRIES) {
+          cliLog?.error('deploy_fetch_rejected', err, { url, attempts: attempt + 1 });
+          throw err;
+        }
+        cliLog?.warn('deploy_fetch_retry', {
+          url,
+          attempt: attempt + 1,
+          delayMs: DEPLOY_POST_BACKOFF_MS[attempt],
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await sleep(DEPLOY_POST_BACKOFF_MS[attempt]);
+        attempt++;
+      }
     }
 
     // `cf-ray` and `cf-cache-status` are the correlation keys that platform
@@ -679,7 +719,39 @@ export class PlatformClient {
     });
 
     if (!res.ok) {
-      await throwPlatformApiError('Deploy failed', res);
+      const body = await res.text();
+      if (res.status === 409) {
+        // The precheck's authoritative verdict — a deployment is already
+        // in flight (possibly the earlier attempt of this same deploy,
+        // or a concurrent one). Surface it as a structured error event
+        // naming the deployment rather than a bare HTTP failure.
+        let parsed: { error?: string; deployment?: string } | null = null;
+        try {
+          const raw: unknown = JSON.parse(body);
+          if (raw !== null && typeof raw === 'object') {
+            parsed = raw as { error?: string; deployment?: string };
+          }
+        } catch {
+          // Non-JSON 409 — fall through to the generic error below.
+        }
+        if (parsed?.deployment) {
+          cliLog?.warn('deploy_conflict', {
+            url,
+            deploymentId: parsed.deployment,
+            error: parsed.error,
+          });
+          yield {
+            event: 'error',
+            step: 'finalize',
+            message:
+              `${parsed.error ?? 'deploy in progress'}: deployment ${parsed.deployment} — ` +
+              'it may be an earlier attempt of this deploy or a concurrent one; ' +
+              'inspect with `void project status` before redeploying',
+          };
+          return;
+        }
+      }
+      throw new PlatformApiError('Deploy failed', res.status, body);
     }
 
     const reader = res.body!.getReader();
@@ -1543,4 +1615,8 @@ export class PlatformClient {
 
     return res.json();
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

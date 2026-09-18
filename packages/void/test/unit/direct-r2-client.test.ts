@@ -238,6 +238,192 @@ describe('PlatformClient.finalizeDeploy', () => {
     });
   });
 
+  function makeCliLog() {
+    return {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      path: '/tmp/test.jsonl',
+      close: vi.fn(),
+    };
+  }
+
+  const deployPostCalls = () => fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/deploy'));
+  const deploymentListCalls = () =>
+    fetchMock.mock.calls.filter(([u]) => String(u).includes('/deployments'));
+
+  it('retries a transport-level fetch rejection with backoff, then streams events', async () => {
+    vi.useFakeTimers();
+    let posts = 0;
+    fetchMock.mockImplementation(() => {
+      posts++;
+      if (posts === 1) {
+        return Promise.reject(
+          new TypeError('fetch failed', { cause: new Error('read ECONNRESET') }),
+        );
+      }
+      return Promise.resolve(
+        ndjsonStreamResponse([
+          { event: 'done', deployment: 'd1', url: 'https://x', urls: [], assets: 0, workers: 0 },
+        ]),
+      );
+    });
+
+    const cliLog = makeCliLog();
+    const client = new PlatformClient(token, { apiUrl, cliLog });
+    try {
+      const events: Array<unknown> = [];
+      const consume = (async () => {
+        for await (const event of client.finalizeDeploy(projectId, makePayload())) {
+          events.push(event);
+        }
+      })();
+      await vi.runAllTimersAsync();
+      await consume;
+
+      expect(deployPostCalls()).toHaveLength(2);
+      // No client-side dedupe GET — the server's precheck is authoritative.
+      expect(deploymentListCalls()).toHaveLength(0);
+      expect(events).toEqual([
+        { event: 'done', deployment: 'd1', url: 'https://x', urls: [], assets: 0, workers: 0 },
+      ]);
+      expect(cliLog.warn).toHaveBeenCalledWith(
+        'deploy_fetch_retry',
+        expect.objectContaining({ attempt: 1, delayMs: 1000 }),
+      );
+      expect(cliLog.error).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('throws the original error after exhausting transport retries', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
+
+    const cliLog = makeCliLog();
+    const client = new PlatformClient(token, { apiUrl, cliLog });
+    try {
+      const consume = (async () => {
+        for await (const _event of client.finalizeDeploy(projectId, makePayload())) {
+          // unreachable — every attempt rejects
+        }
+      })();
+      const assertion = expect(consume).rejects.toBeInstanceOf(TypeError);
+      await vi.runAllTimersAsync();
+      await assertion;
+
+      // 1 initial attempt + 3 retries — no dedupe GETs.
+      expect(deployPostCalls()).toHaveLength(4);
+      expect(deploymentListCalls()).toHaveLength(0);
+      const retries = cliLog.warn.mock.calls.filter(([msg]) => msg === 'deploy_fetch_retry');
+      expect(retries.map(([, fields]) => fields?.delayMs)).toEqual([1000, 5000, 10000]);
+      expect(cliLog.error).toHaveBeenCalledWith(
+        'deploy_fetch_rejected',
+        expect.any(TypeError),
+        expect.objectContaining({
+          url: `${apiUrl}/projects/${projectId}/deploy`,
+          attempts: 4,
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces the server 409 as an error event when a deploy is already in progress', async () => {
+    vi.useFakeTimers();
+    // The replay hits the authoritative concurrency guard — possibly the
+    // earlier attempt of this same deploy, or a concurrent one.
+    let posts = 0;
+    fetchMock.mockImplementation(() => {
+      posts++;
+      if (posts === 1) {
+        return Promise.reject(new TypeError('fetch failed'));
+      }
+      return Promise.resolve(
+        jsonResponse({ error: 'deploy in progress', deployment: 'dpl_conflict' }, 409),
+      );
+    });
+
+    const cliLog = makeCliLog();
+    const client = new PlatformClient(token, { apiUrl, cliLog });
+    try {
+      const events: Array<unknown> = [];
+      const consume = (async () => {
+        for await (const event of client.finalizeDeploy(projectId, makePayload())) {
+          events.push(event);
+        }
+      })();
+      await vi.runAllTimersAsync();
+      await consume;
+
+      expect(deployPostCalls()).toHaveLength(2);
+      expect(events).toEqual([
+        {
+          event: 'error',
+          step: 'finalize',
+          message: expect.stringContaining('dpl_conflict'),
+        },
+      ]);
+      expect(cliLog.warn).toHaveBeenCalledWith(
+        'deploy_conflict',
+        expect.objectContaining({ deploymentId: 'dpl_conflict' }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces a first-attempt 409 without retrying', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ error: 'deploy in progress', deployment: 'dpl_busy' }, 409),
+    );
+
+    const client = makeClient();
+    const events: Array<unknown> = [];
+    for await (const event of client.finalizeDeploy(projectId, makePayload())) {
+      events.push(event);
+    }
+
+    expect(deployPostCalls()).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      event: 'error',
+      message: expect.stringContaining('dpl_busy'),
+    });
+  });
+
+  it('throws the platform error for a 409 without a deployment id', async () => {
+    fetchMock.mockResolvedValue(new Response('conflict', { status: 409 }));
+    const client = makeClient();
+    const gen = client.finalizeDeploy(projectId, makePayload());
+    await expect(gen.next()).rejects.toMatchObject({
+      name: 'PlatformApiError',
+      status: 409,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry non-transport rejections (e.g. AbortError)', async () => {
+    fetchMock.mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'));
+    const client = makeClient();
+    const gen = client.finalizeDeploy(projectId, makePayload());
+    await expect(gen.next()).rejects.toBeInstanceOf(DOMException);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry HTTP error responses — the server answered', async () => {
+    fetchMock.mockResolvedValue(new Response('busted', { status: 503 }));
+    const client = makeClient();
+    const gen = client.finalizeDeploy(projectId, makePayload());
+    await expect(gen.next()).rejects.toMatchObject({
+      name: 'PlatformApiError',
+      status: 503,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('serializes workerFiles as base64 in the JSON body', async () => {
     fetchMock.mockResolvedValueOnce(
       ndjsonStreamResponse([
