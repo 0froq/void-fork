@@ -225,6 +225,20 @@
       "when": 1789524839834,
       "tag": "0038_deployment_admission_protocol",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1789625466263,
+      "tag": "0039_email_domains",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789678291923,
+      "tag": "0040_productive_vector",
+      "breakpoints": true
     }
   ]
 }
