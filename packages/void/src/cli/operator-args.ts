@@ -299,10 +299,50 @@ export const operatorCommands: Array<OperatorCommand> = [
   {
     group: 'email',
     action: 'limit',
-    description: "Set a project's monthly and burst email caps",
+    description: "Set a project's monthly and burst recipient submission caps",
     path: '/email/projects/:project/limit',
     positional: ['project'],
-    values: { monthly: 'Messages per month', burst: 'Messages per minute' },
+    values: {
+      monthly: 'Recipient submissions per UTC calendar month',
+      burst: 'Recipient submissions per rolling 60-second window',
+    },
+    method: 'POST',
+  },
+  {
+    group: 'email',
+    action: 'logs',
+    description: 'Inspect retained email receipt and recipient outcomes for a project',
+    path: '/email/projects/:project/logs',
+    positional: ['project'],
+  },
+  {
+    group: 'email',
+    action: 'attempts',
+    description: 'List unresolved email send attempts awaiting operator reconciliation',
+    path: '/email/attempts',
+    values: { project: 'Project id or slug' },
+  },
+  {
+    group: 'email',
+    action: 'attempt-resolve',
+    description: 'Resolve a stopped send as outcome unknown and release its cleanup fence',
+    path: '/email/attempts/:id/resolve',
+    positional: ['id'],
+    values: { reason: 'Audit reason without recipient or message content' },
+    booleans: ['ended'],
+    method: 'POST',
+  },
+  {
+    group: 'email',
+    action: 'operation-resolve',
+    description: 'Resolve an ended ambiguous email setup write with operator attestation',
+    path: '/email/operations/:id/resolve',
+    positional: ['id'],
+    values: {
+      outcome: 'Provider outcome: applied or not-applied',
+      reason: 'Audit reason for the verified provider outcome',
+    },
+    booleans: ['ended'],
     method: 'POST',
   },
   {
@@ -332,8 +372,16 @@ export const operatorCommands: Array<OperatorCommand> = [
   {
     group: 'email',
     action: 'domain-sync',
-    description: 'Redeploy an email domain relay and rotate its secret',
+    description: 'Reconcile an email domain with its Cloudflare setup',
     path: '/email/domains/:domain/sync',
+    positional: ['domain'],
+    method: 'POST',
+  },
+  {
+    group: 'email',
+    action: 'domain-rotate-secret',
+    description: "Rotate an email domain's ingress secret",
+    path: '/email/domains/:domain/rotate-secret',
     positional: ['domain'],
     method: 'POST',
   },
@@ -343,7 +391,7 @@ export const operatorCommands: Array<OperatorCommand> = [
     description: 'Remove an email domain and its Cloudflare setup',
     path: '/email/domains/:domain/remove',
     positional: ['domain'],
-    booleans: ['force'],
+    booleans: ['token-stdin'],
     method: 'POST',
   },
   {
@@ -415,7 +463,7 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
   const positional: Array<string> = [];
   const values: Record<string, string> = {};
   const flags = new Set<string>();
-  const booleanFlags = new Set(['json', 'plan', 'yes', 'follow', 'token-stdin', 'force']);
+  const booleanFlags = new Set(['json', 'plan', 'yes', 'follow', 'token-stdin', 'force', 'ended']);
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
     if (!arg.startsWith('-')) {
@@ -491,12 +539,13 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
       `platform: Usage: ${command.usage?.[identitySignupEntry ? 1 : 0]?.replace(/ \[options\]$/, '') ?? `void platform ${group} ${action}${command.positional?.map((name) => ` <${name}>`).join('') ?? ''}`}.`,
     );
   }
-  const paged = action === 'list' || action === 'events' || action === 'logs';
+  const paged =
+    action === 'list' || action === 'events' || action === 'logs' || action === 'attempts';
   const allowed = new Set([
     'connection',
     ...(command.method ? ['timeout'] : []),
     ...Object.keys(command.values ?? {}),
-    ...(paged ? ['limit', ...(action !== 'logs' ? ['page'] : [])] : []),
+    ...(paged ? ['limit', ...(action !== 'logs' || group === 'email' ? ['page'] : [])] : []),
   ]);
   for (const name of Object.keys(values)) {
     if (!allowed.has(name)) {
@@ -559,7 +608,8 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
       continue;
     }
     if (name === 'page' || name === 'limit') {
-      const maximum = name === 'limit' ? (action === 'logs' ? 500 : 100) : 1_000_000;
+      const maximum =
+        name === 'limit' ? (action === 'logs' && group !== 'email' ? 500 : 100) : 1_000_000;
       if (!/^[1-9]\d*$/.test(value) || Number(value) > maximum) {
         throw new Error(`platform: --${name} must be an integer from 1 to ${maximum}.`);
       }

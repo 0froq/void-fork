@@ -5,7 +5,7 @@ import {
   PLATFORM_DISABLED_KEY,
   PLATFORM_DISABLED_VALUE,
 } from '@void/platform';
-import { lt, sql } from 'drizzle-orm';
+import { eq, lt, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { adminAuthMiddleware } from './admin/middleware/auth.ts';
 import { adminCsrfMiddleware } from './admin/middleware/csrf.ts';
@@ -47,6 +47,16 @@ import {
   type Db,
 } from './db.ts';
 import { escapeHtml } from './email.ts';
+import { pruneEmailActionHistory } from './email/admission.ts';
+import { emailDomainRoutes, emailOperations } from './email/connection-schema.ts';
+import {
+  ensureSharedEmailConnection,
+  reconcilePendingEmailOperations,
+  runEmailOperation,
+  flushEmailCacheOutbox,
+} from './email/connection-service.ts';
+import emailIngressResolution from './email/ingress-resolution.ts';
+import { repairEmailRecipientPolicyMirror } from './email/settings.ts';
 import type { ApiEnv } from './env.ts';
 import { ErrorAlertMonitor } from './error-alert-monitor.ts';
 import { cancelContainerBuildDos } from './github/cancel-builds.ts';
@@ -66,7 +76,7 @@ import {
   deleteCustomHostname,
   getCustomHostname,
 } from './provisioning/cloudflare-api.ts';
-import { isReservedEmailSlug } from './reserved-slugs.ts';
+import { reconcileEmailDestinationCleanups } from './provisioning/email-destination-cleanup.ts';
 import { oidcRoutes } from './routes/auth-oidc.ts';
 import auth from './routes/auth.ts';
 import deleteRoute from './routes/delete.ts';
@@ -75,6 +85,7 @@ import domains from './routes/domains.ts';
 import emailConfirm from './routes/email-confirm.ts';
 import emailRoutes from './routes/email.ts';
 import { githubProjectRoutes, githubRoutes } from './routes/github.ts';
+import internalEmailActions from './routes/internal-email-actions.ts';
 import internalEmailDomainCredential from './routes/internal-email.ts';
 import internalGitHubWebhook from './routes/internal-github-webhook.ts';
 import internalResolveResource from './routes/internal-resolve-resource.ts';
@@ -149,6 +160,8 @@ const app = new Hono<ApiEnv>()
       (context.req.path === '/health' ||
         context.req.path === '/.well-known/void-platform' ||
         context.req.path === '/internal/platform/sandbox-drain' ||
+        (context.req.path === '/internal/platform/email-bootstrap' &&
+          context.req.method === 'POST') ||
         (context.req.path === '/internal/platform/domain-preflight' &&
           context.req.method === 'POST'));
     const maintenanceSandboxDrain =
@@ -269,6 +282,78 @@ const app = new Hono<ApiEnv>()
     );
   })
   .post('/internal/platform/domain-preflight', platformDomainPreflight)
+  .post('/internal/platform/email-bootstrap', async (context) => {
+    const healthProbeToken = context.env.PLATFORM_HEALTH_PROBE_TOKEN;
+    if (
+      !healthProbeToken ||
+      context.req.header('X-Void-Platform-Probe') !== healthProbeToken ||
+      !context.env.PLATFORM_INSTALLATION_ID ||
+      !getPlatformCapabilities(context.env).email
+    ) {
+      return context.json({ error: 'not found' }, 404);
+    }
+    let operationId: string | null = null;
+    try {
+      const db = context.get('db');
+      operationId = await ensureSharedEmailConnection(db, context.env);
+      if (!operationId) {
+        return context.json({ version: 1, state: 'unconfigured' }, 503);
+      }
+      await runEmailOperation(db, context.env, operationId);
+      const operation = (
+        await db
+          .select({
+            currentStep: emailOperations.current_step,
+            failureCode: emailOperations.failure_code,
+            routeId: emailOperations.route_id,
+            status: emailOperations.status,
+          })
+          .from(emailOperations)
+          .where(eq(emailOperations.id, operationId))
+          .limit(1)
+      )[0];
+      const route = operation?.routeId
+        ? (
+            await db
+              .select({
+                desiredState: emailDomainRoutes.desired_state,
+                inboundStatus: emailDomainRoutes.inbound_status,
+              })
+              .from(emailDomainRoutes)
+              .where(eq(emailDomainRoutes.id, operation.routeId))
+              .limit(1)
+          )[0]
+        : null;
+      if (
+        operation?.status !== 'completed' ||
+        route?.desiredState !== 'active' ||
+        route.inboundStatus !== 'ready'
+      ) {
+        return context.json(
+          {
+            version: 1,
+            state: 'incomplete',
+            operationId,
+            operationStatus: operation?.status ?? 'missing',
+            currentStep: operation?.currentStep ?? null,
+            failureCode: operation?.failureCode ?? null,
+          },
+          503,
+        );
+      }
+      return context.json({ version: 1, state: 'ready', operationId });
+    } catch (error) {
+      console.error('[api] shared email installer bootstrap failed', error);
+      return context.json(
+        {
+          version: 1,
+          state: 'failed',
+          ...(operationId ? { operationId, operationStatus: 'failed' } : {}),
+        },
+        503,
+      );
+    }
+  })
   .get('/internal/platform/sandbox-drain', async (context) => {
     const healthProbeToken = context.env.PLATFORM_HEALTH_PROBE_TOKEN;
     if (!healthProbeToken || context.req.header('X-Void-Platform-Probe') !== healthProbeToken) {
@@ -335,6 +420,8 @@ const app = new Hono<ApiEnv>()
   .route('/internal/revalidate', internalRevalidate)
   .use('/internal/email/*', capabilityMiddleware('email'))
   .route('/internal/email/domain-credential', internalEmailDomainCredential)
+  .route('/internal/email/actions', internalEmailActions)
+  .route('/internal/email', emailIngressResolution)
   .use('/internal/github-webhook', capabilityMiddleware('managedBuilds'))
   .route('/internal/github-webhook', internalGitHubWebhook)
   .route('/internal/resolve-resource', internalResolveResource)
@@ -430,6 +517,31 @@ async function scheduled(
   }
   const db = createDb(env.HYPERDRIVE.connectionString);
   const capabilities = getPlatformCapabilities(env);
+
+  if (capabilities.email) {
+    await reconcileEmailDestinationCleanups(db, {
+      accountId: env.CF_ACCOUNT_ID,
+      apiToken: env.CF_API_TOKEN,
+    }).catch((error) => console.error('[scheduled] email destination cleanup failed:', error));
+    await (async () => {
+      const operationId = await ensureSharedEmailConnection(db, env);
+      if (operationId) {
+        await runEmailOperation(db, env, operationId);
+      }
+    })().catch((error) => console.error('[scheduled] shared email setup failed:', error));
+    await reconcilePendingEmailOperations(db, env).catch((error) =>
+      console.error('[scheduled] email operation reconciliation failed:', error),
+    );
+    await flushEmailCacheOutbox(db, env.ROUTING).catch((error) =>
+      console.error('[scheduled] email display publication failed:', error),
+    );
+    if (controller.cron !== FAST_CRON) {
+      await pruneEmailActionHistory(db).catch((error) =>
+        console.error('[scheduled] email history cleanup failed:', error),
+      );
+      await repairEmailRecipientPolicyMirror(db, env.ROUTING);
+    }
+  }
 
   // Fast tier (every 2 min): only reconcile recently-created pending domains
   // (within the last 30 min) so a freshly-configured custom domain comes online
@@ -819,47 +931,6 @@ async function processUserRollover(
   user: { id: string; plan: string; billing_cycle_start: string; suspended_reason: string | null },
   userProjects: ReadonlyArray<{ id: string; slug: string }>,
 ): Promise<void> {
-  // Backfill the `email-slug:<projectId>` mirror. It is written
-  // best-effort at createProject time, so a transient KV blip during
-  // create would leave a project permanently unsendable (the proxy's
-  // /email/send answers 502 'project slug unknown' without it).
-  // Re-write it idempotently on every hourly pass so a missing — or
-  // stale, after a project rename — mirror heals with no operator
-  // action. In its own try/catch, ahead of the routing-JSON backfill
-  // below: that block throws out on a malformed routing entry every
-  // pass, so sharing its try/catch would hold the mirror hostage to one
-  // bad entry (and vice versa) — neither may block the other, and
-  // neither may block rollover/unsuspension.
-  //
-  // A project whose slug is an email identity (`EMAIL_RESERVED_SLUGS`:
-  // `noreply`, `postmaster`, …) gets NO mirror. Those slugs were reserved
-  // only when email shipped, so a project registered earlier can still
-  // hold one, and the create-time check never sees it; the mirror is what
-  // authorizes `/email/send`, so withholding it keeps the proxy's answer
-  // at 502 for that project. A mirror written before the slug was
-  // reserved is deleted here — this pass is the migration — and the
-  // proxy refuses the slug on its own as well, for the hour until it is.
-  try {
-    for (const project of userProjects) {
-      const emailSlugKey = `email-slug:${project.id}`;
-      const existingSlug = await env.ROUTING.get(emailSlugKey);
-      if (isReservedEmailSlug(project.slug)) {
-        if (existingSlug !== null) {
-          await env.ROUTING.delete(emailSlugKey);
-          console.warn(
-            `[backfill] removed email-slug mirror for project ${project.id}: "${project.slug}" is a reserved email identity`,
-          );
-        }
-        continue;
-      }
-      if (existingSlug !== project.slug) {
-        await env.ROUTING.put(emailSlugKey, project.slug);
-      }
-    }
-  } catch (err) {
-    console.error(`[backfill] email-slug backfill failed for user ${user.id}:`, err);
-  }
-
   // Backfill userId into old KV routing entries (all plans, before early return).
   // Wrapped in try/catch so a malformed KV entry doesn't block rollover/unsuspension.
   try {

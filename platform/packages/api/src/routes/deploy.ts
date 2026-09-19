@@ -3833,6 +3833,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
           {
             projectSlug: project.slug,
             emailSenderDomain: context.env.EMAIL_SENDER_DOMAIN,
+            deploymentId: deployment.id,
           },
         );
         await assertDeploymentNotCanceled(context.get('db'), deployment.id);
@@ -4089,8 +4090,7 @@ async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promise<Respo
         // No per-project `send_email` binding is uploaded. The framework's
         // `sendEmail()` POSTs MIME + recipients to `__VOID_PROXY/email/send`;
         // the proxy holds the account-level send_email binding and enforces
-        // the per-project verified-destination allowlist from the
-        // `email-allowlist:<projectId>` KV mirror. See
+        // the per-project verified-destination policy through SQL admission. See
         // `meta/design-docs/0078-email-cf-native.md` and `packages/proxy/src/email.ts`.
         const allBindings = [
           ...plainTextBindings,

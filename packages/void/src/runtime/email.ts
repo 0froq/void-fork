@@ -2,10 +2,8 @@
 //
 // On the managed platform, user worker code never holds a `send_email`
 // binding directly. The framework builds MIME locally, then POSTs to
-// `__VOID_PROXY/email/send`. The proxy worker holds the platform-level
-// `send_email` binding and enforces per-project quotas, suspend kill-switch,
-// and verified-destinations allowlist (mirrored from `email_destinations`
-// into KV by the API on every CRUD).
+// `__VOID_PROXY/email/send`. The platform gateway enforces authoritative
+// project policy and quotas and records each provider submission's outcome.
 //
 // On the developer's own Cloudflare account (`void deploy --platform
 // cloudflare`) there is no proxy: the deploy provisions a `send_email`
@@ -34,6 +32,7 @@ import {
 } from './email/dev-inbox.ts';
 import { buildMime, MimeError, normalizeEmail } from './email/mime.ts';
 import type {
+  EmailDeliveryState,
   NormalizedEmail,
   SendEmailDelivery,
   SendEmailErrorCode,
@@ -47,6 +46,7 @@ import { getRawRuntimeEnv } from './env-raw.ts';
 export type {
   Address,
   Attachment,
+  EmailDeliveryState,
   NormalizedEmail,
   SendEmailDelivery,
   SendEmailError,
@@ -153,6 +153,42 @@ interface ProxyEnv {
 // The `send_email` binding `void deploy --platform cloudflare` provisions
 // (`cli/email-cloudflare.ts` writes the same name into wrangler.jsonc).
 const SEND_EMAIL_BINDING_NAME = 'SEND_EMAIL';
+const EMAIL_PROVIDER_DEADLINE_MS = 30_000;
+const PLATFORM_SEND_DEADLINE_MS = 60_000;
+
+class EmailBindingTimeoutError extends Error {
+  constructor() {
+    super('email binding outcome unknown after timeout');
+    this.name = 'EmailBindingTimeoutError';
+  }
+}
+
+function createBindingSendDeadline() {
+  const deadline = Date.now() + PLATFORM_SEND_DEADLINE_MS;
+  return {
+    expired: () => Date.now() >= deadline,
+    async run<T>(submit: () => Promise<T>): Promise<T> {
+      const remaining = Math.min(EMAIL_PROVIDER_DEADLINE_MS, deadline - Date.now());
+      if (remaining <= 0) {
+        throw new EmailBindingTimeoutError();
+      }
+      const work = submit();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          work,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new EmailBindingTimeoutError()), remaining);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
+      }
+    },
+  };
+}
 
 // The legacy `EmailMessage` overload of `SendEmail.send`. Only `messageId`
 // is read, and defensively: some builds have returned nothing.
@@ -179,14 +215,10 @@ function resolveSendEmailBinding(
  * Cloudflare's Workers API reference); the older Email Routing sender
  * throws message-only errors, so the destination-verification phrasing the
  * platform proxy already keys on is kept as a fallback. Anything else is
- * `UPSTREAM_ERROR` with the original error as `cause` — the framework has
- * no way to act on a delivery failure or a service outage beyond
- * reporting it.
+ * `OUTCOME_UNKNOWN` with the original error as `cause`: once `send()` has
+ * started, an undocumented rejection does not prove the provider declined
+ * the message before accepting it.
  *
- * The platform proxy's `classifyUpstream` mirrors this table for its own
- * binding, except the two sender codes: there `from` is pinned to the
- * project sender, so a sender failure is the platform's to fix and stays
- * `UPSTREAM_ERROR`. Keep the recipient and limit rows in lockstep.
  */
 function classifyBindingError(e: unknown): SendEmailError {
   const message = e instanceof Error ? e.message : String(e);
@@ -207,13 +239,12 @@ function classifyBindingError(e: unknown): SendEmailError {
   if (UNVERIFIED_DESTINATION_RE.test(message)) {
     return makeError('UNVERIFIED_DESTINATION', message, e);
   }
-  return makeError('UPSTREAM_ERROR', message, e);
+  return makeError('OUTCOME_UNKNOWN', message, e);
 }
 
 // Anchored to Cloudflare's own phrasing ("destination address … not (yet)
 // verified"), with bounded runs so a long preamble or a multi-line stack
 // cannot drag an unrelated mention of the address into a false positive.
-// Mirrors `classifyUpstream` in the platform proxy.
 const UNVERIFIED_DESTINATION_RE =
   /^[^\n]{0,200}destination address[^\n]{0,200}not (?:yet )?verified/i;
 
@@ -228,10 +259,10 @@ function bytesToReadableStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
 
 /**
  * Deliver through the worker's own `SEND_EMAIL` binding. One `EmailMessage`
- * per recipient, every recipient attempted, and the same `deliveries` shape
- * the proxy returns so a caller retries the failed ones the same way in both
- * modes. The stream is rebuilt per send because a `ReadableStream` is
- * one-shot.
+ * per recipient, within one bounded batch, and the same `deliveries` shape
+ * the proxy returns so a caller can inspect each attempted or cancelled
+ * outcome in either mode. The stream is rebuilt per send because a
+ * `ReadableStream` is one-shot.
  */
 async function sendViaBinding(
   binding: SendEmailBinding,
@@ -251,15 +282,44 @@ async function sendViaBinding(
     );
   }
   const deliveries: Array<SendEmailRecipientResult> = [];
-  for (const recipient of recipients) {
+  const deadline = createBindingSendDeadline();
+  for (let index = 0; index < recipients.length; index++) {
+    const recipient = recipients[index];
+    if (deadline.expired()) {
+      for (const unstarted of recipients.slice(index)) {
+        deliveries.push({
+          recipient: unstarted,
+          ok: false,
+          state: 'cancelled',
+          error: makeError(
+            'UPSTREAM_ERROR',
+            'email: batch deadline elapsed before provider submission',
+          ),
+        });
+      }
+      break;
+    }
     try {
-      const result = await binding.send(
-        new EmailMessage(from, recipient, bytesToReadableStream(raw)),
+      const result = await deadline.run(() =>
+        binding.send(new EmailMessage(from, recipient, bytesToReadableStream(raw))),
       );
       const mid = typeof result?.messageId === 'string' ? result.messageId : '';
       deliveries.push({ recipient, ok: true, messageId: mid || fallbackId });
     } catch (e) {
-      deliveries.push({ recipient, ok: false, error: classifyBindingError(e) });
+      const error =
+        e instanceof EmailBindingTimeoutError
+          ? makeError(
+              'OUTCOME_UNKNOWN',
+              'email: binding submission timed out; inspect provider logs before retrying',
+              e,
+            )
+          : classifyBindingError(e);
+      deliveries.push({
+        recipient,
+        ok: false,
+        ...(error.code === 'OUTCOME_UNKNOWN' ? { state: 'outcome_unknown' as const } : {}),
+        error,
+      });
     }
   }
   if (deliveries.some((d) => !d.ok)) {
@@ -357,33 +417,28 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 interface ProxySendBody {
   projectId: string;
-  /**
-   * HMAC of `projectId` under the shared `JWT_SECRET`. The proxy currently
-   * reads this under the legacy `aiToken` key (auth was originally written
-   * for the AI proxy). New `proxyToken` field below ships the same value
-   * under the renamed key so the proxy can migrate without a coordinated
-   * release; once every deployed proxy reads `proxyToken`, drop `aiToken`.
-   */
+  /** Project HMAC accepted by the shared proxy authentication middleware. */
   aiToken: string;
-  proxyToken: string;
   from: string;
   recipients: Array<string>;
   mimeBase64: string;
-  byteSize: number;
   requestId: string;
-  fromDomain: string;
+  idempotencyKey?: string;
 }
 
 interface ProxyOkResponse {
   ok: true;
   ids: Array<SendEmailDelivery>;
+  operationId?: string;
 }
 interface ProxyPreflightFailure {
   ok: false;
   error: { code: SendEmailErrorCode | string; message: string };
+  operationId?: string;
 }
 interface ProxyMidBatchFailure {
   ok: false;
+  operationId?: string;
   deliveries: Array<{
     recipient: string;
     ok: boolean;
@@ -401,6 +456,8 @@ function coerceErrorCode(code: unknown): SendEmailErrorCode {
     'UNVERIFIED_DESTINATION',
     'MIME_ERROR',
     'QUOTA_EXCEEDED',
+    'IDEMPOTENCY_CONFLICT',
+    'OUTCOME_UNKNOWN',
     'UPSTREAM_ERROR',
   ];
   return known.includes(code as SendEmailErrorCode)
@@ -426,11 +483,7 @@ function readProxyRefusal(body: unknown): string | null {
   return typeof message === 'string' && message !== '' ? message : error;
 }
 
-// Discriminator + shape check that runs before we destructure. The proxy
-// response shape is well-defined, but treating the parsed body as
-// `unknown` here lets us short-circuit to a clean UPSTREAM_ERROR for any
-// malformed payload (null, primitive, missing discriminator, wrong
-// array types) instead of throwing a TypeError mid-map.
+// A malformed response leaves the provider outcome unknown.
 function isValidProxyResponse(b: unknown): b is ProxyResponse {
   if (typeof b !== 'object' || b === null) {
     return false;
@@ -451,29 +504,10 @@ function isValidProxyResponse(b: unknown): b is ProxyResponse {
 type RecipientListRead<T> = { ok: true; entries: Array<T> } | { ok: false; reason: string };
 
 /**
- * Validate a per-recipient list from the proxy against the recipients this
- * send asked for. Both list-bearing responses go through here — `ids` on
- * `ok: true` and `deliveries` on a mid-batch `ok: false` — so the two cannot
- * drift: the proxy builds both from the same per-recipient list, one entry
- * per requested address, and a caller following the documented retry
- * pattern (retry only `ok: false` entries) can act on an outcome only if
- * every recipient has one.
- *
- * The rules shared by both shapes: the count equals the recipients sent;
- * every entry is an object naming a requested recipient exactly once. The
- * list is compared as a set against the unique, lowercased recipients the
- * request carried and returned in the order the proxy gave it — order is
- * not part of the contract (the proxy lists allowlist rejections before the
- * sends it attempted). `readEntry` decides the rest of the entry's shape and
- * returns `undefined` when it does not hold; `shape` names that shape in the
- * reason.
- *
- * Anything else is a schema-skewed or corrupt proxy and is refused as a
- * whole rather than trimmed to the entries that parse: a dropped entry is a
- * recipient whose outcome the caller can neither trust nor retry. Entries
- * are named by index only — the body is attached as `cause`, and a recipient
- * string from a corrupt response is not a value to interpolate into an
- * error message.
+ * Require exactly one valid outcome per requested recipient in either list
+ * shape. A missing, duplicate, or foreign entry makes the whole result unknown;
+ * trimming it could hide a submission. Order is not part of the contract.
+ * Diagnostics identify entries by index rather than echoing corrupt addresses.
  */
 function readRecipientList<T>(
   raw: Array<unknown>,
@@ -510,14 +544,11 @@ function readRecipientList<T>(
 }
 
 /**
- * The `ids` list of an `ok: true` response. The proxy answers `ok: true`
- * only once every requested recipient passed its allowlist and
- * `SEND_EMAIL.send()` confirmed each one, so every entry is
- * `{ recipient, messageId }` with `messageId` always a string (`''` when
- * Cloudflare returned none; that is the proxy's explicit convention, and the
- * framework's own Message-ID stands in for it). An `ok: true` with a
- * delivery missing would tell the caller a send was confirmed when it never
- * was, and a success carries no per-recipient failure to retry from.
+ * The `ids` list of an `ok: true` response. The proxy answers `ok: true` only
+ * after every requested recipient has an accepted provider outcome. Each entry
+ * is `{ recipient, messageId }`; the framework's own Message-ID stands in for
+ * an empty provider reference. A missing delivery would leave no safe retry
+ * decision, so the whole response is rejected as malformed.
  */
 function readDeliveryList(
   raw: Array<unknown>,
@@ -530,20 +561,18 @@ function readDeliveryList(
     '{ recipient: string, messageId: string }',
     (entry, recipient) =>
       typeof entry.messageId === 'string'
-        ? { recipient, messageId: entry.messageId || fallbackId }
+        ? {
+            recipient,
+            messageId: entry.messageId || fallbackId,
+            ...(entry.state === 'provider_accepted' ? { state: 'provider_accepted' as const } : {}),
+          }
         : undefined,
   );
 }
 
 /**
- * The `deliveries` list of a mid-batch `ok: false` response. Each entry is
- * either a confirmed send (`ok: true`, `messageId` a string with the same
- * `''` convention as above) or a failure (`ok: false`, `error` with a string
- * `message`; the code is coerced, unknown values become `UPSTREAM_ERROR`).
- * Both are the proxy's own outcome for that recipient; `ok` is what the
- * caller retries on, so an entry that does not state it is not an outcome
- * at all — treating it as failed would retry a recipient that may have been
- * delivered, and treating it as delivered would silently lose one.
+ * Preserve each recipient's acceptance or error and recorded state. `ok: false`
+ * alone does not establish that retrying is safe: submission may be unresolved.
  */
 function readFailureDeliveries(
   raw: Array<unknown>,
@@ -557,13 +586,25 @@ function readFailureDeliveries(
     (entry, recipient) => {
       if (entry.ok === true) {
         return typeof entry.messageId === 'string'
-          ? { recipient, ok: true, messageId: entry.messageId || fallbackId }
+          ? {
+              recipient,
+              ok: true,
+              messageId: entry.messageId || fallbackId,
+              ...(entry.state === 'provider_accepted'
+                ? { state: 'provider_accepted' as const }
+                : {}),
+            }
           : undefined;
       }
       if (entry.ok === false) {
         const error = entry.error as { code?: unknown; message?: unknown } | null | undefined;
         return typeof error === 'object' && error !== null && typeof error.message === 'string'
-          ? { recipient, ok: false, error: makeError(coerceErrorCode(error.code), error.message) }
+          ? {
+              recipient,
+              ok: false,
+              error: makeError(coerceErrorCode(error.code), error.message),
+              ...(readDeliveryState(entry.state) ? { state: readDeliveryState(entry.state) } : {}),
+            }
           : undefined;
       }
       return undefined;
@@ -571,17 +612,117 @@ function readFailureDeliveries(
   );
 }
 
+function readDeliveryState(value: unknown): EmailDeliveryState | undefined {
+  const states: ReadonlyArray<EmailDeliveryState> = [
+    'rejected',
+    'reserved',
+    'attempt_started',
+    'provider_accepted',
+    'failed',
+    'outcome_unknown',
+    'cancelled',
+  ];
+  return states.find((state) => state === value);
+}
+
+const MAX_PROXY_RESPONSE_BYTES = 64 * 1024;
+
+function createPlatformSendDeadline(): {
+  signal: AbortSignal;
+  beforeDeadline: <T>(run: () => Promise<T>) => Promise<T>;
+} {
+  const controller = new AbortController();
+  const deadline = Date.now() + PLATFORM_SEND_DEADLINE_MS;
+  return {
+    signal: controller.signal,
+    async beforeDeadline<T>(run: () => Promise<T>): Promise<T> {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        controller.abort();
+        throw new Error('email platform send timed out');
+      }
+      const promise = run();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              reject(new Error('email platform send timed out'));
+            }, remaining);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
+      }
+    },
+  };
+}
+
+async function readBoundedProxyJson(
+  response: Response,
+  beforeDeadline: <T>(run: () => Promise<T>) => Promise<T>,
+): Promise<unknown> {
+  const declared = response.headers.get('content-length');
+  if (
+    declared !== null &&
+    (!/^\d+$/.test(declared) || Number(declared) > MAX_PROXY_RESPONSE_BYTES)
+  ) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error('email proxy response too large');
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('email proxy response is empty');
+  }
+  const bytes = new Uint8Array(MAX_PROXY_RESPONSE_BYTES);
+  let size = 0;
+  try {
+    for (;;) {
+      const chunk = await beforeDeadline(() => reader.read());
+      if (chunk.done) {
+        break;
+      }
+      if (size + chunk.value.byteLength > bytes.byteLength) {
+        throw new Error('email proxy response too large');
+      }
+      bytes.set(chunk.value, size);
+      size += chunk.value.byteLength;
+    }
+    if (declared !== null && size !== Number(declared)) {
+      throw new Error('email proxy response length mismatch');
+    }
+    return JSON.parse(
+      new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes.subarray(0, size)),
+    ) as unknown;
+  } finally {
+    void reader.cancel().catch(() => {});
+    try {
+      reader.releaseLock();
+    } catch {
+      // A timed-out read may still be settling after cancellation.
+    }
+  }
+}
+
 async function readResponseAsResult(
   res: Response,
   recipients: ReadonlyArray<string>,
   fallbackId: string,
+  beforeDeadline: <T>(run: () => Promise<T>) => Promise<T>,
 ): Promise<SendEmailResult> {
   try {
     let body: unknown;
     try {
-      body = await res.json();
+      body = await readBoundedProxyJson(res, beforeDeadline);
     } catch {
-      return err('UPSTREAM_ERROR', `email: proxy returned ${res.status} with non-JSON body`);
+      return err(
+        'OUTCOME_UNKNOWN',
+        `email: could not establish the send outcome (status ${res.status}); check email logs or repeat the same idempotency key`,
+      );
     }
     if (!isValidProxyResponse(body)) {
       // The proxy's own middleware — auth, platform lifecycle, capability
@@ -597,7 +738,7 @@ async function readResponseAsResult(
         return err('UPSTREAM_ERROR', `email: proxy returned ${res.status}: ${refusal}`, body);
       }
       return err(
-        'UPSTREAM_ERROR',
+        'OUTCOME_UNKNOWN',
         `email: proxy returned malformed response (status ${res.status})`,
         body,
       );
@@ -606,36 +747,41 @@ async function readResponseAsResult(
     // recipients this send asked for (`ids` / `deliveries` are `unknown[]`
     // from the typeguard's perspective).
     const malformedList = (reason: string): SendEmailResult =>
-      err('UPSTREAM_ERROR', `email: proxy returned a malformed delivery list (${reason})`, body);
+      err(
+        'OUTCOME_UNKNOWN',
+        `email: proxy returned a malformed delivery list (${reason}); do not retry with a new idempotency key`,
+        body,
+      );
+    const operation =
+      typeof body.operationId === 'string' && body.operationId.length <= 128
+        ? { operationId: body.operationId }
+        : {};
     if (body.ok === true) {
       const list = readDeliveryList(body.ids as Array<unknown>, recipients, fallbackId);
-      return list.ok ? { ok: true, ids: list.entries } : malformedList(list.reason);
+      return list.ok ? { ok: true, ids: list.entries, ...operation } : malformedList(list.reason);
     }
     // Treat the body as a flat record from here — the discriminated
     // union narrowing fights the `unknown`-derived branches and adds
     // little value once we've validated the shape via isValidProxyResponse.
     const failure = body as unknown as Record<string, unknown>;
-    if ('error' in failure && failure.error) {
-      const e = failure.error as { code?: unknown; message?: unknown };
-      return err(
+    if (Array.isArray(failure.deliveries)) {
+      const list = readFailureDeliveries(failure.deliveries, recipients, fallbackId);
+      return list.ok
+        ? { ok: false, deliveries: list.entries, ...operation }
+        : malformedList(list.reason);
+    }
+    const e = failure.error as { code?: unknown; message?: unknown };
+    return {
+      ...err(
         coerceErrorCode(e.code),
         typeof e.message === 'string' ? e.message : 'email: upstream send failed',
-      );
-    }
-    // Mid-batch — per-recipient outcomes, one per requested recipient, so
-    // the caller can retry exactly the failed ones.
-    const list = readFailureDeliveries(
-      failure.deliveries as Array<unknown>,
-      recipients,
-      fallbackId,
-    );
-    return list.ok ? { ok: false, deliveries: list.entries } : malformedList(list.reason);
+      ),
+      ...operation,
+    };
   } catch (e) {
-    // Defense-in-depth: any unexpected error parsing the proxy response
-    // becomes a clean UPSTREAM_ERROR rather than escaping `sendEmail` as
-    // an unhandled rejection.
+    // Parsing failures must not imply that no provider submission occurred.
     return err(
-      'UPSTREAM_ERROR',
+      'OUTCOME_UNKNOWN',
       `email: failed to parse proxy response (status ${res.status}): ${e instanceof Error ? e.message : String(e)}`,
       e,
     );
@@ -820,6 +966,15 @@ function capturedResult(normalized: NormalizedEmail, captureId: string): SendEma
  * override for a single call.
  */
 export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult> {
+  if (
+    opts.idempotencyKey !== undefined &&
+    (typeof opts.idempotencyKey !== 'string' || !/^[\x21-\x7e]{1,128}$/.test(opts.idempotencyKey))
+  ) {
+    return err(
+      'MIME_ERROR',
+      'email: idempotencyKey must contain 1–128 printable non-space ASCII characters.',
+    );
+  }
   const resolvedOpts = resolveDefaultFrom(opts);
   if (resolvedOpts.from === undefined) {
     return err(
@@ -892,6 +1047,12 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
   // proxy hop and no platform quota — Cloudflare's own limits apply.
   const sendBinding = resolveSendEmailBinding(rawEnv);
   if (sendBinding) {
+    if (opts.idempotencyKey !== undefined) {
+      return err(
+        'MIME_ERROR',
+        'email: idempotencyKey requires a Void platform; the native Cloudflare binding cannot deduplicate sends.',
+      );
+    }
     return sendViaBinding(sendBinding, normalized.from.email, recipients, raw, messageId);
   }
 
@@ -911,34 +1072,36 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
   }
 
   const requestId = newRequestId();
-  const fromDomain = normalized.from.email.split('@')[1] ?? '';
   const body: ProxySendBody = {
     projectId,
     aiToken: proxyToken,
-    proxyToken,
     from: normalized.from.email,
     recipients,
     mimeBase64: bytesToBase64(raw),
-    byteSize: raw.byteLength,
     requestId,
-    fromDomain,
+    ...(opts.idempotencyKey === undefined ? {} : { idempotencyKey: opts.idempotencyKey }),
   };
 
+  const requestBody = JSON.stringify(body);
+  const deadline = createPlatformSendDeadline();
   let res: Response;
   try {
-    res = await proxy.fetch('https://email-proxy/email/send', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    res = await deadline.beforeDeadline(() =>
+      proxy.fetch('https://email-proxy/email/send', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: requestBody,
+        signal: deadline.signal,
+      }),
+    );
   } catch (e) {
     return err(
-      'UPSTREAM_ERROR',
-      `email: proxy unreachable: ${e instanceof Error ? e.message : String(e)}`,
+      'OUTCOME_UNKNOWN',
+      `email: send outcome is unknown: ${e instanceof Error ? e.message : String(e)}. Check email logs or repeat the same idempotency key; do not create a new send.`,
       e,
     );
   }
-  return readResponseAsResult(res, recipients, messageId);
+  return readResponseAsResult(res, recipients, messageId, deadline.beforeDeadline);
 }
 
 /**

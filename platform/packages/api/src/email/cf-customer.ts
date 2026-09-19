@@ -1,36 +1,15 @@
-/**
- * Customer-Cloudflare API client — the calls the api makes INTO the
- * customer's own Cloudflare account/zone with the credential they granted
- * (an OAuth grant's refreshed access token, or a pasted API token on the
- * fallback path). Design doc 0078, "Custom domains on Cloudflare".
- *
- * Follows cfFetch (../provisioning/cloudflare-api.ts): Bearer auth, the v4
- * `{ success, errors, result }` envelope, and CloudflareApiError carrying
- * the HTTP status so callers branch on the wire code. Two deviations:
- *   - A FormData body (the relay script upload) must not carry a hand-set
- *     Content-Type — fetch fills in the multipart boundary, same handling
- *     as the WfP upload in routes/deploy.ts.
- *   - relayScriptExists reads the raw script GET, which answers the worker
- *     source or a bare 404 — not a v4 envelope.
- *
- * The credential is only ever sent as the Authorization header. It is
- * never logged, embedded in an error message, or returned.
- */
+/** Customer Cloudflare API client for email routing and sending. */
 
 import { CloudflareApiError } from '../provisioning/cloudflare-api.ts';
 import {
-  RELAY_EMAIL_DOMAIN_BINDING,
-  RELAY_PROXY_ORIGIN_BINDING,
+  RELAY_ACCOUNT_BINDING,
+  RELAY_GATEWAY_ORIGIN_BINDING,
+  RELAY_INGRESS_BINDING,
   RELAY_SECRET_BINDING,
+  RELAY_ZONE_BINDING,
 } from './relay-worker.ts';
 
 export const CF_CUSTOMER_API_BASE = 'https://api.cloudflare.com/client/v4';
-
-// wrangler's public PKCE OAuth client (design doc 0078, "The OAuth grant
-// on wrangler's client") — the refresh chain the api owns per domain row.
-export const CF_EMAIL_OAUTH_CLIENT_ID = '54d11594-84e4-41aa-b438-e81b8fa78ee7';
-const CF_OAUTH_TOKEN_URL = 'https://dash.cloudflare.com/oauth2/token';
-const CF_OAUTH_REVOKE_URL = 'https://dash.cloudflare.com/oauth2/revoke';
 
 type CfCustomerResult<T> = Readonly<{
   success: boolean;
@@ -49,6 +28,7 @@ export async function cfCustomerFetch<T>(
 ): Promise<T> {
   const response = await fetch(url, {
     ...init,
+    signal: init?.signal ?? AbortSignal.timeout(15_000),
     headers: {
       Authorization: `Bearer ${credential}`,
       ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
@@ -83,26 +63,21 @@ export type RelayScriptUpload = Readonly<{
   /** Module-syntax worker source (RELAY_SOURCE). */
   source: string;
   compatibilityDate: string;
-  /** Declared as the VOID_PROXY_ORIGIN plain-text var. */
-  proxyOrigin: string;
-  /** Declared as the VOID_EMAIL_DOMAIN plain-text var. */
-  emailDomain: string;
-}>;
-
-export type SendRawMessage = Readonly<{
-  from: string;
-  recipients: ReadonlyArray<string>;
-  mime_message: string;
-}>;
-
-export type SendRawResult = Readonly<{
-  message_id?: string;
+  gatewayOrigin: string;
+  accountId: string;
+  zoneId: string;
+  ingressName: string;
 }>;
 
 export type CfCatchAllRule = Readonly<{
   enabled: boolean;
   /** The worker name a 'worker' action points at; null for any other action shape. */
   workerName: string | null;
+}>;
+export type CfEmailRoutingRule = Readonly<{
+  enabled: boolean;
+  name: string | null;
+  addresses: ReadonlyArray<string>;
 }>;
 
 /** One entry of the sending-subdomain list; name + enabled are required on the wire. */
@@ -145,6 +120,10 @@ export type CfCustomerClient = Readonly<{
   ) => Promise<void>;
   /** PUT .../secrets — the non-namespace variant of putWorkerSecret (project-secrets.ts). */
   putRelaySecret: (accountId: string, scriptName: string, secret: string) => Promise<void>;
+  /** Public probe routing for the deployed ingress Worker. */
+  getWorkersSubdomain: (accountId: string) => Promise<string>;
+  getScriptSubdomainEnabled: (accountId: string, scriptName: string) => Promise<boolean>;
+  enableScriptSubdomain: (accountId: string, scriptName: string) => Promise<void>;
   /** PUT catch-all pointing the zone at the relay. `value` is a one-entry array, one action only. */
   setCatchAll: (zoneId: string, relayWorkerName: string) => Promise<void>;
   /**
@@ -154,6 +133,8 @@ export type CfCustomerClient = Readonly<{
    * write what they own. 404 → null.
    */
   getCatchAll: (zoneId: string) => Promise<CfCatchAllRule | null>;
+  /** Enabled explicit address rules outrank a zone catch-all. */
+  listRoutingRules: (zoneId: string) => Promise<ReadonlyArray<CfEmailRoutingRule>>;
   /** PUT catch-all with wrangler's reset shape: one drop action, disabled. */
   resetCatchAll: (zoneId: string) => Promise<void>;
   /**
@@ -163,8 +144,6 @@ export type CfCustomerClient = Readonly<{
   getRoutingSettings: (zoneId: string) => Promise<unknown>;
   /** DELETE the relay script. 404 is success — the customer may have deleted it themselves. */
   deleteRelayScript: (accountId: string, scriptName: string) => Promise<void>;
-  /** POST /accounts/{a}/email/sending/send_raw — the REST send (contract 5). */
-  sendRaw: (accountId: string, message: SendRawMessage) => Promise<SendRawResult>;
 }>;
 
 export function createCfCustomerClient(credential: string): CfCustomerClient {
@@ -231,7 +210,7 @@ export function createCfCustomerClient(credential: string): CfCustomerClient {
     relayScriptExists: async (accountId, scriptName) => {
       const response = await fetch(
         `${CF_CUSTOMER_API_BASE}/accounts/${accountId}/workers/scripts/${scriptName}`,
-        { headers: { Authorization: `Bearer ${credential}` } },
+        { headers: { Authorization: `Bearer ${credential}` }, signal: AbortSignal.timeout(15_000) },
       );
       if (response.status === 404) {
         return false;
@@ -253,8 +232,18 @@ export function createCfCustomerClient(credential: string): CfCustomerClient {
         main_module: 'index.js',
         compatibility_date: upload.compatibilityDate,
         bindings: [
-          { type: 'plain_text', name: RELAY_PROXY_ORIGIN_BINDING, text: upload.proxyOrigin },
-          { type: 'plain_text', name: RELAY_EMAIL_DOMAIN_BINDING, text: upload.emailDomain },
+          {
+            type: 'plain_text',
+            name: RELAY_GATEWAY_ORIGIN_BINDING,
+            text: upload.gatewayOrigin,
+          },
+          { type: 'plain_text', name: RELAY_ACCOUNT_BINDING, text: upload.accountId },
+          { type: 'plain_text', name: RELAY_ZONE_BINDING, text: upload.zoneId },
+          {
+            type: 'plain_text',
+            name: RELAY_INGRESS_BINDING,
+            text: upload.ingressName,
+          },
         ],
       };
       const formData = new FormData();
@@ -277,6 +266,28 @@ export function createCfCustomerClient(credential: string): CfCustomerClient {
       await call(`/accounts/${accountId}/workers/scripts/${scriptName}/secrets`, {
         method: 'PUT',
         body: JSON.stringify({ name: RELAY_SECRET_BINDING, text: secret, type: 'secret_text' }),
+      });
+    },
+
+    getWorkersSubdomain: async (accountId) => {
+      const result = await call<{ subdomain: string }>(`/accounts/${accountId}/workers/subdomain`);
+      if (!result?.subdomain) {
+        throw new Error('Cloudflare Workers account subdomain is unavailable');
+      }
+      return result.subdomain;
+    },
+
+    getScriptSubdomainEnabled: async (accountId, scriptName) => {
+      const result = await call<{ enabled: boolean }>(
+        `/accounts/${accountId}/workers/scripts/${scriptName}/subdomain`,
+      );
+      return result.enabled === true;
+    },
+
+    enableScriptSubdomain: async (accountId, scriptName) => {
+      await call(`/accounts/${accountId}/workers/scripts/${scriptName}/subdomain`, {
+        method: 'POST',
+        body: JSON.stringify({ enabled: true, previews_enabled: false }),
       });
     },
 
@@ -317,6 +328,47 @@ export function createCfCustomerClient(credential: string): CfCustomerClient {
       return { enabled: (rule as { enabled?: unknown }).enabled === true, workerName };
     },
 
+    listRoutingRules: async (zoneId) => {
+      const rules: Array<CfEmailRoutingRule> = [];
+      for (let page = 1; page <= 20; page++) {
+        const result = await call<unknown>(
+          `/zones/${zoneId}/email/routing/rules?page=${page}&per_page=50`,
+        );
+        if (!Array.isArray(result)) {
+          throw new Error('Cloudflare routing rules response was not an array');
+        }
+        for (const value of result) {
+          if (!value || typeof value !== 'object') {
+            continue;
+          }
+          const rule = value as { enabled?: unknown; name?: unknown; matchers?: unknown };
+          const addresses = Array.isArray(rule.matchers)
+            ? rule.matchers.flatMap((matcher: unknown) => {
+                if (!matcher || typeof matcher !== 'object') {
+                  return [];
+                }
+                const m = matcher as { type?: unknown; field?: unknown; value?: unknown };
+                return m.type === 'literal' && typeof m.value === 'string'
+                  ? [m.value.toLowerCase()]
+                  : [];
+              })
+            : [];
+          rules.push({
+            enabled: rule.enabled === true,
+            name: typeof rule.name === 'string' ? rule.name : null,
+            addresses,
+          });
+        }
+        if (result.length < 50) {
+          break;
+        }
+        if (page === 20) {
+          throw new Error('Cloudflare routing rule list exceeded 1,000 entries');
+        }
+      }
+      return rules;
+    },
+
     resetCatchAll: async (zoneId) => {
       await call(`/zones/${zoneId}/email/routing/rules/catch_all`, {
         method: 'PUT',
@@ -341,114 +393,5 @@ export function createCfCustomerClient(credential: string): CfCustomerClient {
         throw err;
       }
     },
-
-    sendRaw: (accountId, message) =>
-      call<SendRawResult>(`/accounts/${accountId}/email/sending/send_raw`, {
-        method: 'POST',
-        body: JSON.stringify(message),
-      }),
   };
-}
-
-/**
- * OAuth token-endpoint failure. `code` is the RFC 6749 error string
- * ('invalid_grant' & co) — the only piece callers branch on. The message
- * deliberately carries just the code and HTTP status: never the
- * description, never any token material.
- */
-export class OAuthGrantError extends Error {
-  readonly code: string;
-  readonly status: number;
-  constructor(code: string, status: number) {
-    super(`Cloudflare OAuth grant failed: ${code} (HTTP ${status})`);
-    this.name = 'OAuthGrantError';
-    this.code = code;
-    this.status = status;
-  }
-}
-
-export type OauthGrantTokens = Readonly<{
-  accessToken: string;
-  /** The ROTATED refresh token — single-use, so persist it atomically with the lease. */
-  refreshToken: string;
-  expiresIn?: number;
-}>;
-
-/**
- * One round of the OAuth refresh chain on wrangler's public client
- * (contract 4): form-encoded POST to dash.cloudflare.com/oauth2/token.
- * Refresh tokens rotate on every use; a missing replacement in the answer
- * fails loudly rather than silently persisting a now-dead token.
- */
-export async function refreshOauthGrant(refreshToken: string): Promise<OauthGrantTokens> {
-  const response = await fetch(CF_OAUTH_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: CF_EMAIL_OAUTH_CLIENT_ID,
-      refresh_token: refreshToken,
-    }).toString(),
-  });
-  let json: {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-    error?: string;
-  } | null = null;
-  try {
-    json = await response.json();
-  } catch {
-    // Non-JSON error body (an HTML error page, a truncated response) —
-    // classified below as unknown_error with the HTTP status.
-  }
-  if (!response.ok) {
-    throw new OAuthGrantError(json?.error ?? 'unknown_error', response.status);
-  }
-  if (!json?.access_token || !json.refresh_token) {
-    throw new OAuthGrantError('invalid_response', response.status);
-  }
-  return {
-    accessToken: json.access_token,
-    refreshToken: json.refresh_token,
-    ...(json.expires_in === undefined ? {} : { expiresIn: json.expires_in }),
-  };
-}
-
-/**
- * RFC 7009 revocation of the grant's refresh token on wrangler's public
- * client — the logout half of contract 4, mirroring wrangler's
- * `workers-auth` logout byte-for-byte: form-encoded POST carrying
- * client_id + token_type_hint + token, and NO Authorization header (a
- * public client authenticates with the token itself).
- *
- * THROWS on a network failure or a non-2xx status: CF answers 200 whether
- * the token was live or already dead (probed 2026-09-17), so a failure
- * leaves the grant's state genuinely unknown — and `removeEmailDomain`
- * records `revoke_grant` in failed_steps only when its dep throws. The
- * response body is ignored. The token is never logged or interpolated
- * into anything.
- */
-export async function revokeOauthGrant(refreshToken: string): Promise<void> {
-  let response: Response;
-  try {
-    response = await fetch(CF_OAUTH_REVOKE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: CF_EMAIL_OAUTH_CLIENT_ID,
-        token_type_hint: 'refresh_token',
-        token: refreshToken,
-      }).toString(),
-    });
-  } catch (err) {
-    // Network-level failure. A fetch TypeError carries no request body, so
-    // the token cannot leak through it.
-    console.error('Cloudflare OAuth grant revocation request failed', err);
-    throw err;
-  }
-  if (!response.ok) {
-    console.error(`Cloudflare OAuth grant revocation failed with HTTP ${response.status}`);
-    throw new Error(`Cloudflare OAuth grant revocation failed with HTTP ${response.status}`);
-  }
 }

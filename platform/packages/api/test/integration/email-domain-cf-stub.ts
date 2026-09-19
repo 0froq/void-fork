@@ -1,9 +1,8 @@
 import { vi } from 'vite-plus/test';
-import { hashEmailRelaySecret } from '../../src/email/domains.ts';
 import { cfError, cfSuccess } from './helpers.ts';
 
 // ---------------------------------------------------------------------------
-// Customer-side CF/OAuth/DNS fetch stub
+// Customer-side Cloudflare and DNS fetch stub
 // ---------------------------------------------------------------------------
 
 export type StubFailTag =
@@ -15,13 +14,16 @@ export type StubFailTag =
   | 'sendingSubdomainsGet'
   | 'scriptGet'
   | 'scriptPut'
+  | 'workersSubdomain'
+  | 'scriptSubdomain'
+  | 'relayProbe'
+  | 'gatewayProbe'
   | 'secretPut'
   | 'catchAll'
   | 'catchAllGet'
+  | 'routingRulesGet'
   | 'routingSettingsGet'
-  | 'scriptDelete'
-  | 'oauthToken'
-  | 'oauthRevoke';
+  | 'scriptDelete';
 
 export type RecordedCall = {
   tag: StubFailTag;
@@ -29,8 +31,6 @@ export type RecordedCall = {
   url: string;
   /** Parsed JSON body for string bodies; parsed metadata for the script PUT. */
   body?: unknown;
-  /** OAuth token-endpoint form fields, minus nothing — dummy fixtures only. */
-  form?: Record<string, string>;
   /** Secrets PUT shape: name/type/text shape — never the text itself. */
   secret?: { name: string; type: string; textShape: string };
 };
@@ -41,6 +41,7 @@ export function stubCustomerCf(
     verifyStatus?: string;
     verifyExpiresOn?: string | null;
     mx?: Record<string, Array<string>>;
+    dnsStatus?: number;
     existingScripts?: ReadonlyArray<string>;
     /**
      * Initial catch-all state, applied to every zone. Absent → CF's real
@@ -51,16 +52,18 @@ export function stubCustomerCf(
     catchAllRule?: { enabled: boolean; workerName: string | null } | null;
     /** GET email/routing's result; default { enabled: true }. */
     routingSettings?: Record<string, unknown>;
+    routingRules?: Array<{ enabled: boolean; addresses: Array<string> }>;
     /** GET sending/subdomains entries; default []. */
     sendingSubdomains?: ReadonlyArray<{ name: string; enabled: boolean }>;
     failOn?: Partial<Record<StubFailTag, { message: string; status: number; code?: number }>>;
+    /** Tags whose configured failure is returned before the provider-side mutation occurs. */
+    failBeforeEffect?: ReadonlyArray<StubFailTag>;
     /** Side-effect hook fired right after a call is recorded (mid-request seams). */
     on?: Partial<Record<StubFailTag, () => void | Promise<void>>>;
-    oauth?: 'rotate' | 'invalid_grant' | 'server_error';
   } = {},
 ) {
   const calls: Array<RecordedCall> = [];
-  let oauthRound = 0;
+  const publishedMx = new Map<string, Array<string>>();
   const fail = (tag: StubFailTag): Response | null => {
     const failure = config.failOn?.[tag];
     return failure ? cfError(failure.message, failure.status, failure.code) : null;
@@ -74,6 +77,8 @@ export function stubCustomerCf(
   const catchAllStates = new Map<string, { enabled: boolean; workerName: string | null } | null>();
   // Per-script sha256 of the last secret PUT text (never the text).
   const secretHashes = new Map<string, string>();
+  const relaySecrets = new Map<string, string>();
+  const scriptSubdomains = new Map<string, boolean>();
   const catchAllStateFor = (zoneId: string) => {
     if (!catchAllStates.has(zoneId)) {
       catchAllStates.set(
@@ -93,49 +98,6 @@ export function stubCustomerCf(
       typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const method = init?.method ?? 'GET';
 
-    if (url.startsWith('https://dash.cloudflare.com/oauth2/token')) {
-      const form: Record<string, string> = {};
-      if (typeof init?.body === 'string') {
-        for (const [key, value] of new URLSearchParams(init.body)) {
-          form[key] = value;
-        }
-      }
-      await record({ tag: 'oauthToken', method, url, form });
-      const failure = fail('oauthToken');
-      if (failure) {
-        return failure;
-      }
-      if (config.oauth === 'invalid_grant') {
-        return Response.json({ error: 'invalid_grant' }, { status: 400 });
-      }
-      if (config.oauth === 'server_error') {
-        return Response.json({ error: 'temporarily_unavailable' }, { status: 503 });
-      }
-      // Chain off the incoming token so the rotation survives stub resets:
-      // a presented `cf-rotated-refresh-dummy-N` rotates to N+1, anything
-      // else (the originally posted grant) starts at 1.
-      const roundMatch = /^cf-rotated-refresh-dummy-(\d+)$/.exec(form.refresh_token ?? '');
-      oauthRound = roundMatch ? Number(roundMatch[1]) + 1 : 1;
-      return Response.json({
-        access_token: `cf-access-dummy-${oauthRound}`,
-        refresh_token: `cf-rotated-refresh-dummy-${oauthRound}`,
-        expires_in: 3600,
-      });
-    }
-
-    if (url.startsWith('https://dash.cloudflare.com/oauth2/revoke')) {
-      const form: Record<string, string> = {};
-      if (typeof init?.body === 'string') {
-        for (const [key, value] of new URLSearchParams(init.body)) {
-          form[key] = value;
-        }
-      }
-      await record({ tag: 'oauthRevoke', method, url, form });
-      // RFC 7009 answers 200 whether the token was revoked or already
-      // invalid; the body is ignored.
-      return fail('oauthRevoke') ?? new Response(null, { status: 200 });
-    }
-
     if (url.startsWith('https://cloudflare-dns.com/dns-query')) {
       await record({ tag: 'mxLookup', method, url });
       const failure = fail('mxLookup');
@@ -143,16 +105,104 @@ export function stubCustomerCf(
         return failure;
       }
       const name = new URL(url).searchParams.get('name') ?? '';
-      const exchanges = config.mx?.[name] ?? [];
+      const exchanges = config.mx?.[name] ?? publishedMx.get(name) ?? [];
       return Response.json({
+        Status: config.dnsStatus ?? 0,
         Answer: exchanges.map((exchange) => ({ type: 15, data: `10 ${exchange}.` })),
       });
+    }
+
+    if (url.endsWith('.workers.dev/__void/email/probe')) {
+      await record({ tag: 'relayProbe', method, url });
+      const failure = fail('relayProbe');
+      if (failure) {
+        return failure;
+      }
+      const name = new URL(url).hostname.split('.')[0]!;
+      const secret = relaySecrets.get(name);
+      if (!secret || !scriptSubdomains.get(name)) {
+        return new Response(null, { status: 404 });
+      }
+      const challenge = new Headers(init?.headers).get('X-Void-Probe-Challenge') ?? '';
+      const generation = Number(new Headers(init?.headers).get('X-Void-Probe-Generation'));
+      const metadata = [...calls]
+        .reverse()
+        .find((call) => call.tag === 'scriptPut' && call.url.includes(`/scripts/${name}`))?.body as
+        | { bindings?: Array<{ name: string; text: string }> }
+        | undefined;
+      const binding = (name: string) =>
+        metadata?.bindings?.find((row) => row.name === name)?.text ?? '';
+      const accountId = binding('VOID_EMAIL_ACCOUNT'),
+        zoneId = binding('VOID_EMAIL_ZONE'),
+        ingressName = binding('VOID_EMAIL_INGRESS');
+      const data = [
+        'email-relay-proof-v1',
+        accountId,
+        zoneId,
+        ingressName,
+        String(generation),
+        challenge,
+      ].join('\n');
+      const key = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign'],
+      );
+      const proof = Array.from(
+        new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data))),
+        (byte) => byte.toString(16).padStart(2, '0'),
+      ).join('');
+      return Response.json({ accountId, zoneId, ingressName, generation, challenge, proof });
+    }
+
+    if (url === 'https://email-gateway.example.test/email/probe') {
+      await record({ tag: 'gatewayProbe', method, url });
+      const failure = fail('gatewayProbe');
+      if (failure) {
+        return failure;
+      }
+      const body =
+        typeof init?.body === 'string' ? (JSON.parse(init.body) as { ingressName?: string }) : {};
+      const bearer = new Headers(init?.headers).get('Authorization')?.replace(/^Bearer /, '');
+      if (
+        !bearer ||
+        (relaySecrets.has(body.ingressName ?? '') &&
+          relaySecrets.get(body.ingressName ?? '') !== bearer)
+      ) {
+        return new Response(null, { status: 403 });
+      }
+      return new Response(null, { status: 204 });
     }
 
     if (!url.startsWith('https://api.cloudflare.com/client/v4/')) {
       throw new Error(`Unmocked fetch: ${method} ${url}`);
     }
     const path = url.slice('https://api.cloudflare.com/client/v4'.length);
+
+    if (/\/accounts\/[^/]+\/workers\/subdomain$/.test(path) && method === 'GET') {
+      await record({ tag: 'workersSubdomain', method, url });
+      return fail('workersSubdomain') ?? cfSuccess({ subdomain: 'customer' });
+    }
+    const scriptSubdomainMatch = /\/accounts\/[^/]+\/workers\/scripts\/([^/]+)\/subdomain$/.exec(
+      path,
+    );
+    if (scriptSubdomainMatch) {
+      await record({ tag: 'scriptSubdomain', method, url });
+      const failure = fail('scriptSubdomain');
+      if (failure) {
+        return failure;
+      }
+      if (method === 'POST') {
+        scriptSubdomains.set(scriptSubdomainMatch[1]!, true);
+        return cfSuccess({ enabled: true, previews_enabled: false });
+      }
+      return cfSuccess({
+        enabled: scriptSubdomains.get(scriptSubdomainMatch[1]!) ?? false,
+        previews_enabled: false,
+      });
+    }
 
     if (path === '/user/tokens/verify') {
       await record({ tag: 'verifyToken', method, url });
@@ -183,7 +233,17 @@ export function stubCustomerCf(
     if (path.includes('/email/routing/dns') && method === 'POST') {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
       await record({ tag: 'routingDns', method, url, body });
-      return fail('routingDns') ?? cfSuccess({});
+      const failure = fail('routingDns');
+      if (failure) {
+        return failure;
+      }
+      const zoneId = path.split('/')[2];
+      const name =
+        body?.name ?? Object.values(config.zones ?? {}).find((zone) => zone.id === zoneId)?.name;
+      if (name) {
+        publishedMx.set(name, ['route1.mx.cloudflare.net']);
+      }
+      return cfSuccess({});
     }
 
     if (path.includes('/email/sending/subdomains') && method === 'POST') {
@@ -210,6 +270,19 @@ export function stubCustomerCf(
         return failure;
       }
       return cfSuccess(config.routingSettings ?? { enabled: true });
+    }
+
+    if (/\/zones\/[^/]+\/email\/routing\/rules\?/.test(path) && method === 'GET') {
+      await record({ tag: 'routingRulesGet', method, url });
+      return (
+        fail('routingRulesGet') ??
+        cfSuccess(
+          (config.routingRules ?? []).map((rule) => ({
+            enabled: rule.enabled,
+            matchers: rule.addresses.map((value) => ({ type: 'literal', field: 'to', value })),
+          })),
+        )
+      );
     }
 
     const catchAllMatch = /\/zones\/([^/]+)\/email\/routing\/rules\/catch_all$/.exec(path);
@@ -256,10 +329,6 @@ export function stubCustomerCf(
     if (secretsMatch && method === 'PUT') {
       const parsed = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
       const text = typeof parsed.text === 'string' ? parsed.text : '';
-      // The worker's CURRENT secret, tracked by sha256 only — the same
-      // form the ROUTING mirror stores — so a test can prove worker, row
-      // and mirror carry ONE secret without the value ever being recorded.
-      secretHashes.set(secretsMatch[1]!, await hashEmailRelaySecret(text));
       await record({
         tag: 'secretPut',
         method,
@@ -271,6 +340,14 @@ export function stubCustomerCf(
           textShape: `len=${text.length} ${/^[A-Za-z0-9_-]+$/.test(text) ? 'base64url' : 'other'}`,
         },
       });
+      if (config.failBeforeEffect?.includes('secretPut')) {
+        return fail('secretPut') ?? cfSuccess({});
+      }
+      // The worker's CURRENT secret, tracked by sha256 only — the same
+      // form the ROUTING mirror stores — so a test can prove worker, row
+      // and mirror carry ONE secret without the value ever being recorded.
+      secretHashes.set(secretsMatch[1]!, await sha256Hex(text));
+      relaySecrets.set(secretsMatch[1]!, text);
       return fail('secretPut') ?? cfSuccess({});
     }
 
@@ -320,4 +397,9 @@ export function sleep(ms: number): Promise<void> {
 
 export function tags(calls: Array<RecordedCall>): Array<StubFailTag> {
   return calls.map((call) => call.tag);
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

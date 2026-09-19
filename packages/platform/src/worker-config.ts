@@ -10,7 +10,7 @@ export type PlatformProvisionedResourceIds = Readonly<{
 }>;
 
 export type PlatformWorkerConfigSet = Readonly<
-  Record<'api' | 'dispatch' | 'proxy' | 'tail', Record<string, unknown>>
+  Record<'api' | 'dispatch' | 'proxy' | 'tail' | 'emailGateway', Record<string, unknown>>
 >;
 
 export function createPlatformWorkerConfigs(input: {
@@ -24,8 +24,11 @@ export function createPlatformWorkerConfigs(input: {
   platformVersion: string;
   publicEndpoints?: boolean;
   proxyUrl: string;
+  emailGatewayUrl: string;
   resources: PlatformProvisionedResourceIds;
-  runtimeEntrypoints: Readonly<Record<'api' | 'dispatch' | 'proxy' | 'tail', string>>;
+  runtimeEntrypoints: Readonly<
+    Record<'api' | 'dispatch' | 'proxy' | 'tail' | 'emailGateway', string>
+  >;
   trafficState?: 'enabled' | 'sandbox-drain' | 'staging';
 }): PlatformWorkerConfigSet {
   const {
@@ -37,12 +40,23 @@ export function createPlatformWorkerConfigs(input: {
     ownershipNonce,
     platformVersion,
     proxyUrl,
+    emailGatewayUrl,
     resources,
     runtimeEntrypoints,
   } = input;
   const publicEndpoints = input.publicEndpoints ?? true;
   const trafficState = input.trafficState ?? 'enabled';
   const names = deployment.resources;
+  const sharedEmailIngress = deployment.emailSharedZoneId
+    ? {
+        EMAIL_SHARED_ACCOUNT_ID: accountId,
+        EMAIL_SHARED_ZONE_ID: deployment.emailSharedZoneId,
+        EMAIL_SHARED_INGRESS_NAME: names.emailGatewayWorker,
+      }
+    : {};
+  const senderDomain = deployment.emailSenderDomain
+    ? { EMAIL_SENDER_DOMAIN: deployment.emailSenderDomain }
+    : {};
   const ownershipVars = (resourceKey: string, resourceName: string) => ({
     PLATFORM_OWNERSHIP_MARKER: JSON.stringify(
       createPlatformResourceOwnershipMarker({
@@ -74,7 +88,9 @@ export function createPlatformWorkerConfigs(input: {
   // bindings here would make API/proxy bootstrap depend on each other existing.
   const fetchWorkersDev =
     Boolean(deployment.application.workersDev) ||
-    [apiUrl, proxyUrl].some((url) => new URL(url).hostname.endsWith('.workers.dev'));
+    [apiUrl, proxyUrl, ...(deployment.capabilities.email ? [emailGatewayUrl] : [])].some((url) =>
+      new URL(url).hostname.endsWith('.workers.dev'),
+    );
 
   const api: Record<string, unknown> = {
     ...common,
@@ -136,6 +152,9 @@ export function createPlatformWorkerConfigs(input: {
       ...ownershipVars('api-worker', names.apiWorker),
       PLATFORM_VERSION: platformVersion,
       PROXY_URL: proxyUrl,
+      EMAIL_GATEWAY_ORIGIN: emailGatewayUrl,
+      ...sharedEmailIngress,
+      ...senderDomain,
       R2_STATIC_ASSETS_BUCKET: names.assetsBucket,
       REQUESTS_DATASET: names.requestsDataset,
       SITE_DOMAIN: deployment.application.baseDomain,
@@ -164,12 +183,14 @@ export function createPlatformWorkerConfigs(input: {
     kv_namespaces: [{ binding: 'ROUTING', id: resources.routingKv }],
     services: [{ binding: 'API', service: names.apiWorker }],
     dispatch_namespaces: dispatchNamespace,
+    ...(deployment.capabilities.email ? { send_email: [{ name: 'SEND_EMAIL' }] } : {}),
     vars: {
       AI_GATEWAY_ID: names.aiGateway,
       PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
       PLATFORM_HEALTH_PROBE_TOKEN: healthProbeToken,
       PLATFORM_INSTALLATION_ID: installationId,
       PLATFORM_TRAFFIC_STATE: trafficState,
+      ...senderDomain,
       ...ownershipVars('proxy-worker', names.proxyWorker),
     },
   };
@@ -180,6 +201,28 @@ export function createPlatformWorkerConfigs(input: {
   return {
     api,
     proxy,
+    emailGateway: {
+      ...common,
+      workers_dev: publicEndpoints,
+      preview_urls: false,
+      name: names.emailGatewayWorker,
+      main: runtimeEntrypoints.emailGateway,
+      no_bundle: true,
+      compatibility_flags: ['nodejs_compat'],
+      kv_namespaces: [{ binding: 'ROUTING', id: resources.routingKv }],
+      services: [{ binding: 'API', service: names.apiWorker }],
+      dispatch_namespaces: dispatchNamespace,
+      ...(deployment.capabilities.email ? { send_email: [{ name: 'SEND_EMAIL' }] } : {}),
+      vars: {
+        PLATFORM_CAPABILITIES: JSON.stringify(deployment.capabilities),
+        PLATFORM_INSTALLATION_ID: installationId,
+        PLATFORM_VERSION: platformVersion,
+        PLATFORM_TRAFFIC_STATE: trafficState,
+        ...sharedEmailIngress,
+        ...senderDomain,
+        ...ownershipVars('email-gateway-worker', names.emailGatewayWorker),
+      },
+    },
     tail: {
       ...common,
       name: names.tailWorker,

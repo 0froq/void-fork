@@ -7,7 +7,7 @@ const PLATFORM_FLAG = {
 };
 
 export const emailSubcommands: Array<SubcommandDef> = [
-  { name: 'usage', description: 'Show monthly email send/receive counts and quota' },
+  { name: 'usage', description: 'Show monthly recipient attempts, inbound receipts, and quota' },
   { name: 'logs', description: 'Show recent email delivery activity' },
   { name: 'destinations', description: 'List verified recipient addresses for outbound mail' },
   { name: 'allow', arg: '<address>', description: 'Add a recipient and trigger CF verification' },
@@ -17,7 +17,7 @@ export const emailSubcommands: Array<SubcommandDef> = [
   // errors naming the missing <domain>, the same as a typed invocation.
   {
     name: 'domain',
-    arg: '<add|status|list|sync|remove>',
+    arg: '<add|status|list|sync|rotate-secret|remove>',
     description: 'Send and receive at your own domain on a Cloudflare zone',
   },
   {
@@ -43,7 +43,14 @@ const EMAIL_SUBCOMMANDS = [
   'setup',
 ] as const;
 
-export const EMAIL_DOMAIN_VERBS = ['add', 'status', 'list', 'sync', 'remove'] as const;
+export const EMAIL_DOMAIN_VERBS = [
+  'add',
+  'status',
+  'list',
+  'sync',
+  'rotate-secret',
+  'remove',
+] as const;
 export type EmailDomainVerb = (typeof EMAIL_DOMAIN_VERBS)[number];
 
 export interface EmailArgs {
@@ -58,12 +65,6 @@ export interface EmailArgs {
    * "[change with --subdomain]").
    */
   subdomain?: string;
-  /**
-   * `--force` on `domain remove`: drop the platform row even when a
-   * Cloudflare-side cleanup step fails (the api answers `forced: true` and
-   * names the failed steps for manual cleanup).
-   */
-  force?: boolean;
   projectSlug?: string;
   limit?: number;
   address?: string;
@@ -115,7 +116,6 @@ export function parseEmailArgs(args: Array<string>): EmailArgs {
   const platformValues: Array<string> = [];
   const backendValues: Array<string> = [];
   const subdomainValues: Array<string> = [];
-  let forceCount = 0;
   const positional: Array<string> = [];
 
   const rest = args.slice(1);
@@ -168,22 +168,10 @@ export function parseEmailArgs(args: Array<string>): EmailArgs {
       }
       subdomainValues.push(value);
       i = next;
-    } else if (rest[i] === '--force' || rest[i]?.startsWith('--force=')) {
-      // A boolean: `--force=yes` is a positional's worth of confusion, not a value.
-      if (rest[i] !== '--force') {
-        throw new Error('email: --force takes no value.');
-      }
-      forceCount++;
     } else {
       positional.push(rest[i]);
     }
   }
-
-  // Same repeated-flag rule as --project/--subdomain.
-  if (forceCount > 1) {
-    throw new Error('email: --force can only be specified once.');
-  }
-  const force = forceCount > 0 ? true : undefined;
 
   // Same rule as `void deploy`: `--project` at most once.
   if (projectValues.length > 1) {
@@ -234,13 +222,10 @@ export function parseEmailArgs(args: Array<string>): EmailArgs {
         'email: --platform cloudflare applies to `void email status` and `void email setup` only (`domain` is a Void platform command).',
       );
     }
-    return parseEmailDomainArgs(positional, { projectSlug, limit, platform, subdomain, force });
+    return parseEmailDomainArgs(positional, { projectSlug, limit, platform, subdomain });
   }
   if (subdomain !== undefined) {
     throw new Error('email: --subdomain applies to `void email domain add` only.');
-  }
-  if (force !== undefined) {
-    throw new Error('email: --force applies to `void email domain remove` only.');
   }
 
   // `void email allow|disallow` takes exactly one address. Silently
@@ -299,20 +284,16 @@ function parseEmailDomainArgs(
     limit?: number;
     platform?: EmailArgs['platform'];
     subdomain?: string;
-    force?: boolean;
   },
 ): EmailArgs {
   const verb = positional[0];
   if (!verb || !(EMAIL_DOMAIN_VERBS as ReadonlyArray<string>).includes(verb)) {
     throw new Error(
-      'email: Usage: void email domain <add|status|list|sync|remove> [<domain>] [--project <name>].',
+      'email: Usage: void email domain <add|status|list|sync|rotate-secret|remove> [<domain>] [--project <name>].',
     );
   }
   if (flags.subdomain !== undefined && verb !== 'add') {
     throw new Error('email: --subdomain applies to `void email domain add` only.');
-  }
-  if (flags.force !== undefined && verb !== 'remove') {
-    throw new Error('email: --force applies to `void email domain remove` only.');
   }
   const domain = positional[1];
   if (verb === 'list') {
@@ -335,7 +316,6 @@ function parseEmailDomainArgs(
     domainVerb: verb as EmailDomainVerb,
     domain,
     subdomain: flags.subdomain,
-    force: flags.force,
     projectSlug: flags.projectSlug,
     limit: flags.limit,
     platform: flags.platform,

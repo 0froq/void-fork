@@ -63,7 +63,7 @@ describe('parseEmailArgs — domain group', () => {
 
   it('errors on a missing or unknown domain verb', () => {
     expect(() => parseEmailArgs(['domain'])).toThrow(
-      'email: Usage: void email domain <add|status|list|sync|remove> [<domain>] [--project <name>].',
+      'email: Usage: void email domain <add|status|list|sync|rotate-secret|remove> [<domain>] [--project <name>].',
     );
     expect(() => parseEmailArgs(['domain', 'frobnicate', 'acme.com'])).toThrow(
       /Usage: void email domain/,
@@ -71,7 +71,7 @@ describe('parseEmailArgs — domain group', () => {
   });
 
   it('errors when a domain verb is missing its domain', () => {
-    for (const verb of ['add', 'status', 'sync', 'remove']) {
+    for (const verb of ['add', 'status', 'sync', 'rotate-secret', 'remove']) {
       expect(() => parseEmailArgs(['domain', verb])).toThrow(
         `email: Usage: void email domain ${verb} <domain> [--project <name>].`,
       );
@@ -111,37 +111,9 @@ describe('parseEmailArgs — domain group', () => {
     );
   });
 
-  it('parses --force on domain remove only', () => {
-    expect(parseEmailArgs(['domain', 'remove', 'acme.com', '--force'])).toMatchObject({
-      domainVerb: 'remove',
-      domain: 'acme.com',
-      force: true,
-    });
-    // Off by default, on every verb.
-    expect(parseEmailArgs(['domain', 'remove', 'acme.com'])).toMatchObject({
-      domainVerb: 'remove',
-      force: undefined,
-    });
-    for (const args of [
-      ['domain', 'add', 'acme.com', '--force'],
-      ['domain', 'status', 'acme.com', '--force'],
-      ['domain', 'sync', 'acme.com', '--force'],
-      ['domain', 'list', '--force'],
-      ['usage', '--force'],
-      ['disallow', 'a@x.dev', '--force'],
-    ]) {
-      expect(() => parseEmailArgs(args)).toThrow(
-        'email: --force applies to `void email domain remove` only.',
-      );
-    }
-  });
-
-  it('rejects --force with a value or repeated', () => {
-    expect(() => parseEmailArgs(['domain', 'remove', 'acme.com', '--force=yes'])).toThrow(
-      'email: --force takes no value.',
-    );
-    expect(() => parseEmailArgs(['domain', 'remove', 'acme.com', '--force', '--force'])).toThrow(
-      'email: --force can only be specified once.',
+  it('rejects the removed force option instead of silently ignoring it', () => {
+    expect(() => parseEmailArgs(['domain', 'remove', 'acme.com', '--force'])).toThrow(
+      /takes exactly one domain argument/,
     );
   });
 

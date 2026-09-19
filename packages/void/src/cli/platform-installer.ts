@@ -336,6 +336,7 @@ export type PlatformInstallerDependencies = Readonly<{
     databaseCheckpointExists: boolean,
   ) => Promise<void>;
   healthCheckResumeCommand?: string;
+  bootstrapEmail?: typeof bootstrapPlatformSharedEmail;
   verifyHealth?: typeof verifyPlatformHealth;
   verifySandboxDrain?: (apiUrl: string, healthProbeToken: string) => Promise<boolean>;
   verifyWorkerCutover?: (
@@ -345,6 +346,7 @@ export type PlatformInstallerDependencies = Readonly<{
 }>;
 
 export type PlatformInstallationResult = Readonly<{
+  emailOperationId?: string;
   manifest: PlatformInstallationManifest;
   setupPending?: boolean;
   waitingForDns: boolean;
@@ -772,6 +774,25 @@ export async function installPlatform(
   const resolvedRuntime = dependencies.runtime ?? resolvePlatformRuntime();
   const runtimeDirectory = resolvedRuntime.directory;
   const runtime = resolvedRuntime.manifest;
+  const hasEmailGatewayArtifact = runtime.artifacts.emailGateway !== undefined;
+  if (runtime.emailProtocolVersion !== 1 && plan.deployment.capabilities.email) {
+    throw new Error(
+      'platform: This runtime cannot serve enabled platform email without email protocol version 1.',
+    );
+  }
+  if (
+    runtime.emailProtocolVersion !== 1 &&
+    existing?.resources.some(
+      (resource) => resource.key === 'email-gateway-worker' && resource.state === 'ready',
+    )
+  ) {
+    throw new Error(
+      'platform: This runtime cannot replace an installed email gateway Worker. Use a runtime with email protocol version 1.',
+    );
+  }
+  const workerKeys: ReadonlyArray<PlatformWorkerKey> = hasEmailGatewayArtifact
+    ? ['api', 'proxy', 'emailGateway', 'tail', 'dispatch']
+    : ['api', 'proxy', 'tail', 'dispatch'];
   if (plan.deployment.authentication.configurable && runtime.authenticationProtocolVersion !== 1) {
     throw new Error(
       'platform: This runtime does not support configurable authentication. Upgrade Void or use a compatible runtime.',
@@ -799,6 +820,11 @@ export async function installPlatform(
       plan.actions.some((action) => action.kind === 'worker' && action.action !== 'create'));
   const wasDisabled = existing?.status === 'disabled';
   const preserveDisabled = existing?.desiredState === 'disabled';
+  const shouldBootstrapSharedEmail =
+    !preserveDisabled &&
+    plan.deployment.capabilities.email &&
+    runtime.emailProtocolVersion === 1 &&
+    !!plan.deployment.emailSharedZoneId;
   const previousPublicEndpoints = stablePublicEndpointState(existing);
   const authenticationProtocolTransition =
     hadPriorWorkers &&
@@ -1406,7 +1432,8 @@ export async function installPlatform(
         key,
         join(runtimeDirectory, artifact.path),
       ]),
-    ) as Record<'api' | 'dispatch' | 'proxy' | 'tail', string>;
+    ) as Record<'api' | 'dispatch' | 'proxy' | 'tail', string> &
+      Partial<Record<'emailGateway', string>>;
     let interruptedCutover = interruptedWorkerCutover(manifest);
     if (interruptedCutover && authenticationProtocolTransition && authenticationEnforcementActive) {
       manifest = recordWorkerCutoverResolution(
@@ -1422,7 +1449,10 @@ export async function installPlatform(
     }
     const recoveringUnsafeTraffic = (interruptedCutover?.unsafeTraffic.size ?? 0) > 0;
     const createsWorker = plan.actions.some(
-      (action) => action.kind === 'worker' && action.action === 'create',
+      (action) =>
+        action.kind === 'worker' &&
+        action.action === 'create' &&
+        (hasEmailGatewayArtifact || action.key !== 'email-gateway-worker'),
     );
     const recoveringCreatedWorker =
       interruptedCutover !== null &&
@@ -1438,6 +1468,7 @@ export async function installPlatform(
       recoveringCreatedWorker ||
       manifest.usageProtocolVersion !== targetUsageProtocolVersion ||
       authenticationProtocolTransition ||
+      shouldBootstrapSharedEmail ||
       requiresSandboxDrain;
     if (requiresTrafficGuard) {
       await dependencies.client.putKvValue(
@@ -1472,6 +1503,7 @@ export async function installPlatform(
       ownershipNonce: manifest.ownershipNonce,
       platformVersion: version,
       proxyUrl: plan.proxyUrl,
+      emailGatewayUrl: `https://${plan.deployment.resources.emailGatewayWorker}.${plan.workersSubdomain}.workers.dev`,
       resources: {
         hyperdrive: requireId(ids, 'hyperdrive'),
         isrCacheKv: requireId(ids, 'isr-cache-kv'),
@@ -1479,7 +1511,7 @@ export async function installPlatform(
         routingKv: requireId(ids, 'routing-kv'),
         zone: zoneId,
       },
-      runtimeEntrypoints: entrypoints,
+      runtimeEntrypoints: entrypoints as Record<PlatformWorkerKey, string>,
     };
     const requiresStagedCommit = !preserveDisabled && requiresTrafficGuard;
     const enabledConfigs = createPlatformWorkerConfigs({
@@ -1501,7 +1533,9 @@ export async function installPlatform(
     });
     const managedRoutes = platformManagedWorkerTraffic(plan.deployment).routes;
     let workerActions: ReadonlyArray<PlatformInstallPlanAction> = plan.actions.filter(
-      (action) => action.kind === 'worker',
+      (action) =>
+        action.kind === 'worker' &&
+        (hasEmailGatewayArtifact || action.key !== 'email-gateway-worker'),
     );
     if (interruptedCutover) {
       for (const key of [...interruptedCutover.staged.keys()].reverse()) {
@@ -1553,7 +1587,7 @@ export async function installPlatform(
                 dependencies.client,
                 plan.account.id,
                 manifest!,
-                `${key}-worker`,
+                key === 'emailGateway' ? 'email-gateway-worker' : `${key}-worker`,
                 snapshot.workerName,
               ),
             removeCustomDomains: async () => {
@@ -1618,7 +1652,7 @@ export async function installPlatform(
           plan,
           manifest,
           await dependencies.replanWorkers(manifest),
-        );
+        ).filter((action) => hasEmailGatewayArtifact || action.key !== 'email-gateway-worker');
       }
     }
     workerCutoverGeneration = nextWorkerCutoverGeneration(manifest);
@@ -1641,9 +1675,12 @@ export async function installPlatform(
         secretCheckpoint(secrets, workerSecretUpdateIntent),
       );
     }
-    for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
+    for (const key of workerKeys) {
       dependencies.onProgress?.(`Deploying the ${key} service`);
-      const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
+      const action = workerActions.find(
+        (entry) =>
+          entry.key === (key === 'emailGateway' ? 'email-gateway-worker' : `${key}-worker`),
+      )!;
       const workerSecrets = platformWorkerSecretPayload(
         key,
         workerDeploymentSecrets,
@@ -1883,6 +1920,9 @@ export async function installPlatform(
       await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
     }
     dependencies.onProgress?.('Verifying platform health');
+    const emailGatewayUrl = hasEmailGatewayArtifact
+      ? `https://${plan.deployment.resources.emailGatewayWorker}.${plan.workersSubdomain}.workers.dev`
+      : undefined;
     if (plan.deployment.authentication.accessProtection) {
       ensurePlatformAccessToken(plan.apiUrl, false, true);
       ensurePlatformAccessToken(plan.proxyUrl, false, true);
@@ -1892,9 +1932,11 @@ export async function installPlatform(
       workers: [
         plan.deployment.resources.apiWorker,
         plan.deployment.resources.proxyWorker,
+        ...(hasEmailGatewayArtifact ? [plan.deployment.resources.emailGatewayWorker] : []),
         plan.deployment.resources.dispatchWorker,
       ],
       resumeCommand: dependencies.healthCheckResumeCommand,
+      ...(emailGatewayUrl ? { emailGatewayUrl } : {}),
     };
     await (dependencies.verifyHealth ?? verifyPlatformHealth)(
       plan.apiUrl,
@@ -1986,9 +2028,12 @@ export async function installPlatform(
           secretCheckpoint(secrets, workerSecretUpdateIntent),
         );
       }
-      for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
+      for (const key of workerKeys) {
         dependencies.onProgress?.(`Enabling the ${key} service`);
-        const action = workerActions.find((entry) => entry.key === `${key}-worker`)!;
+        const action = workerActions.find(
+          (entry) =>
+            entry.key === (key === 'emailGateway' ? 'email-gateway-worker' : `${key}-worker`),
+        )!;
         const workerSecrets = platformWorkerSecretPayload(
           key,
           workerDeploymentSecrets,
@@ -2125,10 +2170,41 @@ export async function installPlatform(
           enabledConfigs,
           plan.account.id,
           runPinnedPlatformWrangler,
+          workerKeys,
         );
       }
     };
     await verifyCurrentWorkerCutover();
+    let emailOperationId: string | undefined;
+    if (shouldBootstrapSharedEmail) {
+      // Shared-zone setup mutates provider routing. Once it begins, retain the
+      // verified Worker set and keep the installation's routing gate closed on
+      // failure so a retry can resume the durable email operation safely.
+      workerDeploymentCommitted = true;
+      manifest = recordWorkerCutoverResolution(
+        manifest,
+        workerCutoverGeneration,
+        'committed',
+        now(),
+      );
+      if (workerSecretUpdateIntent) {
+        manifest = recordWorkerSecretUpdateState(
+          manifest,
+          workerCutoverGeneration,
+          'committed',
+          workerSecretUpdateIntent.id,
+          now(),
+        );
+      }
+      writeInstallationManifest(manifest);
+      await writeRemoteInstallationCheckpoint(dependencies.client, plan, manifest);
+      workerRollbacks = [];
+      dependencies.onProgress?.('Preparing shared email routing');
+      emailOperationId = await (dependencies.bootstrapEmail ?? bootstrapPlatformSharedEmail)(
+        plan.apiUrl,
+        createPlatformHealthProbeToken(manifest.ownershipNonce),
+      );
+    }
     if (dependencies.client.deleteKvValue) {
       await dependencies.client.deleteKvValue(
         plan.account.id,
@@ -2186,6 +2262,7 @@ export async function installPlatform(
     saveInstalledPlatformConnection(plan, manifest);
     return {
       manifest,
+      ...(emailOperationId ? { emailOperationId } : {}),
       setupPending,
       waitingForDns: false,
       waitingForSandboxDrain: false,
@@ -2767,19 +2844,26 @@ export function apiWorkerSecrets(
 
 /** Existing Workers inherit live secrets, including complete encryption keyrings. */
 export function platformWorkerSecretPayload(
-  worker: 'api' | 'proxy' | 'tail' | 'dispatch',
+  worker: 'api' | 'proxy' | 'emailGateway' | 'tail' | 'dispatch',
   secrets: PlatformInstallationSecrets,
   accountId: string,
   zoneId: string,
   existingWorker: boolean,
 ): Record<string, string> | null {
-  if (worker !== 'api' && worker !== 'proxy') {
+  if (worker !== 'api' && worker !== 'proxy' && worker !== 'emailGateway') {
     return null;
   }
   if (!existingWorker) {
-    return worker === 'api'
-      ? apiWorkerSecrets(secrets, accountId, zoneId)
-      : proxyWorkerSecrets(secrets, accountId);
+    if (worker === 'api') {
+      return apiWorkerSecrets(secrets, accountId, zoneId);
+    }
+    if (worker === 'emailGateway') {
+      return withoutEmptySecrets({ JWT_SECRET: secrets.jwtSecret });
+    }
+    return proxyWorkerSecrets(secrets, accountId);
+  }
+  if (worker === 'emailGateway') {
+    return null;
   }
   const allowed =
     worker === 'api'
@@ -2906,6 +2990,16 @@ export function assertRequiredPlatformSecrets(
     )
   ) {
     requireSecret(secrets.cloudflareApiToken, 'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN');
+    requireSecret(secrets.jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
+  }
+  if (
+    plan.actions.some(
+      (action) =>
+        action.key === 'email-gateway-worker' &&
+        action.kind === 'worker' &&
+        action.action === 'create',
+    )
+  ) {
     requireSecret(secrets.jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
   }
   if (missing.size > 0) {
@@ -4921,7 +5015,7 @@ function nextTrafficGeneration(manifest: PlatformInstallationManifest): number {
   );
 }
 
-type PlatformWorkerKey = 'api' | 'proxy' | 'tail' | 'dispatch';
+type PlatformWorkerKey = 'api' | 'proxy' | 'emailGateway' | 'tail' | 'dispatch';
 
 type PlatformWorkerCutoverSnapshot = Readonly<{
   previousVersionId: string | null;
@@ -5092,9 +5186,8 @@ function interruptedWorkerCutover(
       generations.set(generation, entry);
       continue;
     }
-    const unsafeTraffic = /^worker-cutover:(\d+):unsafe-traffic:(api|proxy|tail|dispatch)$/.exec(
-      step.key,
-    );
+    const unsafeTraffic =
+      /^worker-cutover:(\d+):unsafe-traffic:(api|proxy|emailGateway|tail|dispatch)$/.exec(step.key);
     if (unsafeTraffic) {
       const generation = Number(unsafeTraffic[1]);
       const entry = generations.get(generation) ?? {
@@ -5106,7 +5199,9 @@ function interruptedWorkerCutover(
       generations.set(generation, entry);
       continue;
     }
-    const staged = /^worker-cutover:(\d+):staged:(api|proxy|tail|dispatch)$/.exec(step.key);
+    const staged = /^worker-cutover:(\d+):staged:(api|proxy|emailGateway|tail|dispatch)$/.exec(
+      step.key,
+    );
     if (!staged) {
       continue;
     }
@@ -5141,16 +5236,23 @@ export async function verifyPlatformWorkerCutoverVersions(
   configs: Record<PlatformWorkerKey, Record<string, unknown>>,
   accountId: string,
   runner: typeof runPlatformWrangler = runPlatformWrangler,
+  workerKeys: ReadonlyArray<PlatformWorkerKey> = [
+    'api',
+    'proxy',
+    'emailGateway',
+    'tail',
+    'dispatch',
+  ],
 ): Promise<void> {
   const cutover = interruptedWorkerCutover(manifest);
-  if (cutover?.generation !== generation || cutover.staged.size !== 4) {
+  if (cutover?.generation !== generation || cutover.staged.size !== workerKeys.length) {
     throw new Error(
       `platform: Worker cutover generation ${generation} is missing a complete immutable-version checkpoint.`,
     );
   }
   const directory = mkdtempSync(join(tmpdir(), 'void-platform-cutover-verify-'));
   try {
-    for (const key of ['api', 'proxy', 'tail', 'dispatch'] as const) {
+    for (const key of workerKeys) {
       const snapshot = cutover.staged.get(key);
       if (!snapshot) {
         throw new Error(
@@ -5250,6 +5352,7 @@ export type PlatformHealthCheckContext = Readonly<{
   accountName: string;
   workers: ReadonlyArray<string>;
   resumeCommand?: string;
+  emailGatewayUrl?: string;
 }>;
 
 export class PlatformAccessBlockedError extends Error {
@@ -5323,11 +5426,12 @@ export async function verifyPlatformHealth(
       signal: AbortSignal.timeout(30_000),
     });
   const dispatchUrl = dispatchOrigin ?? `https://test.${applicationBaseDomain}`;
-  const [health, discovery, proxy, dispatch] = await Promise.all([
+  const [health, discovery, proxy, dispatch, emailGateway] = await Promise.all([
     request(`${apiUrl}/health`),
     request(`${apiUrl}/.well-known/void-platform`),
     request(`${proxyUrl}/health`),
     request(`${dispatchUrl}/health`),
+    context?.emailGatewayUrl ? request(`${context.emailGatewayUrl}/health`) : undefined,
   ]);
   if (!health.ok) {
     throw await platformProbeFailure('Health check', apiUrl, health, context);
@@ -5356,6 +5460,30 @@ export async function verifyPlatformHealth(
   }
   if (!dispatch.ok) {
     throw await platformProbeFailure('Dispatch health check', dispatchUrl, dispatch, context);
+  }
+  if (emailGateway) {
+    if (!emailGateway.ok) {
+      throw await platformProbeFailure(
+        'Email gateway health check',
+        context!.emailGatewayUrl!,
+        emailGateway,
+        context,
+      );
+    }
+    const identity = (await emailGateway.json()) as {
+      installationId?: unknown;
+      platformVersion?: unknown;
+      emailProtocolVersion?: unknown;
+    } | null;
+    if (
+      identity?.installationId !== installationId ||
+      identity.platformVersion !== platformVersion ||
+      identity.emailProtocolVersion !== 1
+    ) {
+      throw new Error(
+        'platform: Deployed email gateway identity, version, or protocol does not match this installation.',
+      );
+    }
   }
 }
 
@@ -5425,6 +5553,52 @@ export async function verifyPlatformSandboxDrain(
     );
   }
   return status.state === 'complete';
+}
+
+export async function bootstrapPlatformSharedEmail(
+  apiUrl: string,
+  healthProbeToken: string,
+  fetcher: typeof fetch = fetch,
+): Promise<string> {
+  const response = await fetcher(`${apiUrl}/internal/platform/email-bootstrap`, {
+    method: 'POST',
+    headers: {
+      'X-Void-Platform-Probe': healthProbeToken,
+      ...cfAccessHeaders(process.env, apiUrl),
+    },
+    signal: AbortSignal.timeout(30_000),
+    redirect: 'manual',
+  });
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch {
+    throw new Error(
+      `platform: Shared email bootstrap failed at ${apiUrl} (HTTP ${response.status}). Traffic remains disabled.`,
+    );
+  }
+  const status =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (
+    !response.ok ||
+    status?.version !== 1 ||
+    status.state !== 'ready' ||
+    typeof status.operationId !== 'string' ||
+    status.operationId.length === 0
+  ) {
+    const detail =
+      status && typeof status.operationId === 'string'
+        ? ` Operation ${status.operationId}: ${typeof status.operationStatus === 'string' ? status.operationStatus : 'incomplete'}.`
+        : status && typeof status.operationStatus === 'string'
+          ? ` Operation status: ${status.operationStatus}.`
+          : '';
+    throw new Error(
+      `platform: Shared email bootstrap did not reach inbound readiness at ${apiUrl} (HTTP ${response.status}).${detail} Traffic remains disabled.`,
+    );
+  }
+  return status.operationId;
 }
 
 export function createPlatformHealthProbeToken(ownershipNonce: string): string {

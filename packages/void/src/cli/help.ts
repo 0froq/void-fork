@@ -72,16 +72,16 @@ function operatorHelpTree(): HelpTree {
                         },
                       ]
                     : []),
-                  ...(['list', 'events', 'logs'].includes(entry.action)
+                  ...(['list', 'events', 'logs', 'attempts'].includes(entry.action)
                     ? [
                         {
                           command: '--limit <number>',
                           description:
-                            entry.action === 'logs'
+                            entry.action === 'logs' && group !== 'email'
                               ? 'Maximum 500 log records'
                               : 'Maximum 100 records per page',
                         },
-                        ...(entry.action !== 'logs'
+                        ...(entry.action !== 'logs' || group === 'email'
                           ? [{ command: '--page <number>', description: 'One-based page number' }]
                           : []),
                       ]
@@ -95,7 +95,13 @@ function operatorHelpTree(): HelpTree {
                     description:
                       flag === 'follow'
                         ? 'Poll new logs until interrupted or the build ends'
-                        : 'Read a full API session from stdin for explicit operator session exchange',
+                        : flag === 'ended'
+                          ? 'Attest that the original provider execution has ended'
+                          : flag === 'token-stdin' && group === 'email'
+                            ? entry.action === 'domain-remove'
+                              ? 'Read a replacement Cloudflare token for blocked project cleanup from stdin'
+                              : 'Read a scoped Cloudflare API token from stdin'
+                            : 'Read a full API session from stdin for explicit operator session exchange',
                   })),
                 ],
               },
@@ -612,7 +618,7 @@ const HELP_TREE: HelpTree = {
       { command: 'allow <address>', description: 'Add a recipient and trigger CF verification' },
       { command: 'disallow <address>', description: 'Remove a recipient from the allowlist' },
       {
-        command: 'domain <add|status|list|sync|remove>',
+        command: 'domain <add|status|list|sync|rotate-secret|remove>',
         description: 'Send and receive at your own domain on a Cloudflare zone',
       },
       {
@@ -655,7 +661,7 @@ const HELP_TREE: HelpTree = {
         'Remove a recipient from the verified allowlist.',
         'void email disallow <address> [options]',
       ),
-      // The one nested group: verbs parse in email-args.ts (`domain <add|status|list|sync|remove>`).
+      // The one nested group: verbs parse in email-args.ts (`domain <add|status|list|sync|rotate-secret|remove>`).
       // Void-platform-only, so `--project` is global here; `--subdomain` is `add`-only.
       domain: {
         summary: 'Send and receive at your own domain on a Cloudflare zone.',
@@ -663,20 +669,24 @@ const HELP_TREE: HelpTree = {
         commands: [
           {
             command: 'add <domain>',
-            description: 'Register the domain (OAuth grant, or a scoped API token)',
+            description: 'Register the domain with a scoped Cloudflare API token',
           },
           {
             command: 'status <domain>',
-            description: 'Show state; re-probes the credential and relay, polls a pending row',
+            description: 'Show inbound, outbound, management, and operation readiness',
           },
           { command: 'list', description: 'List registered email domains' },
           {
+            command: 'rotate-secret <domain>',
+            description: 'Rotate the shared zone ingress secret with a deployment probe',
+          },
+          {
             command: 'sync <domain>',
-            description: 'Redeploy the relay at the current version and rotate its secret',
+            description: 'Reconcile the zone connection and refresh readiness',
           },
           {
             command: 'remove <domain>',
-            description: 'Delete the registration, stored credential, and relay secret',
+            description: 'Disable the domain assignment and reconcile shared resources',
           },
         ],
         options: [
@@ -700,30 +710,25 @@ const HELP_TREE: HelpTree = {
             ],
           },
           status: withProjectOption(
-            'Show a registered domain, re-probing its credential and relay.',
+            'Show a registered domain and its recorded readiness.',
             'void email domain status <domain> [options]',
           ),
           list: withProjectOption(
             'List registered email domains.',
             'void email domain list [options]',
           ),
+          'rotate-secret': withProjectOption(
+            'Rotate the shared zone ingress secret and verify the deployed generation.',
+            'void email domain rotate-secret <domain> [options]',
+          ),
           sync: withProjectOption(
-            'Redeploy the relay at the current version and rotate its secret.',
+            'Reconcile the zone connection and refresh readiness.',
             'void email domain sync <domain> [options]',
           ),
-          // Not `withProjectOption`: `remove` has a flag of its own (`--force`),
-          // same shape as the `email logs` page above.
-          remove: {
-            summary: 'Delete the registration, stored credential, and relay secret.',
-            usage: ['void email domain remove <domain> [options]'],
-            options: [
-              {
-                command: '--force',
-                description: 'Drop the row even when Cloudflare-side cleanup fails',
-              },
-              { command: '--project <name>', description: 'Project name override' },
-            ],
-          },
+          remove: withProjectOption(
+            'Disable the domain assignment and reconcile shared resources.',
+            'void email domain remove <domain> [options]',
+          ),
         },
       },
       // Mode B (design doc 0078): both read the local project + your wrangler session,

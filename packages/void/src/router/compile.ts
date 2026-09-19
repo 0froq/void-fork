@@ -2627,7 +2627,7 @@ export interface WorkerEntryOptions {
   runtimeEnvPath?: string;
   /**
    * Path to the `void/email` runtime, used for `createMessageProxy` in the
-   * generated `email()` handler. Defaults to a sibling-of-`runtimeEnvPath`
+   * generated email handlers. Defaults to a sibling-of-`runtimeEnvPath`
    * derivation, which covers both bare specifiers (`void/_env` -> `void/email`)
    * and resolved file paths.
    */
@@ -2641,10 +2641,7 @@ export interface WorkerEntryOptions {
    * and SSR apps leave this disabled so intentional 404s stay 404.
    */
   serveSpaFallback?: boolean;
-  /**
-   * Emit the `email()` RPC method and the inbound dispatch glue. The route
-   * table must export `__emailHandler` when this is set.
-   */
+  /** Emit native email and authenticated receipt handlers. Requires `__emailHandler`. */
   hasEmail?: boolean;
   live?: boolean | { bindingName?: string; className?: string };
   /**
@@ -2853,6 +2850,7 @@ ${renderBlock}
 
   const internalRouteHelper = `async function __handleInternal(request, env, ctx) {
   const url = new URL(request.url);
+  ${hasEmail ? `if (url.pathname === "/__void/email/receipt/v1") return __handleEmailReceipt(request, env, ctx);` : ''}
   // Readiness probe — platform polls this to confirm the worker is live after WfP upload.
   // Handled here (before app.fetch) so user middleware cannot block it.
   if (request.method === "GET" && url.pathname === "/__void/ready") {
@@ -2883,21 +2881,13 @@ ${envValidateCall}${isrDeploymentStamp}  const userEnv = __filterInternalBinding
   return withRuntimeEnv(env, () => scheduled(controller, userEnv, ctx));
 }`;
 
-  // `ForwardableEmailMessage` is not in workerd's RPC BaseType allowlist, so the
-  // platform router serializes the message to an `EmailEnvelope`, this worker's
-  // `email()` method rebuilds a proxy through `createMessageProxy`, runs the user
-  // handler, and returns the recorded `EmailAction[]` for the router to enact.
-  //
-  // On the developer's own account Cloudflare calls `email()` with the real
-  // message and ignores the return value, so the actions would be lost: the
-  // message is accepted, then silently discarded. The same proxy runs the
-  // handler there (the native message satisfies the envelope shape, and the
-  // proxy makes `raw` replayable), and `enactEmailActions` replays what was
-  // recorded on the real message before returning.
+  // Both the authenticated receipt endpoint and native Cloudflare email event
+  // run the same handler. Native events replay recorded actions on the real
+  // message; receipts return bounded action frames to the platform.
   const emailImport = hasEmail ? ', __emailHandler' : '';
   const emailRuntimePath = runtimeEmailPath ?? deriveEmailRuntimePath(runtimeEnvPath);
   const emailProxyImport = hasEmail
-    ? `import { createMessageProxy as __createMessageProxy, enactEmailActions as __enactEmailActions, isForwardableEmailMessage as __isForwardableEmailMessage } from ${JSON.stringify(emailRuntimePath)};\n`
+    ? `import { createMessageProxy as __createMessageProxy, enactEmailActions as __enactEmailActions, isForwardableEmailMessage as __isForwardableEmailMessage } from ${JSON.stringify(emailRuntimePath)};\nimport { EMAIL_PROTOCOL_VERSION as __EMAIL_PROTOCOL_VERSION, encodeEmailActions as __encodeEmailActions, readEmailEnvelope as __readEmailEnvelope, verifyEmailReceiptThroughProxy as __verifyEmailReceiptThroughProxy } from "void/_email-protocol";\n`
     : '';
   // `__VOID_PROJECT_SLUG` is the same binding the outbound `sendEmail` reads to
   // default `from`. It is passed to `createMessageProxy` so the user-visible
@@ -2905,14 +2895,9 @@ ${envValidateCall}${isrDeploymentStamp}  const userEnv = __filterInternalBinding
   // the generated `__emailHandler`, which routes on the wire address
   // (`__voidPlatformTo`) and strips the `<slug>+` prefix iff a slug is set.
   //
-  // Except on the relay lane: an envelope carrying `viaDomain` arrived via
-  // POST /email/relay from a customer zone (design doc 0078, "Custom domains
-  // on Cloudflare") and its recipient carries no `<slug>+` prefix — the
-  // dispatcher runs in no-prefix mode (Mode B item 4), so `support+T-42@acme.com`
-  // reaches `email/support+[ticket].ts` with the tag intact. Provisioning
-  // injects `__VOID_PROJECT_SLUG` unconditionally, so the slug must be
-  // suppressed HERE: left applied, the strip would take everything up to the
-  // first `+` and dispatch the bare tag to `_default` or a wrong `[user]`.
+  // Verified custom-domain receipts carry `viaDomain` and have no project
+  // prefix. Suppress the slug there so tags such as `support+T-42@acme.com`
+  // reach the matching handler intact.
   const emailHandler = hasEmail
     ? remotePath
       ? `async function handleEmail(envelope, env, ctx) {
@@ -2938,18 +2923,47 @@ ${envValidateCall}  const userEnv = __filterInternalBindings(env);
 }`
     : '';
 
-  // The default export is a `WorkerEntrypoint` subclass. A plain default object
-  // only exposes `.fetch()` through a Workers-for-Platforms dispatch stub, so
-  // `email()` would be unreachable; class methods on a `WorkerEntrypoint`
-  // subclass become RPC provider methods on that stub. `fetch()` stays
-  // HTTP-compatible inside the class.
+  const emailReceiptHandler = hasEmail
+    ? `async function __handleEmailReceipt(request, env, ctx) {
+  if (request.method !== "POST" || request.headers.get("content-encoding")) return new Response(null, { status: 404 });
+  const __token = request.headers.get("x-void-email-receipt");
+  const __recipient = request.headers.get("x-void-email-recipient");
+  if (!__token || __token.length > 1536 || !__recipient || __recipient.length > 320 ||
+      !env.__VOID_PROXY_TOKEN || !env.__PROJECT_ID || !env.__VOID_EMAIL_DEPLOYMENT_ID || !env.__VOID_PROXY) {
+    return new Response(null, { status: 404 });
+  }
+  const __verified = await __verifyEmailReceiptThroughProxy(env.__VOID_PROXY, env.__VOID_PROXY_TOKEN, {
+    receipt: __token, projectId: env.__PROJECT_ID,
+    deploymentId: env.__VOID_EMAIL_DEPLOYMENT_ID, recipient: __recipient,
+  });
+  if (!__verified) return new Response(null, { status: 404 });
+  let __envelope;
+  try { __envelope = await __readEmailEnvelope(request.body); }
+  catch { return new Response(null, { status: 400 }); }
+  if (__envelope.to !== __recipient) return new Response(null, { status: 400 });
+  const __actions = await handleEmail(__envelope, env, ctx);
+  return new Response(__encodeEmailActions(__actions), {
+    headers: { "content-type": "application/vnd.void.email-actions; version=" + __EMAIL_PROTOCOL_VERSION,
+      "cache-control": "no-store" },
+  });
+}`
+    : '';
+
+  // The default export remains a WorkerEntrypoint for platform fetch dispatch.
+  // Its email method accepts only native events on direct Cloudflare deploys;
+  // platform mail enters through the authenticated receipt fetch endpoint.
   const entryImport = `import { WorkerEntrypoint } from "cloudflare:workers";\n`;
   const fetchDeclaration = `const __voidFetch = ${fetchHandler};`;
   const queueMethodBody = hasQueues
     ? `  async queue(batch) { return __voidQueue(batch, this.env, this.ctx); }\n`
     : '';
   const emailMethodBody = hasEmail
-    ? `  async email(envelope) { return handleEmail(envelope, this.env, this.ctx); }\n`
+    ? `  async email(message) {
+    if (this.env.__VOID_EMAIL_DEPLOYMENT_ID || !__isForwardableEmailMessage(message)) {
+      throw new TypeError("Native email event required");
+    }
+    await handleEmail(message, this.env, this.ctx);
+  }\n`
     : '';
   const entryClass = `export default class extends WorkerEntrypoint {
   async fetch(request) { return __voidFetch(request, this.env, this.ctx); }
@@ -2963,6 +2977,7 @@ ${internalRouteHelper}
 ${fetchDeclaration}
 ${scheduledHandler}
 ${emailHandler}
+${emailReceiptHandler}
 async function __voidQueue(batch, env, ctx) {
 ${envValidateCall}${remotePath ? `  if (env.__VOID_REMOTE === "1") env = ${createRemoteEnvCall};\n` : ''}${isrDeploymentStamp}  const userEnv = __filterInternalBindings(env);
   const messages = [...batch.messages].map(m => ({
@@ -2996,6 +3011,7 @@ ${internalRouteHelper}
 ${fetchDeclaration}
 ${scheduledHandler}
 ${emailHandler}
+${emailReceiptHandler}
 ${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}
 ${liveExport}
 ${sandboxExport}

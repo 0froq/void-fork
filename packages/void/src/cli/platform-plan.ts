@@ -4,6 +4,7 @@ import {
   createApplicationRoutes,
   createPlatformResourceOwnershipMarker,
   createPlatformResourceNames,
+  normalizeApplicationDomain,
   normalizeInstallationSlug,
   parsePlatformInstallationManifest,
   parsePlatformResourceOwnershipMarker,
@@ -50,6 +51,8 @@ export type PlatformInstallPlanInput = Readonly<{
   controlPlaneDomain: string;
   dedicatedZone: boolean;
   displayName: string;
+  emailSharedZoneId?: string;
+  emailSenderDomain?: string;
   installationSlug: string;
   zoneName: string;
   workersDev?: boolean;
@@ -85,6 +88,7 @@ export async function createPlatformInstallPlan(
     authoritativeProvisionIntents?: boolean;
     repairMissing?: boolean;
     allowUnverifiedAiGateway?: boolean;
+    includeEmailGateway?: boolean;
   },
 ): Promise<PlatformInstallPlan> {
   const accounts = await client.listAccounts();
@@ -92,6 +96,24 @@ export async function createPlatformInstallPlan(
   if (existing && existing.account.id !== account.id) {
     throw new Error(
       `platform: Refusing to resume installation ${existing.id} in a different Cloudflare account.`,
+    );
+  }
+  const providedEmailSharedZoneId = input.emailSharedZoneId?.trim();
+  const providedEmailSenderDomain = input.emailSenderDomain?.trim();
+  if (
+    existing?.deployment.emailSharedZoneId &&
+    providedEmailSharedZoneId &&
+    existing.deployment.emailSharedZoneId !== providedEmailSharedZoneId
+  ) {
+    throw new Error('platform: The shared email zone is already recorded for this installation.');
+  }
+  if (
+    existing?.deployment.emailSenderDomain &&
+    providedEmailSenderDomain &&
+    existing.deployment.emailSenderDomain !== normalizeApplicationDomain(providedEmailSenderDomain)
+  ) {
+    throw new Error(
+      'platform: The shared email sender domain is already recorded for this installation.',
     );
   }
   const installationSlug = normalizeInstallationSlug(input.installationSlug);
@@ -119,19 +141,38 @@ export async function createPlatformInstallPlan(
     );
   }
   const testing = !!workersDev && !input.zoneName;
-  const deployment = createPlatformDeploymentManifest({
-    authentication: input.authentication ?? existing?.deployment.authentication,
+  const emailSharedZoneId = (
+    existing?.deployment.emailSharedZoneId ?? providedEmailSharedZoneId
+  )?.trim();
+  const emailSenderDomain = existing?.deployment.emailSenderDomain ?? providedEmailSenderDomain;
+  if (!!emailSharedZoneId !== !!emailSenderDomain) {
+    throw new Error(
+      'platform: Set VOID_EMAIL_SENDER_DOMAIN and VOID_EMAIL_SHARED_ZONE_ID together to enable email.',
+    );
+  }
+  const normalizedEmailSenderDomain = emailSenderDomain
+    ? normalizeApplicationDomain(emailSenderDomain)
+    : undefined;
+  const enableEmail =
+    options?.includeEmailGateway !== false && !!emailSharedZoneId && !!normalizedEmailSenderDomain;
+  const capabilities = {
+    ...existing?.deployment.capabilities,
     ...(input.authentication
       ? {
-          capabilities: {
-            ...existing?.deployment.capabilities,
-            githubOAuth: input.authentication.providers.includes('github'),
-            googleOAuth: input.authentication.providers.includes('google'),
-          },
+          githubOAuth: input.authentication.providers.includes('github'),
+          googleOAuth: input.authentication.providers.includes('google'),
         }
-      : existing
-        ? { capabilities: existing.deployment.capabilities }
-        : {}),
+      : {}),
+    ...(enableEmail ? { email: true } : {}),
+  };
+  if (capabilities.email && options?.includeEmailGateway !== false && !enableEmail) {
+    throw new Error(
+      'platform: Email-enabled installations require VOID_EMAIL_SENDER_DOMAIN and VOID_EMAIL_SHARED_ZONE_ID before deploying this runtime.',
+    );
+  }
+  const deployment = createPlatformDeploymentManifest({
+    authentication: input.authentication ?? existing?.deployment.authentication,
+    ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
     application: {
       baseDomain: testing ? `${accountSubdomain}.workers.dev` : input.applicationDomain,
       dedicatedZone: input.dedicatedZone,
@@ -147,10 +188,35 @@ export async function createPlatformInstallPlan(
       proxyHostname: null,
     },
     displayName: input.displayName,
+    ...(emailSharedZoneId ? { emailSharedZoneId } : {}),
+    ...(normalizedEmailSenderDomain ? { emailSenderDomain: normalizedEmailSenderDomain } : {}),
     installationSlug,
     resources: existing?.deployment.resources ?? createPlatformResourceNames(installationSlug),
   });
-  if (existing && JSON.stringify(existing.deployment) !== JSON.stringify(deployment)) {
+  const {
+    emailSharedZoneId: configuredEmailZone,
+    emailSenderDomain: configuredSenderDomain,
+    ...deploymentWithoutEmailZone
+  } = deployment;
+  const {
+    emailSharedZoneId: recordedEmailZone,
+    emailSenderDomain: recordedSenderDomain,
+    ...existingWithoutEmailZone
+  } = existing?.deployment ?? deployment;
+  const comparableExistingWithoutEmailZone =
+    existing && deployment.capabilities.email && !existing.deployment.capabilities.email
+      ? {
+          ...existingWithoutEmailZone,
+          capabilities: { ...existingWithoutEmailZone.capabilities, email: true },
+        }
+      : existingWithoutEmailZone;
+  if (
+    existing &&
+    (JSON.stringify(comparableExistingWithoutEmailZone) !==
+      JSON.stringify(deploymentWithoutEmailZone) ||
+      (recordedEmailZone !== undefined && recordedEmailZone !== configuredEmailZone) ||
+      (recordedSenderDomain !== undefined && recordedSenderDomain !== configuredSenderDomain))
+  ) {
     throw new Error(
       `platform: --resume inputs do not match installation ${existing.id}. Use its recorded configuration.`,
     );
@@ -266,6 +332,7 @@ export async function createPlatformInstallPlan(
     for (const [key, name] of [
       ['api-worker', names.apiWorker],
       ['proxy-worker', names.proxyWorker],
+      ['email-gateway-worker', names.emailGatewayWorker],
       ['tail-worker', names.tailWorker],
       ['dispatch-worker', names.dispatchWorker],
     ] as const) {
@@ -495,6 +562,9 @@ export async function createPlatformInstallPlan(
   for (const [key, name] of [
     ['api-worker', names.apiWorker],
     ['proxy-worker', names.proxyWorker],
+    ...(options?.includeEmailGateway === false
+      ? []
+      : ([['email-gateway-worker', names.emailGatewayWorker]] as const)),
     ['tail-worker', names.tailWorker],
     ['dispatch-worker', names.dispatchWorker],
   ] as const) {
@@ -561,7 +631,10 @@ export async function revalidatePlatformInstallAction(
       zoneName: deployment.application.zoneName,
     },
     manifest,
-    options,
+    {
+      ...options,
+      includeEmailGateway: original.actions.some((entry) => entry.key === 'email-gateway-worker'),
+    },
   );
   const current = refreshed.actions.find((entry) => entry.key === action.key);
   if (
@@ -942,6 +1015,7 @@ const RESOURCE_NAME_KEY_BY_ACTION: Readonly<
   'isr-cache-kv': 'isrCacheKv',
   'legacy-assets-kv': 'legacyAssetsKv',
   'proxy-worker': 'proxyWorker',
+  'email-gateway-worker': 'emailGatewayWorker',
   'routing-kv': 'routingKv',
   'tail-worker': 'tailWorker',
   'usage-queue': 'usageQueue',

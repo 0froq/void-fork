@@ -172,6 +172,129 @@ describe('sendEmail (test harness)', () => {
     }
   });
 
+  it('bounds native binding submissions and preserves later provider references', async () => {
+    vi.useFakeTimers();
+    try {
+      const send = vi
+        .fn()
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce({ messageId: 'cf-second' });
+      const pending = withRuntimeEnv({ SEND_EMAIL: { send } }, () =>
+        sendEmail({
+          from: 'a@x.dev',
+          to: ['first@y.dev', 'second@y.dev'],
+          subject: 'deadline',
+          text: 'body',
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      const result = await pending;
+
+      expect(result).toMatchObject({
+        ok: false,
+        deliveries: [
+          {
+            recipient: 'first@y.dev',
+            state: 'outcome_unknown',
+            error: { code: 'OUTCOME_UNKNOWN' },
+          },
+          { recipient: 'second@y.dev', ok: true, messageId: 'cf-second' },
+        ],
+      });
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops a native binding batch at 60 seconds without submitting the remainder', async () => {
+    vi.useFakeTimers();
+    try {
+      const send = vi.fn(() => new Promise(() => {}));
+      const pending = withRuntimeEnv({ SEND_EMAIL: { send } }, () =>
+        sendEmail({
+          from: 'a@x.dev',
+          to: ['first@y.dev', 'second@y.dev', 'third@y.dev'],
+          subject: 'batch deadline',
+          text: 'body',
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      const result = await pending;
+
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(result).toMatchObject({
+        ok: false,
+        deliveries: [
+          { state: 'outcome_unknown', error: { code: 'OUTCOME_UNKNOWN' } },
+          { state: 'outcome_unknown', error: { code: 'OUTCOME_UNKNOWN' } },
+          { state: 'cancelled', error: { code: 'UPSTREAM_ERROR' } },
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('treats an undocumented native binding rejection as an unknown outcome', async () => {
+    const cause = new Error('connection closed after submission');
+    const send = vi.fn().mockRejectedValue(cause);
+    const result = await withRuntimeEnv({ SEND_EMAIL: { send } }, () =>
+      sendEmail({
+        from: 'a@x.dev',
+        to: 'b@y.dev',
+        subject: 'ambiguous rejection',
+        text: 'body',
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      deliveries: [
+        {
+          recipient: 'b@y.dev',
+          state: 'outcome_unknown',
+          error: {
+            code: 'OUTCOME_UNKNOWN',
+            message: 'connection closed after submission',
+            cause,
+          },
+        },
+      ],
+    });
+  });
+
+  it('keeps a documented native provider refusal definitive', async () => {
+    const cause = Object.assign(new Error('recipient is not allowed'), {
+      code: 'E_RECIPIENT_NOT_ALLOWED',
+    });
+    const result = await withRuntimeEnv(
+      { SEND_EMAIL: { send: vi.fn().mockRejectedValue(cause) } },
+      () =>
+        sendEmail({
+          from: 'a@x.dev',
+          to: 'b@y.dev',
+          subject: 'provider refusal',
+          text: 'body',
+        }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      deliveries: [
+        {
+          recipient: 'b@y.dev',
+          error: { code: 'UNVERIFIED_DESTINATION', cause },
+        },
+      ],
+    });
+    if (!result.ok && 'deliveries' in result) {
+      expect(result.deliveries[0].state).toBeUndefined();
+    }
+  });
+
   it('clear() empties the harness without disposing the sink', async () => {
     const harness = createEmailTestHarness();
     try {
@@ -248,14 +371,14 @@ describe('sendEmail (error mapping)', () => {
     try {
       const result = await sendEmail({
         from: 'a@x.dev',
-        to: Array.from({ length: 101 }, (_, i) => `u${i}@example.com`),
+        to: Array.from({ length: 51 }, (_, i) => `u${i}@example.com`),
         subject: 's',
         text: 't',
       });
       expect(result.ok).toBe(false);
       if (!result.ok && 'error' in result) {
         expect(result.error.code).toBe('INVALID_TO');
-        expect(result.error.message).toMatch(/too many recipients \(max 100, got 101\)/);
+        expect(result.error.message).toMatch(/too many recipients \(max 50, got 51\)/);
       }
       expect(harness.messages).toHaveLength(0);
     } finally {
@@ -568,11 +691,7 @@ describe('sendEmail (proxy round trip)', () => {
     expect(calls[0].url).toContain('/email/send');
     const body = calls[0].body as Record<string, unknown>;
     expect(body.projectId).toBe('p_test');
-    // Legacy auth field name (proxy still reads it under the historical
-    // `aiToken` key). New `proxyToken` ships the same value so the proxy
-    // can migrate without a coordinated release.
     expect(body.aiToken).toBe('tok');
-    expect(body.proxyToken).toBe('tok');
     expect(body.from).toBe('a@x.dev');
     expect(Array.isArray(body.recipients)).toBe(true);
     expect(body.recipients as Array<string>).toEqual(['b@y.dev']);
@@ -625,7 +744,7 @@ describe('sendEmail (proxy round trip)', () => {
     }
   });
 
-  it('returns UPSTREAM_ERROR on proxy fetch failure', async () => {
+  it('returns OUTCOME_UNKNOWN on proxy fetch failure', async () => {
     const proxy = {
       async fetch() {
         throw new Error('network unreachable');
@@ -642,8 +761,86 @@ describe('sendEmail (proxy round trip)', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok && 'error' in result) {
-      expect(result.error.code).toBe('UPSTREAM_ERROR');
+      expect(result.error.code).toBe('OUTCOME_UNKNOWN');
     }
+  });
+
+  it.each(['fetch', 'body'] as const)(
+    'returns OUTCOME_UNKNOWN when the platform proxy %s never settles',
+    async (stall) => {
+      vi.useFakeTimers();
+      try {
+        let markStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+          markStarted = resolve;
+        });
+        const proxy = {
+          fetch() {
+            markStarted();
+            if (stall === 'fetch') {
+              return new Promise<Response>(() => {});
+            }
+            return Promise.resolve(
+              new Response(
+                new ReadableStream<Uint8Array>({
+                  start(controller) {
+                    controller.enqueue(new TextEncoder().encode('{"ok":true,"ids":['));
+                  },
+                }),
+              ),
+            );
+          },
+        };
+        const pending = withRuntimeEnv({ __VOID_PROXY: proxy, ...PROXY_ENV_KEYS }, () =>
+          sendEmail({
+            from: 'a@x.dev',
+            to: 'b@y.dev',
+            subject: 's',
+            text: 't',
+            sendInDev: true,
+          }),
+        );
+
+        await started;
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(60_000);
+        const result = await pending;
+        expect(result).toMatchObject({ ok: false, error: { code: 'OUTCOME_UNKNOWN' } });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('returns OUTCOME_UNKNOWN without reading an oversized proxy response', async () => {
+    const cancel = vi.fn();
+    const proxy = {
+      async fetch() {
+        return new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              cancel,
+              pull() {
+                throw new Error('oversized body must not be read');
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+          { headers: { 'content-length': String(64 * 1024 + 1) } },
+        );
+      },
+    };
+    const result = await withRuntimeEnv({ __VOID_PROXY: proxy, ...PROXY_ENV_KEYS }, () =>
+      sendEmail({
+        from: 'a@x.dev',
+        to: 'b@y.dev',
+        subject: 's',
+        text: 't',
+        sendInDev: true,
+      }),
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: 'OUTCOME_UNKNOWN' } });
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
   });
 
   it('passes mid-batch deliveries through unchanged', async () => {
@@ -711,7 +908,7 @@ describe('sendEmail (proxy round trip)', () => {
     ['ok:false with neither error nor deliveries', { ok: false }],
     ['primitive number body', 42],
     ['primitive array body', []],
-  ])('returns UPSTREAM_ERROR (no throw) for malformed proxy response: %s', async (_, payload) => {
+  ])('returns OUTCOME_UNKNOWN (no throw) for malformed proxy response: %s', async (_, payload) => {
     const { proxy } = fakeProxy(() => ({ status: 200, body: payload }));
     const result = await withRuntimeEnv({ __VOID_PROXY: proxy, ...PROXY_ENV_KEYS }, () =>
       sendEmail({
@@ -724,7 +921,7 @@ describe('sendEmail (proxy round trip)', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok && 'error' in result) {
-      expect(result.error.code).toBe('UPSTREAM_ERROR');
+      expect(result.error.code).toBe('OUTCOME_UNKNOWN');
     }
   });
 
@@ -781,12 +978,12 @@ describe('sendEmail (proxy round trip)', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok && 'error' in result) {
-      expect(result.error.code).toBe('UPSTREAM_ERROR');
+      expect(result.error.code).toBe('OUTCOME_UNKNOWN');
       expect(result.error.message).toBe('email: proxy returned malformed response (status 200)');
     }
   });
 
-  it('returns UPSTREAM_ERROR when proxy responds with non-JSON', async () => {
+  it('returns OUTCOME_UNKNOWN when proxy responds with non-JSON', async () => {
     const proxy = {
       async fetch() {
         return new Response('not json', {
@@ -806,7 +1003,7 @@ describe('sendEmail (proxy round trip)', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok && 'error' in result) {
-      expect(result.error.code).toBe('UPSTREAM_ERROR');
+      expect(result.error.code).toBe('OUTCOME_UNKNOWN');
     }
   });
 
@@ -911,15 +1108,15 @@ describe('sendEmail (proxy delivery list)', () => {
       'entry 0 names a recipient that was not requested',
     ],
   ])(
-    'returns UPSTREAM_ERROR for an ok:true response carrying %s',
+    'returns OUTCOME_UNKNOWN for an ok:true response carrying %s',
     async (_, to, payload, reason) => {
       const { proxy } = fakeProxy(() => ({ status: 200, body: payload }));
       const result = await send(proxy, to);
       expect(result).toEqual({
         ok: false,
         error: {
-          code: 'UPSTREAM_ERROR',
-          message: `email: proxy returned a malformed delivery list (${reason})`,
+          code: 'OUTCOME_UNKNOWN',
+          message: `email: proxy returned a malformed delivery list (${reason}); do not retry with a new idempotency key`,
           cause: payload,
         },
       });
@@ -958,13 +1155,12 @@ describe('sendEmail (proxy delivery list)', () => {
 // as `ids`: one entry per requested address, each either
 // `{ recipient, ok: true, messageId }` or `{ recipient, ok: false, error }`
 // (the proxy always attaches `error` to a failed entry — both its producer
-// paths do). The documented retry pattern acts on exactly the `ok: false`
-// entries, so a list that skips, repeats or invents a recipient, or an
-// entry that does not state its outcome, cannot be acted on: skipping the
-// bad entry would leave a recipient with no outcome and no retry, and
-// treating an entry with no `ok` as failed would retry a recipient that may
-// have been delivered. Such a response is a schema-skewed or corrupt proxy
-// and is refused as a whole, under the same rules as the success path.
+// paths do). A list that skips, repeats or invents a recipient, or an entry
+// that does not state its outcome, cannot be acted on: skipping the bad entry
+// would leave a recipient with no outcome, and treating an entry with no `ok`
+// as failed could lead to a duplicate delivery. Such a response is a
+// schema-skewed or corrupt proxy and is refused as a whole, under the same
+// rules as the success path.
 describe('sendEmail (proxy mid-batch delivery list)', () => {
   const send = (proxy: ReturnType<typeof fakeProxy>['proxy'], to: string | Array<string>) =>
     withRuntimeEnv({ __VOID_PROXY: proxy, ...PROXY_ENV_KEYS }, () =>
@@ -1118,15 +1314,15 @@ describe('sendEmail (proxy mid-batch delivery list)', () => {
       `entry 1 is not ${SHAPE}`,
     ],
   ])(
-    'returns a top-level UPSTREAM_ERROR for a mid-batch response carrying %s',
+    'returns a top-level OUTCOME_UNKNOWN for a mid-batch response carrying %s',
     async (_, to, payload, reason) => {
       const { proxy } = fakeProxy(() => ({ status: 200, body: payload }));
       const result = await send(proxy, to);
       expect(result).toEqual({
         ok: false,
         error: {
-          code: 'UPSTREAM_ERROR',
-          message: `email: proxy returned a malformed delivery list (${reason})`,
+          code: 'OUTCOME_UNKNOWN',
+          message: `email: proxy returned a malformed delivery list (${reason}); do not retry with a new idempotency key`,
           cause: payload,
         },
       });
@@ -1181,8 +1377,8 @@ describe('sendEmail (proxy mid-batch delivery list)', () => {
 
   it('does not refuse a mid-batch list in which every entry succeeded', async () => {
     // Contradicts `anyFailed`, but every recipient has a trustworthy
-    // outcome and the retry filter selects nothing. Refusing it would make
-    // the caller retry the whole call and deliver duplicates.
+    // accepted outcome. Refusing it would make the caller treat the whole
+    // call as unknown despite the complete provider evidence.
     const { proxy } = fakeProxy(() => ({
       status: 200,
       body: {
@@ -1266,5 +1462,71 @@ describe('sendEmail (sendInDev escape hatch)', () => {
       expect(result.error.message).toContain('`sendInDev: true`, which does not deliver');
       expect(result.error.message).toContain('`void dev` binds no send transport at all');
     }
+  });
+});
+
+describe('sendEmail platform idempotency', () => {
+  const options = { from: 'a@x.dev', to: 'b@y.dev', subject: 's', text: 't', sendInDev: true };
+  it('carries the key and preserves the operation and provider acceptance state', async () => {
+    const { proxy, calls } = fakeProxy(() => ({
+      status: 200,
+      body: {
+        ok: true,
+        operationId: 'emailact_1',
+        ids: [{ recipient: 'b@y.dev', messageId: 'cf-1', state: 'provider_accepted' }],
+      },
+    }));
+    const result = await withRuntimeEnv({ __VOID_PROXY: proxy, ...PROXY_ENV_KEYS }, () =>
+      sendEmail({ ...options, idempotencyKey: 'invoice:42' }),
+    );
+    expect(calls[0]?.body).toMatchObject({ idempotencyKey: 'invoice:42' });
+    expect(result).toMatchObject({
+      ok: true,
+      operationId: 'emailact_1',
+      ids: [{ state: 'provider_accepted' }],
+    });
+  });
+  it('keeps partial outcomes when the response also carries an overall error', async () => {
+    const { proxy } = fakeProxy(() => ({
+      status: 200,
+      body: {
+        ok: false,
+        operationId: 'emailact_2',
+        error: { code: 'OUTCOME_UNKNOWN', message: 'unknown' },
+        deliveries: [
+          {
+            recipient: 'b@y.dev',
+            ok: false,
+            state: 'outcome_unknown',
+            error: { code: 'OUTCOME_UNKNOWN', message: 'unknown' },
+          },
+        ],
+      },
+    }));
+    const result = await withRuntimeEnv({ __VOID_PROXY: proxy, ...PROXY_ENV_KEYS }, () =>
+      sendEmail(options),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      operationId: 'emailact_2',
+      deliveries: [{ state: 'outcome_unknown', error: { code: 'OUTCOME_UNKNOWN' } }],
+    });
+  });
+  it('refuses an invalid key before transport and rejects unsupported native deduplication', async () => {
+    const send = vi.fn();
+    for (const idempotencyKey of ['', 'a b', 'x'.repeat(129)]) {
+      const result = await withRuntimeEnv({ SEND_EMAIL: { send } }, () =>
+        sendEmail({ ...options, idempotencyKey }),
+      );
+      expect(result).toMatchObject({ ok: false, error: { code: 'MIME_ERROR' } });
+    }
+    const result = await withRuntimeEnv({ SEND_EMAIL: { send } }, () =>
+      sendEmail({ ...options, idempotencyKey: 'invoice:42' }),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'MIME_ERROR', message: expect.stringContaining('native Cloudflare') },
+    });
+    expect(send).not.toHaveBeenCalled();
   });
 });

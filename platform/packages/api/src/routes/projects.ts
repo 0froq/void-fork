@@ -64,7 +64,6 @@ import {
   restoreQueueConsumer,
   snapshotQueueConsumer,
 } from '../provisioning/cloudflare-api.ts';
-import { syncProjectAllowlistKvBestEffort } from '../provisioning/email-allowlist.ts';
 import {
   addDestination,
   listDestinations,
@@ -639,14 +638,7 @@ const app = new Hono<ApiEnv>()
 
     const userId = context.get('user').id;
     try {
-      // ROUTING carries the `email-slug:<projectId>` mirror the email proxy
-      // reads to pin a project's outbound `from` to its own slug.
-      const project = await createProject(
-        context.get('db'),
-        userId,
-        body.slug,
-        context.env.ROUTING,
-      );
+      const project = await createProject(context.get('db'), userId, body.slug);
       // Pre-seed the owner's own address as a destination so mail to
       // themselves works from the first deploy. CF sends them a verification
       // link; the row stays `pending` until they click it.
@@ -675,7 +667,6 @@ const app = new Hono<ApiEnv>()
             context.env.CF_ACCOUNT_ID,
             context.env.CF_API_TOKEN,
             context.get('db'),
-            context.env.ROUTING,
             project.id,
             address,
             userId,
@@ -3180,7 +3171,6 @@ async function autoAddOwnerDestination(
   accountId: string,
   apiToken: string,
   db: Db,
-  kv: KVNamespace,
   projectId: string,
   address: string,
   ownerUserId: string,
@@ -3244,11 +3234,6 @@ async function autoAddOwnerDestination(
       // means they can re-add it.
       throw new Error('owner destination row vanished between insert and read-back');
     }
-    // Already verified on a prior project — push it into the allowlist mirror
-    // now so the proxy accepts the first send without a manual refresh.
-    if (status === 'verified') {
-      await syncProjectAllowlistKvBestEffort(db, kv, projectId);
-    }
   } catch (err) {
     console.error('[projects] auto-add owner email destination failed:', err);
     if (allocatedTag) {
@@ -3262,7 +3247,7 @@ async function autoAddOwnerDestination(
       // FK-only check. The `refs === 0` guard inside `rollbackCfDestination`
       // is what stops it revoking a recipient a sibling project still uses —
       // including the already-exists path, where the address predates us.
-      await rollbackCfDestination(db, accountId, apiToken, projectId, address, allocatedTag);
+      await rollbackCfDestination(db, accountId, apiToken, allocatedTag);
     }
   }
 }

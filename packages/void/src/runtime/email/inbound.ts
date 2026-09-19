@@ -1,22 +1,11 @@
-// `ForwardableEmailMessage` is not in workerd's RPC BaseType allowlist, so the
-// platform router serializes it into an `EmailEnvelope` and the worker returns
-// `EmailAction[]` describing what the handler decided. The router enacts the
-// actions on the real message.
-//
-// On the developer's own Cloudflare account there is no router: Cloudflare
-// calls the worker's `email()` with the real message. The same proxy runs the
-// handler, and `enactEmailActions` replays the recorded actions on the native
-// message, whose return value Cloudflare ignores.
+// Managed delivery uses bounded HTTP envelopes and recorded action responses.
+// Native Cloudflare email events use the same proxy, then enact its actions on
+// the original message before returning.
 
+import { EMAIL_MAX_RESPONSE_BYTES } from '@void/platform/email-protocol';
 import type { Email as PostalMimeEmail } from 'postal-mime';
 import { getRawRuntimeEnv } from '../env-raw.ts';
-import {
-  buildMime,
-  MAX_MESSAGE_BYTES,
-  MimeError,
-  normalizeEmail,
-  validateAddressParts,
-} from './mime.ts';
+import { buildMime, MimeError, normalizeEmail, validateAddressParts } from './mime.ts';
 import type { Address, Attachment } from './types.ts';
 
 // Mirror the slug-validity rule from runtime/email.ts so a malformed
@@ -24,72 +13,36 @@ import type { Address, Attachment } from './types.ts';
 // the default reply `from` address.
 const VALID_SLUG = /^[a-z0-9](?:[a-z0-9-]{0,54}[a-z0-9])?$/;
 
-/**
- * Guardrails on what one handler may queue.
- *
- * These are NOT the security boundary. Recording happens inside the tenant's
- * own worker, and on the platform a Workers-for-Platforms tenant can ship any
- * `WorkerEntrypoint` whose `email()` returns any array at all, bypassing this
- * file entirely — so the load-bearing caps are the matching ones in the
- * platform router (`MAX_ACTIONS` / `MAX_ACTION_ADDRESS_LENGTH` in
- * `email-router.ts`). What these buy is a fast, precise failure at the call
- * that went wrong, instead of a whole action list silently dropped at the
- * router with only a platform-side log to show for it.
- */
+// SDK limits give handlers early errors. The gateway independently validates
+// untrusted tenant responses before admitting any action.
 const MAX_ACTIONS = 100;
 const MAX_ACTION_ADDRESS_LENGTH = 320;
+const MAX_ACTION_METADATA_BYTES = 8 * 1024;
 
-/**
- * Bounds on one forward's header bag: how many, and how long a name or a
- * value may be. Restated from the router's `MAX_FORWARD_HEADERS` /
- * `MAX_FORWARD_HEADER_LENGTH` (`email-router.ts` — the platform depends on
- * the framework, never the reverse, so the numbers cannot be imported; a
- * proxy-side test pins them equal). The router drops the WHOLE action list
- * on a violation, so a bag that passed here and failed there was a handler
- * whose test reported the forward and whose managed deployment silently
- * performed no actions. Exported for that parity test only.
- */
+/** Bounds on a forward's headers, shared with the handler test harness. */
 export const MAX_FORWARD_HEADERS: number = 32;
 export const MAX_FORWARD_HEADER_LENGTH: number = 1024;
 
-/**
- * Cap on a reject reason, restated from the router's
- * `MAX_REJECT_REASON_LENGTH` in `email-router.ts` for the same reason as
- * above, and pinned by the same test. See `normalizeRejectReason`.
- */
+/** Maximum normalized SMTP rejection reason length. */
 export const MAX_REJECT_REASON_LENGTH: number = 1000;
 
-/**
- * The router's ADMISSION bounds — what it refuses BEFORE the handler runs
- * (`MAX_INBOUND_BYTES` / `MAX_INBOUND_HEADERS` in `email-router.ts`,
- * restated for the same reason as above and pinned by the same test).
- * `routeInbound` rejects a message over either one and never dispatches it,
- * so a handler's behaviour on such a message is unreachable after a managed
- * deploy; the test harness applies both before it invokes the handler.
- *
- * `MAX_INBOUND_BYTES` is NOT `MAX_MESSAGE_BYTES`, though the numbers agree
- * today. That one is Cloudflare's cap on an OUTBOUND message (and the
- * `parseEmail` guard); this one is the router's own heap headroom on an
- * inbound one, set well under Cloudflare's ~25 MB inbound ceiling, and the
- * two can move independently.
- */
+/** Inbound admission limits also applied by the handler test harness. */
 export const MAX_INBOUND_BYTES: number = 10 * 1024 * 1024;
 export const MAX_INBOUND_HEADERS: number = 1024;
 
-/**
- * Cumulative reply-byte budget for ONE dispatch.
- *
- * `MAX_MESSAGE_BYTES` bounds a single `reply()` call, not the queue: N replies
- * at the cap is N x 10 MiB of `Uint8Array` riding one RPC response. workerd
- * caps a serialized RPC payload at 32 MiB, so the queue that clears our
- * per-reply check still fails at the boundary — opaquely. The router cannot
- * tell that failure from any other dispatch error, so the whole message comes
- * back to the sender as a generic "project handler error" reject with nothing
- * in it a handler author could act on. Two full-size replies is already well
- * past any legitimate use, and failing here names the exact call that
- * overran.
- */
-const MAX_REPLY_BYTES_TOTAL = 2 * MAX_MESSAGE_BYTES;
+const MAX_REPLY_BYTES = 5 * 1024 * 1024;
+const EMAIL_STREAM_DEADLINE_MS = 15_000;
+const EMAIL_ACTION_TERMINAL_BYTES = 5;
+const actionEncoder = new TextEncoder();
+
+function emailActionWireSize(action: EmailAction): number {
+  const metadata = actionEncoder.encode(
+    JSON.stringify(
+      action.type === 'reply' ? { type: action.type, from: action.from, to: action.to } : action,
+    ),
+  );
+  return 5 + metadata.byteLength + (action.type === 'reply' ? 5 + action.raw.byteLength : 0);
+}
 
 function readRawProjectSlug(): string | undefined {
   let raw: unknown;
@@ -181,10 +134,10 @@ export class ParseEmailError extends Error {
  * one-shot.
  */
 export async function parseEmail(message: ForwardableEmailMessage): Promise<ParsedEmail> {
-  if (message.rawSize > MAX_MESSAGE_BYTES) {
+  if (message.rawSize > MAX_INBOUND_BYTES) {
     throw new ParseEmailError(
       'INBOUND_TOO_LARGE',
-      `parseEmail: message size ${message.rawSize} bytes exceeds maximum of ${MAX_MESSAGE_BYTES} bytes.`,
+      `parseEmail: message size ${message.rawSize} bytes exceeds maximum of ${MAX_INBOUND_BYTES} bytes.`,
     );
   }
   const { default: PostalMime } = await import('postal-mime');
@@ -221,41 +174,25 @@ interface RawCache {
 }
 const proxyRawCache = new WeakMap<ForwardableEmailMessage, RawCache>();
 
-/**
- * Serialized inbound email message — sent from the platform router to the
- * user worker over RPC. Every field is in workerd's RPC `BaseType`
- * allowlist (string, plain object, ReadableStream<Uint8Array>, number).
- */
+/** Inbound message decoded from the authenticated gateway request. */
 export interface EmailEnvelope {
   from: string;
   to: string;
-  /** Headers serialized as a plain object so they cross RPC. */
+  /** Decoded header metadata. */
   headers: Record<string, string>;
   /**
-   * Raw RFC 5322 bytes. Pre-buffered by the router so it's replayable on the
-   * receiving side (`parseEmail` consumes the stream once; if the handler
-   * also calls `parseEmail` directly, the platform tee'd a fresh stream per
-   * delivery).
+   * Raw RFC 5322 bytes. The message proxy caches them for repeated reads.
    */
   raw: ReadableStream<Uint8Array> | Uint8Array;
   rawSize: number;
   /**
-   * The registered custom domain this message arrived on, set only by the
-   * platform's relay lane (`POST /email/relay` — design doc 0078, "Custom
-   * domains on Cloudflare"). Undefined on the platform mail zone. A relayed
-   * recipient carries no `<slug>+` prefix, so the generated dispatcher runs
-   * in no-prefix mode for it (Mode B item 4) and `replyEmail` defaults
-   * `from` to the address that received it, on this domain.
+   * Exact custom domain selected by the gateway. Custom-domain recipients
+   * have no project-slug prefix; replies default to the received address.
    */
   viaDomain?: string;
 }
 
-/**
- * What the user handler decided to do with a message. Returned from the
- * worker's `email(envelope)` RPC method as an array (handlers may chain
- * multiple actions, e.g. forward then reply); the router enacts each on the
- * real `ForwardableEmailMessage` in order.
- */
+/** Handler intents, validated and admitted by the gateway before delivery. */
 export type EmailAction =
   | { type: 'reject'; reason: string }
   | { type: 'forward'; to: string; headers?: Record<string, string> }
@@ -309,15 +246,15 @@ function stripSlugFromAddress(address: string, slug: string | undefined): string
 function replyTooLarge(size: number): MimeError {
   return new MimeError(
     'MIME_ERROR',
-    `reply: message size ${size} bytes exceeds Cloudflare limit of ${MAX_MESSAGE_BYTES} bytes.`,
+    `reply: message size ${size} bytes exceeds Void's sending limit of ${MAX_REPLY_BYTES} bytes.`,
   );
 }
 
 function replyBudgetExhausted(size: number): MimeError {
   return new MimeError(
     'MIME_ERROR',
-    `reply: cumulative reply size ${size} bytes exceeds this delivery's budget of ` +
-      `${MAX_REPLY_BYTES_TOTAL} bytes.`,
+    `reply: serialized actions would use ${size} bytes, over this delivery's ` +
+      `${EMAIL_MAX_RESPONSE_BYTES}-byte response budget.`,
   );
 }
 
@@ -434,18 +371,47 @@ async function readStreamToBytes(
   const reader = stream.getReader();
   const chunks: Array<Uint8Array> = [];
   let total = 0;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
+  const deadline = Date.now() + EMAIL_STREAM_DEADLINE_MS;
+  try {
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new MimeError('MIME_ERROR', 'email stream timed out');
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const { value, done } = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new MimeError('MIME_ERROR', 'email stream timed out')),
+            remaining,
+          );
+        }),
+      ]).finally(() => {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
+      });
+      if (done) {
+        break;
+      }
+      total += value.byteLength;
+      if (total > limit) {
+        throw onOverflow(total);
+      }
+      chunks.push(value);
     }
-    total += value.byteLength;
-    if (total > limit) {
-      // Stop pulling: the producer would otherwise keep filling memory.
-      await reader.cancel().catch(() => {});
-      throw onOverflow(total);
+  } catch (error) {
+    // Cancellation is cleanup, not part of the stream deadline. A custom
+    // handler stream may never settle its underlying cancel algorithm.
+    void reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // A timed-out read may still be settling after cancellation.
     }
-    chunks.push(value);
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -476,7 +442,7 @@ function bytesToReadableStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
  * accept a native `EmailMessage` from `cloudflare:email`: that class exposes
  * only `from` and `to` (workers-types declares nothing else, and the body
  * has no public accessor), so its bytes cannot be recorded here, and nothing
- * could carry them over RPC to the platform router. The reply MIME bytes are
+ * could encode them for the gateway. The reply MIME bytes are
  * buffered before being recorded so the action is fully self-contained.
  *
  * When `opts.slug` is provided, `message.to` is rewritten to remove the
@@ -539,12 +505,32 @@ export function createMessageProxy(
   }
 
   let rejected = false;
-  let replyBytesUsed = 0;
+  // The gateway counts every metadata/raw frame and the terminal frame, so
+  // reserve that terminal here and reject an action before recording it.
+  let actionWireBytesUsed = EMAIL_ACTION_TERMINAL_BYTES;
+  let pendingReplies = 0;
+  let replyRecordingTail: Promise<void> = Promise.resolve();
+
+  function recordAction(action: EmailAction): boolean {
+    if (rejected) {
+      return false;
+    }
+    if (actions.length >= MAX_ACTIONS) {
+      throw queueFull();
+    }
+    const nextSize = actionWireBytesUsed + emailActionWireSize(action);
+    if (nextSize > EMAIL_MAX_RESPONSE_BYTES) {
+      throw replyBudgetExhausted(nextSize);
+    }
+    actions.push(action);
+    actionWireBytesUsed = nextSize;
+    return true;
+  }
 
   // `actions` only ever grows through forward/reply, and `setReject` purges
   // both, so length IS the queue depth.
   function assertQueueHasRoom(): void {
-    if (actions.length >= MAX_ACTIONS) {
+    if (actions.length + pendingReplies >= MAX_ACTIONS) {
       throw queueFull();
     }
   }
@@ -578,17 +564,8 @@ export function createMessageProxy(
         return; // already rejected; ignore second reject
       }
       rejected = true;
-      // Deliberately NOT bounded by MAX_ACTIONS. The purge below makes this
-      // the one call that SHRINKS the queue, so it can never be what overruns
-      // it — and throwing out of "refuse this mail" would cost the handler its
-      // reject and hand the message back to the sender as a dispatch error,
-      // which is strictly worse than whatever the oversized queue was.
-      // Walk back through the queue and drop any prior forward/reply: CF
-      // (and the platform router) treats setReject as terminal — preceding
-      // actions in this dispatch never execute. Without this purge the
-      // action queue lies (records a forward the router never enacts),
-      // which corrupts the audit trail. Warn so handler authors notice
-      // the misuse.
+      // Reject is terminal and replaces queued deliveries, so it must remain
+      // available even when the action queue is full.
       let dropped = 0;
       for (let i = actions.length - 1; i >= 0; i--) {
         const a = actions[i];
@@ -604,7 +581,9 @@ export function createMessageProxy(
             'Move the reject earlier in the handler.',
         );
       }
-      actions.push({ type: 'reject', reason: normalizeRejectReason(reason) });
+      const action = { type: 'reject' as const, reason: normalizeRejectReason(reason) };
+      actions.push(action);
+      actionWireBytesUsed = EMAIL_ACTION_TERMINAL_BYTES + emailActionWireSize(action);
     },
     async forward(to: string, fwdHeaders?: Headers | Record<string, string>) {
       if (rejected) {
@@ -618,16 +597,7 @@ export function createMessageProxy(
       if (to.length > MAX_ACTION_ADDRESS_LENGTH) {
         throw addressTooLong('to', to.length);
       }
-      // Shape, after the length bound above so the scan is over at most 320
-      // characters. `forward(rcptTo)` takes a bare address — Cloudflare's
-      // "verified destination address" — so no display name is parsed; the
-      // rule is the one `sendEmail` applies to its `to` AND the one the
-      // platform router drops on (`email-validator`, on both sides), so a
-      // handler's forward refuses exactly what an outbound send refuses and
-      // records nothing the router would lose. Left to replay, a malformed
-      // address in a LATER forward was refused by Cloudflare only after
-      // earlier forwards and replies had fired (the platform router
-      // validates the whole list first and drops just that forward).
+      // Validate the bare address before recording any delivery intent.
       validateAddressParts('to', to);
       // Accept both `Headers` (matches CF's runtime signature) and a plain
       // `Record<string, string>`. `Headers.entries()` lowercases keys per
@@ -638,15 +608,8 @@ export function createMessageProxy(
       if (fwdHeaders instanceof Headers) {
         headersObj = Object.fromEntries(fwdHeaders.entries());
       } else if (fwdHeaders) {
-        // A `Headers` instance has already validated its names and values;
-        // a record has not. Every consumer replays the record through
-        // `new Headers()` — `enactEmailActions` on a native message, the
-        // platform router before its own replay — so run that constructor
-        // here and fail in the handler's own call. Left to replay, a CRLF
-        // or NUL in a LATER forward surfaced only after earlier forwards and
-        // replies had fired, leaving Cloudflare a failed invocation for a
-        // message that was partly delivered. The record itself is what is
-        // stored: preserving name casing is why this form exists.
+        // Validate now to avoid partial delivery during native replay. Keep
+        // the record itself so caller-provided header casing is preserved.
         try {
           void new Headers(fwdHeaders);
         } catch (e) {
@@ -660,7 +623,18 @@ export function createMessageProxy(
       if (headersObj) {
         assertForwardHeadersWithinBounds(headersObj);
       }
-      actions.push({ type: 'forward', to, ...(headersObj ? { headers: headersObj } : {}) });
+      const action = {
+        type: 'forward' as const,
+        to,
+        ...(headersObj ? { headers: headersObj } : {}),
+      };
+      if (new TextEncoder().encode(JSON.stringify(action)).byteLength > MAX_ACTION_METADATA_BYTES) {
+        throw new MimeError(
+          'MIME_ERROR',
+          `forward: action metadata exceeds ${MAX_ACTION_METADATA_BYTES} bytes.`,
+        );
+      }
+      void recordAction(action);
     },
     async reply(reply: { from: string; to: string; raw: ReadableStream<Uint8Array> | Uint8Array }) {
       if (rejected) {
@@ -685,49 +659,84 @@ export function createMessageProxy(
       // every earlier action had fired. Both are bare addresses.
       validateAddressParts('from', reply.from);
       validateAddressParts('to', reply.to);
-      // `replyEmail()` is bounded by `buildMime`; a hand-built reply is not, so
-      // bound it here before the bytes travel to the proxy (or to native reply).
-      const remaining = MAX_REPLY_BYTES_TOTAL - replyBytesUsed;
-      let rawBytes: Uint8Array;
-      if (reply.raw instanceof Uint8Array) {
-        if (reply.raw.byteLength > MAX_MESSAGE_BYTES) {
-          throw replyTooLarge(reply.raw.byteLength);
+      pendingReplies++;
+      const previousReply = replyRecordingTail;
+      let releaseReply!: () => void;
+      replyRecordingTail = new Promise<void>((resolve) => {
+        releaseReply = resolve;
+      });
+      await previousReply;
+      try {
+        if (rejected) {
+          console.warn(
+            '[void/email] reply() completed after setReject() — ignored. ' +
+              'CF rejects are terminal: nothing else runs once setReject fires.',
+          );
+          return;
         }
-        if (reply.raw.byteLength > remaining) {
-          throw replyBudgetExhausted(replyBytesUsed + reply.raw.byteLength);
+        // `replyEmail()` is bounded by `buildMime`; a hand-built reply is not, so
+        // bound it here before the bytes travel to the proxy (or to native reply).
+        const metadataOnlyAction = {
+          type: 'reply' as const,
+          from: reply.from,
+          to: reply.to,
+          raw: new Uint8Array(),
+        };
+        const replyFrameBytes = emailActionWireSize(metadataOnlyAction);
+        const remaining = EMAIL_MAX_RESPONSE_BYTES - actionWireBytesUsed - replyFrameBytes;
+        if (remaining < 0) {
+          throw replyBudgetExhausted(EMAIL_MAX_RESPONSE_BYTES - remaining);
         }
-        rawBytes = reply.raw;
-      } else {
-        // A native `EmailMessage` lands here: `from` and `to` only, no `raw`.
-        // Name the problem instead of failing on `undefined.getReader()`,
-        // which in platform mode is a generic "project handler error" bounce
-        // with nothing a handler author could act on.
-        const raw: unknown = reply.raw;
-        if (
-          typeof raw !== 'object' ||
-          raw === null ||
-          typeof (raw as ReadableStream<Uint8Array>).getReader !== 'function'
-        ) {
-          throw new MimeError(
-            'MIME_ERROR',
-            'reply: expected { from, to, raw } with raw as a Uint8Array or ReadableStream. ' +
-              'A native EmailMessage cannot be replayed from a Void handler — its body has ' +
-              'no public accessor. Use replyEmail() from void/email, or pass the MIME bytes as raw.',
+        let rawBytes: Uint8Array;
+        if (reply.raw instanceof Uint8Array) {
+          if (reply.raw.byteLength > MAX_REPLY_BYTES) {
+            throw replyTooLarge(reply.raw.byteLength);
+          }
+          if (reply.raw.byteLength > remaining) {
+            throw replyBudgetExhausted(
+              actionWireBytesUsed + replyFrameBytes + reply.raw.byteLength,
+            );
+          }
+          rawBytes = reply.raw;
+        } else {
+          // A native `EmailMessage` lands here: `from` and `to` only, no `raw`.
+          // Name the problem instead of failing on `undefined.getReader()`,
+          // which in platform mode is a generic "project handler error" bounce
+          // with nothing a handler author could act on.
+          const raw: unknown = reply.raw;
+          if (
+            typeof raw !== 'object' ||
+            raw === null ||
+            typeof (raw as ReadableStream<Uint8Array>).getReader !== 'function'
+          ) {
+            throw new MimeError(
+              'MIME_ERROR',
+              'reply: expected { from, to, raw } with raw as a Uint8Array or ReadableStream. ' +
+                'A native EmailMessage cannot be replayed from a Void handler — its body has ' +
+                'no public accessor. Use replyEmail() from void/email, or pass the MIME bytes as raw.',
+            );
+          }
+          // The REMAINING budget, not the per-reply cap — an earlier reply has
+          // already spent part of it, and the stream must stop where the budget
+          // does. Whichever bound is lower is the one that fires, so the
+          // callback names the one that actually bound this read.
+          const limit = Math.min(MAX_REPLY_BYTES, remaining);
+          rawBytes = await readStreamToBytes(reply.raw, limit, (total) =>
+            limit === MAX_REPLY_BYTES
+              ? replyTooLarge(total)
+              : replyBudgetExhausted(actionWireBytesUsed + replyFrameBytes + total),
           );
         }
-        // The REMAINING budget, not the per-reply cap — an earlier reply has
-        // already spent part of it, and the stream must stop where the budget
-        // does. Whichever bound is lower is the one that fires, so the
-        // callback names the one that actually bound this read.
-        const limit = Math.min(MAX_MESSAGE_BYTES, remaining);
-        rawBytes = await readStreamToBytes(reply.raw, limit, (total) =>
-          limit === MAX_MESSAGE_BYTES
-            ? replyTooLarge(total)
-            : replyBudgetExhausted(replyBytesUsed + total),
-        );
+        if (!recordAction({ type: 'reply', from: reply.from, to: reply.to, raw: rawBytes })) {
+          console.warn(
+            '[void/email] reply() completed after setReject() — ignored. ' +
+              'CF rejects are terminal: nothing else runs once setReject fires.',
+          );
+        }
+      } finally {
+        pendingReplies--;
+        releaseReply();
       }
-      replyBytesUsed += rawBytes.byteLength;
-      actions.push({ type: 'reply', from: reply.from, to: reply.to, raw: rawBytes });
     },
   } as unknown as ForwardableEmailMessage;
 
@@ -1287,8 +1296,8 @@ export async function buildReplyMessage(
 /**
  * Send a threading-aware reply to an inbound message. Builds the reply MIME
  * (correct `In-Reply-To` / `References` / `Subject: Re: …`) and records a
- * reply intent on the message proxy. The platform router enacts the reply
- * via the real `ForwardableEmailMessage.reply()` once the handler returns.
+ * reply intent on the message proxy. Delivery follows handler completion and,
+ * on the platform, authoritative admission.
  *
  * The threading headers are best-effort, since the inbound values they are
  * built from are remote-sender controlled: an id no header line can carry
@@ -1308,10 +1317,8 @@ export async function replyEmail(
 }
 
 /**
- * Whether `value` is a real `ForwardableEmailMessage` — one Cloudflare
- * delivered to this worker's `email()` directly — rather than an
- * `EmailEnvelope` from the platform router. Functions do not survive RPC,
- * so their presence is the discriminator.
+ * Recognize native email operations. This structural check is not an
+ * authentication boundary; managed entrypoints require receipt authentication.
  */
 export function isForwardableEmailMessage(value: unknown): value is ForwardableEmailMessage {
   if (typeof value !== 'object' || value === null) {
@@ -1325,6 +1332,43 @@ export function isForwardableEmailMessage(value: unknown): value is ForwardableE
   );
 }
 
+const INBOUND_PROVIDER_DEADLINE_MS = 30_000;
+const INBOUND_ACTION_BATCH_DEADLINE_MS = 60_000;
+
+function createInboundProviderDeadline() {
+  const deadline = Date.now() + INBOUND_ACTION_BATCH_DEADLINE_MS;
+  return {
+    async run<T>(submit: () => Promise<T>): Promise<T> {
+      const remaining = Math.min(INBOUND_PROVIDER_DEADLINE_MS, deadline - Date.now());
+      if (remaining <= 0) {
+        throw new Error('email action batch deadline elapsed before provider submission');
+      }
+      const work = submit();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          work,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    'email action provider timed out; outcome unknown, do not retry automatically',
+                  ),
+                ),
+              remaining,
+            );
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
+      }
+    },
+  };
+}
+
 /**
  * Replay recorded `EmailAction`s on a real `ForwardableEmailMessage`, in
  * order. The proxy already made `setReject` terminal (earlier forward/reply
@@ -1333,33 +1377,30 @@ export function isForwardableEmailMessage(value: unknown): value is ForwardableE
  * duck-typed object — so `cloudflare:email` is loaded here, and only when
  * a reply was recorded.
  *
- * The `new Headers()` below is the one step this loop constructs from
- * handler input, and it cannot fail on a recorded action: the proxy's
- * `forward()` already ran the record through that constructor, so a bad
- * record failed inside the handler, before any replay. (`EmailMessage`
- * construction neither validates nor reads its stream — measured under
- * workerd.) A reject's reason reaches the native `setReject()` as the proxy
- * recorded it — already sliced and stripped the way the platform router
- * would (`normalizeRejectReason`), so the SMTP reply is the same in both
- * deployments. What Cloudflare itself refuses at `forward()` / `reply()`
- * still throws out of the loop, as any native call would.
+ * The proxy already validated forward headers and normalized reject reasons.
+ * Provider refusals still propagate to the native event caller.
  */
 export async function enactEmailActions(
   message: ForwardableEmailMessage,
   actions: ReadonlyArray<EmailAction>,
 ): Promise<void> {
+  const providerDeadline = createInboundProviderDeadline();
   for (const action of actions) {
     switch (action.type) {
       case 'reject':
         message.setReject(action.reason);
         break;
       case 'forward':
-        await message.forward(action.to, action.headers ? new Headers(action.headers) : undefined);
+        await providerDeadline.run(() =>
+          message.forward(action.to, action.headers ? new Headers(action.headers) : undefined),
+        );
         break;
       case 'reply': {
         const { EmailMessage } = await import('cloudflare:email');
-        await message.reply(
-          new EmailMessage(action.from, action.to, bytesToReadableStream(action.raw)),
+        await providerDeadline.run(() =>
+          message.reply(
+            new EmailMessage(action.from, action.to, bytesToReadableStream(action.raw)),
+          ),
         );
         break;
       }

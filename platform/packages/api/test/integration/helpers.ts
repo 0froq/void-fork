@@ -467,6 +467,23 @@ export async function teardownEnv(): Promise<void> {
 }
 
 export async function clearTables(db: Db): Promise<void> {
+  for (const table of [
+    schema.emailDestinationCleanups,
+    schema.emailOperationSteps,
+    schema.emailOperations,
+    schema.emailDomainRoutes,
+    schema.emailZoneConnections,
+    schema.emailCredentials,
+    schema.emailCacheOutbox,
+    schema.emailUnresolvedAttempts,
+    schema.emailActionRecipients,
+    schema.emailActions,
+    schema.emailReceipts,
+    schema.emailProjectControls,
+    schema.emailMonthlyUsage,
+  ]) {
+    await db.delete(table);
+  }
   await db.delete(sandboxDrainCheckpoints);
   await db.delete(domains);
   await db.delete(resources);

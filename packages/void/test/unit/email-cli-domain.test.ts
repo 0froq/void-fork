@@ -4,7 +4,6 @@ import {
   PlatformApiError,
   PlatformClient,
   type EmailDomainResponse,
-  type EmailDomainStatusResponse,
   type RemoveEmailDomainResponse,
 } from '../../src/cli/client.ts';
 import {
@@ -15,10 +14,10 @@ import {
   emailDomainRemove,
   emailDomainStatus,
   emailDomainSync,
+  emailDomainRotateSecret,
   isValidEmailDomainInput,
   normalizeEmailDomainInput,
   resolveEmailDomainTarget,
-  type CfTokenVerification,
   type EmailDomainAddDeps,
 } from '../../src/cli/email.ts';
 
@@ -35,9 +34,10 @@ vi.mock('@clack/prompts', async (importOriginal) => {
 
 const LEGACY_TOKEN = `Lgcy-${'a1'.repeat(17)}B`; // 40 chars, [A-Za-z0-9_-]
 const CFUT_TOKEN = `cfut_${'c0'.repeat(20)}${'deed'.repeat(2)}`; // 40-char core + checksum tail
-const GRANT_SENTINEL = 'grant-refresh-token-placeholder';
 /** The default platform: owners register their own domains. */
-const selfServeSettings = async () => ({ domains: { management: 'self-serve' as const } });
+const selfServeSettings = async (): Promise<{
+  domains: { management: 'self-serve' | 'admin' };
+}> => ({ domains: { management: 'self-serve' } });
 const noEmailDomains = async (): Promise<Array<EmailDomainResponse>> => [];
 
 type LogSpy = ReturnType<typeof vi.spyOn>;
@@ -77,29 +77,20 @@ function domainRow(overrides: Partial<EmailDomainResponse> = {}): EmailDomainRes
   return {
     id: 'edom_1',
     domain: 'acme.com',
-    mode: 'apex',
-    status: 'active',
-    credential_kind: 'oauth_grant',
-    relay_worker_name: 'void-email-relay',
+    projectId: 'prj_1',
+    status: 'ready',
+    managed_by: 'owner',
+    connectionId: 'conn_1',
+    account_id: 'account_1',
+    zone_id: 'zone_1',
+    relay_worker_name: 'void-email-ingress',
     relay_version: 1,
-    token_id: null,
-    token_expires_on: null,
-    setup_state: null,
-    created_at: '2026-09-16T00:00:00Z',
-    updated_at: '2026-09-16T00:00:00Z',
-    ...overrides,
-  };
-}
-
-function statusRow(overrides: Partial<EmailDomainStatusResponse> = {}): EmailDomainStatusResponse {
-  return {
-    ...domainRow(),
-    credential_status: 'active',
-    current_relay_version: 1,
-    relay_drift: false,
-    relay_missing: false,
-    catch_all: 'points_here',
-    catch_all_drift: false,
+    operationId: null,
+    readiness: {
+      inbound: { status: 'ready', reason: null, observedAt: null },
+      outbound: { status: 'verified_only', reason: null, observedAt: null },
+      management: { status: 'healthy', reason: null, observedAt: null },
+    },
     ...overrides,
   };
 }
@@ -226,10 +217,10 @@ describe('PlatformClient.getEmailSettings', () => {
     });
   });
 
-  it('treats a platform without the route as self-serve, but a missing project as an error', async () => {
-    await expect(clientWith(404, '404 Not Found').getEmailSettings('prj_1')).resolves.toEqual({
-      domains: { management: 'self-serve' },
-    });
+  it('does not start a credential flow when the settings route is unavailable', async () => {
+    await expect(clientWith(404, '404 Not Found').getEmailSettings('prj_1')).rejects.toThrow(
+      PlatformApiError,
+    );
     await expect(
       clientWith(404, JSON.stringify({ error: 'project not found' })).getEmailSettings('prj_gone'),
     ).rejects.toThrow(PlatformApiError);
@@ -237,1409 +228,276 @@ describe('PlatformClient.getEmailSettings', () => {
 });
 
 describe('emailDomainAdd', () => {
-  // The fixed per-invocation attempt id the randomUUID spy returns.
   const ATTEMPT_ID = '11111111-2222-4333-8444-555555555555';
-
   function addDeps(overrides: Partial<EmailDomainAddDeps> = {}): EmailDomainAddDeps {
     return {
       dns: { resolveMx: vi.fn(async () => []) },
-      runGrant: vi.fn(async () => ({ refreshToken: GRANT_SENTINEL })),
       isInteractive: true,
+      openUrl: vi.fn(),
+      readClipboard: () => null,
+      clearClipboard: vi.fn(),
+      pasteToken: vi.fn(async () => LEGACY_TOKEN),
+      confirmScope: vi.fn(async () => true),
+      verifyToken: vi.fn(async () => 'active' as const),
       waitForEnter: neverEnter,
       watchIntervalMs: 1,
-      watchTimeoutMs: 50,
-      // Instant reconcile polls — the loop is bounded by attempt count.
+      watchTimeoutMs: 40,
       sleep: vi.fn(async () => {}),
       exit: exitSpy(),
       ...overrides,
     };
   }
-
-  /** Pins the per-invocation attempt id (restored by the outer afterEach). */
-  function mockAttemptId(id: string = ATTEMPT_ID): void {
-    vi.spyOn(crypto, 'randomUUID').mockReturnValue(id as ReturnType<typeof crypto.randomUUID>);
+  function client() {
+    return {
+      addEmailDomain: vi.fn(async () => domainRow({ operationStatus: 'completed' })),
+      getEmailDomain: vi.fn(async () => domainRow()),
+      getEmailOperation: vi.fn(async () => ({
+        operationId: 'op_1',
+        attemptId: ATTEMPT_ID,
+        status: 'completed' as const,
+        domain: 'acme.com',
+        readiness: {
+          inbound: { status: 'ready' as const },
+          outbound: { status: 'ready' as const },
+          management: { status: 'healthy' as const },
+        },
+      })),
+      getEmailSettings: vi.fn(selfServeSettings),
+      listEmailDomains: vi.fn(noEmailDomains),
+    };
   }
 
-  it('runs the grant and POSTs the refresh token for an MX-empty apex', async () => {
-    const addEmailDomain = vi.fn(async () => domainRow({ domain: 'acme.com', mode: 'apex' }));
+  it('uses scoped API-token setup and submits no OAuth grant', async () => {
+    const api = client();
     const deps = addDeps();
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      deps,
-    );
-
-    expect(addEmailDomain).toHaveBeenCalledWith('prj_1', {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue(ATTEMPT_ID);
+    await emailDomainAdd(api, 'prj_1', 'acme.com', undefined, deps);
+    expect(api.addEmailDomain).toHaveBeenCalledWith('prj_1', {
       domain: 'acme.com',
-      refreshToken: GRANT_SENTINEL,
-      attemptId: expect.any(String),
+      apiToken: LEGACY_TOKEN,
+      attemptId: ATTEMPT_ID,
     });
-    expect(printed(infoSpy)).toContain('acme.com has no MX records → using the apex');
-    expect(printed(successSpy)).toContain(
-      'Grant stored on the platform, encrypted for this project — nothing is kept on this machine.',
+    expect(deps.openUrl).toHaveBeenCalledWith(expect.stringContaining('/profile/api-tokens?'));
+    expect(deps.confirmScope).toHaveBeenCalledWith('acme.com');
+    expect(printed(infoSpy)).toContain('replace All accounts and All zones');
+    expect(printed(successSpy)).toContain('zone connection');
+    expect([printed(infoSpy), printed(successSpy), notedBlocks()].join('')).not.toContain(
+      LEGACY_TOKEN,
     );
-    expect(notedBlocks()).toContain('Domain:      acme.com');
-    expect(notedBlocks()).toContain('Mode:        apex');
-    // The credential never reaches an output.
-    expect(printed(infoSpy) + printed(successSpy) + notedBlocks()).not.toContain(GRANT_SENTINEL);
   });
 
-  it('prints the administrator command and stops on an admin-managed platform', async () => {
-    const addEmailDomain = vi.fn();
-    const runGrant = vi.fn();
-    const resolveMx = vi.fn(async () => []);
-    const exit = exitSpy();
-
+  it('does not submit a token whose scope was not confirmed', async () => {
+    const api = client();
     await expect(
       emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain: vi.fn(),
-          getEmailSettings: async () => ({
-            domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
-          }),
-          listEmailDomains: noEmailDomains,
-        },
+        api,
         'prj_1',
         'acme.com',
         undefined,
-        addDeps({ runGrant, dns: { resolveMx }, exit }),
+        addDeps({ confirmScope: async () => false }),
       ),
-    ).rejects.toThrow('exit 0');
-
-    expect(printed(infoSpy)).toContain(
-      'Email domains on this platform are managed by its administrator.',
-    );
-    expect(printed(infoSpy)).toContain(
-      'void platform email domain-add acme.com --project hr-portal',
-    );
-    // The target was decided, but no browser or POST ran — and exit was clean.
-    expect(resolveMx).toHaveBeenCalledWith('acme.com');
-    expect(runGrant).not.toHaveBeenCalled();
-    expect(addEmailDomain).not.toHaveBeenCalled();
-    expect(exit).toHaveBeenCalledWith(0);
+    ).rejects.toThrow('exit 1');
+    expect(api.addEmailDomain).not.toHaveBeenCalled();
   });
 
-  it('prints the mail subdomain for an admin-managed apex that already receives mail', async () => {
-    const addEmailDomain = vi.fn();
-    const runGrant = vi.fn();
+  it('chooses a mail subdomain when the apex already receives mail', async () => {
+    const api = client();
     const resolveMx = vi.fn(async (name: string) =>
-      name === 'acme.com' ? [{ exchange: 'aspmx.l.google.com.', priority: 1 }] : [],
+      name === 'acme.com' ? [{ exchange: 'mx.example.net', priority: 10 }] : [],
     );
-    const exit = exitSpy();
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain: vi.fn(),
-          getEmailSettings: async () => ({
-            domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
-          }),
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps({ runGrant, dns: { resolveMx }, exit }),
-      ),
-    ).rejects.toThrow('exit 0');
-
-    expect(printed(infoSpy)).toContain('acme.com carries MX for aspmx.l.google.com');
-    expect(printed(infoSpy)).toContain(
-      'void platform email domain-add mail.acme.com --project hr-portal',
+    await emailDomainAdd(api, 'prj_1', 'acme.com', undefined, addDeps({ dns: { resolveMx } }));
+    expect(api.addEmailDomain).toHaveBeenCalledWith(
+      'prj_1',
+      expect.objectContaining({ domain: 'mail.acme.com' }),
     );
-    expect(runGrant).not.toHaveBeenCalled();
-    expect(addEmailDomain).not.toHaveBeenCalled();
-    expect(exit).toHaveBeenCalledWith(0);
   });
 
-  it('keeps a forced admin-managed subdomain in the printed command and warns on its MX', async () => {
-    const addEmailDomain = vi.fn();
-    const runGrant = vi.fn();
-    const resolveMx = vi.fn(async () => [{ exchange: 'aspmx.l.google.com.', priority: 1 }]);
-    const exit = exitSpy();
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain: vi.fn(),
-          getEmailSettings: async () => ({
-            domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
-          }),
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        'mx',
-        addDeps({ runGrant, dns: { resolveMx }, exit }),
-      ),
-    ).rejects.toThrow('exit 0');
-
-    expect(resolveMx).toHaveBeenCalledWith('mx.acme.com');
-    expect(printed(warnSpy)).toContain('mx.acme.com already carries MX');
-    expect(printed(warnSpy)).toContain('may refuse it');
-    expect(printed(infoSpy)).toContain(
-      'void platform email domain-add mx.acme.com --project hr-portal',
+  it('honors an explicitly selected mail subdomain', async () => {
+    const api = client();
+    await emailDomainAdd(api, 'prj_1', 'acme.com', 'notifications', addDeps());
+    expect(api.addEmailDomain).toHaveBeenCalledWith(
+      'prj_1',
+      expect.objectContaining({ domain: 'notifications.acme.com' }),
     );
-    expect(runGrant).not.toHaveBeenCalled();
-    expect(addEmailDomain).not.toHaveBeenCalled();
   });
 
-  it('prints the administrator command when the target is already an administrator row', async () => {
-    const addEmailDomain = vi.fn();
-    const runGrant = vi.fn();
-    const resolveMx = vi.fn(async () => []);
-    const exit = exitSpy();
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain: vi.fn(),
-          getEmailSettings: async () => ({
-            domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
-          }),
-          listEmailDomains: async () => [domainRow({ managed_by: 'admin' })],
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps({ runGrant, dns: { resolveMx }, exit }),
-      ),
-    ).rejects.toThrow('exit 0');
-
-    expect(printed(infoSpy)).toContain(
-      'void platform email domain-add acme.com --project hr-portal',
+  it('rejects invalid domains before opening a browser', async () => {
+    const api = client();
+    const deps = addDeps();
+    await expect(emailDomainAdd(api, 'prj_1', 'https://acme.com', undefined, deps)).rejects.toThrow(
+      'exit 1',
     );
-    expect(resolveMx).toHaveBeenCalledWith('acme.com');
-    expect(runGrant).not.toHaveBeenCalled();
-    expect(addEmailDomain).not.toHaveBeenCalled();
+    expect(deps.openUrl).not.toHaveBeenCalled();
+    expect(api.addEmailDomain).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['an explicit owner row', 'owner' as const],
-    ['a row from an older api without managed_by', undefined],
-  ])(
-    'continues the renewal flow for %s on an admin-managed platform',
-    async (_label, managedBy) => {
-      const addEmailDomain = vi.fn(async () =>
-        domainRow({ domain: 'mail.acme.com', mode: 'subdomain', managed_by: managedBy }),
-      );
-      const runGrant = vi.fn(async () => ({ refreshToken: GRANT_SENTINEL }));
-      const resolveMx = vi.fn(async () => [{ exchange: 'aspmx.l.google.com.', priority: 1 }]);
-      const exit = exitSpy();
+  it('hands new administrator-managed domains to the operator without a token flow', async () => {
+    const api = client();
+    const deps = addDeps();
+    api.getEmailSettings.mockResolvedValue({ domains: { management: 'admin' } });
+    await expect(emailDomainAdd(api, 'prj_1', 'acme.com', undefined, deps)).rejects.toThrow(
+      'exit 0',
+    );
+    expect(deps.openUrl).not.toHaveBeenCalled();
+    expect(deps.pasteToken).not.toHaveBeenCalled();
+    expect(printed(infoSpy)).toContain('void platform email domain-add acme.com --project prj_1');
+  });
 
-      await emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain: vi.fn(),
-          getEmailSettings: async () => ({
-            domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
-          }),
-          listEmailDomains: async () => [
-            domainRow({ domain: 'mail.acme.com', managed_by: managedBy }),
-          ],
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps({ runGrant, dns: { resolveMx }, exit }),
-      );
+  it('lets an owner renew their earlier assignment after the administrator mode switch', async () => {
+    const api = client();
+    const deps = addDeps();
+    api.getEmailSettings.mockResolvedValue({ domains: { management: 'admin' } });
+    api.listEmailDomains.mockResolvedValue([domainRow({ managed_by: 'owner' })]);
+    await emailDomainAdd(api, 'prj_1', 'acme.com', undefined, deps);
+    expect(api.addEmailDomain).toHaveBeenCalledWith(
+      'prj_1',
+      expect.objectContaining({ domain: 'acme.com', apiToken: LEGACY_TOKEN }),
+    );
+    expect(deps.dns?.resolveMx).not.toHaveBeenCalled();
+  });
 
-      expect(resolveMx).not.toHaveBeenCalled();
-      expect(printed(infoSpy)).toContain(
-        'Renewing mail.acme.com — the stored credential is replaced; rules and the relay stay.',
+  it('fails non-interactive setup without opening a browser', async () => {
+    const api = client();
+    const deps = addDeps({ isInteractive: false });
+    await expect(emailDomainAdd(api, 'prj_1', 'acme.com', undefined, deps)).rejects.toThrow(
+      'exit 1',
+    );
+    expect(deps.openUrl).not.toHaveBeenCalled();
+  });
+
+  it('cancels masked paste without storing a credential', async () => {
+    const api = client();
+    const deps = addDeps({ pasteToken: async () => null });
+    await emailDomainAdd(api, 'prj_1', 'acme.com', undefined, deps);
+    expect(api.addEmailDomain).not.toHaveBeenCalled();
+    expect(deps.confirmScope).not.toHaveBeenCalled();
+  });
+
+  it.each(['ghp_not-a-cloudflare-token', 'not-a-token'])(
+    'rejects foreign or malformed credential %s locally',
+    async (token) => {
+      const api = client();
+      const deps = addDeps({ pasteToken: async () => token });
+      await expect(emailDomainAdd(api, 'prj_1', 'acme.com', undefined, deps)).rejects.toThrow(
+        'exit 1',
       );
-      expect(runGrant).toHaveBeenCalled();
-      expect(addEmailDomain).toHaveBeenCalledWith('prj_1', {
-        domain: 'mail.acme.com',
-        refreshToken: GRANT_SENTINEL,
-        attemptId: expect.any(String),
-      });
-      expect(exit).not.toHaveBeenCalledWith(0);
+      expect(deps.verifyToken).not.toHaveBeenCalled();
+      expect(api.addEmailDomain).not.toHaveBeenCalled();
     },
   );
 
-  it.each([
-    ['an apex row', 'acme.com'],
-    ['an already-prefixed mail row', 'mail.acme.com'],
-  ])('renews %s without re-running the MX decision', async (_label, existingDomain) => {
-    const addEmailDomain = vi.fn(async () => domainRow({ domain: existingDomain }));
-    const runGrant = vi.fn(async () => ({ refreshToken: GRANT_SENTINEL }));
-    const resolveMx = vi.fn(async () => [{ exchange: 'route1.mx.cloudflare.net.', priority: 10 }]);
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: async () => ({
-          domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
-        }),
-        listEmailDomains: async () => [domainRow({ domain: existingDomain, managed_by: 'owner' })],
-      },
-      'prj_1',
-      existingDomain,
-      undefined,
-      addDeps({ runGrant, dns: { resolveMx } }),
-    );
-
-    expect(resolveMx).not.toHaveBeenCalled();
-    expect(printed(infoSpy)).toContain(`Renewing ${existingDomain}`);
-    expect(addEmailDomain).toHaveBeenCalledWith('prj_1', {
-      domain: existingDomain,
-      refreshToken: GRANT_SENTINEL,
-      attemptId: expect.any(String),
-    });
-  });
-
-  it('proposes mail.<domain> when the apex carries MX, and says so', async () => {
-    const addEmailDomain = vi.fn(async () =>
-      domainRow({ domain: 'mail.acme.com', mode: 'subdomain' }),
-    );
-    const resolveMx = vi.fn(async (name: string) =>
-      name === 'acme.com' ? [{ exchange: 'aspmx.l.google.com.', priority: 1 }] : [],
-    );
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps({ dns: { resolveMx } }),
-    );
-
-    expect(printed(infoSpy)).toContain(
-      'acme.com carries MX for aspmx.l.google.com → apex is off limits',
-    );
-    expect(printed(infoSpy)).toContain('using mail.acme.com  [change with --subdomain]');
-    expect(addEmailDomain).toHaveBeenCalledWith('prj_1', {
-      domain: 'mail.acme.com',
-      refreshToken: GRANT_SENTINEL,
-      attemptId: expect.any(String),
-    });
-  });
-
-  it('honours an explicit --subdomain and normalizes the positional domain', async () => {
-    const addEmailDomain = vi.fn(async () =>
-      domainRow({ domain: 'mx.acme.com', mode: 'subdomain' }),
-    );
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      '  ACME.com. ',
-      'mx',
-      addDeps(),
-    );
-
-    expect(addEmailDomain).toHaveBeenCalledWith('prj_1', {
-      domain: 'mx.acme.com',
-      refreshToken: GRANT_SENTINEL,
-      attemptId: expect.any(String),
-    });
-  });
-
-  it('refuses an invalid domain or a foreign --subdomain before any grant', async () => {
-    const runGrant = vi.fn();
-    const addEmailDomain = vi.fn();
-
+  it('refuses an inactive token', async () => {
+    const api = client();
     await expect(
       emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain: vi.fn(),
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'not a domain',
-        undefined,
-        addDeps({ runGrant }),
-      ),
-    ).rejects.toThrow('exit 1');
-    expect(printed(errorSpy)).toContain("email: invalid domain 'not a domain'.");
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain: vi.fn(),
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        'other.com',
-        addDeps({ runGrant }),
-      ),
-    ).rejects.toThrow('exit 1');
-    expect(printed(errorSpy)).toContain('--subdomain must name a subdomain of acme.com');
-    expect(runGrant).not.toHaveBeenCalled();
-    expect(addEmailDomain).not.toHaveBeenCalled();
-  });
-
-  it('refuses to run non-interactively (both grant paths need a human)', async () => {
-    const runGrant = vi.fn();
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain: vi.fn(),
-          getEmailDomain: vi.fn(),
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
+        api,
         'prj_1',
         'acme.com',
         undefined,
-        addDeps({ runGrant, isInteractive: false }),
+        addDeps({ verifyToken: async () => 'inactive' }),
       ),
     ).rejects.toThrow('exit 1');
-    expect(printed(errorSpy)).toContain('needs an interactive terminal');
-    expect(runGrant).not.toHaveBeenCalled();
+    expect(api.addEmailDomain).not.toHaveBeenCalled();
   });
 
-  it('falls back to the template link + clipboard watch when the grant fails', async () => {
-    const token = CFUT_TOKEN;
-    const clipboard = ['clipboard-before', token];
-    let reads = 0;
-    const readClipboard = vi.fn(() => clipboard[Math.min(reads++, clipboard.length - 1)]!);
-    const clearClipboard = vi.fn();
-    const verifyToken = vi.fn(async (): Promise<CfTokenVerification> => 'active');
-    const openUrl = vi.fn();
-    const addEmailDomain = vi.fn(async () =>
-      domainRow({ credential_kind: 'api_token', domain: 'acme.com' }),
-    );
-
+  it('leaves authoritative verification to the API if the local token probe is unavailable', async () => {
+    const api = client();
     await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
+      api,
       'prj_1',
       'acme.com',
       undefined,
-      addDeps({
-        runGrant: vi.fn(async () => {
-          throw new Error('cf-oauth: could not start the local callback server on port 8976.');
-        }),
-        readClipboard,
-        clearClipboard,
-        verifyToken,
-        openUrl,
-      }),
+      addDeps({ verifyToken: async () => 'unknown' }),
     );
-
-    // The failure is named, the link opened, and only the token-shaped NEW
-    // clipboard value was verified and POSTed.
-    expect(printed(warnSpy)).toContain('could not start the local callback server');
-    expect(openUrl).toHaveBeenCalledWith(buildCfApiTokenTemplateUrl('acme.com'));
-    expect(verifyToken).toHaveBeenCalledTimes(1);
-    expect(clearClipboard).toHaveBeenCalledTimes(1);
-    expect(addEmailDomain).toHaveBeenCalledWith('prj_1', {
-      domain: 'acme.com',
-      apiToken: token,
-      attemptId: expect.any(String),
-    });
-    expect(printed(successSpy)).toContain(
-      'Token stored on the platform, encrypted for this project — nothing is kept on this machine.',
-    );
-    expect(printed(infoSpy) + printed(successSpy) + notedBlocks()).not.toContain(token);
+    expect(api.addEmailDomain).toHaveBeenCalled();
   });
 
-  it('keeps watching past wrong-shape clipboard values without a network call', async () => {
-    const values = ['snapshot', 'ghp_' + 'a'.repeat(36), 'not a token', LEGACY_TOKEN];
-    let reads = 0;
-    const readClipboard = vi.fn(() => values[Math.min(reads++, values.length - 1)]!);
-    const verifyToken = vi.fn(async (): Promise<CfTokenVerification> => 'active');
-    const addEmailDomain = vi.fn(async () => domainRow({ credential_kind: 'api_token' }));
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps({
-        runGrant: vi.fn(async () => {
-          throw new Error('cf-oauth: cancelled.');
-        }),
-        readClipboard,
-        clearClipboard: vi.fn(),
-        verifyToken,
-        openUrl: vi.fn(),
-      }),
-    );
-
-    // One verify — for the only value that passed the shape check.
-    expect(verifyToken).toHaveBeenCalledTimes(1);
-    expect(addEmailDomain).toHaveBeenCalledWith('prj_1', {
-      domain: 'acme.com',
-      apiToken: LEGACY_TOKEN,
-      attemptId: expect.any(String),
-    });
-  });
-
-  it('switches to the masked paste on Enter; a cancel stores nothing', async () => {
-    const addEmailDomain = vi.fn(async () => domainRow({ credential_kind: 'api_token' }));
-    const pasteToken = vi.fn(async () => `  ${LEGACY_TOKEN}\n`);
-    const verifyToken = vi.fn(async (): Promise<CfTokenVerification> => 'active');
-    // The grant hangs (it waits on a browser for minutes); Enter resolves at
-    // once, so the race deterministically switches paths.
-    const pendingGrant = vi.fn(() => new Promise<never>(() => {}));
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps({
-        runGrant: pendingGrant,
-        waitForEnter: vi.fn(async () => {}),
-        readClipboard: vi.fn(() => 'clipboard-before'),
-        verifyToken,
-        pasteToken,
-        openUrl: vi.fn(),
-        clearClipboard: vi.fn(),
-      }),
-    );
-
-    expect(addEmailDomain).toHaveBeenCalledWith('prj_1', {
-      domain: 'acme.com',
-      apiToken: LEGACY_TOKEN,
-      attemptId: expect.any(String),
-    });
-
-    // Esc at the paste prompt: nothing is POSTed, nothing is stored.
-    const addEmailDomain2 = vi.fn();
-    await emailDomainAdd(
-      {
-        addEmailDomain: addEmailDomain2,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps({
-        runGrant: pendingGrant,
-        waitForEnter: vi.fn(async () => {}),
-        readClipboard: vi.fn(() => null),
-        pasteToken: vi.fn(async () => null),
-        openUrl: vi.fn(),
-      }),
-    );
-    expect(addEmailDomain2).not.toHaveBeenCalled();
-    expect(printed(infoSpy)).toContain('Cancelled — nothing was stored anywhere.');
-  });
-
-  it('stops the clipboard watch once Enter wins — no orphaned poll loop', async () => {
-    const addEmailDomain = vi.fn(async () => domainRow({ credential_kind: 'api_token' }));
-    // A constant non-token value: the poll loop keeps watching without verifying.
-    const readClipboard = vi.fn(() => 'clipboard-before');
-    const verifyToken = vi.fn(async (): Promise<CfTokenVerification> => 'active');
-    let resolveEnter!: () => void;
-    const enterPressed = new Promise<void>((resolve) => {
-      resolveEnter = resolve;
-    });
-
-    const run = emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps({
-        runGrant: vi.fn(async () => {
-          throw new Error('cf-oauth: cancelled.');
-        }),
-        // The first waitForEnter arms the grant race and never fires (the
-        // grant's failure ends that race); the second arms the watch race and
-        // is fired below, once the poll loop is observably running.
-        waitForEnter: vi
-          .fn()
-          .mockImplementationOnce(neverEnter)
-          .mockImplementationOnce(() => enterPressed),
-        readClipboard,
-        clearClipboard: vi.fn(),
-        verifyToken,
-        pasteToken: vi.fn(async () => LEGACY_TOKEN),
-        openUrl: vi.fn(),
-        // Far past the observation window below, so a still-running loop
-        // would keep polling through it.
-        watchTimeoutMs: 10_000,
-      }),
-    );
-
-    // The watch is running: the snapshot read plus at least one interval poll.
-    await vi.waitFor(() => {
-      expect(readClipboard.mock.calls.length).toBeGreaterThanOrEqual(2);
-    });
-    resolveEnter();
-    await run;
-
-    // Enter switched to the paste path, which POSTed the pasted token.
-    expect(addEmailDomain).toHaveBeenCalledWith('prj_1', {
-      domain: 'acme.com',
-      apiToken: LEGACY_TOKEN,
-      attemptId: expect.any(String),
-    });
-    // The settled race stopped the poll loop: no further clipboard reads (so
-    // no timer chain and no stray verify from the watch) past this point.
-    const readsAtSettle = readClipboard.mock.calls.length;
-    await new Promise((resolve) => setTimeout(resolve, 30)); // ~30 watch intervals
-    expect(readClipboard.mock.calls.length).toBe(readsAtSettle);
-    expect(verifyToken).toHaveBeenCalledTimes(1); // the pasted token's check
-  });
-
-  it('refuses a pasted token shaped like another vendor’s, without a network call', async () => {
-    const verifyToken = vi.fn();
-    const addEmailDomain = vi.fn();
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain: vi.fn(),
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps({
-          runGrant: vi.fn(() => new Promise<never>(() => {})),
-          waitForEnter: vi.fn(async () => {}),
-          readClipboard: vi.fn(() => null),
-          pasteToken: vi.fn(async () => `ghp_${'a'.repeat(36)}`),
-          verifyToken,
-          openUrl: vi.fn(),
-        }),
-      ),
-    ).rejects.toThrow('exit 1');
-    expect(printed(errorSpy)).toContain('that looks like a different kind of token');
-    expect(verifyToken).not.toHaveBeenCalled();
-    expect(addEmailDomain).not.toHaveBeenCalled();
-  });
-
-  it('refuses a pasted token Cloudflare says is not active', async () => {
-    const addEmailDomain = vi.fn();
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain: vi.fn(),
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps({
-          runGrant: vi.fn(() => new Promise<never>(() => {})),
-          waitForEnter: vi.fn(async () => {}),
-          readClipboard: vi.fn(() => null),
-          pasteToken: vi.fn(async () => LEGACY_TOKEN),
-          verifyToken: vi.fn(async (): Promise<CfTokenVerification> => 'inactive'),
-          openUrl: vi.fn(),
-        }),
-      ),
-    ).rejects.toThrow('exit 1');
-    expect(printed(errorSpy)).toContain('that is not an active Cloudflare token');
-    expect(addEmailDomain).not.toHaveBeenCalled();
-  });
-
-  it('renders a failed row with the failed step and the retry hint', async () => {
-    const addEmailDomain = vi.fn(async () =>
-      domainRow({
-        status: 'failed',
-        setup_state: { failed_step: 'zone_lookup' },
-        error: 'no Cloudflare zone found for acme.com in an account this credential can see',
-      }),
-    );
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps(),
-    );
-
-    expect(printed(errorSpy)).toContain('failed at zone lookup');
-    expect(printed(errorSpy)).toContain('no Cloudflare zone found for acme.com');
-    expect(printed(infoSpy)).toContain('re-run `void email domain add acme.com`');
-  });
-
-  it('renders the pending row with the routing-subdomain dashboard step', async () => {
-    const addEmailDomain = vi.fn(async () =>
-      domainRow({
-        domain: 'mail.acme.com',
-        mode: 'subdomain',
-        status: 'pending',
-        setup_state: { remaining_steps: ['routing_subdomain'] },
-      }),
-    );
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps(),
-    );
-
-    expect(notedBlocks()).toContain('Domain:      mail.acme.com');
-    expect(printed(warnSpy)).toContain('Email Routing → acme.com → Settings → Subdomains');
-    expect(printed(infoSpy)).toContain('void email domain status mail.acme.com');
-  });
-
-  it('renders the Workers Free hint when sending onboarding is still pending on a live row', async () => {
-    const addEmailDomain = vi.fn(async () =>
-      domainRow({
-        status: 'active',
-        setup_state: { remaining_steps: ['sending_onboarding'] },
-      }),
-    );
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain: vi.fn(),
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps(),
-    );
-
-    expect(printed(infoSpy)).toContain('Workers Paid');
-    expect(printed(infoSpy)).toContain('void email domain sync acme.com');
-    // The row is live — the success line still prints.
-    expect(printed(successSpy)).toContain('acme.com is live');
-  });
-
-  it('rethrows an API rejection without reconciling — the server already revoked the grant', async () => {
-    const addEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError(
-        'Failed to add email domain',
-        409,
-        '{"error":"domain is registered to another project"}',
-      );
-    });
-    const getEmailDomain = vi.fn();
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain,
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps(),
-      ),
-    ).rejects.toThrow(PlatformApiError);
-    // No reconciliation, no CLI-side revoke: the API's rejection owns both.
-    expect(getEmailDomain).not.toHaveBeenCalled();
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it('routes a 500 answer through the attempt-id reconcile — the row committed', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError('Failed to add email domain', 500, '{"error":"internal error"}');
-    });
-    // A 500 is ambiguous — the add may have committed before the error. The
-    // reconcile proves it did: the row carries this attempt's id.
-    const getEmailDomain = vi.fn(async () => statusRow({ attemptId: ATTEMPT_ID }));
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain,
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps(),
-    );
-
-    expect(getEmailDomain).toHaveBeenCalledTimes(1);
-    expect(printed(warnSpy)).toContain('answer was lost');
-    expect(notedBlocks()).toContain('Domain:      acme.com');
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it('routes a 500 answer through the attempt-id reconcile — nothing persisted, the grant is revoked', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError('Failed to add email domain', 500, '{"error":"internal error"}');
-    });
-    const getEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError(
-        'Failed to fetch email domain status',
-        404,
-        '{"error":"email domain not found"}',
-      );
-    });
-    const fetchSpy = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain,
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps(),
-      ),
-    ).rejects.toThrow('exit 1');
-
-    // The 500 did not prove a server-side revoke, so the CLI kills the grant
-    // it still holds once the polls prove nothing persisted.
-    expect(getEmailDomain).toHaveBeenCalledTimes(15);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://dash.cloudflare.com/oauth2/revoke');
-    expect(printed(errorSpy)).toContain('was not registered');
-    expect(printed(errorSpy)).toContain('was revoked');
-  });
-
-  it('reconciles a 403 answer — a suspended account never reached the route, nothing persisted', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError(
-        'Failed to add email domain',
-        403,
-        '{"error":"account suspended"}',
-      );
-    });
-    // A 403 may come from the middleware pre-route (no parse, no revoke), so
-    // it reconciles like any other ambiguous answer — here the polls prove
-    // nothing persisted and the held grant is revoked.
-    const getEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError(
-        'Failed to fetch email domain status',
-        404,
-        '{"error":"email domain not found"}',
-      );
-    });
-    const fetchSpy = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain,
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps(),
-      ),
-    ).rejects.toThrow('exit 1');
-
-    expect(getEmailDomain).toHaveBeenCalledTimes(15);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0]![0])).toBe('https://dash.cloudflare.com/oauth2/revoke');
-    expect(printed(errorSpy)).toContain('was not registered');
-  });
-
-  it('reconciles a 403 answer — every poll 403s too, so the state stays unknown and nothing is revoked', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError(
-        'Failed to add email domain',
-        403,
-        '{"error":"account suspended"}',
-      );
-    });
-    const getEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError(
-        'Failed to fetch email domain status',
-        403,
-        '{"error":"account suspended"}',
-      );
-    });
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain,
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps(),
-      ),
-    ).rejects.toThrow('exit 1');
-
-    // No poll produced a read — the grant may be live, and a blind revoke
-    // could brick a committed row: report, don't revoke.
-    expect(getEmailDomain).toHaveBeenCalledTimes(15);
-    expect(printed(errorSpy)).toContain('state is unknown');
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it('reports a failed revocation instead of claiming it — the grant may still be live', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new TypeError('fetch failed');
-    });
-    const getEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError(
-        'Failed to fetch email domain status',
-        404,
-        '{"error":"email domain not found"}',
-      );
-    });
-    // Cloudflare answers the revoke with a 500: fetch resolves, and a helper
-    // that ignored the status would let the CLI claim a revocation that
-    // never happened.
-    const fetchSpy = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response('nope', { status: 500 }),
-    );
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain,
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps(),
-      ),
-    ).rejects.toThrow('exit 1');
-
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(printed(errorSpy)).toContain('could not be revoked');
-    expect(printed(errorSpy)).toContain('revoke it in the Cloudflare dashboard');
-    expect(printed(errorSpy)).not.toContain('was revoked');
-  });
-
-  it('reconciles a lost answer: the row carries this attempt id, nothing is revoked', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new TypeError('fetch failed');
-    });
-    const getEmailDomain = vi.fn(async () => statusRow({ attemptId: ATTEMPT_ID }));
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain,
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps(),
-    );
-
-    // One read settles it: the stamped attempt id proves this attempt's
-    // POST committed, so the platform holds the credential and the row
-    // renders like any other add.
-    expect(getEmailDomain).toHaveBeenCalledTimes(1);
-    expect(getEmailDomain).toHaveBeenCalledWith('prj_1', 'acme.com');
-    expect(printed(warnSpy)).toContain('answer was lost');
-    expect(notedBlocks()).toContain('Domain:      acme.com');
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it('reconciles a lost answer: a 404 then the row with this attempt id — the insert was still in flight', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new TypeError('fetch failed');
-    });
-    const getEmailDomain = vi
+  it('accepts only a new Cloudflare-shaped clipboard value and clears it after use', async () => {
+    const api = client();
+    const readClipboard = vi
       .fn()
-      .mockRejectedValueOnce(
-        new PlatformApiError(
-          'Failed to fetch email domain status',
-          404,
-          '{"error":"email domain not found"}',
-        ),
-      )
-      .mockResolvedValueOnce(statusRow({ attemptId: ATTEMPT_ID }));
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain,
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
+      .mockReturnValueOnce('old clipboard')
+      .mockReturnValueOnce('ghp_ignored')
+      .mockReturnValue(CFUT_TOKEN);
+    const deps = addDeps({ readClipboard });
+    await emailDomainAdd(api, 'prj_1', 'acme.com', undefined, deps);
+    expect(deps.verifyToken).toHaveBeenCalledTimes(1);
+    expect(deps.verifyToken).toHaveBeenCalledWith(CFUT_TOKEN);
+    expect(deps.clearClipboard).toHaveBeenCalledTimes(1);
+    expect(api.addEmailDomain).toHaveBeenCalledWith(
       'prj_1',
-      'acme.com',
-      undefined,
-      addDeps(),
+      expect.objectContaining({ apiToken: CFUT_TOKEN }),
     );
-
-    // The lost answer did not stop the API worker: the row committed
-    // between polls, and the stamped attempt id proves the credential is
-    // this attempt's — revoking here would brick the row.
-    expect(getEmailDomain).toHaveBeenCalledTimes(2);
-    expect(printed(warnSpy)).toContain('answer was lost');
-    expect(notedBlocks()).toContain('Domain:      acme.com');
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('reconciles a lost answer against an api without attempt identity: the row exists, nothing is revoked', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new TypeError('fetch failed');
-    });
-    // No attemptId key in the parsed row at all (statusRow carries none):
-    // an old api, where this could be my committed add — indistinguishable
-    // from a pre-existing row, so trust it and never revoke.
-    const getEmailDomain = vi.fn(async () => statusRow({ status: 'pending' }));
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await emailDomainAdd(
-      {
-        addEmailDomain,
-        getEmailDomain,
-        getEmailSettings: selfServeSettings,
-        listEmailDomains: noEmailDomains,
-      },
-      'prj_1',
-      'acme.com',
-      undefined,
-      addDeps(),
-    );
-
-    expect(getEmailDomain).toHaveBeenCalledTimes(1);
-    expect(getEmailDomain).toHaveBeenCalledWith('prj_1', 'acme.com');
-    expect(printed(warnSpy)).toContain('answer was lost');
-    expect(notedBlocks()).toContain('Domain:      acme.com');
-    expect(fetchSpy).not.toHaveBeenCalled();
+  it('recovers a lost submission response by exact operation key', async () => {
+    const api = client();
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue(ATTEMPT_ID);
+    api.addEmailDomain.mockRejectedValue(new Error('connection reset'));
+    await emailDomainAdd(api, 'prj_1', 'acme.com', undefined, addDeps());
+    expect(api.getEmailOperation).toHaveBeenCalledWith('prj_1', ATTEMPT_ID);
+    expect(api.getEmailDomain).not.toHaveBeenCalled();
+    expect(notedBlocks()).toContain('Operation:   op_1');
+    expect(notedBlocks()).toContain('Inbound:     ready');
+    expect(notedBlocks()).not.toContain('[object Object]');
   });
 
-  it('revokes the minted grant when the row keeps a different attempt id through the deadline', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new TypeError('fetch failed');
-    });
-    // The pre-existing row, stamped by an earlier attempt: this attempt's
-    // replace POST never landed, and a committed mine would carry my id.
-    const getEmailDomain = vi.fn(async () =>
-      statusRow({ attemptId: '99999999-9999-4999-8999-999999999999' }),
+  it('never treats missing operation reads as proof that nothing committed', async () => {
+    const api = client();
+    api.addEmailDomain.mockRejectedValue(new Error('connection reset'));
+    api.getEmailOperation.mockRejectedValue(new PlatformApiError('not found', 404, '{}'));
+    await expect(emailDomainAdd(api, 'prj_1', 'acme.com', undefined, addDeps())).rejects.toThrow(
+      'exit 1',
     );
-    const fetchSpy = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain,
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps(),
-      ),
-    ).rejects.toThrow('exit 1');
-
-    expect(getEmailDomain).toHaveBeenCalledTimes(15);
-    // Exactly one call: the RFC 7009 revoke of the grant this process held.
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchSpy.mock.calls[0]!;
-    expect(String(url)).toBe('https://dash.cloudflare.com/oauth2/revoke');
-    const form = new URLSearchParams(String(init?.body));
-    expect(form.get('token')).toBe(GRANT_SENTINEL);
-    expect(form.get('token_type_hint')).toBe('refresh_token');
-    expect(printed(errorSpy)).toContain("kept the row's existing credential");
-    expect(printed(errorSpy)).toContain('revoked');
-    // The token itself never reaches an output line.
-    expect(printed(errorSpy) + printed(infoSpy) + printed(warnSpy)).not.toContain(GRANT_SENTINEL);
+    expect(api.getEmailOperation).toHaveBeenCalledTimes(15);
+    expect(printed(errorSpy)).toContain('outcome is unknown');
+    expect(printed(errorSpy)).toContain('Nothing was revoked');
   });
 
-  it('treats a stamped null attempt id as foreign — a row an older CLI wrote', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new TypeError('fetch failed');
-    });
-    const getEmailDomain = vi.fn(async () => statusRow({ attemptId: null }));
-    const fetchSpy = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 200 }),
+  it('does not poll after a definitive validation refusal', async () => {
+    const api = client();
+    api.addEmailDomain.mockRejectedValue(new PlatformApiError('invalid domain', 400, '{}'));
+    await expect(emailDomainAdd(api, 'prj_1', 'acme.com', undefined, addDeps())).rejects.toThrow(
+      'invalid domain',
     );
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain,
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps(),
-      ),
-    ).rejects.toThrow('exit 1');
-
-    // The key is present (new api) but null — not this attempt, so the
-    // posted grant was never stored and the revoke is safe.
-    expect(getEmailDomain).toHaveBeenCalledTimes(15);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(printed(errorSpy)).toContain("kept the row's existing credential");
+    expect(api.getEmailOperation).not.toHaveBeenCalled();
   });
 
-  it('revokes the minted grant when a transport failure provably never persisted it', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new TypeError('fetch failed');
-    });
-    const getEmailDomain = vi.fn(async () => {
-      throw new PlatformApiError(
-        'Failed to fetch email domain status',
-        404,
-        '{"error":"email domain not found"}',
+  it.each(['pending', 'running', 'blocked', 'unknown'] as const)(
+    'returns failure when setup is %s, even if a row exists',
+    async (operationStatus) => {
+      const api = client();
+      api.addEmailDomain.mockResolvedValue(
+        domainRow({ operationId: 'op_1', operationStatus, error: 'setup unfinished' }),
       );
-    });
-    const fetchSpy = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain,
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps(),
-      ),
-    ).rejects.toThrow('exit 1');
-
-    // 404 at every one of the 15 polls — provably nothing persisted.
-    expect(getEmailDomain).toHaveBeenCalledTimes(15);
-    // Exactly one call: the RFC 7009 revoke of the grant this process held.
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchSpy.mock.calls[0]!;
-    expect(String(url)).toBe('https://dash.cloudflare.com/oauth2/revoke');
-    const form = new URLSearchParams(String(init?.body));
-    expect(form.get('token')).toBe(GRANT_SENTINEL);
-    expect(form.get('token_type_hint')).toBe('refresh_token');
-    expect(printed(errorSpy)).toContain('was not registered');
-    expect(printed(errorSpy)).toContain('revoked');
-    // The token itself never reaches an output line.
-    expect(printed(errorSpy) + printed(infoSpy) + printed(warnSpy)).not.toContain(GRANT_SENTINEL);
-  });
-
-  it('never revokes on an indeterminate reconcile — the grant may be the row’s credential', async () => {
-    mockAttemptId();
-    const addEmailDomain = vi.fn(async () => {
-      throw new TypeError('fetch failed');
-    });
-    const getEmailDomain = vi.fn(async () => {
-      throw new TypeError('fetch failed');
-    });
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-
-    await expect(
-      emailDomainAdd(
-        {
-          addEmailDomain,
-          getEmailDomain,
-          getEmailSettings: selfServeSettings,
-          listEmailDomains: noEmailDomains,
-        },
-        'prj_1',
-        'acme.com',
-        undefined,
-        addDeps(),
-      ),
-    ).rejects.toThrow('exit 1');
-
-    // No poll produced any read: a blind revoke could brick a committed
-    // row — report, don't revoke.
-    expect(getEmailDomain).toHaveBeenCalledTimes(15);
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(printed(errorSpy)).toContain('state is unknown');
-  });
+      await expect(emailDomainAdd(api, 'prj_1', 'acme.com', undefined, addDeps())).rejects.toThrow(
+        'exit 1',
+      );
+      expect(printed(errorSpy)).toContain('setup unfinished');
+      expect(notedBlocks()).toContain(`op_1 · ${operationStatus}`);
+    },
+  );
 });
 
 describe('emailDomainStatus', () => {
-  it('renders the row, the live credential probe and the relay state', async () => {
-    const getEmailDomain = vi.fn(async () =>
-      statusRow({ token_id: 'cf-token-id', token_expires_on: '2026-12-31T00:00:00Z' }),
-    );
+  it('shows the recorded readiness and gives an owner the correct reconciliation command', async () => {
     const getEmailSettings = vi.fn(selfServeSettings);
-    await emailDomainStatus({ getEmailDomain, getEmailSettings }, 'prj_1', 'acme.com');
-
-    const block = notedBlocks();
-    expect(block).toContain('Domain:      acme.com');
-    expect(block).toContain('Mode:        apex');
-    expect(block).toContain('Credential:  OAuth grant · active');
-    expect(block).toContain('Token:       id cf-token-id · expires 2026-12-31T00:00:00Z');
-    expect(block).toContain('Relay:       void-email-relay v1');
-    expect(getEmailDomain).toHaveBeenCalledWith('prj_1', 'acme.com');
-    expect(getEmailSettings).not.toHaveBeenCalled();
-  });
-
-  it('points at sync when the relay drifted or went missing', async () => {
     await emailDomainStatus(
       {
         getEmailDomain: vi.fn(async () =>
-          statusRow({ relay_drift: true, current_relay_version: 2 }),
-        ),
-        getEmailSettings: selfServeSettings,
-      },
-      'prj_1',
-      'acme.com',
-    );
-    expect(notedBlocks()).toContain('drifted (current is v2)');
-    expect(printed(infoSpy)).toContain('void email domain sync acme.com');
-
-    await emailDomainStatus(
-      {
-        getEmailDomain: vi.fn(async () => statusRow({ relay_missing: true })),
-        getEmailSettings: selfServeSettings,
-      },
-      'prj_1',
-      'acme.com',
-    );
-    expect(notedBlocks()).toContain('missing from the account');
-  });
-
-  it('names the renewal path for a revoked or expired credential', async () => {
-    await emailDomainStatus(
-      {
-        getEmailDomain: vi.fn(async () =>
-          statusRow({ status: 'token_revoked', credential_status: 'revoked' }),
-        ),
-        getEmailSettings: selfServeSettings,
-      },
-      'prj_1',
-      'acme.com',
-    );
-    expect(printed(warnSpy)).toContain('Re-run `void email domain add acme.com`');
-    expect(printed(warnSpy)).toContain('adding again replaces the credential, rules stay');
-  });
-
-  it('prints the api error verbatim and the remaining human step', async () => {
-    await emailDomainStatus(
-      {
-        getEmailDomain: vi.fn(async () =>
-          statusRow({
+          domainRow({
             status: 'pending',
-            mode: 'subdomain',
-            domain: 'mail.acme.com',
-            error: 'probe text safe to print',
-            setup_state: { remaining_steps: ['routing_subdomain'] },
-          }),
-        ),
-        getEmailSettings: selfServeSettings,
-      },
-      'prj_1',
-      'mail.acme.com',
-    );
-    expect(printed(errorSpy)).toContain('email: probe text safe to print');
-    expect(printed(warnSpy)).toContain('Email Routing → acme.com → Settings → Subdomains');
-  });
-
-  it('renders the catch-all state, and the sync hint only when it drifted', async () => {
-    await emailDomainStatus(
-      {
-        getEmailDomain: vi.fn(async () => statusRow({ catch_all: 'points_here' })),
-        getEmailSettings: selfServeSettings,
-      },
-      'prj_1',
-      'acme.com',
-    );
-    expect(notedBlocks()).toContain('Catch-all:   points_here');
-    expect(printed(infoSpy)).not.toContain('re-point it');
-
-    await emailDomainStatus(
-      {
-        getEmailDomain: vi.fn(async () =>
-          statusRow({ catch_all: 'points_elsewhere', catch_all_drift: true }),
-        ),
-        getEmailSettings: selfServeSettings,
-      },
-      'prj_1',
-      'acme.com',
-    );
-    expect(notedBlocks()).toContain('Catch-all:   points_elsewhere');
-    expect(printed(infoSpy)).toContain('run `void email domain sync acme.com` to re-point it');
-  });
-
-  it('points administrator-managed setup and drift remediation at the administrator', async () => {
-    await emailDomainStatus(
-      {
-        getEmailDomain: vi.fn(async () =>
-          statusRow({
-            managed_by: 'admin',
-            status: 'pending',
-            mode: 'subdomain',
-            domain: 'mail.acme.com',
-            relay_drift: true,
-            catch_all: 'points_elsewhere',
-            catch_all_drift: true,
-            setup_state: { remaining_steps: ['routing_subdomain'] },
-          }),
-        ),
-        getEmailSettings: selfServeSettings,
-      },
-      'prj_1',
-      'mail.acme.com',
-    );
-
-    expect(printed(warnSpy)).toContain(
-      "One step for your administrator, in the platform's Cloudflare account",
-    );
-    expect(printed(infoSpy)).toContain('void platform email domain-sync mail.acme.com');
-    expect(printed(infoSpy)).not.toContain('void email domain sync');
-  });
-
-  it.each([
-    ['platform credential', 'platform' as const, false],
-    ['pasted API token', 'api_token' as const, true],
-  ])(
-    'points failed administrator setup using a %s at domain-add',
-    async (_label, kind, tokenStdin) => {
-      const getEmailSettings = vi.fn(async () => ({
-        domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
-      }));
-      await emailDomainStatus(
-        {
-          getEmailDomain: vi.fn(async () =>
-            statusRow({
-              managed_by: 'admin',
-              credential_kind: kind,
-              status: 'failed',
-              relay_worker_name: null,
-              relay_version: null,
-              relay_drift: true,
-              catch_all_drift: true,
-              setup_state: { failed_step: 'zone_lookup' },
-            }),
-          ),
-          getEmailSettings,
-        },
-        'prj_1',
-        'acme.com',
-      );
-
-      const output = printed(warnSpy) + printed(infoSpy);
-      expect(output).toContain('void platform email domain-add acme.com --project hr-portal');
-      expect(output.includes('--token-stdin')).toBe(tokenStdin);
-      expect(output).not.toContain('domain-sync');
-      expect(getEmailSettings).toHaveBeenCalledTimes(1);
-    },
-  );
-
-  it('points an expired administrator API token at platform domain-add with the project slug', async () => {
-    const getEmailSettings = vi.fn(async () => ({
-      domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
-    }));
-    await emailDomainStatus(
-      {
-        getEmailDomain: vi.fn(async () =>
-          statusRow({
-            managed_by: 'admin',
-            credential_kind: 'api_token',
-            status: 'token_expired',
-            credential_status: 'expired',
+            operationId: 'eop_1',
+            operationStatus: 'blocked',
+            readiness: {
+              inbound: {
+                status: 'pending',
+                reason: 'Enable Email Routing for mail.acme.com',
+                observedAt: '2026-09-17T00:00:00Z',
+              },
+              outbound: { status: 'verified_only' },
+              management: { status: 'healthy' },
+            },
           }),
         ),
         getEmailSettings,
@@ -1647,31 +505,108 @@ describe('emailDomainStatus', () => {
       'prj_1',
       'acme.com',
     );
+    expect(notedBlocks()).toContain('Operation:   eop_1 · blocked');
+    expect(notedBlocks()).toContain('Enable Email Routing for mail.acme.com');
+    expect(notedBlocks()).toContain('outbound     verified_only');
+    expect(printed(infoSpy)).toContain('void email domain sync acme.com');
+    expect(getEmailSettings).not.toHaveBeenCalled();
+  });
 
-    expect(printed(warnSpy)).toContain(
-      'void platform email domain-add acme.com --project hr-portal --token-stdin',
+  it('sends an administrator-managed pending assignment to the operator', async () => {
+    const getEmailSettings = vi.fn(async () => ({
+      domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
+    }));
+    await emailDomainStatus(
+      {
+        getEmailDomain: vi.fn(async () =>
+          domainRow({
+            managed_by: 'admin',
+            status: 'pending',
+            readiness: {
+              inbound: { status: 'pending' },
+              outbound: { status: 'verified_only' },
+              management: { status: 'healthy' },
+            },
+          }),
+        ),
+        getEmailSettings,
+      },
+      'prj_1',
+      'acme.com',
     );
+    expect(notedBlocks()).toContain('Managed by:  administrator');
+    expect(printed(infoSpy)).toContain('void platform email domain-sync acme.com');
+    expect(printed(infoSpy)).not.toContain('Run `void email domain sync');
     expect(getEmailSettings).toHaveBeenCalledWith('prj_1');
+  });
+
+  it('names credential renewal and the project for an administrator-managed route', async () => {
+    await emailDomainStatus(
+      {
+        getEmailDomain: vi.fn(async () =>
+          domainRow({
+            managed_by: 'admin',
+            readiness: {
+              inbound: { status: 'ready' },
+              outbound: { status: 'blocked' },
+              management: { status: 'revoked', reason: 'token revoked' },
+            },
+          }),
+        ),
+        getEmailSettings: vi.fn(async () => ({
+          domains: { management: 'admin' as const, projectSlug: 'hr-portal' },
+        })),
+      },
+      'prj_1',
+      'acme.com',
+    );
+    expect(notedBlocks()).toContain('management   revoked — token revoked');
+    expect(printed(infoSpy)).toContain(
+      'void platform email domain-add acme.com --project hr-portal',
+    );
+  });
+
+  it('does not invite reconciliation of an operation with an unknown provider outcome', async () => {
+    await emailDomainStatus(
+      {
+        getEmailDomain: vi.fn(async () =>
+          domainRow({
+            status: 'drifted',
+            operationId: 'eop_unknown',
+            operationStatus: 'unknown',
+            readiness: {
+              inbound: { status: 'drifted' },
+              outbound: { status: 'verified_only' },
+              management: { status: 'refresh_unknown' },
+            },
+          }),
+        ),
+        getEmailSettings: vi.fn(selfServeSettings),
+      },
+      'prj_1',
+      'acme.com',
+    );
+    expect(printed(warnSpy)).toContain('eop_unknown');
+    expect(printed(infoSpy)).not.toContain('domain sync');
   });
 });
 
 describe('emailDomainList', () => {
   it('reports the empty state with the add hint', async () => {
     await emailDomainList({ listEmailDomains: vi.fn(async () => []) }, 'prj_1');
-    expect(printed(infoSpy)).toContain('No email domains.');
     expect(printed(infoSpy)).toContain('void email domain add <domain>');
   });
 
-  it('renders one line per domain with status and mode', async () => {
+  it('lists actual assignment status and management, without a retired mode column', async () => {
     await emailDomainList(
       {
         listEmailDomains: vi.fn(async () => [
-          domainRow({ domain: 'acme.com', status: 'active', mode: 'apex' }),
+          domainRow(),
           domainRow({
             id: 'edom_2',
             domain: 'mail.example.org',
             status: 'pending',
-            mode: 'subdomain',
+            managed_by: 'admin',
           }),
         ]),
       },
@@ -1679,160 +614,175 @@ describe('emailDomainList', () => {
     );
     const block = notedBlocks();
     expect(block).toContain('acme.com');
+    expect(block).toContain('ready');
     expect(block).toContain('mail.example.org');
-    expect(block).toContain('subdomain');
+    expect(block).toContain('administrator');
+    expect(block).not.toContain('  —');
   });
 });
 
 describe('emailDomainSync', () => {
-  it('renders the redeploy + rotation on success', async () => {
-    const syncEmailDomain = vi.fn(async () => domainRow({ relay_version: 2 }));
-    await emailDomainSync({ syncEmailDomain }, 'prj_1', 'acme.com');
-    expect(printed(successSpy)).toContain('Relay redeployed at v2 with a rotated secret.');
-    expect(syncEmailDomain).toHaveBeenCalledWith('prj_1', 'acme.com');
-  });
-
-  it('renders a failed sync with the failed step', async () => {
+  it('renders the current readiness and operation without claiming secret rotation', async () => {
     const syncEmailDomain = vi.fn(async () =>
-      domainRow({
-        status: 'failed',
-        relay_version: null,
-        setup_state: { failed_step: 'deploy_relay' },
-        error: 'PUT script failed',
-      }),
+      domainRow({ operationId: 'eop_sync', operationStatus: 'completed' }),
     );
     await emailDomainSync({ syncEmailDomain }, 'prj_1', 'acme.com');
-    expect(printed(errorSpy)).toContain('failed at deploy relay');
-    expect(printed(errorSpy)).toContain('PUT script failed');
-    expect(printed(successSpy)).not.toContain('Relay redeployed');
+    expect(notedBlocks()).toContain('eop_sync · completed');
+    expect(notedBlocks()).toContain('outbound     verified_only');
+    expect(printed(successSpy)).not.toContain('rotated secret');
   });
 
-  it('prints the catch-all outcome when the response carries one', async () => {
-    const syncEmailDomain = vi.fn(async () => ({ ...domainRow(), catch_all: 'ensured' as const }));
-    await emailDomainSync({ syncEmailDomain }, 'prj_1', 'acme.com');
-    expect(printed(infoSpy)).toContain('Catch-all: ensured');
-    expect(printed(warnSpy)).not.toContain('NOT overwritten');
-  });
-
-  it('warns instead of claiming the catch-all when it points at a different worker', async () => {
-    const syncEmailDomain = vi.fn(async () => ({
-      ...domainRow(),
-      catch_all: 'foreign_conflict' as const,
-    }));
-    await emailDomainSync({ syncEmailDomain }, 'prj_1', 'acme.com');
-    expect(printed(warnSpy)).toContain("the zone's catch-all points at a different worker");
-    expect(printed(warnSpy)).toContain('NOT overwritten');
-    expect(printed(infoSpy)).not.toContain('Catch-all:');
-  });
-
-  it('prints no catch-all line when the response omits it (a row with no zone_id)', async () => {
-    const syncEmailDomain = vi.fn(async () => domainRow());
-    await emailDomainSync({ syncEmailDomain }, 'prj_1', 'acme.com');
-    expect(printed(infoSpy) + printed(warnSpy)).not.toContain('Catch-all');
-  });
+  it.each(['pending', 'running', 'blocked', 'unknown'] as const)(
+    'exits unsuccessfully for a %s operation while retaining its ID',
+    async (operationStatus) => {
+      const syncEmailDomain = vi.fn(async () =>
+        domainRow({ operationId: 'eop_sync', operationStatus, error: 'provider step unresolved' }),
+      );
+      await expect(emailDomainSync({ syncEmailDomain }, 'prj_1', 'acme.com')).rejects.toThrow(
+        'eop_sync',
+      );
+      expect(printed(errorSpy)).toContain('provider step unresolved');
+    },
+  );
 });
 
 describe('emailDomainRemove', () => {
-  function removeClient(body: RemoveEmailDomainResponse): Pick<
-    PlatformClient,
-    'removeEmailDomain'
-  > & {
-    removeEmailDomain: ReturnType<typeof vi.fn>;
-  } {
+  function removeClient(body: RemoveEmailDomainResponse) {
     return { removeEmailDomain: vi.fn(async () => body) };
   }
 
-  it('renders a clean removal with no warnings', async () => {
-    const client = removeClient({ ok: true, removed: true });
-    await emailDomainRemove(client, 'prj_1', 'acme.com');
-    expect(client.removeEmailDomain).toHaveBeenCalledWith('prj_1', 'acme.com', undefined);
-    expect(printed(successSpy)).toContain(
-      'Removed acme.com — the platform row, the stored credential and the relay secret are gone.',
-    );
-    expect(printed(warnSpy)).toBe('');
-    expect(printed(errorSpy)).toBe('');
-  });
-
-  it('passes --force through to the api', async () => {
-    const client = removeClient({ ok: true, removed: true });
-    await emailDomainRemove(client, 'prj_1', 'acme.com', { force: true });
-    expect(client.removeEmailDomain).toHaveBeenCalledWith('prj_1', 'acme.com', true);
-  });
-
-  it('kept for retry: names the failed steps, points at retry and --force, exits 1', async () => {
-    const client = removeClient({
-      ok: false,
-      removed: false,
-      failed_steps: ['catch_all', 'delete_relay'],
-    });
-    const exit = exitSpy();
-    await expect(emailDomainRemove(client, 'prj_1', 'acme.com', { exit })).rejects.toThrow(
-      'exit 1',
-    );
-    expect(printed(errorSpy)).toContain('failed Cloudflare-side steps: catch_all, delete_relay');
-    expect(printed(infoSpy)).toContain('The registration was kept');
-    expect(printed(infoSpy)).toContain('retry `void email domain remove acme.com`');
-    expect(printed(infoSpy)).toContain('re-run with --force to drop the row anyway');
-    expect(exit).toHaveBeenCalledWith(1);
-  });
-
-  it('forced: success plus a warning naming the failed steps and the manual cleanup', async () => {
+  it('reports completion and retained shared zone resources', async () => {
     const client = removeClient({
       ok: true,
       removed: true,
-      forced: true,
-      failed_steps: ['delete_relay', 'catch_all'],
+      operationId: 'eop_remove',
+      operationStatus: 'completed',
     });
-    await emailDomainRemove(client, 'prj_1', 'acme.com', { force: true });
-    expect(printed(successSpy)).toContain('Removed acme.com');
-    expect(printed(warnSpy)).toContain('delete_relay, catch_all');
-    expect(printed(warnSpy)).toContain('delete the relay worker and reset the catch-all');
-    expect(printed(warnSpy)).toContain("the zone's Email Routing settings");
+    await emailDomainRemove(client, 'prj_1', 'acme.com');
+    expect(client.removeEmailDomain).toHaveBeenCalledWith('prj_1', 'acme.com');
+    expect(printed(infoSpy)).toContain('eop_remove · completed');
+    expect(printed(successSpy)).toContain(
+      'Zone resources still used by other domains were retained',
+    );
   });
 
-  it('a grant-revoke failure alone is a one-line note, not a warning', async () => {
-    const client = removeClient({ ok: true, removed: true, failed_steps: ['revoke_grant'] });
-    await emailDomainRemove(client, 'prj_1', 'acme.com');
-    expect(printed(successSpy)).toContain('Removed acme.com');
-    expect(printed(infoSpy)).toContain('the Cloudflare grant could not be revoked');
-    expect(printed(infoSpy)).toContain('no mail impact');
-    expect(printed(warnSpy)).toBe('');
-  });
+  it.each(['blocked', 'unknown', 'running'] as const)(
+    'returns a nonzero result for %s cleanup and never claims removal',
+    async (operationStatus) => {
+      const client = removeClient({
+        ok: false,
+        removed: false,
+        operationId: 'eop_remove',
+        operationStatus,
+        error: 'cleanup still recorded',
+      });
+      const exit = exitSpy();
+      await expect(emailDomainRemove(client, 'prj_1', 'acme.com', { exit })).rejects.toThrow(
+        'exit 1',
+      );
+      expect(printed(infoSpy)).toContain(`eop_remove · ${operationStatus}`);
+      expect(printed(errorSpy)).toContain('cleanup still recorded');
+      expect(printed(successSpy)).toBe('');
+    },
+  );
 });
 
 describe('PlatformClient.removeEmailDomain', () => {
-  const apiUrl = 'https://api.test';
-  let originalFetch: typeof globalThis.fetch | undefined;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-  });
-
-  afterEach(() => {
-    if (originalFetch) {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('DELETEs the domain URL, appending ?force=1 only when forced', async () => {
+  it('DELETEs only the exact domain path', async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response(JSON.stringify({ ok: true, removed: true }), {
+        new Response(
+          JSON.stringify({
+            ok: true,
+            removed: true,
+            operationId: 'eop_remove',
+            operationStatus: 'completed',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new PlatformClient('tok', { apiUrl: 'https://api.test' });
+    await client.removeEmailDomain('prj_1', 'acme.com');
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe('https://api.test/projects/prj_1/email/domains/acme.com');
+    expect(init?.method).toBe('DELETE');
+  });
+});
+
+describe('emailDomainRotateSecret', () => {
+  it('reports completion only after the deployed generation was verified', async () => {
+    const attemptId = '11111111-2222-4333-8444-555555555555';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue(attemptId);
+    const rotateEmailDomainSecret = vi.fn(async () =>
+      domainRow({ operationId: 'eop_rotate', operationStatus: 'completed' }),
+    );
+    await emailDomainRotateSecret(
+      { rotateEmailDomainSecret, getEmailOperation: vi.fn() },
+      'prj_1',
+      'acme.com',
+    );
+    expect(rotateEmailDomainSecret).toHaveBeenCalledWith('prj_1', 'acme.com', attemptId);
+    expect(printed(successSpy)).toContain('verified on the deployed Worker');
+  });
+
+  it('reports an uncertain rotation without claiming success', async () => {
+    const rotateEmailDomainSecret = vi.fn(async () =>
+      domainRow({ operationId: 'eop_rotate', operationStatus: 'unknown' }),
+    );
+    await expect(
+      emailDomainRotateSecret(
+        { rotateEmailDomainSecret, getEmailOperation: vi.fn() },
+        'prj_1',
+        'acme.com',
+      ),
+    ).rejects.toThrow('eop_rotate');
+    expect(printed(successSpy)).not.toContain('secret rotated');
+  });
+
+  it('recovers a lost response by the exact rotation key before reporting success', async () => {
+    const attemptId = '11111111-2222-4333-8444-555555555555';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue(attemptId);
+    const rotateEmailDomainSecret = vi.fn(async () => {
+      throw new Error('connection reset');
+    });
+    const getEmailOperation = vi.fn(async () => ({
+      operationId: 'eop_rotate',
+      attemptId,
+      status: 'completed' as const,
+      domain: 'acme.com',
+      readiness: domainRow().readiness,
+    }));
+    await emailDomainRotateSecret(
+      { rotateEmailDomainSecret, getEmailOperation },
+      'prj_1',
+      'acme.com',
+      { sleep: vi.fn(async () => {}) },
+    );
+    expect(rotateEmailDomainSecret).toHaveBeenCalledWith('prj_1', 'acme.com', attemptId);
+    expect(getEmailOperation).toHaveBeenCalledWith('prj_1', attemptId);
+    expect(notedBlocks()).toContain('eop_rotate');
+    expect(printed(successSpy)).toContain('verified on the deployed Worker');
+  });
+});
+
+describe('PlatformClient.rotateEmailDomainSecret', () => {
+  it('submits an idempotency key with the rotation request', async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify(domainRow()), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
     );
-    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
-    const client = new PlatformClient('tok', { apiUrl });
-
-    await client.removeEmailDomain('prj_1', 'acme.com');
-    const [plainUrl, plainInit] = fetchMock.mock.calls[0]!;
-    expect(String(plainUrl)).toBe(`${apiUrl}/projects/prj_1/email/domains/acme.com`);
-    expect(plainInit?.method).toBe('DELETE');
-
-    await client.removeEmailDomain('prj_1', 'acme.com', true);
-    const [forceUrl, forceInit] = fetchMock.mock.calls[1]!;
-    expect(String(forceUrl)).toBe(`${apiUrl}/projects/prj_1/email/domains/acme.com?force=1`);
-    expect(forceInit?.method).toBe('DELETE');
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new PlatformClient('tok', { apiUrl: 'https://api.test' });
+    await client.rotateEmailDomainSecret('prj_1', 'acme.com', 'attempt_1');
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe(
+      'https://api.test/projects/prj_1/email/domains/acme.com/rotate-secret',
+    );
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ attemptId: 'attempt_1' });
   });
 });

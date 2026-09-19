@@ -4,13 +4,13 @@ import type { Context } from 'hono';
 import { signConfirmToken, type ConfirmTokenPayload } from '../auth/confirm-token.ts';
 import { capabilityMiddleware } from '../capabilities.ts';
 import {
-  countProjectsUsingDestination,
   deleteEmailDestination,
   getEmailDestinationByAddress,
   getEmailDestinationsByProjectId,
   getProject,
   getUser,
   promoteEmailDestinationWithOwnerAudit,
+  queueUnreferencedEmailDestinationCleanup,
   tryCreateEmailDestination,
   updateEmailDestinationStatus,
   type Db,
@@ -18,13 +18,16 @@ import {
   type OwnerVerificationAudit,
   type Tx,
 } from '../db.ts';
+import { getProjectEmailUsage, getProjectEmailLogs } from '../email/admission.ts';
+import { emailDomainRoutes, emailZoneConnections } from '../email/connection-schema.ts';
 import {
   addEmailDomainForProject,
   getEmailDomainStatusForProject,
   removeEmailDomainForProject,
-  revokeRejectedGrant,
-  serializeEmailDomain,
+  getEmailOperationForProject,
+  serializeEmailRoute,
   syncEmailDomainForProject,
+  rotateEmailIngressSecretForProject,
 } from '../email/domain-service.ts';
 import { sendPlatformVerificationEmail } from '../email/send-verification.ts';
 import {
@@ -34,19 +37,13 @@ import {
 } from '../email/settings.ts';
 import type { ApiEnv } from '../env.ts';
 import { isForeignKeyViolation, isUniqueViolation } from '../pg-errors.ts';
-import {
-  projectAllowlistKvDiffers,
-  syncProjectAllowlistKv,
-  syncProjectAllowlistKvBestEffort,
-} from '../provisioning/email-allowlist.ts';
+import { runEmailDestinationCleanup } from '../provisioning/email-destination-cleanup.ts';
 import {
   addDestination,
-  deleteDestination,
   isAlreadyExistsError,
   listDestinations,
   type CfDestinationAddress,
 } from '../provisioning/email-routing.ts';
-import { emailDomains } from '../schema.ts';
 import type { EmailDestination } from '../types.ts';
 
 /**
@@ -57,8 +54,7 @@ import type { EmailDestination } from '../types.ts';
  *   - 5 requests / minute (TTL 5m)
  *   - 50 requests / day   (TTL 25h)
  *
- * Counters live in ROUTING KV (same namespace as the email-* counters)
- * with poisoning defense identical to the proxy's send counter:
+ * Counters live in ROUTING KV. Treat malformed values as zero:
  * `parseInt('NaN', 10) → NaN` would silently bypass `count >= LIMIT` if
  * not coerced, so any non-finite or negative read becomes 0.
  */
@@ -81,10 +77,9 @@ const MAX_ADDRESS_LENGTH = 320;
 /**
  * Email observability + destinations management.
  *
- * Counters live in `ROUTING` KV under monthly buckets — exposed via the
- * `/usage` endpoint. Recipient destinations live in the `email_destinations`
- * Postgres table; the `/destinations` endpoints proxy CF Email Routing's
- * account-level address API and keep our per-project view in sync.
+ * Usage and recipient consent are SQL-authoritative. The destination routes
+ * proxy CF Email Routing's account-level address API and keep the per-project
+ * consent view in sync.
  */
 const app = new Hono<ApiEnv>()
   // Path-scoped, NOT `use('*')` as `domains.ts` does: this router is one of
@@ -103,26 +98,7 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'forbidden' }, 403);
     }
 
-    const month = monthBucket();
-    const [sent, recv, suspended, limitOverride] = await Promise.all([
-      context.env.ROUTING.get(`email-sent:${projectId}:${month}`),
-      context.env.ROUTING.get(`email-recv:${projectId}:${month}`),
-      context.env.ROUTING.get(`email-suspended:${projectId}`),
-      context.env.ROUTING.get(`email-limit:${projectId}`),
-    ]);
-
-    const limit = parseLimit(limitOverride) ?? 200;
-    const sentCount = parseCounter(sent);
-    const recvCount = parseCounter(recv);
-
-    return context.json({
-      month,
-      sent: sentCount,
-      received: recvCount,
-      limit,
-      remaining: Math.max(0, limit - sentCount),
-      suspended: suspended !== null,
-    });
+    return context.json(await getProjectEmailUsage(context.get('db'), projectId));
   })
 
   .get('/:id/email/logs', async (context) => {
@@ -135,15 +111,11 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'forbidden' }, 403);
     }
 
-    // Log entries currently live only in worker `console.log` output —
-    // surfaced via the existing tail/observability pipeline. This endpoint
-    // returns an empty list with a marker so consumers know AE-backed logs
-    // aren't wired yet.
-    return context.json({
-      logs: [],
-      pending: true,
-      note: 'Persistent log storage lands when Analytics Engine queries are wired.',
-    });
+    const limit = Number(context.req.query('limit') ?? 50);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      return context.json({ error: 'limit must be between 1 and 100' }, 400);
+    }
+    return context.json(await getProjectEmailLogs(context.get('db'), projectId, limit));
   })
 
   // -------------------------------------------------------------------------
@@ -176,7 +148,6 @@ const app = new Hono<ApiEnv>()
     const pending = rows.filter(
       (r) => r.status === 'pending' && r.verification_source !== 'platform',
     );
-    let anyFlipped = false;
     if (pending.length > 0) {
       try {
         const cfRows = await listDestinations(context.env.CF_ACCOUNT_ID, context.env.CF_API_TOKEN);
@@ -193,13 +164,16 @@ const app = new Hono<ApiEnv>()
           }
           if (cf.tag === row.cf_destination_id) {
             // The click answered the destination THIS row registered.
-            await updateEmailDestinationStatus(
+            const updated = await updateEmailDestinationStatus(
               context.get('db'),
               row.id,
               'verified',
               cf.tag,
               cf.verified,
             );
+            if (!updated) {
+              continue;
+            }
           } else {
             // The account carries the address under a tag this row never
             // registered: its own destination was deleted at Cloudflare
@@ -250,35 +224,12 @@ const app = new Hono<ApiEnv>()
           row.status = 'verified';
           row.cf_destination_id = cf.tag;
           row.verified_at = cf.verified;
-          anyFlipped = true;
         }
       } catch (err) {
         console.error('[email] destinations refresh failed:', err);
         // Non-fatal — we still return the cached view.
       }
     }
-    // Push any newly-verified address into the proxy's allowlist KV, and
-    // repair the mirror whenever it has drifted from the verified rows.
-    //
-    // The repair is not belt-and-braces. Every write to this mirror is
-    // best-effort, and nothing else re-derives the key: the confirm route
-    // early-returns on an already-verified row, the hourly `scheduled()`
-    // backfill in `index.ts` touches only `email-slug:`, and no deploy hook
-    // calls the sync. One swallowed KV failure after Postgres committed
-    // `verified` therefore leaves the owner looking at a `verified` listing
-    // while the proxy — which reads a missing key as deny-all — rejects every
-    // send as an unverified destination, with no user-visible cause. So THIS
-    // listing is the repair: the same read-compare-write self-heal shape as
-    // the `email-slug:` backfill. Cost is one KV read (skipped entirely when
-    // a flip already forces the write); the write happens only on a real
-    // difference, never on every listing.
-    if (
-      anyFlipped ||
-      (await projectAllowlistKvDiffers(context.get('db'), context.env.ROUTING, projectId))
-    ) {
-      await syncProjectAllowlistKvBestEffort(context.get('db'), context.env.ROUTING, projectId);
-    }
-
     return context.json(rows.map(serializeDestination));
   })
 
@@ -319,9 +270,7 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'invalid address' }, 400);
     }
 
-    // Per-project rate-limit BEFORE calling CF. Counters use the
-    // NaN-poison-resistant reader; reads are not strongly consistent so
-    // the gate is approximate, but at our planned volumes that's fine.
+    // Rate-limit before Cloudflare calls. KV reads make this abuse gate approximate.
     const rateCheck = await checkAndIncrementAddRate(context.env.ROUTING, projectId);
     if (!rateCheck.allowed) {
       return context.json({ error: rateCheck.message }, 429);
@@ -429,16 +378,11 @@ const app = new Hono<ApiEnv>()
           context.get('db'),
           context.env.CF_ACCOUNT_ID,
           context.env.CF_API_TOKEN,
-          projectId,
-          address,
           cfRow.tag,
         );
         return context.json({ error: 'destination concurrently modified, try again' }, 409);
       }
       const { row } = inserted;
-      if (row.status === 'verified') {
-        await syncProjectAllowlistKvBestEffort(context.get('db'), context.env.ROUTING, projectId);
-      }
       return context.json(serializeDestination(row), 201);
     }
 
@@ -473,8 +417,6 @@ const app = new Hono<ApiEnv>()
           context.get('db'),
           context.env.CF_ACCOUNT_ID,
           context.env.CF_API_TOKEN,
-          projectId,
-          address,
           cfRow.tag,
         );
         return context.json({ error: 'destination concurrently modified, try again' }, 409);
@@ -519,8 +461,6 @@ const app = new Hono<ApiEnv>()
         context.get('db'),
         context.env.CF_ACCOUNT_ID,
         context.env.CF_API_TOKEN,
-        projectId,
-        address,
         cfRow.tag,
       );
       return context.json({ error: 'destination concurrently modified, try again' }, 409);
@@ -553,99 +493,20 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'destination not found' }, 404);
     }
 
-    // Tighten the KV mirror BEFORE anything destructive runs. The proxy
-    // enforces every send against `email-allowlist:<projectId>`, and this row
-    // is what a retry would re-derive that mirror from — delete the row first
-    // and a failed KV write strands the revoked address in the allowlist with
-    // nothing left to repair it from, so a revoked recipient keeps receiving
-    // mail. (Same inversion as unretain-before-cleanup: never destroy the
-    // record the retry needs.) The sync must EXCLUDE this row explicitly:
-    // it is still `verified` in Postgres at this point, so a plain re-sync
-    // would write the address straight back. `status` is the snapshot's: a
-    // `pending` row is not in the mirror and has nothing to tighten, and the
-    // re-derive after the delete below covers a row that was promoted in
-    // between.
-    if (dest.status === 'verified') {
-      try {
-        await syncProjectAllowlistKv(context.get('db'), context.env.ROUTING, projectId, {
-          excludeDestinationId: dest.id,
-        });
-      } catch (err) {
-        console.error('[email] allowlist tighten failed; keeping destination row:', err);
-        return context.json({ error: 'failed to update send allowlist; try again' }, 503);
-      }
+    const cleanupTag = await deleteEmailDestination(context.get('db'), dest.id);
+    if (cleanupTag) {
+      await runEmailDestinationCleanup(
+        context.get('db'),
+        { accountId: context.env.CF_ACCOUNT_ID, apiToken: context.env.CF_API_TOKEN },
+        cleanupTag,
+      );
     }
-
-    // Best-effort CF cleanup. Only delete from CF if no other project
-    // references the same destination tag — destinations are account-wide.
-    //
-    // The count and the upstream delete are not one step, and nothing
-    // serializes them against a sibling project's POST. Two concurrent
-    // revokes of a shared tag can both read `refs === 2`, both decline the
-    // upstream delete, and both drop their row (an orphan). The mirror image:
-    // a POST for the same address on another project whose already-exists
-    // recovery listed this tag BEFORE the delete below lands, and whose row
-    // INSERT lands AFTER this count, commits a row pointing at a tag CF no
-    // longer has. The listing never re-checks a `verified` row against CF and
-    // a repeat POST returns the existing row without calling CF, so that row
-    // stays dangling until its owner runs `void email disallow` then `allow`:
-    // the DELETE's upstream call 404s (caught below), the row goes, and the
-    // re-add is a fresh create that mails a new link. Re-validating the tag
-    // from the POST side after its insert only narrows this to "insert and
-    // re-check both land between this count and this delete"; closing it
-    // needs both sides to compensate, and the same count-then-delete shape is
-    // in the admin revoke and in teardown, where the rows die later in the
-    // cascade and the window is far wider — so it belongs in one change
-    // across all three (design doc 0067), not here.
-    if (dest.cf_destination_id) {
-      const refs = await countProjectsUsingDestination(context.get('db'), dest.cf_destination_id);
-      if (refs <= 1) {
-        try {
-          await deleteDestination(
-            context.env.CF_ACCOUNT_ID,
-            context.env.CF_API_TOKEN,
-            dest.cf_destination_id,
-          );
-        } catch (err) {
-          // Non-fatal — proceed with the row delete. There is NO sweep for the
-          // orphan this leaves, so this log line is the only trace an operator
-          // gets. A 404 here is also the recovery path for a dangling row (see
-          // above): the tag is already gone, and the row must go with it.
-          console.error('[email] CF deleteDestination failed:', err);
-        }
-      }
-    }
-
-    await deleteEmailDestination(context.get('db'), dest.id);
-
-    // Re-derive the mirror now that the row is gone. The tighten above works
-    // from a snapshot, and the snapshot can go stale before this delete: a
-    // confirm click (or the listing's CF refresh) can flip a `pending` row to
-    // `verified` and write it into the mirror after the snapshot was taken,
-    // and a click on a SIBLING row re-derives the whole project from rows
-    // that still include this one. Either way the delete then drops the row
-    // and the mirror keeps granting an address nothing backs. Deriving after
-    // the delete cannot include the row. Best-effort on purpose: the row is
-    // already gone, so a 503 here would not be retryable, and the residual
-    // is bounded — Postgres and KV are written separately and KV has no
-    // compare-and-swap, so a concurrent writer that derived its mirror while
-    // the row still existed can still land its write after this one, and
-    // the grant then lasts until this project's next listing re-derives the
-    // mirror (`projectAllowlistKvDiffers`) or any other mirror write for the
-    // project. That is a revoke delayed, not consent bypassed: the recipient
-    // clicked to allow this project. Serializing the two routes is the
-    // project-level lock class from design doc 0067, deliberately not here.
-    await syncProjectAllowlistKvBestEffort(context.get('db'), context.env.ROUTING, projectId);
     return context.json({ ok: true });
   })
 
   // -------------------------------------------------------------------------
-  // Custom email domains on the customer's own Cloudflare zone (design doc
-  // 0078, "Custom domains on Cloudflare"). The add/sync/remove orchestration
-  // lives in src/email/relay-engine.ts (contract 7); these routes own the
-  // owner guard, the `email_domains` row, both encrypted triples, and the
-  // ROUTING KV mirror the proxy reads (contract 2). Neither the credential
-  // nor the relay secret is ever returned — serializers carry metadata only.
+  // Custom email domain routes. The connection service runs durable
+  // operations; these routes apply the owner guard and map responses.
   // -------------------------------------------------------------------------
 
   // Installation settings the CLI needs before it acts: who manages email
@@ -666,7 +527,7 @@ const app = new Hono<ApiEnv>()
       getEmailDomainManagement(db),
       getEmailRecipientPolicy(db),
     ]);
-    // Same best-effort repair the destinations listing does for its mirror.
+    // Republish a drifted recipient-policy mirror for the proxy's local gate.
     await repairEmailRecipientPolicyMirror(db, context.env.ROUTING);
     return context.json({
       domains: { management, projectSlug: project.slug },
@@ -687,17 +548,24 @@ const app = new Hono<ApiEnv>()
     const rows = await context
       .get('db')
       .select()
-      .from(emailDomains)
-      .where(eq(emailDomains.project_id, projectId))
-      .orderBy(asc(emailDomains.created_at));
-    return context.json(rows.map((row) => serializeEmailDomain(row)));
+      .from(emailDomainRoutes)
+      .innerJoin(emailZoneConnections, eq(emailZoneConnections.id, emailDomainRoutes.connection_id))
+      .where(
+        and(
+          eq(emailDomainRoutes.project_id, projectId),
+          ne(emailDomainRoutes.desired_state, 'removed'),
+        ),
+      )
+      .orderBy(asc(emailDomainRoutes.created_at));
+    return context.json(
+      rows.map((row) => serializeEmailRoute(row.email_domain_routes, row.email_zone_connections)),
+    );
   })
 
   .post('/:id/email/domains', async (context) => {
     const projectId = context.req.param('id');
     let body: {
       domain?: unknown;
-      mode?: unknown;
       refreshToken?: unknown;
       apiToken?: unknown;
       attemptId?: unknown;
@@ -707,36 +575,37 @@ const app = new Hono<ApiEnv>()
     } catch {
       return context.json({ error: 'invalid domain' }, 400);
     }
-    // Parsed before EVERY guard so every rejection can revoke a posted
-    // grant: the CLI mints a fresh user-wide OAuth grant per attempt and
-    // drops its only copy on any error response, so any reject without a
-    // revoke strands a live broad grant in the customer's account per
-    // retry. Revocation asks for no ownership: for wrangler's public client
-    // the token itself is the only credential the RFC 7009 endpoint wants,
-    // so revoking what was posted grants no capability the caller did not
-    // already hold.
-    const postedRefreshToken =
-      typeof body.refreshToken === 'string' && body.refreshToken.length > 0
-        ? body.refreshToken
-        : undefined;
+    if (body.refreshToken !== undefined) {
+      return context.json(
+        { error: 'OAuth grants are not supported; use a scoped Cloudflare API token' },
+        400,
+      );
+    }
     const db = context.get('db');
     const project = await getProject(db, projectId);
     if (!project) {
-      await revokeRejectedGrant(context, postedRefreshToken);
       return context.json({ error: 'project not found' }, 404);
     }
     if (project.user_id !== context.get('user').id) {
-      await revokeRejectedGrant(context, postedRefreshToken);
       return context.json({ error: 'forbidden' }, 403);
     }
     return addEmailDomainForProject(context, project, {
       domain: typeof body.domain === 'string' ? body.domain : '',
-      mode: body.mode,
-      refreshToken: postedRefreshToken,
       apiToken: typeof body.apiToken === 'string' ? body.apiToken : undefined,
       attemptId: body.attemptId,
       managedBy: 'owner',
     });
+  })
+
+  .get('/:id/email/operations/:operationId', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
+    if (!project) {
+      return context.json({ error: 'project not found' }, 404);
+    }
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
+    }
+    return getEmailOperationForProject(context, project, context.req.param('operationId'));
   })
 
   .get('/:id/email/domains/:domain', async (context) => {
@@ -749,6 +618,41 @@ const app = new Hono<ApiEnv>()
       return context.json({ error: 'forbidden' }, 403);
     }
     return getEmailDomainStatusForProject(context, project, context.req.param('domain'));
+  })
+
+  .post('/:id/email/domains/:domain/rotate-secret', async (context) => {
+    const project = await getProject(context.get('db'), context.req.param('id'));
+    if (!project) {
+      return context.json({ error: 'project not found' }, 404);
+    }
+    if (project.user_id !== context.get('user').id) {
+      return context.json({ error: 'forbidden' }, 403);
+    }
+    let attemptId: string | undefined;
+    if (context.req.header('content-type')?.includes('application/json')) {
+      let body: { attemptId?: unknown };
+      try {
+        body = await context.req.json();
+      } catch {
+        return context.json({ error: 'invalid JSON' }, 400);
+      }
+      if (
+        body.attemptId !== undefined &&
+        (typeof body.attemptId !== 'string' ||
+          body.attemptId.length < 1 ||
+          body.attemptId.length > 128)
+      ) {
+        return context.json({ error: 'invalid attemptId' }, 400);
+      }
+      attemptId = body.attemptId as string | undefined;
+    }
+    return rotateEmailIngressSecretForProject(
+      context,
+      project,
+      context.req.param('domain'),
+      'owner',
+      attemptId,
+    );
   })
 
   .post('/:id/email/domains/:domain/sync', async (context) => {
@@ -774,19 +678,8 @@ const app = new Hono<ApiEnv>()
     if (project.user_id !== context.get('user').id) {
       return context.json({ error: 'forbidden' }, 403);
     }
-    return removeEmailDomainForProject(
-      context,
-      project,
-      context.req.param('domain'),
-      context.req.query('force') === '1',
-      'owner',
-    );
+    return removeEmailDomainForProject(context, project, context.req.param('domain'), 'owner');
   });
-
-function monthBucket(): string {
-  const d = new Date();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-}
 
 function parseCounter(raw: string | null): number {
   if (!raw) {
@@ -794,14 +687,6 @@ function parseCounter(raw: string | null): number {
   }
   const n = parseInt(raw, 10);
   return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
-function parseLimit(raw: string | null): number | undefined {
-  if (!raw) {
-    return undefined;
-  }
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 /**
@@ -871,25 +756,10 @@ async function dispatchPlatformVerification(
 /**
  * Insert + retry-on-race wrapper around `tryCreateEmailDestination`.
  *
- * The underlying helper returns `{ row: null }` only when:
- *   1. Our INSERT lost the ON CONFLICT race AND
- *   2. The winning row was DELETED before our follow-up SELECT could
- *      read it back.
- *
- * That's a real, observable race (sibling tab issuing a DELETE while
- * we're processing a duplicate POST). One retry with a fresh insert+
- * select almost always wins — if it still misses, the caller surfaces
- * a clean 409 to the user with a "concurrently modified, try again"
- * message rather than a generic 500. The caller rolls the CF tag back.
- *
- * A foreign-key violation reports the same "not inserted" outcome: see
- * the catch below. So does `ownerEmailChanged`, without the retry: the
- * helper found the owner's address rotated away from the one whose
- * Cloudflare consent the Option C branch meant to inherit (the read the
- * branch made is unlocked, and a login can commit between it and the
- * insert). A second attempt would read the same answer. The 409 is right
- * on the merits — the retry re-reads the owner and, the address now being
- * somebody else's, takes the Option B platform link instead.
+ * A missing row can mean the conflicting row disappeared before readback,
+ * or that project teardown marked the project deleting after the route's
+ * initial guard. One retry resolves the former; the latter stays rejected
+ * and lets the caller retire the provider tag.
  */
 async function tryInsertWithRetry(
   db: Db,
@@ -936,54 +806,21 @@ async function tryInsertWithRetry(
   return { row: null, inserted: false };
 }
 
-/**
- * Undo the CF-side registration for a destination whose row never landed.
- *
- * `email_destinations` rows are the ONLY thing that maps an account-level CF
- * destination back to a project — teardown's cleanup reads them, and there is
- * no sweep for one nothing points at. Every path here already failed to
- * persist a row, so without this the address stays allocated forever against
- * the shared 200-destination account cap.
- *
- * The reference count must be ZERO, not `<= 1` the way the DELETE route reads
- * it: that route still holds its own row, and we have none. A live sibling
- * project can legitimately share the tag (the already-exists recovery above
- * reuses one CF address across projects), so a non-zero count must never
- * delete — it would silently revoke the sibling's recipient. Anything that
- * goes wrong keeps the original log line so an operator can still find the
- * tag by hand.
- *
- * Takes `db` / account / token explicitly rather than a Hono `Context`
- * because `autoAddOwnerDestination` in `routes/projects.ts` shares it and has
- * no context by design — it runs after the 201 response, so it outlives the
- * request whose context it would otherwise borrow.
- */
+/** Queue an allocated provider tag when its project row did not land. */
 export async function rollbackCfDestination(
   db: Db,
   accountId: string,
   apiToken: string,
-  projectId: string,
-  address: string,
   cfDestinationId: string,
 ): Promise<void> {
-  try {
-    const refs = await countProjectsUsingDestination(db, cfDestinationId);
-    if (refs === 0) {
-      await deleteDestination(accountId, apiToken, cfDestinationId);
-      return;
-    }
-  } catch (err) {
-    console.error('[email] CF destination rollback failed:', err);
+  if (await queueUnreferencedEmailDestinationCleanup(db, cfDestinationId)) {
+    await runEmailDestinationCleanup(db, { accountId, apiToken }, cfDestinationId);
   }
-  console.error(
-    `[email] destination row not persisted for project=${projectId} address=${address}; orphan CF tag candidate: ${cfDestinationId}`,
-  );
 }
 
 /**
- * Approximate per-project rate-limit on POST /destinations. Same
- * NaN-poisoning defense as the proxy's send counter (`parseInt('NaN')`
- * returns NaN, which would silently bypass `count >= LIMIT`).
+ * Approximate per-project rate-limit on POST /destinations. Malformed values
+ * become zero so they cannot bypass the numeric comparisons.
  *
  * Not strongly consistent — KV reads can lag writes for ~60s per colo,
  * so racing requests across colos can exceed the limit by a few. That's
