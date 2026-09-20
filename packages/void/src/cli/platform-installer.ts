@@ -110,6 +110,8 @@ export type PlatformInstallationSecrets = Readonly<{
   bootstrapGitHubLogin: string;
   cloudflareApiToken: string;
   databaseUrl: string;
+  emailEnabled: boolean;
+  emailSigningSecret: string;
   githubClientId: string;
   githubClientSecret: string;
   jwtSecret: string;
@@ -118,11 +120,12 @@ export type PlatformInstallationSecrets = Readonly<{
   projectSecretKeysJson: string;
   r2AccessKeyId: string;
   r2SecretAccessKey: string;
-  /** Explicit configuration changes only; never populated from recovery data. */
+  /** Explicitly authorized updates; recovered email identity remains authoritative. */
   workerSecretUpdates?: Readonly<
     Partial<
       Record<
         | 'CF_API_TOKEN'
+        | 'EMAIL_SIGNING_SECRET'
         | 'GITHUB_CLIENT_ID'
         | 'GITHUB_CLIENT_SECRET'
         | 'R2_ACCESS_KEY_ID'
@@ -137,6 +140,7 @@ export type PlatformInstallationSecrets = Readonly<{
 
 const PLATFORM_WORKER_SECRET_UPDATE_NAMES = [
   'CF_API_TOKEN',
+  'EMAIL_SIGNING_SECRET',
   'GITHUB_CLIENT_ID',
   'GITHUB_CLIENT_SECRET',
   'R2_ACCESS_KEY_ID',
@@ -369,6 +373,9 @@ export function createPlatformInstallationSecrets(input: {
   bootstrapGitHubLogin: string;
   cloudflareApiToken: string;
   databaseUrl: string;
+  emailEnabled?: boolean;
+  emailSigningSecret?: string;
+  existingEmailEnabled?: boolean;
   githubClientId: string;
   githubClientSecret: string;
   existingInstallation?: boolean;
@@ -437,6 +444,34 @@ export function createPlatformInstallationSecrets(input: {
       'platform: VOID_PLATFORM_JWT_SECRET must contain at least 32 bytes of secret material unique to this installation.',
     );
   }
+  const emailEnabled = input.emailEnabled === true;
+  const existingEmailEnabled = input.existingEmailEnabled === true;
+  const emailSigningSecretInScope = emailEnabled || existingEmailEnabled;
+  let emailSigningSecret = emailSigningSecretInScope
+    ? restoredIdentity(input.emailSigningSecret || '', 'emailSigningSecret')
+    : checkpoint.emailSigningSecret || '';
+  if (emailEnabled && !emailSigningSecret) {
+    if (existingInstallation && existingEmailEnabled) {
+      throw new Error(
+        'platform: VOID_PLATFORM_EMAIL_SIGNING_SECRET is required to maintain an email-enabled installation without its encrypted recovery state.',
+      );
+    }
+    emailSigningSecret = randomBytes(32).toString('base64');
+  }
+  if (
+    emailSigningSecretInScope &&
+    emailSigningSecret &&
+    Buffer.byteLength(emailSigningSecret, 'utf8') < 32
+  ) {
+    throw new Error(
+      'platform: VOID_PLATFORM_EMAIL_SIGNING_SECRET must contain at least 32 bytes of secret material unique to this installation.',
+    );
+  }
+  if (emailSigningSecretInScope && emailSigningSecret && emailSigningSecret === resolvedJwtSecret) {
+    throw new Error(
+      'platform: VOID_PLATFORM_EMAIL_SIGNING_SECRET must be different from VOID_PLATFORM_JWT_SECRET.',
+    );
+  }
   const projectSecretKeyring = resolveProjectSecretKeyring({
     checkpoint,
     existingInstallation,
@@ -448,8 +483,14 @@ export function createPlatformInstallationSecrets(input: {
   const pendingWorkerSecretUpdateIntent = parseWorkerSecretUpdateIntent(
     checkpoint.workerSecretUpdatesJson,
   );
+  const emailSigningSecretUpdateAuthorized =
+    emailSigningSecretInScope &&
+    !!emailSigningSecret &&
+    ((emailEnabled && (!existingEmailEnabled || !checkpoint.emailSigningSecret)) ||
+      !!input.emailSigningSecret);
   const explicitWorkerSecretUpdates = withoutEmptySecrets({
     CF_API_TOKEN: input.cloudflareApiToken,
+    ...(emailSigningSecretUpdateAuthorized ? { EMAIL_SIGNING_SECRET: emailSigningSecret } : {}),
     GITHUB_CLIENT_ID: input.githubClientId,
     GITHUB_CLIENT_SECRET: input.githubClientSecret,
     R2_ACCESS_KEY_ID: input.r2AccessKeyId,
@@ -491,6 +532,8 @@ export function createPlatformInstallationSecrets(input: {
           'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN',
         ),
     databaseUrl: required(input.databaseUrl || checkpoint.databaseUrl || '', 'DATABASE_URL'),
+    emailEnabled,
+    emailSigningSecret,
     githubClientId:
       existingInstallation || modernAuthentication
         ? configured(input.githubClientId, 'githubClientId')
@@ -675,6 +718,7 @@ function secretCheckpoint(
     githubClientId: secrets.githubClientId,
     githubClientSecret: secrets.githubClientSecret,
     jwtSecret: secrets.jwtSecret,
+    emailSigningSecret: secrets.emailSigningSecret,
     projectSecretActiveKeyVersion: secrets.projectSecretActiveKeyVersion,
     projectSecretKey: secrets.projectSecretKey,
     projectSecretKeysJson: secrets.projectSecretKeysJson,
@@ -931,6 +975,8 @@ export async function installPlatform(
       explicitUpdates: explicitWorkerSecretUpdates,
       localIntent: secrets.pendingWorkerSecretUpdateIntent,
       manifest,
+      requiresEmailSigningSecret:
+        manifest.deployment.capabilities.email || plan.deployment.capabilities.email,
     });
   } catch (error) {
     await releaseDatabaseLock();
@@ -2828,6 +2874,7 @@ export function apiWorkerSecrets(
     CF_ZONE_ID: zoneId,
     GITHUB_CLIENT_ID: secrets.githubClientId,
     GITHUB_CLIENT_SECRET: secrets.githubClientSecret,
+    ...(secrets.emailEnabled ? { EMAIL_SIGNING_SECRET: secrets.emailSigningSecret } : {}),
     JWT_SECRET: secrets.jwtSecret,
     PLATFORM_BOOTSTRAP_GITHUB_ID: secrets.bootstrapGitHubId,
     PLATFORM_AUTH_SETUP_TOKEN: secrets.authSetupToken ?? '',
@@ -2858,23 +2905,26 @@ export function platformWorkerSecretPayload(
       return apiWorkerSecrets(secrets, accountId, zoneId);
     }
     if (worker === 'emailGateway') {
-      return withoutEmptySecrets({ JWT_SECRET: secrets.jwtSecret });
+      const payload = withoutEmptySecrets({
+        EMAIL_SIGNING_SECRET: secrets.emailEnabled ? secrets.emailSigningSecret : '',
+      });
+      return Object.keys(payload).length > 0 ? payload : null;
     }
     return proxyWorkerSecrets(secrets, accountId);
-  }
-  if (worker === 'emailGateway') {
-    return null;
   }
   const allowed =
     worker === 'api'
       ? [
           'CF_API_TOKEN',
+          'EMAIL_SIGNING_SECRET',
           'GITHUB_CLIENT_ID',
           'GITHUB_CLIENT_SECRET',
           'R2_ACCESS_KEY_ID',
           'R2_SECRET_ACCESS_KEY',
         ]
-      : ['CF_API_TOKEN'];
+      : worker === 'proxy'
+        ? ['CF_API_TOKEN', 'EMAIL_SIGNING_SECRET']
+        : ['EMAIL_SIGNING_SECRET'];
   const updates = Object.fromEntries(
     Object.entries(secrets.workerSecretUpdates ?? {}).filter(
       ([name, value]) => allowed.includes(name) && typeof value === 'string' && value !== '',
@@ -2924,6 +2974,7 @@ function proxyWorkerSecrets(
   return withoutEmptySecrets({
     CF_ACCOUNT_ID: accountId,
     CF_API_TOKEN: secrets.cloudflareApiToken,
+    ...(secrets.emailEnabled ? { EMAIL_SIGNING_SECRET: secrets.emailSigningSecret } : {}),
     JWT_SECRET: secrets.jwtSecret,
   });
 }
@@ -2972,6 +3023,9 @@ export function assertRequiredPlatformSecrets(
       requireSecret(secrets.githubClientSecret, 'VOID_PLATFORM_GITHUB_CLIENT_SECRET');
     }
     requireSecret(secrets.jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
+    if (plan.deployment.capabilities.email) {
+      requireSecret(secrets.emailSigningSecret, 'VOID_PLATFORM_EMAIL_SIGNING_SECRET');
+    }
     requireSecret(
       secrets.projectSecretKeysJson,
       'VOID_PLATFORM_PROJECT_SECRET_KEYS_JSON (or VOID_PLATFORM_PROJECT_SECRET_KEY for v1)',
@@ -2991,6 +3045,9 @@ export function assertRequiredPlatformSecrets(
   ) {
     requireSecret(secrets.cloudflareApiToken, 'VOID_PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN');
     requireSecret(secrets.jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
+    if (plan.deployment.capabilities.email) {
+      requireSecret(secrets.emailSigningSecret, 'VOID_PLATFORM_EMAIL_SIGNING_SECRET');
+    }
   }
   if (
     plan.actions.some(
@@ -3000,7 +3057,9 @@ export function assertRequiredPlatformSecrets(
         action.action === 'create',
     )
   ) {
-    requireSecret(secrets.jwtSecret, 'VOID_PLATFORM_JWT_SECRET');
+    if (plan.deployment.capabilities.email) {
+      requireSecret(secrets.emailSigningSecret, 'VOID_PLATFORM_EMAIL_SIGNING_SECRET');
+    }
   }
   if (missing.size > 0) {
     throw new Error(

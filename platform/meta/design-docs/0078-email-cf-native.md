@@ -181,6 +181,19 @@ first registered project is permitted.
 
 ### Trust and management scope
 
+The platform API, proxy and gateway share a dedicated `EMAIL_SIGNING_SECRET`
+for email request proofs, provider credential leases, tenant dispatch receipts
+and recipient confirmation links. Login sessions and project authentication
+continue to use `JWT_SECRET`; the gateway receives no login signing key.
+Neither key is exposed to tenant Workers or customer ingress Workers.
+
+Generate the email key once per installation, preserve it in encrypted recovery
+state and the operator's secret manager, and provision it with the first Worker
+upload. Production and staging use different values. Missing keys fail closed;
+there is no JWT fallback. Rotate the email key across all three services together;
+outstanding email receipts and confirmation links then expire, while login
+sessions remain valid.
+
 An ingress credential authenticates one `(installation, account, zone, ingress)`
 identity, not a caller-supplied project ID. The gateway verifies that the exact
 recipient domain is active on that ingress and resolves its project from the
@@ -685,6 +698,8 @@ is required for the first release.
 There are no production email users to migrate, so dual-running the old design
 and maintaining legacy email protocol compatibility are not release requirements.
 Development installations may be reset or explicitly converted as appropriate.
+An explicit conversion must remove the gateway's obsolete `JWT_SECRET` binding
+after the dedicated email-key cutover; preserve the API and proxy login keys.
 Any reset must account for real provider resources and credentials: inspect owned
 catch-all rules, retain unrelated mail configuration, clean up obsolete relays,
 and explicitly revoke unused test grants. Test shared and custom routes together
